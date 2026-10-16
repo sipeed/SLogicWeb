@@ -1,7 +1,14 @@
 # Deploying to GitHub Pages
 
-`.github/workflows/pages.yml` builds on every push to `main` and publishes the result.
-There is no `gh-pages` branch and nothing built is committed.
+`.github/workflows/deploy-pages.yml` builds on every push to `main` and publishes the
+result to `https://slogic.sipeed.com/` (the custom domain in `public/CNAME`). There is no
+`gh-pages` branch and nothing built is committed.
+
+`.github/workflows/pages.yml` is the upstream project-page workflow (`--base=/<repo>/`).
+It is **not** the publisher for the custom domain, it currently fails in
+`inlineEntryForFileOpen`, and it stages no `/ota/` (see below). Do not let it and
+`deploy-pages.yml` both deploy: they share the `pages` concurrency group but produce
+different bases, so whichever finishes last wins the site.
 
 ## One-time setup
 
@@ -38,6 +45,40 @@ To reproduce a project-page build by hand:
 
 ```
 npm run build -- --base=/logicweb/
+```
+
+## The firmware-update pages under `/ota/`
+
+`sub_service/ota` is a submodule (`sipeed/slogic_ota_server`) holding the WebUSB
+firmware-update pages. The build copies it into `dist/ota/`, so the updater is published
+from the same origin as the analyser:
+
+| URL | Page |
+|---|---|
+| `https://slogic.sipeed.com/ota/` | one board |
+| `https://slogic.sipeed.com/ota/batch.html` | production batch update |
+
+No base rewriting is needed. Those pages link everything relatively and carry a relative
+import map, so they resolve identically from a subdirectory - their own Pages deployment
+already serves them from `https://sipeed.github.io/slogic_ota_server/`. The batch page's
+browser policy names the **origin**, not a path (`STATION_ORIGIN` in
+`sub_service/ota/src/station.js`, already `https://slogic.sipeed.com`), so `/ota/batch.html`
+is covered by the policy the "Station setup" section installs.
+
+Two things keep it working:
+
+- The checkout uses `submodules: true`. A plain checkout leaves `sub_service/ota` empty,
+  and the staging step then fails on the missing `index.html` rather than silently
+  publishing a site without `/ota/`.
+- The submodule's own suite runs before the build, so a stale asset stamp in its import
+  map (or a broken update flow) fails the deploy instead of shipping a page that mixes
+  cached old modules with new ones.
+
+To stage the same tree by hand, after `npx vite build --base=/`:
+
+```
+mkdir -p dist/ota
+cp -r sub_service/ota/{index.html,batch.html,style.css,favicon.svg,firmware.json,src} dist/ota/
 ```
 
 ## The decoder pin

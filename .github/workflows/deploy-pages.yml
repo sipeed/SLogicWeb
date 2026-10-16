@@ -10,6 +10,11 @@
 #     the base is `/`. It MUST be an absolute base: the decode worker resolves
 #     Pyodide/decoders from import.meta.env.BASE_URL, and a relative base ('./')
 #     would 404 inside the blob worker (see src/decode/worker.ts).
+#   - sub_service/ota is the sipeed/slogic_ota_server submodule: the WebUSB
+#     firmware-update pages. They are copied verbatim into dist/ota/ so the
+#     published site carries both the analyser and the updater on one origin -
+#     which is also the origin its batch-page browser policy names
+#     (STATION_ORIGIN in sub_service/ota/src/station.js).
 name: Deploy to GitHub Pages
 
 on:
@@ -38,6 +43,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # sub_service/ota is a submodule: without this the directory is empty
+          # and the staging step below cannot publish /ota/. Its remote is an
+          # SSH URL; with no ssh-key the action rewrites git@github.com: to
+          # HTTPS, which is all a public submodule needs.
+          submodules: true
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -59,8 +70,29 @@ jobs:
       - name: Type-check
         run: npm run check
 
+      # The update pages ship byte-for-byte as the submodule holds them, so the
+      # submodule's own suite is what proves the copy is publishable - including
+      # stamp.test.mjs, which fails on a stale asset hash in the import map.
+      - name: Test the OTA update pages
+        working-directory: sub_service/ota
+        run: node --test test/*.test.mjs
+
       - name: Build (absolute base for the custom-domain root)
         run: npx vite build --base=/
+
+      # Only the files the browser needs, exactly as the submodule's own pages
+      # workflow publishes them. The pages use relative URLs and a relative
+      # import map, so they need no base rewriting to live under /ota/.
+      - name: Stage the OTA update pages under /ota/
+        run: |
+          mkdir -p dist/ota
+          cp -r sub_service/ota/index.html \
+                sub_service/ota/batch.html \
+                sub_service/ota/style.css \
+                sub_service/ota/favicon.svg \
+                sub_service/ota/firmware.json \
+                sub_service/ota/src \
+                dist/ota/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
