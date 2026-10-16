@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>logicweb uictrl</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/src/ui/style.css" />
+</head>
+<body>
+  <main id="uictrl" aria-labelledby="uictrl-title">
+    <header id="uictrl-header">
+      <h1 id="uictrl-title">UI Controls</h1>
+    </header>
+    <section id="uictrl-controls" aria-label="UI layout controls">
+      <article class="uictrl-card" aria-labelledby="uictrl-toolbar-title">
+        <header class="uictrl-card-head">
+          <h2 class="uictrl-card-title" id="uictrl-toolbar-title">Toolbar</h2>
+          <p class="uictrl-card-note">Floor = max(min-height, min-ratio of viewport); a smaller height loses; empty restores the default.</p>
+        </header>
+        <div class="uictrl-field">
+          <label class="uictrl-field-label" for="uictrl-toolbar-height">Height</label>
+          <input class="uictrl-field-input" id="uictrl-toolbar-height" type="number" min="24" max="240" step="1" placeholder="auto" />
+          <span class="uictrl-field-unit">px</span>
+        </div>
+        <div class="uictrl-field">
+          <label class="uictrl-field-label" for="uictrl-toolbar-min-height">Min height</label>
+          <input class="uictrl-field-input" id="uictrl-toolbar-min-height" type="number" min="0" max="240" step="1" placeholder="57" />
+          <span class="uictrl-field-unit">px</span>
+        </div>
+        <div class="uictrl-field">
+          <label class="uictrl-field-label" for="uictrl-toolbar-min-ratio">Min ratio</label>
+          <input class="uictrl-field-input" id="uictrl-toolbar-min-ratio" type="number" min="0" max="50" step="1" placeholder="0" />
+          <span class="uictrl-field-unit">%</span>
+        </div>
+        <div class="uictrl-card-actions">
+          <button class="mini" id="uictrl-toolbar-reset" type="button">Reset</button>
+        </div>
+      </article>
+    </section>
+  </main>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

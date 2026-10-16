@@ -14,3 +14,11 @@ __pycache__/
 
 # Self-signed dev TLS pair for LAN serving (per-machine, regenerate with npm run cert)
 certs/
+tmp/
+
+.agents/
+.codex/
+.gitattributes
+.pi/
+.trellis/
+AGENTS.md

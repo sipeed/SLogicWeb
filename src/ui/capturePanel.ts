@@ -19,7 +19,8 @@ import { SAMPLERATES_HZ, vrefCode, vrefVolts } from '../device/index.js';
 import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import { formatDuration, formatRate } from './format.js';
-import { channelColor, type CaptureSettings, type ChannelState } from './state.js';
+import { t } from './i18n.js';
+import type { CaptureSettings, ChannelState } from './state.js';
 import { MAX_SAMPLES } from './captureIO.js';
 
 const THRESHOLDS = [0.6, 0.9, 1.2, 1.5, 1.65, 1.8, 2.5, 3.3];
@@ -28,7 +29,6 @@ export interface CapturePanelCallbacks {
   onSettings(next: CaptureSettings): void;
   onToggleChannel(index: number, enabled: boolean): void;
   onSetAllChannels(enabled: boolean): void;
-  onConnect(): void;
   onUsbControl(command: string): Promise<string>;
 }
 
@@ -40,16 +40,13 @@ export interface CapturePanelView {
   stopping: boolean;
   /** Non-null while a capture is streaming. */
   progress: { seconds: number; samples: number; bytes: number; lost: number } | null;
-  webusbAvailable: boolean;
   maxSamplerateHz: Readonly<Record<number, number>>;
   triggerState: 'off' | 'waiting' | 'triggered' | 'not-found';
 }
 
 export class CapturePanel {
   private advancedOpen = false;
-  private consoleLines: string[] = [
-    'Enter help for commands. Numbers are decimal or 0x-prefixed hex.',
-  ];
+  private consoleLines: string[] = [];
 
   constructor(
     private readonly root: HTMLElement,
@@ -60,28 +57,11 @@ export class CapturePanel {
     const s = v.settings;
     this.root.replaceChildren();
 
-    const head = div('panel-head');
-    const title = div('panel-title');
-    title.textContent = v.deviceName ?? 'No device';
-    head.appendChild(title);
-    const sub = div('panel-sub');
-    sub.textContent = v.deviceName
-      ? 'Sipeed SLogic U3 over WebUSB'
-      : v.webusbAvailable
-        ? 'Click Connect and pick an SLogic16/32 U3. The grant is remembered for this origin.'
-        : 'WebUSB is unavailable in this browser. Use Brave or Chrome over http://127.0.0.1.';
-    head.appendChild(sub);
-    const connect = button(v.deviceName ? 'Reconnect' : 'Connect device', 'pill');
-    connect.disabled = !v.webusbAvailable;
-    connect.addEventListener('click', () => this.cb.onConnect());
-    head.appendChild(connect);
-    this.root.appendChild(head);
-
     // ---- channels
-    const chSec = section('Digital');
-    const all = button('All', 'mini');
+    const chSec = section(t('capturePanel.digital'));
+    const all = button(t('capturePanel.all'), 'mini');
     all.addEventListener('click', () => this.cb.onSetAllChannels(true));
-    const clear = button('Clear', 'mini');
+    const clear = button(t('capturePanel.clear'), 'mini');
     clear.addEventListener('click', () => this.cb.onSetAllChannels(false));
     chSec.header.append(all, clear);
 
@@ -92,10 +72,10 @@ export class CapturePanel {
       chip.textContent = String(c.index);
       chip.title = c.name;
       if (c.enabled) {
-        chip.style.background = channelColor(c.index);
+        chip.style.background = c.color;
         chip.style.color = '#141415';
       } else {
-        chip.style.color = channelColor(c.index);
+        chip.style.color = c.color;
       }
       chip.addEventListener('click', () => this.cb.onToggleChannel(c.index, !c.enabled));
       grid.appendChild(chip);
@@ -111,7 +91,7 @@ export class CapturePanel {
     );
     rate.addEventListener('change', () =>
       this.cb.onSettings({ ...s, samplerate: Number(rate.value) }));
-    rowRT.appendChild(labelled('Sample rate', rate));
+    rowRT.appendChild(labelled(t('capturePanel.sampleRate'), rate));
 
     const th = select(
       THRESHOLDS.map((t) => [String(t), `${t} V`]),
@@ -119,21 +99,24 @@ export class CapturePanel {
     );
     th.addEventListener('change', () =>
       this.cb.onSettings({ ...s, thresholdVolts: Number(th.value) }));
-    rowRT.appendChild(labelled('Threshold', th));
+    rowRT.appendChild(labelled(t('capturePanel.threshold'), th));
     chSec.body.appendChild(rowRT);
 
     const code = vrefCode(s.thresholdVolts);
     const note = div('panel-note');
-    note.textContent =
-      `DAC code ${code} = ${vrefVolts(code).toFixed(3)} V actual. ` +
-      `Capture width ${s.channels} ch (ceiling ${formatRate(ceiling)}).`;
+    note.textContent = t('capturePanel.dacNote', {
+      code,
+      volts: vrefVolts(code).toFixed(3),
+      channels: s.channels,
+      rate: formatRate(ceiling),
+    });
     chSec.body.appendChild(note);
     this.root.appendChild(chSec.el);
 
     // ---- mode
-    const modeSec = section('Capture');
+    const modeSec = section(t('capturePanel.capture'));
     const seg = div('segmented');
-    for (const [id, text] of [['free', 'Free run'], ['timer', 'Timer']] as const) {
+    for (const [id, text] of [['free', t('capturePanel.freeRun')], ['timer', t('capturePanel.timer')]] as const) {
       const b = document.createElement('button');
       b.className = 'seg' + (s.mode === id ? ' on' : '');
       b.textContent = text;
@@ -152,42 +135,46 @@ export class CapturePanel {
       secs.value = String(s.seconds);
       secs.addEventListener('change', () =>
         this.cb.onSettings({ ...s, seconds: Math.min(Number(secs.value), maxSeconds) }));
-      modeSec.body.appendChild(labelled('Duration (s)', secs));
+      modeSec.body.appendChild(labelled(t('capturePanel.durationS'), secs));
     }
 
     const limit = div('panel-note');
-    limit.textContent =
-      `Ceiling ${MAX_SAMPLES.toLocaleString()} samples = ${formatDuration(maxSeconds)} at ` +
-      `${formatRate(s.samplerate)}. A free run stops itself there.`;
+    limit.textContent = t('capturePanel.ceilingNote', {
+      samples: MAX_SAMPLES.toLocaleString(),
+      duration: formatDuration(maxSeconds),
+      rate: formatRate(s.samplerate),
+    });
     modeSec.body.appendChild(limit);
 
-    const triggerSec = section('Software trigger');
+    const triggerSec = section(t('capturePanel.softwareTrigger'));
     const mask = document.createElement('input');
     mask.type = 'checkbox'; mask.checked = s.triggerEnableMask; mask.disabled = v.running || v.stopping;
-    mask.title = 'Enable software trigger';
+    mask.title = t('capturePanel.enableTrigger');
     triggerSec.header.appendChild(mask);
     mask.addEventListener('change', () => this.cb.onSettings({ ...s, triggerEnableMask: mask.checked }));
     triggerSec.body.hidden = !s.triggerEnableMask;
     if (s.triggerEnableMask) {
       const pre = select([
-        ['0', 'No pre-trigger'], ['10', '10%'], ['25', '25%'], ['50', '50%'], ['75', '75%'],
+        // Percent-notation options stay literal: they are notation, not prose.
+        ['0', t('capturePanel.noPreTrigger')], ['10', '10%'], ['25', '25%'], ['50', '50%'], ['75', '75%'],
       ], String(s.preTriggerPercent));
       pre.disabled = v.running || v.stopping;
       pre.addEventListener('change', () => this.cb.onSettings({ ...s, preTriggerPercent: Number(pre.value) }));
-      triggerSec.body.appendChild(labelled('Pre-trigger buffer', pre));
+      triggerSec.body.appendChild(labelled(t('capturePanel.preTriggerBuffer'), pre));
 
       // The one mistake this section invites: enabling the trigger and never picking a
       // condition, which silently arms nothing. Say what is armed, or what is missing.
       const armed = div('panel-note');
       if (s.triggerConditions.length === 0) {
         armed.classList.add('error');
-        armed.textContent =
-          'No condition set - the capture will run untriggered. Click the trigger ' +
-          'button on a channel row (left column) and pick an edge or a level.';
+        armed.textContent = t('capturePanel.noCondition');
       } else {
         const what = s.triggerConditions
-          .map((c) => `D${c.channel} ${c.kind === 'level' ? (c.level ? 'high' : 'low') : c.kind}`)
-          .join(' AND ');
+          .map((c) => `D${c.channel} ${c.kind === 'level'
+            ? t(c.level ? 'capturePanel.condHigh' : 'capturePanel.condLow')
+            : t(c.kind === 'rising' ? 'capturePanel.condRising'
+              : c.kind === 'falling' ? 'capturePanel.condFalling' : 'capturePanel.condEdge')}`)
+          .join(t('capturePanel.condJoiner'));
         // The *effective* pre-trigger window, with the same clamps startCapture
         // applies: percent of the post-trigger budget, capped by the 64 MiB retained
         // prefix. Promising the raw percentage would overstate it exactly when the
@@ -201,26 +188,28 @@ export class CapturePanel {
           Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bytesPerSampleForChannels(s.channels)),
         );
         const capped = pre < Math.floor(post * s.preTriggerPercent / 100);
-        armed.textContent =
-          `Armed: ${what}. T=0 at the trigger; up to ` +
-          `${formatDuration(pre / s.samplerate)} before it is kept as negative time` +
-          (capped ? ` (capped by the ${MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / 1048576} MiB pre-trigger buffer)` : '') +
-          '.';
+        armed.textContent = capped
+          ? t('capturePanel.armedCapped', {
+            what,
+            duration: formatDuration(pre / s.samplerate),
+            megabytes: MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / 1048576,
+          })
+          : t('capturePanel.armed', { what, duration: formatDuration(pre / s.samplerate) });
       }
       triggerSec.body.appendChild(armed);
 
       if (v.triggerState === 'waiting') {
         const wait = div('panel-note live');
-        wait.textContent = 'Waiting for the trigger condition…';
+        wait.textContent = t('capturePanel.waitingTrigger');
         triggerSec.body.appendChild(wait);
       } else if (v.triggerState === 'triggered') {
         const hit = div('panel-note live');
-        hit.textContent = 'Triggered - recording the post-trigger window.';
+        hit.textContent = t('capturePanel.triggered');
         triggerSec.body.appendChild(hit);
       } else if (v.triggerState === 'not-found') {
         const miss = div('panel-note error');
         // finish() discards the rolling search prefix - nothing was recorded.
-        miss.textContent = 'Stopped without a trigger; nothing was recorded.';
+        miss.textContent = t('capturePanel.triggerNotFound');
         triggerSec.body.appendChild(miss);
       }
     }
@@ -229,18 +218,18 @@ export class CapturePanel {
     // no second control that can disagree with it about whether a capture may start.
     if (v.progress) {
       const p = div('panel-note live');
-      p.textContent =
-        `Recording ${v.progress.seconds.toFixed(2)} s · ` +
-        `${v.progress.samples.toLocaleString()} samples · ` +
-        `${(v.progress.bytes / 1e6).toFixed(1)} MB`;
+      p.textContent = t('capturePanel.recording', {
+        seconds: v.progress.seconds.toFixed(2),
+        samples: v.progress.samples.toLocaleString(),
+        megabytes: (v.progress.bytes / 1e6).toFixed(1),
+      });
       modeSec.body.appendChild(p);
       // A dropout that the user cannot see is nearly as bad as one that is not recorded:
       // the samples are in the store as filler and drawn as NO_DATA, but the count is the
       // only place the size of the loss is legible while the capture is still running.
       if (v.progress.lost > 0) {
         const d = div('panel-note error');
-        d.textContent =
-          `${v.progress.lost.toLocaleString()} samples lost to dropouts, marked as gaps`;
+        d.textContent = t('capturePanel.dropped', { samples: v.progress.lost.toLocaleString() });
         modeSec.body.appendChild(d);
       }
     }
@@ -253,37 +242,40 @@ export class CapturePanel {
     advanced.open = this.advancedOpen;
     advanced.addEventListener('toggle', () => { this.advancedOpen = advanced.open; });
     const summary = document.createElement('summary');
-    summary.textContent = 'Advanced';
+    summary.textContent = t('capturePanel.advanced');
     advanced.appendChild(summary);
     const body = div('advanced-body');
 
     const source = select([
-      ['0', 'Normal'],
-      ['2', 'Simulator'],
-      ['1', 'USB MAX SPEED'],
+      ['0', t('capturePanel.testNormal')],
+      ['2', t('capturePanel.testSimulator')],
+      ['1', t('capturePanel.testUsbMax')],
     ], String(s.testMode));
     source.disabled = v.running;
     source.addEventListener('change', () =>
       this.cb.onSettings({ ...s, testMode: Number(source.value) as 0 | 1 | 2 }));
-    body.appendChild(labelled('Device test mode (next capture)', source));
+    body.appendChild(labelled(t('capturePanel.testMode'), source));
 
     const consoleLabel = document.createElement('label');
     consoleLabel.className = 'advanced-console-label';
-    consoleLabel.textContent = 'USB control console';
+    consoleLabel.textContent = t('capturePanel.usbConsole');
     const output = document.createElement('pre');
     output.className = 'usb-console-output';
     const renderOutput = (): void => {
       output.textContent = this.consoleLines.join('\n');
       output.scrollTop = output.scrollHeight;
     };
+    // The seed line is console chrome in the current locale; scrollback after it
+    // (echoed commands, device replies) is history and does not retranslate.
+    if (this.consoleLines.length === 0) this.consoleLines.push(t('capturePanel.consoleSeed'));
     renderOutput();
     const commandRow = div('usb-console-command');
     const input = document.createElement('input');
     input.type = 'text';
     input.spellcheck = false;
-    input.placeholder = 'read 0x000c 4';
+    input.placeholder = t('capturePanel.usbPlaceholder');
     input.disabled = !v.deviceName || v.running;
-    const send = button('Send', 'mini');
+    const send = button(t('capturePanel.usbSend'), 'mini');
     send.disabled = input.disabled;
     const execute = async (): Promise<void> => {
       const command = input.value.trim();
@@ -296,7 +288,7 @@ export class CapturePanel {
       try {
         this.consoleLines.push(await this.cb.onUsbControl(command));
       } catch (e) {
-        this.consoleLines.push(`error: ${e instanceof Error ? e.message : String(e)}`);
+        this.consoleLines.push(t('capturePanel.consoleError', { detail: e instanceof Error ? e.message : String(e) }));
       } finally {
         this.consoleLines = this.consoleLines.slice(-80);
         input.disabled = !v.deviceName || v.running;
@@ -312,10 +304,7 @@ export class CapturePanel {
     commandRow.append(input, send);
     body.append(consoleLabel, output, commandRow);
     const help = div('panel-note');
-    help.textContent =
-      'Commands: read <addr> [len], write <addr> <byte>..., ctrl <value>, ' +
-      'flags, clear-fifo, ' +
-      'in <request> <value> <index> <len>, out <request> <value> <index> [byte]...';
+    help.textContent = t('capturePanel.usbHelp');
     body.appendChild(help);
     advanced.appendChild(body);
     this.root.appendChild(advanced);

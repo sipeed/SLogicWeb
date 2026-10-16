@@ -35,6 +35,23 @@ function lanServer(port: number): ServerOptions {
   };
 }
 
+function serveUiControlEntry(): Plugin {
+  return {
+    name: 'logicweb:uictrl-entry',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use((request, _response, next) => {
+        const url = request.url;
+        if (url === '/uictrl') request.url = '/uictrl/';
+        else if (url?.startsWith('/uictrl?')) {
+          request.url = `/uictrl/${url.slice('/uictrl'.length)}`;
+        }
+        next();
+      });
+    },
+  };
+}
+
 /*
  * Fail the build when a run-time asset is missing, rather than shipping a bundle that
  * looks fine and 404s on first use.
@@ -222,9 +239,33 @@ export default defineConfig({
     // Keep production minification while making the exact TypeScript sources available
     // in DevTools when diagnosing USB/decoder issues on a user's machine.
     sourcemap: true,
-    chunkSizeWarningLimit: portable ? 20_000 : 500,
-    rollupOptions: { output: { banner: BANNER } },
+    chunkSizeWarningLimit: portable ? 20_000 : 2048,
+    rollupOptions: {
+      output: {
+        banner: BANNER,
+        // The inlineEntryForFileOpen plugin inlines the entry script into
+        // dist/index.html in EVERY build, so a relative dynamic-import
+        // specifier resolves against the document URL, not against assets/.
+        // Locale chunks must therefore sit at the dist root: emitted under the
+        // default assets/[name]-[hash].js they would be requested from
+        // <origin-root>/<chunk>.js and 404. Today the locale catalogs are the only
+        // dynamic imports, so nothing else lands at the root for this reason.
+        // Caveat: rollup renders the specifier relative to the entry chunk, so it
+        // is emitted as "../<chunk>.js". That resolves correctly for the deployments
+        // that work today (dist/ at the origin root; the live --base=/ custom-domain
+        // build) but escapes the base when dist/ is hosted below a sub-path. Fixing
+        // sub-path hosting is a separate, coordinated change (the plugin must become
+        // base-aware - it currently crashes on a sub-path base even without this
+        // commit - plus co-located entry/chunks and matching worker map placement).
+        chunkFileNames: '[name]-[hash].js',
+        // The portable build inlines the entry into index.html, deletes every
+        // sibling executable file, and is opened over file:// - where a
+        // separate chunk import cannot work. Folding dynamic imports back into
+        // the entry keeps the single-file artifact intact and self-contained.
+        ...(portable ? { inlineDynamicImports: true } : {}),
+      },
+    },
   },
 
-  plugins: [requireRuntimeAssets(), emitLicense(), inlineEntryForFileOpen()],
+  plugins: [serveUiControlEntry(), requireRuntimeAssets(), emitLicense(), inlineEntryForFileOpen()],
 });

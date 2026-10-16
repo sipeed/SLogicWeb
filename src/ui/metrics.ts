@@ -35,6 +35,23 @@ export const CHANNEL_COLORS: readonly string[] = [
   '#9AA0A6', // D8k+7 grey
 ];
 
+/**
+ * [CHOSEN] Dialog preset colors. The existing eight defaults come first so familiar
+ * channel colors are always one click away; seven bright additions widen the hue range
+ * while remaining visible on the dark plot. This is picker content only, not a second
+ * default cycle: CHANNEL_COLORS and LOGIC2_CHANNEL_COLORS stay unchanged.
+ */
+export const CHANNEL_COLOR_PRESETS: readonly string[] = [
+  ...CHANNEL_COLORS,
+  '#FB7185', // rose
+  '#F472B6', // pink
+  '#E879F9', // fuchsia
+  '#C084FC', // purple
+  '#818CF8', // indigo
+  '#22D3EE', // cyan
+  '#2DD4BF', // teal
+];
+
 /** [CHOSEN] . */
 export const COLORS = {
   /** Darkest background, used for the toolbar's inactive areas. */
@@ -64,7 +81,7 @@ export const COLORS = {
  */
 export const CHROME = {
   /** device y 66..125 */
-  toolbarHeight: 30,
+  toolbarHeight: 56,
   /** device y 128..185 */
   axisHeight: 29,
   /** device y 1922..1999 */
@@ -73,8 +90,6 @@ export const CHROME = {
   labelColWidth: 170,
   /** device x 0..9, filled with the channel colour */
   colorStripWidth: 5,
-  /** device x 3106..3199 including its 2 device px left border */
-  railWidth: 47,
   /** every border between two panels is 2 device px */
   borderWidth: 1,
 } as const;
@@ -90,8 +105,13 @@ export const CHROME = {
 export const ROWS = {
   /** [CHOICE] fallback when the stack has no height yet. */
   baseRowHeight: 48,
-  /** [CHOICE] clamps on the auto-fit, so a 1-channel capture is not one 800 px row. */
-  minRowHeight: 26,
+  /**
+   * [CHOSEN] The reserved channel card needs 46 px: 6 px of cell insets, 2 px of card
+   * border, 4 px of body padding, an 18 px head, a 2 px gap and a 14 px decoder strip.
+   * Keep 2 px of slack rather than letting dense captures clip the controls.
+   */
+  minRowHeight: 48,
+  /** [CHOICE] Upper auto-fit clamp, so a 1-channel capture is not one 800 px row. */
   maxRowHeight: 72,
   /** [MEASURED] src/render/theme.ts, 4 device px of #57575E at every row boundary. */
   separator: 2,

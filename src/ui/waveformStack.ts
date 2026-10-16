@@ -23,7 +23,7 @@
  * applies it to every renderer, so all canvases share the same sample window.
  */
 
-import { ViewTransform, WaveformRenderer } from '../render/index.js';
+import { DARK_THEME, ViewTransform, WaveformRenderer } from '../render/index.js';
 import type { SampleStore } from '../data/types.js';
 import { ROWS } from './metrics.js';
 
@@ -54,6 +54,8 @@ export class WaveformStack {
   private canvases: HTMLCanvasElement[] = [];
   private rows: RowSpec[] = [];
   private groups: RowSpec[][] = [];
+  /** Absolute capture-channel index -> #rrggbb, shared by every renderer group. */
+  private channelColors: string[] = [...DARK_THEME.channelColors];
   private dpr: number;
 
   constructor(
@@ -91,7 +93,10 @@ export class WaveformStack {
     return this.renderers[0]?.widthDevicePx ?? 0;
   }
 
-  setRows(rows: readonly RowSpec[]): void {
+  setRows(
+    rows: readonly RowSpec[],
+    channelColors: readonly string[] = DARK_THEME.channelColors,
+  ): void {
     for (const r of rows) {
       if (!Number.isInteger(r.heightCss) || r.heightCss <= 0) {
         throw new Error(`row height must be a positive integer CSS px, got ${r.heightCss}`);
@@ -100,6 +105,7 @@ export class WaveformStack {
         throw new Error(`row channel ${r.channel} outside 0..${this.store.channelCount - 1}`);
       }
     }
+    this.channelColors = [...channelColors];
     this.rows = [...rows];
     this.groups = [];
     for (let i = 0; i < this.rows.length; i += MAX_ROWS_PER_CANVAS) {
@@ -109,6 +115,7 @@ export class WaveformStack {
   }
 
   private syncCanvases(): void {
+    const theme = { ...DARK_THEME, channelColors: this.channelColors };
     while (this.renderers.length < this.groups.length) {
       const canvas = document.createElement('canvas');
       canvas.className = 'wave-canvas';
@@ -117,6 +124,7 @@ export class WaveformStack {
       this.renderers.push(new WaveformRenderer({
         canvas,
         store: this.store,
+        theme,
         channels: [0],
         rowHeightCssPx: ROWS.baseRowHeight,
         gutterCssPx: ROWS.gutter,
@@ -138,6 +146,7 @@ export class WaveformStack {
       let h = 0;
       for (const row of group) h += row.heightCss;
       canvas.style.height = `${h}px`;
+      r.setTheme(theme);
       r.setChannels(group.map((g) => g.channel));
       r.setRowHeights(group.map((g) => g.heightCss));
     }

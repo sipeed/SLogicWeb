@@ -94,7 +94,8 @@ try {
   const result = await waitFor(async () => {
     const evaluated = await cdp('Runtime.evaluate', {
       expression: `window.logicweb?.decodeWarm ? 'ready' :
-        window.logicweb?.statusError ? 'error:' + window.logicweb.statusError : ''`,
+        window.logicweb?.debug.snapshot().error ?
+          'error:' + window.logicweb.debug.snapshot().error : ''`,
       returnByValue: true,
     });
     const value = evaluated.result.value;
@@ -147,7 +148,7 @@ try {
       const state = await cdp('Runtime.evaluate', {
         expression: `JSON.stringify({ready: document.readyState,
           hasApp: !!window.logicweb, warm: window.logicweb?.decodeWarm,
-          status: window.logicweb?.statusError,
+          status: window.logicweb?.debug.snapshot().error,
           pending: window.logicweb?.decodeClient?.pending?.size,
           worker: !!window.logicweb?.decodeClient?.worker})`,
         returnByValue: true,

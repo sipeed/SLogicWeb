@@ -12,17 +12,113 @@
     404s. Vite rewrites this href with the build's base, so it follows the subdirectory.
   -->
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <!--
+    Pre-paint theme apply: dark is the default theme, so this sets data-theme="dark"
+    before the stylesheet loads and no session can flash the light chrome first.
+    Mirrors pickTheme() in src/ui/theme.ts: a stored live id wins; absent, garbage,
+    and the migrated legacy 'default' pick all land on dark - with today's registry
+    every path does. The storage read is real, not decorative: the theme self-test
+    (src/ui/tools/theme-selftest.ts) pins the getItem literal so this script and
+    pickTheme() cannot drift, and a future added theme id turns the honor check into
+    a real branch. A bare inline script on purpose: vite.config.ts's
+    inlineEntryForFileOpen only rewrites module scripts and the stylesheet link, so
+    this passes the portable single-file build untouched.
+  -->
+  <script>
+    try {
+      // pickTheme() mirror: honor a stored live id, else the dark default. 'default'
+      // is retired (migrates to dark), so 'dark' is the only live stored id today.
+      const stored = localStorage.getItem('logicweb.theme');
+      document.documentElement.setAttribute('data-theme', stored === 'dark' ? stored : 'dark');
+    } catch {
+      // Storage unavailable (privacy mode): pickTheme's fallback is dark too.
+      document.documentElement.setAttribute('data-theme', 'dark');
+    }
+  </script>
   <link rel="stylesheet" href="/src/ui/style.css" />
 </head>
 <body>
   <div id="app">
     <div id="toolbar">
-      <button id="transport" class="primary" title="Start a capture on the connected device">Start</button>
-      <button id="btn-open" title="Load a sigrok .sr session or a .lwcap">Open…</button>
-      <button id="btn-save" title="Save this capture as .lwcap">Save</button>
-      <button id="btn-fit" title="Zoom to the whole capture">Fit</button>
-      <span id="capture-title">no capture</span>
+      <button id="btn-connect" class="toolbar-item toolbar-device" title="Connect device">
+        <span class="toolbar-item-media">
+          <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
+            <rect x="3" y="4" width="14" height="13" rx="2"></rect>
+            <path d="M7 8h6M7 12h3M17 9h4v6h-2a2 2 0 0 1-2-2"></path>
+          </svg>
+        </span>
+        <span class="toolbar-item-content">
+          <span id="device-title" class="toolbar-item-title">Device</span>
+          <span id="device-description" class="toolbar-item-description">Connect device</span>
+        </span>
+      </button>
+      <span class="toolbar-separator" role="separator" aria-orientation="vertical"></span>
+      <button id="transport" class="toolbar-item primary" data-i18n-title="toolbar.startTitle" title="Start a capture on the connected device">
+        <span class="toolbar-item-media">
+          <svg class="toolbar-item-icon transport-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
+            <path d="m8 5 11 7-11 7Z"></path>
+          </svg>
+          <svg class="toolbar-item-icon transport-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
+            <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+          </svg>
+        </span>
+        <span class="toolbar-item-content">
+          <span id="transport-title" class="toolbar-item-title" data-i18n="toolbar.start">Start</span>
+        </span>
+      </button>
+      <button id="btn-open" class="toolbar-item" data-i18n-title="toolbar.openTitle" title="Load a sigrok .sr session or a .lwcap">
+        <span class="toolbar-item-media">
+          <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
+            <path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>
+            <path d="M3 7h18"></path>
+          </svg>
+        </span>
+        <span class="toolbar-item-content">
+          <span class="toolbar-item-title" data-i18n="toolbar.open">Open…</span>
+        </span>
+      </button>
+      <button id="btn-save" class="toolbar-item" data-i18n-title="toolbar.saveTitle" title="Save this capture as .lwcap">
+        <span class="toolbar-item-media">
+          <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
+            <path d="M5 3h12l4 4v14H3V3Z"></path>
+            <path d="M7 3v6h10V3M7 21v-8h10v8"></path>
+          </svg>
+        </span>
+        <span class="toolbar-item-content">
+          <span class="toolbar-item-title" data-i18n="toolbar.save">Save</span>
+        </span>
+      </button>
+      <button id="btn-fit" class="toolbar-item" data-i18n-title="toolbar.fitTitle" title="Zoom to the whole capture">
+        <span class="toolbar-item-media">
+          <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
+            <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path>
+          </svg>
+        </span>
+        <span class="toolbar-item-content">
+          <span class="toolbar-item-title" data-i18n="toolbar.fit">Fit</span>
+        </span>
+      </button>
+      <span class="toolbar-separator" role="separator" aria-orientation="vertical"></span>
+      <button id="btn-settings" class="toolbar-item toolbar-settings" data-i18n-title="settings.titleHint" title="Language and display preferences" aria-controls="settings-menu" aria-expanded="false">
+        <span class="toolbar-item-media">
+          <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
+            <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"></path>
+            <path d="M1 14h6M9 8h6M17 16h6"></path>
+          </svg>
+        </span>
+        <span class="toolbar-item-content">
+          <span class="toolbar-item-title" data-i18n="settings.title">Settings</span>
+        </span>
+      </button>
       <span class="spacer"></span>
+      <button id="btn-sidebar" class="toolbar-item toolbar-sidebar" data-i18n-title="toolbar.sidebarTitle" title="Choose right sidebar" aria-label="Choose right sidebar" aria-controls="sidebar-menu" aria-expanded="false">
+        <span class="toolbar-item-media">
+          <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
+            <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+            <path d="M15 3v18"></path>
+          </svg>
+        </span>
+      </button>
     </div>
 
     <div id="main">
@@ -37,19 +133,14 @@
           <div id="plot">
             <div id="wave-stack"></div>
             <div id="empty-hint">
-              No capture loaded.<br />
-              Open a .sr or .lwcap file, or connect an SLogic16/32 U3.
+              <span data-i18n="emptyHint.line1">No capture loaded.</span><br />
+              <span data-i18n="emptyHint.line2">Open a .sr or .lwcap file, or connect an SLogic16/32 U3.</span>
             </div>
           </div>
         </div>
       </div>
 
       <div id="side-panel"></div>
-
-      <div id="rail">
-        <button class="rail-btn" id="rail-device" title="Device and capture settings">◈</button>
-        <button class="rail-btn" id="rail-analyzers" title="Protocol analyzers">≡</button>
-      </div>
     </div>
 
     <div id="status"></div>

@@ -337,3 +337,530 @@ Two other honest gaps:
 `run-ui.mjs` creates a throwaway Brave profile in the OS temp directory and **does not
 delete it**; the path is printed at the end of each run. Nothing in `src/ui` recursively
 removes any directory, including ones it created itself.
+
+## 11. i18n: catalogs, the core, and what is deliberately not translated
+
+The shell is being taught more than English. The mechanism is house-built (`src/ui/i18n.ts`
++ `src/ui/locales/<locale>.ts`), not a dependency: four locales do not make the case
+for i18next in a tree whose only runtime dependency is pyodide.
+
+- **The English catalog is the key contract.** `locales/en.ts` exports the catalog and
+  `Messages = Record<keyof typeof en, string>`; every other locale declares
+  `: Messages`, so a missing/extra/renamed key is a tsc error, not a runtime hole.
+  Keys are flat and dotted so they map 1:1 onto `data-i18n` attributes in index.html.
+- **Interpolation is `{var}` with a visible-failure contract**: an unknown variable
+  stays literal in the output (swallowed would look identical to a correct translation
+  until someone counts). Pinned by `src/ui/tools/i18n-selftest.ts`, run like the other
+  ui suites:
+
+  ```
+  node_modules/.bin/esbuild src/ui/tools/i18n-selftest.ts --bundle --format=esm \
+    --platform=node --outfile=/tmp/i18n-selftest.mjs && node /tmp/i18n-selftest.mjs
+  ```
+
+- **Default is English, deliberately not the browser's language** - the choice is only
+  ever the user's explicit one, persisted in localStorage['logicweb.lang'] [CHOSEN];
+  absent or unknown stored values mean 'en'. The stored locale is read by
+  `initLocale()` at boot, never at module evaluation.
+- **The non-English catalogs are code-split, not shipped in the entry chunk.** `en`
+  stays statically imported as the fallback, but zh-CN/ru/fr sit behind literal
+  `import()` specifiers in the `LOADERS` registry (`i18n.ts`) and reach the browser
+  only when that language is selected - a menu pick or a persisted preference.
+  `vite build` emits one chunk per locale at the **dist root** (`dist/zh-CN-*.js`,
+  `ru-*.js`, `fr-*.js`), not under `assets/`: `inlineEntryForFileOpen` inlines the
+  entry script into `index.html` in every build, so a relative dynamic-import
+  specifier resolves against the document URL, and an `assets/`-placed chunk would
+  be requested from `<origin-root>/<chunk>.js` and 404. [MEASURED] The split took
+  the entry from 594.53 kB / gzip 149.72 kB (after the loader seam landed) to
+  572.20 kB / gzip 143.46 kB, against a pre-task baseline of 593.53 kB / gzip
+  149.32 kB; the zh-CN/ru/fr chunks measure 7.07/9.82/7.68 kB. The
+  standard-build `chunkSizeWarningLimit` is `2048` KB [CHOSEN], replacing the
+  historical `500` KB value; the portable build retains `20_000` KB for its inlined
+  assets. `i18n-selftest.ts` pins both configuration branches without evaluating the
+  asset-dependent portable config. The suite passed 29/29; temporarily restoring `500`
+  made only the new threshold check fail (28/29), and restoring `2048` returned it to
+  29/29 [MEASURED]. Loading the standard config through Vite's `loadConfigFromFile`
+  also returned `2048` KB [MEASURED]. Known limitation: rollup renders the specifier as
+  `../<chunk>.js`,
+  which is correct at the origin root and for the live `--base=/` build, but hosting
+  `dist/` below a sub-path breaks locale chunk loading (and a sub-path `--base`
+  crashes the inline plugin independently - pre-existing). Sub-path hosting needs a
+  coordinated fix (base-aware plugin, co-located entry/chunks, worker map
+  placement), not yet scheduled.
+- **`LOGICWEB_PORTABLE=1` folds every dynamic import back into the entry** via
+  `inlineDynamicImports`, so the single-file `index.html` performs no sibling
+  `file://` import. Laziness is lost there by design, and the setting is not
+  locale-specific: any FUTURE dynamic import is silently folded too. Locale
+  switching over `file://` was browser-verified (ru/fr/zh-CN/en all commit with zero
+  external requests; `check:portable`'s request capture shows only the document and
+  the Pyodide worker blob).
+- **Switching locale is asynchronous; the render path is not.** `setLocale(locale)`
+  resolves a `Promise<LocaleSwitchResult>` - `'committed'`, `'superseded'` (a newer
+  pick won; a normal race outcome, not an error), or `'failed'` (the catalog could
+  not load). A monotonic `requestToken` is bumped FIRST, so even picking the active
+  locale cancels an in-flight switch and the last pick always wins with exactly one
+  re-render; the check pass reproduced a settle-on-wrong-locale bug before this
+  ordering landed. `current` never names a locale whose catalog is absent from
+  `DICTS` (the load-before-commit invariant), and `t()` / `applyStaticI18n` keep
+  reading `DICTS` synchronously with English as the constructed fallback.
+  `initLocale()` preloads the persisted catalog before `new App()` so the first
+  render paints in it; `main.ts` boots through an async IIFE because Vite's default
+  target rejects top-level await. `App.debug.setLocale` returns that promise now, so
+  scripts must `await logicweb.debug.setLocale('fr')`.
+- **A failed catalog load is visible, not fatal.** The switch keeps the current
+  locale, warns to the console, and leaves the persisted choice intact so a transient
+  error retries next session; a menu pick surfaces it as `error.localeLoad` through
+  the ordinary status-error path (the detail half renders the locale id, e.g.
+  `...: fr`). A failure on a pick the user has already superseded stays silent.
+- **One known limitation: a persisted non-English locale can flash English static
+  chrome at boot.** Module scripts are deferred, so `data-i18n` markup can paint
+  before `initLocale()` resolves the persisted chunk; there is no fix short of
+  embedding the catalogs in the HTML.
+- **The core is node-safe at module top level** (storage behind a typeof guard, no DOM
+  touch outside functions) because the self-test bundles it for node.
+- **Session state that used to be pre-formatted English is structured data now.**
+  `captureLabel` (five shapes) and `statusError` are unions/records in state.ts,
+  formatted by `formatCaptureLabel` / `formatStatusError` (format.ts) at render time -
+  the only way a mid-session locale switch can retranslate them. `debug.snapshot()`
+  still returns the formatted strings, so the script contract is unchanged. The
+  console.error prefix in `fail()` is now the stable message KEY (`error.openCapture`
+  and friends), greppable in every locale; the status bar still shows the translated
+  prefix followed by the raw diagnostic detail.
+- **Analyzer status notes are structured too** (`AnalyzerNote` in state.ts): pending /
+  edges / stats / timeout / cancelled are translated at render time, while decoder
+  diagnostics (`error.detail`, `stats.firstError`) pass through raw. The USB console's
+  seed line is chrome in the then-current locale; the scrollback after it (echoed
+  commands, device replies) is history and deliberately does not retranslate.
+  Percent-notation option labels and glyphs (`×`, `···`, rail icons, `>` echo) are
+  notation, not prose - they stay literal.
+- **`triggerSummary` moved to `formatTriggerSummary` in format.ts.** app.ts is not
+  node-importable, so the summary string could not be pinned by the self-test while it
+  lived there; format.ts is the display-formatting home and the move is a pure key
+  substitution, pinned with five exact cases. The channel list's tooltips, aria labels
+  and picker names, and the hover readout labels (`Width:`/`Freq:`/`Duty:`/
+  `no transition in view`), all render through t() now; `width⁻¹` and the `D<n>`/
+  `A`/`B`/`|B-A|` notations stay symbolic.
+- **The settings menu is a transient disclosure, not an ARIA menu.** Built on open,
+  destroyed on close (`settingsMenu.ts`), right-anchored via the CSS `right` property
+  (never measures its own width), its flyout a positioned CHILD of the menu so one
+  `contains()` answers click-outside for both. Its three document/window listeners are
+  open-scoped (events-and-lifecycle rule), it closes on resize and on locale change,
+  and only one overlay may be open: opening it dismisses the channel trigger picker.
+  The surface constants are shared with `.trigger-inline-picker` in one joint
+  declaration so the measured values cannot drift; the picker's scaleX entrance stays
+  picker-specific. Focus returns to the Settings button on Escape/pick, but an outside
+  click keeps the focus the user chose.
+- **Four catalogs ship**: en (source of truth), zh-CN, ru, fr. tsc proves completeness
+  (`: Messages`), and the self-test re-proves it at runtime (catching an `as Messages`
+  cheat) plus a salient-probe check so a wholesale-untranslated catalog cannot pass.
+  It also drives the async path: per-locale loader object identity + key parity, an
+  fr round-trip, pick-current cancellation, and a superseded-pick single-notification
+  guard.
+  Russian and French counts use the count-neutral "Noun: {n}" shape - plural rules are
+  out of scope. Command syntax (`read 0x000c 4`), device mode names (USB MAX SPEED),
+  and percent notation stay English in every catalog. End-to-end switching (menu pick,
+  reload persistence, `<html lang>`, corrupt-storage fallback, byte-identical English
+  restoration) was exercised with headless-Chrome CDP drives during development;
+  those drives are throwaway scripts, not committed tooling. One known limit: the
+  hover readout's lines are formatted when the hover is taken, so a scripted
+  locale switch with an active hover keeps the old language until the next hover -
+  unreachable through the UI itself, because moving the pointer to the toolbar fires
+  pointerleave on the plot and clears the hover.
+- **Not translated, on purpose**: SI/number formatting (format.ts), decoder names and
+  descriptions (sigrok metadata), diagnostic error payloads after the chrome prefix,
+  `sourceDescription` (it is baked into .lwcap files at save time - translating it
+  would make saved files locale-dependent), canvas glyphs and the A/B/|B-A| status
+  symbols, and the boot-failure message in main.ts.
+
+## 12. Themes: the token layer, the dark theme, and the pre-paint apply
+
+The settings menu is Language-only again: the Theme sub-option (`default` | `dark`)
+was retired once `dark` became the default theme for every visitor - keeping a hidden
+picker reachable would have been pointless, and keeping a stored light pick honored
+would have stranded those users on a theme they can no longer change. `default` is
+the measured Logic2-style palette this app shipped with; `dark` is a shadcn-style
+dark theme. The theme is chrome-only CSS - canvases, capture state and layout metrics
+never move. The machinery is deliberately NOT torn out: `theme.ts`, the label keys,
+the catalog entries and `debug.setTheme` all stay live, so re-showing the row is a
+one-item revert in `settingsItems()`.
+
+- **`src/ui/theme.ts` is `i18n.ts` shrunk to fit a synchronous problem.** Same module
+  shape (module state, guarded `localStorage['logicweb.theme']`, subscribers, node-safe
+  top level), but `setTheme` is sync: there is no catalog to fetch, so no Promise, no
+  request race, no 'superseded'. `pickTheme` resolves absent or garbage storage - AND
+  a stored legacy `default` pick - to the dark fallback (`DEFAULT_THEME`): the old
+  light pick predates dark-by-default and the retired picker, so it migrates instead
+  of stranding its owner. Only `dark` is a live stored id today. The module owns the
+  DOM side effect (`document.documentElement.dataset.theme`), the same ownership
+  split as `setLocale` owning `<html lang>`. Scriptable through
+  `App.debug.setTheme/getTheme`; `snapshot().theme` carries it.
+- **Pre-paint apply is a small inline script in `index.html`** (module scripts are
+  deferred, so waiting for `boot()` would flash the light chrome). It mirrors
+  `pickTheme()`: a stored live id wins; absent, garbage, migrated-`default`, and
+  throwing-storage paths all set `data-theme="dark"` before the stylesheet loads.
+  The duplication of the storage key is drift-proof: `theme-selftest.ts` builds its
+  needle from `THEME_STORAGE_KEY` as the exact quoted `getItem('<key>')` literal - a
+  substring match would not catch a drift to a longer key, which is why the needle is
+  quoted. The portable build's `inlineEntryForFileOpen` only rewrites module scripts
+  and stylesheet links, so the bare inline script passes through untouched (verified
+  in dist).
+- **Three CSS layers, one stylesheet.** Layer A is the legacy `:root`, untouched, so
+  `default` is pixel-identical by construction (gated on a 0-byte-diff headless-Chrome
+  screenshot against the pre-theme baseline, not on hope). Layer B is a shadcn semantic
+  token block that only *aliases* the legacy variables (`--card: var(--bg20)`, ...), so
+  adopting a token cannot change the default render either. Layer C is one
+  `html[data-theme="dark"]` block with the shadcn dark palette in oklch plus a legacy
+  remap, so rules not yet migrated to semantic tokens still follow the theme.
+- **The `--accent` collision is settled by never introducing shadcn's.** logicweb's
+  `--accent` is the brand violet; shadcn's `--accent` is a hover surface. Brand maps to
+  `--primary`, hover surfaces to `--muted`/`--secondary`, `--accent` keeps its legacy
+  meaning everywhere.
+- **`--bg10` stays `#1B1B1C` under dark - the canvas seam wins over palette purity.**
+  The axis canvas *paints* `COLORS.bg10` from metrics.ts, and the labels column, labels
+  spacer and plot CSS background must meet that pixel seamlessly (the measured seam in
+  this file's §1). Mapping `--bg10` to the near-black `--background` would have stepped
+  the label column against every waveform row. The dark shell differentiation comes from
+  explicit semantic overrides on the toolbar, side panel, rail and status bar instead,
+  and the plot reads as an inset well by tonal contrast alone. A `#plot` frame was
+  evaluated and rejected: a `border-top` doubles the axis hairline and (border-box)
+  shifts the waveform canvases 1 px out of row alignment, an inset `box-shadow` paints
+  *under* the child canvases (invisible), and a `border-radius` reveals the body's
+  identical background (also invisible).
+- **The metric freeze is enforced, not promised.** `theme-selftest.ts` scans the sheet
+  (comments stripped - the token-layer header itself mentions the dark selector, and a
+  naive scan would attribute the next block's declarations to it) and fails if any
+  `html[data-theme="dark"]` block redefines `--toolbar-h/--axis-h/--status-h/--labels-w/
+  --rail-w/--strip-w/--panel-w`, or if any `[data-theme="default"]` rule exists.
+- **Specificity traps that were designed around**: `.ch-trigger.active.triggered` (green)
+  and `.not-found` (red) sit one specificity step below a naive dark `.active` override,
+  so the dark rule excludes them with `:not()`; `#toolbar button` out-specifies
+  `.primary`, so the dark button restyle excludes `.primary`/`.danger` the same way. The
+  waiting pulse's peak colour moved into `--accent-hi` (default `#a98ff0`, dark an oklch
+  violet) so `@keyframes trigger-waiting` retunes per theme without an override block -
+  custom properties in keyframes resolve against the animated element.
+- **Switching themes is chrome-only by construction and by measurement.** `App`'s
+  `onThemeChange` handler closes the transient settings menu (new `'theme'` close
+  reason, no focus hand-off - same class as `'retranslate'`) and nothing else: no
+  re-render, no relayout, no canvas repaint. Measured with a loaded 200k-sample
+  capture: `debug.snapshot()` deep-equal across a switch (minus the `theme` field), and
+  a full-viewport screenshot byte-identical across a default->dark->default round-trip.
+  A running capture differs from a loaded one only by more canvas paints of the same
+  frozen palette, which the theme never touches.
+- **Pressed feedback is one veil, not a family of tokens.** Every `<button>` -
+  momentary or toggle - darkens while held via `button:active { box-shadow: inset
+  0 0 0 999px rgb(0 0 0 / 25%) }`. An inset veil was chosen over per-family pressed
+  background tokens because it darkens WHATEVER is showing - base, hover, `.on`,
+  `.primary`/`.danger`, and the inline `channelColor` of an enabled `.chip`, which no
+  token swap could reach - and because `box-shadow` is additive, it composes over
+  `:hover` with no cascade-order fragility and no new tokens in either theme. No
+  button class sets its own `box-shadow` (only overlay containers do), the dark focus
+  ring is `outline`-based, and a disabled native button never matches `:active`, so
+  the veil clobbers nothing and needs no disabled guard. The 25% figure is [CHOSEN],
+  tuned for readability on `--bg20`/`--secondary` without washing out channel chips.
+- **The dark segmented active state inverts; a tonal shift there is provably
+  invisible.** The first dark pass styled `.seg.on` after the ToggleGroup idiom (a
+  `--secondary` surface), but in the dark token set `--secondary` equals BOTH the base
+  `.seg` surface and `--muted` (all `oklch(0.269 0 0)`), so free-run vs timed was
+  indistinguishable - in the theme that is now the default. `.seg.on` under dark now
+  mirrors the default theme's inversion instead: `--foreground` surface,
+  `--background` text, `--foreground` border, at 0-3-1 specificity over the 0-2-1 base
+  rule. The remaining toggle families were audited rather than assumed: `.chip.on`
+  (inline channel colour), `.ch-trigger.active` (violet surface both themes),
+  `.trigger-inline-option.selected` (`--accent`/`--primary`), and `.rail-btn.on`
+  (`--bg20` on the `--panel` rail; `--secondary` on the `--background` rail) already
+  read as active in both themes and were left untouched.
+
+## 13. The waveform table as cards: channel-card structure, consistent decoder height, themed scrollbars
+
+The waveform table (label column + plot rows) was the last square-edged surface:
+flat cells with a 2 px separator each, and stock scrollbars. It now renders after
+the shadcn Item idiom under the dark theme - one rounded card per channel - while
+the plot, the renderer and the row geometry are byte-for-byte untouched. Three
+ideas carry the design; all were verified against the screenshot matrix (empty,
+uart.sr, uart.sr + decoder, narrow-overflow; default x dark), not by eyeball alone.
+
+- **The wrappers are layout-invisible until a theme opts in.** `.ch-card` (around
+  strip+body) and `.ch-analyzers` (around the decoder chips) are `display: contents`
+  in the base sheet, so the default theme renders exactly as before - pixel identity
+  is structural, and the zero-pixel screenshot diff is the proof, not the hope.
+  Under dark, `.ch-card` becomes the real card: `--card` surface, `--border`
+  hairline, `calc(var(--radius) - 2px)` radius, `overflow: hidden` to clip the
+  colour strip to the corner. The cell box keeps its measured pitch - alignment
+  with the waveform rows is still by construction, only the card insets ([CHOSEN]
+  3 px vertical, 4/2 px horizontal).
+- **Cards are one consistent height, decoder or not.** A decoded channel's cell is
+  taller by its lane strips (the stack needs those rows), which used to make its
+  label visibly taller and shifted the tag/name row on attach/detach. The cell now
+  reports the lane part as `ChannelCell.laneCss`, set inline as the
+  `--ch-lane-offset` custom property, and the dark card reads it as `margin-top`:
+  every card is exactly `band - insets` tall and hugs its trace band, with the lane
+  strip transparent above it - visually part of the plot's annotation lane. A
+  custom property rather than inline padding because a property is inert until a
+  rule reads it: TS stays theme-blind and the default theme cannot move. Measured:
+  all 16 cards 48 px on a 54 px pitch; the decoded card's top equals cell top +
+  lane + inset exactly. Inside the card, `.ch-analyzers` reserves a fixed one-line
+  strip ([MEASURED] 14 px = the 12 px chip line + its 2 px gap) in EVERY card, so
+  the head row is collinear across channels and never shifts. Edge cases accepted,
+  no regression either way: a second chip on one card wraps and can clip like
+  today's overflow does, and at the 26 px minimum row height the strip clips before
+  the head.
+- **State moves with the card, not the pitch box.** Hover (dark-only affordance)
+  steps `--card` -> `--muted` + `--border` -> `--input` - verified by token VALUE
+  (oklch 0.205 -> 0.269), per the rule-10 lesson. The drop-target outline was
+  redirected from the cell (whose box now has transparent insets) to the card.
+- **Scrollbars: quiet by token, not by hiding.** `#scroll-area` and `#side-panel`
+  under dark: transparent track, slim 8 px rounded thumb in `--border-high`
+  brightening to `--muted-foreground` on hover; Firefox takes
+  `scrollbar-width: thin` + `scrollbar-color`, WebKit/Blink the pseudo-elements.
+  [CHOSEN] 8 px is about half the native width but stays grabbable; the thumb at
+  15% white sits just above the shell's contrast floor. `.usb-console-output` keeps
+  its native bar this round - an embedded console surface, not chrome.
+
+Rejected at the mockup gate (four options were built and served for review):
+**B** (one rounded frame around the whole table + hairline separators + full-row
+hover wash) - needs a new scroll-container wrapper with sticky-axis interplay for
+moderate gain; **C** (per-row islands with real gaps across label and plot) - the
+only render-layer option (per-row rounded cards in the shader), highest risk;
+**D** (separate rounded frames for labels and plot with a gutter) - loosens the
+strip/trace adjacency the label column exists for.
+
+## 14. Adaptive channel pitch with a readable minimum
+
+**Prediction, recorded before the layout measurements.** The current card geometry needs
+46 CSS px of pitch: 6 px of cell insets, 2 px of card border, 4 px of body padding, an
+18 px head, a 2 px gap and the reserved 14 px decoder strip. A [CHOSEN] 48 px minimum
+should therefore keep both the head and the reserved strip inside the card with 2 px of
+slack. The existing auto-fit rule and 72 px maximum stay in place. At 32 channels the
+minimum-sized stack should be 1,536 px plus annotation lanes, so a short viewport must
+scroll instead of compressing the cards. The browser check must also prove that the
+label cells and waveform rows still share the same pitch after a resize.
+
+**Result: HELD.** [MEASURED] in headless Chrome through the normal capture-loading path.
+At 1000x500 with 32 channels, every label cell and channel row was 48 px, the stack was
+1,536 px split across two 768 px canvases, and the scroll area was 1,566 px tall for a
+429 px viewport (the sticky axis accounts for the 30 px difference). Every card kept its
+head and reserved decoder strip inside its body; no horizontal overflow or uncaught page
+error appeared. Resizing to 1280x1000 retained that geometry and overflow. With eight enabled
+channels the same browser then grew the rows to the unchanged 72 px maximum (576 px
+stack, no overflow); shrinking to 1000x500 recomputed a 49 px pitch and a 392 px stack,
+again without overflow. Overlay canvases matched the plot height in every pass.
+
+The sizing arithmetic now lives in the pure UI-owned `computeChannelRowHeight` rather
+than a second test-only row model. Nine exact node checks cover fit, integer flooring,
+both clamps, annotation lanes, the 1,536 px 32-channel fit boundary and App's delegation
+to that policy. The theme suite adds the exact 48 px card-minimum guard; mutating its
+bundled input back to 26 px makes that check fail, so the guard has a working control.
+
+**Not measured in this pass.** The browser capture had no decoder attached, so annotation
+lane arithmetic is covered by the exact node checks and the pre-existing lane model, not
+by a new 32-channel decoded browser scene. Arbitrary numbers of decoder chips still use
+the existing one-line reservation and can clip as documented in section 13.
+
+## 15. Channel name and trigger settings in a native dialog
+
+**Prediction, recorded before the dialog browser checks.** Replacing the 30x18 CSS px
+trigger button with a 24x18 gear and rendering the name as an 18 px-line read-only span
+should preserve the 18 px channel head and the 46 px card-content requirement from
+section 14. The 48 px minimum pitch therefore stays valid. Moving name and trigger
+editing into one native `<dialog>` should also remove the picker's two document-level
+listeners without changing the five existing trigger mappings.
+
+**Implementation, before measurement.** The row checkbox, editable name input, trigger
+button and inline picker are gone. Each row now has a D-tag, read-only name and gear
+button. `ChannelSettingsDialog` follows the shadcn Dialog header / field-group / footer
+anatomy with `showModal()`, a visible labelled title, a native text field, five native
+radio choices and Cancel/Save actions. Save trims the name and emits one callback;
+Cancel, Escape and backdrop dismissal emit nothing. Trigger choices alone are disabled
+while running or stopping, so name metadata remains editable. App applies the callback
+through the existing clamp/condition pipeline and resets a stale trigger origin only
+when trigger settings actually change. The dialog is persistent, has no document-level
+listeners, closes before row re-renders, and refreshes every translated string on open.
+Earlier inline-trigger descriptions in sections 6 and 11-13 are historical; this
+section describes the current interaction.
+
+**Result: HELD.** [MEASURED] in headless Chrome at 1280x800 and 500x700 through the
+shipping DOM. All 26 browser checks passed: 16 rows had no inputs, their names were
+read-only spans, and every 18 px gear was exactly centered in an 18 px head. The dialog
+matched `:modal`, received initial name-input focus, exposed five radios, and returned
+focus to the gear after Save, Cancel and Escape. Save trimmed names and preserved an
+empty name; Cancel, Escape and a real backdrop click discarded drafts. All five modes
+preserved their condition mapping, the other channel's AND condition, Enable Mask and
+the 25% pre-trigger setting. Digital-chip disable/re-enable, reorder callbacks and all
+four locale titles also passed. The narrow scene kept 48 px label/waveform rows,
+centering and zero horizontal overflow, with no uncaught page error.
+
+Running and stopping were injected separately as browser-state preconditions, then the
+ordinary settings render path and actual dialog/save path were used. In both states the
+trigger field set was disabled while the name input and gear stayed enabled; Save
+changed the name but retained the stored mode. This proves the UI state guard, not a
+hardware capture lifecycle.
+
+The node suites also passed: 12/12 channel-layout checks (nine layout checks plus three
+source-integrity guards for row structure, native-modal save and listener-free close
+paths), 27/27 i18n checks with the new labels added to the translated-probe set, and
+`tsc --noEmit`. No decoder was attached in this pass, so annotation-lane alignment is
+covered by the existing layout checks rather than a new decoded browser scene.
+
+## 16. Per-channel colors through the same settings dialog
+
+**Prediction, recorded before the color browser checks.** Moving the default
+`channelColor(index)` result into `ChannelState.color` should be behavior-neutral for
+untouched channels. Passing one absolute-channel-index palette to every
+`WaveformRenderer` through its existing `setTheme()` API should then make a dialog color
+edit agree across the card, Digital chip, waveform and hover marker, including after
+reorder and across 16-row canvas groups. No renderer implementation or capture-format
+change should be necessary.
+
+**Implementation, before measurement.** `defaultChannels()` initializes the required
+color field from the unchanged eight-color cycle. The native color input joins name and
+trigger in the existing atomic dialog payload. Row strips/tags and Digital chips now read
+the channel object rather than recalculating by index; hover uses the same object with a
+loud default fallback for an absent channel. `WaveformStack.setRows()` accepts the
+index-aligned palette, applies it when constructing renderer groups, and refreshes
+existing groups with `setTheme({ ...DARK_THEME, channelColors })`. Capture replacement
+still creates default channel models, so colors are session-only and no file version
+changes.
+
+**Result: HELD.** [MEASURED] through the normal `i2c.sr` capture-loading path in
+headless Chrome. The combined Pair-1 and color run passed 40/40 checks. A #12ab34 edit
+reached the native color field, card strip/tag, enabled and disabled Digital chips,
+real-pointer hover color and both renderer groups. Cancel discarded color with the other
+draft fields; reopening restored the saved value. Reorder moved D0 and its color together.
+One decoded I2C lane produced two visible canvases, each with the custom absolute-index
+palette. Running and stopping separately left name/color enabled, locked trigger choices,
+and propagated another color to both groups without changing the stored trigger. Capture
+replacement restored D0 #FF4D4D and D1 #FF9E2C.
+
+Seven independent PNG pixel checks also passed. In the default scene D0 contained 779
+exact #FF4D4D pixels and D1 contained 773 #FF9E2C pixels. After Save, D0 contained 773
+exact #12AB34 pixels and zero old-red pixels while D1 stayed orange. After reorder, the
+first row was orange and the second row contained those 773 green pixels, proving the
+waveform follows capture channel rather than row position.
+
+The first color-harness run was not accepted as evidence: it contained three setup
+mistakes (a previous locale still active, a detached chip read after re-render, and UART
+decoding an idle channel). The harness was corrected to restore English, reacquire the
+chip, and use the known I2C capture/channels; no production defect was found on the
+successful rerun. As in section 15, running/stopping were injected state preconditions,
+not a hardware capture lifecycle.
+
+Node checks passed with 13/13 channel-layout results, 13/13 theme results (including the
+exact 17-channel UI/renderer default-color cycle), 27/27 i18n results with the color
+label in the translated-probe set, and `tsc --noEmit`.
+
+## 17. Key/value channel settings fields
+
+**Prediction, recorded before the KV browser checks.** Giving the name and trigger rows
+a 104 CSS px label column and a flexible control column should put labels on the left and
+controls on the right without a breakpoint. The trigger choices may wrap inside their own
+column on narrow screens. Color must remain a vertical field and the final configuration
+item, while the existing modal draft, focus and Save behavior stays unchanged.
+
+**Implementation, before measurement.** The name and trigger fields now share the
+`channel-settings-kv` grid. A visible external span labels the native trigger field set
+through `aria-labelledby`, avoiding field set/legend grid layout while retaining its
+group semantics and single running/stopping disabled flag. The header has only its
+required visible title: the description element, ARIA relationship, dead CSS and four
+`channels.dialogDescription` catalog entries are removed. Color retains its native input
+and vertical field class in this pair. No trigger mapping, channel color, App state or
+row-pitch code changed.
+
+**Repair, before the focus rerun.** The first real-mouse backdrop check discarded the
+draft but left focus on `body`: preventing the backdrop pointerdown's default action is
+necessary so the completed click cannot retarget focus after the handler restores it.
+
+**Result: HELD after one focus repair.** [MEASURED] in headless Chrome at 1280x800 and
+320x700: 9/9 checks passed. At desktop the 420 px dialog gave both KV labels 104 px and
+both controls 270 px; at 320 px the 288 px dialog retained the 104 px labels and shrank
+the controls to 138 px, wrapping trigger choices without page or dialog horizontal
+overflow. Color remained vertical and last, the visible title remained, and no
+description element or ARIA relationship existed. Save trimmed a name and retained its
+trigger/color payload; Cancel, real Escape and a real backdrop click discarded drafts.
+Save, Cancel, Escape and backdrop all returned focus to the D0 settings button. A zh-CN
+switch preserved the layout and description-free header, and no uncaught page error
+occurred.
+
+The first backdrop run was not accepted: it exposed a real post-click focus move to
+`body`. The repair above prevents that default focus action; the rerun then passed the
+same real-mouse check. The earlier driver startup timeouts were target/navigation setup
+issues, not product evidence, and were discarded rather than counted as application
+failures.
+
+Node checks passed with 16/16 channel-layout results, including exact KV/color-order,
+description and backdrop-focus guards; 28/28 i18n results, including description-key
+absence in all four catalogs; and `tsc --noEmit`.
+
+## 18. Six trigger modes with an explicit any-value default
+
+**Prediction, recorded before the trigger browser checks.** The software trigger already
+matches `edge`, so adding it to the UI-owned mode union and moving the pure mode/condition
+transforms beside the state types should expose dual-edge without touching capture code.
+A shared `DEFAULT_TRIGGER_MODE = 'dont-care'` should preserve the existing unconfigured
+X behavior, while `triggerModeFromCondition` should stop legacy/debug edge conditions
+from degrading to X. Six 36 px choices should fit the desktop KV control column and wrap
+without changing the measured dialog widths.
+
+**Implementation, before measurement.** `state.ts` now owns the six-mode union, default,
+and both pure transforms; App imports them and retains all clamping, origin reset and
+redraw ownership. The radio order is falling, rising, dual-edge, high, low and any-value,
+with the existing `trigger.anyEdge` translation reused. Every glyph was redrawn as a
+coherent stepped-edge, level or X family with rounded stroke joins. The dual-edge glyph
+shows rising and falling steps side by side. All trigger colors, channel colors, global
+mask and pre-trigger logic are unchanged.
+
+**Result: HELD.** [MEASURED] in the combined headless-Chrome scene: 12/12 checks passed,
+including all Pair-1 regressions. The six icons had distinct path data and translated
+accessible names, fit one row in the 270 px desktop control column, and an unconfigured
+channel selected X. Saving each mode produced its exact expected condition: dual-edge
+produced `kind: 'edge'`, X removed only its own channel's condition, and every saved
+selection survived reopen. The other channel's condition, Enable Mask and pre-trigger
+percentage stayed unchanged. Running and stopping were injected separately as UI state
+preconditions, not a hardware lifecycle: in both, all radios were disabled while name and
+color stayed editable, and metadata Save retained the stored edge mode. No uncaught page
+error occurred.
+
+Node checks passed with 20/20 channel-layout results, including exact six-mode mapping,
+round-trip, sorted mixed-condition and shared-default tables; 28/28 i18n results with
+`trigger.anyEdge` added to the translated probes; and `tsc --noEmit`.
+
+## 19. Preset color grid and a custom-color Popover
+
+**Prediction, recorded before the color-grid browser checks.** Fifteen preset buttons plus
+one custom invoker in an eight-column CSS grid should produce exactly two rows at both
+desktop and narrow widths. A native Popover anchored to the 16th swatch can provide
+shadcn-style rounded, token-colored arbitrary color input without document listeners or
+a new dependency. Keeping `selectedColor` as dialog-only draft data and using the existing
+configure callback should leave every card/chip/waveform color consumer unchanged.
+
+**Implementation, before measurement.** `CHANNEL_COLOR_PRESETS` starts with the unchanged
+eight channel defaults and adds seven bright hues. The last vertical field now owns a
+role-labelled 2x8 button grid. Presets use `aria-pressed` and visible ring selection; the
+custom swatch always previews the current draft and carries a token-backed + badge. Its
+native Popover contains the existing full-width color input, focuses it on open, updates
+the draft on `input`, and closes/returns focus on `change`. Opening a saved preset selects
+its button; any other saved value selects custom. Dialog close and Submit both hide the
+Popover before proceeding, and only Submit reaches App.
+
+**Result: HELD.** [MEASURED] in the combined headless-Chrome scene: 17/17 checks passed,
+including every Pair-1/2 regression. The grid had 16 cells in exactly two rows of eight at
+1280x800 and 320x700. A #F472B6 preset and arbitrary #12AB34 custom color each reached the
+card and Digital chip, retained the trigger mode, and reopened with the correct
+preset-versus-custom selection. Cancel, real light dismiss and two-stage Escape discarded
+drafts; the first Escape closed only the Popover and the second closed the outer dialog
+and restored gear focus.
+
+The open Popover remained modal-owned, focused its native color input and used a measured
+7.5 px radius with a 220x82 px box. At 320 px it stayed inside the viewport
+(left=100, top=457, right=320, bottom=539). No uncaught page error occurred.
+
+Through the tracked `fixtures/i2c.sr` loading path, three exact waveform PNG checks also
+passed: D0 contained 797 #F472B6 pixels after preset Save; after custom Save it contained
+790 #12AB34 pixels and zero remaining pink pixels; untouched D1 retained 791 #FF9E2C
+pixels and zero green pixels. The browser-owned OS color chooser surface itself was not
+automated; the shipping input was exercised through its standard input/change events,
+while the Popover, draft lifecycle and downstream rendering were measured.
+
+Node checks passed with 21/21 channel-layout results, 28/28 i18n results with the custom
+color label in translated probes, and 14/14 theme results including 15 unique valid
+presets and unchanged UI/renderer defaults. `tsc --noEmit` and the production Vite build
+also passed; only the pre-existing chunk-size warning remained.

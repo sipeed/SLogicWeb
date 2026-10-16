@@ -29,17 +29,25 @@ import type { ChannelEdges, DecodeRequest, DecodeResult } from '../decode/index.
 import { AnalyzerPanel } from './analyzerPanel.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
 import { CapturePanel } from './capturePanel.js';
-import { ChannelList, type ChannelCell } from './channelList.js';
+import { ChannelList, type ChannelCell, type ChannelConfiguration } from './channelList.js';
+import { computeChannelRowHeight } from './channelLayout.js';
 import {
   MAX_SAMPLES, levelAt, loadFiles, loadLwcap, saveLwcap,
 } from './captureIO.js';
-import { formatCount, formatDuration, formatFreq, formatRate } from './format.js';
+import { formatCount, formatDuration, formatFreq, formatRate,
+  formatAnalyzerNote, formatCaptureLabel, formatStatusError } from './format.js';
+import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, setLocale, t,
+  type Locale, type MessageKey, type MessageVars } from './i18n.js';
+import { getTheme, onThemeChange, setTheme, type ThemeId } from './theme.js';
+import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
 import { COLORS, MEASURE_COLORS, ROWS } from './metrics.js';
 import { Overlay, type HoverMeasurement } from './overlay.js';
 import { StoreRef } from './storeRef.js';
 import {
-  analyzerColor, defaultChannels, channelColor,
+  analyzerColor, defaultChannels, channelColor, DEFAULT_TRIGGER_MODE,
+  modesToConditions, triggerModeFromCondition,
   type AnalyzerState, type CaptureSettings, type ChannelState, type TriggerMode,
+  type CaptureLabel, type StatusError,
 } from './state.js';
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
 import { WaveformStack, type RowSpec } from './waveformStack.js';
@@ -61,6 +69,8 @@ export class App {
   private readonly channelList: ChannelList;
   private readonly capturePanel: CapturePanel;
   private readonly analyzerPanel: AnalyzerPanel;
+  private readonly settingsMenu: SettingsMenu;
+  private readonly sidebarMenu: SettingsMenu;
   private readonly decodeClient = sharedDecodeClient({
     // Resolve from the document, not from the worker script. This supports static sites
     // hosted below a subdirectory and keeps all runtime files together in dist/.
@@ -96,8 +106,8 @@ export class App {
   /** Trigger sample position in SampleStore; the time axis labels this sample T=0. */
   private triggerSampleIndex: number | null = null;
 
-  private captureLabel = 'no capture';
-  private statusError = '';
+  private captureLabel: CaptureLabel = { kind: 'none' };
+  private statusError: StatusError | null = null;
   private decodeBusy = false;
   private decodeWarm = false;
   private abort: AbortController | null = null;
@@ -115,7 +125,9 @@ export class App {
     plot: HTMLDivElement; waveStack: HTMLDivElement; axis: HTMLCanvasElement;
     scroll: HTMLDivElement;
     channelList: HTMLDivElement; side: HTMLDivElement; status: HTMLDivElement;
-    hint: HTMLDivElement; transport: HTMLButtonElement; title: HTMLSpanElement;
+    hint: HTMLDivElement; transport: HTMLButtonElement;
+    connect: HTMLButtonElement; connectTitle: HTMLSpanElement; connectDescription: HTMLSpanElement;
+    transportTitle: HTMLSpanElement; sidebar: HTMLButtonElement;
     fileInput: HTMLInputElement;
   };
 
@@ -130,22 +142,35 @@ export class App {
       status: must<HTMLDivElement>('status'),
       hint: must<HTMLDivElement>('empty-hint'),
       transport: must<HTMLButtonElement>('transport'),
-      title: must<HTMLSpanElement>('capture-title'),
+      connect: must<HTMLButtonElement>('btn-connect'),
+      connectTitle: must<HTMLSpanElement>('device-title'),
+      connectDescription: must<HTMLSpanElement>('device-description'),
+      transportTitle: must<HTMLSpanElement>('transport-title'),
+      sidebar: must<HTMLButtonElement>('btn-sidebar'),
       fileInput: must<HTMLInputElement>('file-input'),
     };
+
+    // Static chrome (toolbar buttons, empty hint) translates in place,
+    // and <html lang> follows the stored locale - both before the first paint.
+    document.documentElement.lang = getLocale();
+    applyStaticI18n(document);
+
+    this.settingsMenu = new SettingsMenu(must<HTMLButtonElement>('btn-settings'));
+    this.sidebarMenu = new SettingsMenu(this.el.sidebar, 'sidebar-menu');
 
     this.storeRef = new StoreRef(createSampleStore(16, 16e6));
     this.stack = new WaveformStack(this.el.waveStack, this.storeRef);
     this.overlay = new Overlay(this.el.plot);
     this.channelList = new ChannelList(this.el.channelList, {
-      onToggle: (i, on) => this.setChannelEnabled(i, on),
-      onRename: (i, name) => { this.channels[i]!.name = name; this.relayout(); },
+      onConfigure: (channel, config) => this.configureChannel(channel, config),
       onReorder: (from, to) => this.reorder(from, to),
       onRemoveAnalyzer: (id) => this.removeAnalyzer(id),
-      onSetTrigger: (channel, mode) => this.setTriggerMode(channel, mode),
     });
 
     const panelHost = document.createElement('div');
+    // The class hooks the dark theme's card stack (style.css): a flex column with a gap,
+    // so the cards space without margins. Under the default theme it styles nothing.
+    panelHost.className = 'panel-host';
     this.el.side.appendChild(panelHost);
     this.capturePanel = new CapturePanel(panelHost, {
       onSettings: (s) => {
@@ -161,7 +186,6 @@ export class App {
       },
       onToggleChannel: (i, on) => this.setChannelEnabled(i, on),
       onSetAllChannels: (on) => this.setAllChannels(on),
-      onConnect: () => void this.connect(),
       onUsbControl: (command) => this.usbControl(command),
     });
     this.analyzerPanel = new AnalyzerPanel(panelHost, {
@@ -173,7 +197,19 @@ export class App {
 
     this.wireToolbar();
     this.wirePlot();
-    this.wireRail();
+
+    // A locale switch is a full re-render pass: every render path is clear-and-rebuild,
+    // so re-running them swaps the language with no stale strings anywhere.
+    onLocaleChange(() => this.retranslate());
+
+    // A theme switch is chrome-only CSS: no strings or layout depend on it, so nothing
+    // re-renders (a loaded/running capture is untouched). The transient settings menu
+    // would keep a stale checkmark, though, so it closes - same class as 'retranslate':
+    // no focus hand-off for a programmatic switch.
+    onThemeChange(() => {
+      this.settingsMenu.close('theme');
+      this.sidebarMenu.close('theme');
+    });
 
     // Observe the scroll viewport, not the plot: the plot's height is now an *output*
     // of relayout (its canvases stack in normal flow so the rows can scroll), and
@@ -189,7 +225,7 @@ export class App {
     // including on file://; dev uses the staged files served by Vite.
     this.decodeClient.warmup().then(
       () => { this.decodeWarm = true; this.renderPanels(); },
-      (e: unknown) => this.fail('decode worker warmup', e),
+      (e: unknown) => this.fail('error.decodeWorkerWarmup', e),
     );
     void this.reconnectGranted();
   }
@@ -202,23 +238,33 @@ export class App {
     return this.order.map((i) => this.channels[i]!).filter((c) => c.enabled);
   }
 
-  /** Commit one inline five-state selector immediately. The global checkbox remains the
-   * only enable gate; changing a channel while it is off merely edits saved modes. */
-  private setTriggerMode(channel: number, mode: TriggerMode): void {
-    if (this.running || this.stopping) return;
-    const triggerModes = { ...this.settings.triggerModes, [channel]: mode };
-    const triggerConditions = modesToConditions(triggerModes);
-    const first = triggerConditions[0] ?? {
-      channel, kind: 'level' as const, level: 1 as const,
-    };
-    this.settings = clampSettings({
-      ...this.settings, triggerModes, triggerConditions,
-      triggerChannel: first.channel, triggerKind: first.kind, triggerLevel: first.level,
-    }, this.rateCeilings);
-    this.triggerState = 'off';
-    this.triggerSampleIndex = null;
+  /** Commit one channel-dialog draft. Name and color metadata stay editable during
+   * capture, while trigger modes retain the existing running/stopping lock. */
+  private configureChannel(channel: number, config: ChannelConfiguration): void {
+    const current = this.channels[channel];
+    if (!current) return;
+    this.channels[channel] = { ...current, name: config.name, color: config.color };
+
+    if (!this.running && !this.stopping) {
+      const triggerModes = { ...this.settings.triggerModes, [channel]: config.mode };
+      const triggerConditions = modesToConditions(triggerModes);
+      const first = triggerConditions[0] ?? {
+        channel, kind: 'level' as const, level: 1 as const,
+      };
+      const next = clampSettings({
+        ...this.settings, triggerModes, triggerConditions,
+        triggerChannel: first.channel, triggerKind: first.kind, triggerLevel: first.level,
+      }, this.rateCeilings);
+      if (triggerSettingsChanged(this.settings, next)) {
+        this.triggerState = 'off';
+        this.triggerSampleIndex = null;
+      }
+      this.settings = next;
+    }
+
     this.relayout();
     this.renderPanels();
+    this.dirty = true;
   }
 
   /**
@@ -235,17 +281,16 @@ export class App {
     const plotH = Math.max(120, (this.el.scroll.clientHeight || 630) - axisH);
     const enabled = this.enabledChannels();
     this.lanes = this.computeLanes(enabled);
+    const channelColors = this.channels.map((channel) => channel.color);
 
     if (enabled.length === 0) {
-      this.stack.setRows([]);
+      this.stack.setRows([], channelColors);
       this.channelList.render([]);
       this.dirty = true;
       return;
     }
 
-    const laneTotal = this.lanes.length * ROWS.laneHeight;
-    let base = Math.floor((plotH - laneTotal) / enabled.length);
-    base = Math.max(ROWS.minRowHeight, Math.min(ROWS.maxRowHeight, base));
+    const base = computeChannelRowHeight(plotH, enabled.length, this.lanes.length);
 
     const rows: RowSpec[] = [];
     const cells: ChannelCell[] = [];
@@ -261,19 +306,16 @@ export class App {
       cells.push({
         channel: c,
         heightCss: base + mine.length * ROWS.laneHeight,
+        laneCss: mine.length * ROWS.laneHeight,
         analyzers: this.analyzers.filter((a) => this.chipChannels(a).includes(c.index)),
         trigger: {
-          active: this.settings.triggerModes[c.index] !== undefined && this.settings.triggerModes[c.index] !== 'dont-care',
-          masked: !this.settings.triggerEnableMask,
-          mode: this.settings.triggerModes[c.index] ?? 'dont-care',
+          mode: this.settings.triggerModes[c.index] ?? DEFAULT_TRIGGER_MODE,
           disabled: this.running || this.stopping,
-          state: this.triggerState,
-          summary: triggerSummary(this.settings, c.index),
         },
       });
     }
 
-    this.stack.setRows(rows);
+    this.stack.setRows(rows, channelColors);
     this.channelList.render(cells);
     this.dirty = true;
   }
@@ -384,7 +426,7 @@ export class App {
     try {
       this.draw();
     } catch (e) {
-      this.fail('render', e);
+      this.fail('error.render', e);
     }
   };
 
@@ -718,24 +760,24 @@ export class App {
       const width = (next - prev) / sr;
       widthX0 = this.toPx(prev);
       widthX1 = this.toPx(next);
-      lines.push(`Width: ${formatDuration(width)}`);
-      lines.push(`width⁻¹: ${formatFreq(1 / width)}`);
+      lines.push(t('hover.width', { duration: formatDuration(width) }));
+      lines.push(t('hover.widthInv', { freq: formatFreq(1 / width) }));
       if (next2 >= 0) {
         const period = (next2 - prev) / sr;
         periodX0 = this.toPx(prev);
         periodX1 = this.toPx(next2);
-        lines.unshift(`Freq: ${formatFreq(1 / period)}`);
-        lines.unshift(`Duty: ${((width / period) * 100).toFixed(2)} %`);
+        lines.unshift(t('hover.freq', { freq: formatFreq(1 / period) }));
+        lines.unshift(t('hover.duty', { pct: ((width / period) * 100).toFixed(2) }));
       }
     } else {
-      lines.push('no transition in view');
+      lines.push(t('hover.noTransition'));
     }
 
     this.hover = {
       pointerX: cssX,
       rowTop: box.top,
       rowBand: box.band,
-      color: channelColor(ch),
+      color: this.channels[ch]?.color ?? channelColor(ch),
       widthX0, widthX1, periodX0, periodX1,
       lines,
     };
@@ -746,9 +788,10 @@ export class App {
     this.stack.setFollowLatest(on);
   }
 
-  // ------------------------------------------------------------------ toolbar / rail
+  // ------------------------------------------------------------------ toolbar
 
   private wireToolbar(): void {
+    this.el.connect.addEventListener('click', () => void this.connect());
     this.el.transport.addEventListener('click', () => {
       if (this.running) void this.stopCapture(); else void this.startCapture();
     });
@@ -765,28 +808,82 @@ export class App {
       this.stack.zoomToFit();
       this.dirty = true;
     });
+    must<HTMLButtonElement>('btn-settings').addEventListener('click', () => {
+      // Keep the channel dialog and this transient menu from competing for focus.
+      this.channelList.closeDialog();
+      this.sidebarMenu.close('outside');
+      this.settingsMenu.toggle(this.settingsItems());
+    });
+    this.el.sidebar.addEventListener('click', () => {
+      this.channelList.closeDialog();
+      this.settingsMenu.close('outside');
+      this.sidebarMenu.toggle(this.sidebarItems());
+    });
   }
 
-  private wireRail(): void {
-    const dev = must<HTMLButtonElement>('rail-device');
-    const ana = must<HTMLButtonElement>('rail-analyzers');
-    dev.addEventListener('click', () => {
-      this.panel = this.panel === 'device' ? null : 'device';
-      this.renderPanels();
-      this.relayout();
-    });
-    ana.addEventListener('click', () => {
-      this.panel = this.panel === 'analyzers' ? null : 'analyzers';
-      this.renderPanels();
-      this.relayout();
-    });
+  /**
+   * The settings menu's content. Built fresh on every open, so the Language row's
+   * hint and the flyout's checkmark always reflect the current locale, and C6's extra
+   * locales appear with zero changes here - LOCALES/LOCALE_LABELS are the registry.
+   */
+  private settingsItems(): SettingsMenuItem[] {
+    return [
+      {
+        label: t('settings.language'),
+        hint: `${LOCALE_LABELS[getLocale()]} ▸`,
+        children: LOCALES.map((l) => ({
+          label: LOCALE_LABELS[l],
+          checked: l === getLocale(),
+          // Async now: the catalog may need fetching. Only a catalog load
+          // failure is surfaced through the status-error path; a pick superseded
+          // by a newer one is a normal outcome, not an error.
+          onPick: () => { void setLocale(l).then((r) => { if (r === 'failed') this.fail('error.localeLoad', l); }); },
+        })),
+      },
+      // No theme row: dark is the only shipping look and the picker is retired.
+      // The machinery stays intact and reachable via debug.setTheme, so re-showing
+      // the row here is a one-item revert.
+    ];
+  }
+
+  private sidebarItems(): SettingsMenuItem[] {
+    return [
+      {
+        label: t('toolbar.sidebarDevice'),
+        checked: this.panel === 'device',
+        onPick: () => this.selectPanel('device'),
+      },
+      {
+        label: t('toolbar.sidebarAnalyzers'),
+        checked: this.panel === 'analyzers',
+        onPick: () => this.selectPanel('analyzers'),
+      },
+      {
+        label: t('toolbar.sidebarNone'),
+        checked: this.panel === null,
+        onPick: () => this.selectPanel(null),
+      },
+    ];
+  }
+
+  private selectPanel(p: 'device' | 'analyzers' | null): void {
+    this.sidebarMenu.close('outside');
+    this.panel = p;
+    this.renderPanels();
+    this.relayout();
+  }
+
+  /** Re-render every string in the shell after a locale change. */
+  private retranslate(): void {
+    this.settingsMenu.close('retranslate');
+    this.sidebarMenu.close('retranslate');
+    applyStaticI18n(document);
+    this.relayout();       // channel cells rebuild; an open channel dialog closes here
+    this.renderPanels();   // side panels + toolbar chrome
+    this.renderStatus();   // status line
   }
 
   private renderPanels(): void {
-    const dev = must<HTMLButtonElement>('rail-device');
-    const ana = must<HTMLButtonElement>('rail-analyzers');
-    dev.classList.toggle('on', this.panel === 'device');
-    ana.classList.toggle('on', this.panel === 'analyzers');
     this.el.side.classList.toggle('hidden', this.panel === null);
 
     // Toolbar chrome is updated before the early return below, not after it. It used to be
@@ -812,7 +909,6 @@ export class App {
             lost: this.lostSamples,
           }
           : null,
-        webusbAvailable: typeof navigator !== 'undefined' && !!navigator.usb,
         maxSamplerateHz: this.rateCeilings,
         triggerState: this.triggerState,
       });
@@ -839,15 +935,27 @@ export class App {
    * vanished mid-run.
    */
   private renderToolbarState(): void {
-    const t = this.el.transport;
-    t.textContent = this.stopping ? 'Stopping…' : this.running ? 'Stop' : 'Start';
-    t.className = this.running ? 'danger' : 'primary';
-    t.disabled = this.stopping || (!this.running && !this.device);
-    t.title = t.disabled
-      ? this.stopping ? 'Waiting for pending USB transfers to be cancelled'
-        : 'Connect a device first (rail: ◈)'
-      : this.running ? 'Stop the running capture' : 'Start a capture on the connected device';
-    this.el.title.textContent = this.captureLabel;
+    const webusbAvailable = typeof navigator !== 'undefined' && !!navigator.usb;
+    const deviceName = this.device?.name ?? null;
+    this.el.connectTitle.textContent = deviceName ?? t('toolbar.device');
+    this.el.connectDescription.textContent = !webusbAvailable ? t('toolbar.webusbUnavailable')
+      : deviceName ? t('toolbar.reconnect') : t('toolbar.connect');
+    this.el.connect.disabled = !webusbAvailable;
+    this.el.connect.title = !webusbAvailable ? t('toolbar.noWebusb')
+      : deviceName ? t('toolbar.reconnect') : t('toolbar.connectHint');
+    this.el.connect.classList.toggle('connected', deviceName !== null);
+
+    const btn = this.el.transport;
+    this.el.sidebar.setAttribute('aria-label', t('toolbar.sidebarTitle'));
+    this.el.transportTitle.textContent = this.stopping ? t('toolbar.stopping')
+      : this.running ? t('toolbar.stop') : t('toolbar.start');
+    btn.classList.toggle('primary', !this.running);
+    btn.classList.toggle('danger', this.running);
+    btn.disabled = this.stopping || (!this.running && !this.device);
+    btn.title = btn.disabled
+      ? this.stopping ? t('toolbar.stoppingTitle')
+        : t('toolbar.connectFirstTitle')
+      : this.running ? t('toolbar.stopTitle') : t('toolbar.startTitle');
   }
 
   private renderStatus(): void {
@@ -855,11 +963,11 @@ export class App {
     const view = this.stack.view;
     const sr = store.samplerate;
     const parts: string[] = [];
-    parts.push(this.captureLabel);
+    parts.push(formatCaptureLabel(this.captureLabel));
     if (store.length > 0) {
-      parts.push(`${formatCount(store.length)} samples @ ${formatRate(sr)}`);
-      parts.push(`${formatDuration(store.length / sr)} total`);
-      parts.push(`view ${formatDuration((view.end - view.start) / sr)}`);
+      parts.push(t('status.summary', { samples: formatCount(store.length), rate: formatRate(sr) }));
+      parts.push(t('status.total', { duration: formatDuration(store.length / sr) }));
+      parts.push(t('status.view', { duration: formatDuration((view.end - view.start) / sr) }));
     }
     // Cursor positions share the axis's origin: T=0 is the trigger sample when there
     // is one, so a pre-trigger cursor reads as the negative time the axis shows.
@@ -887,14 +995,16 @@ export class App {
     if (this.statusError) {
       const s = document.createElement('span');
       s.className = 'right err';
-      s.textContent = this.statusError;
+      s.textContent = formatStatusError(this.statusError);
       this.el.status.appendChild(s);
     }
   }
 
-  private fail(what: string, e: unknown): void {
+  private fail(what: MessageKey, e: unknown, vars?: MessageVars): void {
     const msg = e instanceof Error ? e.message : String(e);
-    this.statusError = `${what}: ${msg}`;
+    this.statusError = { what, ...(vars ? { vars } : {}), detail: msg };
+    // The console prefix is the stable message KEY, not the translated text -
+    // greppable in every locale.
     console.error(`[ui] ${what}`, e);
     this.dirty = true;
   }
@@ -907,7 +1017,7 @@ export class App {
    * the user reads is the read loop's, not a teardown artefact.
    */
   private deviceFailed(e: unknown): void {
-    this.fail('device', e);
+    this.fail('error.device', e);
     if (this.running && !this.stopping) void this.stopCapture();
   }
 
@@ -915,17 +1025,17 @@ export class App {
 
   private async openFiles(files: File[]): Promise<void> {
     try {
-      this.statusError = '';
+      this.statusError = null;
       const t0 = performance.now();
       const cap = await loadFiles(files);
       this.adoptCapture(cap.store, cap.channelNames,
-        `${cap.sourceDescription} · loaded in ${Math.round(performance.now() - t0)} ms`);
+        { kind: 'loaded', source: cap.sourceDescription, ms: Math.round(performance.now() - t0) });
     } catch (e) {
-      this.fail('open capture', e);
+      this.fail('error.openCapture', e);
     }
   }
 
-  private adoptCapture(store: SampleStore, names: string[], label: string): void {
+  private adoptCapture(store: SampleStore, names: string[], label: CaptureLabel): void {
     this.storeRef.set(store);
     this.channels = defaultChannels(store.channelCount);
     for (let i = 0; i < this.channels.length; i++) {
@@ -939,7 +1049,7 @@ export class App {
     this.order = this.channels.map((c) => c.index);
     // Annotations belong to a capture; a new one invalidates them.
     for (const a of this.analyzers) {
-      a.result = null; a.index = null; a.status = 'idle'; a.message = 'not decoded';
+      a.result = null; a.index = null; a.status = 'idle'; a.note = { kind: 'pending' };
     }
     this.cursorA = null;
     this.cursorB = null;
@@ -965,7 +1075,7 @@ export class App {
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
     } catch (e) {
-      this.fail('save', e);
+      this.fail('error.save', e);
     }
   }
 
@@ -984,13 +1094,13 @@ export class App {
       this.renderPanels();
     } catch (e) {
       // Not fatal: the device may be claimed by sigrok-cli, or unplugged.
-      this.fail('reconnect', e);
+      this.fail('error.reconnect', e);
     }
   }
 
   private async connect(): Promise<void> {
     try {
-      this.statusError = '';
+      this.statusError = null;
       const d = await requestDeviceOnBestThread();
       d.onError = (e) => this.deviceFailed(e);
       this.device = d;
@@ -998,7 +1108,7 @@ export class App {
       this.adoptDeviceChannels(d);
       this.renderPanels();
     } catch (e) {
-      this.fail('connect', e);
+      this.fail('error.connect', e);
     }
   }
 
@@ -1047,9 +1157,9 @@ export class App {
 
   private async startCapture(): Promise<void> {
     if (this.running || this.stopping) return;
-    if (!this.device) { this.fail('start', new Error('no device connected')); return; }
+    if (!this.device) { this.fail('error.start', new Error('no device connected')); return; }
     try {
-      this.statusError = '';
+      this.statusError = null;
       const cfg: CaptureConfig = {
         channels: this.settings.channels,
         samplerate: this.settings.samplerate,
@@ -1068,7 +1178,7 @@ export class App {
       this.channels = defaultChannels(cfg.channels);
       this.order = this.channels.map((c) => c.index);
       for (const a of this.analyzers) {
-        a.result = null; a.index = null; a.status = 'idle'; a.message = 'not decoded';
+        a.result = null; a.index = null; a.status = 'idle'; a.note = { kind: 'pending' };
       }
       this.captureBytes = 0;
       this.lostSamples = 0;
@@ -1079,7 +1189,7 @@ export class App {
         : MAX_SAMPLES - 1;
       this.captureLimitSamples = postTriggerSamples;
       this.triggerState = this.settings.softwareTrigger ? 'waiting' : 'off';
-      this.captureLabel = `capturing ${cfg.channels} ch @ ${formatRate(cfg.samplerate)}`;
+      this.captureLabel = { kind: 'capturing', channels: cfg.channels, rate: cfg.samplerate };
       this.running = true;
       this.relayout();
       // Show a window rather than the whole (empty) capture, and follow the live edge.
@@ -1133,7 +1243,7 @@ export class App {
         // `pos` is not the anchor, but it is a free cross-check on the invariant, and a
         // silent divergence here would misplace every gap in the capture. Reported once.
         if (pos !== store.length && this.lostSamples === 0) {
-          this.fail('dropout accounting',
+          this.fail('error.dropoutAccounting',
             new Error(`device counted ${pos} samples delivered, store holds ${store.length}`));
         }
         const n = appendLostSamples(store, missing, this.captureLimitSamples);
@@ -1184,7 +1294,7 @@ export class App {
       this.triggerState = 'off';
       this.triggerSampleIndex = null;
       this.relayout();
-      this.fail('start capture', e);
+      this.fail('error.startCapture', e);
       this.renderPanels();
     }
   }
@@ -1197,16 +1307,15 @@ export class App {
     try {
       await this.device?.stop();
     } catch (e) {
-      this.fail('stop capture', e);
+      this.fail('error.stopCapture', e);
     } finally {
       this.stopping = false;
     }
     this.setFollow(false);
     const sr = this.store.samplerate;
     this.captureLabel = this.triggerState === 'not-found'
-      ? `no trigger · ${formatCount(this.store.length)} samples retained`
-      : `live capture · ${formatCount(this.store.length)} samples @ ${formatRate(sr)} · ` +
-        `${formatDuration(this.store.length / sr)}`;
+      ? { kind: 'stoppedNoTrigger', samples: this.store.length }
+      : { kind: 'live', samples: this.store.length, rate: sr, seconds: this.store.length / sr };
     this.stack.zoomToFit();
     this.relayout();
     this.renderPanels();
@@ -1232,7 +1341,7 @@ export class App {
       result: null,
       index: null,
       status: 'idle',
-      message: 'not decoded',
+      note: { kind: 'pending' },
     };
     this.analyzers.push(a);
     this.renderPanels();
@@ -1250,7 +1359,7 @@ export class App {
     if (!a) return;
     const store = this.store as CountingStore;
     try {
-      this.statusError = '';
+      this.statusError = null;
       if (store.length === 0) throw new Error('no capture to decode');
       // [src/decode/limits.ts] annotation spans are Int32Array, so 2^31-1 is a hard
       // ceiling - 10.7 s at 200 MSa/s, which this bench can actually reach.
@@ -1276,7 +1385,7 @@ export class App {
       }
 
       a.status = 'decoding';
-      a.message = `${formatCount(edgeTotal)} edges`;
+      a.note = { kind: 'edges', count: edgeTotal };
       this.decodeBusy = true;
       this.renderPanels();
 
@@ -1300,16 +1409,20 @@ export class App {
       a.result = result;
       a.index = new AnnotationIndex(result);
       a.status = 'done';
-      a.message =
-        `${formatCount(result.annotations.count)} anns, ${Math.round(result.decodeMs)} ms ` +
-        `(${Math.round(performance.now() - t0)} ms wall)`;
-      if (result.errors.length) a.message += ` · ${result.errors[0]}`;
+      a.note = {
+        kind: 'stats',
+        anns: result.annotations.count,
+        decodeMs: result.decodeMs,
+        wallMs: performance.now() - t0,
+        // The decoder's own first error is diagnostic payload: appended raw.
+        ...(result.errors.length ? { firstError: result.errors[0]! } : {}),
+      };
     } catch (e) {
       a.status = 'error';
-      a.message = e instanceof DecodeTimeoutError ? 'timed out'
-        : e instanceof DecodeCancelledError ? 'cancelled'
-          : e instanceof Error ? e.message : String(e);
-      this.fail(`decode ${a.decoderId}`, e);
+      a.note = e instanceof DecodeTimeoutError ? { kind: 'timeout' as const }
+        : e instanceof DecodeCancelledError ? { kind: 'cancelled' as const }
+          : { kind: 'error' as const, detail: e instanceof Error ? e.message : String(e) };
+      this.fail('error.decode', e, { id: a.decoderId });
     } finally {
       this.decodeBusy = false;
       this.abort = null;
@@ -1331,6 +1444,10 @@ export class App {
    */
   readonly debug = {
     connect: () => this.connect(),
+    setLocale: (l: Locale) => setLocale(l),
+    getLocale: () => getLocale(),
+    setTheme: (id: ThemeId) => setTheme(id),
+    getTheme: () => getTheme(),
     start: () => this.startCapture(),
     stop: () => this.stopCapture(),
     attach: (id: string, ch: Record<number, number>, opts: Record<string, string | number> = {}) =>
@@ -1347,9 +1464,7 @@ export class App {
       this.renderPanels();
     },
     setPanel: (p: 'device' | 'analyzers' | null) => {
-      this.panel = p;
-      this.renderPanels();
-      this.relayout();
+      this.selectPanel(p);
     },
     setViewportSeconds: (a: number, b: number) => {
       const sr = this.store.samplerate;
@@ -1364,9 +1479,12 @@ export class App {
     hoverAt: (cssX: number, cssY: number) => this.updateHover(cssX, cssY),
     toggleChannel: (i: number, on: boolean) => this.setChannelEnabled(i, on),
     rename: (i: number, name: string) => {
-      const c = this.channels[i];
-      if (c) c.name = name;
-      this.relayout();
+      const current = this.channels[i];
+      if (current) {
+        this.configureChannel(i, {
+          name, mode: this.settings.triggerModes[i] ?? DEFAULT_TRIGGER_MODE, color: current.color,
+        });
+      }
     },
     reorder: (from: number, to: number) => this.reorder(from, to),
     /**
@@ -1414,8 +1532,9 @@ export class App {
       return true;
     },
     snapshot: () => ({
-      label: this.captureLabel,
-      error: this.statusError,
+      label: formatCaptureLabel(this.captureLabel),
+      theme: getTheme(),
+      error: this.statusError ? formatStatusError(this.statusError) : '',
       running: this.running,
       stopping: this.stopping,
       device: this.device?.name ?? null,
@@ -1442,7 +1561,7 @@ export class App {
         id: a.id,
         decoder: a.decoderId,
         status: a.status,
-        message: a.message,
+        message: formatAnalyzerNote(a.note),
         annotations: a.result?.annotations.count ?? 0,
         laneChannel: a.laneChannel,
       })),
@@ -1478,12 +1597,7 @@ function clampSettings(
     .map((c) => ({ ...c }));
   const triggerModes: Record<number, TriggerMode> = { ...savedModes };
   for (const c of triggerConditions) {
-    // 'edge' (either direction) is engine-supported but has no glyph in the inline
-    // five-state picker, so a saved/debug condition using it maps to X here and the
-    // condition is dropped on the next settings edit. Unsupported in this UI on
-    // purpose; pick rising or falling instead.
-    triggerModes[c.channel] = c.kind === 'level' ? (c.level ? 'high' : 'low')
-      : c.kind === 'rising' ? 'rising' : c.kind === 'falling' ? 'falling' : 'dont-care';
+    triggerModes[c.channel] = triggerModeFromCondition(c);
   }
   return {
     ...s, samplerate, seconds: Math.max(0.001, Math.min(s.seconds, max)),
@@ -1496,30 +1610,6 @@ function clampSettings(
     triggerConditions,
     preTriggerPercent: Math.max(0, Math.min(75, s.preTriggerPercent)),
   };
-}
-
-function modesToConditions(modes: Record<number, TriggerMode>): CaptureSettings['triggerConditions'] {
-  return Object.keys(modes).map(Number).sort((a, b) => a - b).flatMap((channel): CaptureSettings['triggerConditions'] => {
-    const mode = modes[channel];
-    if (!mode || mode === 'dont-care') return [];
-    if (mode === 'low' || mode === 'high') return [{ channel, kind: 'level' as const, level: mode === 'high' ? 1 as const : 0 as const }];
-    return [{ channel, kind: mode, level: 1 as const }];
-  });
-}
-
-function triggerSummary(s: CaptureSettings, channel: number): string {
-  const c = s.triggerConditions.find((x) => x.channel === channel);
-  const kind = c?.kind ?? s.triggerKind;
-  const level = c?.level ?? s.triggerLevel;
-  const condition = kind === 'level'
-    ? `Level ${level}`
-    : kind === 'rising'
-      ? 'Rising edge'
-      : kind === 'falling'
-        ? 'Falling edge'
-        : 'Any edge';
-  const total = s.triggerConditions.length;
-  return `${condition} · ${s.preTriggerPercent}% pre-trigger${total > 1 ? ` · AND ${total} conditions` : ''}`;
 }
 
 /** Configuration edits describe a future capture; they must not leave the previous

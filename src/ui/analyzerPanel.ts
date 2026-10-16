@@ -19,6 +19,8 @@ import {
 } from '../decode/index.js';
 import type { DecoderInfo } from '../decode/index.js';
 import { button, div, labelled, section, select } from './capturePanel.js';
+import { formatAnalyzerNote } from './format.js';
+import { t } from './i18n.js';
 import { COLORS } from './metrics.js';
 import type { AnalyzerState, ChannelState } from './state.js';
 
@@ -53,17 +55,18 @@ export class AnalyzerPanel {
 
     const head = div('panel-head');
     const title = div('panel-title');
-    title.textContent = 'Analyzers';
+    title.textContent = t('analyzerPanel.title');
     head.appendChild(title);
     const sub = div('panel-sub');
-    sub.textContent = `${decoderCount} stock sigrok decoders. ` +
-      (v.warm ? 'Worker warm.' : 'Worker warming up (~850 ms, once per session).');
+    sub.textContent = v.warm
+      ? t('analyzerPanel.subWarm', { count: decoderCount })
+      : t('analyzerPanel.subCold', { count: decoderCount });
     head.appendChild(sub);
     this.root.appendChild(head);
 
     // ---------------------------------------------------------------- attached
     if (v.analyzers.length) {
-      const s = section('Attached');
+      const s = section(t('analyzerPanel.attached'));
       for (const a of v.analyzers) {
         const row = div('analyzer-row');
         const sq = document.createElement('span');
@@ -76,20 +79,20 @@ export class AnalyzerPanel {
         row.appendChild(name);
         const st = document.createElement('span');
         st.className = 'analyzer-status';
-        st.textContent = a.status === 'decoding' ? 'decoding…' : a.message;
+        st.textContent = a.status === 'decoding' ? t('analyzerPanel.decoding') : formatAnalyzerNote(a.note);
         st.style.color = a.status === 'error' ? COLORS.negative : COLORS.text50;
         row.appendChild(st);
-        const re = button('Decode', 'mini');
+        const re = button(t('analyzerPanel.decode'), 'mini');
         re.disabled = !v.hasCapture || a.status === 'decoding';
         re.addEventListener('click', () => this.cb.onRedecode(a.id));
         row.appendChild(re);
-        const rm = button('Remove', 'mini');
+        const rm = button(t('analyzerPanel.remove'), 'mini');
         rm.addEventListener('click', () => this.cb.onRemove(a.id));
         row.appendChild(rm);
         s.body.appendChild(row);
       }
       if (v.busy) {
-        const cancel = button('Cancel decode', 'mini');
+        const cancel = button(t('analyzerPanel.cancelDecode'), 'mini');
         cancel.addEventListener('click', () => this.cb.onCancel());
         s.body.appendChild(cancel);
       }
@@ -97,7 +100,7 @@ export class AnalyzerPanel {
     }
 
     // ---------------------------------------------------------------- add
-    const add = section('Add');
+    const add = section(t('analyzerPanel.add'));
     const logic = listDecoders()
       .filter((d) => d.inputs.length === 1 && d.inputs[0] === 'logic')
       .sort((a, b) => a.id.localeCompare(b.id));
@@ -108,7 +111,7 @@ export class AnalyzerPanel {
       this.draftOptions = {};
       this.render(v);
     });
-    add.body.appendChild(labelled('Decoder', pick));
+    add.body.appendChild(labelled(t('analyzerPanel.decoder'), pick));
 
     let info: DecoderInfo;
     try {
@@ -119,8 +122,7 @@ export class AnalyzerPanel {
     }
     if (!isLogicDecoder(info)) {
       const warn = div('panel-note');
-      warn.textContent = `${info.id} consumes ${info.inputs.join(', ')}, so it must be stacked ` +
-        `on a producer. Stacking is not exposed in this panel.`;
+      warn.textContent = t('analyzerPanel.stacked', { id: info.id, inputs: info.inputs.join(', ') });
       add.body.appendChild(warn);
     }
 
@@ -147,7 +149,7 @@ export class AnalyzerPanel {
         if (val < 0) delete this.draftChannels[i];
         else this.draftChannels[i] = val;
       });
-      add.body.appendChild(labelled(`${ch.name}${required ? '' : ' (optional)'}`, sel));
+      add.body.appendChild(labelled(`${ch.name}${required ? '' : t('analyzerPanel.optionalSuffix')}`, sel));
     });
 
     for (const opt of info.options) {
@@ -175,7 +177,7 @@ export class AnalyzerPanel {
       add.body.appendChild(p);
     }
 
-    const attach = button('Attach', 'primary');
+    const attach = button(t('analyzerPanel.attach'), 'primary');
     attach.disabled = problems.length > 0;
     attach.addEventListener('click', () =>
       this.cb.onAttach(this.chosen, { ...this.draftChannels }, { ...this.draftOptions }));
@@ -183,7 +185,7 @@ export class AnalyzerPanel {
 
     if (!v.hasCapture) {
       const p = div('panel-note');
-      p.textContent = 'Load or record a capture first; a decoder needs edges to read.';
+      p.textContent = t('analyzerPanel.loadFirst');
       add.body.appendChild(p);
     }
     this.root.appendChild(add.el);

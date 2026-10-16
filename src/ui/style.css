@@ -31,15 +31,100 @@
    * i.e. 30 + 1 = 31 CSS px total - writing 30 here made every band one CSS px short,
    * which is exactly what the first measurement of our own screenshot caught.
    */
-  --toolbar-h: 31px;   /* content device y 66..125, border 126..127 */
+  --toolbar-h: 57px;   /* content device y 66..125, border 126..127 */
   --axis-h: 30px;      /* content device y 128..185, border 186..187 */
   --status-h: 40px;    /* border device y 1920..1921, content 1922..1999 */
-  /* [CHOICE] the D-tag, the (optional) name field and the trigger button; default
+  /* [CHOICE] the D-tag, the (optional) read-only name and the settings button; default
      channel names are empty now, so the column no longer reserves "Channel 15" width. */
   --labels-w: 128px;
-  --rail-w: 47px;      /* border device x 3106..3107, content 3108..3199 */
   --strip-w: 5px;      /* device x 0..9 */
   --panel-w: 296px;
+}
+
+/*
+ * ------------------------------------------------------- theme token layers
+ *
+ * Two additions, one rule: `default` renders byte-identically to before because the
+ * semantic tokens below only ALIAS the measured legacy variables, and every dark
+ * override is scoped to html[data-theme="dark"]. See src/ui/NOTES.md for the contract.
+ *
+ * Naming collision, settled: logicweb's --accent is the BRAND violet (checks, primary
+ * action, focus); shadcn's --accent is a HOVER SURFACE. shadcn's --accent is never
+ * introduced here - the brand role maps to --primary, hover surfaces to --muted /
+ * --secondary, and --accent keeps its legacy meaning.
+ */
+
+/* Layer B: shadcn semantic tokens [SOURCE] shadcn/ui naming + roles, aliased to the
+   measured legacy palette so adopting a token can never change the default render. */
+:root {
+  --background: var(--bg10);
+  --foreground: var(--text80);
+  --card: var(--bg20);
+  --card-foreground: var(--text80);
+  --popover: var(--bg20);
+  --popover-foreground: var(--text80);
+  --secondary: var(--bg30);
+  --secondary-foreground: var(--text);
+  --muted: var(--panel);
+  --muted-foreground: var(--text50);
+  --primary: var(--accent);
+  --primary-foreground: #ffffff;
+  --destructive: var(--negative);
+  --destructive-foreground: #ffffff;
+  --border: var(--border-low);
+  --input: var(--border-low);
+  --ring: var(--accent);
+  --radius: 3px;             /* [MEASURED] the existing control radius */
+}
+
+/* Layer C: the dark theme. Token values [SOURCE] shadcn/ui dark (oklch), except where
+   tagged. Chrome metric variables (--toolbar-h, --axis-h, --status-h, --labels-w,
+   --strip-w, --panel-w) are theme-independent and NEVER redefined here -
+   src/ui/tools/theme-selftest.ts enforces the freeze. */
+html[data-theme="dark"] {
+  color-scheme: dark;        /* native select/checkbox/scrollbar render dark */
+
+  /* [SOURCE] shadcn/ui dark */
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.269 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  /* [CHOSEN] shadcn's violet ramp keeps logicweb's brand hue instead of the neutral
+     near-white default primary. */
+  --primary: oklch(0.606 0.25 292.7);
+  --primary-foreground: oklch(0.969 0.016 293.756);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: var(--primary);
+  --shadow: oklch(0 0 0 / 45%);  /* [CHOSEN] overlay/popover shadow, deeper than default's 40% */
+  --radius: 0.625rem;        /* [SOURCE] shadcn default: 10px cards, 6px controls via calc() */
+
+  /* Legacy remap: rules not yet migrated to semantic tokens still follow the theme.
+     [MEASURED] EXCEPTION --bg10 stays the canvas tone #1B1B1C: the axis canvas paints
+     metrics.ts COLORS.bg10 and the labels column / labels spacer / plot CSS must meet
+     the canvas pixel-perfectly (the measured seam documented in this sheet's header).
+     Toolbar, side panel and status get explicit semantic overrides instead. */
+  --bg00: oklch(0.12 0 0);
+  --bg10: #1B1B1C;
+  --bg20: var(--card);
+  --bg30: var(--secondary);
+  --panel: var(--card);
+  --border-low: var(--border);
+  --border-high: var(--input);
+  --text: var(--foreground);
+  --text80: var(--card-foreground);
+  --text50: var(--muted-foreground);
+  --accent: var(--primary);
+  --negative: var(--destructive);
+  --stop: var(--destructive);
 }
 
 * { box-sizing: border-box; }
@@ -69,19 +154,22 @@ html, body {
 /* ---------------------------------------------------------------- toolbar */
 
 #toolbar {
-  min-height: var(--toolbar-h);
-  background: var(--bg10);
-  border-bottom: 1px solid var(--border-high);
+  min-width: 0;
+  min-height: max(var(--toolbar-min-height, var(--toolbar-h)), var(--toolbar-min-ratio, 0px));
+  height: var(--toolbar-height, auto);
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground);
   display: flex;
   align-items: center;
-  flex-wrap: wrap;       /* phones: the title drops to a second line, buttons stay */
-  gap: 2px 6px;
-  padding: 2px 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
 }
 
-#toolbar .spacer { flex: 1; }
+#toolbar .spacer { flex: 1 1 12px; min-width: 0; }
 
-#toolbar button, .pill, .mini, .primary, .danger, .seg {
+.pill, .mini, .primary, .danger, .seg {
   background: var(--bg20);
   color: var(--text80);
   border: 1px solid var(--border-low);
@@ -90,22 +178,99 @@ html, body {
   font: inherit;
   cursor: pointer;
 }
-#toolbar button:hover, .pill:hover, .mini:hover { background: var(--panel); }
+.pill:hover, .mini:hover { background: var(--panel); }
 button:disabled { opacity: 0.45; cursor: default; }
+/* Pressed feedback for every button, momentary or toggle: an inset black veil darkens
+   WHATEVER background is currently showing - base, hover, .on/.active, .primary,
+   .danger, or the inline channel colour of a .chip - so one rule covers all families
+   in both themes, and being additive (box-shadow) it composes over :hover with no
+   cascade-order fragility. [CHOSEN] 25% black: readable on the darkest surfaces
+   (--bg20/--secondary) without washing out the bright channel chips. The 999px spread
+   covers the widest button (full-width .settings-item rows) and clips to the border
+   box, so the overshoot is free. A disabled native button never matches :active, so
+   the disabled look needs no guard; no button class sets its own box-shadow, and the
+   dark focus ring is outline-based, so the veil clobbers neither. */
+button:active { box-shadow: inset 0 0 0 999px rgb(0 0 0 / 25%); }
 .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .danger { background: var(--stop); border-color: var(--stop); color: #fff; }
 .mini { padding: 1px 6px; font-size: 11px; }
 
-#transport {
-  font-size: 13px;
-  min-width: 74px;
-}
-#capture-title {
-  color: var(--text50);
+#toolbar .toolbar-item { display: flex; align-items: center; gap: 8px; min-width: 0; text-align: left; }
+#toolbar button.toolbar-item {
+  flex: 0 0 auto;
+  width: fit-content;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 240px;
+  min-height: 44px;
+  padding: 5px 10px;
+  background: transparent;
+  color: var(--foreground);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font: inherit;
+  cursor: pointer;
+}
+#toolbar button.toolbar-item.primary {
+  background: var(--primary); border-color: var(--primary); color: var(--primary-foreground);
+}
+#toolbar button.toolbar-item.danger {
+  background: var(--destructive); border-color: var(--destructive); color: var(--destructive-foreground);
+}
+#toolbar button.toolbar-item:not(.primary):not(.danger):not(:disabled):hover {
+  background: var(--muted); border-color: var(--border);
+}
+#toolbar button.toolbar-item.primary:not(:disabled):hover,
+#toolbar button.toolbar-item.danger:not(:disabled):hover { opacity: 0.9; }
+#toolbar button.toolbar-item:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+#toolbar .toolbar-item-media {
+  display: flex; align-items: center; justify-content: center; flex: none;
+  width: 28px; height: 28px; border-radius: var(--radius);
+  background: var(--secondary); color: var(--muted-foreground);
+}
+#toolbar .toolbar-item-icon { display: block; width: 18px; height: 18px; }
+#toolbar .toolbar-item-content { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; overflow: hidden; }
+#toolbar .toolbar-item-title,
+#toolbar .toolbar-item-description {
+  display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#toolbar .toolbar-item-title { color: inherit; font-size: 12px; font-weight: 600; line-height: 1.25; }
+#toolbar .toolbar-item-description { color: var(--muted-foreground); font-size: 10px; line-height: 1.2; }
+#toolbar .primary .toolbar-item-media,
+#toolbar .danger .toolbar-item-media { background: transparent; color: inherit; }
+#toolbar .toolbar-device.connected .toolbar-item-media { color: var(--primary); }
+#toolbar .toolbar-separator {
+  align-self: center; flex: none; width: 1px; height: 28px; margin: 0 2px; background: var(--border);
+}
+#transport .transport-stop { display: none; }
+#transport.danger .transport-play { display: none; }
+#transport.danger .transport-stop { display: block; }
+
+@media (max-width: 760px) {
+  #toolbar { gap: 4px; padding: 6px; }
+  #toolbar button.toolbar-item { min-height: 38px; max-width: min(240px, 100%); padding: 4px 8px; }
+  #toolbar button.toolbar-device { min-height: 44px; }
+  #toolbar .toolbar-separator,
+  #toolbar .spacer { display: none; }
+  #toolbar .toolbar-sidebar { margin-left: auto; }
+}
+
+/* Dark theme: the toolbar drops to the shell's near-black ground and its hairline
+   softens to --border; buttons become secondary surfaces with the control radius,
+   hover is --muted (the shadcn ghost idiom). .primary/.danger keep their signal
+   colours (excluded via :not so the brand and stop actions stay loud). */
+html[data-theme="dark"] .pill,
+html[data-theme="dark"] .mini,
+html[data-theme="dark"] .seg {
+  background: var(--secondary); color: var(--secondary-foreground);
+  border: 1px solid var(--input); border-radius: calc(var(--radius) - 4px);
+}
+html[data-theme="dark"] .pill:hover,
+html[data-theme="dark"] .mini:hover { background: var(--muted); }
+html[data-theme="dark"] .primary {
+  background: var(--primary); border-color: var(--primary); color: var(--primary-foreground);
+}
+html[data-theme="dark"] .danger {
+  background: var(--destructive); border-color: var(--destructive); color: var(--destructive-foreground);
 }
 
 /* ---------------------------------------------------------------- main row */
@@ -166,6 +331,12 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 .ch-strip { width: var(--strip-w); min-width: var(--strip-w); }
 
+/* The card and chips wrappers are structure only: `display: contents` keeps them
+   layout-invisible here, so this base layer renders byte-identically to before they
+   existed. The dark theme promotes them to real boxes (rounded card, reserved
+   decoder strip) - see the dark channel-row block below. */
+.ch-card, .ch-analyzers { display: contents; }
+
 .ch-body {
   flex: 1;
   min-width: 0;
@@ -177,72 +348,291 @@ button:disabled { opacity: 0.45; cursor: default; }
 }
 
 .ch-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.ch-enable { margin: 0; width: 11px; height: 11px; accent-color: var(--accent); }
 .ch-tag { font-size: 11px; min-width: 22px; }
 
 .ch-name {
   flex: 1;
   min-width: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 2px;
+  padding: 0 2px;
   color: var(--text80);
-  font: inherit;
-  padding: 0 2px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.ch-name:hover { border-color: var(--border-low); }
-.ch-name:focus { outline: none; border-color: var(--accent); background: var(--bg00); }
-/* The rename affordance only shows itself when the pointer is already there. */
-.ch-name::placeholder { color: transparent; }
-.ch-name:hover::placeholder, .ch-name:focus::placeholder { color: var(--text50); }
-.ch-trigger {
+.ch-settings {
   flex: none;
-  width: 30px;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
   height: 18px;
-  padding: 0 2px;
+  padding: 0;
   border: 1px solid var(--border-low);
   border-radius: 3px;
   background: var(--bg20);
   color: var(--text50);
-  font-size: 10px;
-  line-height: 16px;
-  font-family: inherit;
   cursor: pointer;
 }
-.ch-trigger:hover { border-color: var(--accent); color: var(--text80); }
-.ch-trigger svg { display: block; width: 24px; height: 16px; }
-.ch-trigger.active {
-  width: 30px;
-  min-width: 30px;
-  padding: 0 2px;
-  border-color: var(--accent);
-  color: #fff;
-  background: var(--accent);
-  font-size: 9px;
+.ch-settings:hover { border-color: var(--accent); color: var(--text80); }
+.ch-settings svg { display: block; width: 14px; height: 14px; }
+
+/* Dark theme: the compact gear follows the same secondary-control roles as the other
+   icon buttons while keeping the established 18 CSS px channel-head height. */
+html[data-theme="dark"] .ch-settings {
+  background: var(--background); border-color: var(--input);
+  color: var(--muted-foreground); border-radius: calc(var(--radius) - 4px);
 }
-.ch-trigger.masked { opacity: .45; }
-.ch-trigger.active.waiting { animation: trigger-waiting 1.1s ease-in-out infinite; }
-@keyframes trigger-waiting {
-  0%, 100% { background: var(--accent); border-color: var(--accent); }
-  50% { background: #a98ff0; border-color: #a98ff0; }
+html[data-theme="dark"] .ch-settings:hover { border-color: var(--primary); color: var(--foreground); }
+
+/* Dark theme: the channel cell renders as one rounded Item-style card (the shadcn
+   Item anatomy: strip = media, tag+name = content, settings = action). The cell box
+   keeps its measured pitch exactly - label-to-trace alignment is untouched; only
+   the visible card insets inside it. [CHOSEN] insets: 3 px vertical keeps the row
+   rhythm tight; 4/2 px horizontal lifts the card off the column edges. */
+html[data-theme="dark"] .ch-cell {
+  border-bottom: 0;
+  padding: 3px 4px 3px 2px;
 }
-.ch-trigger.active.triggered { background: #2f9e64; border-color: #2f9e64; }
-.ch-trigger.active.not-found { background: var(--negative); border-color: var(--negative); }
-.trigger-inline-picker {
-  position: fixed; z-index: 40; display: flex; gap: 3px; padding: 3px;
-  transform: translate(22px, -50%) scaleX(0); transform-origin: left center;
-  opacity: 0; pointer-events: none; transition: transform 140ms ease, opacity 100ms ease;
+html[data-theme="dark"] .ch-card {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  /* A decoded channel's cell is taller by its lane strips; the margin pushes the
+     card past them so it hugs the trace band. Every card is therefore exactly the
+     band height (pitch minus lanes minus insets), with or without a decoder, and
+     the lane strip stays transparent above it - visually part of the plot's lane. */
+  margin-top: var(--ch-lane-offset, 0px);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);  /* [SOURCE] shadcn control radius idiom */
+  overflow: hidden;                          /* clips the colour strip to the radius */
+}
+/* The reserved decoder strip: one fixed-height line in EVERY card, empty when no
+   analyzer is attached, so attaching or removing a decoder never shifts the
+   tag/name row. [MEASURED] 14px = the .ch-analyzer line (12px) plus its 2px gap. */
+html[data-theme="dark"] .ch-analyzers {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 14px;
+}
+/* Hover brightens the card. Verified by token VALUE (styling rule 10): --card is
+   oklch 0.205 and --muted oklch 0.269 - a real lightness step, not the --secondary
+   no-op trap. */
+html[data-theme="dark"] .ch-cell:hover .ch-card {
+  background: var(--muted);
+  border-color: var(--input);
+}
+/* The drop outline moves from the pitch box (which now has transparent insets) to
+   the visible card. Same --primary ring, right rectangle. */
+html[data-theme="dark"] .ch-cell.drop-target { outline: none; }
+html[data-theme="dark"] .ch-cell.drop-target .ch-card {
+  outline: 1px solid var(--primary);
+  outline-offset: -1px;
+}
+/* Native top-layer dialog with the shadcn Header / FieldGroup / Footer anatomy.
+   [CHOSEN] 420px content width and a 60% backdrop; no z-index is needed in the top
+   layer, and the viewport clamps keep the complete form reachable on narrow screens. */
+.channel-settings-dialog {
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow-y: auto;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+}
+.channel-settings-dialog::backdrop { background: rgb(0 0 0 / 60%); }
+.channel-settings-form { display: flex; flex-direction: column; gap: 16px; padding: 16px; }
+.channel-settings-header { display: flex; flex-direction: column; gap: 4px; }
+.channel-settings-header h2 { margin: 0; font-size: 14px; line-height: 20px; }
+.channel-settings-fields { display: flex; flex-direction: column; gap: 12px; }
+.channel-settings-field { display: flex; flex-direction: column; gap: 6px; }
+/* [CHOSEN] Horizontal Field anatomy: 104px holds the localized setting name while
+   the flexible control column can shrink and wrap without a new breakpoint. */
+.channel-settings-kv {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.channel-settings-copy { color: var(--muted-foreground); font-size: 11px; line-height: 16px; }
+.channel-settings-name,
+.channel-settings-color {
+  width: 100%;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) - 4px);
+}
+.channel-settings-name { min-width: 0; padding: 5px 8px; font: inherit; }
+/* [CHOSEN] The custom Popover keeps a full-width 32px native swatch for arbitrary
+   #rrggbb input; the outer preset grid stays independent of native picker geometry. */
+.channel-settings-color { height: 32px; padding: 2px 4px; cursor: pointer; }
+.channel-settings-name:focus-visible,
+.channel-settings-color:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* [CHOSEN] Eight flexible columns keep exactly two rows at every dialog width; 6px
+   separates swatches without letting the narrow 320px scene overflow. */
+.channel-color-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
+}
+.channel-color-swatch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  background: var(--background);
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) - 4px);
+  cursor: pointer;
+}
+.channel-color-swatch:hover { border-color: var(--primary); }
+.channel-color-swatch.selected,
+.channel-color-swatch:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.channel-color-custom { anchor-name: --channel-color-custom; }
+/* [CHOSEN] A token-backed 14px badge keeps + readable over any custom swatch color. */
+.channel-color-custom-mark {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+  pointer-events: none;
+}
+/* [SOURCE] shadcn Popover anatomy and semantic roles, translated to the native top
+   layer. [CHOSEN] 220px content width and 6px anchor offset; no manual z-index. */
+.channel-color-palette {
+  position: fixed;
+  inset: auto;
+  position-anchor: --channel-color-custom;
+  position-area: bottom center;
+  position-try-fallbacks: flip-block, flip-inline;
+  width: 220px;
+  max-width: calc(100vw - 16px);
+  margin: 6px 0;
+  padding: 12px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+}
+.channel-color-palette:popover-open { display: flex; flex-direction: column; gap: 8px; }
+.channel-color-palette-label { color: var(--muted-foreground); font-size: 11px; line-height: 16px; }
+.channel-trigger-options {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  width: 100%;
+  gap: 6px;
+}
+/* [CHOSEN] Six 36px choices fit the desktop KV control column and wrap three-per-row
+   at the measured 320px viewport without changing the dialog width. */
+.channel-trigger-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 30px;
+  background: var(--background);
+  color: var(--muted-foreground);
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) - 4px);
+  cursor: pointer;
+}
+.channel-trigger-option input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.channel-trigger-option svg { width: 24px; height: 16px; pointer-events: none; }
+.channel-trigger-option:hover { border-color: var(--primary); color: var(--foreground); }
+.channel-trigger-option:has(input:checked) {
+  background: var(--primary); border-color: var(--primary); color: var(--primary-foreground);
+}
+.channel-trigger-option:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.channel-trigger-options:disabled .channel-trigger-option { opacity: .45; pointer-events: none; }
+.channel-settings-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.channel-settings-cancel {
+  padding: 3px 9px;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) - 4px);
+  font: inherit;
+  cursor: pointer;
+}
+.channel-settings-cancel:hover { background: var(--muted); }
+
+/* Surface constants shared by the settings menu and its flyout. */
+.settings-menu, .settings-flyout {
   background: var(--bg20); border: 1px solid var(--border-high); border-radius: 4px;
   box-shadow: 0 5px 18px rgb(0 0 0 / 40%);
 }
-.trigger-inline-picker.open { transform: translate(22px, -50%) scaleX(1); opacity: 1; pointer-events: auto; }
-.trigger-inline-option {
-  width: 30px; height: 25px; padding: 2px; display: grid; place-items: center;
-  color: var(--text50); background: var(--bg10); border: 1px solid var(--border-low);
-  border-radius: 3px; cursor: pointer;
+
+/* ---------------------------------------------------------------- settings menu */
+
+/* z-index 40 remains the transient-popover layer. The native channel dialog uses the
+   browser's top layer instead, so the two stacking mechanisms do not compete. */
+.settings-menu {
+  position: fixed; z-index: 40; padding: 3px;
+  display: flex; flex-direction: column; gap: 1px;
+  min-width: 150px;               /* [CHOSEN] one row plus the flyout hint stays readable */
+  max-width: calc(100vw - 16px);  /* narrow phones: never overflow the viewport */
 }
-.trigger-inline-option:hover, .trigger-inline-option.selected { color: var(--text); border-color: var(--accent); background: var(--accent); }
-.trigger-inline-option svg { width: 24px; height: 16px; }
+.settings-flyout {
+  position: absolute;             /* child of the fixed menu: its offsetParent */
+  right: 100%;                    /* the menu is right-anchored, so fly out leftward */
+  padding: 3px;
+  display: flex; flex-direction: column; gap: 1px;
+  white-space: nowrap;
+}
+.settings-item {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 4px 8px;
+  background: none; border: 0; border-radius: 3px;
+  color: var(--text80); font: inherit; text-align: left; cursor: pointer;
+  white-space: nowrap;
+}
+/* Hover mirrors the toolbar buttons' --panel; --accent stays reserved for the check. */
+.settings-item:hover, .settings-item.open { background: var(--panel); color: var(--text); }
+.settings-check { width: 14px; flex: none; color: var(--accent); }
+.settings-hint { margin-left: auto; padding-left: 12px; color: var(--text50); }
+
+/* Dark theme: the transient overlays read as shadcn popovers - popover surface, subtle
+   border, the theme radius, a deeper shadow. Higher-specificity selectors
+   (html[data-theme]) win over the shared rule regardless of source order. */
+html[data-theme="dark"] .settings-menu,
+html[data-theme="dark"] .settings-flyout {
+  background: var(--popover); color: var(--popover-foreground);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+html[data-theme="dark"] .settings-item {
+  border-radius: calc(var(--radius) - 4px); color: var(--popover-foreground);
+}
+html[data-theme="dark"] .settings-item:hover,
+html[data-theme="dark"] .settings-item.open { background: var(--muted); color: var(--foreground); }
+html[data-theme="dark"] .settings-check { color: var(--primary); }
+html[data-theme="dark"] .settings-hint { color: var(--muted-foreground); }
+html[data-theme="dark"] .channel-settings-dialog,
+html[data-theme="dark"] .channel-color-palette { box-shadow: 0 8px 24px var(--shadow); }
 
 .ch-analyzer {
   display: flex;
@@ -313,7 +703,7 @@ button:disabled { opacity: 0.45; cursor: default; }
   color: var(--text50); pointer-events: none; text-align: center; line-height: 1.6;
 }
 
-/* ---------------------------------------------------------------- side panel + rail */
+/* ---------------------------------------------------------------- side panel */
 
 #side-panel {
   width: var(--panel-w);
@@ -332,32 +722,13 @@ button:disabled { opacity: 0.45; cursor: default; }
     position: absolute;
     top: 0;
     bottom: 0;
-    right: var(--rail-w);
+    right: 0;
     z-index: 20;
-    width: min(var(--panel-w), calc(100% - var(--rail-w)));
+    width: min(var(--panel-w), 100%);
     min-width: 0;
     box-shadow: -6px 0 24px rgb(0 0 0 / 45%);
   }
 }
-
-#rail {
-  width: var(--rail-w);
-  min-width: var(--rail-w);
-  background: var(--panel);
-  border-left: 1px solid var(--border-high);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-top: 8px;
-  gap: 4px;
-}
-.rail-btn {
-  width: 34px; height: 34px;
-  background: none; border: none; border-radius: 4px;
-  color: var(--text50); cursor: pointer; font-size: 15px;
-}
-.rail-btn:hover { background: #4a4a4f; color: var(--text80); }
-.rail-btn.on { background: var(--bg20); color: var(--text); }
 
 .panel-head { padding: 12px 12px 10px; border-bottom: 1px solid var(--border-low); }
 .panel-title { font-size: 15px; color: var(--text); margin-bottom: 4px; }
@@ -421,6 +792,87 @@ button:disabled { opacity: 0.45; cursor: default; }
 .analyzer-name { min-width: 54px; }
 .analyzer-status { flex: 1; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Dark theme: the side panel becomes a card stack (the shadcn Card composition) - the
+   flat border-separated sections turn into outlined cards on a darker panel ground.
+   The border shorthand replaces each section's border-bottom; spacing comes from the
+   host's gap, never margins. Padding/gap live inside the scrollable panel - no shell
+   metric moves (theme-selftest pins the freeze). */
+html[data-theme="dark"] #side-panel { background: var(--background); }
+html[data-theme="dark"] .panel-host {
+  display: flex; flex-direction: column; gap: 8px; padding: 8px;
+}
+html[data-theme="dark"] .panel-head,
+html[data-theme="dark"] .panel-section,
+html[data-theme="dark"] .advanced {
+  background: var(--card); color: var(--card-foreground);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+html[data-theme="dark"] .panel-head { padding: 14px 14px 12px; }
+html[data-theme="dark"] .panel-section { padding: 12px 14px; }
+html[data-theme="dark"] .panel-title,
+html[data-theme="dark"] .panel-section-head,
+html[data-theme="dark"] .advanced summary { color: var(--foreground); }
+html[data-theme="dark"] .panel-sub,
+html[data-theme="dark"] .panel-note { color: var(--muted-foreground); }
+
+/* Dark theme: panel controls take the shadcn control shape - control radius, --input
+   border, ground-level fields on the card. The segmented active state was first styled
+   after the ToggleGroup idiom (a secondary surface), but dark --secondary equals the
+   base .seg surface AND --muted (all oklch(0.269 0 0)), so a tonal shift is provably
+   invisible here; the active segment INVERTS like the default theme's --text80-on-bg00
+   instead, and takes the foreground border to keep its edge crisp against the
+   unselected siblings. Enabled chips keep their TS-painted channel colours (inline
+   style beats the sheet). */
+html[data-theme="dark"] .chip {
+  background: var(--background); border-color: var(--input);
+  border-radius: calc(var(--radius) - 4px);
+}
+html[data-theme="dark"] .field select,
+html[data-theme="dark"] .field input,
+html[data-theme="dark"] .usb-console-command input {
+  background: var(--background); border-color: var(--input);
+  border-radius: calc(var(--radius) - 4px);
+}
+html[data-theme="dark"] .field label { color: var(--muted-foreground); }
+html[data-theme="dark"] .seg.on {
+  background: var(--foreground); color: var(--background);
+  border-color: var(--foreground);
+}
+html[data-theme="dark"] .usb-console-output { border-color: var(--input); }
+
+/* The plot needs no frame of its own under dark: the canvas paints the measured
+   #1B1B1C in both themes while the chrome drops to near-black, so the tonal contrast
+   already reads as an inset well. Evaluated and rejected: a border-top doubles the
+   axis hairline and (border-box) shifts the waveform canvases 1 px out of alignment
+   with the channel rows; an inset box-shadow paints UNDER the child canvases and is
+   invisible; a radius reveals the body's identical background. Contrast wins. */
+
+/* Dark theme: scrollbars stop shouting. The stock overlay/native bar painted a
+   bright track+thumb against the shell; here the track is transparent and the
+   thumb is a slim rounded --border-high (15% white) that only brightens to
+   --muted-foreground under the pointer. 8px [CHOSEN]: about half the native width,
+   still grabbable. Firefox takes scrollbar-width/scrollbar-color, WebKit/Blink the
+   pseudo-elements; tokens only, no literals, per the dark-rule discipline. The
+   console output keeps its native bar this round (an embedded surface, not chrome). */
+html[data-theme="dark"] #scroll-area,
+html[data-theme="dark"] #side-panel {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-high) transparent;
+}
+html[data-theme="dark"] #scroll-area::-webkit-scrollbar,
+html[data-theme="dark"] #side-panel::-webkit-scrollbar { width: 8px; height: 8px; }
+html[data-theme="dark"] #scroll-area::-webkit-scrollbar-thumb,
+html[data-theme="dark"] #side-panel::-webkit-scrollbar-thumb {
+  background: var(--border-high);
+  border-radius: 999px;
+}
+html[data-theme="dark"] #scroll-area::-webkit-scrollbar-thumb:hover,
+html[data-theme="dark"] #side-panel::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+html[data-theme="dark"] #scroll-area::-webkit-scrollbar-track,
+html[data-theme="dark"] #side-panel::-webkit-scrollbar-track { background: transparent; }
+
 /* ---------------------------------------------------------------- status bar */
 
 #status {
@@ -438,3 +890,71 @@ button:disabled { opacity: 0.45; cursor: default; }
 #status .sep { color: var(--text50); }
 #status .right { margin-left: auto; }
 #status .err { color: var(--negative); }
+
+/* Dark theme: the status bar joins the shell ground; a visible focus ring exists ONLY
+   here - under the default theme the browser's outline stays untouched, because adding
+   one would break its pixel identity. */
+html[data-theme="dark"] #status {
+  background: var(--background); border-top-color: var(--border); color: var(--card-foreground);
+}
+html[data-theme="dark"] :is(button, select, input, summary):focus-visible {
+  outline: 2px solid var(--ring); outline-offset: 1px;
+}
+
+#uictrl {
+  height: 100%;
+  overflow: auto;
+  padding: 16px;
+  background: var(--background);
+  color: var(--foreground);
+}
+#uictrl-header {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  border-bottom: 1px solid var(--border);
+}
+#uictrl-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+#uictrl-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 360px);
+  gap: 12px;
+  padding: 16px 0;
+}
+
+.uictrl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.uictrl-card-head { display: flex; flex-direction: column; gap: 4px; }
+.uictrl-card-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--foreground); }
+.uictrl-card-note { margin: 0; font-size: 11px; line-height: 1.4; color: var(--muted-foreground); }
+.uictrl-field { display: flex; align-items: center; gap: 8px; }
+.uictrl-field-label { flex: 1 1 auto; min-width: 0; color: var(--foreground); }
+.uictrl-field-input {
+  flex: none;
+  width: 72px;
+  padding: 4px 18px 4px 6px;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--input);
+  border-radius: var(--radius);
+  font: inherit;
+  text-align: right;
+}
+.uictrl-field-unit { flex: none; width: 24px; font-size: 11px; text-align: right; color: var(--muted-foreground); }
+.uictrl-card-actions { display: flex; justify-content: flex-end; }
+.uictrl-card-actions .mini { padding: 3px 10px; }
+html[data-theme="dark"] .uictrl-field-input { border-radius: calc(var(--radius) - 4px); }
+html[data-theme="dark"] .uictrl-card-actions .mini { background: transparent; }
+html[data-theme="dark"] .uictrl-card-actions .mini:hover { background: var(--secondary); }
