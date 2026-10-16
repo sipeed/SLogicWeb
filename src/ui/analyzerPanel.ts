@@ -18,10 +18,11 @@ import {
   decoderCount, getDecoder, isLogicDecoder, listDecoders, validateStack,
 } from '../decode/index.js';
 import type { DecoderInfo } from '../decode/index.js';
-import { button, div, labelled, section, select } from './capturePanel.js';
+import { button, div, labelled, section } from './capturePanel.js';
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { COLORS } from './metrics.js';
+import { selectControl, type SelectOptionTuple } from './select.js';
 import type { AnalyzerState, ChannelState } from './state.js';
 
 export interface AnalyzerPanelCallbacks {
@@ -104,14 +105,17 @@ export class AnalyzerPanel {
     const logic = listDecoders()
       .filter((d) => d.inputs.length === 1 && d.inputs[0] === 'logic')
       .sort((a, b) => a.id.localeCompare(b.id));
-    const pick = select(logic.map((d) => [d.id, `${d.id} - ${d.longname}`]), this.chosen);
+    const pickOptions: SelectOptionTuple[] = logic.map(
+      (d) => [d.id, `${d.id} - ${d.longname}`] as SelectOptionTuple,
+    );
+    const pick = selectControl('analyzer.decoder', t('analyzerPanel.decoder'), pickOptions, this.chosen);
     pick.addEventListener('change', () => {
       this.chosen = pick.value;
       this.draftChannels = {};
       this.draftOptions = {};
       this.render(v);
     });
-    add.body.appendChild(labelled(t('analyzerPanel.decoder'), pick));
+    add.body.appendChild(pick.el);
 
     let info: DecoderInfo;
     try {
@@ -143,21 +147,29 @@ export class AnalyzerPanel {
       const cur = this.draftChannels[i];
       const def = cur !== undefined ? String(cur) : required ? String(enabled[i]?.index ?? 0) : '-1';
       if (cur === undefined && required) this.draftChannels[i] = Number(def);
-      const sel = select(chanOpts(required), def);
+      const sel = selectControl(
+        `analyzer.channel.${i}`,
+        `${ch.name}${required ? '' : t('analyzerPanel.optionalSuffix')}`,
+        chanOpts(required),
+        def,
+      );
       sel.addEventListener('change', () => {
         const val = Number(sel.value);
         if (val < 0) delete this.draftChannels[i];
         else this.draftChannels[i] = val;
       });
-      add.body.appendChild(labelled(`${ch.name}${required ? '' : t('analyzerPanel.optionalSuffix')}`, sel));
+      add.body.appendChild(sel.el);
     });
 
     for (const opt of info.options) {
       const cur = this.draftOptions[opt.id] ?? opt.default ?? '';
       if (opt.values.length) {
-        const sel = select(opt.values.map((x) => [String(x), String(x)]), String(cur));
+        const optionValues: SelectOptionTuple[] = opt.values.map(
+          (x) => [String(x), String(x)] as SelectOptionTuple,
+        );
+        const sel = selectControl(`analyzer.option.${opt.id}`, opt.desc, optionValues, String(cur));
         sel.addEventListener('change', () => { this.draftOptions[opt.id] = coerce(opt.type, sel.value); });
-        add.body.appendChild(labelled(opt.desc, sel));
+        add.body.appendChild(sel.el);
       } else {
         const inp = document.createElement('input');
         inp.type = opt.type === 'str' ? 'text' : 'number';

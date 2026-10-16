@@ -349,18 +349,6 @@ export function button(text: string, cls: string): HTMLButtonElement {
   return b;
 }
 
-export function select(opts: [string, string][], value: string): HTMLSelectElement {
-  const s = document.createElement('select');
-  for (const [v, t] of opts) {
-    const o = document.createElement('option');
-    o.value = v;
-    o.textContent = t;
-    s.appendChild(o);
-  }
-  s.value = value;
-  return s;
-}
-
 export function labelled(text: string, el: HTMLElement): HTMLDivElement {
   const d = div('field');
   const l = document.createElement('label');

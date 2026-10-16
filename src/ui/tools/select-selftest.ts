@@ -9,6 +9,13 @@ import {
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
+  readdirSync(path: string, options: { withFileTypes: true }): DirentLike[];
+}
+
+interface DirentLike {
+  name: string;
+  isDirectory(): boolean;
+  isFile(): boolean;
 }
 
 interface TestResult {
@@ -113,6 +120,13 @@ check(
 {
   const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
   if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+
+  const walk = (dir: string): string[] =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) return walk(path);
+      return entry.isFile() && path.endsWith('.ts') ? [path] : [];
+    });
 
   const src = fs.readFileSync('src/ui/select.ts', 'utf8');
   const css = fs.readFileSync('src/ui/style.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -362,13 +376,60 @@ check(
     `source=${capture.includes('source.disabled = v.running;')}`,
   );
 
-  const nativeKept = capture.includes('export function select(');
-  const analyzerUsesNative = analyzer.includes("select } from './capturePanel.js'") &&
-    (analyzer.match(/= select\(/g)?.length ?? 0) === 3;
+  const analyzerMigrated =
+    analyzer.includes("import { selectControl, type SelectOptionTuple } from './select.js';") &&
+    !analyzer.includes("select } from './capturePanel.js'") &&
+    (analyzer.match(/selectControl\(/g)?.length ?? 0) === 3;
+  const analyzerKeys = [
+    "'analyzer.decoder'",
+    '`analyzer.channel.${i}`',
+    '`analyzer.option.${opt.id}`',
+  ];
+  const missingAnalyzerKeys = analyzerKeys.filter((needle) => !analyzer.includes(needle));
+  const pickRoot = analyzer.includes('add.body.appendChild(pick.el)');
+  const selRoots = analyzer.match(/add\.body\.appendChild\(sel\.el\)/g)?.length ?? 0;
   check(
-    'the native select factory survives for the three analyzer call sites only',
-    nativeKept && analyzerUsesNative,
-    `nativeKept=${nativeKept}, analyzerUsesNative=${analyzerUsesNative}`,
+    'the decoder picker, channel maps, and enumerated options all use selectControl with stable keys',
+    analyzerMigrated && missingAnalyzerKeys.length === 0 && pickRoot && selRoots === 2,
+    `migrated=${analyzerMigrated}, missingKeys=${JSON.stringify(missingAnalyzerKeys)}, ` +
+    `pickRoot=${pickRoot}, selRoots=${selRoots}`,
+  );
+
+  const draftNeedles = [
+    'this.chosen = pick.value;',
+    'this.draftChannels = {};',
+    'this.draftOptions = {};',
+    'if (val < 0) delete this.draftChannels[i];',
+    'else this.draftChannels[i] = val;',
+    'this.draftOptions[opt.id] = coerce(opt.type, sel.value);',
+  ];
+  const missingDraft = draftNeedles.filter((needle) => !analyzer.includes(needle));
+  check(
+    'decoder selection still resets drafts and every channel/option draft update is preserved',
+    missingDraft.length === 0,
+    `missing=${JSON.stringify(missingDraft)}`,
+  );
+
+  const nativeFactoryNeedle = ['export function ', 'select('].join('');
+  const nativeCtorNeedle = ['createElement(', "'select'", ')'].join('');
+  const sourceFiles = walk('src');
+  const nativeFactoryFiles = sourceFiles.filter((path) =>
+    fs.readFileSync(path, 'utf8').includes(nativeFactoryNeedle));
+  const nativeCtorFiles = sourceFiles.filter((path) =>
+    fs.readFileSync(path, 'utf8').includes(nativeCtorNeedle));
+  check(
+    'the native select factory and every native <select> construction are gone from src',
+    nativeFactoryFiles.length === 0 && nativeCtorFiles.length === 0,
+    `factory=${JSON.stringify(nativeFactoryFiles)}, constructors=${JSON.stringify(nativeCtorFiles)}`,
+  );
+
+  const noNativeSelectSelector = !/\.field\s+select\b/.test(css);
+  const baseInputRule = /\.field input\s*\{[^}]*background:\s*var\(--bg10\)[^}]*color:\s*var\(--text80\)[^}]*border:\s*1px solid var\(--border-low\)[^}]*border-radius:\s*3px[^}]*padding:\s*4px 6px;[^}]*font:\s*inherit[^}]*width:\s*100%/.test(css);
+  const darkInputRule = /html\[data-theme="dark"\]\s*\.field input,\s*html\[data-theme="dark"\]\s*\.usb-console-command input\s*\{[^}]*background:\s*var\(--background\)[^}]*border-color:\s*var\(--input\)[^}]*border-radius:\s*calc\(var\(--radius\) - 4px\)/.test(css);
+  check(
+    'the native select selector is removed while every input declaration survives in both themes',
+    noNativeSelectSelector && baseInputRule && darkInputRule,
+    `noSelectSelector=${noNativeSelectSelector}, baseInput=${baseInputRule}, darkInput=${darkInputRule}`,
   );
 
   const guardIndex = app.indexOf("closest('.select-field') !== null");
