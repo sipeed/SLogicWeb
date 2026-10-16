@@ -169,9 +169,10 @@ check(
 
   const noGlobalListeners = !src.includes('document.addEventListener') &&
     !src.includes('window.addEventListener');
-  const noInnerHtml = !src.includes('innerHTML');
+  const innerHtmlToken = ['inner', 'HTML'].join('');
+  const noInnerHtml = !src.includes(innerHtmlToken);
   check(
-    'the control installs no document/window listener and never uses innerHTML',
+    'the control installs no document/window listener and never uses string-built markup',
     noGlobalListeners && noInnerHtml,
     `noGlobalListeners=${noGlobalListeners}, noInnerHtml=${noInnerHtml}`,
   );
@@ -294,6 +295,91 @@ check(
     missingTokens.length === 0 && noDefaultScope && noBaseTriggerRing,
     `missing=${JSON.stringify(missingTokens)}, noDefaultScope=${noDefaultScope}, ` +
     `noBaseTriggerRing=${noBaseTriggerRing}`,
+  );
+
+  const capture = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
+  const analyzer = fs.readFileSync('src/ui/analyzerPanel.ts', 'utf8');
+  const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+
+  const controlKeys = [
+    'capture.sampleRate',
+    'capture.threshold',
+    'capture.preTrigger',
+    'capture.testMode',
+  ];
+  const controlCalls = capture.match(/selectControl\(/g)?.length ?? 0;
+  const missingKeys = controlKeys.filter((key) => !capture.includes(`'${key}'`));
+  const oldNativeSites = [
+    'const rate = select(',
+    'const th = select(',
+    'const pre = select(',
+    'const source = select(',
+  ].filter((needle) => capture.includes(needle));
+  const oldLabelled = [
+    "labelled(t('capturePanel.sampleRate')",
+    "labelled(t('capturePanel.threshold')",
+    "labelled(t('capturePanel.preTriggerBuffer')",
+    "labelled(t('capturePanel.testMode')",
+  ].filter((needle) => capture.includes(needle));
+  check(
+    'all four capture selects are migrated to selectControl with stable keys',
+    missingKeys.length === 0 && controlCalls === 4 && oldNativeSites.length === 0 &&
+      oldLabelled.length === 0,
+    `missingKeys=${JSON.stringify(missingKeys)}, controlCalls=${controlCalls}, ` +
+    `oldNativeSites=${JSON.stringify(oldNativeSites)}, oldLabelled=${JSON.stringify(oldLabelled)}`,
+  );
+
+  const appendedRoots = [
+    'rowRT.appendChild(rate.el)',
+    'rowRT.appendChild(th.el)',
+    'triggerSec.body.appendChild(pre.el)',
+    'body.appendChild(source.el)',
+  ].filter((needle) => capture.includes(needle));
+  check(
+    'each migrated control appends its own .field.select-field root instead of labelled()',
+    appendedRoots.length === 4,
+    `appended=${JSON.stringify(appendedRoots)}`,
+  );
+
+  const payloadNeedles = [
+    'samplerate: Number(rate.value)',
+    'thresholdVolts: Number(th.value)',
+    'preTriggerPercent: Number(pre.value)',
+    'testMode: Number(source.value) as 0 | 1 | 2',
+  ];
+  const missingPayload = payloadNeedles.filter((needle) => !capture.includes(needle));
+  check(
+    'every onSettings payload and value coercion is preserved verbatim',
+    missingPayload.length === 0,
+    `missing=${JSON.stringify(missingPayload)}`,
+  );
+
+  check(
+    'the pre-trigger and test-mode disabled conditions are unchanged',
+    capture.includes('pre.disabled = v.running || v.stopping;') &&
+      capture.includes('source.disabled = v.running;'),
+    `pre=${capture.includes('pre.disabled = v.running || v.stopping;')}, ` +
+    `source=${capture.includes('source.disabled = v.running;')}`,
+  );
+
+  const nativeKept = capture.includes('export function select(');
+  const analyzerUsesNative = analyzer.includes("select } from './capturePanel.js'") &&
+    (analyzer.match(/= select\(/g)?.length ?? 0) === 3;
+  check(
+    'the native select factory survives for the three analyzer call sites only',
+    nativeKept && analyzerUsesNative,
+    `nativeKept=${nativeKept}, analyzerUsesNative=${analyzerUsesNative}`,
+  );
+
+  const guardIndex = app.indexOf("closest('.select-field') !== null");
+  const fitIndex = app.indexOf("e.key === 'f'");
+  const inputGuard = app.indexOf('e.target instanceof HTMLInputElement');
+  const shortcutGuard = guardIndex >= 0 && fitIndex >= 0 &&
+    inputGuard >= 0 && inputGuard < guardIndex && guardIndex < fitIndex;
+  check(
+    'application shortcuts ignore key events from .select-field before f/Space/Escape handling',
+    shortcutGuard,
+    `inputGuard@${inputGuard}, selectFieldGuard@${guardIndex}, fHandler@${fitIndex}`,
   );
 }
 

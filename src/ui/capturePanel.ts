@@ -20,6 +20,7 @@ import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import { formatDuration, formatRate } from './format.js';
 import { t } from './i18n.js';
+import { selectControl, type SelectOptionTuple } from './select.js';
 import type { CaptureSettings, ChannelState } from './state.js';
 import { MAX_SAMPLES } from './captureIO.js';
 
@@ -85,21 +86,29 @@ export class CapturePanel {
     // ---- rate + threshold
     const rowRT = div('field-row');
     const ceiling = v.maxSamplerateHz[s.channels] ?? 200e6;
-    const rate = select(
-      SAMPLERATES_HZ.filter((r) => r <= ceiling).map((r) => [String(r), formatRate(r)]),
+    const rateOptions: SelectOptionTuple[] = SAMPLERATES_HZ
+      .filter((r) => r <= ceiling)
+      .map((r) => [String(r), formatRate(r)]);
+    const rate = selectControl(
+      'capture.sampleRate',
+      t('capturePanel.sampleRate'),
+      rateOptions,
       String(s.samplerate),
     );
     rate.addEventListener('change', () =>
       this.cb.onSettings({ ...s, samplerate: Number(rate.value) }));
-    rowRT.appendChild(labelled(t('capturePanel.sampleRate'), rate));
+    rowRT.appendChild(rate.el);
 
-    const th = select(
-      THRESHOLDS.map((t) => [String(t), `${t} V`]),
+    const thresholdOptions: SelectOptionTuple[] = THRESHOLDS.map((t) => [String(t), `${t} V`]);
+    const th = selectControl(
+      'capture.threshold',
+      t('capturePanel.threshold'),
+      thresholdOptions,
       String(nearest(THRESHOLDS, s.thresholdVolts)),
     );
     th.addEventListener('change', () =>
       this.cb.onSettings({ ...s, thresholdVolts: Number(th.value) }));
-    rowRT.appendChild(labelled(t('capturePanel.threshold'), th));
+    rowRT.appendChild(th.el);
     chSec.body.appendChild(rowRT);
 
     const code = vrefCode(s.thresholdVolts);
@@ -154,13 +163,19 @@ export class CapturePanel {
     mask.addEventListener('change', () => this.cb.onSettings({ ...s, triggerEnableMask: mask.checked }));
     triggerSec.body.hidden = !s.triggerEnableMask;
     if (s.triggerEnableMask) {
-      const pre = select([
+      const preOptions: SelectOptionTuple[] = [
         // Percent-notation options stay literal: they are notation, not prose.
         ['0', t('capturePanel.noPreTrigger')], ['10', '10%'], ['25', '25%'], ['50', '50%'], ['75', '75%'],
-      ], String(s.preTriggerPercent));
+      ];
+      const pre = selectControl(
+        'capture.preTrigger',
+        t('capturePanel.preTriggerBuffer'),
+        preOptions,
+        String(s.preTriggerPercent),
+      );
       pre.disabled = v.running || v.stopping;
       pre.addEventListener('change', () => this.cb.onSettings({ ...s, preTriggerPercent: Number(pre.value) }));
-      triggerSec.body.appendChild(labelled(t('capturePanel.preTriggerBuffer'), pre));
+      triggerSec.body.appendChild(pre.el);
 
       // The one mistake this section invites: enabling the trigger and never picking a
       // condition, which silently arms nothing. Say what is armed, or what is missing.
@@ -246,15 +261,21 @@ export class CapturePanel {
     advanced.appendChild(summary);
     const body = div('advanced-body');
 
-    const source = select([
+    const testModeOptions: SelectOptionTuple[] = [
       ['0', t('capturePanel.testNormal')],
       ['2', t('capturePanel.testSimulator')],
       ['1', t('capturePanel.testUsbMax')],
-    ], String(s.testMode));
+    ];
+    const source = selectControl(
+      'capture.testMode',
+      t('capturePanel.testMode'),
+      testModeOptions,
+      String(s.testMode),
+    );
     source.disabled = v.running;
     source.addEventListener('change', () =>
       this.cb.onSettings({ ...s, testMode: Number(source.value) as 0 | 1 | 2 }));
-    body.appendChild(labelled(t('capturePanel.testMode'), source));
+    body.appendChild(source.el);
 
     const consoleLabel = document.createElement('label');
     consoleLabel.className = 'advanced-console-label';
