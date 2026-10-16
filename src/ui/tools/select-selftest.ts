@@ -1,0 +1,303 @@
+import {
+  TYPEAHEAD_RESET_MS,
+  matchPrefix,
+  moveActiveIndex,
+  nextTypeaheadPrefix,
+  resolveLabel,
+  type SelectOption,
+} from '../select.js';
+
+interface FsLike {
+  readFileSync(path: string, encoding: 'utf8'): string;
+}
+
+interface TestResult {
+  name: string;
+  pass: boolean;
+  detail: string;
+}
+
+const nodeProcess = (() => {
+  const process = (globalThis as {
+    process?: { exit(code: number): never; getBuiltinModule?(name: string): unknown };
+  }).process;
+  if (!process || typeof process.exit !== 'function') {
+    throw new Error('this entry point only runs under node');
+  }
+  return process;
+})();
+
+const results: TestResult[] = [];
+
+function check(name: string, pass: boolean, detail: string): void {
+  results.push({ name, pass, detail });
+}
+
+const navigation: readonly (readonly [number, number, number, number])[] = [
+  [-1, 1, 5, 0],
+  [-1, -1, 5, 4],
+  [4, 1, 5, 0],
+  [0, -1, 5, 4],
+  [2, 3, 5, 0],
+  [7, 1, 1, 0],
+  [-1, 1, 0, -1],
+  [0, -1, 0, -1],
+];
+const navigationFailures = navigation.filter(
+  ([current, delta, count, expected]) => moveActiveIndex(current, delta, count) !== expected,
+);
+check(
+  'active-index movement wraps in both directions and rejects empty lists',
+  navigationFailures.length === 0,
+  navigationFailures.length === 0
+    ? `all ${navigation.length} literal cases matched`
+    : navigationFailures
+      .map(([current, delta, count]) => `${current}+${delta}/${count}=${moveActiveIndex(current, delta, count)}`)
+      .join('; '),
+);
+
+const prefixOptions: readonly SelectOption[] = [
+  { value: 'a', label: 'Apple' },
+  { value: 'ap', label: 'Apricot' },
+  { value: 'b', label: 'Banana' },
+];
+const prefixCases: readonly (readonly [string, number, number])[] = [
+  ['apr', 0, 1],
+  ['ap', 2, 0],
+  ['BAN', 0, 2],
+  ['zz', 0, -1],
+  ['', 0, -1],
+];
+const prefixFailures = prefixCases.filter(
+  ([prefix, from, expected]) => matchPrefix(prefixOptions, prefix, from) !== expected,
+);
+check(
+  'typeahead matches case-insensitively, wraps forward, and rejects empty/absent prefixes',
+  prefixFailures.length === 0,
+  prefixFailures.length === 0
+    ? `all ${prefixCases.length} literal cases matched`
+    : prefixFailures
+      .map(([prefix, from]) => `'${prefix}'@${from}=${matchPrefix(prefixOptions, prefix, from)}`)
+      .join('; '),
+);
+
+const repeated: readonly SelectOption[] = [
+  { value: '1', label: 'Alpha' },
+  { value: '2', label: 'Axe' },
+  { value: '3', label: 'Beta' },
+];
+check(
+  'repeated single-character typeahead keeps a cycling prefix while other keys extend it',
+  nextTypeaheadPrefix('', 'A') === 'a' &&
+    nextTypeaheadPrefix('a', 'a') === 'a' &&
+    nextTypeaheadPrefix('ab', 'C') === 'abc' &&
+    matchPrefix(repeated, 'a', 0) === 1 && matchPrefix(repeated, 'a', 1) === 0,
+  `single=${nextTypeaheadPrefix('a', 'a')}, extended=${nextTypeaheadPrefix('ab', 'C')}, ` +
+    `from0=${matchPrefix(repeated, 'a', 0)}, from1=${matchPrefix(repeated, 'a', 1)}`,
+);
+
+check(
+  'label resolution returns the exact label or an empty string',
+  resolveLabel(prefixOptions, 'ap') === 'Apricot' &&
+    resolveLabel(prefixOptions, 'b') === 'Banana' &&
+    resolveLabel(prefixOptions, 'x') === '',
+  `ap=${JSON.stringify(resolveLabel(prefixOptions, 'ap'))}, x=${JSON.stringify(resolveLabel(prefixOptions, 'x'))}`,
+);
+
+check(
+  'the typeahead prefix window is the pinned 800ms literal',
+  TYPEAHEAD_RESET_MS === 800,
+  `TYPEAHEAD_RESET_MS=${TYPEAHEAD_RESET_MS}`,
+);
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+
+  const src = fs.readFileSync('src/ui/select.ts', 'utf8');
+  const css = fs.readFileSync('src/ui/style.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+
+  const anatomyNeedles = [
+    'export class SelectControl extends EventTarget',
+    "popover.setAttribute('popover', 'auto')",
+    "trigger.setAttribute('popovertarget', this.listboxId)",
+    "trigger.setAttribute('role', 'combobox')",
+    "trigger.setAttribute('aria-haspopup', 'listbox')",
+    "trigger.setAttribute('aria-expanded'",
+    "trigger.setAttribute('aria-controls', this.listboxId)",
+    "popover.setAttribute('role', 'listbox')",
+    "popover.setAttribute('aria-labelledby', this.labelId)",
+    "group.setAttribute('role', 'group')",
+    "item.setAttribute('role', 'option')",
+    "item.setAttribute('aria-selected'",
+    "this.trigger.setAttribute('aria-activedescendant'",
+    'this.items[index].scrollIntoView({ block: \'nearest\' })',
+    'trigger.dataset.selectKey = key',
+    "this.popover.showPopover()",
+    'this.popover.hidePopover()',
+  ];
+  const missingAnatomy = anatomyNeedles.filter((needle) => !src.includes(needle));
+  check(
+    'the control realizes the combobox/listbox/option anatomy over a native popover',
+    missingAnatomy.length === 0,
+    `missing=${JSON.stringify(missingAnatomy)}`,
+  );
+
+  const interactionNeedles = [
+    "item.addEventListener('pointerdown'",
+    "item.addEventListener('click'",
+    'nextTypeaheadPrefix',
+    "trigger.addEventListener('keydown'",
+    'ArrowDown',
+    'ArrowUp',
+    'Home',
+    'End',
+    'Enter',
+    "'Tab'",
+    "'Escape'",
+    'moveActiveIndex',
+    'matchPrefix',
+    'TYPEAHEAD_RESET_MS',
+    "new Event('change', { bubbles: true })",
+  ];
+  const missingInteraction = interactionNeedles.filter((needle) => !src.includes(needle));
+  check(
+    'pointer, keyboard, typeahead, and change contracts are all present',
+    missingInteraction.length === 0,
+    `missing=${JSON.stringify(missingInteraction)}`,
+  );
+
+  const noGlobalListeners = !src.includes('document.addEventListener') &&
+    !src.includes('window.addEventListener');
+  const noInnerHtml = !src.includes('innerHTML');
+  check(
+    'the control installs no document/window listener and never uses innerHTML',
+    noGlobalListeners && noInnerHtml,
+    `noGlobalListeners=${noGlobalListeners}, noInnerHtml=${noInnerHtml}`,
+  );
+
+  const classIndex = src.indexOf('export class SelectControl');
+  const topLevelDom = /^(document|window)\./m.test(src);
+  check(
+    'the module top level performs no DOM access so node self-tests can import it',
+    classIndex >= 0 && !topLevelDom,
+    `class@${classIndex}, topLevelDom=${topLevelDom}`,
+  );
+
+  const focusLookup = '`.select-trigger[data-select-key="${CSS.escape(this.key)}"]`';
+  const dispatchIndex = src.indexOf("this.dispatchEvent(new Event('change'");
+  const escapeIndex = src.indexOf('CSS.escape(this.key)');
+  const scopedFocus = src.includes("this.el.closest('.panel-host')") &&
+    src.includes(focusLookup) &&
+    dispatchIndex >= 0 && escapeIndex > dispatchIndex;
+  check(
+    'change is emitted before a scoped, CSS.escape-quoted stable-key focus lookup',
+    scopedFocus,
+    `panelScope=${src.includes("this.el.closest('.panel-host')")}, lookup=${src.includes(focusLookup)}, ` +
+    `dispatch@${dispatchIndex}, escape@${escapeIndex}`,
+  );
+
+  const pointerHoverStaysDistinct = !src.includes("item.addEventListener('pointermove'");
+  check(
+    'pointer hover does not synthesize the keyboard-active ring',
+    pointerHoverStaysDistinct,
+    `pointerHoverStaysDistinct=${pointerHoverStaysDistinct}`,
+  );
+
+  const hoverToken = css.includes(
+    '--popover-hover: color-mix(in oklab, var(--popover) 92%, var(--popover-foreground))',
+  );
+  const hoverRule = /\.select-item:hover\s*\{\s*background:\s*var\(--popover-hover\)/.test(css);
+  const activeRule =
+    /\.select-item\.active\s*\{[^}]*background:\s*var\(--popover-hover\)[^}]*outline:\s*2px solid var\(--ring\)/.test(css);
+  const noDarkHoverOverride = !/html\[data-theme="dark"\]\s*\{[^}]*--popover-hover/.test(css) &&
+    !/html\[data-theme="dark"\]\s*\.select-item(?![\w-])/.test(css);
+  check(
+    'hover and keyboard-active are token-derived, distinct, and not re-sourced per theme',
+    hoverToken && hoverRule && activeRule && noDarkHoverOverride,
+    `hoverToken=${hoverToken}, hoverRule=${hoverRule}, activeRule=${activeRule}, noDarkOverride=${noDarkHoverOverride}`,
+  );
+
+  const baseShadow =
+    /\.select-popover\s*\{[^}]*box-shadow:\s*0 8px 24px rgb\(0 0 0 \/ 40%\)/.test(css);
+  const darkShadow =
+    /html\[data-theme="dark"\]\s*\.select-popover\s*\{[^}]*box-shadow:\s*0 8px 24px var\(--shadow\)/.test(css);
+  check(
+    'the popover carries a literal base shadow and the token shadow only in dark',
+    baseShadow && darkShadow,
+    `baseShadow=${baseShadow}, darkShadow=${darkShadow}`,
+  );
+
+  const rootFont = Number(/html,\s*body\s*\{[^}]*font:\s*([\d.]+)px/.exec(css)?.[1]);
+  const defaultRadius = Number(/--radius:\s*([\d.]+)px/.exec(css)?.[1]);
+  const darkRadiusRem = Number(
+    /html\[data-theme="dark"\]\s*\{[\s\S]*?--radius:\s*([\d.]+)rem/.exec(css)?.[1],
+  );
+  const darkRadius = darkRadiusRem * rootFont;
+  const outerRadius =
+    /\.select-trigger\s*\{[^}]*border-radius:\s*var\(--radius\)/.test(css) &&
+    /\.select-popover\s*\{[^}]*border-radius:\s*var\(--radius\)/.test(css);
+  const innerRadius = /\.select-item\s*\{[^}]*border-radius:\s*calc\(var\(--radius\) - 2px\)/.test(css);
+  check(
+    'outer radius is the theme radius and the inner radius stays non-negative in both themes',
+    rootFont === 12 && defaultRadius === 3 && darkRadiusRem === 0.625 && darkRadius === 7.5 &&
+      defaultRadius - 2 === 1 && darkRadius - 2 === 5.5 &&
+      outerRadius && innerRadius,
+    `root=${rootFont}px, default=${defaultRadius}px, dark=${darkRadiusRem}rem->${darkRadius}px, ` +
+    `outer=${outerRadius}, inner=${innerRadius}`,
+  );
+
+  const positionNeedles = [
+    'anchor-name: var(--select-anchor, none)',
+    'position-anchor: var(--select-anchor, none)',
+    'position-area: bottom center',
+    'position-try-fallbacks: flip-block, --select-flip-inline',
+    '@position-try --select-flip-inline { position-area: bottom span-left; }',
+    'min-width: min(anchor-size(width), calc(100vw - 16px))',
+    'max-width: min(320px, calc(100vw - 16px))',
+    'max-height: min(320px, calc(100vh - 32px))',
+    'max-height: min(320px, calc(100dvh - 32px))',
+    'margin: 4px 8px',
+    'overflow-y: auto',
+  ];
+  const missingPosition = positionNeedles.filter((needle) => !css.includes(needle));
+  check(
+    'the popover is anchor-positioned, clamped to the viewport, and scroll-bounded',
+    missingPosition.length === 0,
+    `missing=${JSON.stringify(missingPosition)}`,
+  );
+
+  const scrollbarToken =
+    css.includes('scrollbar-color: var(--border-high) transparent') &&
+    /\.select-popover::-webkit-scrollbar-thumb\s*\{\s*background:\s*var\(--border-high\)/.test(css) &&
+    /\.select-popover::-webkit-scrollbar-thumb:hover\s*\{\s*background:\s*var\(--muted-foreground\)/.test(css);
+  check(
+    'long-list scrollbars use the shared border/muted-foreground token roles',
+    scrollbarToken,
+    `tokenScrollbars=${scrollbarToken}`,
+  );
+
+  const tokenSurfaceNeedles = [
+    'background: var(--background)',
+    'color: var(--foreground)',
+    'border: 1px solid var(--border)',
+    'background: var(--popover)',
+    'color: var(--popover-foreground)',
+    'color: var(--primary)',
+    'outline: 2px solid var(--ring)',
+  ];
+  const missingTokens = tokenSurfaceNeedles.filter((needle) => !css.includes(needle));
+  const noDefaultScope = !css.includes('[data-theme="default"]');
+  const noBaseTriggerRing = !css.includes('.select-trigger:focus-visible');
+  check(
+    'trigger, popover, check, hover, and focus read semantic tokens with no default-scope rule',
+    missingTokens.length === 0 && noDefaultScope && noBaseTriggerRing,
+    `missing=${JSON.stringify(missingTokens)}, noDefaultScope=${noDefaultScope}, ` +
+    `noBaseTriggerRing=${noBaseTriggerRing}`,
+  );
+}
+
+console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
+const failed = results.filter((r) => !r.pass).length;
+console.log(`\n${results.length - failed}/${results.length} passed`);
+nodeProcess.exit(failed === 0 ? 0 : 1);

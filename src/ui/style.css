@@ -63,6 +63,7 @@
   --card-foreground: var(--text80);
   --popover: var(--bg20);
   --popover-foreground: var(--text80);
+  --popover-hover: color-mix(in oklab, var(--popover) 92%, var(--popover-foreground));
   --secondary: var(--bg30);
   --secondary-foreground: var(--text);
   --muted: var(--panel);
@@ -760,6 +761,63 @@ html[data-theme="dark"] .channel-color-palette { box-shadow: 0 8px 24px var(--sh
   padding: 4px 6px; font: inherit; width: 100%;
 }
 .panel-section-head .field input[type="checkbox"] { width: auto; align-self: flex-start; }
+
+.select-field { min-width: 0; }
+.select-trigger {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; min-width: 0; padding: 4px 6px;
+  background: var(--background); color: var(--foreground);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font: inherit; text-align: left; cursor: pointer;
+  anchor-name: var(--select-anchor, none);
+}
+.select-trigger:hover { border-color: var(--input); }
+.select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-trigger-icon { width: 12px; height: 12px; flex: none; color: var(--muted-foreground); }
+
+.select-popover {
+  position: fixed;
+  inset: auto;
+  position-anchor: var(--select-anchor, none);
+  position-area: bottom center;
+  position-try-fallbacks: flip-block, --select-flip-inline;
+  width: max-content;
+  min-width: min(anchor-size(width), calc(100vw - 16px));
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: min(320px, calc(100vh - 32px));
+  max-height: min(320px, calc(100dvh - 32px));
+  margin: 4px 8px;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-high) transparent;
+}
+@position-try --select-flip-inline { position-area: bottom span-left; }
+.select-popover::-webkit-scrollbar { width: 8px; height: 8px; }
+.select-popover::-webkit-scrollbar-thumb { background: var(--border-high); border-radius: 999px; }
+.select-popover::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
+.select-popover::-webkit-scrollbar-track { background: transparent; }
+
+.select-group { display: flex; flex-direction: column; gap: 1px; }
+.select-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--popover-foreground);
+  cursor: pointer; white-space: nowrap;
+}
+.select-item:hover { background: var(--popover-hover); }
+.select-item.active { background: var(--popover-hover); outline: 2px solid var(--ring); outline-offset: -2px; }
+.select-item-check { width: 14px; flex: none; color: var(--primary); }
+.select-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+html[data-theme="dark"] .select-popover { box-shadow: 0 8px 24px var(--shadow); }
 
 .segmented { display: flex; }
 .seg { flex: 1; border-radius: 0; }
