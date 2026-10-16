@@ -131,6 +131,12 @@ check(
   const src = fs.readFileSync('src/ui/select.ts', 'utf8');
   const css = fs.readFileSync('src/ui/style.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
+  const ruleBody = (selector: string): string | null => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const body = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css)?.[1];
+    return body === undefined ? null : body.replace(/\s+/g, ' ').trim();
+  };
+
   const anatomyNeedles = [
     'export class SelectControl extends EventTarget',
     "popover.setAttribute('popover', 'auto')",
@@ -233,14 +239,70 @@ check(
     `hoverToken=${hoverToken}, hoverRule=${hoverRule}, activeRule=${activeRule}, noDarkOverride=${noDarkHoverOverride}`,
   );
 
-  const baseShadow =
-    /\.select-popover\s*\{[^}]*box-shadow:\s*0 8px 24px rgb\(0 0 0 \/ 40%\)/.test(css);
-  const darkShadow =
-    /html\[data-theme="dark"\]\s*\.select-popover\s*\{[^}]*box-shadow:\s*0 8px 24px var\(--shadow\)/.test(css);
+  const sharedSurfaceBody = ruleBody('.select-popover, .settings-menu, .settings-flyout');
+  const sharedSurfaceNeedles = [
+    'background: var(--popover)',
+    'color: var(--popover-foreground)',
+    'border: 1px solid var(--border)',
+    'border-radius: var(--radius)',
+    'box-shadow: 0 8px 24px rgb(0 0 0 / 40%)',
+  ];
+  const sharedSurface = sharedSurfaceBody !== null &&
+    sharedSurfaceNeedles.every((needle) => sharedSurfaceBody.includes(needle));
   check(
-    'the popover carries a literal base shadow and the token shadow only in dark',
-    baseShadow && darkShadow,
-    `baseShadow=${baseShadow}, darkShadow=${darkShadow}`,
+    'the select popover, settings menu, and flyout share one token-only surface rule',
+    sharedSurface,
+    `body=${JSON.stringify(sharedSurfaceBody)}`,
+  );
+
+  const darkShadow =
+    /html\[data-theme="dark"\] \.select-popover,\s*html\[data-theme="dark"\] \.settings-menu,\s*html\[data-theme="dark"\] \.settings-flyout\s*\{\s*box-shadow:\s*0 8px 24px var\(--shadow\);\s*\}/.test(css);
+  const noDarkSurfaceRedefinition =
+    !/html\[data-theme="dark"\]\s*\.select-popover\s*\{/.test(css) &&
+    !/html\[data-theme="dark"\]\s*\.settings-(menu|flyout)\s*\{[^}]*border-radius:/.test(css);
+  check(
+    'the popover family takes the literal base shadow and the token shadow only in dark',
+    sharedSurface && darkShadow && noDarkSurfaceRedefinition,
+    `shared=${sharedSurface}, darkShadow=${darkShadow}, ` +
+    `noDarkSurfaceRedefinition=${noDarkSurfaceRedefinition}`,
+  );
+
+  const settingsItemBody = ruleBody('.settings-item');
+  const settingsState = settingsItemBody !== null &&
+    settingsItemBody.includes('border-radius: calc(var(--radius) - 2px)') &&
+    settingsItemBody.includes('color: var(--popover-foreground)') &&
+    (ruleBody('.settings-item:hover, .settings-item.open') ?? '') === 'background: var(--popover-hover);' &&
+    (ruleBody('.settings-check') ?? '').includes('color: var(--primary)') &&
+    (ruleBody('.settings-hint') ?? '').includes('color: var(--muted-foreground)');
+  const darkRules: { selectors: string; body: string }[] = [];
+  for (let from = 0; ; ) {
+    const open = css.indexOf('html[data-theme="dark"]', from);
+    if (open === -1) break;
+    const brace = css.indexOf('{', open);
+    const close = brace === -1 ? -1 : css.indexOf('}', brace);
+    if (brace === -1 || close === -1) break;
+    darkRules.push({ selectors: css.slice(open, brace), body: css.slice(brace + 1, close) });
+    from = close + 1;
+  }
+  const darkSettingsState = darkRules.filter((rule) =>
+    /\.settings-(item|check|hint)\b/.test(rule.selectors));
+  const darkSettingsSurface = darkRules.filter((rule) =>
+    /\.settings-(menu|flyout)\b/.test(rule.selectors) &&
+    /(?:^|;)\s*(?:background|color|border|border-radius)\s*:/.test(rule.body));
+  check(
+    'the settings and sidebar rows reuse the select hover, check, radius, and foreground roles',
+    settingsState && darkSettingsState.length === 0 && darkSettingsSurface.length === 0,
+    `settingsState=${settingsState}, darkStateRules=${darkSettingsState.length}, ` +
+    `darkSurfaceRules=${darkSettingsSurface.length}`,
+  );
+
+  const deadSelectFocus = /:is\([^)]*\bselect\b[^)]*\)/.test(css);
+  const scopedFocusRule =
+    css.includes('html[data-theme="dark"] :is(button, input, summary):focus-visible');
+  check(
+    'the retired native select element no longer appears in the shared focus rule',
+    !deadSelectFocus && scopedFocusRule,
+    `deadSelectFocus=${deadSelectFocus}, scopedFocusRule=${scopedFocusRule}`,
   );
 
   const rootFont = Number(/html,\s*body\s*\{[^}]*font:\s*([\d.]+)px/.exec(css)?.[1]);
@@ -251,7 +313,7 @@ check(
   const darkRadius = darkRadiusRem * rootFont;
   const outerRadius =
     /\.select-trigger\s*\{[^}]*border-radius:\s*var\(--radius\)/.test(css) &&
-    /\.select-popover\s*\{[^}]*border-radius:\s*var\(--radius\)/.test(css);
+    (sharedSurfaceBody ?? '').includes('border-radius: var(--radius)');
   const innerRadius = /\.select-item\s*\{[^}]*border-radius:\s*calc\(var\(--radius\) - 2px\)/.test(css);
   check(
     'outer radius is the theme radius and the inner radius stays non-negative in both themes',

@@ -44,9 +44,7 @@
 /*
  * ------------------------------------------------------- theme token layers
  *
- * Two additions, one rule: `default` renders byte-identically to before because the
- * semantic tokens below only ALIAS the measured legacy variables, and every dark
- * override is scoped to html[data-theme="dark"]. See src/ui/NOTES.md for the contract.
+ * Dark overrides are scoped to html[data-theme="dark"].
  *
  * Naming collision, settled: logicweb's --accent is the BRAND violet (checks, primary
  * action, focus); shadcn's --accent is a HOVER SURFACE. shadcn's --accent is never
@@ -54,8 +52,7 @@
  * --secondary, and --accent keeps its legacy meaning.
  */
 
-/* Layer B: shadcn semantic tokens [SOURCE] shadcn/ui naming + roles, aliased to the
-   measured legacy palette so adopting a token can never change the default render. */
+/* Layer B: shadcn semantic token names and roles. */
 :root {
   --background: var(--bg10);
   --foreground: var(--text80);
@@ -83,7 +80,7 @@
    --strip-w, --panel-w) are theme-independent and NEVER redefined here -
    src/ui/tools/theme-selftest.ts enforces the freeze. */
 html[data-theme="dark"] {
-  color-scheme: dark;        /* native select/checkbox/scrollbar render dark */
+  color-scheme: dark;        /* native checkbox/scrollbar render dark */
 
   /* [SOURCE] shadcn/ui dark */
   --background: oklch(0.145 0 0);
@@ -581,10 +578,10 @@ html[data-theme="dark"] .ch-cell.drop-target .ch-card {
 }
 .channel-settings-cancel:hover { background: var(--muted); }
 
-/* Surface constants shared by the settings menu and its flyout. */
-.settings-menu, .settings-flyout {
-  background: var(--bg20); border: 1px solid var(--border-high); border-radius: 4px;
-  box-shadow: 0 5px 18px rgb(0 0 0 / 40%);
+.select-popover, .settings-menu, .settings-flyout {
+  background: var(--popover); color: var(--popover-foreground);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
 }
 
 /* ---------------------------------------------------------------- settings menu */
@@ -607,31 +604,19 @@ html[data-theme="dark"] .ch-cell.drop-target .ch-card {
 .settings-item {
   display: flex; align-items: center; gap: 6px; width: 100%;
   padding: 4px 8px;
-  background: none; border: 0; border-radius: 3px;
-  color: var(--text80); font: inherit; text-align: left; cursor: pointer;
+  background: none; border: 0; border-radius: calc(var(--radius) - 2px);
+  color: var(--popover-foreground); font: inherit; text-align: left; cursor: pointer;
   white-space: nowrap;
 }
-/* Hover mirrors the toolbar buttons' --panel; --accent stays reserved for the check. */
-.settings-item:hover, .settings-item.open { background: var(--panel); color: var(--text); }
-.settings-check { width: 14px; flex: none; color: var(--accent); }
-.settings-hint { margin-left: auto; padding-left: 12px; color: var(--text50); }
+.settings-item:hover, .settings-item.open { background: var(--popover-hover); }
+.settings-check { width: 14px; flex: none; color: var(--primary); }
+.settings-hint { margin-left: auto; padding-left: 12px; color: var(--muted-foreground); }
 
-/* Dark theme: the transient overlays read as shadcn popovers - popover surface, subtle
-   border, the theme radius, a deeper shadow. Higher-specificity selectors
-   (html[data-theme]) win over the shared rule regardless of source order. */
+html[data-theme="dark"] .select-popover,
 html[data-theme="dark"] .settings-menu,
 html[data-theme="dark"] .settings-flyout {
-  background: var(--popover); color: var(--popover-foreground);
-  border: 1px solid var(--border); border-radius: var(--radius);
   box-shadow: 0 8px 24px var(--shadow);
 }
-html[data-theme="dark"] .settings-item {
-  border-radius: calc(var(--radius) - 4px); color: var(--popover-foreground);
-}
-html[data-theme="dark"] .settings-item:hover,
-html[data-theme="dark"] .settings-item.open { background: var(--muted); color: var(--foreground); }
-html[data-theme="dark"] .settings-check { color: var(--primary); }
-html[data-theme="dark"] .settings-hint { color: var(--muted-foreground); }
 html[data-theme="dark"] .channel-settings-dialog,
 html[data-theme="dark"] .channel-color-palette { box-shadow: 0 8px 24px var(--shadow); }
 
@@ -790,11 +775,6 @@ html[data-theme="dark"] .channel-color-palette { box-shadow: 0 8px 24px var(--sh
   padding: 4px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
   scrollbar-width: thin;
   scrollbar-color: var(--border-high) transparent;
 }
@@ -816,8 +796,6 @@ html[data-theme="dark"] .channel-color-palette { box-shadow: 0 8px 24px var(--sh
 .select-item.active { background: var(--popover-hover); outline: 2px solid var(--ring); outline-offset: -2px; }
 .select-item-check { width: 14px; flex: none; color: var(--primary); }
 .select-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-html[data-theme="dark"] .select-popover { box-shadow: 0 8px 24px var(--shadow); }
 
 .segmented { display: flex; }
 .seg { flex: 1; border-radius: 0; }
@@ -954,7 +932,7 @@ html[data-theme="dark"] #side-panel::-webkit-scrollbar-track { background: trans
 html[data-theme="dark"] #status {
   background: var(--background); border-top-color: var(--border); color: var(--card-foreground);
 }
-html[data-theme="dark"] :is(button, select, input, summary):focus-visible {
+html[data-theme="dark"] :is(button, input, summary):focus-visible {
   outline: 2px solid var(--ring); outline-offset: 1px;
 }
 
