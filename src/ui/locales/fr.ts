@@ -100,8 +100,6 @@ export const fr: Messages = {
   'channels.triggerHigh': 'Niveau haut',
   'channels.triggerLow': 'Niveau bas',
   'channels.triggerAny': 'Valeur quelconque (X)',
-  'channels.nameHint.name': 'L’étiquette colorée affiche le nom du canal (D{index} par défaut). Style des étiquettes : {path}.',
-  'channels.nameHint.legacy': 'L’étiquette colorée D{index} garde la couleur du canal ; l’étiquette blanche affiche le nom. Style des étiquettes : {path}.',
 
   // ------------------------------------------------------- capture panel
   'capturePanel.digital': 'Canaux numériques',
@@ -172,12 +170,7 @@ export const fr: Messages = {
   'settings.title': 'Paramètres',
   'settings.titleHint': 'Langue et préférences d’affichage',
   'settings.language': 'Langue',
-  'settings.channelLabels': 'Étiquettes des canaux',
   'settings.theme': 'Thème',
-
-  // --------------------------------------------------- channel label modes
-  'channelLabels.name': 'Nom seul',
-  'channelLabels.legacy': 'Étiquette Dx + nom',
 
   // ------------------------------------------------------------ theme
   'theme.default': 'Par défaut',

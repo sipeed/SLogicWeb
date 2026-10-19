@@ -136,9 +136,9 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const dialogSource = channelList.slice(0, rowStart);
   const rowSimplified = !rowSource.includes('ch-enable') && !rowSource.includes('ch-trigger') &&
     !rowSource.includes("const name = document.createElement('input')");
-  const readOnlyEntry = rowSource.includes("const name = document.createElement('span')") &&
-    rowSource.includes('channelLabelTexts(') &&
-    rowSource.includes('name.textContent = texts.name') &&
+  const readOnlyEntry = rowSource.includes("const tag = document.createElement('span')") &&
+    rowSource.includes('tag.textContent = cell.channel.name') &&
+    !rowSource.includes("'ch-name'") &&
     rowSource.includes("settings.className = 'ch-settings'") &&
     rowSource.includes('this.settingsDialog.open(settings, cell)');
   check('channel rows keep only a read-only name and gear settings entry',

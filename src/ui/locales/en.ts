@@ -104,8 +104,6 @@ export const en = {
   'channels.triggerHigh': 'High level',
   'channels.triggerLow': 'Low level',
   'channels.triggerAny': 'Any value (X)',
-  'channels.nameHint.name': 'The colored label shows the channel name (D{index} by default). Label style: {path}.',
-  'channels.nameHint.legacy': 'The colored D{index} tag keeps the channel color; the white label shows the channel name. Label style: {path}.',
 
   // ------------------------------------------------------- capture panel
   'capturePanel.digital': 'Digital',
@@ -176,12 +174,7 @@ export const en = {
   'settings.title': 'Settings',
   'settings.titleHint': 'Language and display preferences',
   'settings.language': 'Language',
-  'settings.channelLabels': 'Channel labels',
   'settings.theme': 'Theme',
-
-  // --------------------------------------------------- channel label modes
-  'channelLabels.name': 'Name only',
-  'channelLabels.legacy': 'Index tag + name',
 
   // ------------------------------------------------------------ theme
   'theme.default': 'Default',

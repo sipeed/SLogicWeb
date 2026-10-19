@@ -4,10 +4,10 @@
  * The channel label column.
  *
  * [MEASURED] on 01-idle-empty-session.png at y=240: a 5 CSS px strip of the channel colour
- * at the far left, the "D0" tag in the *channel colour* starting at x=18, the channel name
- * in `#E0E0E0` starting at x=53, and below it one line per attached analyzer - a filled
- * square in the analyzer's colour then its name in small grey text. The column is 106 CSS
- * px wide including a 1 CSS px `#57575F` right border.
+ * at the far left, the "D0" tag in the *channel colour* starting at x=18, and below it one
+ * line per attached analyzer - a filled square in the analyzer's colour then its name in
+ * small grey text. The column is 106 CSS px wide including a 1 CSS px `#57575F` right
+ * border.
  *
  * Each cell's height is its row's height in the waveform stack, annotation lanes included,
  * so the labels line up with the traces by construction rather than by a shared constant
@@ -23,7 +23,6 @@
  */
 
 import { button, div } from './capturePanel.js';
-import { channelLabelTexts, getChannelLabelMode } from './channelLabelMode.js';
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { CHANNEL_COLOR_PRESETS, COLORS } from './metrics.js';
@@ -390,21 +389,11 @@ export class ChannelList {
       const head = document.createElement('div');
       head.className = 'ch-head';
 
-      const mode = getChannelLabelMode();
-      const texts = channelLabelTexts(mode, cell.channel);
-
       const tag = document.createElement('span');
-      tag.className = mode === 'name' ? 'ch-tag ch-tag--name' : 'ch-tag';
-      tag.textContent = texts.tag;
+      tag.className = 'ch-tag ch-tag--name';
+      tag.textContent = cell.channel.name;
       tag.style.color = cell.channel.color;
       head.appendChild(tag);
-
-      if (texts.name !== null) {
-        const name = document.createElement('span');
-        name.className = 'ch-name';
-        name.textContent = texts.name;
-        head.appendChild(name);
-      }
 
       const settings = document.createElement('button');
       settings.type = 'button';

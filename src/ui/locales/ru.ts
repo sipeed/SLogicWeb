@@ -100,8 +100,6 @@ export const ru: Messages = {
   'channels.triggerHigh': 'Высокий уровень',
   'channels.triggerLow': 'Низкий уровень',
   'channels.triggerAny': 'Любое значение (X)',
-  'channels.nameHint.name': 'Цветная метка показывает имя канала (по умолчанию D{index}). Стиль меток: {path}.',
-  'channels.nameHint.legacy': 'Цветная метка D{index} сохраняет цвет канала, белая подпись показывает имя. Стиль меток: {path}.',
 
   // ------------------------------------------------------- capture panel
   'capturePanel.digital': 'Цифровые каналы',
@@ -172,12 +170,7 @@ export const ru: Messages = {
   'settings.title': 'Настройки',
   'settings.titleHint': 'Язык и параметры отображения',
   'settings.language': 'Язык',
-  'settings.channelLabels': 'Метки каналов',
   'settings.theme': 'Тема',
-
-  // --------------------------------------------------- channel label modes
-  'channelLabels.name': 'Только имя',
-  'channelLabels.legacy': 'Метка Dx и имя',
 
   // ------------------------------------------------------------ theme
   'theme.default': 'По умолчанию',
