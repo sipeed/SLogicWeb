@@ -9,6 +9,7 @@ import { App } from './app.js';
 import { initLocale } from './i18n.js';
 import { initTheme } from './theme.js';
 import { initToolbarOverride } from './toolbarOverride.js';
+import { initTooltip } from './tooltip.js';
 // Side effect: hands `workerTransport` the browser's USB worker constructor. Imported
 // here, not from `device/index.ts`, so the device layer stays bundlable without Vite.
 import '../device/usbWorkerSpawn.js';
@@ -30,6 +31,13 @@ async function boot(): Promise<void> {
     initToolbarOverride();
     await initLocale();
     window.logicweb = new App();
+    // Chrome polish, deliberately outside the fatal path: a tooltip-layer failure
+    // must never paint the boot overlay over a working shell.
+    try {
+      initTooltip();
+    } catch (e) {
+      console.warn('[logicweb] tooltip layer failed to start', e);
+    }
   } catch (e) {
     console.error('[logicweb] failed to start', e);
     const pre = document.createElement('pre');

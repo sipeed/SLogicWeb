@@ -383,6 +383,22 @@ for (const hard of ['escape', 'scroll'] as const) {
     missing.length === 0 && noZIndex && rawColors === 0 && darkOverride,
     `missing=[${missing.join(' | ')}], noZIndex=${noZIndex}, rawColors=${rawColors}, darkOverride=${darkOverride}`);
 }
+{
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const main = fs.readFileSync('src/ui/main.ts', 'utf8');
+  const wired = main.includes("from './tooltip.js'") && main.includes('initTooltip();');
+  // The call must sit in its own try/catch AFTER the App construction — the
+  // fatal boot overlay is for the shell, not for chrome polish.
+  const appAt = main.indexOf('new App()');
+  const initAt = main.indexOf('initTooltip();');
+  const guarded = appAt >= 0 && initAt > appAt && main.includes('tooltip layer failed to start');
+  const capture = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
+  const aria = capture.includes("mask.setAttribute('aria-label', mask.title)");
+  check('main.ts wires initTooltip() guarded after App; the trigger mask has an accessible name',
+    wired && guarded && aria,
+    `wired=${wired}, guarded=${guarded}, appAt=${appAt}, initAt=${initAt}, aria=${aria}`);
+}
+
 // ------------------------------------------------- adapter action ordering
 {
   if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');

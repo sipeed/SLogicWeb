@@ -598,7 +598,7 @@ html[data-theme="dark"] .ch-cell.drop-target .ch-card {
   overflow-wrap: break-word;
   pointer-events: none;
   opacity: 0; visibility: hidden;
-  transition: opacity 120ms ease, visibility 0s linear 120ms;
+  transition: opacity 120ms ease, visibility 0s linear 120ms; /* [CHOSEN] subtle fade */
 }
 .tooltip.open { opacity: 1; visibility: visible; transition: opacity 120ms ease; }
 
