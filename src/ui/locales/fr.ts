@@ -40,6 +40,10 @@ export const fr: Messages = {
   'toolbar.sidebarAnalyzers': 'Analyseurs de protocole',
   'toolbar.sidebarNone': 'Aucun panneau latéral',
 
+  // ---------------------------------------------------------- side panel
+  'panel.resizeLabel': 'Redimensionner la barre latérale',
+  'panel.resizeTitle': 'Glisser pour redimensionner la barre latérale',
+
   // ---------------------------------------------------- capture title
   'capture.none': 'aucune capture',
   'capture.capturing': 'capture en cours : {channels} canaux @ {rate}',

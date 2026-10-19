@@ -534,6 +534,18 @@ function mediaRule(source: string, selector: string, media: readonly SourceRange
   return '';
 }
 
+function mediaBlocks(source: string, query: string): string[] {
+  return mediaRanges(source)
+    .map((range) => source.slice(range.start, range.end))
+    .filter((block) => block.startsWith(`@media ${query}`));
+}
+
+function readIndexHtml(): string {
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  return fs.readFileSync('index.html', 'utf8');
+}
+
 {
   const css = readStyleCode();
   const media = mediaRanges(css);
@@ -605,7 +617,102 @@ function mediaRule(source: string, selector: string, media: readonly SourceRange
     `darkBlocks=${darkBlocks}, offenders=${offenders.join(',') || '(none)'}`);
 }
 
-console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
+{
+  const css = readStyleCode();
+  const base = /(?:^|\n)#panel-resizer \{([^}]*)\}/.exec(css)?.[0] ?? '';
+  const needles = [
+    'position: absolute',
+    'right: calc(var(--panel-effective-w) - 3px)',
+    'width: 6px',
+    'cursor: col-resize',
+    'touch-action: none',
+  ];
+  const missing = needles.filter((needle) => !base.includes(needle));
+  check('style.css: the resize handle is an out-of-flow 6px hit box centred on the panel seam',
+    base !== '' && missing.length === 0,
+    `missing=${JSON.stringify(missing)}, base=${JSON.stringify(base.replace(/\s+/g, ' ').slice(0, 200))}`);
+}
+
+{
+  const css = readStyleCode();
+  const media = mediaRanges(css);
+  const hiddenRule = topLevelRules(css, '#panel-resizer.hidden', media)[0] ?? '';
+  const guardRule =
+    topLevelRules(css, '#main:has(> #side-panel.hidden) > #panel-resizer', media)[0] ?? '';
+  const resizingRule = topLevelRules(css, 'html.resizing', media)[0] ?? '';
+  const hiddenOk = hiddenRule.includes('display: none');
+  const guardOk = guardRule.includes('display: none');
+  const resizingOk = resizingRule.includes('cursor: col-resize') &&
+    resizingRule.includes('user-select: none');
+  check('style.css: the handle has its own hidden class, the temporary :has() guard mirrors the panel toggle, and html.resizing owns the drag cursor',
+    hiddenOk && guardOk && resizingOk,
+    `hidden=${hiddenOk}(${JSON.stringify(hiddenRule)}), guard=${guardOk}(${JSON.stringify(guardRule)}), ` +
+    `resizing=${resizingOk}(${JSON.stringify(resizingRule)})`);
+}
+
+{
+  const css = readStyleCode();
+  const mobile = mediaBlocks(css, '(max-width: 760px)');
+  const withHandle = mobile.filter((block) => block.includes('#panel-resizer'));
+  const handleBlock = withHandle[0] ?? '';
+  const overlayBlock = mobile.find((block) => block.includes('min(var(--panel-w), 100%)')) ?? '';
+  check('style.css: the handle is hidden in its own 760px block, never appended to the existing responsive block',
+    mobile.length >= 2 && withHandle.length === 1 && handleBlock.includes('#panel-resizer {') &&
+    handleBlock.includes('display: none') && overlayBlock !== '' &&
+    !overlayBlock.includes('#panel-resizer'),
+    `mobileBlocks=${mobile.length}, withHandle=${withHandle.length}, overlay=${overlayBlock !== ''}, ` +
+    `overlayMentionsHandle=${overlayBlock.includes('#panel-resizer')}, ` +
+    `block=${JSON.stringify(handleBlock.replace(/\s+/g, ' ').slice(0, 120))}`);
+}
+
+{
+  const html = readIndexHtml();
+  const tag = /<div[^>]*\bid="panel-resizer"[^>]*>/.exec(html)?.[0] ?? '';
+  const attributes = [
+    'role="separator"',
+    'aria-orientation="vertical"',
+    'aria-controls="side-panel"',
+    'aria-label="Resize sidebar"',
+    'data-i18n-aria-label="panel.resizeLabel"',
+    'data-i18n-title="panel.resizeTitle"',
+  ];
+  const missing = attributes.filter((attribute) => !tag.includes(attribute));
+  check('index.html: the resize handle is a vertical separator bound to #side-panel',
+    tag !== '' && missing.length === 0,
+    `missing=${JSON.stringify(missing)}, tag=${JSON.stringify(tag.replace(/\s+/g, ' ').slice(0, 240))}`);
+}
+
+{
+  const html = readIndexHtml();
+  const scroll = html.indexOf('id="scroll-area"');
+  const handle = html.indexOf('id="panel-resizer"');
+  const panel = html.indexOf('id="side-panel"');
+  check('index.html: the handle sits between the scroll area and the side panel',
+    scroll !== -1 && handle !== -1 && panel !== -1 && scroll < handle && handle < panel,
+    `scroll-area=${scroll}, panel-resizer=${handle}, side-panel=${panel}`);
+}
+
+{
+  const html = readIndexHtml();
+  const needle = `getItem('${PANEL_WIDTH_STORAGE_KEY}')`;
+  const needleAt = html.indexOf(needle);
+  const linkAt = html.indexOf('<link rel="stylesheet"');
+  const scriptStart = needleAt === -1 ? -1 : html.lastIndexOf('<script>', needleAt);
+  const scriptEnd = scriptStart === -1 ? -1 : html.indexOf('</script>', scriptStart);
+  const script = scriptStart !== -1 && scriptEnd > scriptStart
+    ? html.slice(scriptStart, scriptEnd)
+    : '';
+  const clampNeedle = `Math.min(${PANEL_WIDTH_MAX}, Math.max(${PANEL_WIDTH_MIN}, Math.round(`;
+  const mirrors = script.includes(`setProperty('--side-panel-w'`) &&
+    script.includes('Number.isFinite(') && script.includes(clampNeedle) &&
+    !script.includes('--panel-w');
+  check('index.html restores the stored width before the stylesheet, clamped into the sibling property and never the factory metric',
+    needleAt !== -1 && linkAt !== -1 && needleAt < linkAt && script !== '' && mirrors,
+    `needle=${JSON.stringify(needle)}, needleAt=${needleAt}, linkAt=${linkAt}, ` +
+    `scriptFound=${script !== ''}, mirrors=${mirrors}`);
+}
+
 const failed = results.filter((r) => !r.pass).length;
+console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 console.log(`\n${results.length - failed}/${results.length} passed`);
 nodeProcess.exit(failed === 0 ? 0 : 1);

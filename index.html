@@ -35,6 +35,17 @@
       document.documentElement.setAttribute('data-theme', 'dark');
     }
   </script>
+  <script>
+    try {
+      const raw = localStorage.getItem('logicweb.panelWidth');
+      const n = raw === null ? NaN : Number(raw);
+      if (Number.isFinite(n) && n > 0) {
+        document.documentElement.style.setProperty('--side-panel-w',
+          Math.min(560, Math.max(240, Math.round(n))) + 'px');
+      }
+    } catch {
+    }
+  </script>
   <link rel="stylesheet" href="/src/ui/style.css" />
 </head>
 <body>
@@ -120,6 +131,11 @@
           </div>
         </div>
       </div>
+
+      <div id="panel-resizer" role="separator" aria-orientation="vertical"
+           aria-controls="side-panel" aria-label="Resize sidebar"
+           data-i18n-aria-label="panel.resizeLabel"
+           data-i18n-title="panel.resizeTitle" title="Drag to resize the sidebar"></div>
 
       <div id="side-panel"></div>
     </div>

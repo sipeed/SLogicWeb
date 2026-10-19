@@ -44,6 +44,10 @@ export const en = {
   'toolbar.sidebarAnalyzers': 'Protocol analyzers',
   'toolbar.sidebarNone': 'No sidebar',
 
+  // ---------------------------------------------------------- side panel
+  'panel.resizeLabel': 'Resize sidebar',
+  'panel.resizeTitle': 'Drag to resize the sidebar',
+
   // ---------------------------------------------------- capture title
   'capture.none': 'no capture',
   'capture.capturing': 'capturing {channels} ch @ {rate}',

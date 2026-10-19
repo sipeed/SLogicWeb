@@ -230,13 +230,23 @@ function check(name: string, pass: boolean, detail: string): void {
     const title = /\stitle="([^"]*)"/.exec(tag)?.[1];
     if (key !== undefined && title !== undefined) titleFound.set(key, title);
   }
+  const ariaLabelFound = new Map<string, string>();
+  for (const m of html.matchAll(/<[^>]*\sdata-i18n-aria-label="[^"]+"[^>]*>/g)) {
+    const tag = m[0];
+    const key = /data-i18n-aria-label="([^"]+)"/.exec(tag)?.[1];
+    const label = /\saria-label="([^"]*)"/.exec(tag)?.[1];
+    if (key !== undefined && label !== undefined) ariaLabelFound.set(key, label);
+  }
 
   const expectedText = [
     'emptyHint.line1', 'emptyHint.line2',
   ];
   const expectedTitles = [
     'toolbar.startTitle', 'toolbar.openTitle', 'toolbar.saveTitle', 'toolbar.fitTitle',
-    'toolbar.sidebarTitle', 'settings.titleHint',
+    'toolbar.sidebarTitle', 'settings.titleHint', 'panel.resizeTitle',
+  ];
+  const expectedAriaLabels = [
+    'panel.resizeLabel',
   ];
 
   const missingTextKeys = expectedText.filter((k) => !textFound.has(k));
@@ -264,6 +274,19 @@ function check(name: string, pass: boolean, detail: string): void {
     titleDrift.length === 0,
     titleDrift.length === 0 ? 'all match' :
       titleDrift.map(([k, title]) => `${k}: html=${JSON.stringify(title)} en=${JSON.stringify(catalog[k])}`).join('; '));
+
+  const missingAriaLabelKeys = expectedAriaLabels.filter((k) => !ariaLabelFound.has(k));
+  const unknownAriaLabelKeys = [...ariaLabelFound.keys()].filter((k) => !(k in catalog));
+  check('index.html data-i18n-aria-label keys are exactly the expected set and all exist',
+    missingAriaLabelKeys.length === 0 && unknownAriaLabelKeys.length === 0 &&
+    ariaLabelFound.size === expectedAriaLabels.length,
+    `found ${ariaLabelFound.size}: ${[...ariaLabelFound.keys()].join(', ') || '(none)'}`);
+
+  const ariaLabelDrift = [...ariaLabelFound.entries()].filter(([k, label]) => catalog[k] !== label);
+  check('data-i18n-aria-label attribute text equals the English catalog value',
+    ariaLabelDrift.length === 0,
+    ariaLabelDrift.length === 0 ? 'all match' :
+      ariaLabelDrift.map(([k, label]) => `${k}: html=${JSON.stringify(label)} en=${JSON.stringify(catalog[k])}`).join('; '));
 
   const toolbarNameKeys: [string, string][] = [
     ['btn-connect', 'toolbar.device'],

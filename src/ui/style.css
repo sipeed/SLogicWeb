@@ -730,6 +730,35 @@ html[data-theme="dark"] .tooltip { box-shadow: 0 4px 12px var(--shadow); }
 }
 #side-panel.hidden { display: none; }
 
+#panel-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: calc(var(--panel-effective-w) - 3px);
+  width: 6px;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+#panel-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: var(--text50);
+  opacity: 0;
+}
+#panel-resizer:hover::after,
+#panel-resizer.resizing::after,
+#panel-resizer:focus-visible::after { opacity: 1; }
+#panel-resizer:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+#panel-resizer.hidden { display: none; }
+#main:has(> #side-panel.hidden) > #panel-resizer { display: none; }
+html.resizing { cursor: col-resize; user-select: none; }
+
 /* Narrow screens: the fixed columns would squeeze the plot to nothing, so the side
    panel floats over the plot instead and the label column gives up a little width. */
 @media (max-width: 760px) {
@@ -744,6 +773,10 @@ html[data-theme="dark"] .tooltip { box-shadow: 0 4px 12px var(--shadow); }
     min-width: 0;
     box-shadow: -6px 0 24px rgb(0 0 0 / 45%);
   }
+}
+
+@media (max-width: 760px) {
+  #panel-resizer { display: none; }
 }
 
 .panel-head { padding: 12px 12px 10px; border-bottom: 1px solid var(--border-low); }

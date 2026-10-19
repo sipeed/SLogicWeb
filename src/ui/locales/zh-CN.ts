@@ -38,6 +38,10 @@ export const zhCN: Messages = {
   'toolbar.sidebarAnalyzers': '协议分析器',
   'toolbar.sidebarNone': '无侧边栏',
 
+  // ---------------------------------------------------------- side panel
+  'panel.resizeLabel': '调整侧边栏宽度',
+  'panel.resizeTitle': '拖动以调整侧边栏宽度',
+
   // ---------------------------------------------------- capture title
   'capture.none': '无采集',
   'capture.capturing': '正在采集 {channels} 通道 @ {rate}',

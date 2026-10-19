@@ -40,6 +40,10 @@ export const ru: Messages = {
   'toolbar.sidebarAnalyzers': 'Протокольные анализаторы',
   'toolbar.sidebarNone': 'Без боковой панели',
 
+  // ---------------------------------------------------------- side panel
+  'panel.resizeLabel': 'Изменить ширину боковой панели',
+  'panel.resizeTitle': 'Перетащите, чтобы изменить ширину боковой панели',
+
   // ---------------------------------------------------- capture title
   'capture.none': 'нет захвата',
   'capture.capturing': 'захват: каналов {channels} @ {rate}',

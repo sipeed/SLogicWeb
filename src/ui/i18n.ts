@@ -247,4 +247,8 @@ export function applyStaticI18n(root: ParentNode): void {
     const v = lookup(el.getAttribute('data-i18n-title') ?? '');
     if (v !== null) el.title = v;
   }
+  for (const el of root.querySelectorAll<HTMLElement>('[data-i18n-aria-label]')) {
+    const v = lookup(el.getAttribute('data-i18n-aria-label') ?? '');
+    if (v !== null) el.setAttribute('aria-label', v);
+  }
 }
