@@ -39,7 +39,7 @@ export interface SettingsMenuItem {
 }
 
 /** Why the menu closed - decides whether focus returns to the anchor. */
-export type CloseReason = 'escape' | 'pick' | 'toggle' | 'outside' | 'resize' | 'retranslate' | 'theme';
+export type CloseReason = 'escape' | 'pick' | 'toggle' | 'outside' | 'resize' | 'retranslate' | 'theme' | 'channelLabels';
 
 export class SettingsMenu {
   private menu: HTMLDivElement | null = null;

@@ -39,6 +39,11 @@ import { formatCount, formatDuration, formatFreq, formatRate,
 import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, setLocale, t,
   type Locale, type MessageKey, type MessageVars } from './i18n.js';
 import { getTheme, onThemeChange, setTheme, type ThemeId } from './theme.js';
+import {
+  CHANNEL_LABEL_MODE_LABEL_KEYS, CHANNEL_LABEL_MODES, getChannelLabelMode,
+  onChannelLabelModeChange, pickChannelLabelMode, setChannelLabelMode,
+  type ChannelLabelMode,
+} from './channelLabelMode.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
 import { COLORS, MEASURE_COLORS, ROWS } from './metrics.js';
 import { Overlay, type HoverMeasurement } from './overlay.js';
@@ -212,6 +217,12 @@ export class App {
     onThemeChange(() => {
       this.settingsMenu.close('theme');
       this.sidebarMenu.close('theme');
+    });
+
+    onChannelLabelModeChange(() => {
+      this.settingsMenu.close('channelLabels');
+      this.sidebarMenu.close('channelLabels');
+      this.relayout();
     });
 
     // Observe the scroll viewport, not the plot: the plot's height is now an *output*
@@ -852,6 +863,15 @@ export class App {
           // failure is surfaced through the status-error path; a pick superseded
           // by a newer one is a normal outcome, not an error.
           onPick: () => { void setLocale(l).then((r) => { if (r === 'failed') this.fail('error.localeLoad', l); }); },
+        })),
+      },
+      {
+        label: t('settings.channelLabels'),
+        hint: `${t(CHANNEL_LABEL_MODE_LABEL_KEYS[getChannelLabelMode()])} ▸`,
+        children: CHANNEL_LABEL_MODES.map((m) => ({
+          label: t(CHANNEL_LABEL_MODE_LABEL_KEYS[m]),
+          checked: m === getChannelLabelMode(),
+          onPick: () => setChannelLabelMode(m),
         })),
       },
       // No theme row: dark is the only shipping look and the picker is retired.
@@ -1517,6 +1537,7 @@ export class App {
     getLocale: () => getLocale(),
     setTheme: (id: ThemeId) => setTheme(id),
     getTheme: () => getTheme(),
+    setChannelLabelMode: (mode: ChannelLabelMode) => setChannelLabelMode(pickChannelLabelMode(mode)),
     start: () => this.startCapture(),
     stop: () => this.stopCapture(),
     demo: () => this.loadDemo(),
@@ -1604,6 +1625,7 @@ export class App {
     snapshot: () => ({
       label: formatCaptureLabel(this.captureLabel),
       theme: getTheme(),
+      channelLabels: getChannelLabelMode(),
       error: this.statusError ? formatStatusError(this.statusError) : '',
       running: this.running,
       stopping: this.stopping,

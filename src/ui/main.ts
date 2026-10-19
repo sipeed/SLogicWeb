@@ -6,6 +6,7 @@
  */
 
 import { App } from './app.js';
+import { initChannelLabelMode } from './channelLabelMode.js';
 import { initLocale } from './i18n.js';
 import { initTheme } from './theme.js';
 import { initToolbarOverride } from './toolbarOverride.js';
@@ -28,6 +29,7 @@ declare global {
 async function boot(): Promise<void> {
   try {
     initTheme();
+    initChannelLabelMode();
     initToolbarOverride();
     await initLocale();
     window.logicweb = new App();
