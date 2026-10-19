@@ -7,6 +7,7 @@
 
 import { App } from './app.js';
 import { initLocale } from './i18n.js';
+import { initPanelWidth } from './panelWidth.js';
 import { initTheme } from './theme.js';
 import { initToolbarOverride } from './toolbarOverride.js';
 import { initTooltip } from './tooltip.js';
@@ -29,6 +30,7 @@ async function boot(): Promise<void> {
   try {
     initTheme();
     initToolbarOverride();
+    initPanelWidth();
     await initLocale();
     window.logicweb = new App();
     try {

@@ -756,6 +756,16 @@ function readIndexHtml(): string {
     `pointerIdFilters=${filtered}`);
 }
 
+{
+  const main = readSource('src/ui/main.ts');
+  const importNeedle = "import { initPanelWidth } from './panelWidth.js';";
+  const callAt = main.indexOf('initPanelWidth();');
+  const appAt = main.indexOf('new App()');
+  check('main.ts restores the persisted width before App construction',
+    main.includes(importNeedle) && callAt !== -1 && appAt !== -1 && callAt < appAt,
+    `import=${main.includes(importNeedle)}, initAt=${callAt}, appAt=${appAt}`);
+}
+
 const failed = results.filter((r) => !r.pass).length;
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 console.log(`\n${results.length - failed}/${results.length} passed`);
