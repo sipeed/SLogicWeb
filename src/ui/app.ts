@@ -50,7 +50,7 @@ import {
   type CaptureLabel, type StatusError,
 } from './state.js';
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
-import { WaveformStack, type RowSpec } from './waveformStack.js';
+import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
 
 /** A store that can also count edges without materialising them (PlanarSampleStore does). */
 type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number): number };
@@ -454,10 +454,16 @@ export class App {
 
     this.overlay.beginFrame();
     this.overlay.drawGrid(ticks);
-    this.overlay.drawLevels(this.stack.boxes().map((b) => ({
+    const boxes = this.stack.boxes();
+    this.drawLaneSurfaces(boxes);
+    if (this.captureLabel.kind === 'demo') {
+      const channelRow = boxes.find((b) => b.spec.kind === 'channel');
+      if (channelRow) this.overlay.drawDemoWatermark(channelRow.height);
+    }
+    this.overlay.drawLevels(boxes.map((b) => ({
       top: b.top, band: b.band, isChannel: b.spec.kind === 'channel',
     })));
-    this.drawLanes(wCss);
+    this.drawLaneBubbles(boxes, wCss);
 
     if (this.triggerSampleIndex !== null) {
       this.overlay.drawTrigger(this.toPx(this.triggerSampleIndex));
@@ -490,15 +496,20 @@ export class App {
     drawAxis(ctx, ticks, wCss, hCss);
   }
 
-  private drawLanes(wCss: number): void {
-    const boxes = this.stack.boxes();
-    const view = this.stack.view;
-    const measure = this.overlay.measureCtx;
+  private drawLaneSurfaces(boxes: readonly RowBox[]): void {
     for (const box of boxes) {
       if (box.spec.kind !== 'lane') continue;
       // The lane is a renderer row, so it currently holds a trace and a separator. Cover
       // it before drawing into it - NOTES.md section 2.
       this.overlay.fillLane(box.top, box.height);
+    }
+  }
+
+  private drawLaneBubbles(boxes: readonly RowBox[], wCss: number): void {
+    const view = this.stack.view;
+    const measure = this.overlay.measureCtx;
+    for (const box of boxes) {
+      if (box.spec.kind !== 'lane') continue;
       const lane = this.laneFor(box);
       if (!lane || !lane.analyzer.result || !lane.analyzer.index) continue;
       const spans = this.spansFor(lane, view.start, view.end);

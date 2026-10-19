@@ -221,6 +221,94 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `card=${cardColors}, chips=${chipColors}, app=${appPalette}, renderers=${rendererPalette}`);
 }
 
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const overlay = fs.readFileSync('src/ui/overlay.ts', 'utf8');
+
+  const gate = app.includes("if (this.captureLabel.kind === 'demo') {");
+  const channelRowLookup = app.includes(
+    "const channelRow = boxes.find((b) => b.spec.kind === 'channel');");
+  const rowHeightPassed = app.includes(
+    'if (channelRow) this.overlay.drawDemoWatermark(channelRow.height);');
+  const noMetricSubstitute = !app.includes('drawDemoWatermark(ROWS.');
+  const singleCallSite = (app.match(/this\.overlay\.drawDemoWatermark\(/g) ?? []).length === 1;
+  check('the demo gate feeds a live channel row height to the watermark',
+    gate && channelRowLookup && rowHeightPassed && noMetricSubstitute && singleCallSite,
+    `gate=${gate}, channelRow=${channelRowLookup}, rowHeight=${rowHeightPassed}, ` +
+    `noMetricSubstitute=${noMetricSubstitute}, singleCallSite=${singleCallSite}`);
+
+  const signature = 'drawDemoWatermark(channelHeightCss: number): void {';
+  const methodStart = overlay.indexOf(signature);
+  const methodEnd = overlay.indexOf('\n  }\n', methodStart);
+  const body = methodStart >= 0 && methodEnd > methodStart
+    ? overlay.slice(methodStart, methodEnd) : '';
+  const fontScale = body.includes(
+    'c.font = `600 ${channelHeightCss * 2}px -apple-system, BlinkMacSystemFont, sans-serif`;');
+  const noLaneHeight = !body.includes('laneHeight') && !body.includes('ROWS.');
+  check('the watermark font is exactly twice the passed channel-row height',
+    methodStart >= 0 && fontScale && noLaneHeight,
+    `method=${methodStart >= 0}, fontScale=${fontScale}, noLaneHeight=${noLaneHeight}`);
+
+  const alpha = body.includes('c.globalAlpha = 0.12;');
+  const color = body.includes('c.fillStyle = COLORS.text80;');
+  const center = body.includes("c.textAlign = 'center';") &&
+    body.includes("c.textBaseline = 'middle';");
+  const anchor = body.includes("c.fillText('DEMO', this.wCss / 2, this.hCss / 2);");
+  check('the watermark is translucent, text80, centered text at the overlay center',
+    alpha && color && center && anchor,
+    `alpha=${alpha}, color=${color}, center=${center}, anchor=${anchor}`);
+
+  const saves = (body.match(/c\.save\(\);/g) ?? []).length;
+  const restores = (body.match(/c\.restore\(\);/g) ?? []).length;
+  const savesFirst = body.includes('const c = this.ctx;\n    c.save();');
+  const scoped = saves === 1 && restores === 1 && savesFirst &&
+    body.trimEnd().endsWith('c.restore();');
+  check('the watermark scopes every canvas state change in save/restore',
+    scoped, `saves=${saves}, restores=${restores}, savesFirst=${savesFirst}`);
+
+  const surfaceStart = app.indexOf('private drawLaneSurfaces(');
+  const bubbleStart = app.indexOf('private drawLaneBubbles(');
+  const laneForStart = app.indexOf('private laneFor(');
+  const surfaceSource = surfaceStart >= 0 && bubbleStart > surfaceStart
+    ? app.slice(surfaceStart, bubbleStart) : '';
+  const bubbleSource = bubbleStart >= 0 && laneForStart > bubbleStart
+    ? app.slice(bubbleStart, laneForStart) : '';
+  const surfacePass = surfaceSource.includes('this.overlay.fillLane(box.top, box.height);') &&
+    surfaceSource.includes("if (box.spec.kind !== 'lane') continue;") &&
+    !surfaceSource.includes('drawBubbles');
+  const bubblePass = bubbleSource.includes(
+    'this.overlay.drawBubbles(bubbles, box.top, lane.analyzer.color);') &&
+    !bubbleSource.includes('fillLane') && !bubbleSource.includes('drawDemoWatermark');
+  check('lane surface filling is a separate pass from bubble painting',
+    surfacePass && bubblePass && !app.includes('this.drawLanes('),
+    `surface=${surfacePass}, bubbles=${bubblePass}, oldPass=${app.includes('this.drawLanes(')}`);
+
+  const drawStart = app.indexOf('private draw(): void {');
+  const drawEnd = app.indexOf('private drawAxisCanvas(');
+  const drawSource = drawStart >= 0 && drawEnd > drawStart
+    ? app.slice(drawStart, drawEnd) : '';
+  const paintOrder = [
+    'this.overlay.beginFrame();',
+    'this.overlay.drawGrid(ticks);',
+    'this.drawLaneSurfaces(boxes);',
+    'this.overlay.drawDemoWatermark(channelRow.height);',
+    'this.overlay.drawLevels(',
+    'this.drawLaneBubbles(boxes, wCss);',
+    'this.overlay.drawTrigger(',
+    'this.overlay.drawLiveEdge(',
+    'this.overlay.drawCursor(this.toPx(this.cursorA)',
+    'this.overlay.drawCursor(this.toPx(this.cursorB)',
+    'this.overlay.drawHover(this.hover);',
+  ];
+  const positions = paintOrder.map((needle) => drawSource.indexOf(needle));
+  const ordered = positions.every((p, i) => p >= 0 && (i === 0 || p > positions[i - 1]!));
+  check('paint order is grid, lane surfaces, watermark, levels, overlays',
+    drawSource.length > 0 && ordered,
+    `positions=${positions.join(',')}`);
+}
+
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
