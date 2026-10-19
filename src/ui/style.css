@@ -340,18 +340,14 @@ html[data-theme="dark"] .danger {
 .ch-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .ch-tag { font-size: 11px; min-width: 22px; }
 
-.ch-name {
-  flex: 1;
-  min-width: 0;
-  padding: 0 2px;
-  color: var(--text80);
-  line-height: 18px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.ch-name, .ch-tag--name {
+  flex: 1; min-width: 0; padding: 0 2px; line-height: 18px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.ch-name { color: var(--text80); }
 .ch-settings {
   flex: none;
+  margin-left: auto;
   align-self: center;
   display: flex;
   align-items: center;

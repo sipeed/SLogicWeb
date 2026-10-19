@@ -23,10 +23,11 @@
  */
 
 import { button, div } from './capturePanel.js';
+import { channelLabelTexts, getChannelLabelMode } from './channelLabelMode.js';
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { CHANNEL_COLOR_PRESETS, COLORS } from './metrics.js';
-import { DEFAULT_TRIGGER_MODE, defaultChannelName,
+import { DEFAULT_TRIGGER_MODE,
   type AnalyzerState, type ChannelState, type TriggerMode } from './state.js';
 
 export interface ChannelConfiguration {
@@ -374,17 +375,21 @@ export class ChannelList {
       const head = document.createElement('div');
       head.className = 'ch-head';
 
+      const mode = getChannelLabelMode();
+      const texts = channelLabelTexts(mode, cell.channel);
+
       const tag = document.createElement('span');
-      tag.className = 'ch-tag';
-      tag.textContent = `D${cell.channel.index}`;
+      tag.className = mode === 'name' ? 'ch-tag ch-tag--name' : 'ch-tag';
+      tag.textContent = texts.tag;
       tag.style.color = cell.channel.color;
       head.appendChild(tag);
 
-      const name = document.createElement('span');
-      name.className = 'ch-name';
-      name.textContent = cell.channel.name;
-      if (cell.channel.name === defaultChannelName(cell.channel.index)) name.textContent = '';
-      head.appendChild(name);
+      if (texts.name !== null) {
+        const name = document.createElement('span');
+        name.className = 'ch-name';
+        name.textContent = texts.name;
+        head.appendChild(name);
+      }
 
       const settings = document.createElement('button');
       settings.type = 'button';

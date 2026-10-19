@@ -2,12 +2,12 @@
 // Copyright (C) 2026 Daniel Tralamazza
 
 import { en } from '../locales/en.js';
-import { channelColor, defaultChannelName, defaultChannels } from '../state.js';
+import { channelColor, defaultChannelName, defaultChannels, type ChannelState } from '../state.js';
 import {
   CHANNEL_LABEL_MODES, CHANNEL_LABEL_MODE_HINT_KEYS, CHANNEL_LABEL_MODE_LABEL_KEYS,
-  CHANNEL_LABEL_MODE_STORAGE_KEY, DEFAULT_CHANNEL_LABEL_MODE, getChannelLabelMode,
-  initChannelLabelMode, onChannelLabelModeChange, pickChannelLabelMode, setChannelLabelMode,
-  type ChannelLabelMode,
+  CHANNEL_LABEL_MODE_STORAGE_KEY, DEFAULT_CHANNEL_LABEL_MODE, channelLabelTexts,
+  getChannelLabelMode, initChannelLabelMode, onChannelLabelModeChange, pickChannelLabelMode,
+  setChannelLabelMode, type ChannelLabelMode,
 } from '../channelLabelMode.js';
 
 const nodeProcess = (() => {
@@ -216,6 +216,46 @@ function defineGlobal(name: 'localStorage', value: unknown): void {
   check('defaultChannels routes through defaultChannelName and the helper tracks its argument',
     routed && defaultChannelName(1) !== defaultChannelName(3),
     `routed=${routed}, D1=${defaultChannelName(1)}, D3=${defaultChannelName(3)}`);
+}
+
+// ------------------------------------------------- label text contract
+
+{
+  interface Row {
+    mode: ChannelLabelMode;
+    index: number;
+    name: string;
+    tag: string;
+    label: string | null;
+  }
+  const table: Row[] = [
+    { mode: 'name', index: 3, name: 'D3', tag: 'D3', label: null },
+    { mode: 'name', index: 3, name: 'SDA', tag: 'SDA', label: null },
+    { mode: 'legacy', index: 3, name: 'D3', tag: 'D3', label: null },
+    { mode: 'legacy', index: 3, name: 'SDA', tag: 'D3', label: 'SDA' },
+    { mode: 'legacy', index: 3, name: 'D1', tag: 'D3', label: 'D1' },
+  ];
+
+  for (const row of table) {
+    const channel: Pick<ChannelState, 'index' | 'name'> = { index: row.index, name: row.name };
+    const got = channelLabelTexts(row.mode, channel);
+    check(`channelLabelTexts ${row.mode}/${row.name} tags ${row.tag} and names ${JSON.stringify(row.label)}`,
+      got.tag === row.tag && got.name === row.label,
+      `tag=${JSON.stringify(got.tag)}, name=${JSON.stringify(got.name)}`);
+  }
+
+  const nameCustom = channelLabelTexts('name', { index: 3, name: 'SDA' });
+  const legacyCustom = channelLabelTexts('legacy', { index: 3, name: 'SDA' });
+  const tagConstant = new Set(table.map((row) => channelLabelTexts(row.mode, row)).map((text) => text.tag));
+  const nameConstant = new Set(table.map((row) => channelLabelTexts(row.mode, row)).map((text) => text.name));
+  const control = nameCustom.tag !== legacyCustom.tag &&
+    nameCustom.name === null && legacyCustom.name === 'SDA' &&
+    tagConstant.size >= 2 && nameConstant.size >= 3;
+  check('the same custom name renders differently per mode, so a mode-blind, constant-tag or always-null implementation fails',
+    control,
+    `nameTag=${nameCustom.tag}, legacyTag=${legacyCustom.tag}, ` +
+    `nameLabel=${JSON.stringify(nameCustom.name)}, legacyLabel=${JSON.stringify(legacyCustom.name)}, ` +
+    `distinctTags=${tagConstant.size}, distinctNames=${nameConstant.size}`);
 }
 
 // ---------------------------------------------------------------------- report

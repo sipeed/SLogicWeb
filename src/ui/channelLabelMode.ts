@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Daniel Tralamazza
 
 import type { MessageKey } from './i18n.js';
+import { defaultChannelName, type ChannelState } from './state.js';
 
 export const CHANNEL_LABEL_MODES = ['name', 'legacy'] as const;
 export type ChannelLabelMode = (typeof CHANNEL_LABEL_MODES)[number];
@@ -69,4 +70,18 @@ export function initChannelLabelMode(): ChannelLabelMode {
 export function onChannelLabelModeChange(cb: () => void): () => void {
   listeners.add(cb);
   return () => { listeners.delete(cb); };
+}
+
+export interface ChannelLabelTexts {
+  readonly tag: string;
+  readonly name: string | null;
+}
+
+export function channelLabelTexts(
+  mode: ChannelLabelMode,
+  channel: Pick<ChannelState, 'index' | 'name'>,
+): ChannelLabelTexts {
+  const tag = defaultChannelName(channel.index);
+  if (mode === 'name') return { tag: channel.name, name: null };
+  return channel.name === tag ? { tag, name: null } : { tag, name: channel.name };
 }
