@@ -19,8 +19,9 @@
  *     path, not just the format plumbing.
  */
 
-import { saveLwcap, loadLwcap } from '../captureIO.js';
+import { createProtocolDemoCapture, saveLwcap, loadLwcap } from '../captureIO.js';
 import { parseSr } from '../srLoad.js';
+import { getDecoder, validateStack } from '../../decode/registry.js';
 import type { SampleStore } from '../../data/index.js';
 
 /**
@@ -117,6 +118,89 @@ function frameUart(edges: readonly number[], initial: number, bitPeriod: number,
     lastStart = p;
   }
   return bytes;
+}
+
+interface LevelTrace {
+  edges: readonly number[];
+  initial: number;
+}
+
+function traceOf(store: SampleStore, channel: number): LevelTrace {
+  return {
+    edges: Array.from(store.edges(channel, 0, store.length)),
+    initial: store.query(channel, 0, 1, 1).high[0]!,
+  };
+}
+
+function risingEdges(trace: LevelTrace): number[] {
+  const out: number[] = [];
+  for (const p of trace.edges) {
+    if (levelAt(trace.edges, trace.initial, p) !== 1) continue;
+    if (levelAt(trace.edges, trace.initial, p - 1) === 1) continue;
+    out.push(p);
+  }
+  return out;
+}
+
+function spiWords(data: LevelTrace, clk: LevelTrace, cs: LevelTrace, offset: number): number[] {
+  const words: number[] = [];
+  let value = 0;
+  let bits = 0;
+  for (const edge of risingEdges(clk)) {
+    if (levelAt(cs.edges, cs.initial, edge) !== 0) continue;
+    value = (value << 1) | levelAt(data.edges, data.initial, edge + offset);
+    bits += 1;
+    if (bits === 8) {
+      words.push(value);
+      value = 0;
+      bits = 0;
+    }
+  }
+  return words;
+}
+
+interface I2cTransfer {
+  start: number;
+  stop: number;
+  address: number;
+  data: number[];
+  acks: number[];
+}
+
+function i2cTransfer(scl: LevelTrace, sda: LevelTrace, offset: number): I2cTransfer {
+  let start = -1;
+  let stop = -1;
+  for (const p of sda.edges) {
+    if (levelAt(scl.edges, scl.initial, p) !== 1) continue;
+    const before = levelAt(sda.edges, sda.initial, p - 1);
+    const after = levelAt(sda.edges, sda.initial, p);
+    if (before === 1 && after === 0 && start < 0) start = p;
+    if (before === 0 && after === 1) stop = p;
+  }
+  const bits = risingEdges(scl)
+    .filter((p) => p > start && p < stop)
+    .map((p) => levelAt(sda.edges, sda.initial, p + offset));
+  const address = bits.slice(0, 8).reduce((acc, b) => (acc << 1) | b, 0);
+  const data: number[] = [];
+  const acks: number[] = [];
+  let i = 8;
+  while (i < bits.length) {
+    acks.push(bits[i]!);
+    i += 1;
+    if (i + 8 <= bits.length) {
+      data.push(bits.slice(i, i + 8).reduce((acc, b) => (acc << 1) | b, 0));
+      i += 8;
+    }
+  }
+  return { start, stop, address, data, acks };
+}
+
+function hexBytes(bytes: readonly number[]): string {
+  return bytes.map((b) => b.toString(16).padStart(2, '0')).join(' ');
+}
+
+function asciiBytes(bytes: readonly number[]): string {
+  return JSON.stringify(String.fromCharCode(...bytes));
 }
 
 // ---------------------------------------------------------------- synthetic zip
@@ -337,6 +421,179 @@ async function main(): Promise<void> {
       name: 'a truncated archive throws',
       pass: truncatedThrew,
       detail: truncatedThrew ? 'rejected' : 'parsed without an EOCD record',
+    });
+  }
+
+  {
+    const demo = createProtocolDemoCapture();
+    const s = demo.store;
+    const wantNames = ['I2C SCL', 'I2C SDA', 'SPI CLK', 'SPI MISO', 'SPI MOSI', 'SPI CS#', 'UART RX', 'UART TX'];
+    const wantInitial = [1, 1, 0, 0, 0, 1, 1, 1];
+    const wantEdges = [56, 8, 32, 13, 11, 2, 26, 32];
+    const shape: string[] = [];
+    if (s.channelCount !== 8) shape.push(`channels ${s.channelCount}`);
+    if (s.samplerate !== 16e6) shape.push(`samplerate ${s.samplerate}`);
+    if (s.length !== 18000) shape.push(`length ${s.length}`);
+    if (demo.channelNames.join('|') !== wantNames.join('|')) {
+      shape.push(`names ${demo.channelNames.join(',')}`);
+    }
+    for (let c = 0; c < demo.channelNames.length; c++) {
+      const initial = s.query(c, 0, 1, 1).high[0]!;
+      const count = s.edges(c, 0, s.length).length;
+      if (initial !== wantInitial[c]) shape.push(`ch${c} initial ${initial}`);
+      if (count !== wantEdges[c]) shape.push(`ch${c} ${count} edges`);
+    }
+    results.push({
+      name: 'protocol demo capture has the documented eight-channel shape',
+      pass: shape.length === 0,
+      detail: shape.length === 0
+        ? `8 ch, ${s.samplerate / 1e6} MSa/s, ${s.length} samples, edges ${wantEdges.join(',')}`
+        : shape.join('; '),
+    });
+
+    const manifest: Array<{
+      id: string;
+      channels: string[];
+      capture: number[];
+      options: Record<string, string | number>;
+    }> = [
+      {
+        id: 'i2c', channels: ['scl', 'sda'], capture: [0, 1],
+        options: { address_format: 'shifted' },
+      },
+      {
+        id: 'spi', channels: ['clk', 'miso', 'mosi', 'cs'], capture: [2, 3, 4, 5],
+        options: { cs_polarity: 'active-low', cpol: 0, cpha: 0, bitorder: 'msb-first', wordsize: 8 },
+      },
+      {
+        id: 'uart', channels: ['rx', 'tx'], capture: [6, 7],
+        options: {
+          baudrate: 115200, data_bits: 8, parity: 'none', stop_bits: 1,
+          bit_order: 'lsb-first', format: 'ascii',
+        },
+      },
+    ];
+    const mapping: string[] = [];
+    if (demo.analyzers.length !== manifest.length) mapping.push(`${demo.analyzers.length} analyzers`);
+    for (const want of manifest) {
+      const got = demo.analyzers.find((a) => a.id === want.id);
+      if (!got) {
+        mapping.push(`missing ${want.id}`);
+        continue;
+      }
+      const info = getDecoder(want.id);
+      const declared = [...info.channels, ...info.optional_channels].map((c) => c.id);
+      if (declared.join(',') !== want.channels.join(',')) {
+        mapping.push(`${want.id} declares ${declared.join(',')}`);
+      }
+      const capture = Object.keys(got.channels)
+        .map(Number).sort((a, b) => a - b).map((k) => got.channels[k]!);
+      if (capture.join(',') !== want.capture.join(',')) {
+        mapping.push(`${want.id} maps ${capture.join(',')}`);
+      }
+      const options = got.options ?? {};
+      for (const [key, value] of Object.entries(want.options)) {
+        if (options[key] !== value) mapping.push(`${want.id}.${key} is ${String(options[key])}`);
+      }
+      if (Object.keys(options).length !== Object.keys(want.options).length) {
+        mapping.push(`${want.id} carries unexpected options`);
+      }
+    }
+    mapping.push(...validateStack(demo.analyzers, s.channelCount));
+    results.push({
+      name: 'protocol demo analyzers match the decoder manifest and validate',
+      pass: mapping.length === 0,
+      detail: mapping.length === 0
+        ? 'i2c scl/sda, spi clk/miso/mosi/cs, uart rx/tx on the documented options'
+        : mapping.join('; '),
+    });
+
+    const scl = traceOf(s, 0);
+    const sda = traceOf(s, 1);
+    const i2c = i2cTransfer(scl, sda, 0);
+    const i2cProblems: string[] = [];
+    if (i2c.start !== 500 || i2c.stop !== 4860) i2cProblems.push(`start/stop ${i2c.start}/${i2c.stop}`);
+    if (i2c.address !== 0xa0) i2cProblems.push(`address ${hexBytes([i2c.address])}`);
+    if (i2c.data.join(',') !== '0,255') i2cProblems.push(`data ${hexBytes(i2c.data)}`);
+    if (i2c.acks.join(',') !== '0,0,0') i2cProblems.push(`acks ${i2c.acks.join(',')}`);
+    results.push({
+      name: 'protocol demo I2C lines carry START, 50 write, 00 FF and STOP',
+      pass: i2cProblems.length === 0,
+      detail: i2cProblems.length === 0
+        ? `start ${i2c.start}, address byte a0 (0x50 write), data ${hexBytes(i2c.data)}, ${i2c.acks.length} ACKs, stop ${i2c.stop}`
+        : i2cProblems.join('; '),
+    });
+    const i2cShifted = i2cTransfer(scl, sda, -80);
+    results.push({
+      name: 'sampling the I2C lines on the falling clock edge breaks the payload',
+      pass: i2cShifted.address !== 0xa0 && i2cShifted.data.join(',') !== '0,255',
+      detail: `falling-edge sampling reads address ${hexBytes([i2cShifted.address])} and data ${hexBytes(i2cShifted.data)}`,
+    });
+
+    const spiClk = traceOf(s, 2);
+    const spiCs = traceOf(s, 5);
+    const miso = spiWords(traceOf(s, 3), spiClk, spiCs, 0);
+    const mosi = spiWords(traceOf(s, 4), spiClk, spiCs, 0);
+    const clocks = risingEdges(spiClk)
+      .filter((p) => levelAt(spiCs.edges, spiCs.initial, p) === 0).length;
+    const spiProblems: string[] = [];
+    if (mosi.join(',') !== `${0xde},${0xad}`) spiProblems.push(`MOSI ${hexBytes(mosi)}`);
+    if (miso.join(',') !== `${0x5a},${0xa5}`) spiProblems.push(`MISO ${hexBytes(miso)}`);
+    if (clocks !== 16) spiProblems.push(`${clocks} clock edges while CS# is low`);
+    if (spiCs.edges.join(',') !== '7000,10040') spiProblems.push(`CS# spans ${spiCs.edges.join(',')}`);
+    const clkFirst = spiClk.edges[0]!;
+    const clkLast = spiClk.edges[spiClk.edges.length - 1]!;
+    if (clkFirst !== 7400 || clkLast !== 9880) spiProblems.push(`clocks span ${clkFirst}..${clkLast}`);
+    results.push({
+      name: 'protocol demo SPI carries DE AD on MOSI and 5A A5 on MISO',
+      pass: spiProblems.length === 0,
+      detail: spiProblems.length === 0
+        ? `MOSI ${hexBytes(mosi)}, MISO ${hexBytes(miso)}, ${clocks} clocks under CS#`
+        : spiProblems.join('; '),
+    });
+    const spiShifted = spiWords(traceOf(s, 4), spiClk, spiCs, 80);
+    results.push({
+      name: 'sampling SPI on the falling clock edge breaks the MOSI word',
+      pass: spiShifted.join(',') !== `${0xde},${0xad}`,
+      detail: `falling-edge sampling reads ${hexBytes(spiShifted)}`,
+    });
+
+    const uartBit = s.samplerate / 115200;
+    const uartRx = traceOf(s, 6);
+    const uartTx = traceOf(s, 7);
+    const rx = frameUart(uartRx.edges, uartRx.initial, uartBit, s.length);
+    const tx = frameUart(uartTx.edges, uartTx.initial, uartBit, s.length);
+    const uartProblems: string[] = [];
+    if (String.fromCharCode(...rx) !== 'OK\r\n') uartProblems.push(`RX ${asciiBytes(rx)}`);
+    if (String.fromCharCode(...tx) !== 'Hello') uartProblems.push(`TX ${asciiBytes(tx)}`);
+    const rxSpan = `${uartRx.edges[0]}..${uartRx.edges[uartRx.edges.length - 1]}`;
+    const txSpan = `${uartTx.edges[0]}..${uartTx.edges[uartTx.edges.length - 1]}`;
+    if (rxSpan !== '8000..13417') uartProblems.push(`RX frames span ${rxSpan}`);
+    if (txSpan !== '8000..14806') uartProblems.push(`TX frames span ${txSpan}`);
+    results.push({
+      name: 'protocol demo UART frames carry Hello and OK at 115200',
+      pass: uartProblems.length === 0,
+      detail: uartProblems.length === 0
+        ? `RX ${asciiBytes(rx)} ${rxSpan}, TX ${asciiBytes(tx)} ${txSpan}, ${rx.length + tx.length} frames`
+        : uartProblems.join('; '),
+    });
+    const slow = frameUart(uartTx.edges, uartTx.initial, s.samplerate / 57600, s.length);
+    results.push({
+      name: 'framing the demo UART at half the baud rate breaks the payload',
+      pass: String.fromCharCode(...slow) !== 'Hello',
+      detail: `57600 baud reads ${asciiBytes(slow)}`,
+    });
+
+    const blob = saveLwcap(s, demo.channelNames);
+    const back = loadLwcap(await blob.arrayBuffer(), 'protocol-demo.lwcap');
+    const roundTrip = compareStores(s, back.store, 'protocol demo round trip')
+      ?? (back.store.samplerate === s.samplerate ? null : `samplerate ${back.store.samplerate}`)
+      ?? (back.channelNames.join('|') === demo.channelNames.join('|')
+        ? null : `names ${back.channelNames.join(',')}`);
+    results.push({
+      name: 'protocol demo round-trips through .lwcap byte-identical',
+      pass: roundTrip === null,
+      detail: roundTrip ?? `${blob.size} bytes, all ${s.channelCount} channels and names`,
     });
   }
 
