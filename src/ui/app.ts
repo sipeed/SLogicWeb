@@ -1559,6 +1559,12 @@ export class App {
         });
       }
     },
+    setTriggerMode: (channel: number, mode: TriggerMode) => {
+      const current = this.channels[channel];
+      if (current) {
+        this.configureChannel(channel, { name: current.name, mode, color: current.color });
+      }
+    },
     reorder: (from: number, to: number) => this.reorder(from, to),
     /**
      * Save this capture as `.lwcap` and load it straight back, comparing every channel's
