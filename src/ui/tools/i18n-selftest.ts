@@ -412,6 +412,7 @@ const baseSettings: CaptureSettings = {
   // clean FAIL, not a crash.
   const probes: (keyof Messages)[] = [
     'toolbar.start', 'toolbar.demo', 'capture.demo', 'settings.language', 'settings.theme',
+    'settings.channelLabels', 'channelLabels.name', 'channelLabels.legacy',
     'trigger.anyEdge',
     'channels.settings', 'channels.name', 'channels.color', 'channels.customColor',
     'channels.triggerMode', 'channels.cancel',

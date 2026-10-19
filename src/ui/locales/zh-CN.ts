@@ -97,6 +97,8 @@ export const zhCN: Messages = {
   'channels.triggerHigh': '高电平',
   'channels.triggerLow': '低电平',
   'channels.triggerAny': '任意值（X）',
+  'channels.nameHint.name': '彩色标签显示通道名称（默认 D{index}）。标签样式：{path}。',
+  'channels.nameHint.legacy': '彩色 D{index} 标签沿用通道颜色，白色标签显示通道名称。标签样式：{path}。',
 
   // ------------------------------------------------------- capture panel
   'capturePanel.digital': '数字通道',
@@ -167,7 +169,12 @@ export const zhCN: Messages = {
   'settings.title': '设置',
   'settings.titleHint': '语言与显示偏好',
   'settings.language': '语言',
+  'settings.channelLabels': '通道标签',
   'settings.theme': '主题',
+
+  // --------------------------------------------------- channel label modes
+  'channelLabels.name': '仅名称',
+  'channelLabels.legacy': '通道号+名称',
 
   // ------------------------------------------------------------ theme
   'theme.default': '默认',
