@@ -23,7 +23,7 @@ import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { COLORS } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
-import type { AnalyzerState, ChannelState } from './state.js';
+import { defaultChannelName, type AnalyzerState, type ChannelState } from './state.js';
 
 export interface AnalyzerPanelCallbacks {
   onAttach(decoderId: string, channels: Record<number, number>, options: Record<string, string | number>): void;
@@ -138,7 +138,9 @@ export class AnalyzerPanel {
     const chanOpts = (required: boolean): [string, string][] => [
       ...(required ? [] : [['-1', '—'] as [string, string]]),
       ...enabled.map((c) =>
-        [String(c.index), c.name ? `D${c.index} ${c.name}` : `D${c.index}`] as [string, string]),
+        [String(c.index),
+          c.name && c.name !== defaultChannelName(c.index) ? `D${c.index} ${c.name}` : `D${c.index}`,
+        ] as [string, string]),
     ];
 
     const allChans = [...info.channels, ...info.optional_channels];

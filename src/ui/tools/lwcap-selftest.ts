@@ -20,6 +20,7 @@
 import { PlanarSampleStore, generateCapture } from '../../data/index.js';
 import type { SampleStore } from '../../data/index.js';
 import { saveLwcap, loadLwcap, levelAt } from '../captureIO.js';
+import { defaultChannels } from '../state.js';
 
 const nodeProcess = (() => {
   const p = (globalThis as { process?: { exit(code: number): never } }).process;
@@ -193,6 +194,38 @@ async function main(): Promise<void> {
       name: 'corrupt v2 spans throw instead of loading',
       pass: bad.length === 0,
       detail: bad.length === 0 ? 'reversed and past-length spans both threw' : `did not throw: ${bad.join(', ')}`,
+    });
+  }
+
+  // 5. Default and custom channel names round trip.
+  {
+    const store = buildPlanar(4099);
+    const defaults = defaultChannels(16).map((c) => c.name);
+    const wantDefaults = Array.from({ length: 16 }, (_, i) => `D${i}`);
+    const loadedDefaults = loadLwcap(await saveLwcap(store, defaults).arrayBuffer(), 'default-names.lwcap');
+    const defaultsSame = loadedDefaults.channelNames.length === wantDefaults.length &&
+      loadedDefaults.channelNames.every((n, i) => n === wantDefaults[i]);
+    const noEmpties = loadedDefaults.channelNames.every((n) => n !== '');
+    const defaultFail = compareStores(store, loadedDefaults.store, 'default names');
+    results.push({
+      name: 'default channel names save as D<index> and load back non-empty',
+      pass: defaultsSame && noEmpties && defaultFail === null,
+      detail: defaultsSame && noEmpties && defaultFail === null
+        ? loadedDefaults.channelNames.join(', ')
+        : defaultFail ?? `${JSON.stringify(loadedDefaults.channelNames)} (want ${wantDefaults.join(', ')})`,
+    });
+
+    const custom = defaults.map((n, i) => (i === 1 ? 'SDA' : i === 4 ? 'I2C SCL' : n));
+    const loadedCustom = loadLwcap(await saveLwcap(store, custom).arrayBuffer(), 'custom-names.lwcap');
+    const customFail = compareStores(store, loadedCustom.store, 'custom names');
+    const customSame = loadedCustom.channelNames.length === custom.length &&
+      loadedCustom.channelNames.every((n, i) => n === custom[i]);
+    results.push({
+      name: 'custom channel names round trip unchanged',
+      pass: customSame && customFail === null,
+      detail: customSame && customFail === null
+        ? loadedCustom.channelNames.join(', ')
+        : customFail ?? `${JSON.stringify(loadedCustom.channelNames)} (want ${JSON.stringify(custom)})`,
     });
   }
 

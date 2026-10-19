@@ -26,7 +26,7 @@ import { button, div } from './capturePanel.js';
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { CHANNEL_COLOR_PRESETS, COLORS } from './metrics.js';
-import { DEFAULT_TRIGGER_MODE,
+import { DEFAULT_TRIGGER_MODE, defaultChannelName,
   type AnalyzerState, type ChannelState, type TriggerMode } from './state.js';
 
 export interface ChannelConfiguration {
@@ -383,6 +383,7 @@ export class ChannelList {
       const name = document.createElement('span');
       name.className = 'ch-name';
       name.textContent = cell.channel.name;
+      if (cell.channel.name === defaultChannelName(cell.channel.index)) name.textContent = '';
       head.appendChild(name);
 
       const settings = document.createElement('button');

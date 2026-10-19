@@ -44,7 +44,7 @@ import { COLORS, MEASURE_COLORS, ROWS } from './metrics.js';
 import { Overlay, type HoverMeasurement } from './overlay.js';
 import { StoreRef } from './storeRef.js';
 import {
-  analyzerColor, defaultChannels, channelColor, DEFAULT_TRIGGER_MODE,
+  analyzerColor, defaultChannels, defaultChannelName, channelColor, DEFAULT_TRIGGER_MODE,
   modesToConditions, triggerModeFromCondition,
   type AnalyzerState, type CaptureSettings, type ChannelState, type TriggerMode,
   type CaptureLabel, type StatusError,
@@ -246,7 +246,8 @@ export class App {
   private configureChannel(channel: number, config: ChannelConfiguration): void {
     const current = this.channels[channel];
     if (!current) return;
-    this.channels[channel] = { ...current, name: config.name, color: config.color };
+    const name = config.name.trim() || defaultChannelName(channel);
+    this.channels[channel] = { ...current, name, color: config.color };
 
     if (!this.running && !this.stopping) {
       const triggerModes = { ...this.settings.triggerModes, [channel]: config.mode };
@@ -1089,8 +1090,8 @@ export class App {
     for (let i = 0; i < this.channels.length; i++) {
       // Keep real names ("SDA"); drop auto-generated ones that would just repeat the
       // D-tag next to them ("D3", "Channel 3", "3").
-      const n = names[i];
-      if (n && n !== `D${i}` && n !== `Channel ${i}` && n !== String(i)) {
+      const n = (names[i] ?? '').trim();
+      if (n && n !== defaultChannelName(i) && n !== `Channel ${i}` && n !== String(i)) {
         this.channels[i]!.name = n;
       }
     }

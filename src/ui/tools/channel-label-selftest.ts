@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Daniel Tralamazza
 
 import { en } from '../locales/en.js';
+import { channelColor, defaultChannelName, defaultChannels } from '../state.js';
 import {
   CHANNEL_LABEL_MODES, CHANNEL_LABEL_MODE_HINT_KEYS, CHANNEL_LABEL_MODE_LABEL_KEYS,
   CHANNEL_LABEL_MODE_STORAGE_KEY, DEFAULT_CHANNEL_LABEL_MODE, getChannelLabelMode,
@@ -185,6 +186,36 @@ function defineGlobal(name: 'localStorage', value: unknown): void {
     notified === 1,
     `boot=${booted}, bootThrew=${bootThrew}, switchThrew=${switchThrew}, ` +
     `notified=${notified}, mode=${getChannelLabelMode()}`);
+}
+
+// ------------------------------------------------- default channel names
+
+{
+  const shape: [number, string][] = [[0, 'D0'], [3, 'D3'], [15, 'D15']];
+  const wrongShape = shape.filter(([index, want]) => defaultChannelName(index) !== want);
+  check('defaultChannelName is the D-prefixed channel index',
+    wrongShape.length === 0,
+    wrongShape.length === 0
+      ? shape.map(([index, want]) => `${index}→${want}`).join(', ')
+      : wrongShape.map(([index, want]) =>
+        `${index}→${JSON.stringify(defaultChannelName(index))} (want ${want})`).join('; '));
+
+  const channels = defaultChannels(17);
+  const wrongNames = channels.filter((c) => c.name !== `D${c.index}`);
+  const emptyNames = channels.filter((c) => c.name === '');
+  const wrongIndices = channels.filter((c, i) => c.index !== i);
+  const wrongColors = channels.filter((c, i) => c.color !== channelColor(i));
+  check('defaultChannels names every channel after its own index and keeps index and color',
+    channels.length === 17 && wrongNames.length === 0 && emptyNames.length === 0 &&
+    wrongIndices.length === 0 && wrongColors.length === 0,
+    `n=${channels.length}, names=${channels.map((c) => c.name).join(',')}, ` +
+    `wrongNames=${wrongNames.length}, emptyNames=${emptyNames.length}, ` +
+    `wrongIndices=${wrongIndices.length}, wrongColors=${wrongColors.length}`);
+
+  const routed = defaultChannels(5).every((c) => c.name === defaultChannelName(c.index));
+  check('defaultChannels routes through defaultChannelName and the helper tracks its argument',
+    routed && defaultChannelName(1) !== defaultChannelName(3),
+    `routed=${routed}, D1=${defaultChannelName(1)}, D3=${defaultChannelName(3)}`);
 }
 
 // ---------------------------------------------------------------------- report
