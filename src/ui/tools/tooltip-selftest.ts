@@ -1,39 +1,8 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
-/**
- * Node entry point for the tooltip layer suite.
- *
- *   node_modules/.bin/esbuild src/ui/tools/tooltip-selftest.ts --bundle --format=esm \
- *     --platform=node --outfile=/tmp/tooltip-selftest.mjs && node /tmp/tooltip-selftest.mjs
- *
- * Run from the repository root. Prints PASS/FAIL per check and exits non-zero on any
- * failure.
- *
- * What is pinned here:
- *
- *   - placeTooltip: below-center happy path, flip above at the bottom edge, no flip
- *     when above lacks room too, left/right viewport clamps, margin honored, and the
- *     degenerate narrow viewport where the lower clamp bound must win;
- *   - tipTransition: the full event table — enter/leave, retarget restores the
- *     previous anchor before stashing the next, pending timer show, visible-anchor
- *     instant re-anchor (tooltip tour), down/escape/scroll suppression while parked,
- *     suppressed anchors do not re-show on re-entry, suppression clears on leave,
- *     focus shows immediately WITHOUT stashing, blur cleanup, pointer+focus
- *     ownership hand-off both directions, external title rewrite, anchorDied;
- *   - titledAncestor: titled parent found, empty/blank titles skipped, null-safe;
- *   - tooltip.ts module shape: pointer events (never mouse events), touch filter,
- *     elementFromPoint fallback, popover top layer, guarded MutationObserver,
- *     :focus-visible gate, isConnected revalidation, AbortController teardown;
- *   - index.html keeps its title/data-i18n-title attributes (source of truth
- *     unmigrated) — guards against accidental call-site migration.
- */
-
 import {
   placeTooltip, titledAncestor, tipTransition, TIP_HIDDEN, TOOLTIP,
   type TipActions, type TipEvent, type TipState,
 } from '../tooltip.js';
 
-/** Same structural-typing trick as i18n-selftest.ts: node access without @types/node. */
 const nodeProcess = (() => {
   const p = (globalThis as {
     process?: { exit(code: number): never; getBuiltinModule?(name: string): unknown };
@@ -63,14 +32,12 @@ function check(name: string, pass: boolean, detail: string): void {
   results.push({ name, pass, detail });
 }
 
-// ------------------------------------------------------------------ placement
-
 {
   const viewport = { width: 1000, height: 700 };
   const tip = { width: 120, height: 28 };
   const anchor = { left: 100, right: 140, top: 100, bottom: 128 };
   const p = placeTooltip(anchor, tip, viewport);
-  const wantLeft = 120 - 60; // anchor center 120, half tip 60
+  const wantLeft = 120 - 60;
   check('placeTooltip centers below the anchor with the configured gap',
     p.side === 'below' && p.top === 128 + TOOLTIP.anchorGap && p.left === wantLeft,
     `side=${p.side}, top=${p.top}, left=${p.left}, wantTop=${128 + TOOLTIP.anchorGap}, wantLeft=${wantLeft}`);
@@ -94,7 +61,6 @@ function check(name: string, pass: boolean, detail: string): void {
   const p = placeTooltip(anchor, tip, viewport);
   check('placeTooltip stays below (clamped) when neither side has room',
     p.side === 'below' && p.top >= TOOLTIP.viewportMargin
-      && p.top + tip.height <= viewport.height - TOOLTIP.viewportMargin + tip.height
       && p.top === Math.max(TOOLTIP.viewportMargin,
         Math.min(30 + TOOLTIP.anchorGap, viewport.height - TOOLTIP.viewportMargin - tip.height)),
     `side=${p.side}, top=${p.top}`);
@@ -123,9 +89,6 @@ function check(name: string, pass: boolean, detail: string): void {
     `left=${p.left}, top=${p.top}`);
 }
 
-// ------------------------------------------------------------- state machine
-
-/** Run an event sequence, collecting the union of action flags per step. */
 function run(seq: readonly TipEvent[]): { states: TipState[]; acts: TipActions[] } {
   const states: TipState[] = [];
   const acts: TipActions[] = [];
@@ -237,16 +200,6 @@ for (const hard of ['escape', 'scroll'] as const) {
 
 {
   const { states, acts } = run([
-    { type: 'focus', anchor: A }, { type: 'enter', anchor: B },
-  ]);
-  const enter = acts[1]!;
-  check('pointer enter elsewhere dismisses a focus-owned anchor (single-anchor model)',
-    states[1]!.anchor === B && !states[1]!.focusInside && enter.stash,
-    `state=${JSON.stringify(states[1])}, act=${JSON.stringify(enter)}`);
-}
-
-{
-  const { states, acts } = run([
     { type: 'enter', anchor: A }, { type: 'timer' }, { type: 'focus', anchor: B },
   ]);
   check('focus elsewhere while the pointer owns an anchor is a no-op (anchor stays A)',
@@ -262,6 +215,16 @@ for (const hard of ['escape', 'scroll'] as const) {
   check('a stray timer after a parked press does not re-show the suppressed chip',
     states[3]!.phase === 'hidden' && states[3]!.suppressed && !acts[3]!.show,
     `state=${JSON.stringify(states[3])}, act=${JSON.stringify(acts[3])}`);
+}
+
+{
+  const { states, acts } = run([
+    { type: 'focus', anchor: A }, { type: 'enter', anchor: B },
+  ]);
+  const enter = acts[1]!;
+  check('pointer enter elsewhere dismisses a focus-owned anchor (single-anchor model)',
+    states[1]!.anchor === B && !states[1]!.focusInside && enter.stash,
+    `state=${JSON.stringify(states[1])}, act=${JSON.stringify(enter)}`);
 }
 
 {
@@ -295,8 +258,6 @@ for (const hard of ['escape', 'scroll'] as const) {
     `timer=${JSON.stringify(stray.act)}, leave=${JSON.stringify(strayLeave.act)}`);
 }
 
-// ------------------------------------------------------------ anchor resolver
-
 {
   const titled = { getAttribute: (n: string) => (n === 'title' ? 'hint' : null) } as Element;
   const empty = { getAttribute: (n: string) => (n === 'title' ? '  ' : null) } as Element;
@@ -308,8 +269,6 @@ for (const hard of ['escape', 'scroll'] as const) {
       && titledAncestor(orphan) === null && titledAncestor(null) === null,
     `titled=${titledAncestor(child) === titled}, blank=${titledAncestor(blankChild)}, orphan=${titledAncestor(orphan)}`);
 }
-
-// -------------------------------------------------------------- module shape
 
 {
   if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
@@ -338,9 +297,10 @@ for (const hard of ['escape', 'scroll'] as const) {
   ];
   const missing = needles.filter((n) => !src.includes(n));
   const noMouse = !src.includes("'mouseover'") && !src.includes("'mousemove'");
+  const noComments = !src.includes('//') && !src.includes('/*');
   check('tooltip.ts wires the designed event model (pointer events, top layer, guarded observer)',
-    missing.length === 0 && noMouse,
-    `missing=[${missing.join(' | ')}], noMouseEvents=${noMouse}`);
+    missing.length === 0 && noMouse && noComments,
+    `missing=[${missing.join(' | ')}], noMouseEvents=${noMouse}, noComments=${noComments}`);
 }
 
 {
@@ -352,7 +312,21 @@ for (const hard of ['escape', 'scroll'] as const) {
     titles >= 7 && i18nTitles >= 6,
     `title attrs=${titles}, data-i18n-title attrs=${i18nTitles}`);
 }
-// -------------------------------------------------------------- tooltip sheet
+
+{
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const main = fs.readFileSync('src/ui/main.ts', 'utf8');
+  const wired = main.includes("from './tooltip.js'") && main.includes('initTooltip();');
+  const appAt = main.indexOf('new App()');
+  const initAt = main.indexOf('initTooltip();');
+  const guarded = appAt >= 0 && initAt > appAt && main.includes('tooltip layer failed to start');
+  const capture = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
+  const aria = capture.includes("mask.setAttribute('aria-label', mask.title)");
+  check('main.ts wires initTooltip() guarded after App; the trigger mask has an accessible name',
+    wired && guarded && aria,
+    `wired=${wired}, guarded=${guarded}, appAt=${appAt}, initAt=${initAt}, aria=${aria}`);
+}
+
 {
   if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
   const css = fs.readFileSync('src/ui/style.css', 'utf8');
@@ -373,8 +347,6 @@ for (const hard of ['escape', 'scroll'] as const) {
     '.tooltip.open',
   ];
   const missing = needles.filter((n) => !block.includes(n));
-  // Top-layer chip: no z-index anywhere in the block, and no raw color
-  // literals (the shadow rgba is the one sanctioned base literal).
   const noZIndex = !block.includes('z-index');
   const rawColors = (block.match(/#[0-9a-fA-F]{3,8}\b|oklch\(/g) ?? []).length;
   const darkOverride = css.includes('html[data-theme="dark"] .tooltip')
@@ -383,29 +355,10 @@ for (const hard of ['escape', 'scroll'] as const) {
     missing.length === 0 && noZIndex && rawColors === 0 && darkOverride,
     `missing=[${missing.join(' | ')}], noZIndex=${noZIndex}, rawColors=${rawColors}, darkOverride=${darkOverride}`);
 }
-{
-  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
-  const main = fs.readFileSync('src/ui/main.ts', 'utf8');
-  const wired = main.includes("from './tooltip.js'") && main.includes('initTooltip();');
-  // The call must sit in its own try/catch AFTER the App construction — the
-  // fatal boot overlay is for the shell, not for chrome polish.
-  const appAt = main.indexOf('new App()');
-  const initAt = main.indexOf('initTooltip();');
-  const guarded = appAt >= 0 && initAt > appAt && main.includes('tooltip layer failed to start');
-  const capture = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
-  const aria = capture.includes("mask.setAttribute('aria-label', mask.title)");
-  check('main.ts wires initTooltip() guarded after App; the trigger mask has an accessible name',
-    wired && guarded && aria,
-    `wired=${wired}, guarded=${guarded}, appAt=${appAt}, initAt=${initAt}, aria=${aria}`);
-}
 
-// ------------------------------------------------- adapter action ordering
 {
   if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
   const src = fs.readFileSync('src/ui/tooltip.ts', 'utf8');
-  // The emit() action block must observe the POST-transition state: a stash
-  // and a show in the same batch read text through state.stashed, so the
-  // assignment has to sit between doStash and doShow (check-round NIT guard).
   const stashAt = src.indexOf('if (a.stash) doStash();');
   const stateAt = src.indexOf('state = next.state;', stashAt);
   const showAt = src.indexOf('if (a.show) doShow();', stateAt);
@@ -414,8 +367,6 @@ for (const hard of ['escape', 'scroll'] as const) {
     stashAt >= 0 && stateAt > stashAt && showAt > stateAt && anchorGuardAt >= 0,
     `stashAt=${stashAt}, stateAt=${stateAt}, showAt=${showAt}, anchorGuardAt=${anchorGuardAt}`);
 }
-
-// ---------------------------------------------------------------------- report
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;

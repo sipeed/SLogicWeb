@@ -578,27 +578,21 @@ html[data-theme="dark"] .ch-cell.drop-target .ch-card {
 
 /* --------------------------------------------------------------------- tooltip */
 
-/* Themed hover chip for intercepted title attributes (src/ui/tooltip.ts). Lives in
-   the browser top layer via popover="manual" — no z-index, same as the native
-   dialog/palette above — so it also paints inside the modal channel dialog. The UA
-   popover box is reset with inset/margin/width; TS owns left/top and the show
-   timing. Floating-surface twin of the popover/menu block above: same tokens, same
-   radius, shadow per the base-literal + dark-token pattern. */
 .tooltip {
   position: fixed; inset: auto; margin: 0; width: auto;
   left: 0; top: 0;
-  max-width: min(320px, calc(100vw - 16px)); /* [CHOSEN] 16px = 2×TOOLTIP.viewportMargin (tooltip.ts) — keep in sync */
-  padding: 4px 8px;                           /* [CHOSEN] dense chrome scale */
-  font-size: 12px; line-height: 1.4;          /* [CHOSEN] hint-size type */
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 4px 8px;
+  font-size: 12px; line-height: 1.4;
   background: var(--popover);
   color: var(--popover-foreground);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 4px 12px rgb(0 0 0 / 40%);    /* [CHOSEN] dark overrides with --shadow below */
+  box-shadow: 0 4px 12px rgb(0 0 0 / 40%);
   overflow-wrap: break-word;
   pointer-events: none;
   opacity: 0; visibility: hidden;
-  transition: opacity 120ms ease, visibility 0s linear 120ms; /* [CHOSEN] subtle fade */
+  transition: opacity 120ms ease, visibility 0s linear 120ms;
 }
 .tooltip.open { opacity: 1; visibility: visible; transition: opacity 120ms ease; }
 

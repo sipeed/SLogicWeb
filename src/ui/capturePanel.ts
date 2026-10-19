@@ -159,8 +159,6 @@ export class CapturePanel {
     const mask = document.createElement('input');
     mask.type = 'checkbox'; mask.checked = s.triggerEnableMask; mask.disabled = v.running || v.stopping;
     mask.title = t('capturePanel.enableTrigger');
-    // The title doubles as the hover tooltip, but a bare checkbox needs a real
-    // accessible name (the tooltip layer temporarily removes title on hover).
     mask.setAttribute('aria-label', mask.title);
     triggerSec.header.appendChild(mask);
     mask.addEventListener('change', () => this.cb.onSettings({ ...s, triggerEnableMask: mask.checked }));

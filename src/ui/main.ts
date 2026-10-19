@@ -31,8 +31,6 @@ async function boot(): Promise<void> {
     initToolbarOverride();
     await initLocale();
     window.logicweb = new App();
-    // Chrome polish, deliberately outside the fatal path: a tooltip-layer failure
-    // must never paint the boot overlay over a working shell.
     try {
       initTooltip();
     } catch (e) {
