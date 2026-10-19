@@ -90,6 +90,7 @@ export const fr: Messages = {
 
   // -------------------------------------------------------- channel list
   'channels.settings': 'Paramètres de D{index}',
+  'channels.resetName': 'Rétablir le nom D{index}',
   'channels.name': 'Nom du canal',
   'channels.color': 'Couleur du canal',
   'channels.customColor': 'Couleur personnalisée',

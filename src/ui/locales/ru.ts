@@ -90,6 +90,7 @@ export const ru: Messages = {
 
   // -------------------------------------------------------- channel list
   'channels.settings': 'Настройки D{index}',
+  'channels.resetName': 'Сбросить имя на D{index}',
   'channels.name': 'Имя канала',
   'channels.color': 'Цвет канала',
   'channels.customColor': 'Пользовательский цвет',

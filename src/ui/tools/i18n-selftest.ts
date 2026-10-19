@@ -415,6 +415,7 @@ const baseSettings: CaptureSettings = {
     'settings.channelLabels', 'channelLabels.name', 'channelLabels.legacy',
     'trigger.anyEdge',
     'channels.settings', 'channels.name', 'channels.color', 'channels.customColor',
+    'channels.resetName',
     'channels.triggerMode', 'channels.cancel',
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',
   ];

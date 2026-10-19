@@ -94,6 +94,7 @@ export const en = {
 
   // -------------------------------------------------------- channel list
   'channels.settings': 'D{index} settings',
+  'channels.resetName': 'Reset name to D{index}',
   'channels.name': 'Channel name',
   'channels.color': 'Channel color',
   'channels.customColor': 'Custom color',

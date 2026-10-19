@@ -88,6 +88,7 @@ export const zhCN: Messages = {
 
   // -------------------------------------------------------- channel list
   'channels.settings': 'D{index} 设置',
+  'channels.resetName': '将名称重置为 D{index}',
   'channels.name': '通道名称',
   'channels.color': '通道颜色',
   'channels.customColor': '自定义颜色',

@@ -164,6 +164,17 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     kvRows,
     `nameTriggerRows=${(dialogSource.match(/channel-settings-field channel-settings-kv/g) ?? []).length}, colorLast=${dialogSource.includes('fields.append(nameField, triggerField, colorField);')}`);
 
+  const nameReset = dialogSource.includes("const nameControl = div('channel-settings-name-control');") &&
+    dialogSource.includes("this.resetNameButton = button('', 'channel-name-reset');") &&
+    dialogSource.includes("this.resetNameButton.type = 'button';") &&
+    dialogSource.includes('nameControl.append(this.nameInput, this.resetNameButton);') &&
+    dialogSource.includes('nameField.append(this.nameLabel, nameControl);') &&
+    dialogSource.includes('this.nameInput.value = defaultChannelName(this.channel);') &&
+    dialogSource.includes("this.resetNameButton.addEventListener('click', () => {");
+  check('the name control pairs the input with an explicit-type draft reset button',
+    nameReset,
+    `resetControl=${nameReset}`);
+
   const colorGrid = dialogSource.includes('for (const color of CHANNEL_COLOR_PRESETS)') &&
     dialogSource.includes('colorGrid.appendChild(this.customColorButton);') &&
     dialogSource.includes("this.colorPalette.setAttribute('popover', 'auto');") &&

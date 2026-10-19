@@ -27,7 +27,7 @@ import { channelLabelTexts, getChannelLabelMode } from './channelLabelMode.js';
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { CHANNEL_COLOR_PRESETS, COLORS } from './metrics.js';
-import { DEFAULT_TRIGGER_MODE,
+import { DEFAULT_TRIGGER_MODE, defaultChannelName,
   type AnalyzerState, type ChannelState, type TriggerMode } from './state.js';
 
 export interface ChannelConfiguration {
@@ -79,6 +79,7 @@ class ChannelSettingsDialog {
   private readonly title: HTMLHeadingElement;
   private readonly nameLabel: HTMLLabelElement;
   private readonly nameInput: HTMLInputElement;
+  private readonly resetNameButton: HTMLButtonElement;
   private readonly colorLabel: HTMLSpanElement;
   private readonly colorInput: HTMLInputElement;
   private readonly paletteLabel: HTMLLabelElement;
@@ -121,7 +122,18 @@ class ChannelSettingsDialog {
     this.nameInput.type = 'text';
     this.nameInput.spellcheck = false;
     this.nameInput.autocomplete = 'off';
-    nameField.append(this.nameLabel, this.nameInput);
+    const nameControl = div('channel-settings-name-control');
+    this.resetNameButton = button('', 'channel-name-reset');
+    this.resetNameButton.type = 'button';
+    this.resetNameButton.appendChild(resetNameIcon());
+    this.resetNameButton.addEventListener('click', () => {
+      if (this.channel < 0) return;
+      this.nameInput.value = defaultChannelName(this.channel);
+      this.nameInput.focus();
+      this.nameInput.select();
+    });
+    nameControl.append(this.nameInput, this.resetNameButton);
+    nameField.append(this.nameLabel, nameControl);
 
     const triggerField = div('channel-settings-field channel-settings-kv');
     this.triggerLabel = document.createElement('span');
@@ -264,6 +276,9 @@ class ChannelSettingsDialog {
   private renderStrings(channel: number): void {
     this.title.textContent = t('channels.settings', { index: channel });
     this.nameLabel.textContent = t('channels.name');
+    const resetTitle = t('channels.resetName', { index: channel });
+    this.resetNameButton.title = resetTitle;
+    this.resetNameButton.setAttribute('aria-label', resetTitle);
     this.colorLabel.textContent = t('channels.color');
     this.paletteLabel.textContent = t('channels.customColor');
     this.customColorButton.title = t('channels.customColor');
@@ -487,6 +502,25 @@ function triggerIcon(mode: TriggerMode): SVGSVGElement {
   path.setAttribute('stroke-linecap', 'round');
   path.setAttribute('stroke-linejoin', 'round');
   svg.appendChild(path);
+  return svg;
+}
+
+function resetNameIcon(): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const arc = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  arc.setAttribute('d', 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8');
+  const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  arrow.setAttribute('d', 'M3 3v5h5');
+  for (const path of [arc, arrow]) {
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+  }
+  svg.append(arc, arrow);
   return svg;
 }
 

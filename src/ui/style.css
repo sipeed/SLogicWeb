@@ -456,12 +456,32 @@ html[data-theme="dark"] .ch-cell.drop-target .ch-card {
   border: 1px solid var(--input);
   border-radius: calc(var(--radius) - 4px);
 }
+.channel-settings-name-control { display: flex; align-items: stretch; gap: 6px; }
+.channel-settings-name-control .channel-settings-name { flex: 1; min-width: 0; width: auto; }
 .channel-settings-name { min-width: 0; padding: 5px 8px; font: inherit; }
 /* [CHOSEN] The custom Popover keeps a full-width 32px native swatch for arbitrary
    #rrggbb input; the outer preset grid stays independent of native picker geometry. */
 .channel-settings-color { height: 32px; padding: 2px 4px; cursor: pointer; }
 .channel-settings-name:focus-visible,
-.channel-settings-color:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.channel-settings-color:focus-visible,
+.channel-name-reset:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.channel-name-reset {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  padding: 0;
+  background: var(--background);
+  color: var(--muted-foreground);
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) - 4px);
+  cursor: pointer;
+}
+.channel-name-reset:hover { border-color: var(--accent); color: var(--text80); }
+.channel-name-reset svg { display: block; width: 14px; height: 14px; }
+html[data-theme="dark"] .channel-name-reset { background: var(--popover); }
+html[data-theme="dark"] .channel-name-reset:hover { border-color: var(--primary); color: var(--foreground); }
 /* [CHOSEN] Eight flexible columns keep exactly two rows at every dialog width; 6px
    separates swatches without letting the narrow 320px scene overflow. */
 .channel-color-grid {
