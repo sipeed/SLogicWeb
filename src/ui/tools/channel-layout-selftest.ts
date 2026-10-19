@@ -15,8 +15,8 @@
 
 import { computeChannelRowHeight } from '../channelLayout.js';
 import { ROWS } from '../metrics.js';
-import { DEFAULT_TRIGGER_MODE, modesToConditions, triggerModeFromCondition,
-  type TriggerCondition, type TriggerMode } from '../state.js';
+import { DEFAULT_TRIGGER_MODE, edgeTriggerAutoArms, isEdgeTriggerMode, modesToConditions,
+  triggerModeFromCondition, type TriggerCondition, type TriggerMode } from '../state.js';
 
 /** Same node access idiom as the other UI self-tests, without requiring @types/node. */
 const nodeProcess = (() => {
@@ -115,6 +115,55 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   check('the shared unconfigured trigger default is any value',
     DEFAULT_TRIGGER_MODE === 'dont-care' && modesToConditions({ 0: DEFAULT_TRIGGER_MODE }).length === 0,
     `default=${DEFAULT_TRIGGER_MODE}`);
+}
+
+{
+  const expected: { mode: TriggerMode; edge: boolean }[] = [
+    { mode: 'falling', edge: true },
+    { mode: 'rising', edge: true },
+    { mode: 'edge', edge: true },
+    { mode: 'high', edge: false },
+    { mode: 'low', edge: false },
+    { mode: 'dont-care', edge: false },
+  ];
+  const bad = expected.filter(({ mode, edge }) => isEdgeTriggerMode(mode) !== edge);
+  check('only rising, falling, and dual-edge modes are edge trigger modes',
+    bad.length === 0,
+    bad.length === 0 ? 'rising/falling/edge true; high/low/any-value false'
+      : bad.map(({ mode, edge }) => `${mode}: expected=${edge}, ` +
+        `actual=${isEdgeTriggerMode(mode)}`).join('; '));
+
+  const degraded = (mode: TriggerMode): boolean => mode !== 'dont-care';
+  const disagreements = expected.filter(({ mode }) => degraded(mode) !== isEdgeTriggerMode(mode));
+  check('the edge predicate is narrower than a coarse any-non-default control',
+    disagreements.length > 0,
+    `degraded disagreements=${disagreements.map(({ mode }) => mode).join(',')}`);
+}
+
+{
+  const rows: { previous: TriggerMode; committed: TriggerMode; mask: boolean; arms: boolean }[] = [
+    { previous: 'dont-care', committed: 'rising', mask: false, arms: true },
+    { previous: 'dont-care', committed: 'falling', mask: false, arms: true },
+    { previous: 'dont-care', committed: 'edge', mask: false, arms: true },
+    { previous: 'high', committed: 'rising', mask: false, arms: true },
+    { previous: 'low', committed: 'edge', mask: false, arms: true },
+    { previous: 'rising', committed: 'falling', mask: false, arms: true },
+    { previous: 'rising', committed: 'edge', mask: false, arms: true },
+    { previous: 'rising', committed: 'rising', mask: false, arms: false },
+    { previous: 'edge', committed: 'edge', mask: false, arms: false },
+    { previous: 'rising', committed: 'high', mask: false, arms: false },
+    { previous: 'rising', committed: 'dont-care', mask: false, arms: false },
+    { previous: 'high', committed: 'low', mask: false, arms: false },
+    { previous: 'dont-care', committed: 'rising', mask: true, arms: false },
+    { previous: 'rising', committed: 'rising', mask: true, arms: false },
+  ];
+  const bad = rows.filter(({ previous, committed, mask, arms }) =>
+    edgeTriggerAutoArms(previous, committed, mask) !== arms);
+  check('auto-arm needs a mode transition into an edge mode with the mask off',
+    bad.length === 0,
+    bad.length === 0 ? 'transitions into an edge mode with the mask off arm; unchanged modes, level modes, and an armed mask do not'
+      : bad.map(({ previous, committed, mask, arms }) => `mask=${mask}, ${previous}->${committed}: ` +
+        `expected=${arms}, actual=${edgeTriggerAutoArms(previous, committed, mask)}`).join('; '));
 }
 
 {

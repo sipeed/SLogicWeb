@@ -105,6 +105,18 @@ export function modesToConditions(modes: Record<number, TriggerMode>): TriggerCo
   });
 }
 
+export function isEdgeTriggerMode(mode: TriggerMode): boolean {
+  return mode === 'rising' || mode === 'falling' || mode === 'edge';
+}
+
+export function edgeTriggerAutoArms(
+  previous: TriggerMode,
+  committed: TriggerMode,
+  maskEnabled: boolean,
+): boolean {
+  return previous !== committed && isEdgeTriggerMode(committed) && !maskEnabled;
+}
+
 export type Source = 'none' | 'file' | 'device';
 
 /**
