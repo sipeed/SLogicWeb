@@ -45,7 +45,7 @@ import { Overlay, type HoverMeasurement } from './overlay.js';
 import { StoreRef } from './storeRef.js';
 import {
   analyzerColor, defaultChannels, defaultChannelName, channelColor, DEFAULT_TRIGGER_MODE,
-  modesToConditions, triggerModeFromCondition,
+  edgeTriggerAutoArms, modesToConditions, triggerModeFromCondition,
   type AnalyzerState, type CaptureSettings, type ChannelState, type TriggerMode,
   type CaptureLabel, type StatusError,
 } from './state.js';
@@ -250,6 +250,7 @@ export class App {
     this.channels[channel] = { ...current, name, color: config.color };
 
     if (!this.running && !this.stopping) {
+      const previous = this.settings.triggerModes[channel] ?? DEFAULT_TRIGGER_MODE;
       const triggerModes = { ...this.settings.triggerModes, [channel]: config.mode };
       const triggerConditions = modesToConditions(triggerModes);
       const first = triggerConditions[0] ?? {
@@ -258,6 +259,8 @@ export class App {
       const next = clampSettings({
         ...this.settings, triggerModes, triggerConditions,
         triggerChannel: first.channel, triggerKind: first.kind, triggerLevel: first.level,
+        ...(edgeTriggerAutoArms(previous, config.mode, this.settings.triggerEnableMask)
+          ? { triggerEnableMask: true } : {}),
       }, this.rateCeilings);
       if (triggerSettingsChanged(this.settings, next)) {
         this.triggerState = 'off';

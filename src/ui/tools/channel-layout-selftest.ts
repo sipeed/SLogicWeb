@@ -179,6 +179,29 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     importsPolicy && delegates && !duplicateClamp,
     `import=${importsPolicy}, delegates=${delegates}, duplicateClamp=${duplicateClamp}`);
 
+  const configureStart = app.indexOf('private configureChannel(');
+  const configureEnd = configureStart >= 0
+    ? app.indexOf('\n  private ', configureStart + 1) : -1;
+  const configureSource = configureEnd > configureStart
+    ? app.slice(configureStart, configureEnd) : '';
+  const armsOnEdge = configureSource.includes('edgeTriggerAutoArms(previous, config.mode') &&
+    configureSource.includes('triggerEnableMask: true');
+  const storedPrevious = configureSource.includes('triggerModes[channel] ?? DEFAULT_TRIGGER_MODE');
+  const noAutoDisarm = configureSource.length > 0 &&
+    !configureSource.includes('triggerEnableMask: false');
+  check('the dialog commit path arms the mask when an edge mode is committed',
+    armsOnEdge && storedPrevious && noAutoDisarm,
+    `slice=${configureSource.length}, armsOnEdge=${armsOnEdge}, ` +
+    `storedPrevious=${storedPrevious}, noAutoDisarm=${noAutoDisarm}`);
+
+  const clampStart = app.indexOf('function clampSettings(');
+  const clampEnd = clampStart >= 0 ? app.indexOf('\n}\n', clampStart) : -1;
+  const clampSource = clampEnd > clampStart ? app.slice(clampStart, clampEnd) : '';
+  const clampAutoArm = clampSource.includes('edgeTriggerAutoArms');
+  check('clampSettings stays a pure clamp with no auto-arm invariant',
+    clampSource.length > 0 && !clampAutoArm,
+    `slice=${clampSource.length}, autoArmInClamp=${clampAutoArm}`);
+
   const channelList = fs.readFileSync('src/ui/channelList.ts', 'utf8');
   const rowStart = channelList.indexOf('export class ChannelList');
   const rowSource = channelList.slice(rowStart, channelList.indexOf('function triggerModeName'));
