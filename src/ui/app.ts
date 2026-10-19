@@ -32,7 +32,7 @@ import { CapturePanel } from './capturePanel.js';
 import { ChannelList, type ChannelCell, type ChannelConfiguration } from './channelList.js';
 import { computeChannelRowHeight } from './channelLayout.js';
 import {
-  MAX_SAMPLES, levelAt, loadFiles, loadLwcap, saveLwcap,
+  MAX_SAMPLES, createProtocolDemoCapture, levelAt, loadFiles, loadLwcap, saveLwcap,
 } from './captureIO.js';
 import { formatCount, formatDuration, formatFreq, formatRate,
   formatAnalyzerNote, formatCaptureLabel, formatStatusError } from './format.js';
@@ -110,6 +110,7 @@ export class App {
   private statusError: StatusError | null = null;
   private decodeBusy = false;
   private decodeWarm = false;
+  private demoBusy = false;
   private abort: AbortController | null = null;
 
   private cursorA: number | null = null;
@@ -694,7 +695,7 @@ export class App {
       if (e.key === 'f') { this.stack.zoomToFit(); this.dirty = true; }
       if (e.key === ' ') {
         e.preventDefault();
-        if (this.running) void this.stopCapture(); else void this.startCapture();
+        this.primaryAction();
       }
       if (e.key === 'Escape') { this.cursorA = null; this.cursorB = null; this.dirty = true; }
     });
@@ -793,9 +794,7 @@ export class App {
 
   private wireToolbar(): void {
     this.el.connect.addEventListener('click', () => void this.connect());
-    this.el.transport.addEventListener('click', () => {
-      if (this.running) void this.stopCapture(); else void this.startCapture();
-    });
+    this.el.transport.addEventListener('click', () => this.primaryAction());
     must<HTMLButtonElement>('btn-open').addEventListener('click', () => {
       this.el.fileInput.value = '';
       this.el.fileInput.click();
@@ -925,13 +924,18 @@ export class App {
     }
   }
 
+  private primaryAction(): void {
+    if (this.stopping || this.demoBusy) return;
+    if (this.running) void this.stopCapture();
+    else if (this.device) void this.startCapture();
+    else void this.loadDemo();
+  }
+
   /**
    * The toolbar transport is the only Start/Stop in the shell - the capture panel used to
    * carry a second pair wired to the same two methods, and the two disagreed about when a
    * capture may start.
    *
-   * Disabled without a device rather than clickable into a "no device connected" error:
-   * `startCapture` still refuses, but the button is no longer the thing that reports it.
    * Always clickable while running, so a capture can be stopped even if the device
    * vanished mid-run.
    */
@@ -949,14 +953,15 @@ export class App {
     const btn = this.el.transport;
     this.el.sidebar.setAttribute('aria-label', t('toolbar.sidebarTitle'));
     this.el.transportTitle.textContent = this.stopping ? t('toolbar.stopping')
-      : this.running ? t('toolbar.stop') : t('toolbar.start');
+      : this.running ? t('toolbar.stop')
+        : this.device ? t('toolbar.start') : t('toolbar.demo');
     btn.classList.toggle('primary', !this.running);
     btn.classList.toggle('danger', this.running);
-    btn.disabled = this.stopping || (!this.running && !this.device);
-    btn.title = btn.disabled
-      ? this.stopping ? t('toolbar.stoppingTitle')
-        : t('toolbar.connectFirstTitle')
-      : this.running ? t('toolbar.stopTitle') : t('toolbar.startTitle');
+    btn.disabled = this.stopping || this.demoBusy;
+    btn.title = this.stopping ? t('toolbar.stoppingTitle')
+      : this.demoBusy ? t('toolbar.demoLoading')
+        : this.running ? t('toolbar.stopTitle')
+          : this.device ? t('toolbar.startTitle') : t('toolbar.demoTitle');
   }
 
   private renderStatus(): void {
@@ -1033,6 +1038,28 @@ export class App {
         { kind: 'loaded', source: cap.sourceDescription, ms: Math.round(performance.now() - t0) });
     } catch (e) {
       this.fail('error.openCapture', e);
+    }
+  }
+
+  private async loadDemo(): Promise<void> {
+    if (this.running || this.stopping || this.demoBusy || this.device) return;
+    this.demoBusy = true;
+    this.renderPanels();
+    try {
+      this.statusError = null;
+      const demo = createProtocolDemoCapture();
+      this.adoptCapture(demo.store, demo.channelNames, { kind: 'demo' });
+      this.settings = clampSettings(
+        { ...this.settings, channels: this.neededWidth(), samplerate: demo.store.samplerate },
+        this.rateCeilings,
+      );
+      this.relayout();
+      this.renderPanels();
+    } catch (e) {
+      this.fail('error.demo', e);
+    } finally {
+      this.demoBusy = false;
+      this.renderPanels();
     }
   }
 
@@ -1451,6 +1478,7 @@ export class App {
     getTheme: () => getTheme(),
     start: () => this.startCapture(),
     stop: () => this.stopCapture(),
+    demo: () => this.loadDemo(),
     attach: (id: string, ch: Record<number, number>, opts: Record<string, string | number> = {}) =>
       this.attachAnalyzer(id, ch, opts),
     setSettings: (s: Partial<CaptureSettings>) => {

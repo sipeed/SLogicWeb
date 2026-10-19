@@ -301,23 +301,26 @@ function check(name: string, pass: boolean, detail: string): void {
     [{ kind: 'capturing', channels: 8, rate: 100e6 }, 'capturing 8 ch @ 100 MS/s'],
     [{ kind: 'loaded', source: 'uart.sr @ 16 MSa/s, 16 probes', ms: 12 },
       'uart.sr @ 16 MSa/s, 16 probes · loaded in 12 ms'],
+    [{ kind: 'demo' }, 'protocol demo'],
     [{ kind: 'stoppedNoTrigger', samples: 12345 }, 'no trigger · 12,345 samples retained'],
     [{ kind: 'live', samples: 12345, rate: 100e6, seconds: 0.5 },
       'live capture · 12,345 samples @ 100 MS/s · 500.0 ms'],
   ];
   const bad = cases.filter(([label, want]) => formatCaptureLabel(label) !== want);
-  check('formatCaptureLabel renders all five variants byte-identical to before',
+  check('formatCaptureLabel renders all six variants byte-identical to before',
     bad.length === 0,
-    bad.length === 0 ? `${cases.length}/5 variants match`
+    bad.length === 0 ? `${cases.length}/6 variants match`
       : bad.map(([l, want]) => `${l.kind}: got ${JSON.stringify(formatCaptureLabel(l))} want ${JSON.stringify(want)}`).join('; '));
 }
 
 {
   const plain = formatStatusError({ what: 'error.openCapture', detail: 'zip: bad' });
   const withVars = formatStatusError({ what: 'error.decode', vars: { id: 'uart' }, detail: 'boom' });
+  const demo = formatStatusError({ what: 'error.demo', detail: 'boom' });
   check('formatStatusError joins translated prefix with raw diagnostic detail',
-    plain === 'open capture: zip: bad' && withVars === 'decode uart: boom',
-    `${JSON.stringify(plain)}, ${JSON.stringify(withVars)}`);
+    plain === 'open capture: zip: bad' && withVars === 'decode uart: boom' &&
+    demo === 'demo: boom',
+    `${JSON.stringify(plain)}, ${JSON.stringify(withVars)}, ${JSON.stringify(demo)}`);
 }
 
 {
@@ -396,7 +399,8 @@ const baseSettings: CaptureSettings = {
   // legitimate rewording does not break the check. A locale missing from `dicts` is a
   // clean FAIL, not a crash.
   const probes: (keyof Messages)[] = [
-    'toolbar.start', 'settings.language', 'settings.theme', 'trigger.anyEdge',
+    'toolbar.start', 'toolbar.demo', 'capture.demo', 'settings.language', 'settings.theme',
+    'trigger.anyEdge',
     'channels.settings', 'channels.name', 'channels.color', 'channels.customColor',
     'channels.triggerMode', 'channels.cancel',
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',

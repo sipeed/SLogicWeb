@@ -118,6 +118,7 @@ export type CaptureLabel =
   | { kind: 'none' }
   | { kind: 'capturing'; channels: number; rate: number }
   | { kind: 'loaded'; source: string; ms: number }
+  | { kind: 'demo' }
   | { kind: 'stoppedNoTrigger'; samples: number }
   | { kind: 'live'; samples: number; rate: number; seconds: number };
 

@@ -100,6 +100,74 @@ check(
   `missing=${JSON.stringify(missingActions)}`,
 );
 
+const primaryStart = app.indexOf('private primaryAction(): void {');
+const primaryEnd = primaryStart >= 0 ? app.indexOf('\n  }', primaryStart) : -1;
+const primaryBody = primaryStart >= 0 && primaryEnd > primaryStart
+  ? app.slice(primaryStart, primaryEnd)
+  : '';
+const primaryRoutes = primaryBody.includes('if (this.stopping || this.demoBusy) return;') &&
+  primaryBody.includes('if (this.running) void this.stopCapture();') &&
+  primaryBody.includes('else if (this.device) void this.startCapture();') &&
+  primaryBody.includes('else void this.loadDemo();');
+const clickDispatch = app.includes(
+  "this.el.transport.addEventListener('click', () => this.primaryAction())");
+const spaceStart = app.indexOf("if (e.key === ' ') {");
+const spaceEnd = spaceStart >= 0 ? app.indexOf('\n      }', spaceStart) : -1;
+const spaceBody = spaceStart >= 0 && spaceEnd > spaceStart ? app.slice(spaceStart, spaceEnd) : '';
+const spaceDispatch = spaceBody.includes('this.primaryAction();') &&
+  !spaceBody.includes('startCapture') && !spaceBody.includes('stopCapture');
+check(
+  'toolbar click and Space share one primary action preferring Stop, then Start, then Demo',
+  primaryRoutes && clickDispatch && spaceDispatch,
+  `routes=${primaryRoutes}, click=${clickDispatch}, space=${spaceDispatch}, ` +
+    `spaceBody=${JSON.stringify(spaceBody.replace(/\s+/g, ' '))}`,
+);
+
+const demoStateNeedles = [
+  ": this.device ? t('toolbar.start') : t('toolbar.demo')",
+  ": this.device ? t('toolbar.startTitle') : t('toolbar.demoTitle')",
+  'btn.disabled = this.stopping || this.demoBusy;',
+  "t('toolbar.demoLoading')",
+];
+const missingDemoState = demoStateNeedles.filter((needle) => !app.includes(needle));
+const transportWebusbGated = /btn\.disabled[^;]*webusbAvailable/.test(app);
+check(
+  'the transport selects Demo only when disconnected and never gates on WebUSB',
+  missingDemoState.length === 0 && !transportWebusbGated,
+  `missing=${JSON.stringify(missingDemoState)}, webusbGated=${transportWebusbGated}`,
+);
+
+const loadDemoStart = app.indexOf('private async loadDemo(): Promise<void> {');
+const loadDemoEnd = loadDemoStart >= 0 ? app.indexOf('\n  }', loadDemoStart) : -1;
+const loadDemoBody = loadDemoStart >= 0 && loadDemoEnd > loadDemoStart
+  ? app.slice(loadDemoStart, loadDemoEnd)
+  : '';
+const demoGuarded = loadDemoBody.includes(
+  'if (this.running || this.stopping || this.demoBusy || this.device) return;');
+const demoAdopts = loadDemoBody.includes('createProtocolDemoCapture()') &&
+  loadDemoBody.includes("this.adoptCapture(demo.store, demo.channelNames, { kind: 'demo' })") &&
+  loadDemoBody.includes('samplerate: demo.store.samplerate');
+const demoClears = loadDemoBody.includes('this.demoBusy = true;') &&
+  loadDemoBody.includes('} finally {') && loadDemoBody.includes('this.demoBusy = false;');
+const demoFails = loadDemoBody.includes("this.fail('error.demo', e)");
+const demoNeverCaptures = !loadDemoBody.includes('startCapture') &&
+  !loadDemoBody.includes('this.running = true');
+check(
+  'Demo loading is re-entry guarded, adopts the fixture at its rate, and always clears its flag',
+  demoGuarded && demoAdopts && demoClears && demoFails && demoNeverCaptures,
+  `guarded=${demoGuarded}, adopts=${demoAdopts}, clears=${demoClears}, ` +
+    `fails=${demoFails}, neverCaptures=${demoNeverCaptures}`,
+);
+
+const debugDemoDelegates = app.includes('demo: () => this.loadDemo(),');
+const retiredConnectFirst = ['connectFirstTitle', 'toolbar.connectFirstTitle']
+  .filter((needle) => app.includes(needle));
+check(
+  'the debug surface drives Demo and the unreachable connect-first string is retired',
+  debugDemoDelegates && retiredConnectFirst.length === 0,
+  `debug=${debugDemoDelegates}, retired=${JSON.stringify(retiredConnectFirst)}`,
+);
+
 const leftCommandIds = ['btn-connect', 'transport', 'btn-open', 'btn-save', 'btn-fit', 'btn-settings'];
 const sidebarCommandId = 'btn-sidebar';
 const commandIds = [...leftCommandIds, sidebarCommandId];
