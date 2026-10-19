@@ -756,7 +756,6 @@ html[data-theme="dark"] .tooltip { box-shadow: 0 4px 12px var(--shadow); }
 #panel-resizer:focus-visible::after { opacity: 1; }
 #panel-resizer:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 #panel-resizer.hidden { display: none; }
-#main:has(> #side-panel.hidden) > #panel-resizer { display: none; }
 html.resizing { cursor: col-resize; user-select: none; }
 
 /* Narrow screens: the fixed columns would squeeze the plot to nothing, so the side

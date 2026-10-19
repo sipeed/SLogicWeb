@@ -42,6 +42,7 @@ import { getTheme, onThemeChange, setTheme, type ThemeId } from './theme.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
 import { COLORS, MEASURE_COLORS, ROWS } from './metrics.js';
 import { Overlay, type HoverMeasurement } from './overlay.js';
+import { PanelResizer } from './panelResizer.js';
 import { StoreRef } from './storeRef.js';
 import {
   analyzerColor, defaultChannels, defaultChannelName, channelColor, DEFAULT_TRIGGER_MODE,
@@ -71,6 +72,7 @@ export class App {
   private readonly analyzerPanel: AnalyzerPanel;
   private readonly settingsMenu: SettingsMenu;
   private readonly sidebarMenu: SettingsMenu;
+  private readonly resizer: PanelResizer;
   private readonly decodeClient = sharedDecodeClient({
     // Resolve from the document, not from the worker script. This supports static sites
     // hosted below a subdirectory and keeps all runtime files together in dist/.
@@ -125,7 +127,7 @@ export class App {
   // DOM
   private readonly el: {
     plot: HTMLDivElement; waveStack: HTMLDivElement; axis: HTMLCanvasElement;
-    scroll: HTMLDivElement;
+    scroll: HTMLDivElement; main: HTMLDivElement; resizer: HTMLDivElement;
     channelList: HTMLDivElement; side: HTMLDivElement; status: HTMLDivElement;
     hint: HTMLDivElement; transport: HTMLButtonElement;
     connect: HTMLButtonElement; open: HTMLButtonElement; save: HTMLButtonElement;
@@ -137,6 +139,8 @@ export class App {
     this.el = {
       plot: must<HTMLDivElement>('plot'),
       scroll: must<HTMLDivElement>('scroll-area'),
+      main: must<HTMLDivElement>('main'),
+      resizer: must<HTMLDivElement>('panel-resizer'),
       waveStack: must<HTMLDivElement>('wave-stack'),
       axis: must<HTMLCanvasElement>('axis'),
       channelList: must<HTMLDivElement>('channel-list'),
@@ -160,6 +164,7 @@ export class App {
 
     this.settingsMenu = new SettingsMenu(must<HTMLButtonElement>('btn-settings'));
     this.sidebarMenu = new SettingsMenu(this.el.sidebar, 'sidebar-menu');
+    this.resizer = new PanelResizer(this.el.resizer, this.el.side, this.el.main);
 
     this.storeRef = new StoreRef(createSampleStore(16, 16e6));
     this.stack = new WaveformStack(this.el.waveStack, this.storeRef);
@@ -902,6 +907,7 @@ export class App {
 
   private renderPanels(): void {
     this.el.side.classList.toggle('hidden', this.panel === null);
+    this.resizer.setHidden(this.panel === null);
 
     // Toolbar chrome is updated before the early return below, not after it. It used to be
     // after, which meant that with no side panel open - the default - starting a capture

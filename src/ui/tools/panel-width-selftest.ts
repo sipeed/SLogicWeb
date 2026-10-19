@@ -480,6 +480,7 @@ let storageListener: StorageListener | null = null;
 
 interface FsLike {
   readFileSync(p: string, enc: 'utf8'): string;
+  existsSync(p: string): boolean;
 }
 
 interface SourceRange {
@@ -487,10 +488,20 @@ interface SourceRange {
   end: number;
 }
 
-function readStyleCode(): string {
+function readSource(path: string): string {
   const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
   if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
-  return fs.readFileSync('src/ui/style.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  return fs.readFileSync(path, 'utf8');
+}
+
+function hasSource(path: string): boolean {
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.existsSync !== 'function') return false;
+  return fs.existsSync(path);
+}
+
+function readStyleCode(): string {
+  return readSource('src/ui/style.css').replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
 function mediaRanges(source: string): SourceRange[] {
@@ -541,9 +552,7 @@ function mediaBlocks(source: string, query: string): string[] {
 }
 
 function readIndexHtml(): string {
-  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
-  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
-  return fs.readFileSync('index.html', 'utf8');
+  return readSource('index.html');
 }
 
 {
@@ -641,12 +650,12 @@ function readIndexHtml(): string {
     topLevelRules(css, '#main:has(> #side-panel.hidden) > #panel-resizer', media)[0] ?? '';
   const resizingRule = topLevelRules(css, 'html.resizing', media)[0] ?? '';
   const hiddenOk = hiddenRule.includes('display: none');
-  const guardOk = guardRule.includes('display: none');
+  const guardOk = guardRule === '' && !css.includes(':has(> #side-panel.hidden)');
   const resizingOk = resizingRule.includes('cursor: col-resize') &&
     resizingRule.includes('user-select: none');
-  check('style.css: the handle has its own hidden class, the temporary :has() guard mirrors the panel toggle, and html.resizing owns the drag cursor',
+  check('style.css: the handle hides through its own class only - the temporary :has() panel guard is gone - and html.resizing owns the drag cursor',
     hiddenOk && guardOk && resizingOk,
-    `hidden=${hiddenOk}(${JSON.stringify(hiddenRule)}), guard=${guardOk}(${JSON.stringify(guardRule)}), ` +
+    `hidden=${hiddenOk}(${JSON.stringify(hiddenRule)}), guardGone=${guardOk}(${JSON.stringify(guardRule)}), ` +
     `resizing=${resizingOk}(${JSON.stringify(resizingRule)})`);
 }
 
@@ -671,13 +680,14 @@ function readIndexHtml(): string {
   const attributes = [
     'role="separator"',
     'aria-orientation="vertical"',
+    'tabindex="0"',
     'aria-controls="side-panel"',
     'aria-label="Resize sidebar"',
     'data-i18n-aria-label="panel.resizeLabel"',
     'data-i18n-title="panel.resizeTitle"',
   ];
   const missing = attributes.filter((attribute) => !tag.includes(attribute));
-  check('index.html: the resize handle is a vertical separator bound to #side-panel',
+  check('index.html: the resize handle is a focusable vertical separator bound to #side-panel',
     tag !== '' && missing.length === 0,
     `missing=${JSON.stringify(missing)}, tag=${JSON.stringify(tag.replace(/\s+/g, ' ').slice(0, 240))}`);
 }
@@ -710,6 +720,40 @@ function readIndexHtml(): string {
     needleAt !== -1 && linkAt !== -1 && needleAt < linkAt && script !== '' && mirrors,
     `needle=${JSON.stringify(needle)}, needleAt=${needleAt}, linkAt=${linkAt}, ` +
     `scriptFound=${script !== ''}, mirrors=${mirrors}`);
+}
+
+{
+  const app = readSource('src/ui/app.ts');
+  const needles = [
+    "must<HTMLDivElement>('panel-resizer')",
+    'new PanelResizer(',
+    'setHidden(this.panel === null)',
+  ];
+  const missing = needles.filter((needle) => !app.includes(needle));
+  check('app.ts owns the handle element, constructs the resizer, and hides it with the same panel source of truth',
+    missing.length === 0,
+    `missing=${JSON.stringify(missing)}`);
+}
+
+{
+  const exists = hasSource('src/ui/panelResizer.ts');
+  const resizer = exists ? readSource('src/ui/panelResizer.ts') : '';
+  const needles = [
+    'setPointerCapture(',
+    'lostpointercapture',
+    'AbortController',
+    'stopPropagation()',
+    'onPanelWidthChange(',
+    'setHidden(',
+  ];
+  const missing = needles.filter((needle) => !resizer.includes(needle));
+  check('panelResizer.ts exists and wires capture, a cancellable drag, consumed keys, and the width-change subscription',
+    exists && missing.length === 0,
+    `exists=${exists}, missing=${JSON.stringify(missing)}`);
+  const filtered = (resizer.match(/pointerId !== /g) ?? []).length;
+  check('panelResizer.ts ignores pointer events that belong to a pointer other than the drag owner',
+    exists && filtered === 4,
+    `pointerIdFilters=${filtered}`);
 }
 
 const failed = results.filter((r) => !r.pass).length;
