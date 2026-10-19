@@ -111,6 +111,7 @@ export class App {
   private decodeBusy = false;
   private decodeWarm = false;
   private demoBusy = false;
+  private readonly demoAnalyzers = new Set<string>();
   private abort: AbortController | null = null;
 
   private cursorA: number | null = null;
@@ -1055,6 +1056,10 @@ export class App {
       );
       this.relayout();
       this.renderPanels();
+      for (const spec of demo.analyzers) {
+        if (this.store !== demo.store) break;
+        await this.attachAnalyzer(spec.id, spec.channels, spec.options ?? {}, true);
+      }
     } catch (e) {
       this.fail('error.demo', e);
     } finally {
@@ -1064,6 +1069,7 @@ export class App {
   }
 
   private adoptCapture(store: SampleStore, names: string[], label: CaptureLabel): void {
+    this.discardDecodeState();
     this.storeRef.set(store);
     this.channels = defaultChannels(store.channelCount);
     for (let i = 0; i < this.channels.length; i++) {
@@ -1202,6 +1208,7 @@ export class App {
       }
 
       const store = createSampleStore(cfg.channels, cfg.samplerate);
+      this.discardDecodeState();
       this.storeRef.set(store);
       this.channels = defaultChannels(cfg.channels);
       this.order = this.channels.map((c) => c.index);
@@ -1352,8 +1359,19 @@ export class App {
 
   // ------------------------------------------------------------------ analyzers
 
+  private discardDecodeState(): void {
+    this.abort?.abort();
+    this.abort = null;
+    this.decodeBusy = false;
+    if (this.demoAnalyzers.size === 0) return;
+    const owned = new Set(this.demoAnalyzers);
+    this.analyzers = this.analyzers.filter((a) => !owned.has(a.id));
+    this.demoAnalyzers.clear();
+  }
+
   private async attachAnalyzer(
     decoderId: string, channels: Record<number, number>, options: Record<string, string | number>,
+    demoOwned = false,
   ): Promise<void> {
     const info = getDecoder(decoderId);
     const mapped = Object.keys(channels).map(Number).sort((a, b) => a - b);
@@ -1372,11 +1390,13 @@ export class App {
       note: { kind: 'pending' },
     };
     this.analyzers.push(a);
+    if (demoOwned) this.demoAnalyzers.add(a.id);
     this.renderPanels();
     await this.runDecode(a.id);
   }
 
   private removeAnalyzer(id: string): void {
+    this.demoAnalyzers.delete(id);
     this.analyzers = this.analyzers.filter((a) => a.id !== id);
     this.relayout();
     this.renderPanels();
@@ -1386,6 +1406,8 @@ export class App {
     const a = this.analyzers.find((x) => x.id === id);
     if (!a) return;
     const store = this.store as CountingStore;
+    const controller = new AbortController();
+    const stale = (): boolean => this.store !== store || !this.analyzers.includes(a);
     try {
       this.statusError = null;
       if (store.length === 0) throw new Error('no capture to decode');
@@ -1415,6 +1437,7 @@ export class App {
       a.status = 'decoding';
       a.note = { kind: 'edges', count: edgeTotal };
       this.decodeBusy = true;
+      this.abort = controller;
       this.renderPanels();
 
       // [src/decode] only channels the stack maps are read; supplying real edge lists for
@@ -1430,10 +1453,10 @@ export class App {
         channels: chans,
         stack: [{ id: a.decoderId, instanceId: a.id, channels: a.channels, options: a.options }],
       };
-      this.abort = new AbortController();
       const t0 = performance.now();
       const result: DecodeResult = await this.decodeClient.decode(
-        req, { timeoutMs: 120_000, signal: this.abort.signal });
+        req, { timeoutMs: 120_000, signal: controller.signal });
+      if (stale()) return;
       a.result = result;
       a.index = new AnnotationIndex(result);
       a.status = 'done';
@@ -1446,14 +1469,17 @@ export class App {
         ...(result.errors.length ? { firstError: result.errors[0]! } : {}),
       };
     } catch (e) {
+      if (stale()) return;
       a.status = 'error';
       a.note = e instanceof DecodeTimeoutError ? { kind: 'timeout' as const }
         : e instanceof DecodeCancelledError ? { kind: 'cancelled' as const }
           : { kind: 'error' as const, detail: e instanceof Error ? e.message : String(e) };
       this.fail('error.decode', e, { id: a.decoderId });
     } finally {
-      this.decodeBusy = false;
-      this.abort = null;
+      if (this.abort === controller) {
+        this.decodeBusy = false;
+        this.abort = null;
+      }
       this.relayout();
       this.renderPanels();
       this.dirty = true;

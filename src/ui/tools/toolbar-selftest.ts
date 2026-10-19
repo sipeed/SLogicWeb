@@ -168,6 +168,85 @@ check(
   `debug=${debugDemoDelegates}, retired=${JSON.stringify(retiredConnectFirst)}`,
 );
 
+function methodBody(marker: string): string {
+  const start = app.indexOf(marker);
+  const end = start >= 0 ? app.indexOf('\n  }', start) : -1;
+  return start >= 0 && end > start ? app.slice(start, end) : '';
+}
+
+const attachBody = methodBody('private async attachAnalyzer(');
+const removeBody = methodBody('private removeAnalyzer(id: string): void {');
+const discardBody = methodBody('private discardDecodeState(): void {');
+const adoptBody = methodBody('private adoptCapture(');
+const startBody = methodBody('private async startCapture(): Promise<void> {');
+const runDecodeBody = methodBody('private async runDecode(id: string): Promise<void> {');
+
+const ownershipDeclared = app.includes('private readonly demoAnalyzers = new Set<string>();');
+const ownsOnInsert = attachBody.includes('this.analyzers.push(a);') &&
+  attachBody.includes('if (demoOwned) this.demoAnalyzers.add(a.id);') &&
+  attachBody.indexOf('this.analyzers.push(a);') < attachBody.indexOf('if (demoOwned)');
+const releasesOnManualRemove = removeBody.includes('this.demoAnalyzers.delete(id);');
+const manualAttachUnmarked = app.includes(
+  "onAttach: (id, ch, opts) => void this.attachAnalyzer(id, ch, opts)") &&
+  app.includes('this.attachAnalyzer(id, ch, opts),');
+check(
+  'Demo-owned analyzers are marked on insertion and released on manual removal',
+  ownershipDeclared && ownsOnInsert && releasesOnManualRemove && manualAttachUnmarked,
+  `declared=${ownershipDeclared}, insert=${ownsOnInsert}, remove=${releasesOnManualRemove}, manual=${manualAttachUnmarked}`,
+);
+
+const sequentialAttach = /for \(const spec of demo\.analyzers\) \{\s*if \(this\.store !== demo\.store\) break;\s*await this\.attachAnalyzer\(spec\.id, spec\.channels, spec\.options \?\? \{\}, true\);/.test(loadDemoBody);
+const awaitedAttach = attachBody.includes('await this.runDecode(a.id);');
+const noDemoFanOut = !/Promise\.all|demo\.analyzers\.(forEach|map)/.test(loadDemoBody);
+check(
+  'the demo attaches its three decoders sequentially and stops once the store is replaced',
+  sequentialAttach && awaitedAttach && noDemoFanOut,
+  `loop=${sequentialAttach}, awaited=${awaitedAttach}, noFanOut=${noDemoFanOut}`,
+);
+
+const discardsInFlight = discardBody.includes('this.abort?.abort();') &&
+  discardBody.includes('this.abort = null;') && discardBody.includes('this.decodeBusy = false;');
+const dropsOnlyOwned = discardBody.includes('const owned = new Set(this.demoAnalyzers);') &&
+  discardBody.includes('this.analyzers = this.analyzers.filter((a) => !owned.has(a.id));') &&
+  discardBody.includes('this.demoAnalyzers.clear();') &&
+  !/this\.analyzers = \[\]/.test(discardBody);
+const adoptDiscardsFirst = adoptBody.indexOf('this.discardDecodeState();') >= 0 &&
+  adoptBody.indexOf('this.discardDecodeState();') < adoptBody.indexOf('this.storeRef.set(store);');
+const startDiscardsAtReplacement = startBody.indexOf('this.discardDecodeState();') >
+  startBody.indexOf('vrefCode(cfg.thresholdVolts)') &&
+  startBody.indexOf('this.discardDecodeState();') < startBody.indexOf('this.storeRef.set(store);');
+check(
+  'capture replacement discards in-flight decode state and only demo-owned analyzers',
+  discardsInFlight && dropsOnlyOwned && adoptDiscardsFirst && startDiscardsAtReplacement,
+  `abort=${discardsInFlight}, ownedOnly=${dropsOnlyOwned}, adopt=${adoptDiscardsFirst}, start=${startDiscardsAtReplacement}`,
+);
+
+const stalePredicate = runDecodeBody.includes(
+  'const stale = (): boolean => this.store !== store || !this.analyzers.includes(a);');
+const staleGuardCount = runDecodeBody.match(/if \(stale\(\)\) return;/g)?.length ?? 0;
+const resultPublishedAfterGuard = staleGuardCount === 2 &&
+  runDecodeBody.indexOf('if (stale()) return;') < runDecodeBody.indexOf('a.result = result;') &&
+  runDecodeBody.indexOf('if (stale()) return;', runDecodeBody.indexOf('} catch (e) {')) <
+    runDecodeBody.indexOf("a.status = 'error';");
+check(
+  'decode results and errors are published only for the capture and analyzer they started on',
+  stalePredicate && resultPublishedAfterGuard,
+  `predicate=${stalePredicate}, guards=${staleGuardCount}, ordered=${resultPublishedAfterGuard}`,
+);
+
+const localController = runDecodeBody.includes('const controller = new AbortController();') &&
+  runDecodeBody.includes('signal: controller.signal') &&
+  !runDecodeBody.includes('signal: this.abort.signal');
+const finallyGuarded = /finally \{\s*if \(this\.abort === controller\) \{\s*this\.decodeBusy = false;\s*this\.abort = null;/.test(runDecodeBody);
+const publishesController = runDecodeBody.indexOf('this.abort = controller;') >= 0 &&
+  runDecodeBody.indexOf('this.abort = controller;') < runDecodeBody.indexOf('await this.decodeClient.decode(');
+const cancelBindingKept = app.includes('onCancel: () => this.abort?.abort()');
+check(
+  'an older decode cannot clear a newer one: controller identity owns busy and abort cleanup',
+  localController && finallyGuarded && publishesController && cancelBindingKept,
+  `local=${localController}, guardedFinish=${finallyGuarded}, publish=${publishesController}, cancel=${cancelBindingKept}`,
+);
+
 const leftCommandIds = ['btn-connect', 'transport', 'btn-open', 'btn-save', 'btn-fit', 'btn-settings'];
 const sidebarCommandId = 'btn-sidebar';
 const commandIds = [...leftCommandIds, sidebarCommandId];
