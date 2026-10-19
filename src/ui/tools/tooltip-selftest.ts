@@ -247,6 +247,25 @@ for (const hard of ['escape', 'scroll'] as const) {
 
 {
   const { states, acts } = run([
+    { type: 'enter', anchor: A }, { type: 'timer' }, { type: 'focus', anchor: B },
+  ]);
+  check('focus elsewhere while the pointer owns an anchor is a no-op (anchor stays A)',
+    states[2]!.anchor === A && states[2]!.pointerInside && states[2]!.phase === 'visible'
+      && !acts[2]!.show && !acts[2]!.hide && !acts[2]!.unstash && !acts[2]!.stash,
+    `state=${JSON.stringify(states[2])}, act=${JSON.stringify(acts[2])}`);
+}
+
+{
+  const { states, acts } = run([
+    { type: 'enter', anchor: A }, { type: 'timer' }, { type: 'down' }, { type: 'timer' },
+  ]);
+  check('a stray timer after a parked press does not re-show the suppressed chip',
+    states[3]!.phase === 'hidden' && states[3]!.suppressed && !acts[3]!.show,
+    `state=${JSON.stringify(states[3])}, act=${JSON.stringify(acts[3])}`);
+}
+
+{
+  const { states, acts } = run([
     { type: 'enter', anchor: A }, { type: 'timer' }, { type: 'rewrite' },
   ]);
   const rewrite = acts[2]!;
@@ -312,6 +331,7 @@ for (const hard of ['escape', 'scroll'] as const) {
     "removeAttribute('title')",
     "anchor.matches(':focus-visible')",
     'anchorEl.isConnected',
+    'next.state.anchor === e.anchor',
     'new AbortController()',
     'requestAnimationFrame(',
     'TOOLTIP.showDelayMs',

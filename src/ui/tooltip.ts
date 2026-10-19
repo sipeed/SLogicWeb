@@ -14,12 +14,13 @@
  *
  * Event-model notes:
  * - Pointer events, never mouse events, and the disabled `#btn-connect`
- *   no-WebUSB hint is a hard requirement [MEASURED 2026-10-19, CDP real-input
- *   spike, Chrome 150: moving onto a disabled <button> dispatches pointerover/
- *   pointerenter/pointermove (even mouseover/mousemove); suppression applies to
- *   the click family only — no pointerdown/mousedown/click. Firefox never
- *   suppressed hover events on disabled controls]. An `elementFromPoint` retry
- *   covers engines that retarget instead.
+ *   no-WebUSB hint is a hard requirement [MEASURED 2026-10-19, real-input
+ *   spikes with a disabled <button>, Chrome 150 via CDP and Firefox 157 via
+ *   WebDriver: both engines dispatch pointerover/pointerenter/pointermove and
+ *   the mouse hover family, both dispatch pointerdown/pointerup, and neither
+ *   dispatches mousedown/mouseup/click or focus events. So a parked press on a
+ *   disabled control hides the chip through the ordinary `down` path]. An
+ *   `elementFromPoint` retry covers engines that retarget instead.
  * - `pointerType === 'touch'` is ignored: a tap acts, it does not hover.
  * - Hide and unstash are separate: on pointerdown/Escape/scroll the chip hides
  *   but the attribute stays stashed while the pointer is parked on the anchor
@@ -349,8 +350,14 @@ export function initTooltip(): void {
     const next = tipTransition(state, e);
     const a = next.act;
     if (a.unstash) doUnstash();
-    if (e.type === 'enter' || e.type === 'focus') anchorEl = e.anchor as Element;
+    // Adopt the event's anchor only when the transition took it: a `focus` that
+    // the pointer path rejects keeps the old anchor, and moving `anchorEl` to
+    // the focused element would strand the old attribute stashed for good.
+    if ((e.type === 'enter' || e.type === 'focus') && next.state.anchor === e.anchor) {
+      anchorEl = e.anchor as Element;
+    }
     if (a.stash) doStash();
+    state = next.state;
     if (a.updateText) {
       el().textContent = anchorText();
       if (state.phase === 'visible') doShow(); // re-lay out around the new text
@@ -362,8 +369,7 @@ export function initTooltip(): void {
     }
     if (a.hide) doHide();
     if (a.show) doShow();
-    if (next.state.anchor === null) anchorEl = null;
-    state = next.state;
+    if (state.anchor === null) anchorEl = null;
   };
 
   const onOver = (e: PointerEvent): void => {
