@@ -545,16 +545,15 @@ check(
 const presentationNeedles = [
   '#toolbar button.toolbar-item:focus-visible',
   '#toolbar .toolbar-device.connected .toolbar-item-media { color: var(--primary); }',
-  'flex: 0 0 auto;',
-  'width: fit-content;',
-  'max-width: 240px',
-  '#toolbar button.toolbar-device { min-height: 44px; }',
+  '#toolbar button.toolbar-item.primary {',
+  '#toolbar button.toolbar-item.danger {',
+  'button:disabled { opacity: 0.45; cursor: default; }',
   '#toolbar .spacer { display: none; }',
   '#toolbar .toolbar-sidebar { margin-left: auto; }',
 ];
 const missingPresentation = presentationNeedles.filter((needle) => !css.includes(needle));
 check(
-  'toolbar styles cover focus, connection, and compact mobile access',
+  'toolbar styles keep focus, connection, transport state, disabled, and mobile placement contracts',
   missingPresentation.length === 0,
   `missing=${JSON.stringify(missingPresentation)}`,
 );
@@ -594,8 +593,63 @@ check(
   `rightFlush=${sidePanelMobileFlushRight}, fullWidth=${sidePanelMobileFullWidth}, noGutter=${sidePanelMobileNoRailGutter}`,
 );
 
-const intrinsicDesktop = css.includes('#toolbar button.toolbar-item {\n  flex: 0 0 auto;\n  width: fit-content;');
-const intrinsicMobile = css.includes('#toolbar button.toolbar-item { min-height: 38px; max-width: min(240px, 100%); padding: 4px 8px; }');
+function ruleBlock(source: string, selector: string): string {
+  const start = source.indexOf(`${selector} {`);
+  const end = start >= 0 ? source.indexOf('}', start) : -1;
+  return start >= 0 && end > start ? source.slice(start, end + 1) : '';
+}
+
+function pxValue(rule: string, property: string): number | null {
+  const match = new RegExp(`[\\s{;]${property}:\\s*(\\d+)px;`).exec(rule);
+  return match ? Number(match[1]) : null;
+}
+
+const desktopButtonRule = ruleBlock(css, '#toolbar button.toolbar-item');
+const mobileButtonRule = ruleBlock(mobileBlock, '#toolbar button.toolbar-item');
+const mediaWrapperRule = ruleBlock(css, '#toolbar .toolbar-item-media');
+const toolbarRule = ruleBlock(css, '#toolbar');
+const mediaBoxPx = 28;
+const buttonBorderPx = 2 * 1;
+const desktopWidth = pxValue(desktopButtonRule, 'width');
+const desktopHeight = pxValue(desktopButtonRule, 'height');
+const desktopPadding = pxValue(desktopButtonRule, 'padding');
+const mobileWidth = pxValue(mobileButtonRule, 'width');
+const mobileHeight = pxValue(mobileButtonRule, 'height');
+const mobilePadding = pxValue(mobileButtonRule, 'padding');
+const mediaWrapperKept = ['flex: none;', 'width: 28px;', 'height: 28px;']
+  .every((needle) => mediaWrapperRule.includes(needle));
+const desktopFitsMedia = desktopWidth !== null && desktopPadding !== null &&
+  desktopWidth - 2 * desktopPadding - buttonBorderPx === mediaBoxPx;
+check(
+  'every toolbar command is a 44x44 desktop square centering the retained 28x28 media wrapper',
+  desktopWidth === 44 && desktopHeight === 44 && desktopPadding === 7 &&
+    desktopFitsMedia && mediaWrapperKept &&
+    desktopButtonRule.includes('flex: 0 0 auto;') &&
+    desktopButtonRule.includes('justify-content: center;'),
+  `width=${desktopWidth}, height=${desktopHeight}, padding=${desktopPadding}, ` +
+    `fits=${desktopFitsMedia}, media=${mediaWrapperKept}`,
+);
+const mobileFitsMedia = mobileWidth !== null && mobilePadding !== null &&
+  mobileWidth - 2 * mobilePadding - buttonBorderPx === mediaBoxPx;
+check(
+  'the 760px breakpoint shrinks every toolbar command to a 38x38 square',
+  mobileWidth === 38 && mobileHeight === 38 && mobilePadding === 4 && mobileFitsMedia,
+  `width=${mobileWidth}, height=${mobileHeight}, padding=${mobilePadding}, fits=${mobileFitsMedia}`,
+);
+
+const buttonRuleDeclaresMinHeight =
+  /(?:^|\n)\s*#toolbar button\.toolbar-item[^{]*\{[^}]*min-height/m.test(css);
+const deviceOverrideAbsent = !/^\s*#toolbar button\.toolbar-device\s*\{/m.test(css) &&
+  !buttonRuleDeclaresMinHeight && !desktopButtonRule.includes('min-height') &&
+  !mobileButtonRule.includes('min-height');
+const textEraSizing = ['fit-content', 'max-width', 'text-overflow', 'white-space', 'text-align']
+  .filter((needle) => desktopButtonRule.includes(needle) || mobileButtonRule.includes(needle));
+check(
+  'toolbar button rules retire the device min-height override and text-era intrinsic sizing',
+  deviceOverrideAbsent && textEraSizing.length === 0,
+  `deviceOverrideAbsent=${deviceOverrideAbsent}, textEra=${JSON.stringify(textEraSizing)}`,
+);
+
 const fixedSizingNeedles = [
   'flex: 0 1 240px',
   'min-width: 180px',
@@ -603,17 +657,19 @@ const fixedSizingNeedles = [
   'flex: 1 1 100%',
 ];
 const fixedSizing = fixedSizingNeedles.filter((needle) => css.includes(needle));
+const nonSquareSizing = ['width: 100%', 'max-width: 100%', 'flex: 1 1 0', 'flex-grow: 1']
+  .filter((needle) => desktopButtonRule.includes(needle) || mobileButtonRule.includes(needle));
 check(
-  'toolbar buttons retire fixed desktop bases and equal or full-row mobile sizing',
-  intrinsicDesktop && intrinsicMobile && fixedSizing.length === 0,
-  `desktop=${intrinsicDesktop}, mobile=${intrinsicMobile}, fixed=${JSON.stringify(fixedSizing)}`,
+  'toolbar buttons retire fixed, equal, and full-row sizing',
+  fixedSizing.length === 0 && nonSquareSizing.length === 0,
+  `fixed=${JSON.stringify(fixedSizing)}, nonSquare=${JSON.stringify(nonSquareSizing)}`,
 );
 
-const unboundedMobile = css.includes('#toolbar button.toolbar-item { min-height: 38px; max-width: 100%; padding: 4px 8px; }');
+const toolbarWraps = toolbarRule.includes('flex-wrap: wrap;');
 check(
-  'mobile toolbar preserves the content cap within narrower available widths',
-  intrinsicMobile && !unboundedMobile,
-  `bounded=${intrinsicMobile}, unbounded=${unboundedMobile}`,
+  'the toolbar keeps wrap as its overflow fallback instead of shrinking the square commands',
+  toolbarRule.length > 0 && toolbarWraps && !toolbarRule.includes('flex-wrap: nowrap;'),
+  `rule=${JSON.stringify(toolbarRule.replace(/\s+/g, ' '))}, wraps=${toolbarWraps}`,
 );
 
 console.log(results.map((result) => (

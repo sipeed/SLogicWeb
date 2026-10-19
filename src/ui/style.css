@@ -193,14 +193,14 @@ button:active { box-shadow: inset 0 0 0 999px rgb(0 0 0 / 25%); }
 .danger { background: var(--stop); border-color: var(--stop); color: #fff; }
 .mini { padding: 1px 6px; font-size: 11px; }
 
-#toolbar .toolbar-item { display: flex; align-items: center; gap: 8px; min-width: 0; text-align: left; }
+#toolbar .toolbar-item { display: flex; align-items: center; min-width: 0; }
 #toolbar button.toolbar-item {
   flex: 0 0 auto;
-  width: fit-content;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
   min-width: 0;
-  max-width: 240px;
-  min-height: 44px;
-  padding: 5px 10px;
+  padding: 7px;
   background: transparent;
   color: var(--foreground);
   border: 1px solid transparent;
@@ -238,8 +238,7 @@ button:active { box-shadow: inset 0 0 0 999px rgb(0 0 0 / 25%); }
 
 @media (max-width: 760px) {
   #toolbar { gap: 4px; padding: 6px; }
-  #toolbar button.toolbar-item { min-height: 38px; max-width: min(240px, 100%); padding: 4px 8px; }
-  #toolbar button.toolbar-device { min-height: 44px; }
+  #toolbar button.toolbar-item { width: 38px; height: 38px; padding: 4px; }
   #toolbar .toolbar-separator,
   #toolbar .spacer { display: none; }
   #toolbar .toolbar-sidebar { margin-left: auto; }
