@@ -40,20 +40,16 @@
 <body>
   <div id="app">
     <div id="toolbar">
-      <button id="btn-connect" class="toolbar-item toolbar-device" title="Connect device">
+      <button id="btn-connect" class="toolbar-item toolbar-device" title="Connect device" aria-label="Device">
         <span class="toolbar-item-media">
           <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
             <rect x="3" y="4" width="14" height="13" rx="2"></rect>
             <path d="M7 8h6M7 12h3M17 9h4v6h-2a2 2 0 0 1-2-2"></path>
           </svg>
         </span>
-        <span class="toolbar-item-content">
-          <span id="device-title" class="toolbar-item-title">Device</span>
-          <span id="device-description" class="toolbar-item-description">Connect device</span>
-        </span>
       </button>
       <span class="toolbar-separator" role="separator" aria-orientation="vertical"></span>
-      <button id="transport" class="toolbar-item primary" data-i18n-title="toolbar.startTitle" title="Start a capture on the connected device">
+      <button id="transport" class="toolbar-item primary" data-i18n-title="toolbar.startTitle" title="Start a capture on the connected device" aria-label="Start">
         <span class="toolbar-item-media">
           <svg class="toolbar-item-icon transport-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
             <path d="m8 5 11 7-11 7Z"></path>
@@ -62,52 +58,37 @@
             <rect x="6" y="6" width="12" height="12" rx="2"></rect>
           </svg>
         </span>
-        <span class="toolbar-item-content">
-          <span id="transport-title" class="toolbar-item-title" data-i18n="toolbar.start">Start</span>
-        </span>
       </button>
-      <button id="btn-open" class="toolbar-item" data-i18n-title="toolbar.openTitle" title="Load a sigrok .sr session or a .lwcap">
+      <button id="btn-open" class="toolbar-item" data-i18n-title="toolbar.openTitle" title="Load a sigrok .sr session or a .lwcap" aria-label="Open…">
         <span class="toolbar-item-media">
           <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
             <path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>
             <path d="M3 7h18"></path>
           </svg>
         </span>
-        <span class="toolbar-item-content">
-          <span class="toolbar-item-title" data-i18n="toolbar.open">Open…</span>
-        </span>
       </button>
-      <button id="btn-save" class="toolbar-item" data-i18n-title="toolbar.saveTitle" title="Save this capture as .lwcap">
+      <button id="btn-save" class="toolbar-item" data-i18n-title="toolbar.saveTitle" title="Save this capture as .lwcap" aria-label="Save">
         <span class="toolbar-item-media">
           <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
             <path d="M5 3h12l4 4v14H3V3Z"></path>
             <path d="M7 3v6h10V3M7 21v-8h10v8"></path>
           </svg>
         </span>
-        <span class="toolbar-item-content">
-          <span class="toolbar-item-title" data-i18n="toolbar.save">Save</span>
-        </span>
       </button>
-      <button id="btn-fit" class="toolbar-item" data-i18n-title="toolbar.fitTitle" title="Zoom to the whole capture">
+      <button id="btn-fit" class="toolbar-item" data-i18n-title="toolbar.fitTitle" title="Zoom to the whole capture" aria-label="Fit">
         <span class="toolbar-item-media">
           <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
             <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"></path>
           </svg>
         </span>
-        <span class="toolbar-item-content">
-          <span class="toolbar-item-title" data-i18n="toolbar.fit">Fit</span>
-        </span>
       </button>
       <span class="toolbar-separator" role="separator" aria-orientation="vertical"></span>
-      <button id="btn-settings" class="toolbar-item toolbar-settings" data-i18n-title="settings.titleHint" title="Language and display preferences" aria-controls="settings-menu" aria-expanded="false">
+      <button id="btn-settings" class="toolbar-item toolbar-settings" data-i18n-title="settings.titleHint" title="Language and display preferences" aria-label="Settings" aria-controls="settings-menu" aria-expanded="false">
         <span class="toolbar-item-media">
           <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
             <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"></path>
             <path d="M1 14h6M9 8h6M17 16h6"></path>
           </svg>
-        </span>
-        <span class="toolbar-item-content">
-          <span class="toolbar-item-title" data-i18n="settings.title">Settings</span>
         </span>
       </button>
       <span class="spacer"></span>

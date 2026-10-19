@@ -128,8 +128,8 @@ export class App {
     scroll: HTMLDivElement;
     channelList: HTMLDivElement; side: HTMLDivElement; status: HTMLDivElement;
     hint: HTMLDivElement; transport: HTMLButtonElement;
-    connect: HTMLButtonElement; connectTitle: HTMLSpanElement; connectDescription: HTMLSpanElement;
-    transportTitle: HTMLSpanElement; sidebar: HTMLButtonElement;
+    connect: HTMLButtonElement; open: HTMLButtonElement; save: HTMLButtonElement;
+    fit: HTMLButtonElement; settings: HTMLButtonElement; sidebar: HTMLButtonElement;
     fileInput: HTMLInputElement;
   };
 
@@ -145,9 +145,10 @@ export class App {
       hint: must<HTMLDivElement>('empty-hint'),
       transport: must<HTMLButtonElement>('transport'),
       connect: must<HTMLButtonElement>('btn-connect'),
-      connectTitle: must<HTMLSpanElement>('device-title'),
-      connectDescription: must<HTMLSpanElement>('device-description'),
-      transportTitle: must<HTMLSpanElement>('transport-title'),
+      open: must<HTMLButtonElement>('btn-open'),
+      save: must<HTMLButtonElement>('btn-save'),
+      fit: must<HTMLButtonElement>('btn-fit'),
+      settings: must<HTMLButtonElement>('btn-settings'),
       sidebar: must<HTMLButtonElement>('btn-sidebar'),
       fileInput: must<HTMLInputElement>('file-input'),
     };
@@ -943,19 +944,21 @@ export class App {
   private renderToolbarState(): void {
     const webusbAvailable = typeof navigator !== 'undefined' && !!navigator.usb;
     const deviceName = this.device?.name ?? null;
-    this.el.connectTitle.textContent = deviceName ?? t('toolbar.device');
-    this.el.connectDescription.textContent = !webusbAvailable ? t('toolbar.webusbUnavailable')
-      : deviceName ? t('toolbar.reconnect') : t('toolbar.connect');
+    this.el.connect.setAttribute('aria-label', deviceName ?? t('toolbar.device'));
     this.el.connect.disabled = !webusbAvailable;
     this.el.connect.title = !webusbAvailable ? t('toolbar.noWebusb')
       : deviceName ? t('toolbar.reconnect') : t('toolbar.connectHint');
     this.el.connect.classList.toggle('connected', deviceName !== null);
+    this.el.open.setAttribute('aria-label', t('toolbar.open'));
+    this.el.save.setAttribute('aria-label', t('toolbar.save'));
+    this.el.fit.setAttribute('aria-label', t('toolbar.fit'));
+    this.el.settings.setAttribute('aria-label', t('settings.title'));
+    this.el.sidebar.setAttribute('aria-label', t('toolbar.sidebarTitle'));
 
     const btn = this.el.transport;
-    this.el.sidebar.setAttribute('aria-label', t('toolbar.sidebarTitle'));
-    this.el.transportTitle.textContent = this.stopping ? t('toolbar.stopping')
+    btn.setAttribute('aria-label', this.stopping ? t('toolbar.stopping')
       : this.running ? t('toolbar.stop')
-        : this.device ? t('toolbar.start') : t('toolbar.demo');
+        : this.device ? t('toolbar.start') : t('toolbar.demo'));
     btn.classList.toggle('primary', !this.running);
     btn.classList.toggle('danger', this.running);
     btn.disabled = this.stopping || this.demoBusy;

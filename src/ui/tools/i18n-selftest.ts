@@ -232,8 +232,7 @@ function check(name: string, pass: boolean, detail: string): void {
   }
 
   const expectedText = [
-    'toolbar.start', 'toolbar.open', 'toolbar.save', 'toolbar.fit',
-    'emptyHint.line1', 'emptyHint.line2', 'settings.title',
+    'emptyHint.line1', 'emptyHint.line2',
   ];
   const expectedTitles = [
     'toolbar.startTitle', 'toolbar.openTitle', 'toolbar.saveTitle', 'toolbar.fitTitle',
@@ -266,11 +265,24 @@ function check(name: string, pass: boolean, detail: string): void {
     titleDrift.length === 0 ? 'all match' :
       titleDrift.map(([k, title]) => `${k}: html=${JSON.stringify(title)} en=${JSON.stringify(catalog[k])}`).join('; '));
 
-  const sidebarButton = /<button[^>]*\bid="btn-sidebar"[^>]*>/.exec(html)?.[0] ?? '';
-  const ariaLabel = /\saria-label="([^"]*)"/.exec(sidebarButton)?.[1];
-  check('sidebar selector aria-label fallback equals the English catalog value',
-    ariaLabel !== undefined && ariaLabel === catalog['toolbar.sidebarTitle'],
-    `aria-label=${JSON.stringify(ariaLabel)} en=${JSON.stringify(catalog['toolbar.sidebarTitle'])}`);
+  const toolbarNameKeys: [string, string][] = [
+    ['btn-connect', 'toolbar.device'],
+    ['transport', 'toolbar.start'],
+    ['btn-open', 'toolbar.open'],
+    ['btn-save', 'toolbar.save'],
+    ['btn-fit', 'toolbar.fit'],
+    ['btn-settings', 'settings.title'],
+    ['btn-sidebar', 'toolbar.sidebarTitle'],
+  ];
+  const nameDrift = toolbarNameKeys.filter(([id, key]) => {
+    const button = new RegExp(`<button[^>]*\\bid="${id}"[^>]*>`).exec(html)?.[0] ?? '';
+    const ariaLabel = /\saria-label="([^"]*)"/.exec(button)?.[1];
+    return ariaLabel === undefined || ariaLabel !== catalog[key];
+  });
+  check('every toolbar button aria-label fallback equals the English catalog value',
+    nameDrift.length === 0,
+    nameDrift.length === 0 ? `${toolbarNameKeys.length} toolbar names match`
+      : nameDrift.map(([id, key]) => `${id}:${key}`).join(', '));
 }
 
 // ------------------------------------------- Vite chunk warning configuration

@@ -226,13 +226,6 @@ button:active { box-shadow: inset 0 0 0 999px rgb(0 0 0 / 25%); }
   background: var(--secondary); color: var(--muted-foreground);
 }
 #toolbar .toolbar-item-icon { display: block; width: 18px; height: 18px; }
-#toolbar .toolbar-item-content { display: flex; flex: 1 1 auto; flex-direction: column; gap: 2px; min-width: 0; overflow: hidden; }
-#toolbar .toolbar-item-title,
-#toolbar .toolbar-item-description {
-  display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-#toolbar .toolbar-item-title { color: inherit; font-size: 12px; font-weight: 600; line-height: 1.25; }
-#toolbar .toolbar-item-description { color: var(--muted-foreground); font-size: 10px; line-height: 1.2; }
 #toolbar .primary .toolbar-item-media,
 #toolbar .danger .toolbar-item-media { background: transparent; color: inherit; }
 #toolbar .toolbar-device.connected .toolbar-item-media { color: var(--primary); }
