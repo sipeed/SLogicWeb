@@ -478,6 +478,133 @@ let storageListener: StorageListener | null = null;
     `notified=${reInitNotified}`);
 }
 
+interface FsLike {
+  readFileSync(p: string, enc: 'utf8'): string;
+}
+
+interface SourceRange {
+  start: number;
+  end: number;
+}
+
+function readStyleCode(): string {
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  return fs.readFileSync('src/ui/style.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+}
+
+function mediaRanges(source: string): SourceRange[] {
+  const ranges: SourceRange[] = [];
+  let from = 0;
+  for (;;) {
+    const start = source.indexOf('@media', from);
+    if (start === -1) break;
+    const brace = source.indexOf('{', start);
+    const end = brace === -1 ? -1 : source.indexOf('\n}', brace);
+    if (brace === -1 || end === -1) break;
+    ranges.push({ start, end });
+    from = end + 1;
+  }
+  return ranges;
+}
+
+function topLevelRules(source: string, selector: string, media: readonly SourceRange[]): string[] {
+  const rules: string[] = [];
+  let from = 0;
+  for (;;) {
+    const start = source.indexOf(`${selector} {`, from);
+    if (start === -1) break;
+    const end = source.indexOf('}', start);
+    if (end === -1 || end <= start) break;
+    const insideMedia = media.some((range) => start > range.start && start < range.end);
+    if (!insideMedia) rules.push(source.slice(start, end + 1));
+    from = end + 1;
+  }
+  return rules;
+}
+
+function mediaRule(source: string, selector: string, media: readonly SourceRange[]): string {
+  for (const range of media) {
+    const block = source.slice(range.start, range.end);
+    const start = block.indexOf(`${selector} {`);
+    if (start === -1) continue;
+    const end = block.indexOf('}', start);
+    if (end > start) return block.slice(start, end + 1);
+  }
+  return '';
+}
+
+{
+  const css = readStyleCode();
+  const media = mediaRanges(css);
+  const rootRules = topLevelRules(css, ':root', media);
+  const metricsRoot = rootRules.find((rule) => rule.includes('--panel-w:')) ?? '';
+  const factoryMirror = metricsRoot.includes(`--panel-w: ${PANEL_WIDTH_DEFAULT}px;`);
+  const reserveNeedle = `--panel-reserve-w: ${PANEL_WIDTH_RESERVE}px;`;
+  const reserveInRoot = metricsRoot.includes(reserveNeedle);
+  const overrideDeclaredInCss = rootRules.some((rule) => rule.includes('--side-panel-w:'));
+  check('style.css: :root keeps the factory --panel-w mirror, declares the reserve, and never declares the runtime override',
+    factoryMirror && reserveInRoot && !overrideDeclaredInCss,
+    `rootBlocks=${rootRules.length}, factoryMirror=${factoryMirror}, ` +
+    `reserve=${JSON.stringify(reserveNeedle)}=${reserveInRoot}, ` +
+    `overrideDeclared=${overrideDeclaredInCss}`);
+}
+
+{
+  const css = readStyleCode();
+  const media = mediaRanges(css);
+  const mainRule = topLevelRules(css, '#main', media)[0] ?? '';
+  const chainNeedle =
+    '--panel-effective-w: min(var(--side-panel-w, var(--panel-w)), calc(100% - var(--panel-reserve-w)));';
+  check('style.css: #main exposes the effective width as the override/fallback chain capped by the reserve',
+    mainRule.includes(chainNeedle),
+    `chain=${JSON.stringify(chainNeedle)}=${mainRule.includes(chainNeedle)}, mainRule=${mainRule.length}ch`);
+}
+
+{
+  const css = readStyleCode();
+  const media = mediaRanges(css);
+  const desktopRules = topLevelRules(css, '#side-panel', media);
+  const desktopRule = desktopRules.find((rule) => rule.includes('--panel-effective-w')) ?? '';
+  const widthRetargeted = desktopRule.includes('width: var(--panel-effective-w);');
+  const minWidthRetargeted = desktopRule.includes('min-width: var(--panel-effective-w);');
+  const factoryMetricRetired = desktopRules.length > 0 &&
+    !desktopRules.some((rule) => rule.includes('var(--panel-w)'));
+  const mobileRule = mediaRule(css, '#side-panel', media);
+  const mobileLiteral = mobileRule.includes('width: min(var(--panel-w), 100%);');
+  const mobileIgnoresOverride = !mobileRule.includes('--panel-effective-w');
+  check('style.css: the in-flow side panel reads the effective width, the factory metric is retired there, the overlay literal survives',
+    widthRetargeted && minWidthRetargeted && factoryMetricRetired && mobileLiteral &&
+    mobileIgnoresOverride && desktopRules.length > 0,
+    `desktopRules=${desktopRules.length}, width=${widthRetargeted}, minWidth=${minWidthRetargeted}, ` +
+    `factoryRetired=${factoryMetricRetired}, mobileLiteral=${mobileLiteral}, ` +
+    `mobileIgnoresOverride=${mobileIgnoresOverride}`);
+}
+
+{
+  const css = readStyleCode();
+  const themedVars = ['--side-panel-w', '--panel-reserve-w', '--panel-effective-w'];
+  const offenders: string[] = [];
+  let darkBlocks = 0;
+  let from = 0;
+  for (;;) {
+    const open = css.indexOf('html[data-theme="dark"]', from);
+    if (open === -1) break;
+    const brace = css.indexOf('{', open);
+    const close = brace === -1 ? -1 : css.indexOf('}', brace);
+    if (brace === -1 || close === -1) break;
+    darkBlocks += 1;
+    const body = css.slice(brace + 1, close);
+    for (const variable of themedVars) {
+      if (new RegExp(`${variable}\\s*:`).test(body)) offenders.push(variable);
+    }
+    from = close + 1;
+  }
+  check('style.css: no dark block redefines the width override, the reserve, or the effective width',
+    darkBlocks > 0 && offenders.length === 0,
+    `darkBlocks=${darkBlocks}, offenders=${offenders.join(',') || '(none)'}`);
+}
+
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

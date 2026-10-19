@@ -39,6 +39,7 @@
   --labels-w: 128px;
   --strip-w: 5px;      /* device x 0..9 */
   --panel-w: 296px;
+  --panel-reserve-w: 320px;
 }
 
 /*
@@ -270,6 +271,7 @@ html[data-theme="dark"] .danger {
   display: flex;
   min-height: 0;
   position: relative;   /* the side panel overlays this box on narrow screens */
+  --panel-effective-w: min(var(--side-panel-w, var(--panel-w)), calc(100% - var(--panel-reserve-w)));
 }
 
 /* The labels and the plot scroll together vertically when the channel rows do not fit
@@ -720,8 +722,8 @@ html[data-theme="dark"] .tooltip { box-shadow: 0 4px 12px var(--shadow); }
 /* ---------------------------------------------------------------- side panel */
 
 #side-panel {
-  width: var(--panel-w);
-  min-width: var(--panel-w);
+  width: var(--panel-effective-w);
+  min-width: var(--panel-effective-w);
   background: var(--bg20);
   border-left: 1px solid var(--border-high);
   overflow-y: auto;
