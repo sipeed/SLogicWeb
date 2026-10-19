@@ -352,6 +352,52 @@ for (const hard of ['escape', 'scroll'] as const) {
     titles >= 7 && i18nTitles >= 6,
     `title attrs=${titles}, data-i18n-title attrs=${i18nTitles}`);
 }
+// -------------------------------------------------------------- tooltip sheet
+{
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const css = fs.readFileSync('src/ui/style.css', 'utf8');
+  const blockStart = css.indexOf('.tooltip {');
+  const openStart = css.indexOf('.tooltip.open');
+  const block = blockStart >= 0 && openStart > blockStart
+    ? css.slice(blockStart, css.indexOf('}', openStart) + 1)
+    : '';
+  const needles: readonly string[] = [
+    'inset: auto; margin: 0',
+    'max-width: min(320px, calc(100vw - 16px))',
+    'background: var(--popover)',
+    'color: var(--popover-foreground)',
+    'border: 1px solid var(--border)',
+    'border-radius: var(--radius)',
+    'box-shadow: 0 4px 12px rgb(0 0 0 / 40%)',
+    'pointer-events: none',
+    '.tooltip.open',
+  ];
+  const missing = needles.filter((n) => !block.includes(n));
+  // Top-layer chip: no z-index anywhere in the block, and no raw color
+  // literals (the shadow rgba is the one sanctioned base literal).
+  const noZIndex = !block.includes('z-index');
+  const rawColors = (block.match(/#[0-9a-fA-F]{3,8}\b|oklch\(/g) ?? []).length;
+  const darkOverride = css.includes('html[data-theme="dark"] .tooltip')
+    && css.includes('box-shadow: 0 4px 12px var(--shadow)');
+  check('style.css styles the tooltip with popover tokens, theme radius, sanctioned shadows',
+    missing.length === 0 && noZIndex && rawColors === 0 && darkOverride,
+    `missing=[${missing.join(' | ')}], noZIndex=${noZIndex}, rawColors=${rawColors}, darkOverride=${darkOverride}`);
+}
+// ------------------------------------------------- adapter action ordering
+{
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const src = fs.readFileSync('src/ui/tooltip.ts', 'utf8');
+  // The emit() action block must observe the POST-transition state: a stash
+  // and a show in the same batch read text through state.stashed, so the
+  // assignment has to sit between doStash and doShow (check-round NIT guard).
+  const stashAt = src.indexOf('if (a.stash) doStash();');
+  const stateAt = src.indexOf('state = next.state;', stashAt);
+  const showAt = src.indexOf('if (a.show) doShow();', stateAt);
+  const anchorGuardAt = src.indexOf('next.state.anchor === e.anchor');
+  check('emit() orders stash → state adoption → show, with the anchor-adoption guard',
+    stashAt >= 0 && stateAt > stashAt && showAt > stateAt && anchorGuardAt >= 0,
+    `stashAt=${stashAt}, stateAt=${stateAt}, showAt=${showAt}, anchorGuardAt=${anchorGuardAt}`);
+}
 
 // ---------------------------------------------------------------------- report
 
