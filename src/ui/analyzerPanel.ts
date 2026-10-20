@@ -128,6 +128,7 @@ export class AnalyzerPanel {
             const p = div('panel-note error');
             p.textContent = String(err);
             add.body.appendChild(p);
+            this.root.appendChild(add.el);
           });
         return;
       }

@@ -32,9 +32,11 @@ export function hydrateDecoders(): Promise<void> {
     hydrating = import('./decoders/manifestDetail').then(m => {
       for (const c of all) {
         const d = m.default[c.id];
-        if (d) full.set(c.id, { ...c, ...d });
+        if (!d) throw new Error(`decoder detail drift: ${c.id} missing from the detail chunk`);
+        full.set(c.id, { ...c, ...d });
       }
     });
+    hydrating.catch(() => { hydrating = null; });
   }
   return hydrating;
 }
