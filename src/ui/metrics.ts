@@ -75,6 +75,43 @@ export const COLORS = {
   stop: '#db4c39',
 } as const;
 
+export const LIGHT_CHROME_TOKENS: Record<string, string> = {
+  '--background': '#FDF6E3',
+  '--foreground': '#57534A',
+  '--card': '#EEE8D5',
+  '--card-foreground': '#3C3836',
+  '--popover': '#F6F0DE',
+  '--popover-foreground': '#3C3836',
+  '--secondary': '#DED5BA',
+  '--secondary-foreground': '#3C3836',
+  '--muted': '#E6DEC6',
+  '--muted-foreground': '#6F6A5A',
+  '--primary': '#775AD2',
+  '--primary-foreground': '#FFFFFF',
+  '--destructive': '#C43B2A',
+  '--destructive-foreground': '#FFFFFF',
+  '--border': '#DDD5BE',
+  '--input': '#CDC3A6',
+  '--ring': '#775AD2',
+  '--shadow': 'oklch(0 0 0 / 18%)',
+  '--backdrop': 'rgb(0 0 0 / 35%)',
+  '--radius': '0.625rem',
+  '--console-fg': '#1F6B4A',
+  '--bg00': '#E6DEC7',
+  '--bg10': '#FDF6E3',
+  '--bg20': 'var(--card)',
+  '--bg30': '#FFFDF4',
+  '--panel': '#DED5BB',
+  '--border-low': 'var(--border)',
+  '--border-high': '#B4AB90',
+  '--text': '#3C3836',
+  '--text80': '#57534A',
+  '--text50': '#6F6A5A',
+  '--accent': '#775AD2',
+  '--negative': '#B31246',
+  '--stop': 'var(--destructive)',
+};
+
 /**
  * [MEASURED] on 01-idle-empty-session.png, and identical on 02/03/04/05.
  * Device px in the comments, CSS px in the values.

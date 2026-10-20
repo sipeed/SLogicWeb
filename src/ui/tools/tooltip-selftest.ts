@@ -349,11 +349,11 @@ for (const hard of ['escape', 'scroll'] as const) {
   const missing = needles.filter((n) => !block.includes(n));
   const noZIndex = !block.includes('z-index');
   const rawColors = (block.match(/#[0-9a-fA-F]{3,8}\b|oklch\(/g) ?? []).length;
-  const darkOverride = css.includes('html[data-theme="dark"] .tooltip')
+  const themedOverride = css.includes(':is(html[data-theme="dark"], html[data-theme="light"]) .tooltip')
     && css.includes('box-shadow: 0 4px 12px var(--shadow)');
   check('style.css styles the tooltip with popover tokens, theme radius, sanctioned shadows',
-    missing.length === 0 && noZIndex && rawColors === 0 && darkOverride,
-    `missing=[${missing.join(' | ')}], noZIndex=${noZIndex}, rawColors=${rawColors}, darkOverride=${darkOverride}`);
+    missing.length === 0 && noZIndex && rawColors === 0 && themedOverride,
+    `missing=[${missing.join(' | ')}], noZIndex=${noZIndex}, rawColors=${rawColors}, themedOverride=${themedOverride}`);
 }
 
 {

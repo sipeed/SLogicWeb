@@ -292,7 +292,8 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const cardColors = rowSource.includes('strip.style.background = cell.channel.color') &&
     rowSource.includes('tag.style.color = cell.channel.color');
   const chipColors = capturePanel.includes('chip.style.background = c.color') &&
-    capturePanel.includes('chip.style.color = c.color') &&
+    capturePanel.includes('chip.style.borderColor = c.color') &&
+    !capturePanel.includes('chip.style.color = c.color') &&
     !capturePanel.includes('channelColor(c.index)');
   const appPalette = app.includes('const channelColors = this.channels.map((channel) => channel.color)') &&
     app.includes('this.stack.setRows(rows, channelColors);') &&

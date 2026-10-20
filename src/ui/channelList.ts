@@ -25,7 +25,7 @@
 import { button, div } from './capturePanel.js';
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
-import { CHANNEL_COLOR_PRESETS, COLORS } from './metrics.js';
+import { CHANNEL_COLOR_PRESETS } from './metrics.js';
 import { DEFAULT_TRIGGER_MODE, defaultChannelName,
   type AnalyzerState, type ChannelState, type TriggerMode } from './state.js';
 
@@ -423,7 +423,7 @@ export class ChannelList {
         chip.appendChild(sq);
         const txt = document.createElement('span');
         txt.textContent = a.label;
-        txt.style.color = a.status === 'error' ? COLORS.negative : COLORS.text50;
+        txt.classList.toggle('error', a.status === 'error');
         chip.appendChild(txt);
         const x = document.createElement('button');
         x.className = 'ch-analyzer-x';

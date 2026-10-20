@@ -35,10 +35,12 @@
  *   - a storage whose getItem/setItem throw does not break boot or the switch;
  *   - index.html resolves the persisted mode (including 'system' via matchMedia)
  *     BEFORE the stylesheet link, keyed by THEME_STORAGE_KEY's actual value;
- *   - style.css keeps every dark rule scoped to [data-theme="dark"] and never
- *     redefines the chrome metric variables inside a theme block;
+ *   - style.css keeps every themed rule scoped to [data-theme="dark"] /
+ *     [data-theme="light"] (never default), theme blocks never redefine the chrome
+ *     metric variables, the light token block matches LIGHT_CHROME_TOKENS exactly,
+ *     and both token blocks carry their color-scheme;
  *   - the channel-card geometry stays wired: neutral display:contents wrappers, the
- *     dark card's --ch-lane-offset margin, the reserved 14px decoder strip, the
+ *     themed card's --ch-lane-offset margin, the reserved 14px decoder strip, the
  *     themed scrollbars, and the TS side that sets/feeds the property (NOTES §13).
  *
  * The checks are ordered fresh-state first, mutation next: checks 7-10 inject fake
@@ -48,7 +50,9 @@
 
 import { LOGIC2_CHANNEL_COLORS } from '../../render/index.js';
 import { en } from '../locales/en.js';
-import { CHANNEL_COLORS, CHANNEL_COLOR_PRESETS, CHROME, ROWS } from '../metrics.js';
+import {
+  CHANNEL_COLORS, CHANNEL_COLOR_PRESETS, CHROME, LIGHT_CHROME_TOKENS, ROWS,
+} from '../metrics.js';
 import { defaultChannels } from '../state.js';
 import {
   getMode, getTheme, initTheme, onThemeChange, pickMode, resolveMode, setMode,
@@ -376,52 +380,79 @@ function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia
 }
 // (no assert against a second hardcoded 'logicweb.theme' literal: THEME_STORAGE_KEY IS the needle)
 
-// ------------------------------------------- style.css dark-scope guards (check 13)
+// ------------------------------------------- style.css theme-scope guards (check 13)
 
 {
   const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
   if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
   const css = fs.readFileSync('src/ui/style.css', 'utf8');
 
-  // Comments can mention the dark selector (the token-layer header does), and a naive
-  // scan would then attribute the NEXT block's declarations to it. Strip comments
-  // first so only real rules are examined.
+  // Comments can mention theme selectors, and a naive scan would then attribute the
+  // NEXT block's declarations to them. Strip comments first so only real rules are
+  // examined. The sheet has no CSS nesting; media-wrapped rules match as their inner
+  // selector+body pairs, which is exactly what the scans below want.
   const code = css.replace(/\/\*[\s\S]*?\*\//g, '');
 
-  // (a) Dark-only scoping: a [data-theme="default"] colour rule would double-source the
-  // default palette and break the pixel-identity-by-construction argument.
-  const defaultScopes = code.match(/\[data-theme="default"\]/g) ?? [];
-
-  // (b) The chrome metric freeze: theme blocks recolour, they never resize. Naive brace
-  // matching is adequate here - this sheet has no CSS nesting, and dark rules are
-  // top-level blocks. Vacuously true until the token layer lands (no dark block yet).
+  // Every themed rule in one flat scan: selector mentions data-theme => the ids must
+  // be a subset of the live theme overrides (dark|light - a default scope would
+  // double-source the legacy palette), and no themed block may redefine a frozen
+  // chrome metric.
   const METRIC_VARS = ['--toolbar-h', '--axis-h', '--status-h', '--labels-w', '--strip-w', '--panel-w'];
-  const offenders: string[] = [];
-  let darkBlocks = 0;
-  let from = 0;
-  for (;;) {
-    const open = code.indexOf('html[data-theme="dark"]', from);
-    if (open === -1) break;
-    const brace = code.indexOf('{', open);
-    const close = brace === -1 ? -1 : code.indexOf('}', brace);
-    if (brace === -1 || close === -1) break;
-    darkBlocks += 1;
-    const body = code.slice(brace + 1, close);
-    for (const v of METRIC_VARS) {
-      if (new RegExp(`${v}\\s*:`).test(body)) offenders.push(v);
+  const LIVE_THEME_SCOPES = ['dark', 'light'];
+  const ruleRe = /([^{}]+)\{([^{}]*)\}/g;
+  const badIds: string[] = [];
+  const metricOffenders: string[] = [];
+  let themedBlocks = 0;
+  let lightTokenBody: string | null = null;
+  let darkTokenBody: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = ruleRe.exec(code)) !== null) {
+    const selector = m[1] ?? '';
+    const body = m[2] ?? '';
+    if (!selector.includes('data-theme')) continue;
+    themedBlocks += 1;
+    const ids = [...selector.matchAll(/data-theme="([^"]+)"/g)].map((x) => x[1]!);
+    for (const id of ids) {
+      if (!(LIVE_THEME_SCOPES as readonly string[]).includes(id)) badIds.push(id);
     }
-    from = close + 1;
+    if (selector.trim() === 'html[data-theme="light"]') lightTokenBody = body;
+    if (selector.trim() === 'html[data-theme="dark"]') darkTokenBody = body;
+    for (const v of METRIC_VARS) {
+      if (new RegExp(`${v}\\s*:`).test(body)) metricOffenders.push(`${v} @ ${selector.trim().slice(0, 48)}`);
+    }
   }
-  check('style.css: no default-scope rules and dark blocks never redefine chrome metrics',
-    defaultScopes.length === 0 && offenders.length === 0,
-    `darkBlocks=${darkBlocks}, defaultScopes=${defaultScopes.length}, ` +
-    `metricOffenders=${offenders.join(',') || '(none)'}${darkBlocks === 0 ? ' (vacuous until the token layer lands)' : ''}`);
+  check('style.css: theme rules are scoped to dark/light only and never redefine chrome metrics',
+    themedBlocks > 0 && badIds.length === 0 && metricOffenders.length === 0,
+    `themedBlocks=${themedBlocks}, badIds=${badIds.join(',') || '(none)'}, ` +
+    `metricOffenders=${metricOffenders.join(',') || '(none)'}`);
 
   const undeclaredMetrics = METRIC_VARS.filter((v) => !new RegExp(`${v}\\s*:`).test(code));
   const railMetricRetired = !/--rail-w\s*:/.test(code);
   check('style.css: the frozen metric set is exactly the live vars and --rail-w is retired',
     undeclaredMetrics.length === 0 && railMetricRetired,
     `undeclared=${JSON.stringify(undeclaredMetrics)}, railMetric=${railMetricRetired}`);
+
+  const darkScheme = darkTokenBody !== null && /color-scheme:\s*dark/.test(darkTokenBody);
+  const lightScheme = lightTokenBody !== null && /color-scheme:\s*light/.test(lightTokenBody);
+  check('style.css: both theme token blocks carry their color-scheme',
+    darkScheme && lightScheme, `dark=${darkScheme}, light=${lightScheme}`);
+
+  // The CSS side of the CSS<->TS light-theme duplication contract: the light token
+  // block must equal LIGHT_CHROME_TOKENS exactly - no missing, no extra, no drift.
+  const parsed = new Map<string, string>();
+  if (lightTokenBody !== null) {
+    for (const decl of lightTokenBody.split(';')) {
+      const dm = /^\s*(--[\w-]+)\s*:\s*(.+?)\s*$/.exec(decl);
+      if (dm) parsed.set(dm[1]!, dm[2]!);
+    }
+  }
+  const expected = new Map(Object.entries(LIGHT_CHROME_TOKENS));
+  const missing = [...expected.keys()].filter((k) => parsed.get(k) !== expected.get(k));
+  const extra = [...parsed.keys()].filter((k) => !expected.has(k));
+  check('style.css: the light token block matches LIGHT_CHROME_TOKENS exactly',
+    lightTokenBody !== null && missing.length === 0 && extra.length === 0 && parsed.size === expected.size,
+    `parsed=${parsed.size}, expected=${expected.size}, ` +
+    `missing/drift=${missing.join(',') || '(none)'}, extra=${extra.join(',') || '(none)'}`);
 }
 
 {
@@ -464,9 +495,14 @@ function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia
   const code = css.replace(/\/\*[\s\S]*?\*\//g, '');
 
   const baseNeutral = /\.ch-card, \.ch-analyzers\s*\{\s*display:\s*contents/.test(code);
-  const laneMargin = /html\[data-theme="dark"\] \.ch-card\s*\{[^}]*margin-top:\s*var\(--ch-lane-offset, 0px\)/.test(code);
-  const stripReserved = /html\[data-theme="dark"\] \.ch-analyzers\s*\{[^}]*min-height:\s*14px/.test(code);
-  const scrollbars = /html\[data-theme="dark"\] #scroll-area,\s*html\[data-theme="dark"\] #side-panel\s*\{[^}]*scrollbar-width:\s*thin/.test(code);
+  const themed = ':is(html[data-theme="dark"], html[data-theme="light"])';
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const laneMargin = new RegExp(`${esc(themed)} \\.ch-card\\s*\\{[^}]*margin-top:\\s*var\\(--ch-lane-offset, 0px\\)`).test(code);
+  const stripReserved = new RegExp(`${esc(themed)} \\.ch-analyzers\\s*\\{[^}]*min-height:\\s*14px`).test(code);
+  const scrollRe = new RegExp(
+    `${esc(themed)} #scroll-area,\\s*${esc(themed)} #side-panel\\s*\\{[^}]*scrollbar-width:\\s*thin`,
+  );
+  const scrollbars = scrollRe.test(code);
 
   const channelList = fs.readFileSync('src/ui/channelList.ts', 'utf8');
   const tsSetsProperty = channelList.includes("setProperty('--ch-lane-offset'");

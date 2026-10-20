@@ -21,7 +21,6 @@ import type { DecoderInfo } from '../decode/index.js';
 import { button, div, labelled, section } from './capturePanel.js';
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
-import { COLORS } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import { defaultChannelName, type AnalyzerState, type ChannelState } from './state.js';
 
@@ -81,7 +80,7 @@ export class AnalyzerPanel {
         const st = document.createElement('span');
         st.className = 'analyzer-status';
         st.textContent = a.status === 'decoding' ? t('analyzerPanel.decoding') : formatAnalyzerNote(a.note);
-        st.style.color = a.status === 'error' ? COLORS.negative : COLORS.text50;
+        st.classList.toggle('error', a.status === 'error');
         row.appendChild(st);
         const re = button(t('analyzerPanel.decode'), 'mini');
         re.disabled = !v.hasCapture || a.status === 'decoding';

@@ -76,7 +76,7 @@ export class CapturePanel {
         chip.style.background = c.color;
         chip.style.color = '#141415';
       } else {
-        chip.style.color = c.color;
+        chip.style.borderColor = c.color;
       }
       chip.addEventListener('click', () => this.cb.onToggleChannel(c.index, !c.enabled));
       grid.appendChild(chip);

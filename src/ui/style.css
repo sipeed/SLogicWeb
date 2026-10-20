@@ -24,6 +24,7 @@
   --accent: #775AD2;
   --negative: #f52a66;
   --stop: #db4c39;
+  --console-fg: #b8e994;
 
   /*
    * These are TOTALS including the 1 px border, because `box-sizing: border-box` is on
@@ -126,6 +127,47 @@ html[data-theme="dark"] {
   --stop: var(--destructive);
 }
 
+/* ------------------------------------------------------------- light theme */
+html[data-theme="light"] {
+  color-scheme: light;       /* native checkbox/scrollbar render light */
+
+  --background: #FDF6E3;
+  --foreground: #57534A;
+  --card: #EEE8D5;
+  --card-foreground: #3C3836;
+  --popover: #F6F0DE;
+  --popover-foreground: #3C3836;
+  --secondary: #DED5BA;
+  --secondary-foreground: #3C3836;
+  --muted: #E6DEC6;
+  --muted-foreground: #6F6A5A;
+  --primary: #775AD2;
+  --primary-foreground: #FFFFFF;
+  --destructive: #C43B2A;
+  --destructive-foreground: #FFFFFF;
+  --border: #DDD5BE;
+  --input: #CDC3A6;
+  --ring: #775AD2;
+  --shadow: oklch(0 0 0 / 18%);
+  --backdrop: rgb(0 0 0 / 35%);
+  --radius: 0.625rem;
+  --console-fg: #1F6B4A;
+
+  --bg00: #E6DEC7;
+  --bg10: #FDF6E3;
+  --bg20: var(--card);
+  --bg30: #FFFDF4;
+  --panel: #DED5BB;
+  --border-low: var(--border);
+  --border-high: #B4AB90;
+  --text: #3C3836;
+  --text80: #57534A;
+  --text50: #6F6A5A;
+  --accent: #775AD2;
+  --negative: #B31246;
+  --stop: var(--destructive);
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -190,6 +232,7 @@ button:disabled { opacity: 0.45; cursor: default; }
    the disabled look needs no guard; no button class sets its own box-shadow, and the
    dark focus ring is outline-based, so the veil clobbers neither. */
 button:active { box-shadow: inset 0 0 0 999px rgb(0 0 0 / 25%); }
+html[data-theme="light"] button:active { box-shadow: inset 0 0 0 999px rgb(0 0 0 / 10%); }
 .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .danger { background: var(--stop); border-color: var(--stop); color: #fff; }
 .mini { padding: 1px 6px; font-size: 11px; }
@@ -249,18 +292,18 @@ button:active { box-shadow: inset 0 0 0 999px rgb(0 0 0 / 25%); }
    softens to --border; buttons become secondary surfaces with the control radius,
    hover is --muted (the shadcn ghost idiom). .primary/.danger keep their signal
    colours (excluded via :not so the brand and stop actions stay loud). */
-html[data-theme="dark"] .pill,
-html[data-theme="dark"] .mini,
-html[data-theme="dark"] .seg {
+:is(html[data-theme="dark"], html[data-theme="light"]) .pill,
+:is(html[data-theme="dark"], html[data-theme="light"]) .mini,
+:is(html[data-theme="dark"], html[data-theme="light"]) .seg {
   background: var(--secondary); color: var(--secondary-foreground);
   border: 1px solid var(--input); border-radius: calc(var(--radius) - 4px);
 }
-html[data-theme="dark"] .pill:hover,
-html[data-theme="dark"] .mini:hover { background: var(--muted); }
-html[data-theme="dark"] .primary {
+:is(html[data-theme="dark"], html[data-theme="light"]) .pill:hover,
+:is(html[data-theme="dark"], html[data-theme="light"]) .mini:hover { background: var(--muted); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .primary {
   background: var(--primary); border-color: var(--primary); color: var(--primary-foreground);
 }
-html[data-theme="dark"] .danger {
+:is(html[data-theme="dark"], html[data-theme="light"]) .danger {
   background: var(--destructive); border-color: var(--destructive); color: var(--destructive-foreground);
 }
 
@@ -367,22 +410,22 @@ html[data-theme="dark"] .danger {
 
 /* Dark theme: the compact gear follows the same secondary-control roles as the other
    icon buttons while keeping the established 18 CSS px channel-head height. */
-html[data-theme="dark"] .ch-settings {
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-settings {
   background: var(--background); border-color: var(--input);
   color: var(--muted-foreground); border-radius: calc(var(--radius) - 4px);
 }
-html[data-theme="dark"] .ch-settings:hover { border-color: var(--primary); color: var(--foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-settings:hover { border-color: var(--primary); color: var(--foreground); }
 
 /* Dark theme: the channel cell renders as one rounded Item-style card (the shadcn
    Item anatomy: strip = media, tag+name = content, settings = action). The cell box
    keeps its measured pitch exactly - label-to-trace alignment is untouched; only
    the visible card insets inside it. [CHOSEN] insets: 3 px vertical keeps the row
    rhythm tight; 4/2 px horizontal lifts the card off the column edges. */
-html[data-theme="dark"] .ch-cell {
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-cell {
   border-bottom: 0;
   padding: 3px 4px 3px 2px;
 }
-html[data-theme="dark"] .ch-card {
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-card {
   display: flex;
   flex: 1;
   min-width: 0;
@@ -399,7 +442,7 @@ html[data-theme="dark"] .ch-card {
 /* The reserved decoder strip: one fixed-height line in EVERY card, empty when no
    analyzer is attached, so attaching or removing a decoder never shifts the
    tag/name row. [MEASURED] 14px = the .ch-analyzer line (12px) plus its 2px gap. */
-html[data-theme="dark"] .ch-analyzers {
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-analyzers {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -408,14 +451,14 @@ html[data-theme="dark"] .ch-analyzers {
 /* Hover brightens the card. Verified by token VALUE (styling rule 10): --card is
    oklch 0.205 and --muted oklch 0.269 - a real lightness step, not the --secondary
    no-op trap. */
-html[data-theme="dark"] .ch-cell:hover .ch-card {
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-cell:hover .ch-card {
   background: var(--muted);
   border-color: var(--input);
 }
 /* The drop outline moves from the pitch box (which now has transparent insets) to
    the visible card. Same --primary ring, right rectangle. */
-html[data-theme="dark"] .ch-cell.drop-target { outline: none; }
-html[data-theme="dark"] .ch-cell.drop-target .ch-card {
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-cell.drop-target { outline: none; }
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-cell.drop-target .ch-card {
   outline: 1px solid var(--primary);
   outline-offset: -1px;
 }
@@ -435,6 +478,7 @@ html[data-theme="dark"] .ch-cell.drop-target .ch-card {
   box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
 }
 .channel-settings-dialog::backdrop { background: rgb(0 0 0 / 60%); }
+html[data-theme="light"] .channel-settings-dialog::backdrop { background: var(--backdrop); }
 .channel-settings-form { display: flex; flex-direction: column; gap: 16px; padding: 16px; }
 .channel-settings-header { display: flex; flex-direction: column; gap: 4px; }
 .channel-settings-header h2 { margin: 0; font-size: 14px; line-height: 20px; }
@@ -481,8 +525,8 @@ html[data-theme="dark"] .ch-cell.drop-target .ch-card {
 }
 .channel-name-reset:hover { border-color: var(--accent); color: var(--text80); }
 .channel-name-reset svg { display: block; width: 14px; height: 14px; }
-html[data-theme="dark"] .channel-name-reset { background: var(--popover); }
-html[data-theme="dark"] .channel-name-reset:hover { border-color: var(--primary); color: var(--foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .channel-name-reset { background: var(--popover); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .channel-name-reset:hover { border-color: var(--primary); color: var(--foreground); }
 /* [CHOSEN] Eight flexible columns keep exactly two rows at every dialog width; 6px
    separates swatches without letting the narrow 320px scene overflow. */
 .channel-color-grid {
@@ -641,14 +685,14 @@ html[data-theme="dark"] .channel-name-reset:hover { border-color: var(--primary)
 .settings-check { width: 14px; flex: none; color: var(--primary); }
 .settings-hint { margin-left: auto; padding-left: 12px; color: var(--muted-foreground); }
 
-html[data-theme="dark"] .select-popover,
-html[data-theme="dark"] .settings-menu,
-html[data-theme="dark"] .settings-flyout {
+:is(html[data-theme="dark"], html[data-theme="light"]) .select-popover,
+:is(html[data-theme="dark"], html[data-theme="light"]) .settings-menu,
+:is(html[data-theme="dark"], html[data-theme="light"]) .settings-flyout {
   box-shadow: 0 8px 24px var(--shadow);
 }
-html[data-theme="dark"] .channel-settings-dialog,
-html[data-theme="dark"] .channel-color-palette { box-shadow: 0 8px 24px var(--shadow); }
-html[data-theme="dark"] .tooltip { box-shadow: 0 4px 12px var(--shadow); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .channel-settings-dialog,
+:is(html[data-theme="dark"], html[data-theme="light"]) .channel-color-palette { box-shadow: 0 8px 24px var(--shadow); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .tooltip { box-shadow: 0 4px 12px var(--shadow); }
 
 .ch-analyzer {
   display: flex;
@@ -775,6 +819,10 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 
 @media (max-width: 760px) {
+  html[data-theme="light"] #side-panel { box-shadow: -6px 0 24px rgb(0 0 0 / 22%); }
+}
+
+@media (max-width: 760px) {
   #panel-resizer { display: none; }
 }
 
@@ -875,7 +923,7 @@ html.resizing { cursor: col-resize; user-select: none; }
 .advanced-console-label { font-size: 10px; color: var(--text50); }
 .usb-console-output {
   height: 132px; margin: 0; padding: 6px; overflow: auto;
-  background: var(--bg00); color: #b8e994; border: 1px solid var(--border-low);
+  background: var(--bg00); color: var(--console-fg); border: 1px solid var(--border-low);
   border-radius: 3px; white-space: pre-wrap; overflow-wrap: anywhere;
   font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -888,30 +936,35 @@ html.resizing { cursor: col-resize; user-select: none; }
 
 .analyzer-row { display: flex; align-items: center; gap: 6px; font-size: 11px; }
 .analyzer-name { min-width: 54px; }
-.analyzer-status { flex: 1; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.analyzer-status {
+  flex: 1; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text50);
+}
+.analyzer-status.error { color: var(--negative); }
+.ch-analyzer .error { color: var(--negative); }
 
 /* Dark theme: the side panel becomes a card stack (the shadcn Card composition) - the
    flat border-separated sections turn into outlined cards on a darker panel ground.
    The border shorthand replaces each section's border-bottom; spacing comes from the
    host's gap, never margins. Padding/gap live inside the scrollable panel - no shell
    metric moves (theme-selftest pins the freeze). */
-html[data-theme="dark"] #side-panel { background: var(--background); }
-html[data-theme="dark"] .panel-host {
+:is(html[data-theme="dark"], html[data-theme="light"]) #side-panel { background: var(--background); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .panel-host {
   display: flex; flex-direction: column; gap: 8px; padding: 8px;
 }
-html[data-theme="dark"] .panel-head,
-html[data-theme="dark"] .panel-section,
-html[data-theme="dark"] .advanced {
+:is(html[data-theme="dark"], html[data-theme="light"]) .panel-head,
+:is(html[data-theme="dark"], html[data-theme="light"]) .panel-section,
+:is(html[data-theme="dark"], html[data-theme="light"]) .advanced {
   background: var(--card); color: var(--card-foreground);
   border: 1px solid var(--border); border-radius: var(--radius);
 }
-html[data-theme="dark"] .panel-head { padding: 14px 14px 12px; }
-html[data-theme="dark"] .panel-section { padding: 12px 14px; }
-html[data-theme="dark"] .panel-title,
-html[data-theme="dark"] .panel-section-head,
-html[data-theme="dark"] .advanced summary { color: var(--foreground); }
-html[data-theme="dark"] .panel-sub,
-html[data-theme="dark"] .panel-note { color: var(--muted-foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .panel-head { padding: 14px 14px 12px; }
+:is(html[data-theme="dark"], html[data-theme="light"]) .panel-section { padding: 12px 14px; }
+:is(html[data-theme="dark"], html[data-theme="light"]) .panel-title,
+:is(html[data-theme="dark"], html[data-theme="light"]) .panel-section-head,
+:is(html[data-theme="dark"], html[data-theme="light"]) .advanced summary { color: var(--foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .panel-sub,
+:is(html[data-theme="dark"], html[data-theme="light"]) .panel-note { color: var(--muted-foreground); }
 
 /* Dark theme: panel controls take the shadcn control shape - control radius, --input
    border, ground-level fields on the card. The segmented active state was first styled
@@ -921,21 +974,21 @@ html[data-theme="dark"] .panel-note { color: var(--muted-foreground); }
    instead, and takes the foreground border to keep its edge crisp against the
    unselected siblings. Enabled chips keep their TS-painted channel colours (inline
    style beats the sheet). */
-html[data-theme="dark"] .chip {
+:is(html[data-theme="dark"], html[data-theme="light"]) .chip {
   background: var(--background); border-color: var(--input);
   border-radius: calc(var(--radius) - 4px);
 }
-html[data-theme="dark"] .field input,
-html[data-theme="dark"] .usb-console-command input {
+:is(html[data-theme="dark"], html[data-theme="light"]) .field input,
+:is(html[data-theme="dark"], html[data-theme="light"]) .usb-console-command input {
   background: var(--background); border-color: var(--input);
   border-radius: calc(var(--radius) - 4px);
 }
-html[data-theme="dark"] .field label { color: var(--muted-foreground); }
-html[data-theme="dark"] .seg.on {
+:is(html[data-theme="dark"], html[data-theme="light"]) .field label { color: var(--muted-foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .seg.on {
   background: var(--foreground); color: var(--background);
   border-color: var(--foreground);
 }
-html[data-theme="dark"] .usb-console-output { border-color: var(--input); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .usb-console-output { border-color: var(--input); }
 
 /* The plot needs no frame of its own under dark: the canvas paints the measured
    #1B1B1C in both themes while the chrome drops to near-black, so the tonal contrast
@@ -951,24 +1004,24 @@ html[data-theme="dark"] .usb-console-output { border-color: var(--input); }
    still grabbable. Firefox takes scrollbar-width/scrollbar-color, WebKit/Blink the
    pseudo-elements; tokens only, no literals, per the dark-rule discipline. The
    console output keeps its native bar this round (an embedded surface, not chrome). */
-html[data-theme="dark"] #scroll-area,
-html[data-theme="dark"] #side-panel {
+:is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area,
+:is(html[data-theme="dark"], html[data-theme="light"]) #side-panel {
   scrollbar-width: thin;
   scrollbar-color: var(--border-high) transparent;
 }
-html[data-theme="dark"] #scroll-area::-webkit-scrollbar,
-html[data-theme="dark"] #side-panel::-webkit-scrollbar { width: 8px; height: 8px; }
-html[data-theme="dark"] #scroll-area::-webkit-scrollbar-thumb,
-html[data-theme="dark"] #side-panel::-webkit-scrollbar-thumb {
+:is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area::-webkit-scrollbar,
+:is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar { width: 8px; height: 8px; }
+:is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area::-webkit-scrollbar-thumb,
+:is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar-thumb {
   background: var(--border-high);
   border-radius: 999px;
 }
-html[data-theme="dark"] #scroll-area::-webkit-scrollbar-thumb:hover,
-html[data-theme="dark"] #side-panel::-webkit-scrollbar-thumb:hover {
+:is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area::-webkit-scrollbar-thumb:hover,
+:is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar-thumb:hover {
   background: var(--muted-foreground);
 }
-html[data-theme="dark"] #scroll-area::-webkit-scrollbar-track,
-html[data-theme="dark"] #side-panel::-webkit-scrollbar-track { background: transparent; }
+:is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area::-webkit-scrollbar-track,
+:is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar-track { background: transparent; }
 
 /* ---------------------------------------------------------------- status bar */
 
@@ -991,10 +1044,10 @@ html[data-theme="dark"] #side-panel::-webkit-scrollbar-track { background: trans
 /* Dark theme: the status bar joins the shell ground; a visible focus ring exists ONLY
    here - under the default theme the browser's outline stays untouched, because adding
    one would break its pixel identity. */
-html[data-theme="dark"] #status {
+:is(html[data-theme="dark"], html[data-theme="light"]) #status {
   background: var(--background); border-top-color: var(--border); color: var(--card-foreground);
 }
-html[data-theme="dark"] :is(button, input, summary):focus-visible {
+:is(html[data-theme="dark"], html[data-theme="light"]) :is(button, input, summary):focus-visible {
   outline: 2px solid var(--ring); outline-offset: 1px;
 }
 
@@ -1052,6 +1105,6 @@ html[data-theme="dark"] :is(button, input, summary):focus-visible {
 .uictrl-field-unit { flex: none; width: 24px; font-size: 11px; text-align: right; color: var(--muted-foreground); }
 .uictrl-card-actions { display: flex; justify-content: flex-end; }
 .uictrl-card-actions .mini { padding: 3px 10px; }
-html[data-theme="dark"] .uictrl-field-input { border-radius: calc(var(--radius) - 4px); }
-html[data-theme="dark"] .uictrl-card-actions .mini { background: transparent; }
-html[data-theme="dark"] .uictrl-card-actions .mini:hover { background: var(--secondary); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .uictrl-field-input { border-radius: calc(var(--radius) - 4px); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .uictrl-card-actions .mini { background: transparent; }
+:is(html[data-theme="dark"], html[data-theme="light"]) .uictrl-card-actions .mini:hover { background: var(--secondary); }

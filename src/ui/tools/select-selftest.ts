@@ -255,15 +255,15 @@ check(
     `body=${JSON.stringify(sharedSurfaceBody)}`,
   );
 
-  const darkShadow =
-    /html\[data-theme="dark"\] \.select-popover,\s*html\[data-theme="dark"\] \.settings-menu,\s*html\[data-theme="dark"\] \.settings-flyout\s*\{\s*box-shadow:\s*0 8px 24px var\(--shadow\);\s*\}/.test(css);
+  const themedShadow =
+    /:is\(html\[data-theme="dark"\], html\[data-theme="light"\]\) \.select-popover,\s*:is\(html\[data-theme="dark"\], html\[data-theme="light"\]\) \.settings-menu,\s*:is\(html\[data-theme="dark"\], html\[data-theme="light"\]\) \.settings-flyout\s*\{\s*box-shadow:\s*0 8px 24px var\(--shadow\);\s*\}/.test(css);
   const noDarkSurfaceRedefinition =
     !/html\[data-theme="dark"\]\s*\.select-popover\s*\{/.test(css) &&
     !/html\[data-theme="dark"\]\s*\.settings-(menu|flyout)\s*\{[^}]*border-radius:/.test(css);
   check(
-    'the popover family takes the literal base shadow and the token shadow only in dark',
-    sharedSurface && darkShadow && noDarkSurfaceRedefinition,
-    `shared=${sharedSurface}, darkShadow=${darkShadow}, ` +
+    'the popover family takes the literal base shadow and the token shadow in both theme overrides',
+    sharedSurface && themedShadow && noDarkSurfaceRedefinition,
+    `shared=${sharedSurface}, themedShadow=${themedShadow}, ` +
     `noDarkSurfaceRedefinition=${noDarkSurfaceRedefinition}`,
   );
 
@@ -298,7 +298,7 @@ check(
 
   const deadSelectFocus = /:is\([^)]*\bselect\b[^)]*\)/.test(css);
   const scopedFocusRule =
-    css.includes('html[data-theme="dark"] :is(button, input, summary):focus-visible');
+    css.includes(':is(html[data-theme="dark"], html[data-theme="light"]) :is(button, input, summary):focus-visible');
   check(
     'the retired native select element no longer appears in the shared focus rule',
     !deadSelectFocus && scopedFocusRule,
@@ -487,11 +487,11 @@ check(
 
   const noNativeSelectSelector = !/\.field\s+select\b/.test(css);
   const baseInputRule = /\.field input\s*\{[^}]*background:\s*var\(--bg10\)[^}]*color:\s*var\(--text80\)[^}]*border:\s*1px solid var\(--border-low\)[^}]*border-radius:\s*3px[^}]*padding:\s*4px 6px;[^}]*font:\s*inherit[^}]*width:\s*100%/.test(css);
-  const darkInputRule = /html\[data-theme="dark"\]\s*\.field input,\s*html\[data-theme="dark"\]\s*\.usb-console-command input\s*\{[^}]*background:\s*var\(--background\)[^}]*border-color:\s*var\(--input\)[^}]*border-radius:\s*calc\(var\(--radius\) - 4px\)/.test(css);
+  const themedInputRule = /:is\(html\[data-theme="dark"\], html\[data-theme="light"\]\)\s*\.field input,\s*:is\(html\[data-theme="dark"\], html\[data-theme="light"\]\)\s*\.usb-console-command input\s*\{[^}]*background:\s*var\(--background\)[^}]*border-color:\s*var\(--input\)[^}]*border-radius:\s*calc\(var\(--radius\) - 4px\)/.test(css);
   check(
     'the native select selector is removed while every input declaration survives in both themes',
-    noNativeSelectSelector && baseInputRule && darkInputRule,
-    `noSelectSelector=${noNativeSelectSelector}, baseInput=${baseInputRule}, darkInput=${darkInputRule}`,
+    noNativeSelectSelector && baseInputRule && themedInputRule,
+    `noSelectSelector=${noNativeSelectSelector}, baseInput=${baseInputRule}, themedInput=${themedInputRule}`,
   );
 
   const guardIndex = app.indexOf("closest('.select-field') !== null");
