@@ -475,7 +475,7 @@ function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia
     'outline: 2px solid var(--ring)',
   ];
   const missingSemantic = semanticNeedles.filter((needle) => !toolbar.includes(needle));
-  const darkToolbarOverrides = toolbar.includes('html[data-theme="dark"] #toolbar');
+  const darkToolbarOverrides = /html\[data-theme="dark"\] #toolbar\s*\{/.test(toolbar);
   const mirror = cssHeight === CHROME.toolbarHeight + CHROME.borderWidth;
   check('toolbar chrome uses semantic roles and keeps its CSS/TS height mirror',
     mirror && missingSemantic.length === 0 && !darkToolbarOverrides,

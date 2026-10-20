@@ -172,6 +172,7 @@ export class App {
     this.settingsMenu = new SettingsMenu(must<HTMLButtonElement>('btn-settings'));
     this.sidebarMenu = new SettingsMenu(this.el.sidebar, 'sidebar-menu');
     this.themeMenu = new SettingsMenu(this.el.theme, 'theme-menu');
+    this.el.theme.dataset.mode = getMode();
     this.resizer = new PanelResizer(this.el.resizer, this.el.side, this.el.main);
 
     this.storeRef = new StoreRef(createSampleStore(16, 16e6));
@@ -235,6 +236,7 @@ export class App {
         this.stack.setBaseTheme(baseTheme(next));
         this.dirty = true;
       }
+      this.el.theme.dataset.mode = getMode();
       this.settingsMenu.close('theme');
       this.sidebarMenu.close('theme');
       this.themeMenu.close('theme');

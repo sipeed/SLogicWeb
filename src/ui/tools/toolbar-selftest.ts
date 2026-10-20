@@ -388,22 +388,35 @@ check(
 
 const themeMarkup = commandMarkup(themeCommandId);
 const themeSvgTags = themeMarkup.match(/<svg\b[^>]*>/g) ?? [];
-const themeSvgAnatomy = themeSvgTags.length === 1 && themeSvgTags.every((tag) =>
-  tag.includes('class="toolbar-item-icon"') && tag.includes('aria-hidden="true"') &&
-  tag.includes('focusable="false"') && tag.includes('data-icon="inline-start"'));
-const themeSunGeometry = themeMarkup.includes('<circle cx="12" cy="12" r="4"></circle>') &&
-  themeMarkup.includes('M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41');
+const themeIconClasses = ['light', 'dark', 'system']
+  .map((id) => `class="toolbar-item-icon theme-icon-${id}"`);
+const themeSvgAnatomy = themeSvgTags.length === 3 &&
+  themeSvgTags.every((tag) => tag.includes('aria-hidden="true"') &&
+    tag.includes('focusable="false"') && tag.includes('data-icon="inline-start"')) &&
+  themeIconClasses.every((cls) => themeSvgTags.some((tag) => tag.includes(cls)));
+const themeGlyphGeometry = themeMarkup.includes('<circle cx="12" cy="12" r="4"></circle>') &&
+  themeMarkup.includes('M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41') &&
+  themeMarkup.includes('M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z') &&
+  themeMarkup.includes('<rect x="2" y="3" width="20" height="14" rx="2"></rect>') &&
+  themeMarkup.includes('M8 21h8M12 17v4');
 const themeDisclosure = themeMarkup.includes('aria-controls="theme-menu"') &&
   themeMarkup.includes('aria-expanded="false"') &&
   themeMarkup.includes('data-i18n-title="toolbar.themeTitle"') &&
   /\saria-label="[^"]+"/.test(themeMarkup);
-const themeNoModeState = !themeMarkup.includes('theme-icon-') && !/\sdata-mode=/.test(themeMarkup) &&
-  !css.includes('theme-icon-') && !css.includes('.toolbar-theme[data-mode=') &&
-  !app.includes('this.el.theme.dataset.mode');
+const themeNoBootMode = !/\sdata-mode=/.test(themeMarkup);
 const themeBaseIconRule = css.includes('#toolbar .toolbar-item-icon { display: block;');
-const themeIconRuleBlocks = css.match(/[^{}]*\.(?:toolbar-theme|toolbar-item-icon)[^{}]*\{[^}]*\}/g) ?? [];
-const themeNoHiding = themeIconRuleBlocks.every((block) =>
-  !block.includes('display: none') && !block.includes('visibility: hidden'));
+const themeHideAll = css.includes('#toolbar .toolbar-theme .toolbar-item-icon { display: none; }');
+const themeResolvedFallback = css.includes(
+  'html:not([data-theme]) #toolbar .toolbar-theme:not([data-mode]) .theme-icon-light,\n' +
+  'html[data-theme="light"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-light,\n' +
+  'html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dark { display: block; }');
+const themeModeRules = css.includes(
+  '#toolbar .toolbar-theme[data-mode="light"] .theme-icon-light,\n' +
+  '#toolbar .toolbar-theme[data-mode="dark"] .theme-icon-dark,\n' +
+  '#toolbar .toolbar-theme[data-mode="system"] .theme-icon-system { display: block; }');
+const themeFallbackAt = css.indexOf('html[data-theme="light"] #toolbar .toolbar-theme:not([data-mode])');
+const themeModeRuleAt = css.indexOf('#toolbar .toolbar-theme[data-mode="light"] .theme-icon-light');
+const themeRuleOrder = themeFallbackAt >= 0 && themeModeRuleAt > themeFallbackAt;
 const themeWiringNeedles = [
   "new SettingsMenu(this.el.theme, 'theme-menu')",
   'this.themeMenu.toggle(this.themeItems())',
@@ -414,6 +427,19 @@ const themeWiringNeedles = [
   "this.el.theme.setAttribute('aria-label', t('toolbar.themeTitle'))",
 ];
 const missingThemeWiring = themeWiringNeedles.filter((needle) => !app.includes(needle));
+const themeWrites = app.match(/this\.el\.theme\.dataset\.mode = getMode\(\);/g) ?? [];
+const themeMenuCtorAt = app.indexOf("new SettingsMenu(this.el.theme, 'theme-menu')");
+const themeResizerAt = app.indexOf('this.resizer = new PanelResizer(');
+const themeHandlerAt = app.indexOf('onThemeChange(() =>');
+const themeHandlerEnd = themeHandlerAt >= 0 ? app.indexOf('\n    });', themeHandlerAt) : -1;
+const themeFirstWriteAt = app.indexOf('this.el.theme.dataset.mode = getMode();');
+const themeSecondWriteAt = themeFirstWriteAt >= 0
+  ? app.indexOf('this.el.theme.dataset.mode = getMode();', themeFirstWriteAt + 1) : -1;
+const themeWritePlacement = themeWrites.length === 2 &&
+  themeMenuCtorAt >= 0 && themeFirstWriteAt > themeMenuCtorAt &&
+  themeResizerAt > themeFirstWriteAt &&
+  themeHandlerAt >= 0 && themeSecondWriteAt > themeHandlerAt &&
+  themeHandlerEnd > themeSecondWriteAt;
 const themeItemsStart = app.indexOf('private themeItems(');
 const themeItemsEnd = themeItemsStart >= 0 ? app.indexOf('\n  }', themeItemsStart) : -1;
 const themeItemsBody = themeItemsStart >= 0 && themeItemsEnd > themeItemsStart
@@ -424,12 +450,15 @@ const themeItemsShape = themeItemsBody.includes('THEME_MODES.map') &&
   themeItemsBody.includes('onPick: () => setMode(m)') &&
   !themeItemsBody.includes('children') && !themeItemsBody.includes('hint');
 check(
-  'the theme button carries a single static sun icon and wires the mode menu',
-  themeSvgAnatomy && themeSunGeometry && themeDisclosure && themeNoModeState &&
-    themeBaseIconRule && themeNoHiding && missingThemeWiring.length === 0 && themeItemsShape,
-  `svgs=${themeSvgTags.length}, anatomy=${themeSvgAnatomy}, sun=${themeSunGeometry}, ` +
-  `disclosure=${themeDisclosure}, noModeState=${themeNoModeState}, baseRule=${themeBaseIconRule}, ` +
-  `noHiding=${themeNoHiding}, missing=${JSON.stringify(missingThemeWiring)}, itemsShape=${themeItemsShape}`,
+  'the theme button shows one per-mode glyph and resolves its icon from data-theme before boot writes data-mode',
+  themeSvgAnatomy && themeGlyphGeometry && themeDisclosure && themeNoBootMode &&
+    themeBaseIconRule && themeHideAll && themeResolvedFallback && themeModeRules &&
+    themeRuleOrder && themeWritePlacement && missingThemeWiring.length === 0 && themeItemsShape,
+  `svgs=${themeSvgTags.length}, anatomy=${themeSvgAnatomy}, glyphs=${themeGlyphGeometry}, ` +
+  `disclosure=${themeDisclosure}, noBootMode=${themeNoBootMode}, base=${themeBaseIconRule}, ` +
+  `hideAll=${themeHideAll}, fallback=${themeResolvedFallback}, modeRules=${themeModeRules}, ` +
+  `order=${themeRuleOrder}, writes=${themeWrites.length}@${themeFirstWriteAt}/${themeSecondWriteAt}, ` +
+  `missing=${JSON.stringify(missingThemeWiring)}, itemsShape=${themeItemsShape}`,
 );
 
 const sidebarChoiceNeedles = [
