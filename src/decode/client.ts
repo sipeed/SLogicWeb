@@ -13,7 +13,7 @@
  */
 
 import { DEFAULT_DECODE_TIMEOUT_MS } from './limits';
-import { getDecoder } from './registry';
+import { getDecoder, hydrateDecoders } from './registry';
 import type { WorkerConfig, WorkerRequest, WorkerResponse } from './protocol';
 import type { DecodeRequest, DecodeResult, DecoderInfo } from './types';
 import DecodeWorker from './worker.ts?worker&inline';
@@ -175,6 +175,7 @@ export class DecodeClient {
     const timeoutMs = opts.timeoutMs ?? DEFAULT_DECODE_TIMEOUT_MS;
     return this.enqueue(async () => {
       if (opts.signal?.aborted) throw new DecodeCancelledError();
+      await hydrateDecoders();
 
       let timer: ReturnType<typeof setTimeout> | undefined;
       let grace: ReturnType<typeof setTimeout> | undefined;

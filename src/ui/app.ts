@@ -22,7 +22,7 @@ import { WorkerSlogicDevice, workerTransport } from '../device/workerTransport.j
 import { WheelIntent, wheelSpanFactor } from '../render/index.js';
 import {
   AnnotationIndex, DecodeCancelledError, DecodeTimeoutError, EDGE_BUDGET, MAX_SAMPLE,
-  annotationTexts, displayRows, getDecoder, rowForClass, sharedDecodeClient,
+  annotationTexts, displayRows, getDecoder, hydrateDecoders, rowForClass, sharedDecodeClient,
 } from '../decode/index.js';
 import type { ChannelEdges, DecodeRequest, DecodeResult } from '../decode/index.js';
 
@@ -1435,6 +1435,7 @@ export class App {
     decoderId: string, channels: Record<number, number>, options: Record<string, string | number>,
     demoOwned = false,
   ): Promise<void> {
+    await hydrateDecoders();
     const info = getDecoder(decoderId);
     const mapped = Object.keys(channels).map(Number).sort((a, b) => a - b);
     const laneChannel = mapped.length ? channels[mapped[mapped.length - 1]!]! : 0;

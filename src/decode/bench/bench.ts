@@ -16,7 +16,9 @@
  * wrong answer cannot pass.
  */
 
-import { DecodeClient, decoderCount, getDecoder, validateStack, MAX_SAMPLE } from '../index';
+import {
+  DecodeClient, decoderCount, getDecoder, hydrateDecoders, validateStack, MAX_SAMPLE,
+} from '../index';
 import type { DecodeResult, DecoderInstance } from '../types';
 import { makeI2cCapture, makeUartCapture, MESSAGE, SAMPLERATE, BAUDRATE } from './fixture';
 import hwCaptures from './hwfixture';
@@ -88,6 +90,7 @@ function decodedBytes(r: DecodeResult): number[] {
 }
 
 export async function runDecodeBench(repeats = 80): Promise<BenchResult> {
+  await hydrateDecoders();
   const cap = makeUartCapture(repeats);
   const res: BenchResult = {
     ok: false, decoderCount, captureSamples: cap.length,

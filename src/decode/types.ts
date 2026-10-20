@@ -129,18 +129,20 @@ export interface AnnotationRowInfo {
   classes: number[];
 }
 
-/** Mirrors libsigrokdecode's struct srd_decoder. */
-export interface DecoderInfo {
+export interface DecoderCore {
   id: string;
   name: string;
   longname: string;
   desc: string;
-  license: string;
   /** ['logic'] for sample-driven decoders; anything else names the protocol
    *  stream this decoder consumes from another decoder. */
   inputs: string[];
   outputs: string[];
   tags: string[];
+}
+
+export interface DecoderDetail {
+  license: string;
   channels: DecoderChannelInfo[];
   optional_channels: DecoderChannelInfo[];
   options: DecoderOptionInfo[];
@@ -149,13 +151,8 @@ export interface DecoderInfo {
   binary: { id: string; desc: string }[];
 }
 
+/** Mirrors libsigrokdecode's struct srd_decoder. */
+export interface DecoderInfo extends DecoderCore, DecoderDetail {}
+
 /** Summary entry, cheap enough to list all decoders without importing them. */
-export interface DecoderListEntry {
-  id: string;
-  name: string;
-  longname: string;
-  desc: string;
-  tags: string[];
-  inputs: string[];
-  outputs: string[];
-}
+export interface DecoderListEntry extends DecoderCore {}

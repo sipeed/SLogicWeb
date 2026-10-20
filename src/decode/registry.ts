@@ -11,10 +11,33 @@
  */
 
 import manifest from './decoders/manifest';
-import type { AnnotationRowInfo, DecoderInfo, DecoderInstance, DecoderListEntry } from './types';
+import type {
+  AnnotationRowInfo, DecoderCore, DecoderInfo, DecoderInstance, DecoderListEntry,
+} from './types';
 
 const all = manifest;
-const byId = new Map<string, DecoderInfo>(all.map(d => [d.id, d]));
+const coreById = new Map<string, DecoderCore>(all.map(d => [d.id, d]));
+const full = new Map<string, DecoderInfo>();
+let hydrating: Promise<void> | null = null;
+
+export class DecoderNotHydratedError extends Error {
+  constructor(id: string) {
+    super(`decoder details not hydrated; call hydrateDecoders() before getDecoder(${JSON.stringify(id)})`);
+    this.name = 'DecoderNotHydratedError';
+  }
+}
+
+export function hydrateDecoders(): Promise<void> {
+  if (!hydrating) {
+    hydrating = import('./decoders/manifestDetail').then(m => {
+      for (const c of all) {
+        const d = m.default[c.id];
+        if (d) full.set(c.id, { ...c, ...d });
+      }
+    });
+  }
+  return hydrating;
+}
 
 /** Every stock decoder, in id order. */
 export function listDecoders(): DecoderListEntry[] {
@@ -23,34 +46,35 @@ export function listDecoders(): DecoderListEntry[] {
 }
 
 export function getDecoder(id: string): DecoderInfo {
-  const d = byId.get(id);
-  if (!d) throw new Error(`unknown decoder ${JSON.stringify(id)}`);
-  return d;
+  const d = full.get(id);
+  if (d) return d;
+  if (coreById.has(id)) throw new DecoderNotHydratedError(id);
+  throw new Error(`unknown decoder ${JSON.stringify(id)}`);
 }
 
 export function hasDecoder(id: string): boolean {
-  return byId.has(id);
+  return coreById.has(id);
 }
 
 export const decoderCount = all.length;
 
 /** Decoders driven directly by sample data (`inputs == ['logic']`). */
-export function logicDecoders(): DecoderInfo[] {
+export function logicDecoders(): DecoderCore[] {
   return all.filter(isLogicDecoder);
 }
 
-export function isLogicDecoder(d: DecoderInfo): boolean {
+export function isLogicDecoder(d: DecoderCore): boolean {
   return d.inputs.length === 1 && d.inputs[0] === 'logic';
 }
 
 /** Decoders that can sit on top of `d`, i.e. consume one of its outputs. */
-export function stackableOn(d: DecoderInfo): DecoderInfo[] {
+export function stackableOn(d: DecoderCore): DecoderCore[] {
   if (!d.outputs.length) return [];
   return all.filter(c => c !== d && c.inputs.some(i => d.outputs.includes(i)));
 }
 
 /** Decoders that can feed `d`. Empty for sample-driven decoders. */
-export function producersFor(d: DecoderInfo): DecoderInfo[] {
+export function producersFor(d: DecoderCore): DecoderCore[] {
   if (isLogicDecoder(d)) return [];
   return all.filter(p => p.outputs.some(o => d.inputs.includes(o)));
 }

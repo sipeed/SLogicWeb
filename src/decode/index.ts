@@ -37,11 +37,11 @@ export { MAX_SAMPLE, EDGE_BUDGET, DEFAULT_DECODE_TIMEOUT_MS } from './limits';
 export {
   listDecoders, getDecoder, hasDecoder, decoderCount, logicDecoders,
   isLogicDecoder, stackableOn, producersFor, allTags, validateStack, rowForClass,
-  displayRows,
+  displayRows, hydrateDecoders, DecoderNotHydratedError,
 } from './registry';
 export type {
   Annotations, AnnotationRowInfo, ChannelEdges, DecodeRequest, DecodeResult,
-  DecoderChannelInfo, DecoderInfo, DecoderInstance, DecoderListEntry,
-  DecoderOptionInfo,
+  DecoderChannelInfo, DecoderCore, DecoderDetail, DecoderInfo, DecoderInstance,
+  DecoderListEntry, DecoderOptionInfo,
 } from './types';
 export type { WorkerConfig } from './protocol';

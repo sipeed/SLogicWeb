@@ -21,7 +21,7 @@
 
 import { createProtocolDemoCapture, saveLwcap, loadLwcap } from '../captureIO.js';
 import { parseSr } from '../srLoad.js';
-import { getDecoder, validateStack } from '../../decode/registry.js';
+import { getDecoder, hydrateDecoders, validateStack } from '../../decode/registry.js';
 import type { SampleStore } from '../../data/index.js';
 
 /**
@@ -271,6 +271,22 @@ async function buildZip(entries: Array<{ name: string; data: Uint8Array; deflate
 }
 
 async function main(): Promise<void> {
+  let preThrew = false;
+  try { getDecoder('uart'); } catch { preThrew = true; }
+  await hydrateDecoders();
+  const hydrated = getDecoder('uart');
+  const declared = [...hydrated.channels, ...hydrated.optional_channels].map((c) => c.id);
+  const hydratedOk = declared.join(',') === 'rx,tx' &&
+    hydrated.annotations.length > 0 && hydrated.annotation_rows.length > 0;
+  results.push({
+    name: 'getDecoder guards the unhydrated path and detail hydrates on demand',
+    pass: preThrew && hydratedOk,
+    detail: preThrew
+      ? `uart detail after hydration: channels ${declared.join('/')}, ` +
+        `${hydrated.annotations.length} annotation classes`
+      : 'getDecoder returned detail before hydrateDecoders() ran',
+  });
+
   // ---------------------------------------------------------------- real files
   for (const name of ['i2c', 'spi', 'uart']) {
     const expected = name === 'uart' ? 200000 : 100000;

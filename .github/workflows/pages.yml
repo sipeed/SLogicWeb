@@ -62,7 +62,7 @@ jobs:
       # The manifest is committed, so a drifting decoder set must fail here rather than
       # ship a UI listing decoders that the bundled zip does not contain.
       - name: Check the committed manifest still matches
-        run: git diff --exit-code -- src/decode/decoders/manifest.ts
+        run: git diff --exit-code -- src/decode/decoders/manifest.ts src/decode/decoders/manifestDetail.ts
 
       # A project page lives at https://<owner>.github.io/<repo>/, so every absolute URL
       # the app builds at run time has to carry that prefix - see the BASE_URL comment in

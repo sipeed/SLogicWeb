@@ -15,7 +15,8 @@
  */
 
 import {
-  decoderCount, getDecoder, isLogicDecoder, listDecoders, validateStack,
+  DecoderNotHydratedError, decoderCount, getDecoder, hydrateDecoders, isLogicDecoder,
+  listDecoders, validateStack,
 } from '../decode/index.js';
 import type { DecoderInfo } from '../decode/index.js';
 import { button, div, labelled, section } from './capturePanel.js';
@@ -119,7 +120,17 @@ export class AnalyzerPanel {
     let info: DecoderInfo;
     try {
       info = getDecoder(this.chosen);
-    } catch {
+    } catch (e) {
+      if (e instanceof DecoderNotHydratedError) {
+        void hydrateDecoders().then(
+          () => this.render(v),
+          (err: unknown) => {
+            const p = div('panel-note error');
+            p.textContent = String(err);
+            add.body.appendChild(p);
+          });
+        return;
+      }
       this.chosen = logic[0]?.id ?? 'i2c';
       info = getDecoder(this.chosen);
     }
