@@ -597,6 +597,21 @@ async function main(): Promise<void> {
     });
   }
 
+  const decodeText = (p: string) => new TextDecoder().decode(readFileAsBuffer(`${nodeProcess.cwd()}/${p}`));
+  const clientSrc = decodeText('src/decode/client.ts');
+  const workerSrc = decodeText('src/decode/worker.ts');
+  const fillNeedle = 'result.instances = request.stack.map(s => getDecoder(s.id))';
+  const instanceProblems: string[] = [];
+  if (!clientSrc.includes(fillNeedle)) instanceProblems.push('client does not attach instances from request.stack');
+  if (/from ['"]\.\/registry(\.js)?['"]/.test(workerSrc)) instanceProblems.push('worker imports the registry');
+  results.push({
+    name: 'decode client attaches instance metadata and the worker ships no registry',
+    pass: instanceProblems.length === 0,
+    detail: instanceProblems.length === 0
+      ? 'client.ts fills result.instances from request.stack; worker.ts has no registry import'
+      : instanceProblems.join('; '),
+  });
+
   console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
   const failed = results.filter((r) => !r.pass).length;
   console.log(`\n${results.length - failed}/${results.length} passed`);

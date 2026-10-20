@@ -13,6 +13,7 @@
  */
 
 import { DEFAULT_DECODE_TIMEOUT_MS } from './limits';
+import { getDecoder } from './registry';
 import type { WorkerConfig, WorkerRequest, WorkerResponse } from './protocol';
 import type { DecodeRequest, DecodeResult, DecoderInfo } from './types';
 import DecodeWorker from './worker.ts?worker&inline';
@@ -213,7 +214,9 @@ export class DecodeClient {
             opts.signal.addEventListener('abort', onAbort, { once: true });
           }
         });
-        return (await Promise.race([inflight, raced])).result;
+        const result = (await Promise.race([inflight, raced])).result;
+        result.instances = request.stack.map(s => getDecoder(s.id));
+        return result;
       } finally {
         if (timer) clearTimeout(timer);
         if (grace) clearTimeout(grace);

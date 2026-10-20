@@ -17,7 +17,6 @@
 
 import sigrokdecodePy from './py/sigrokdecode.py?raw';
 import srdenginePy from './py/srdengine.py?raw';
-import { getDecoder } from './registry';
 import { EDGE_BUDGET, MAX_SAMPLE } from './limits';
 import type { Annotations, DecodeRequest, DecodeResult } from './types';
 import type { WorkerRequest, WorkerResponse } from './protocol';
@@ -381,12 +380,7 @@ p
     texts: obj.texts as string[],
   };
 
-  // Instance metadata comes from the build-time manifest, not from a fresh
-  // describe() per decode: it is static, and re-deriving it inside Pyodide on
-  // every request duplicated data the main thread already had.
-  const instances = req.stack.map(s => getDecoder(s.id));
-
-  return { annotations, instances, errors: obj.errors as string[], decodeMs };
+  return { annotations, instances: [], errors: obj.errors as string[], decodeMs };
 }
 
 function transferables(r: DecodeResult): Transferable[] {
