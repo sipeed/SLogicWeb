@@ -290,7 +290,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const capturePanel = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
   const waveformStack = fs.readFileSync('src/ui/waveformStack.ts', 'utf8');
   const cardColors = rowSource.includes('strip.style.background = cell.channel.color') &&
-    rowSource.includes('tag.style.color = cell.channel.color');
+    !rowSource.includes('tag.style.color');
   const chipColors = capturePanel.includes('chip.style.background = c.color') &&
     capturePanel.includes('chip.style.borderColor = c.color') &&
     !capturePanel.includes('chip.style.color = c.color') &&

@@ -52,7 +52,8 @@ import { DARK_THEME, LIGHT_THEME, LOGIC2_CHANNEL_COLORS } from '../../render/ind
 import { en } from '../locales/en.js';
 import { canvasPalette } from '../canvasPalette.js';
 import {
-  CHANNEL_COLORS, CHANNEL_COLOR_PRESETS, CHROME, COLORS, GRID, LIGHT_CHROME_TOKENS, ROWS,
+  ANALYZER_COLORS, CHANNEL_COLORS, CHANNEL_COLOR_PRESETS, CHROME, chipForeground, COLORS,
+  GRID, LIGHT_CHROME_TOKENS, ROWS,
 } from '../metrics.js';
 import { defaultChannels } from '../state.js';
 import {
@@ -526,7 +527,7 @@ function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia
     pass, `min=${ROWS.minRowHeight}px, max=${ROWS.maxRowHeight}px`);
 }
 
-// ------------------------------------------- light canvas palette (checks 16-19)
+// ------------------------------------------- light canvas palette (checks 21-24)
 
 {
   const seamDark = DARK_THEME.background === '#1B1B1C' && COLORS.bg10 === '#1B1B1C';
@@ -605,6 +606,164 @@ function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia
   const lightFlip = /html\[data-theme="light"\] \.grid-canvas\s*\{\s*mix-blend-mode:\s*darken;\s*\}/.test(code);
   check('the grid canvas keeps the lighten blend with a darken flip under the light theme',
     baseBlend && lightFlip, `baseBlend=${baseBlend}, lightFlip=${lightFlip}`);
+}
+
+// ------------------------------------------- dual-theme color metrics (checks 25-28)
+
+// sRGB math for the acceptance-criterion pins: relative luminance + WCAG contrast,
+// CIEDE2000 pairwise distance, and a Machado-2009 deuteranopia simulation. The
+// thresholds come from the task's design table (min pairwise dE00 >= 12, min
+// cycle-adjacent >= 15, min simulated >= 3.5, >= 2.9:1 against both plot grounds).
+function hex255(hex: string): [number, number, number] {
+  const v = parseInt(hex.slice(1), 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+function linearize(c: number): number {
+  const s = c / 255;
+  return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+}
+function relLuminance(hex: string): number {
+  const [r, g, b] = hex255(hex).map(linearize);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+function contrast(a: string, b: string): number {
+  const la = relLuminance(a);
+  const lb = relLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+function lab(hex: string): [number, number, number] {
+  const [r, g, b] = hex255(hex).map(linearize);
+  const x = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047;
+  const y = 0.2126729 * r + 0.7151522 * g + 0.0721750 * b;
+  const z = (0.0193339 * r + 0.1191920 * g + 0.9503041 * b) / 1.08883;
+  const f = (val: number) => (val > 0.008856 ? Math.cbrt(val) : 7.787 * val + 16 / 116);
+  const fx = f(x);
+  const fy = f(y);
+  const fz = f(z);
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+function deltaE00(c1: string, c2: string): number {
+  const [l1, a1, b1] = lab(c1);
+  const [l2, a2, b2] = lab(c2);
+  const c1s = Math.hypot(a1, b1);
+  const c2s = Math.hypot(a2, b2);
+  const cBar = (c1s + c2s) / 2;
+  const g = 0.5 * (1 - Math.sqrt(Math.pow(cBar, 7) / (Math.pow(cBar, 7) + Math.pow(25, 7))));
+  const a1p = a1 * (1 + g);
+  const a2p = a2 * (1 + g);
+  const c1p = Math.hypot(a1p, b1);
+  const c2p = Math.hypot(a2p, b2);
+  const h1p = (Math.atan2(b1, a1p) + 2 * Math.PI) % (2 * Math.PI);
+  const h2p = (Math.atan2(b2, a2p) + 2 * Math.PI) % (2 * Math.PI);
+  const dLp = l2 - l1;
+  const dCp = c2p - c1p;
+  let dhp = 0;
+  if (c1p * c2p !== 0) {
+    dhp = h2p - h1p;
+    if (dhp > Math.PI) dhp -= 2 * Math.PI;
+    if (dhp < -Math.PI) dhp += 2 * Math.PI;
+  }
+  const dHp = 2 * Math.sqrt(c1p * c2p) * Math.sin(dhp / 2);
+  const lBarP = (l1 + l2) / 2;
+  const cBarP = (c1p + c2p) / 2;
+  let hBarP: number;
+  if (c1p * c2p === 0) hBarP = h1p + h2p;
+  else if (Math.abs(h1p - h2p) <= Math.PI) hBarP = (h1p + h2p) / 2;
+  else hBarP = (h1p + h2p + (h1p + h2p < 2 * Math.PI ? 2 * Math.PI : -2 * Math.PI)) / 2;
+  const tt = 1 - 0.17 * Math.cos(hBarP - Math.PI / 6) + 0.24 * Math.cos(2 * hBarP) +
+    0.32 * Math.cos(3 * hBarP + Math.PI / 30) - 0.2 * Math.cos(4 * hBarP - 63 * Math.PI / 180);
+  const dTheta = (30 * Math.PI / 180) *
+    Math.exp(-Math.pow((hBarP - 275 * Math.PI / 180) / (25 * Math.PI / 180), 2));
+  const rc = 2 * Math.sqrt(Math.pow(cBarP, 7) / (Math.pow(cBarP, 7) + Math.pow(25, 7)));
+  const sl = 1 + (0.015 * Math.pow(lBarP - 50, 2)) / Math.sqrt(20 + Math.pow(lBarP - 50, 2));
+  const sc = 1 + 0.045 * cBarP;
+  const sh = 1 + 0.015 * cBarP * tt;
+  const rt = -Math.sin(2 * dTheta) * rc;
+  return Math.sqrt(
+    Math.pow(dLp / sl, 2) + Math.pow(dCp / sc, 2) + Math.pow(dHp / sh, 2) +
+    rt * (dCp / sc) * (dHp / sh),
+  );
+}
+function deuteranope(hex: string): [number, number, number] {
+  const [r, g, b] = hex255(hex).map(linearize);
+  return [
+    0.367322 * r + 0.860646 * g - 0.227968 * b,
+    0.280085 * r + 0.672501 * g + 0.047413 * b,
+    -0.011820 * r + 0.042940 * g + 0.968881 * b,
+  ].map((c) => {
+    const cl = Math.min(1, Math.max(0, c));
+    const s = cl <= 0.0031308 ? 12.92 * cl : 1.055 * Math.pow(cl, 1 / 2.4) - 0.055;
+    return Math.round(s * 255);
+  }) as [number, number, number];
+}
+function rgb255ToHex([r, g, b]: [number, number, number]): string {
+  return '#' + [r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('');
+}
+
+{
+  const darkBg = '#1B1B1C';
+  const beige = LIGHT_THEME.background;
+  const channelSet = [...new Set([...CHANNEL_COLORS, ...LOGIC2_CHANNEL_COLORS])];
+  const floors = channelSet.map((c) => Math.min(contrast(c, darkBg), contrast(c, beige)));
+  const minFloor = Math.min(...floors);
+
+  let minPair = Infinity;
+  let minPairDeutan = Infinity;
+  let minAdjacent = Infinity;
+  for (let i = 0; i < channelSet.length; i++) {
+    for (let j = i + 1; j < channelSet.length; j++) {
+      const a = channelSet[i]!;
+      const b = channelSet[j]!;
+      minPair = Math.min(minPair, deltaE00(a, b));
+      minPairDeutan = Math.min(minPairDeutan,
+        deltaE00(rgb255ToHex(deuteranope(a)), rgb255ToHex(deuteranope(b))));
+      if (j === i + 1) minAdjacent = Math.min(minAdjacent, deltaE00(a, b));
+    }
+  }
+  minAdjacent = Math.min(minAdjacent,
+    deltaE00(channelSet[0]!, channelSet[channelSet.length - 1]!));
+  check('channel colors hold >=2.9:1 on both plot grounds and stay pairwise distinguishable',
+    minFloor >= 2.9 && minPair >= 12 && minAdjacent >= 15 && minPairDeutan >= 3.5,
+    `minFloor=${minFloor.toFixed(2)}, minPairDE=${minPair.toFixed(1)}, ` +
+    `minAdjacentDE=${minAdjacent.toFixed(1)}, minDeutanDE=${minPairDeutan.toFixed(1)}`);
+
+  const card = LIGHT_CHROME_TOKENS['--card']!;
+  const bubbleInk = canvasPalette('light').bubbleInk;
+  const analyzerFloors = ANALYZER_COLORS.map((c) => Math.min(
+    contrast(c, darkBg), contrast(c, beige), contrast(c, card), contrast(bubbleInk, c),
+  ));
+  const minAnalyzer = Math.min(...analyzerFloors);
+  check('analyzer colors clear both plot grounds, the light card, and paper-ink-on-bubble',
+    minAnalyzer >= 2.9 &&
+      ANALYZER_COLORS.every((c) => contrast(bubbleInk, c) >= 3 && contrast(c, card) >= 3),
+    `minAnalyzer=${minAnalyzer.toFixed(2)}`);
+}
+
+{
+  const expectedInk: Record<string, string> = {
+    '#C81A21': '#FFFDF4', '#E4602A': '#141415', '#997100': '#FFFDF4', '#5A7100': '#FFFDF4',
+    '#B0733C': '#141415', '#3191D9': '#141415', '#007971': '#FFFDF4', '#E94D95': '#141415',
+  };
+  const misses = CHANNEL_COLORS.filter((c) => chipForeground(c) !== expectedInk[c]);
+  check('chipForeground picks the winning ink for every default channel fill',
+    misses.length === 0 && Object.keys(expectedInk).length === CHANNEL_COLORS.length,
+    `misses=${misses.join(',') || '(none)'}`);
+
+  const gridMinor = canvasPalette('light').gridMinor;
+  const gridMajor = canvasPalette('light').gridMajor;
+  const grid = hex255(gridMinor);
+  const major = hex255(gridMajor);
+  const bg = hex255(LIGHT_THEME.background);
+  const notched: string[] = [];
+  for (const ink of [...LOGIC2_CHANNEL_COLORS, LIGHT_THEME.rowSeparatorColor, LIGHT_THEME.noDataColor]) {
+    const c = hex255(ink);
+    if (c.some((v, i) => v > grid[i]!)) notched.push(ink);
+  }
+  const majorDimmer = major.every((v, i) => v >= grid[i]!);
+  const gridVisible = grid.every((v, i) => v < bg[i]!);
+  check('the light grid clears the darken blend window (no trace notching, major stays dimmer)',
+    notched.length === 0 && majorDimmer && gridVisible,
+    `notched=${notched.join(',') || '(none)'}, majorDimmer=${majorDimmer}, gridVisible=${gridVisible}`);
 }
 
 // ---------------------------------------------------------------------- report

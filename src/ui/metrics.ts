@@ -17,7 +17,7 @@
 
 /**
  * [CHOSEN] The 8 digital-channel colours, cycled so that every group of eight reads
- * red, orange, yellow, green, brown, blue, white, grey: D8k+0..D8k+7 are those in that
+ * red, orange, yellow, green, brown, blue, cyan, magenta: D8k+0..D8k+7 are those in that
  * order, and D8(k+1)+0 starts the cycle again.
  *
  * This list drives the labels, chips and strips; the waveform itself uses
@@ -25,14 +25,14 @@
  * change both together, or a channel is drawn in one colour and named in another.
  */
 export const CHANNEL_COLORS: readonly string[] = [
-  '#FF4D4D', // D8k+0 red
-  '#FF9E2C', // D8k+1 orange
-  '#F2D024', // D8k+2 yellow
-  '#48C860', // D8k+3 green
+  '#C81A21', // D8k+0 red
+  '#E4602A', // D8k+1 orange
+  '#997100', // D8k+2 yellow
+  '#5A7100', // D8k+3 green
   '#B0733C', // D8k+4 brown
-  '#4C9AFF', // D8k+5 blue
-  '#FFFFFF', // D8k+6 white
-  '#9AA0A6', // D8k+7 grey
+  '#3191D9', // D8k+5 blue
+  '#007971', // D8k+6 cyan
+  '#E94D95', // D8k+7 magenta
 ];
 
 /**
@@ -74,6 +74,17 @@ export const COLORS = {
   warning: '#fbd86f',
   stop: '#db4c39',
 } as const;
+
+export function chipForeground(fill: string): string {
+  const v = parseInt(fill.slice(1), 16);
+  const linear = (c: number): number => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  const lum = 0.2126 * linear((v >> 16) & 255) + 0.7152 * linear((v >> 8) & 255) +
+    0.0722 * linear(v & 255);
+  return lum < 0.2 ? '#FFFDF4' : '#141415';
+}
 
 export const LIGHT_CHROME_TOKENS: Record<string, string> = {
   '--background': '#FDF6E3',
@@ -241,12 +252,11 @@ export const BUBBLE = {
 } as const;
 
 /**
- * [CHOSEN] three analyzer colours -
- * I2C, Async Serial and SPI in that order - then [DRIVEN] the spec's stated default
- * #95A0B4, then [CHOICE] two more in the same register so a fourth analyzer is not black.
+ * [CHOSEN] six analyzer colours -
+ * I2C, Async Serial and SPI in that order, then three more in the same register.
  */
 export const ANALYZER_COLORS: readonly string[] = [
-  '#D2B56F', '#F69998', '#ABA48B', '#95A0B4', '#8FBF9F', '#B5A8D8',
+  '#9A7B2E', '#A8504E', '#6E6A55', '#5A6579', '#4A7D5C', '#6E5F94',
 ];
 
 /** [SOURCE] Range measurements have their own four-colour palette. */

@@ -392,7 +392,6 @@ export class ChannelList {
       const tag = document.createElement('span');
       tag.className = 'ch-tag ch-tag--name';
       tag.textContent = cell.channel.name;
-      tag.style.color = cell.channel.color;
       head.appendChild(tag);
 
       const settings = document.createElement('button');

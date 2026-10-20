@@ -20,6 +20,7 @@ import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import { formatDuration, formatRate } from './format.js';
 import { t } from './i18n.js';
+import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { CaptureSettings, ChannelState } from './state.js';
 import { MAX_SAMPLES } from './captureIO.js';
@@ -74,7 +75,7 @@ export class CapturePanel {
       chip.title = c.name;
       if (c.enabled) {
         chip.style.background = c.color;
-        chip.style.color = '#141415';
+        chip.style.color = chipForeground(c.color);
       } else {
         chip.style.borderColor = c.color;
       }
