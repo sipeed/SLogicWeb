@@ -16,16 +16,18 @@
 
 import {
   MAX_SAMPLERATE_HZ,
-  Slogic16U3,
   TEST_MODE_EMULATION,
   TEST_MODE_NORMAL,
+  vrefCode,
+  vrefVolts,
+} from './protocol.js';
+import {
+  Slogic16U3,
   getGrantedDevices,
   expandPacked,
   requestDevice,
-  vrefCode,
-  vrefVolts,
-  type CaptureConfig,
-} from './index.js';
+} from './slogic16u3.js';
+import type { CaptureConfig } from './types.js';
 
 const RESULT_SINK = 'http://127.0.0.1:5177/result';
 

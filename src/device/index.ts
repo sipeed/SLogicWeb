@@ -40,16 +40,8 @@ export {
   type SoftwareTriggerOptions,
   type SoftwareTriggerStats,
 } from '../data/softwareTrigger.js';
-export {
-  Slogic16U3,
-  USB_FILTERS,
-  expandPacked,
-  getGrantedDevices,
-  requestDevice,
-  type StartOptions,
-  type Stats,
-  type StreamTuning,
-} from './slogic16u3.js';
+export { USB_FILTERS } from './usbCore.js';
+export type { StartOptions, Stats, StreamTuning } from './slogic16u3.js';
 export {
   MAX_SAMPLERATE_HZ,
   MAX_SAMPLERATE_HZ_SLOGIC32_U3,

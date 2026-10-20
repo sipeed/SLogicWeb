@@ -2200,6 +2200,10 @@ async function main(): Promise<void> {
     wtSrc.includes(`await import('./slogic16u3.js')`) &&
     !/import\s*\{[^}]*\bSlogic16U3\b[^}]*\}\s*from\s*['"]\.\/slogic16u3\.js['"]/.test(wtSrc),
     'a static Slogic16U3 import pulls the driver back into the entry chunk');
+  const barrelSrc = fs?.readFileSync(`${procFs?.cwd?.() ?? ''}/src/device/index.ts`, 'utf8') ?? '';
+  check('the device barrel holds no value edge to the driver module',
+    !/export\s*\{[^}]*\}\s*from\s*['"]\.\/slogic16u3\.js['"]/.test(barrelSrc),
+    'a value re-export from slogic16u3.js lets barrel consumers re-inline the driver');
 
   console.log(`\n${failures === 0 ? 'all offline checks passed' : failures + ' offline check(s) FAILED'}`);
   if (failures) failExit();
