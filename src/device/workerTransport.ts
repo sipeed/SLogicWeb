@@ -10,7 +10,7 @@
  * to a multi-gigabyte store and drawing it (NOTES 8.18).
  */
 
-import { LoopStallWatch, Slogic16U3, USB_FILTERS } from './slogic16u3.js';
+import { LoopStallWatch, USB_FILTERS } from './usbCore.js';
 import type { Stats, StartOptions } from './slogic16u3.js';
 import type {
   CaptureConfig, CaptureStartOptions, Device, DropoutSink, SampleSink,
@@ -375,6 +375,7 @@ function post(worker: Worker, message: ToWorker): void {
 
 /** The in-page transport, used when the worker path is unavailable or refused. */
 export async function openInPage(usb: USBDevice): Promise<Device> {
+  const { Slogic16U3 } = await import('./slogic16u3.js');
   const device = new Slogic16U3(usb);
   await device.open();
   return device;

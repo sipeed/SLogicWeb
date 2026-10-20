@@ -2193,6 +2193,14 @@ async function main(): Promise<void> {
       !!before && !!after, `before=${before} after=${after}`);
   }
 
+  const procFs = (globalThis as { process?: { cwd?(): string; getBuiltinModule?(n: string): unknown } }).process;
+  const fs = procFs?.getBuiltinModule?.('fs') as { readFileSync(p: string, e: 'utf8'): string } | undefined;
+  const wtSrc = fs?.readFileSync(`${procFs?.cwd?.() ?? ''}/src/device/workerTransport.ts`, 'utf8') ?? '';
+  check('workerTransport loads the fallback driver only on demand',
+    wtSrc.includes(`await import('./slogic16u3.js')`) &&
+    !/import\s*\{[^}]*\bSlogic16U3\b[^}]*\}\s*from\s*['"]\.\/slogic16u3\.js['"]/.test(wtSrc),
+    'a static Slogic16U3 import pulls the driver back into the entry chunk');
+
   console.log(`\n${failures === 0 ? 'all offline checks passed' : failures + ' offline check(s) FAILED'}`);
   if (failures) failExit();
 }

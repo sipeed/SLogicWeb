@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Daniel Tralamazza
 import type { Device } from './types.js';
 import { PID_SLOGIC16_U3, PID_SLOGIC32_U3, USB_VID_SIPEED } from './protocol.js';
-import { USB_FILTERS } from './slogic16u3.js';
+import { USB_FILTERS } from './usbCore.js';
 import { workerTransport } from './workerTransport.js';
 
 export type { CaptureConfig, CaptureStartOptions, Device, SampleSink } from './types.js';
