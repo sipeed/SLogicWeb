@@ -248,9 +248,8 @@ export default defineConfig({
         // specifier resolves against the document URL, not against assets/.
         // Locale chunks must therefore sit at the dist root: emitted under the
         // default assets/[name]-[hash].js they would be requested from
-        // <origin-root>/<chunk>.js and 404. Today the locale catalogs and the
-        // on-demand USB fallback driver are the only dynamic imports, so nothing
-        // else lands at the root for this reason.
+        // <origin-root>/<chunk>.js and 404. Today the locale catalogs are the only
+        // dynamic imports, so nothing else lands at the root for this reason.
         // Caveat: rollup renders the specifier relative to the entry chunk, so it
         // is emitted as "../<chunk>.js". That resolves correctly for the deployments
         // that work today (dist/ at the origin root; the live --base=/ custom-domain

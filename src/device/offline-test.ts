@@ -2196,13 +2196,14 @@ async function main(): Promise<void> {
   const procFs = (globalThis as { process?: { cwd?(): string; getBuiltinModule?(n: string): unknown } }).process;
   const fs = procFs?.getBuiltinModule?.('fs') as { readFileSync(p: string, e: 'utf8'): string } | undefined;
   const wtSrc = fs?.readFileSync(`${procFs?.cwd?.() ?? ''}/src/device/workerTransport.ts`, 'utf8') ?? '';
-  check('workerTransport loads the fallback driver only on demand',
-    wtSrc.includes(`await import('./slogic16u3.js')`) &&
-    !/import\s*\{[^}]*\bSlogic16U3\b[^}]*\}\s*from\s*['"]\.\/slogic16u3\.js['"]/.test(wtSrc),
-    'a static Slogic16U3 import pulls the driver back into the entry chunk');
+  check('workerTransport keeps the fallback driver inside the entry chunk',
+    /import\s*\{[^}]*\bSlogic16U3\b[^}]*\}\s*from\s*['"]\.\/slogic16u3\.js['"]/.test(wtSrc) &&
+    !wtSrc.includes(`import('./slogic16u3.js')`),
+    'a lazily imported driver chunk shares bindings with the entry asset and re-executes the inlined app');
   const barrelSrc = fs?.readFileSync(`${procFs?.cwd?.() ?? ''}/src/device/index.ts`, 'utf8') ?? '';
   check('the device barrel holds no value edge to the driver module',
-    !/export\s*\{[^}]*\}\s*from\s*['"]\.\/slogic16u3\.js['"]/.test(barrelSrc),
+    barrelSrc.length > 0 &&
+    !/export\s*(\{[^}]*\}|\*)\s*from\s*['"]\.\/slogic16u3\.js['"]/.test(barrelSrc),
     'a value re-export from slogic16u3.js lets barrel consumers re-inline the driver');
 
   console.log(`\n${failures === 0 ? 'all offline checks passed' : failures + ' offline check(s) FAILED'}`);
