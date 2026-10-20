@@ -12,26 +12,13 @@
     404s. Vite rewrites this href with the build's base, so it follows the subdirectory.
   -->
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <!--
-    Pre-paint theme apply: dark is the default theme, so this sets data-theme="dark"
-    before the stylesheet loads and no session can flash the light chrome first.
-    Mirrors pickTheme() in src/ui/theme.ts: a stored live id wins; absent, garbage,
-    and the migrated legacy 'default' pick all land on dark - with today's registry
-    every path does. The storage read is real, not decorative: the theme self-test
-    (src/ui/tools/theme-selftest.ts) pins the getItem literal so this script and
-    pickTheme() cannot drift, and a future added theme id turns the honor check into
-    a real branch. A bare inline script on purpose: vite.config.ts's
-    inlineEntryForFileOpen only rewrites module scripts and the stylesheet link, so
-    this passes the portable single-file build untouched.
-  -->
   <script>
     try {
-      // pickTheme() mirror: honor a stored live id, else the dark default. 'default'
-      // is retired (migrates to dark), so 'dark' is the only live stored id today.
       const stored = localStorage.getItem('logicweb.theme');
-      document.documentElement.setAttribute('data-theme', stored === 'dark' ? stored : 'dark');
+      const mode = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'dark';
+      const dark = mode === 'dark' || (mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     } catch {
-      // Storage unavailable (privacy mode): pickTheme's fallback is dark too.
       document.documentElement.setAttribute('data-theme', 'dark');
     }
   </script>

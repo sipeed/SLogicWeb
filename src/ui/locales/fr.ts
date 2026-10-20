@@ -179,4 +179,6 @@ export const fr: Messages = {
   // ------------------------------------------------------------ theme
   'theme.default': 'Par défaut',
   'theme.dark': 'Sombre',
+  'theme.light': 'Clair',
+  'theme.system': 'Système',
 };

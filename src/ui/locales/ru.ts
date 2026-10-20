@@ -179,4 +179,6 @@ export const ru: Messages = {
   // ------------------------------------------------------------ theme
   'theme.default': 'По умолчанию',
   'theme.dark': 'Тёмная',
+  'theme.light': 'Светлая',
+  'theme.system': 'Системная',
 };

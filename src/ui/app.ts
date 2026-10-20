@@ -38,7 +38,7 @@ import { formatCount, formatDuration, formatFreq, formatRate,
   formatAnalyzerNote, formatCaptureLabel, formatStatusError } from './format.js';
 import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, setLocale, t,
   type Locale, type MessageKey, type MessageVars } from './i18n.js';
-import { getTheme, onThemeChange, setTheme, type ThemeId } from './theme.js';
+import { getMode, getTheme, onThemeChange, setMode, type ThemeId } from './theme.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
 import { COLORS, MEASURE_COLORS, ROWS } from './metrics.js';
 import { Overlay, type HoverMeasurement } from './overlay.js';
@@ -1524,8 +1524,9 @@ export class App {
     connect: () => this.connect(),
     setLocale: (l: Locale) => setLocale(l),
     getLocale: () => getLocale(),
-    setTheme: (id: ThemeId) => setTheme(id),
+    setTheme: (id: ThemeId) => setMode(id === 'default' ? 'dark' : id),
     getTheme: () => getTheme(),
+    getMode: () => getMode(),
     start: () => this.startCapture(),
     stop: () => this.stopCapture(),
     demo: () => this.loadDemo(),

@@ -11,28 +11,39 @@
  *
  * What is pinned here:
  *
- *   - the theme registry and the storage-key literal;
- *   - pickTheme falls back to dark for absent and unknown stored values, and
- *     migrates a stored legacy 'default' pick to dark as well;
- *   - every theme has a label key that exists (non-empty) in the English catalog;
- *   - a fresh module boots to dark - asserted BEFORE any stub injection, so the
- *     node-safety of module evaluation is part of the pass;
- *   - setTheme persists the pick, applies the <html> attribute, and notifies exactly
- *     once per real change; a same-id pick is a silent no-op (no write, no notify);
+ *   - the theme registry (default,dark,light), the mode registry (light,dark,system),
+ *     and the storage-key literal;
+ *   - pickMode falls back to dark for absent/unknown values and migrates a stored
+ *     legacy 'default' pick to dark; resolveMode maps system through the explicit
+ *     systemDark argument (the no-matchMedia fallback resolves to dark);
+ *   - every theme id and every mode has a label key that exists (non-empty) in the
+ *     English catalog;
+ *   - a fresh module boots to mode dark + resolved dark - asserted BEFORE any stub
+ *     injection, so the node-safety of module evaluation is part of the pass;
+ *   - setMode persists the mode, applies the resolved <html> attribute only when the
+ *     resolved id changes, and notifies on every real mode change (the button icon
+ *     follows the mode even when the resolved id is unchanged); a same-mode pick is
+ *     a silent no-op (no write, no notify);
  *   - the returned unsubscribe stops further notifications;
+ *   - initTheme never notifies on boot, resolves a stored 'system' pick through the
+ *     stubbed matchMedia, and installs exactly ONE matchMedia-change listener and ONE
+ *     storage listener across repeated calls (the latch);
+ *   - the matchMedia listener re-resolves only while mode is 'system' and only when
+ *     the resolved id actually flips (explicit modes get zero notifications);
+ *   - the storage listener adopts the MODE from other tabs (key match or null),
+ *     re-resolves locally, ignores unrelated keys and same-mode writes;
  *   - a storage whose getItem/setItem throw does not break boot or the switch;
- *   - index.html restores the persisted theme BEFORE the stylesheet link, keyed by
- *     THEME_STORAGE_KEY's actual value (renaming the key on either side turns this red);
+ *   - index.html resolves the persisted mode (including 'system' via matchMedia)
+ *     BEFORE the stylesheet link, keyed by THEME_STORAGE_KEY's actual value;
  *   - style.css keeps every dark rule scoped to [data-theme="dark"] and never
- *     redefines the chrome metric variables inside a dark block (vacuous until the
- *     token layer lands, load-bearing from then on);
+ *     redefines the chrome metric variables inside a theme block;
  *   - the channel-card geometry stays wired: neutral display:contents wrappers, the
  *     dark card's --ch-lane-offset margin, the reserved 14px decoder strip, the
  *     themed scrollbars, and the TS side that sets/feeds the property (NOTES §13).
  *
- * The checks are ordered fresh-state first, mutation next: checks 5-8 inject fake
- * localStorage/document globals, so an earlier check must not observe them. Checks
- * 9-10 are read-only file scans and are unaffected by those stubs.
+ * The checks are ordered fresh-state first, mutation next: checks 7-10 inject fake
+ * localStorage/document/window/matchMedia globals, so an earlier check must not
+ * observe them. The style.css/index.html scans are read-only and unaffected by stubs.
  */
 
 import { LOGIC2_CHANNEL_COLORS } from '../../render/index.js';
@@ -40,8 +51,9 @@ import { en } from '../locales/en.js';
 import { CHANNEL_COLORS, CHANNEL_COLOR_PRESETS, CHROME, ROWS } from '../metrics.js';
 import { defaultChannels } from '../state.js';
 import {
-  getTheme, initTheme, onThemeChange, pickTheme, setTheme,
-  THEME_LABEL_KEYS, THEME_STORAGE_KEY, THEMES, type ThemeId,
+  getMode, getTheme, initTheme, onThemeChange, pickMode, resolveMode, setMode,
+  THEME_LABEL_KEYS, THEME_MODE_LABEL_KEYS, THEME_MODES, THEME_STORAGE_KEY, THEMES,
+  type ThemeMode,
 } from '../theme.js';
 
 /** Same structural-typing trick as i18n-selftest.ts: node access without @types/node. */
@@ -74,7 +86,7 @@ function check(name: string, pass: boolean, detail: string): void {
  * Install a global for the mutation checks. Object.defineProperty rather than a plain
  * assignment so the stub wins even where node exposes the name as an accessor.
  */
-function defineGlobal(name: 'localStorage' | 'document', value: unknown): void {
+function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia', value: unknown): void {
   Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
 }
 
@@ -82,9 +94,10 @@ function defineGlobal(name: 'localStorage' | 'document', value: unknown): void {
 
 {
   const ids = [...THEMES].join(',');
-  check('THEMES is exactly default,dark and the storage key is logicweb.theme',
-    ids === 'default,dark' && THEME_STORAGE_KEY === 'logicweb.theme',
-    `themes=[${ids}], key=${THEME_STORAGE_KEY}`);
+  const modes = [...THEME_MODES].join(',');
+  check('THEMES is default,dark,light; THEME_MODES is light,dark,system; key is logicweb.theme',
+    ids === 'default,dark,light' && modes === 'light,dark,system' && THEME_STORAGE_KEY === 'logicweb.theme',
+    `themes=[${ids}], modes=[${modes}], key=${THEME_STORAGE_KEY}`);
 }
 
 // ---------------------------------------------------- default channel colors
@@ -108,33 +121,49 @@ function defineGlobal(name: 'localStorage' | 'document', value: unknown): void {
     `count=${presetCount}, unique=${unique}, valid=${valid}, defaultsFirst=${defaultsFirst}`);
 }
 
-// ------------------------------------------------------------------ pickTheme
+// ------------------------------------------------------- pickMode/resolveMode
 
 {
-  const absent = pickTheme(null);
-  const unknown = pickTheme('xx');
-  const dark = pickTheme('dark');
-  const legacy = pickTheme('default');
-  check('pickTheme falls back to dark for absent/unknown and migrates the legacy default pick',
-    absent === 'dark' && unknown === 'dark' && dark === 'dark' && legacy === 'dark',
-    `null→${absent}, xx→${unknown}, dark→${dark}, default→${legacy}`);
+  const absent = pickMode(null);
+  const unknown = pickMode('xx');
+  const legacy = pickMode('default');
+  const light = pickMode('light');
+  const dark = pickMode('dark');
+  const system = pickMode('system');
+  const picksOk = absent === 'dark' && unknown === 'dark' && legacy === 'dark' &&
+    light === 'light' && dark === 'dark' && system === 'system';
+
+  const sysDark = resolveMode('system', true);
+  const sysLight = resolveMode('system', false);
+  const lightExplicit = resolveMode('light', true);
+  const darkExplicit = resolveMode('dark', false);
+  const resolvesOk = sysDark === 'dark' && sysLight === 'light' &&
+    lightExplicit === 'light' && darkExplicit === 'dark';
+
+  check('pickMode honors the three modes and migrates absent/unknown/legacy-default to dark',
+    picksOk, `null→${absent}, xx→${unknown}, default→${legacy}, light→${light}, system→${system}`);
+  check('resolveMode maps system through systemDark; explicit modes ignore it (dark fallback pinned)',
+    resolvesOk,
+    `system+dark→${sysDark}, system+light→${sysLight}, light+dark→${lightExplicit}, dark+light→${darkExplicit}`);
 }
 
 // ------------------------------------------- label keys ↔ en catalog
 
 {
   const catalog = en as Record<string, string>;
-  const missing = THEMES.filter((id) => {
-    const key = THEME_LABEL_KEYS[id];
-    return key === undefined || (catalog[key] ?? '').trim() === '';
-  });
-  const extra = Object.keys(THEME_LABEL_KEYS)
+  const missingThemes = THEMES.filter((id) => (catalog[THEME_LABEL_KEYS[id]] ?? '').trim() === '');
+  const missingModes = THEME_MODES.filter((m) => (catalog[THEME_MODE_LABEL_KEYS[m]] ?? '').trim() === '');
+  const extraThemeKeys = Object.keys(THEME_LABEL_KEYS)
     .filter((k) => !(THEMES as readonly string[]).includes(k));
-  check('every theme has a non-empty label key present in the en catalog',
-    missing.length === 0 && extra.length === 0,
-    missing.length === 0 && extra.length === 0
-      ? THEMES.map((id) => `${id}=${THEME_LABEL_KEYS[id]}`).join(', ')
-      : `missing=${missing.join(',') || '(none)'} extra=${extra.join(',') || '(none)'}`);
+  const extraModeKeys = Object.keys(THEME_MODE_LABEL_KEYS)
+    .filter((k) => !(THEME_MODES as readonly string[]).includes(k));
+  const ok = missingThemes.length === 0 && missingModes.length === 0 &&
+    extraThemeKeys.length === 0 && extraModeKeys.length === 0;
+  check('every theme id and every mode has a non-empty label key present in the en catalog',
+    ok,
+    ok
+      ? THEME_MODES.map((m) => `${m}=${THEME_MODE_LABEL_KEYS[m]}`).join(', ')
+      : `missingThemes=${missingThemes.join(',') || '(none)'} missingModes=${missingModes.join(',') || '(none)'}`);
 }
 
 // ------------------------------------------------- fresh-state node boot
@@ -143,87 +172,183 @@ function defineGlobal(name: 'localStorage' | 'document', value: unknown): void {
   // Asserted before any stub: the module was bundled --platform=node, so reaching
   // this line already proves module evaluation touched neither storage nor the DOM
   // (either touch would have thrown), and the state must be the mandated default.
-  const boot = getTheme();
-  check('a fresh module boots to dark before any storage/DOM access',
-    boot === 'dark', `getTheme()=${boot}`);
+  check('a fresh module boots to mode dark and resolved dark before any storage/DOM access',
+    getMode() === 'dark' && getTheme() === 'dark',
+    `getMode()=${getMode()}, getTheme()=${getTheme()}`);
 }
 
 // ------------------------------------------------- mutation checks (ordered)
 
-// 5. Persistence + notification, and the same-id no-op.
+// 7. Persistence + notify semantics, the same-mode no-op, and the resolved-id gate.
 {
   const writes: [string, string][] = [];
   defineGlobal('localStorage', {
     getItem: () => null,
     setItem: (key: string, value: string) => { writes.push([key, value]); },
   });
+  const doc = { documentElement: { dataset: {} as Record<string, string> } };
+  defineGlobal('document', doc);
   let notified = 0;
   const unsubscribe = onThemeChange(() => { notified += 1; });
 
-  setTheme('default'); // fresh state is dark: this is the first real change
-  const afterFirst = { theme: getTheme(), writes: writes.length, notified };
-  setTheme('default'); // same id: must not persist or notify again
-  unsubscribe();
+  setMode('light'); // real change: write + attribute + notify
+  const afterLight = { writes: writes.length, notified, attr: doc.documentElement.dataset.theme };
+  setMode('light'); // same mode: total no-op
+  const afterNoop = { writes: writes.length, notified };
 
-  const ok = afterFirst.theme === 'default' && afterFirst.writes === 1 && afterFirst.notified === 1 &&
-    writes.length === 1 && writes[0]?.[0] === THEME_STORAGE_KEY && writes[0]?.[1] === 'default' &&
-    notified === 1;
-  check('setTheme persists and notifies once, and a same-id pick is a silent no-op',
-    ok, `theme=${getTheme()}, writes=${writes.length}, notified=${notified}`);
+  setMode('system'); // systemDark defaults true (no matchMedia): resolved dark, a real flip
+  const afterSystem = { writes: writes.length, notified, attr: doc.documentElement.dataset.theme };
+  setMode('dark'); // mode change, resolved UNCHANGED: persists + notifies, no attribute write
+  const attrBefore = doc.documentElement.dataset.theme;
+  const afterSameResolved = { writes: writes.length, notified, attr: doc.documentElement.dataset.theme };
+  unsubscribe();
+  setMode('light'); // unsubscribed: no notify
+  const finalNotify = notified;
+
+  const ok = afterLight.writes === 1 && afterLight.notified === 1 && afterLight.attr === 'light' &&
+    afterNoop.writes === 1 && afterNoop.notified === 1 &&
+    afterSystem.writes === 2 && afterSystem.notified === 2 && afterSystem.attr === 'dark' &&
+    writes[1]?.[1] === 'system' &&
+    afterSameResolved.writes === 3 && afterSameResolved.notified === 3 &&
+    afterSameResolved.attr === 'dark' && attrBefore === 'dark' &&
+    writes[2]?.[0] === THEME_STORAGE_KEY && writes[2]?.[1] === 'dark' &&
+    finalNotify === 3;
+  check('setMode persists the MODE, gates the attribute on the resolved id, notifies per mode change; no-op and unsubscribe hold',
+    ok,
+    `writes=${JSON.stringify(writes)}, notified=${notified}, attr=${doc.documentElement.dataset.theme}, theme=${getTheme()}`);
 }
 
-// 6. One notification per real change; unsubscribe stops the stream.
+// 8. Listeners: latched install, matchMedia re-resolution, cross-tab storage adoption.
 {
-  let fired = 0;
-  const unsubscribe = onThemeChange(() => { fired += 1; });
-  setTheme('dark'); // real change
-  const afterReal = fired;
-  setTheme('dark'); // no-op
-  unsubscribe();
-  setTheme('default'); // real change while unsubscribed
-  check('onThemeChange fires once per real change and unsubscribe stops it',
-    afterReal === 1 && fired === 1 && getTheme() === 'default',
-    `afterReal=${afterReal}, fired=${fired}, theme=${getTheme()}`);
+  const mqlListeners: ((e: { matches: boolean }) => void)[] = [];
+  const mql = {
+    matches: false,
+    addEventListener: (type: string, cb: (e: { matches: boolean }) => void) => {
+      if (type === 'change') mqlListeners.push(cb);
+    },
+  };
+  defineGlobal('matchMedia', (_query: string) => mql);
+  const storageListeners: ((e: { key: string | null; newValue: string | null }) => void)[] = [];
+  defineGlobal('window', {
+    addEventListener: (type: string, cb: (e: { key: string | null; newValue: string | null }) => void) => {
+      if (type === 'storage') storageListeners.push(cb);
+    },
+  });
+  const listenerWrites: [string, string][] = [];
+  defineGlobal('localStorage', {
+    getItem: (key: string) => (key === THEME_STORAGE_KEY ? 'system' : null),
+    setItem: (key: string, value: string) => { listenerWrites.push([key, value]); },
+  });
+  const doc = { documentElement: { dataset: { theme: 'dark' } as Record<string, string> } };
+  defineGlobal('document', doc);
+
+  let notified = 0;
+  onThemeChange(() => { notified += 1; });
+  const booted = initTheme(); // stored 'system' + mql.matches=false -> light; boot must not notify
+  const bootAttr = doc.documentElement.dataset.theme;
+  doc.documentElement.dataset.theme = 'dark'; // a repeat initTheme must re-apply, not no-op
+  initTheme(); // second call: the latch must keep listener counts at exactly one
+  const reapplyAttr = doc.documentElement.dataset.theme;
+  const counts = { mql: mqlListeners.length, storage: storageListeners.length };
+  const bootNotified = notified;
+
+  mqlListeners[0]?.({ matches: true }); // system mode, resolved flips dark
+  const afterFlipDark = { notified, attr: getTheme() };
+  mqlListeners[0]?.({ matches: false }); // flips back to light
+  const afterFlipLight = { notified, attr: getTheme() };
+
+  setMode('dark'); // explicit mode now
+  const afterExplicit = notified;
+  mqlListeners[0]?.({ matches: true }); // explicit mode: ZERO notifications
+  const afterExplicitFlip = notified;
+
+  const fireStorage = (key: string | null, newValue: string | null) => {
+    storageListeners[0]?.({ key, newValue });
+  };
+  fireStorage('logicweb.panelWidth', '420'); // unrelated key: ignored
+  const afterUnrelated = notified;
+  fireStorage(THEME_STORAGE_KEY, 'dark'); // same mode as current: no-op
+  const afterSameMode = notified;
+  fireStorage(THEME_STORAGE_KEY, 'system'); // adopt the MODE; re-resolve against systemDark=true
+  const afterAdopt = { notified, mode: getMode(), theme: getTheme() };
+  fireStorage(null, null); // external clear() -> absent -> dark; resolved unchanged, still notifies
+  const afterClear = { notified, mode: getMode(), theme: getTheme() };
+
+  const ok = booted === 'system' && bootAttr === 'light' && reapplyAttr === 'light' && bootNotified === 0 &&
+    counts.mql === 1 && counts.storage === 1 &&
+    afterFlipDark.notified === 1 && afterFlipDark.attr === 'dark' &&
+    afterFlipLight.notified === 2 && afterFlipLight.attr === 'light' &&
+    afterExplicit === 3 && afterExplicitFlip === 3 &&
+    afterUnrelated === 3 && afterSameMode === 3 &&
+    afterAdopt.notified === 4 && afterAdopt.mode === 'system' && afterAdopt.theme === 'dark' &&
+    afterClear.notified === 5 && afterClear.mode === 'dark' && afterClear.theme === 'dark' &&
+    listenerWrites.length === 1 && listenerWrites[0]?.[1] === 'dark';
+  check('initTheme latches both listeners, system re-resolves live, explicit modes stay silent, storage adopts modes',
+    ok,
+    `boot=${booted}/${bootAttr}, reapply=${reapplyAttr}, counts=${counts.mql}/${counts.storage}, notified=${notified}, bootNotified=${bootNotified}, ` +
+    `adopt=${afterAdopt.mode}/${afterAdopt.theme}, clear=${afterClear.mode}, listenerWrites=${listenerWrites.length}`);
 }
 
-// 7. The <html data-theme> side effect.
+// 9. The no-matchMedia fallback: a stored system pick resolves to dark, pinned as
+// the fallback (not confused with 'system works').
 {
-  setTheme('dark'); // settle before the stub goes in
+  defineGlobal('matchMedia', undefined);
   const doc = { documentElement: { dataset: {} as Record<string, string> } };
   defineGlobal('document', doc);
-  setTheme('default');
-  check('applyTheme writes the theme id onto <html data-theme>',
-    doc.documentElement.dataset.theme === 'default',
-    `data-theme=${JSON.stringify(doc.documentElement.dataset.theme)}`);
+  defineGlobal('localStorage', {
+    getItem: (key: string) => (key === THEME_STORAGE_KEY ? 'system' : null),
+    setItem: () => {},
+  });
+  const booted = initTheme();
+  check('without matchMedia, a stored system mode resolves to the dark fallback',
+    booted === 'system' && getMode() === 'system' && getTheme() === 'dark' &&
+    doc.documentElement.dataset.theme === 'dark',
+    `boot=${booted}, mode=${getMode()}, theme=${getTheme()}, attr=${doc.documentElement.dataset.theme}`);
 }
 
-// 8. Throwing storage must not break boot or the switch.
+// 10. Throwing storage must not break boot or the switch.
 {
   defineGlobal('localStorage', {
     getItem: () => { throw new Error('storage denied'); },
     setItem: () => { throw new Error('storage denied'); },
   });
-  let booted: ThemeId = 'default';
+  let booted: ThemeMode = 'light';
   let bootThrew = false;
   try {
     booted = initTheme();
   } catch {
     bootThrew = true;
   }
-  const afterBoot = getTheme();
+  const afterBoot = { mode: getMode(), theme: getTheme() };
   let switchThrew = false;
   try {
-    setTheme('default'); // boot landed dark: a real switch through the throwing setItem
+    setMode('light'); // a real switch through the throwing setItem
   } catch {
     switchThrew = true;
   }
   check('throwing storage does not break boot or the in-memory switch',
-    !bootThrew && booted === 'dark' && afterBoot === 'dark' && !switchThrew &&
-    getTheme() === 'default',
-    `boot=${booted}, bootThrew=${bootThrew}, switchThrew=${switchThrew}, theme=${getTheme()}`);
+    !bootThrew && booted === 'dark' && afterBoot.mode === 'dark' && afterBoot.theme === 'dark' &&
+    !switchThrew && getMode() === 'light' && getTheme() === 'light',
+    `boot=${booted}, bootThrew=${bootThrew}, switchThrew=${switchThrew}, mode=${getMode()}, theme=${getTheme()}`);
 }
 
-// ------------------------------------------- index.html pre-paint script (check 9)
+// ------------------------------------------- theme.ts listener-shape needles
+
+// The legacy MediaQueryList.addListener fallback and the single cross-tab storage
+// listener are unpinned by behavior (the latch consumes the stub before a legacy
+// variant could be exercised), so pin the source intent directly.
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const src = fs.readFileSync('src/ui/theme.ts', 'utf8');
+  const addListenerFallback = src.includes('mql.addListener?.(onSystemChange)');
+  const storageListener = src.includes("window.addEventListener('storage', onStorage)");
+  check('theme.ts keeps the addListener fallback and the single cross-tab storage listener',
+    addListenerFallback && storageListener,
+    `addListenerFallback=${addListenerFallback}, storageListener=${storageListener}`);
+}
+
+// ------------------------------------------- index.html pre-paint script (check 12)
 
 {
   const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
@@ -237,14 +362,21 @@ function defineGlobal(name: 'localStorage' | 'document', value: unknown): void {
   const needle = `getItem('${THEME_STORAGE_KEY}')`;
   const keyIdx = html.indexOf(needle);
   const cssIdx = html.indexOf('<link rel="stylesheet"');
-  check('index.html restores the persisted theme before the stylesheet link',
+  const head = keyIdx !== -1 && cssIdx !== -1 ? html.slice(Math.max(0, keyIdx - 600), cssIdx) : '';
+  const modesPresent = ["'light'", "'dark'", "'system'"].every((l) => head.includes(l));
+  const mqlPresent = head.includes("matchMedia('(prefers-color-scheme: dark)')");
+  // Pin the pick expression itself, not just the literals: dropping the
+  // 'light'/'system' honor branch would flash dark for those users on boot while
+  // the trailing ternary literals keep a looser needle green.
+  const pickExpr = head.includes("stored === 'light' || stored === 'dark' || stored === 'system'");
+  check('index.html resolves the persisted mode (system via matchMedia) before the stylesheet link',
     keyIdx !== -1 && cssIdx !== -1 && keyIdx < cssIdx &&
-    html.includes('data-theme') && html.includes("'dark'"),
-    `storageKey@${keyIdx}, stylesheet@${cssIdx}, data-theme=${html.includes('data-theme')}`);
+    head.includes('data-theme') && modesPresent && mqlPresent && pickExpr,
+    `storageKey@${keyIdx}, stylesheet@${cssIdx}, modes=${modesPresent}, mql=${mqlPresent}, pickExpr=${pickExpr}`);
 }
 // (no assert against a second hardcoded 'logicweb.theme' literal: THEME_STORAGE_KEY IS the needle)
 
-// ------------------------------------------- style.css dark-scope guards (check 10)
+// ------------------------------------------- style.css dark-scope guards (check 13)
 
 {
   const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
@@ -318,7 +450,7 @@ function defineGlobal(name: 'localStorage' | 'document', value: unknown): void {
     `missing=${JSON.stringify(missingSemantic)}, darkToolbarOverrides=${darkToolbarOverrides}`);
 }
 
-// ------------------------------------------- channel-card geometry guards (check 11)
+// ------------------------------------------- channel-card geometry guards (check 14)
 
 // The waveform-table cards (NOTES.md section 13) hang on a few load-bearing threads:
 // the wrappers stay display:contents in the base layer (else the default theme
@@ -347,7 +479,7 @@ function defineGlobal(name: 'localStorage' | 'document', value: unknown): void {
     `scrollbars=${scrollbars}, tsSets=${tsSetsProperty}, appFeeds=${appFeedsLane}`);
 }
 
-// ------------------------------------------- readable row minimum (check 12)
+// ------------------------------------------- readable row minimum (check 15)
 
 // The reserved one-line card needs 46 px including its insets and borders (NOTES §14).
 // Pin the approved value exactly, and keep the upper auto-fit clamp ordered above it.

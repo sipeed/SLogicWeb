@@ -183,6 +183,8 @@ export const en = {
   // ------------------------------------------------------------ theme
   'theme.default': 'Default',
   'theme.dark': 'Dark',
+  'theme.light': 'Light',
+  'theme.system': 'System',
 };
 
 /**

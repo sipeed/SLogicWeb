@@ -177,4 +177,6 @@ export const zhCN: Messages = {
   // ------------------------------------------------------------ theme
   'theme.default': '默认',
   'theme.dark': '深色',
+  'theme.light': '浅色',
+  'theme.system': '跟随系统',
 };
