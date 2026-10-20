@@ -388,20 +388,22 @@ check(
 
 const themeMarkup = commandMarkup(themeCommandId);
 const themeSvgTags = themeMarkup.match(/<svg\b[^>]*>/g) ?? [];
-const themeSvgAnatomy = themeSvgTags.length === 3 && themeSvgTags.every((tag) =>
-  tag.includes('class="toolbar-item-icon theme-icon-') && tag.includes('aria-hidden="true"') &&
+const themeSvgAnatomy = themeSvgTags.length === 1 && themeSvgTags.every((tag) =>
+  tag.includes('class="toolbar-item-icon"') && tag.includes('aria-hidden="true"') &&
   tag.includes('focusable="false"') && tag.includes('data-icon="inline-start"'));
-const themeModeIcons = ['light', 'dark', 'system'].every((m) =>
-  themeMarkup.includes(`theme-icon-${m}`));
+const themeSunGeometry = themeMarkup.includes('<circle cx="12" cy="12" r="4"></circle>') &&
+  themeMarkup.includes('M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41');
 const themeDisclosure = themeMarkup.includes('aria-controls="theme-menu"') &&
   themeMarkup.includes('aria-expanded="false"') &&
   themeMarkup.includes('data-i18n-title="toolbar.themeTitle"') &&
-  /\sdata-mode="dark"/.test(themeMarkup) &&
   /\saria-label="[^"]+"/.test(themeMarkup);
-const iconVisibility = css.includes('#toolbar .toolbar-theme .toolbar-item-icon { display: none; }') &&
-  ['light', 'dark', 'system'].every((m) =>
-    css.includes(`#toolbar .toolbar-theme[data-mode="${m}"] .theme-icon-${m}`)) &&
-  (css.match(/\.toolbar-theme\[data-mode="(?:light|dark|system)"\] \.theme-icon-(?:light|dark|system)/g) ?? []).length === 3;
+const themeNoModeState = !themeMarkup.includes('theme-icon-') && !/\sdata-mode=/.test(themeMarkup) &&
+  !css.includes('theme-icon-') && !css.includes('.toolbar-theme[data-mode=') &&
+  !app.includes('this.el.theme.dataset.mode');
+const themeBaseIconRule = css.includes('#toolbar .toolbar-item-icon { display: block;');
+const themeIconRuleBlocks = css.match(/[^{}]*\.(?:toolbar-theme|toolbar-item-icon)[^{}]*\{[^}]*\}/g) ?? [];
+const themeNoHiding = themeIconRuleBlocks.every((block) =>
+  !block.includes('display: none') && !block.includes('visibility: hidden'));
 const themeWiringNeedles = [
   "new SettingsMenu(this.el.theme, 'theme-menu')",
   'this.themeMenu.toggle(this.themeItems())',
@@ -412,12 +414,6 @@ const themeWiringNeedles = [
   "this.el.theme.setAttribute('aria-label', t('toolbar.themeTitle'))",
 ];
 const missingThemeWiring = themeWiringNeedles.filter((needle) => !app.includes(needle));
-const modeAssignments = app.match(/this\.el\.theme\.dataset\.mode = getMode\(\)/g) ?? [];
-const themeHandlerIndex = app.indexOf('onThemeChange(() => {');
-const firstAssign = app.indexOf('this.el.theme.dataset.mode = getMode()');
-const modeAssignmentPlacement = modeAssignments.length === 2 && themeHandlerIndex >= 0 &&
-  firstAssign >= 0 && firstAssign < themeHandlerIndex &&
-  app.lastIndexOf('this.el.theme.dataset.mode = getMode()') > themeHandlerIndex;
 const themeItemsStart = app.indexOf('private themeItems(');
 const themeItemsEnd = themeItemsStart >= 0 ? app.indexOf('\n  }', themeItemsStart) : -1;
 const themeItemsBody = themeItemsStart >= 0 && themeItemsEnd > themeItemsStart
@@ -428,12 +424,12 @@ const themeItemsShape = themeItemsBody.includes('THEME_MODES.map') &&
   themeItemsBody.includes('onPick: () => setMode(m)') &&
   !themeItemsBody.includes('children') && !themeItemsBody.includes('hint');
 check(
-  'the theme button carries the three mode icons, shows exactly one per data-mode, and wires the mode menu',
-  themeModeIcons && themeSvgAnatomy && themeDisclosure && iconVisibility &&
-    missingThemeWiring.length === 0 && modeAssignmentPlacement && themeItemsShape,
-  `icons=${themeModeIcons}, svgAnatomy=${themeSvgAnatomy}, disclosure=${themeDisclosure}, ` +
-  `visibility=${iconVisibility}, missing=${JSON.stringify(missingThemeWiring)}, ` +
-  `modeAssignments=${modeAssignments.length}@${firstAssign}/${themeHandlerIndex}, itemsShape=${themeItemsShape}`,
+  'the theme button carries a single static sun icon and wires the mode menu',
+  themeSvgAnatomy && themeSunGeometry && themeDisclosure && themeNoModeState &&
+    themeBaseIconRule && themeNoHiding && missingThemeWiring.length === 0 && themeItemsShape,
+  `svgs=${themeSvgTags.length}, anatomy=${themeSvgAnatomy}, sun=${themeSunGeometry}, ` +
+  `disclosure=${themeDisclosure}, noModeState=${themeNoModeState}, baseRule=${themeBaseIconRule}, ` +
+  `noHiding=${themeNoHiding}, missing=${JSON.stringify(missingThemeWiring)}, itemsShape=${themeItemsShape}`,
 );
 
 const sidebarChoiceNeedles = [
