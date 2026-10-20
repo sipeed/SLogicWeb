@@ -1,4 +1,20 @@
 import {
+  FUZZY_BOUNDARY,
+  FUZZY_CAMEL,
+  FUZZY_CONSECUTIVE,
+  FUZZY_DIGIT,
+  FUZZY_EXACT_CASE,
+  FUZZY_GAP_EXTEND,
+  FUZZY_GAP_START,
+  FUZZY_MAX_NEEDLE,
+  FUZZY_START,
+  FUZZY_SUBSTRING,
+  fuzzyMatch,
+  fuzzyRank,
+  highlightRuns,
+  type FuzzyRun,
+} from '../fuzzy.js';
+import {
   TYPEAHEAD_RESET_MS,
   matchPrefix,
   moveActiveIndex,
@@ -117,6 +133,129 @@ check(
   `TYPEAHEAD_RESET_MS=${TYPEAHEAD_RESET_MS}`,
 );
 
+const fuzzyConstants: readonly (readonly [string, number, number])[] = [
+  ['FUZZY_START', FUZZY_START, 10],
+  ['FUZZY_BOUNDARY', FUZZY_BOUNDARY, 8],
+  ['FUZZY_CAMEL', FUZZY_CAMEL, 6],
+  ['FUZZY_DIGIT', FUZZY_DIGIT, 4],
+  ['FUZZY_CONSECUTIVE', FUZZY_CONSECUTIVE, 6],
+  ['FUZZY_SUBSTRING', FUZZY_SUBSTRING, 6],
+  ['FUZZY_EXACT_CASE', FUZZY_EXACT_CASE, 2],
+  ['FUZZY_GAP_START', FUZZY_GAP_START, -3],
+  ['FUZZY_GAP_EXTEND', FUZZY_GAP_EXTEND, -1],
+  ['FUZZY_MAX_NEEDLE', FUZZY_MAX_NEEDLE, 32],
+];
+const fuzzyConstantFailures = fuzzyConstants.filter(([, actual, expected]) => actual !== expected);
+check(
+  'fuzzy scoring constants match the pinned literal table',
+  fuzzyConstantFailures.length === 0,
+  fuzzyConstantFailures.length === 0
+    ? `all ${fuzzyConstants.length} constants pinned`
+    : fuzzyConstantFailures
+      .map(([name, actual, expected]) => `${name}=${actual}, want ${expected}`)
+      .join('; '),
+);
+
+interface FuzzyMatchCase {
+  readonly needle: string;
+  readonly haystack: string;
+  readonly score: number | null;
+  readonly positions: readonly number[];
+}
+const fuzzyMatchCases: readonly FuzzyMatchCase[] = [
+  { needle: 'i2c', haystack: 'i2c - Inter-Integrated Circuit', score: 50, positions: [0, 1, 2] },
+  { needle: 'ir nec', haystack: 'ir_nec - IR NEC', score: 72, positions: [0, 1, 2, 3, 4, 5] },
+  { needle: 'rc6', haystack: 'ir_rc6 - IR RC-6', score: 36, positions: [3, 4, 5] },
+  { needle: 'USB', haystack: 'usb_signalling - USB signalling', score: 36, positions: [0, 1, 2] },
+  { needle: 'zzz', haystack: 'i2c - Inter-Integrated Circuit', score: null, positions: [] },
+  { needle: '', haystack: 'i2c - Inter-Integrated Circuit', score: 0, positions: [] },
+  {
+    needle: 'a'.repeat(FUZZY_MAX_NEEDLE + 1),
+    haystack: 'a'.repeat(FUZZY_MAX_NEEDLE + 8),
+    score: null,
+    positions: [],
+  },
+];
+const fuzzyMatchFailures = fuzzyMatchFailures0();
+function fuzzyMatchFailures0(): string[] {
+  const failures: string[] = [];
+  for (const { needle, haystack, score, positions } of fuzzyMatchCases) {
+    const match = fuzzyMatch(needle, haystack);
+    if (score === null) {
+      if (match !== null) failures.push(`'${needle}' should miss, got ${match.score}`);
+      continue;
+    }
+    if (match === null) {
+      failures.push(`'${needle}' missed, want ${score}`);
+    } else if (match.score !== score ||
+      JSON.stringify(match.positions) !== JSON.stringify(positions)) {
+      failures.push(
+        `'${needle}' = ${match.score}@${JSON.stringify(match.positions)}, ` +
+        `want ${score}@${JSON.stringify(positions)}`,
+      );
+    }
+  }
+  return failures;
+}
+check(
+  'fuzzyMatch returns exact scores and offsets across contiguous, separator-equivalent, digit, case-bonus, and rejection cases',
+  fuzzyMatchFailures.length === 0,
+  fuzzyMatchFailures.length === 0
+    ? `all ${fuzzyMatchCases.length} literal cases matched`
+    : fuzzyMatchFailures.join('; '),
+);
+
+const fuzzyRankCases: readonly (readonly [string, readonly string[], readonly number[]])[] = [
+  [
+    'uart',
+    ['quadrature_encoder - Quadrature encoder', 'uart - Universal Asynchronous Rx/Tx'],
+    [1, 0],
+  ],
+  ['x', ['x a', 'x b'], [0, 1]],
+  ['ab', ['x1 - AB', 'x1 - ab'], [1, 0]],
+];
+const fuzzyRankFailures = fuzzyRankCases.filter(([needle, haystacks, expected]) => {
+  const order = fuzzyRank(needle, haystacks).map((rank) => rank.index);
+  return JSON.stringify(order) !== JSON.stringify(expected);
+});
+check(
+  'fuzzyRank orders by score, keeps equal scores in original order, and rewards exact case',
+  fuzzyRankFailures.length === 0,
+  fuzzyRankFailures.length === 0
+    ? `all ${fuzzyRankCases.length} literal cases matched`
+    : fuzzyRankFailures
+      .map(([needle, haystacks]) =>
+        `'${needle}' -> ${JSON.stringify(fuzzyRank(needle, haystacks).map((rank) => rank.index))}`)
+      .join('; '),
+);
+
+const fuzzyRunCases: readonly (readonly [readonly number[], number, readonly FuzzyRun[]])[] = [
+  [[1, 4, 5], 10, [
+    { start: 0, length: 1, hit: false },
+    { start: 1, length: 1, hit: true },
+    { start: 2, length: 2, hit: false },
+    { start: 4, length: 2, hit: true },
+    { start: 6, length: 4, hit: false },
+  ]],
+  [[], 5, [{ start: 0, length: 5, hit: false }]],
+  [[0, 1, 2], 3, [{ start: 0, length: 3, hit: true }]],
+  [[], 0, []],
+];
+const fuzzyRunFailures = fuzzyRunCases.filter(([positions, length, expected]) => {
+  const runs = highlightRuns(positions, length);
+  return JSON.stringify(runs) !== JSON.stringify(expected);
+});
+check(
+  'highlightRuns merges match offsets into alternating plain and hit runs',
+  fuzzyRunFailures.length === 0,
+  fuzzyRunFailures.length === 0
+    ? `all ${fuzzyRunCases.length} literal cases matched`
+    : fuzzyRunFailures
+      .map(([positions, length]) =>
+        `${JSON.stringify(positions)}/${length} -> ${JSON.stringify(highlightRuns(positions, length))}`)
+      .join('; '),
+);
+
 {
   const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
   if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
@@ -130,6 +269,15 @@ check(
 
   const src = fs.readFileSync('src/ui/select.ts', 'utf8');
   const css = fs.readFileSync('src/ui/style.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+
+  const fuzzySrc = fs.readFileSync('src/ui/fuzzy.ts', 'utf8');
+  const fuzzyDomToken = /^(document|window)\./m.test(fuzzySrc);
+  const fuzzyMarkupToken = fuzzySrc.includes(['inner', 'HTML'].join(''));
+  check(
+    'the fuzzy matcher module performs no DOM access and no string-built markup',
+    !fuzzyDomToken && !fuzzyMarkupToken,
+    `fuzzyDomToken=${fuzzyDomToken}, fuzzyMarkupToken=${fuzzyMarkupToken}`,
+  );
 
   const ruleBody = (selector: string): string | null => {
     const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
