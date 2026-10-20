@@ -48,10 +48,11 @@
  * observe them. The style.css/index.html scans are read-only and unaffected by stubs.
  */
 
-import { LOGIC2_CHANNEL_COLORS } from '../../render/index.js';
+import { DARK_THEME, LIGHT_THEME, LOGIC2_CHANNEL_COLORS } from '../../render/index.js';
 import { en } from '../locales/en.js';
+import { canvasPalette } from '../canvasPalette.js';
 import {
-  CHANNEL_COLORS, CHANNEL_COLOR_PRESETS, CHROME, LIGHT_CHROME_TOKENS, ROWS,
+  CHANNEL_COLORS, CHANNEL_COLOR_PRESETS, CHROME, COLORS, GRID, LIGHT_CHROME_TOKENS, ROWS,
 } from '../metrics.js';
 import { defaultChannels } from '../state.js';
 import {
@@ -523,6 +524,87 @@ function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia
   const pass = ROWS.minRowHeight === 48 && ROWS.maxRowHeight >= ROWS.minRowHeight;
   check('channel rows keep the readable 48px minimum below the maximum clamp',
     pass, `min=${ROWS.minRowHeight}px, max=${ROWS.maxRowHeight}px`);
+}
+
+// ------------------------------------------- light canvas palette (checks 16-19)
+
+{
+  const seamDark = DARK_THEME.background === '#1B1B1C' && COLORS.bg10 === '#1B1B1C';
+  const seamLight = LIGHT_THEME.background === LIGHT_CHROME_TOKENS['--bg10'];
+  const geometry = LIGHT_THEME.rowSeparatorCssPx === DARK_THEME.rowSeparatorCssPx &&
+    LIGHT_THEME.noDataWashAlpha === DARK_THEME.noDataWashAlpha &&
+    LIGHT_THEME.noDataBorderAlpha === DARK_THEME.noDataBorderAlpha &&
+    LIGHT_THEME.noDataBorderCssPx === DARK_THEME.noDataBorderCssPx;
+  const sharedChannels = LIGHT_THEME.channelColors === DARK_THEME.channelColors &&
+    LIGHT_THEME.channelColors === LOGIC2_CHANNEL_COLORS;
+  const separators = LIGHT_THEME.rowSeparatorColor === LIGHT_CHROME_TOKENS['--border-high'] &&
+    LIGHT_THEME.noDataColor === LIGHT_CHROME_TOKENS['--text50'];
+  check('LIGHT_THEME keeps the dark geometry, shares the channel cycle, and meets the light seams',
+    seamDark && seamLight && geometry && sharedChannels && separators,
+    `seamDark=${seamDark}, seamLight=${seamLight}, geometry=${geometry}, ` +
+    `sharedChannels=${sharedChannels}, separators=${separators}`);
+}
+
+{
+  const dark = canvasPalette('dark');
+  const legacy = dark.bg === COLORS.bg10 && dark.text === COLORS.text &&
+    dark.text80 === COLORS.text80 && dark.text50 === COLORS.text50 &&
+    dark.bubbleBg === COLORS.bg30 && dark.bubbleBorder === COLORS.borderHigh &&
+    dark.gridMinor === GRID.minorColor && dark.gridMajor === GRID.majorColor &&
+    dark.axisTickMinor === GRID.minorColor && dark.axisTickMajor === GRID.majorColor &&
+    dark.warning === COLORS.warning && dark.negative === COLORS.negative &&
+    dark.selection === COLORS.selection && dark.bubbleInk === dark.bg &&
+    dark.noDataColor === DARK_THEME.noDataColor;
+  check('the dark canvas palette is byte-identical to the legacy constants',
+    legacy, `legacy=${legacy}`);
+}
+
+{
+  const light = canvasPalette('light');
+  const links = light.bg === LIGHT_THEME.background &&
+    light.text === LIGHT_CHROME_TOKENS['--text'] &&
+    light.text80 === LIGHT_CHROME_TOKENS['--text80'] &&
+    light.text50 === LIGHT_CHROME_TOKENS['--text50'] &&
+    light.negative === LIGHT_CHROME_TOKENS['--negative'] &&
+    light.bubbleBg === LIGHT_CHROME_TOKENS['--bg30'] &&
+    light.bubbleBorder === LIGHT_CHROME_TOKENS['--border-high'] &&
+    light.bubbleInk === light.bg && light.noDataColor === LIGHT_THEME.noDataColor;
+  const axisMinor: string = light.axisTickMinor;
+  const axisMajor: string = light.axisTickMajor;
+  const gridMinor: string = light.gridMinor;
+  const gridMajor: string = light.gridMajor;
+  const lightLiterals = axisMinor !== gridMinor && axisMajor !== gridMajor &&
+    gridMinor === '#EDE9DC' && gridMajor === '#F3EEE2' &&
+    axisMinor === '#D3C9AE' && axisMajor === '#C9BF9F' &&
+    light.warning === '#A67C00' && light.selection === '#1B7FA8';
+  const hex = /^#[0-9A-Fa-f]{6}$/;
+  const bad: string[] = [];
+  for (const id of ['dark', 'light'] as const) {
+    for (const [k, v] of Object.entries(canvasPalette(id))) {
+      if (!hex.test(v)) bad.push(`${id}.${k}`);
+    }
+  }
+  for (const [k, v] of Object.entries({
+    background: LIGHT_THEME.background,
+    rowSeparatorColor: LIGHT_THEME.rowSeparatorColor,
+    noDataColor: LIGHT_THEME.noDataColor,
+  })) {
+    if (!hex.test(v)) bad.push(`LIGHT_THEME.${k}`);
+  }
+  check('the light canvas palette derives from LIGHT_THEME plus pinned tokens, and every canvas color is #rrggbb',
+    links && lightLiterals && bad.length === 0,
+    `links=${links}, lightLiterals=${lightLiterals}, nonHex=${bad.join(',') || '(none)'}`);
+}
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const css = fs.readFileSync('src/ui/style.css', 'utf8');
+  const code = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const baseBlend = /\.grid-canvas\s*\{[^}]*mix-blend-mode:\s*lighten/.test(code);
+  const lightFlip = /html\[data-theme="light"\] \.grid-canvas\s*\{\s*mix-blend-mode:\s*darken;\s*\}/.test(code);
+  check('the grid canvas keeps the lighten blend with a darken flip under the light theme',
+    baseBlend && lightFlip, `baseBlend=${baseBlend}, lightFlip=${lightFlip}`);
 }
 
 // ---------------------------------------------------------------------- report

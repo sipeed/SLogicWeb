@@ -22,6 +22,7 @@ export type { LayoutMetrics, LayoutOptions, RowGeometry } from './layout.js';
 
 export {
   DARK_THEME,
+  LIGHT_THEME,
   LOGIC2_CHANNEL_COLORS,
   LOGIC2_BACKGROUNDS,
   LOGIC2_BORDERS,

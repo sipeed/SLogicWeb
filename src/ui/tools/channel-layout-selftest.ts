@@ -299,11 +299,24 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     app.includes('this.stack.setRows(rows, channelColors);') &&
     app.includes('color: this.channels[ch]?.color ?? channelColor(ch)');
   const rendererPalette = waveformStack.includes(
-    'const theme = { ...DARK_THEME, channelColors: this.channelColors };') &&
+    'const theme = { ...this.baseTheme, channelColors: this.channelColors };') &&
     waveformStack.includes('r.setTheme(theme);');
   check('custom color flows from channel state through cards, chips, hover, and renderers',
     cardColors && chipColors && appPalette && rendererPalette,
     `card=${cardColors}, chips=${chipColors}, app=${appPalette}, renderers=${rendererPalette}`);
+}
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const overlay = fs.readFileSync('src/ui/overlay.ts', 'utf8');
+  const noLegacyColorReads = !/\bCOLORS\./.test(overlay);
+  const gridReads = overlay.match(/\bGRID\./g) ?? [];
+  const gridGeometryOnly = gridReads.length === 2 &&
+    overlay.includes('GRID.dash') && overlay.includes('GRID.width');
+  check('overlay paints from the injected palette only (GRID limited to dash and width)',
+    noLegacyColorReads && gridGeometryOnly,
+    `noLegacyColorReads=${noLegacyColorReads}, gridReads=${gridReads.length}, gridGeometryOnly=${gridGeometryOnly}`);
 }
 
 {
@@ -337,7 +350,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `method=${methodStart >= 0}, fontScale=${fontScale}, noLaneHeight=${noLaneHeight}`);
 
   const alpha = body.includes('c.globalAlpha = 0.12;');
-  const color = body.includes('c.fillStyle = COLORS.text80;');
+  const color = body.includes('c.fillStyle = this.palette.text80;');
   const center = body.includes("c.textAlign = 'center';") &&
     body.includes("c.textBaseline = 'middle';");
   const anchor = body.includes("c.fillText('DEMO', this.wCss / 2, this.hCss / 2);");

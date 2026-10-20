@@ -755,6 +755,7 @@ html[data-theme="light"] .channel-settings-dialog::backdrop { background: var(--
   position: absolute; inset: 0; pointer-events: none;
   mix-blend-mode: lighten;
 }
+html[data-theme="light"] .grid-canvas { mix-blend-mode: darken; }
 .overlay-canvas { position: absolute; inset: 0; pointer-events: none; }
 
 #empty-hint {

@@ -92,6 +92,17 @@ export const DARK_THEME: Theme = {
   noDataBorderCssPx: 2,
 };
 
+export const LIGHT_THEME: Theme = {
+  background: '#FDF6E3',
+  channelColors: LOGIC2_CHANNEL_COLORS,
+  rowSeparatorColor: '#B4AB90',
+  rowSeparatorCssPx: 2,
+  noDataColor: '#6F6A5A',
+  noDataWashAlpha: 0.04,
+  noDataBorderAlpha: 0.2,
+  noDataBorderCssPx: 2,
+};
+
 /**
  * [MEASURED] Row pitch in rendered output is 98 device px =
  * 49 CSS px, of which the bottom 2 CSS px are the separator, leaving a 47 CSS px band.

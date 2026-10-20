@@ -18,7 +18,8 @@
  */
 
 import type { Bubble } from './annotationLayout.js';
-import { BUBBLE, COLORS, GRID, ROWS } from './metrics.js';
+import { canvasPalette, type CanvasPalette } from './canvasPalette.js';
+import { BUBBLE, GRID, ROWS } from './metrics.js';
 import type { TickSet } from './timeAxis.js';
 
 export interface HoverMeasurement {
@@ -50,6 +51,7 @@ export class Overlay {
   private wCss = 0;
   private hCss = 0;
   private dpr = 1;
+  private palette: CanvasPalette = canvasPalette('dark');
 
   constructor(container: HTMLElement) {
     this.grid = document.createElement('canvas');
@@ -63,6 +65,10 @@ export class Overlay {
     if (!g || !c) throw new Error('2D canvas context is unavailable');
     this.gridCtx = g;
     this.ctx = c;
+  }
+
+  setPalette(next: CanvasPalette): void {
+    this.palette = next;
   }
 
   /** A context with the bubble font set, for measuring text during layout. */
@@ -104,7 +110,7 @@ export class Overlay {
     g.setLineDash([...GRID.dash]);
     g.lineWidth = GRID.width;
     for (const t of ticks.ticks) {
-      g.strokeStyle = t.major ? GRID.majorColor : GRID.minorColor;
+      g.strokeStyle = t.major ? this.palette.gridMajor : this.palette.gridMinor;
       const x = Math.round(t.x) + 0.5;
       g.beginPath();
       g.moveTo(x, 0);
@@ -123,7 +129,7 @@ export class Overlay {
    * row out - lane above, band unchanged.
    */
   fillLane(top: number, height: number): void {
-    this.ctx.fillStyle = COLORS.bg10;
+    this.ctx.fillStyle = this.palette.bg;
     this.ctx.fillRect(0, top, this.wCss, height);
   }
 
@@ -131,7 +137,7 @@ export class Overlay {
     const c = this.ctx;
     c.save();
     c.globalAlpha = 0.12;
-    c.fillStyle = COLORS.text80;
+    c.fillStyle = this.palette.text80;
     c.font = `600 ${channelHeightCss * 2}px -apple-system, BlinkMacSystemFont, sans-serif`;
     c.textAlign = 'center';
     c.textBaseline = 'middle';
@@ -153,7 +159,7 @@ export class Overlay {
     const c = this.ctx;
     c.save();
     c.font = '8px -apple-system, BlinkMacSystemFont, sans-serif';
-    c.fillStyle = COLORS.text50;
+    c.fillStyle = this.palette.text50;
     c.textBaseline = 'middle';
     for (const b of boxes) {
       if (!b.isChannel) continue;
@@ -188,10 +194,10 @@ export class Overlay {
         c.font = `${BUBBLE.badgeFontPx}px ${BUBBLE.font.split('px ')[1] ?? 'sans-serif'}`;
         const bw = c.measureText(b.badge).width + 2 * BUBBLE.badgePad;
         const bh = BUBBLE.badgeFontPx + 2 * BUBBLE.badgePad;
-        c.fillStyle = COLORS.bg30;
+        c.fillStyle = this.palette.bubbleBg;
         roundRect(c, tx, y + (h - bh) / 2, bw, bh, BUBBLE.badgeRadius);
         c.fill();
-        c.fillStyle = COLORS.text80;
+        c.fillStyle = this.palette.text80;
         c.fillText(b.badge, tx + BUBBLE.badgePad, y + h / 2);
         tx += bw + 3;
         c.font = BUBBLE.font;
@@ -201,7 +207,7 @@ export class Overlay {
         c.beginPath();
         c.rect(b.x0, y, w, h);
         c.clip();
-        c.fillStyle = COLORS.bg10;
+        c.fillStyle = this.palette.bubbleInk;
         c.fillText(b.text, tx, y + h / 2 + 0.5);
         c.restore();
       }
@@ -225,7 +231,7 @@ export class Overlay {
     c.fillStyle = color;
     roundRect(c, x - w / 2, 0, w, 14, 2);
     c.fill();
-    c.fillStyle = COLORS.bg10;
+    c.fillStyle = this.palette.bg;
     c.fillText(label, x - w / 2 + 4, 2);
     c.restore();
   }
@@ -236,7 +242,7 @@ export class Overlay {
     if (x < -20 || x > this.wCss + 20) return;
     const px = Math.round(x) + 0.5;
     c.save();
-    c.strokeStyle = COLORS.warning;
+    c.strokeStyle = this.palette.warning;
     c.lineWidth = 1.5;
     c.beginPath();
     c.moveTo(px, 0);
@@ -246,10 +252,10 @@ export class Overlay {
     c.textBaseline = 'top';
     const label = 'T';
     const w = c.measureText(label).width + 10;
-    c.fillStyle = COLORS.warning;
+    c.fillStyle = this.palette.warning;
     roundRect(c, x - w / 2, 0, w, 15, 2);
     c.fill();
-    c.fillStyle = COLORS.bg10;
+    c.fillStyle = this.palette.bg;
     c.fillText(label, x - w / 2 + 5, 2);
     c.restore();
   }
@@ -258,7 +264,7 @@ export class Overlay {
   drawLiveEdge(x: number): void {
     const c = this.ctx;
     c.save();
-    c.strokeStyle = COLORS.negative;
+    c.strokeStyle = this.palette.negative;
     c.lineWidth = 1;
     c.setLineDash([2, 2]);
     c.beginPath();
@@ -301,12 +307,12 @@ export class Overlay {
       let by = h.rowTop + h.rowBand + 2;
       if (by + boxH > this.hCss) by = h.rowTop - boxH - 2;
       if (by < 0) by = 0;
-      c.fillStyle = COLORS.bg30;
+      c.fillStyle = this.palette.bubbleBg;
       roundRect(c, bx, by, w, boxH, 3);
       c.fill();
-      c.strokeStyle = COLORS.borderHigh;
+      c.strokeStyle = this.palette.bubbleBorder;
       c.stroke();
-      c.fillStyle = COLORS.text80;
+      c.fillStyle = this.palette.text80;
       h.lines.forEach((l, i) => c.fillText(l, bx + 6, by + 4 + i * 14));
     }
     c.restore();

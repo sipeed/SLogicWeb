@@ -39,6 +39,7 @@ import { formatCount, formatDuration, formatFreq, formatRate,
 import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, setLocale, t,
   type Locale, type MessageKey, type MessageVars } from './i18n.js';
 import { getMode, getTheme, onThemeChange, setMode, type ThemeId } from './theme.js';
+import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
 import { COLORS, MEASURE_COLORS, ROWS } from './metrics.js';
 import { Overlay, type HoverMeasurement } from './overlay.js';
@@ -122,6 +123,8 @@ export class App {
 
   private dirty = true;
   private panel: 'device' | 'analyzers' | null = 'device';
+  private paintedTheme: ThemeId;
+  private palette: CanvasPalette;
   private readonly wheelIntent = new WheelIntent();
 
   // DOM
@@ -169,6 +172,10 @@ export class App {
     this.storeRef = new StoreRef(createSampleStore(16, 16e6));
     this.stack = new WaveformStack(this.el.waveStack, this.storeRef);
     this.overlay = new Overlay(this.el.plot);
+    this.paintedTheme = getTheme();
+    this.palette = canvasPalette(this.paintedTheme);
+    this.overlay.setPalette(this.palette);
+    this.stack.setBaseTheme(baseTheme(this.paintedTheme));
     this.channelList = new ChannelList(this.el.channelList, {
       onConfigure: (channel, config) => this.configureChannel(channel, config),
       onReorder: (from, to) => this.reorder(from, to),
@@ -215,6 +222,14 @@ export class App {
     // would keep a stale checkmark, though, so it closes - same class as 'retranslate':
     // no focus hand-off for a programmatic switch.
     onThemeChange(() => {
+      const next = getTheme();
+      if (next !== this.paintedTheme) {
+        this.paintedTheme = next;
+        this.palette = canvasPalette(next);
+        this.overlay.setPalette(this.palette);
+        this.stack.setBaseTheme(baseTheme(next));
+        this.dirty = true;
+      }
       this.settingsMenu.close('theme');
       this.sidebarMenu.close('theme');
     });
@@ -502,7 +517,7 @@ export class App {
     const ctx = c.getContext('2d');
     if (!ctx) throw new Error('axis 2D context unavailable');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawAxis(ctx, ticks, wCss, hCss);
+    drawAxis(ctx, ticks, wCss, hCss, this.palette);
   }
 
   private drawLaneSurfaces(boxes: readonly RowBox[]): void {

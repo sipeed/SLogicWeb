@@ -24,6 +24,7 @@
  */
 
 import { DARK_THEME, ViewTransform, WaveformRenderer } from '../render/index.js';
+import type { Theme } from '../render/index.js';
 import type { SampleStore } from '../data/types.js';
 import { ROWS } from './metrics.js';
 
@@ -56,6 +57,7 @@ export class WaveformStack {
   private groups: RowSpec[][] = [];
   /** Absolute capture-channel index -> #rrggbb, shared by every renderer group. */
   private channelColors: string[] = [...DARK_THEME.channelColors];
+  private baseTheme: Theme = DARK_THEME;
   private dpr: number;
 
   constructor(
@@ -93,9 +95,14 @@ export class WaveformStack {
     return this.renderers[0]?.widthDevicePx ?? 0;
   }
 
+  setBaseTheme(next: Theme): void {
+    this.baseTheme = next;
+    this.syncCanvases();
+  }
+
   setRows(
     rows: readonly RowSpec[],
-    channelColors: readonly string[] = DARK_THEME.channelColors,
+    channelColors: readonly string[] = this.baseTheme.channelColors,
   ): void {
     for (const r of rows) {
       if (!Number.isInteger(r.heightCss) || r.heightCss <= 0) {
@@ -115,7 +122,7 @@ export class WaveformStack {
   }
 
   private syncCanvases(): void {
-    const theme = { ...DARK_THEME, channelColors: this.channelColors };
+    const theme = { ...this.baseTheme, channelColors: this.channelColors };
     while (this.renderers.length < this.groups.length) {
       const canvas = document.createElement('canvas');
       canvas.className = 'wave-canvas';

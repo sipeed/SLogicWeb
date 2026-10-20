@@ -18,7 +18,8 @@
  * incremental floating-point drift.
  */
 
-import { AXIS, COLORS, GRID } from './metrics.js';
+import { AXIS } from './metrics.js';
+import type { CanvasPalette } from './canvasPalette.js';
 import { majorLabel, minorLabel } from './format.js';
 import { MIN_SAMPLES_ON_SCREEN } from '../render/transform.js';
 
@@ -164,9 +165,10 @@ export function drawAxis(
   set: TickSet,
   widthCss: number,
   heightCss: number,
+  palette: CanvasPalette,
 ): void {
   ctx.clearRect(0, 0, widthCss, heightCss);
-  ctx.fillStyle = COLORS.bg10;
+  ctx.fillStyle = palette.bg;
   ctx.fillRect(0, 0, widthCss, heightCss);
 
   ctx.font = AXIS.tickFont;
@@ -178,21 +180,21 @@ export function drawAxis(
 
   for (const t of set.ticks) {
     const x = Math.round(t.x) + 0.5;
-    ctx.strokeStyle = t.major ? GRID.majorColor : GRID.minorColor;
+    ctx.strokeStyle = t.major ? palette.axisTickMajor : palette.axisTickMinor;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(x, t.major ? majorTop : minorTop);
     ctx.lineTo(x, heightCss);
     ctx.stroke();
 
-    ctx.fillStyle = t.major ? COLORS.text : COLORS.text50;
+    ctx.fillStyle = t.major ? palette.text : palette.text50;
     ctx.fillText(t.label, Math.round(t.x) + 1, t.major ? AXIS.majorBaseline : AXIS.minorBaseline);
   }
 
   if (set.pinned) {
     // [SOURCE] 4x6 px left-pointing arrow instead of a line.
     const { w, h } = AXIS.pinnedArrow;
-    ctx.fillStyle = COLORS.text;
+    ctx.fillStyle = palette.text;
     ctx.beginPath();
     ctx.moveTo(0, majorTop + h / 2);
     ctx.lineTo(w, majorTop);
