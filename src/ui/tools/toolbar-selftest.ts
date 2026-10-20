@@ -616,6 +616,30 @@ check(
   `missing=${JSON.stringify(missingPresentation)}`,
 );
 
+const plotCursorDecl = /#plot\s*\{[^}]*?cursor:\s*([^;]+);/.exec(css)?.[1] ?? '';
+const plotCursorUri = /url\("([^"]+)"\)/.exec(plotCursorDecl)?.[1] ?? '';
+const plotCursorSvg = decodeURIComponent(plotCursorUri.replace(/^data:image\/svg\+xml,/, ''));
+const plotCursorPaths = plotCursorSvg.match(/<path\b[^>]*>/g) ?? [];
+const haloInkAt = plotCursorSvg.indexOf("stroke='#FFFDF4'");
+const coreInkAt = plotCursorSvg.indexOf("stroke='#141415'");
+check(
+  'the plot pointer is a dual-tone image cursor with a centered hotspot and a native fallback',
+  plotCursorDecl.includes('url("data:image/svg+xml,') &&
+    plotCursorDecl.trim().endsWith('") 12 12, crosshair') &&
+    plotCursorDecl.includes('%23FFFDF4') && plotCursorDecl.includes('%23141415') &&
+    plotCursorPaths.length === 2 &&
+    plotCursorSvg.includes("stroke='#FFFDF4' stroke-width='3.6'") &&
+    plotCursorSvg.includes("stroke='#141415' stroke-width='1.6'") &&
+    haloInkAt >= 0 && coreInkAt > haloInkAt &&
+    (plotCursorSvg.match(/M12 2v20M2 12h20/g) ?? []).length === 2 &&
+    (plotCursorSvg.match(/stroke-linecap='round'/g) ?? []).length === 2 &&
+    plotCursorSvg.includes("xmlns='http://www.w3.org/2000/svg'") &&
+    plotCursorSvg.includes("width='24' height='24'") &&
+    plotCursorSvg.includes("viewBox='0 0 24 24'"),
+  `decl=${JSON.stringify(plotCursorDecl.trim().slice(-60))}, paths=${plotCursorPaths.length}, ` +
+  `inkAt=${haloInkAt}/${coreInkAt}, svgLen=${plotCursorSvg.length}`,
+);
+
 const mobileBlockStart = css.indexOf('@media (max-width: 760px) {');
 const mobileBlockEnd = mobileBlockStart >= 0 ? css.indexOf('\n}', mobileBlockStart) : -1;
 const mobileBlock = mobileBlockStart >= 0 && mobileBlockEnd > mobileBlockStart

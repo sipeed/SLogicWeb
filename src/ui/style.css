@@ -737,7 +737,7 @@ html[data-theme="light"] .channel-settings-dialog::backdrop { background: var(--
      stretches to fill the scroll viewport when the rows are shorter than it. */
   flex: 1 1 auto;
   background: var(--bg10);
-  cursor: crosshair;
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M12 2v20M2 12h20' fill='none' stroke='%23FFFDF4' stroke-width='3.6' stroke-linecap='round'/%3E%3Cpath d='M12 2v20M2 12h20' fill='none' stroke='%23141415' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") 12 12, crosshair;
   /* Vertical swipes scroll the channel stack (the browser's), horizontal pans and
      two-finger pinches drive the viewport (ours, via pointer events). */
   touch-action: pan-y;
