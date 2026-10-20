@@ -35,6 +35,18 @@ function lanServer(port: number): ServerOptions {
   };
 }
 
+function hostedWorkerFiles(): Plugin {
+  return {
+    name: 'logicweb:hosted-worker-files',
+    apply: 'build',
+    enforce: 'pre',
+    resolveId(source, importer) {
+      if (portable || !importer || !source.endsWith('?worker&inline')) return null;
+      return this.resolve(source.replace(/\?worker&inline$/, '?worker'), importer, { skipSelf: true });
+    },
+  };
+}
+
 function serveUiControlEntry(): Plugin {
   return {
     name: 'logicweb:uictrl-entry',
@@ -118,13 +130,23 @@ function emitLicense(): Plugin {
       this.emitFile({
         type: 'asset',
         fileName: 'DEPLOY.txt',
-        source:
-          'logicweb static distribution\n\n' +
-          'index.html contains the UI, Decode Worker, Pyodide WASM/stdlib and sigrok decoders.\n' +
-          'Double-click it for capture, WebUSB, protocol decoding and the Advanced USB console.\n' +
-          'Node, npm and a local HTTP server are not runtime dependencies.\n' +
-          'It can also be served unchanged from any static HTTPS host.\n' +
-          'JavaScript source maps are included for browser debugging. Advanced contains the USB console.\n',
+        source: portable
+          ? 'logicweb static distribution\n\n' +
+            'index.html contains the UI, Decode Worker, Pyodide WASM/stdlib and sigrok decoders.\n' +
+            'Double-click it for capture, WebUSB, protocol decoding and the Advanced USB console.\n' +
+            'Node, npm and a local HTTP server are not runtime dependencies.\n' +
+            'It can also be served unchanged from any static HTTPS host.\n' +
+            'JavaScript source maps are included for browser debugging. Advanced contains the USB console.\n'
+          : 'logicweb static distribution\n\n' +
+            'index.html inlines the application code and styles; the Decode and USB workers,\n' +
+            'the decoder detail data, Pyodide WASM/stdlib and the sigrok decoders ship as\n' +
+            'separate files beside it. Serve this directory unchanged from any static HTTPS\n' +
+            'host - Node and npm are not runtime dependencies. The entry source map is inlined\n' +
+            'for browser debugging; other maps ship beside their files. Advanced contains the\n' +
+            'USB console.\n\n' +
+            'Double-clicking index.html still opens the UI and capture works through the\n' +
+            'in-page USB fallback, but the workers and the decoder detail data cannot load\n' +
+            'from file://, so protocol decoding needs the portable single-file build instead.\n',
       });
     },
   };
@@ -161,6 +183,10 @@ function inlineEntryForFileOpen(): Plugin {
                 readFileSync(mapPath).toString('base64')}`;
             },
           );
+          code = code.replace(
+            /new URL\("([^"./][^"]*?\.js)",(\s*)import\.meta\.url\)/g,
+            'new URL("assets/$1",$2import.meta.url)',
+          );
           code = code.replace(/<\/script/gi, '<\\/script');
           return `<script type="module">\n${code}\n</script>`;
         },
@@ -177,6 +203,14 @@ function inlineEntryForFileOpen(): Plugin {
         `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,${
           readFileSync(resolve(out, 'favicon.svg')).toString('base64')}">`,
       );
+      const stray = html.match(/new URL\("(?!assets\/)[^"]+\.js"/);
+      if (stray) this.error(`inlined entry has an unresolved worker URL: ${stray[0]}`);
+      for (const m of html.matchAll(/new URL\("assets\/([^"]+\.js)"/g)) {
+        if (!existsSync(resolve(out, 'assets', m[1]))) {
+          this.error(`inlined entry references missing asset ${m[1]}`);
+        }
+      }
+
       writeFileSync(indexPath, html);
 
       if (portable) {
@@ -267,5 +301,5 @@ export default defineConfig({
     },
   },
 
-  plugins: [serveUiControlEntry(), requireRuntimeAssets(), emitLicense(), inlineEntryForFileOpen()],
+  plugins: [serveUiControlEntry(), requireRuntimeAssets(), emitLicense(), inlineEntryForFileOpen(), hostedWorkerFiles()],
 });

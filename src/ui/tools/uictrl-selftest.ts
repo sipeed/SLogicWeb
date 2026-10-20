@@ -181,13 +181,14 @@ const routeNeedles = [
   "name: 'logicweb:uictrl-entry'",
   "apply: 'serve'",
   "if (url === '/uictrl') request.url = '/uictrl/';",
-  'plugins: [serveUiControlEntry(), requireRuntimeAssets(), emitLicense(), inlineEntryForFileOpen()]',
 ];
+const pluginList = /plugins: \[([^\]]+)\]/.exec(config)?.[1] ?? '';
 const missingRouteNeedles = routeNeedles.filter((needle) => !config.includes(needle));
 check(
   'serve-only middleware keeps the exact console path ahead of SPA fallback',
-  missingRouteNeedles.length === 0 && !config.includes("input: 'uictrl/index.html'"),
-  `missing=${JSON.stringify(missingRouteNeedles)}`,
+  missingRouteNeedles.length === 0 && pluginList.includes('serveUiControlEntry()') &&
+    !config.includes("input: 'uictrl/index.html'"),
+  `missing=${JSON.stringify(missingRouteNeedles)} serveInPlugins=${pluginList.includes('serveUiControlEntry()')}`,
 );
 
 const styleNeedles = [
