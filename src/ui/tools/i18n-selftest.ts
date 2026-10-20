@@ -243,7 +243,7 @@ function check(name: string, pass: boolean, detail: string): void {
   ];
   const expectedTitles = [
     'toolbar.startTitle', 'toolbar.openTitle', 'toolbar.saveTitle', 'toolbar.fitTitle',
-    'toolbar.sidebarTitle', 'settings.titleHint', 'panel.resizeTitle',
+    'toolbar.sidebarTitle', 'toolbar.themeTitle', 'settings.titleHint', 'panel.resizeTitle',
   ];
   const expectedAriaLabels = [
     'panel.resizeLabel',
@@ -295,6 +295,7 @@ function check(name: string, pass: boolean, detail: string): void {
     ['btn-save', 'toolbar.save'],
     ['btn-fit', 'toolbar.fit'],
     ['btn-settings', 'settings.title'],
+    ['btn-theme', 'toolbar.themeTitle'],
     ['btn-sidebar', 'toolbar.sidebarTitle'],
   ];
   const nameDrift = toolbarNameKeys.filter(([id, key]) => {

@@ -246,8 +246,9 @@ check(
 );
 
 const leftCommandIds = ['btn-connect', 'transport', 'btn-open', 'btn-save', 'btn-fit', 'btn-settings'];
+const themeCommandId = 'btn-theme';
 const sidebarCommandId = 'btn-sidebar';
-const commandIds = [...leftCommandIds, sidebarCommandId];
+const commandIds = [...leftCommandIds, themeCommandId, sidebarCommandId];
 
 function commandMarkup(id: string): string {
   const idIndex = toolbar.indexOf(`id="${id}"`);
@@ -288,7 +289,7 @@ const sidebarMarkup = commandMarkup(sidebarCommandId);
 const separatorCount = toolbar.match(/role="separator"/g)?.length ?? 0;
 const verticalSeparatorCount = toolbar.match(/aria-orientation="vertical"/g)?.length ?? 0;
 check(
-  'seven icon-only commands expose shadcn anatomy, one media wrapper each, distinct decorative icons, and separators',
+  'eight icon-only commands expose shadcn anatomy, one media wrapper each, distinct decorative icons, and separators',
   anatomyFailures.length === 0 && iconSignatures.size === commandIds.length &&
     separatorCount === 2 && verticalSeparatorCount === 2,
   `failures=${JSON.stringify(anatomyFailures)}, icons=${iconSignatures.size}, separators=${separatorCount}/${verticalSeparatorCount}`,
@@ -325,19 +326,30 @@ check(
   `segment=${JSON.stringify(settingsToSpacer.replace(/\s+/g, ' '))}`,
 );
 
+const themeIndex = toolbar.indexOf('id="btn-theme"');
+const themeButtonStart = themeIndex >= 0 ? toolbar.lastIndexOf('<button', themeIndex) : -1;
+const themeButtonEnd = themeIndex >= 0 ? toolbar.indexOf('</button>', themeIndex) : -1;
+const themeAfterSpacer = spacerIndex >= 0 && themeButtonStart > spacerIndex;
+const spacerToTheme = themeAfterSpacer ? toolbar.slice(spacerIndex, themeButtonStart) : '';
+const themeDirectlyAfterSpacer = spacerToTheme.length > 0 &&
+  !spacerToTheme.includes('<button') && !spacerToTheme.includes('role="separator"');
+
 const sidebarIndex = toolbar.indexOf(`id="${sidebarCommandId}"`);
 const sidebarButtonStart = sidebarIndex >= 0 ? toolbar.lastIndexOf('<button', sidebarIndex) : -1;
-const sidebarAfterSpacer = spacerIndex >= 0 && sidebarButtonStart > spacerIndex;
-const spacerToSidebar = sidebarAfterSpacer ? toolbar.slice(spacerIndex, sidebarButtonStart) : '';
-const sidebarDirectlyAfterSpacer = spacerToSidebar.length > 0 &&
-  !spacerToSidebar.includes('<button') && !spacerToSidebar.includes('role="separator"');
+const sidebarAfterTheme = themeButtonStart >= 0 && sidebarButtonStart > themeButtonStart;
+const themeToSidebar = sidebarAfterTheme && themeButtonEnd > themeButtonStart
+  ? toolbar.slice(themeButtonEnd, sidebarButtonStart) : '';
+const sidebarDirectlyAfterTheme = themeToSidebar.length > 0 &&
+  !themeToSidebar.includes('<button') && !themeToSidebar.includes('role="separator"');
 const lastButtonIndex = toolbar.lastIndexOf('<button');
 const sidebarIsFinalCommand = lastButtonIndex >= 0 && lastButtonIndex === sidebarButtonStart &&
   toolbar.indexOf('role="separator"', sidebarIndex) === -1;
 check(
-  'the icon-only sidebar selector is the final toolbar command after the spacer',
-  sidebarAfterSpacer && sidebarDirectlyAfterSpacer && sidebarIsFinalCommand,
-  `spacer@${spacerIndex}, sidebar@${sidebarIndex}, afterSpacer=${sidebarAfterSpacer}, directlyAfter=${sidebarDirectlyAfterSpacer}, final=${sidebarIsFinalCommand}`,
+  'the theme mode button sits second from the right, between the spacer and the final sidebar selector',
+  themeAfterSpacer && themeDirectlyAfterSpacer && sidebarAfterTheme &&
+    sidebarDirectlyAfterTheme && sidebarIsFinalCommand,
+  `spacer@${spacerIndex}, theme@${themeIndex}, sidebar@${sidebarIndex}, ` +
+  `afterSpacer=${themeDirectlyAfterSpacer}, between=${sidebarDirectlyAfterTheme}, final=${sidebarIsFinalCommand}`,
 );
 
 const disclosureNeedles = [
@@ -372,6 +384,56 @@ check(
   'the sidebar selector reuses the settings menu with a distinct id and mutual overlay closure',
   missingSidebarWiring.length === 0 && menuIdConstructor,
   `missing=${JSON.stringify(missingSidebarWiring)}, menuId=${menuIdConstructor}`,
+);
+
+const themeMarkup = commandMarkup(themeCommandId);
+const themeSvgTags = themeMarkup.match(/<svg\b[^>]*>/g) ?? [];
+const themeSvgAnatomy = themeSvgTags.length === 3 && themeSvgTags.every((tag) =>
+  tag.includes('class="toolbar-item-icon theme-icon-') && tag.includes('aria-hidden="true"') &&
+  tag.includes('focusable="false"') && tag.includes('data-icon="inline-start"'));
+const themeModeIcons = ['light', 'dark', 'system'].every((m) =>
+  themeMarkup.includes(`theme-icon-${m}`));
+const themeDisclosure = themeMarkup.includes('aria-controls="theme-menu"') &&
+  themeMarkup.includes('aria-expanded="false"') &&
+  themeMarkup.includes('data-i18n-title="toolbar.themeTitle"') &&
+  /\sdata-mode="dark"/.test(themeMarkup) &&
+  /\saria-label="[^"]+"/.test(themeMarkup);
+const iconVisibility = css.includes('#toolbar .toolbar-theme .toolbar-item-icon { display: none; }') &&
+  ['light', 'dark', 'system'].every((m) =>
+    css.includes(`#toolbar .toolbar-theme[data-mode="${m}"] .theme-icon-${m}`)) &&
+  (css.match(/\.toolbar-theme\[data-mode="(?:light|dark|system)"\] \.theme-icon-(?:light|dark|system)/g) ?? []).length === 3;
+const themeWiringNeedles = [
+  "new SettingsMenu(this.el.theme, 'theme-menu')",
+  'this.themeMenu.toggle(this.themeItems())',
+  "this.el.theme.addEventListener('click'",
+  "this.themeMenu.close('outside')",
+  "this.themeMenu.close('retranslate')",
+  "this.themeMenu.close('theme')",
+  "this.el.theme.setAttribute('aria-label', t('toolbar.themeTitle'))",
+];
+const missingThemeWiring = themeWiringNeedles.filter((needle) => !app.includes(needle));
+const modeAssignments = app.match(/this\.el\.theme\.dataset\.mode = getMode\(\)/g) ?? [];
+const themeHandlerIndex = app.indexOf('onThemeChange(() => {');
+const firstAssign = app.indexOf('this.el.theme.dataset.mode = getMode()');
+const modeAssignmentPlacement = modeAssignments.length === 2 && themeHandlerIndex >= 0 &&
+  firstAssign >= 0 && firstAssign < themeHandlerIndex &&
+  app.lastIndexOf('this.el.theme.dataset.mode = getMode()') > themeHandlerIndex;
+const themeItemsStart = app.indexOf('private themeItems(');
+const themeItemsEnd = themeItemsStart >= 0 ? app.indexOf('\n  }', themeItemsStart) : -1;
+const themeItemsBody = themeItemsStart >= 0 && themeItemsEnd > themeItemsStart
+  ? app.slice(themeItemsStart, themeItemsEnd) : '';
+const themeItemsShape = themeItemsBody.includes('THEME_MODES.map') &&
+  themeItemsBody.includes('label: t(THEME_MODE_LABEL_KEYS[m])') &&
+  themeItemsBody.includes('checked: m === getMode()') &&
+  themeItemsBody.includes('onPick: () => setMode(m)') &&
+  !themeItemsBody.includes('children') && !themeItemsBody.includes('hint');
+check(
+  'the theme button carries the three mode icons, shows exactly one per data-mode, and wires the mode menu',
+  themeModeIcons && themeSvgAnatomy && themeDisclosure && iconVisibility &&
+    missingThemeWiring.length === 0 && modeAssignmentPlacement && themeItemsShape,
+  `icons=${themeModeIcons}, svgAnatomy=${themeSvgAnatomy}, disclosure=${themeDisclosure}, ` +
+  `visibility=${iconVisibility}, missing=${JSON.stringify(missingThemeWiring)}, ` +
+  `modeAssignments=${modeAssignments.length}@${firstAssign}/${themeHandlerIndex}, itemsShape=${themeItemsShape}`,
 );
 
 const sidebarChoiceNeedles = [

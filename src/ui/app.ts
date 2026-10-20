@@ -38,7 +38,8 @@ import { formatCount, formatDuration, formatFreq, formatRate,
   formatAnalyzerNote, formatCaptureLabel, formatStatusError } from './format.js';
 import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, setLocale, t,
   type Locale, type MessageKey, type MessageVars } from './i18n.js';
-import { getMode, getTheme, onThemeChange, setMode, type ThemeId } from './theme.js';
+import { getMode, getTheme, onThemeChange, setMode, THEME_MODES, THEME_MODE_LABEL_KEYS,
+  type ThemeId } from './theme.js';
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
 import { COLORS, MEASURE_COLORS, ROWS } from './metrics.js';
@@ -73,6 +74,7 @@ export class App {
   private readonly analyzerPanel: AnalyzerPanel;
   private readonly settingsMenu: SettingsMenu;
   private readonly sidebarMenu: SettingsMenu;
+  private readonly themeMenu: SettingsMenu;
   private readonly resizer: PanelResizer;
   private readonly decodeClient = sharedDecodeClient({
     // Resolve from the document, not from the worker script. This supports static sites
@@ -135,6 +137,7 @@ export class App {
     hint: HTMLDivElement; transport: HTMLButtonElement;
     connect: HTMLButtonElement; open: HTMLButtonElement; save: HTMLButtonElement;
     fit: HTMLButtonElement; settings: HTMLButtonElement; sidebar: HTMLButtonElement;
+    theme: HTMLButtonElement;
     fileInput: HTMLInputElement;
   };
 
@@ -157,6 +160,7 @@ export class App {
       fit: must<HTMLButtonElement>('btn-fit'),
       settings: must<HTMLButtonElement>('btn-settings'),
       sidebar: must<HTMLButtonElement>('btn-sidebar'),
+      theme: must<HTMLButtonElement>('btn-theme'),
       fileInput: must<HTMLInputElement>('file-input'),
     };
 
@@ -167,6 +171,8 @@ export class App {
 
     this.settingsMenu = new SettingsMenu(must<HTMLButtonElement>('btn-settings'));
     this.sidebarMenu = new SettingsMenu(this.el.sidebar, 'sidebar-menu');
+    this.themeMenu = new SettingsMenu(this.el.theme, 'theme-menu');
+    this.el.theme.dataset.mode = getMode();
     this.resizer = new PanelResizer(this.el.resizer, this.el.side, this.el.main);
 
     this.storeRef = new StoreRef(createSampleStore(16, 16e6));
@@ -230,8 +236,10 @@ export class App {
         this.stack.setBaseTheme(baseTheme(next));
         this.dirty = true;
       }
+      this.el.theme.dataset.mode = getMode();
       this.settingsMenu.close('theme');
       this.sidebarMenu.close('theme');
+      this.themeMenu.close('theme');
     });
 
     // Observe the scroll viewport, not the plot: the plot's height is now an *output*
@@ -849,12 +857,20 @@ export class App {
       // Keep the channel dialog and this transient menu from competing for focus.
       this.channelList.closeDialog();
       this.sidebarMenu.close('outside');
+      this.themeMenu.close('outside');
       this.settingsMenu.toggle(this.settingsItems());
     });
     this.el.sidebar.addEventListener('click', () => {
       this.channelList.closeDialog();
       this.settingsMenu.close('outside');
+      this.themeMenu.close('outside');
       this.sidebarMenu.toggle(this.sidebarItems());
+    });
+    this.el.theme.addEventListener('click', () => {
+      this.channelList.closeDialog();
+      this.settingsMenu.close('outside');
+      this.sidebarMenu.close('outside');
+      this.themeMenu.toggle(this.themeItems());
     });
   }
 
@@ -877,10 +893,15 @@ export class App {
           onPick: () => { void setLocale(l).then((r) => { if (r === 'failed') this.fail('error.localeLoad', l); }); },
         })),
       },
-      // No theme row: dark is the only shipping look and the picker is retired.
-      // The machinery stays intact and reachable via debug.setTheme, so re-showing
-      // the row here is a one-item revert.
     ];
+  }
+
+  private themeItems(): SettingsMenuItem[] {
+    return THEME_MODES.map((m) => ({
+      label: t(THEME_MODE_LABEL_KEYS[m]),
+      checked: m === getMode(),
+      onPick: () => setMode(m),
+    }));
   }
 
   private sidebarItems(): SettingsMenuItem[] {
@@ -914,6 +935,7 @@ export class App {
   private retranslate(): void {
     this.settingsMenu.close('retranslate');
     this.sidebarMenu.close('retranslate');
+    this.themeMenu.close('retranslate');
     applyStaticI18n(document);
     this.relayout();       // channel cells rebuild; an open channel dialog closes here
     this.renderPanels();   // side panels + toolbar chrome
@@ -989,6 +1011,7 @@ export class App {
     this.el.save.setAttribute('aria-label', t('toolbar.save'));
     this.el.fit.setAttribute('aria-label', t('toolbar.fit'));
     this.el.settings.setAttribute('aria-label', t('settings.title'));
+    this.el.theme.setAttribute('aria-label', t('toolbar.themeTitle'));
     this.el.sidebar.setAttribute('aria-label', t('toolbar.sidebarTitle'));
 
     const btn = this.el.transport;

@@ -36,6 +36,7 @@ export const ru: Messages = {
   'toolbar.saveTitle': 'Сохранить этот захват как .lwcap',
   'toolbar.fitTitle': 'Масштабировать на весь захват',
   'toolbar.sidebarTitle': 'Выбор правой боковой панели',
+  'toolbar.themeTitle': 'Переключить тему',
   'toolbar.sidebarDevice': 'Устройство и настройки захвата',
   'toolbar.sidebarAnalyzers': 'Протокольные анализаторы',
   'toolbar.sidebarNone': 'Без боковой панели',

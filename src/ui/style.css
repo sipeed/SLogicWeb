@@ -279,6 +279,10 @@ html[data-theme="light"] button:active { box-shadow: inset 0 0 0 999px rgb(0 0 0
 #transport .transport-stop { display: none; }
 #transport.danger .transport-play { display: none; }
 #transport.danger .transport-stop { display: block; }
+#toolbar .toolbar-theme .toolbar-item-icon { display: none; }
+#toolbar .toolbar-theme[data-mode="light"] .theme-icon-light,
+#toolbar .toolbar-theme[data-mode="dark"] .theme-icon-dark,
+#toolbar .toolbar-theme[data-mode="system"] .theme-icon-system { display: block; }
 
 @media (max-width: 760px) {
   #toolbar { gap: 4px; padding: 6px; }

@@ -40,6 +40,7 @@ export const en = {
   'toolbar.saveTitle': 'Save this capture as .lwcap',
   'toolbar.fitTitle': 'Zoom to the whole capture',
   'toolbar.sidebarTitle': 'Choose right sidebar',
+  'toolbar.themeTitle': 'Toggle theme',
   'toolbar.sidebarDevice': 'Device and capture settings',
   'toolbar.sidebarAnalyzers': 'Protocol analyzers',
   'toolbar.sidebarNone': 'No sidebar',
