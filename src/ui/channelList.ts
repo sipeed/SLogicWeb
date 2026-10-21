@@ -303,7 +303,6 @@ class ChannelSettingsDialog {
     }
     this.customColorButton.classList.toggle('selected', !presetSelected);
     this.customColorButton.setAttribute('aria-pressed', String(!presetSelected));
-    this.customColorButton.style.background = this.selectedColor;
     this.colorInput.value = this.selectedColor;
   }
 

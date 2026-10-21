@@ -258,6 +258,17 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     colorGrid,
     `presetGridAndCustomPopover=${colorGrid}`);
 
+  const styleSheet = fs.readFileSync('src/ui/style.css', 'utf8');
+  const staticFill = !dialogSource.includes('customColorButton.style.background') &&
+    /\.channel-color-custom\s*\{[^}]*background:\s*var\(--bg20\)/.test(styleSheet) &&
+    /html\[data-theme="light"\]\s+\.channel-color-custom\s*\{[^}]*background:\s*var\(--bg30\)/.test(styleSheet);
+  const markBody = styleSheet.match(/\.channel-color-custom-mark\s*\{([^}]*)\}/)?.[1] ?? '';
+  const bareMark = markBody.includes('color: var(--foreground)') &&
+    !markBody.includes('background') && !markBody.includes('border');
+  check('the custom swatch keeps a static brighter fill and a bare foreground plus',
+    staticFill && bareMark,
+    `staticFill=${staticFill}, bareMark=${bareMark}`);
+
   const descriptionRemoved = !dialogSource.includes('aria-describedby') &&
     !dialogSource.includes('channel-settings-description') &&
     !dialogSource.includes('channels.dialogDescription') &&

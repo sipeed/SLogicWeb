@@ -557,18 +557,12 @@ html[data-theme="light"] .channel-settings-dialog::backdrop { background: var(--
 .channel-color-swatch:hover { border-color: var(--primary); }
 .channel-color-swatch.selected,
 .channel-color-swatch:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.channel-color-custom { anchor-name: --channel-color-custom; }
-/* [CHOSEN] A token-backed 14px badge keeps + readable over any custom swatch color. */
+.channel-color-custom { anchor-name: --channel-color-custom; background: var(--bg20); }
+html[data-theme="light"] .channel-color-custom { background: var(--bg30); }
 .channel-color-custom-mark {
-  display: grid;
-  place-items: center;
-  width: 14px;
-  height: 14px;
-  background: var(--card);
-  color: var(--card-foreground);
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  font-size: 12px;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 600;
   line-height: 1;
   pointer-events: none;
 }
