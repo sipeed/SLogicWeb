@@ -178,6 +178,12 @@ const fuzzyMatchCases: readonly FuzzyMatchCase[] = [
   { needle: 'zzz', haystack: 'i2c - Inter-Integrated Circuit', score: null, positions: [] },
   { needle: '', haystack: 'i2c - Inter-Integrated Circuit', score: 0, positions: [] },
   {
+    needle: 'a'.repeat(FUZZY_MAX_NEEDLE),
+    haystack: 'a'.repeat(FUZZY_MAX_NEEDLE + 8),
+    score: 274,
+    positions: Array.from({ length: FUZZY_MAX_NEEDLE }, (_, i) => i),
+  },
+  {
     needle: 'a'.repeat(FUZZY_MAX_NEEDLE + 1),
     haystack: 'a'.repeat(FUZZY_MAX_NEEDLE + 8),
     score: null,
