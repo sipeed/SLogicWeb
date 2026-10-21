@@ -462,6 +462,7 @@ const baseSettings: CaptureSettings = {
     'toolbar.start', 'toolbar.demo', 'capture.demo', 'settings.language', 'settings.theme',
     'trigger.anyEdge',
     'channels.settings', 'channels.name', 'channels.color', 'channels.customColor',
+    'channels.moreColors',
     'channels.resetName',
     'channels.triggerMode', 'channels.cancel',
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',

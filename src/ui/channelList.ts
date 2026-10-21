@@ -25,7 +25,7 @@
 import { button, div } from './capturePanel.js';
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
-import { CHANNEL_COLOR_PRESETS } from './metrics.js';
+import { CHANNEL_COLOR_PRESETS, CHANNEL_PALETTE_COLORS } from './metrics.js';
 import { DEFAULT_TRIGGER_MODE, defaultChannelName,
   type AnalyzerState, type ChannelState, type TriggerMode } from './state.js';
 
@@ -81,10 +81,11 @@ class ChannelSettingsDialog {
   private readonly resetNameButton: HTMLButtonElement;
   private readonly colorLabel: HTMLSpanElement;
   private readonly colorInput: HTMLInputElement;
-  private readonly paletteLabel: HTMLLabelElement;
   private readonly colorPalette: HTMLDivElement;
   private readonly customColorButton: HTMLButtonElement;
+  private readonly moreColorsButton: HTMLButtonElement;
   private readonly presetColorButtons = new Map<string, HTMLButtonElement>();
+  private readonly paletteSwatches = new Map<string, HTMLButtonElement>();
   private selectedColor = '#000000';
   private readonly triggerLabel: HTMLSpanElement;
   private readonly triggerFieldset: HTMLFieldSetElement;
@@ -193,19 +194,36 @@ class ChannelSettingsDialog {
     this.colorPalette.setAttribute('popover', 'auto');
     this.colorPalette.setAttribute('role', 'group');
     this.customColorButton.setAttribute('popovertarget', this.colorPalette.id);
-    this.paletteLabel = document.createElement('label');
-    this.paletteLabel.className = 'channel-color-palette-label';
-    this.paletteLabel.id = 'channel-custom-color-label';
-    this.paletteLabel.htmlFor = 'channel-settings-color';
-    this.colorPalette.setAttribute('aria-labelledby', this.paletteLabel.id);
-    this.colorInput = document.createElement('input');
-    this.colorInput.id = 'channel-settings-color';
-    this.colorInput.className = 'channel-settings-color';
-    this.colorInput.type = 'color';
-    this.colorInput.addEventListener('input', () => {
-      this.selectedColor = this.colorInput.value;
-      this.syncColorSelection();
+    const paletteGrid = div('channel-color-palette-grid');
+    for (const color of CHANNEL_PALETTE_COLORS) {
+      const swatch = button('', 'channel-color-palette-swatch');
+      swatch.type = 'button';
+      swatch.title = color;
+      swatch.setAttribute('aria-label', color);
+      swatch.setAttribute('aria-pressed', 'false');
+      swatch.style.background = color;
+      swatch.addEventListener('click', () => {
+        this.selectedColor = color;
+        this.syncColorSelection();
+        this.hideColorPalette();
+        this.customColorButton.focus();
+      });
+      paletteGrid.appendChild(swatch);
+      this.paletteSwatches.set(color, swatch);
+    }
+    this.moreColorsButton = button('', 'channel-color-palette-more');
+    this.moreColorsButton.type = 'button';
+    this.moreColorsButton.addEventListener('click', () => {
+      if (typeof this.colorInput.showPicker === 'function') {
+        this.colorInput.showPicker();
+      } else {
+        this.colorInput.click();
+      }
     });
+    this.colorInput = document.createElement('input');
+    this.colorInput.className = 'channel-color-palette-input';
+    this.colorInput.type = 'color';
+    this.colorInput.tabIndex = -1;
     this.colorInput.addEventListener('change', () => {
       this.selectedColor = this.colorInput.value;
       this.syncColorSelection();
@@ -213,9 +231,17 @@ class ChannelSettingsDialog {
       this.customColorButton.focus();
     });
     this.colorPalette.addEventListener('toggle', () => {
-      if (this.colorPalette.matches(':popover-open')) this.colorInput.focus();
+      if (!this.colorPalette.matches(':popover-open')) return;
+      const selected = this.selectedColor.toLowerCase();
+      for (const [color, swatch] of this.paletteSwatches) {
+        if (color.toLowerCase() === selected) {
+          swatch.focus();
+          return;
+        }
+      }
+      this.moreColorsButton.focus();
     });
-    this.colorPalette.append(this.paletteLabel, this.colorInput);
+    this.colorPalette.append(paletteGrid, this.moreColorsButton, this.colorInput);
     colorField.append(this.colorLabel, colorGrid, this.colorPalette);
 
     fields.append(nameField, triggerField, colorField);
@@ -279,7 +305,11 @@ class ChannelSettingsDialog {
     this.resetNameButton.title = resetTitle;
     this.resetNameButton.setAttribute('aria-label', resetTitle);
     this.colorLabel.textContent = t('channels.color');
-    this.paletteLabel.textContent = t('channels.customColor');
+    this.colorPalette.setAttribute('aria-label', t('channels.customColor'));
+    const moreColors = t('channels.moreColors');
+    this.moreColorsButton.textContent = `+ ${moreColors}`;
+    this.moreColorsButton.title = moreColors;
+    this.moreColorsButton.setAttribute('aria-label', moreColors);
     this.customColorButton.title = t('channels.customColor');
     this.customColorButton.setAttribute('aria-label', t('channels.customColor'));
     this.triggerLabel.textContent = t('channels.triggerMode');
@@ -303,6 +333,11 @@ class ChannelSettingsDialog {
     }
     this.customColorButton.classList.toggle('selected', !presetSelected);
     this.customColorButton.setAttribute('aria-pressed', String(!presetSelected));
+    for (const [color, swatch] of this.paletteSwatches) {
+      const active = color.toLowerCase() === selected;
+      swatch.classList.toggle('selected', active);
+      swatch.setAttribute('aria-pressed', String(active));
+    }
     this.colorInput.value = this.selectedColor;
   }
 

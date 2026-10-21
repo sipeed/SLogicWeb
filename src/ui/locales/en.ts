@@ -103,6 +103,7 @@ export const en = {
   'channels.name': 'Channel name',
   'channels.color': 'Channel color',
   'channels.customColor': 'Custom color',
+  'channels.moreColors': 'More colors…',
   'channels.triggerMode': 'Trigger mode',
   'channels.cancel': 'Cancel',
   'channels.removeAnalyzer': 'Remove {label}',

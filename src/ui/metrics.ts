@@ -52,6 +52,12 @@ export const CHANNEL_COLOR_PRESETS: readonly string[] = [
   '#2DD4BF', // teal
 ];
 
+export const CHANNEL_PALETTE_COLORS: readonly string[] = [
+  '#DC2626', '#EA580C', '#D97706', '#16A34A', '#0D9488', '#2563EB', '#7C3AED', '#DB2777',
+  '#EF4444', '#F97316', '#F59E0B', '#22C55E', '#14B8A6', '#3B82F6', '#8B5CF6', '#EC4899',
+  '#65A30D', '#059669', '#0891B2', '#0284C7', '#4F46E5', '#C026D3', '#E11D48', '#78716C',
+];
+
 /** [CHOSEN] . */
 export const COLORS = {
   /** Darkest background, used for the toolbar's inactive areas. */

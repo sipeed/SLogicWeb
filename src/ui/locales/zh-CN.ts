@@ -97,6 +97,7 @@ export const zhCN: Messages = {
   'channels.name': '通道名称',
   'channels.color': '通道颜色',
   'channels.customColor': '自定义颜色',
+  'channels.moreColors': '更多颜色…',
   'channels.triggerMode': '触发模式',
   'channels.cancel': '取消',
   'channels.removeAnalyzer': '移除 {label}',

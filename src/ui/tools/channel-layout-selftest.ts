@@ -269,6 +269,40 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     staticFill && bareMark,
     `staticFill=${staticFill}, bareMark=${bareMark}`);
 
+  const paletteStructure = dialogSource.includes("div('channel-color-palette-grid')") &&
+    dialogSource.includes('for (const color of CHANNEL_PALETTE_COLORS)') &&
+    dialogSource.includes("'channel-color-palette-swatch'") &&
+    dialogSource.includes("'channel-color-palette-more'") &&
+    /swatch\.type = 'button'/.test(dialogSource) &&
+    /moreColorsButton\.type = 'button'/.test(dialogSource) &&
+    dialogSource.includes("typeof this.colorInput.showPicker === 'function'") &&
+    dialogSource.includes('this.colorInput.click();') &&
+    dialogSource.includes('for (const [color, swatch] of this.paletteSwatches)') &&
+    dialogSource.includes('this.moreColorsButton.focus();');
+  check('the custom swatch opens a swatch palette with a feature-gated native picker',
+    paletteStructure,
+    `paletteStructure=${paletteStructure}`);
+
+  const paletteA11y = !dialogSource.includes('paletteLabel') &&
+    !dialogSource.includes('channel-color-palette-label') &&
+    !dialogSource.includes('colorInput.id =') &&
+    dialogSource.includes("this.colorPalette.setAttribute('aria-label', t('channels.customColor'))") &&
+    !dialogSource.includes("colorInput.addEventListener('input'") &&
+    dialogSource.includes("this.colorInput.className = 'channel-color-palette-input'") &&
+    dialogSource.includes('this.colorInput.tabIndex = -1;') &&
+    /\.channel-color-palette-input\s*\{[^}]*opacity:\s*0/.test(styleSheet) &&
+    !/\.channel-color-palette-input\s*\{[^}]*display:\s*none/.test(styleSheet);
+  check('the palette keeps an accessible name and a rendered hidden input without the strip',
+    paletteA11y,
+    `paletteA11y=${paletteA11y}`);
+
+  const paletteGridShape = /\.channel-color-palette-grid\s*\{[^}]*repeat\(8, minmax\(0, 1fr\)\)/.test(styleSheet) &&
+    !styleSheet.includes('.channel-color-palette-label') &&
+    !/\.channel-settings-color(?![\w-])/.test(styleSheet);
+  check('the palette grid keeps the 8-column shape and retires the strip styles',
+    paletteGridShape,
+    `paletteGridShape=${paletteGridShape}`);
+
   const descriptionRemoved = !dialogSource.includes('aria-describedby') &&
     !dialogSource.includes('channel-settings-description') &&
     !dialogSource.includes('channels.dialogDescription') &&

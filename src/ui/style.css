@@ -500,8 +500,7 @@ html[data-theme="light"] .channel-settings-dialog::backdrop { background: var(--
   gap: 12px;
 }
 .channel-settings-copy { color: var(--muted-foreground); font-size: 11px; line-height: 16px; }
-.channel-settings-name,
-.channel-settings-color {
+.channel-settings-name {
   width: 100%;
   background: var(--background);
   color: var(--foreground);
@@ -511,11 +510,7 @@ html[data-theme="light"] .channel-settings-dialog::backdrop { background: var(--
 .channel-settings-name-control { display: flex; align-items: stretch; gap: 6px; }
 .channel-settings-name-control .channel-settings-name { flex: 1; min-width: 0; width: auto; }
 .channel-settings-name { min-width: 0; padding: 5px 8px; font: inherit; }
-/* [CHOSEN] The custom Popover keeps a full-width 32px native swatch for arbitrary
-   #rrggbb input; the outer preset grid stays independent of native picker geometry. */
-.channel-settings-color { height: 32px; padding: 2px 4px; cursor: pointer; }
 .channel-settings-name:focus-visible,
-.channel-settings-color:focus-visible,
 .channel-name-reset:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .channel-name-reset {
   flex: none;
@@ -567,25 +562,66 @@ html[data-theme="light"] .channel-color-custom { background: var(--bg30); }
   pointer-events: none;
 }
 /* [SOURCE] shadcn Popover anatomy and semantic roles, translated to the native top
-   layer. [CHOSEN] 220px content width and 6px anchor offset; no manual z-index. */
+   layer; no manual z-index. */
 .channel-color-palette {
   position: fixed;
   inset: auto;
   position-anchor: --channel-color-custom;
   position-area: bottom center;
   position-try-fallbacks: flip-block, flip-inline;
-  width: 220px;
+  width: 252px;
   max-width: calc(100vw - 16px);
   margin: 6px 0;
-  padding: 12px;
+  padding: 8px;
   background: var(--popover);
   color: var(--popover-foreground);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
 }
-.channel-color-palette:popover-open { display: flex; flex-direction: column; gap: 8px; }
-.channel-color-palette-label { color: var(--muted-foreground); font-size: 11px; line-height: 16px; }
+.channel-color-palette:popover-open { display: flex; flex-direction: column; gap: 6px; }
+.channel-color-palette-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
+}
+.channel-color-palette-swatch {
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) - 4px);
+  cursor: pointer;
+}
+.channel-color-palette-swatch:hover { border-color: var(--primary); }
+.channel-color-palette-swatch.selected,
+.channel-color-palette-swatch:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.channel-color-palette-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 24px;
+  padding: 0 6px;
+  background: none;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.channel-color-palette-more:hover { background: var(--popover-hover); color: var(--popover-foreground); }
+.channel-color-palette-more:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.channel-color-palette-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
 .channel-trigger-options {
   min-width: 0;
   margin: 0;

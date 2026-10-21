@@ -99,6 +99,7 @@ export const fr: Messages = {
   'channels.name': 'Nom du canal',
   'channels.color': 'Couleur du canal',
   'channels.customColor': 'Couleur personnalisée',
+  'channels.moreColors': 'Plus de couleurs…',
   'channels.triggerMode': 'Mode de trigger',
   'channels.cancel': 'Annuler',
   'channels.removeAnalyzer': 'Retirer {label}',
