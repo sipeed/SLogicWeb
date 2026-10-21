@@ -126,7 +126,7 @@ export const frDecoder: DecoderMessages = {
   'decoder.caliper.opt.unit': 'Conversion des unités',
   'decoder.caliper.opt.changes': 'Changements uniquement',
   'decoder.can.opt.nominal_bitrate': 'Débit binaire nominal (bits/s)',
-  'decoder.can.opt.fast_bitrate': 'Débit binaire rapide (bits/s)',
+  'decoder.can.opt.fast_bitrate': 'Débit binaire des données (bits/s)',
   'decoder.can.opt.sample_point': 'Point d’échantillonnage (%)',
   'decoder.counter.opt.data_edge': 'Fronts à compter (données)',
   'decoder.counter.opt.divider': 'Diviseur de comptage (largeur de mot)',
