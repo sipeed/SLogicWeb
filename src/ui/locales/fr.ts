@@ -154,8 +154,6 @@ export const fr: Messages = {
   'analyzerPanel.subCold': 'décodeurs sigrok fournis : {count}. Worker en préchauffage (~850 ms, une fois par session).',
   'analyzerPanel.decoding': 'décodage…',
   'analyzerPanel.attached': 'Attachés',
-  'analyzerPanel.decode': 'Décoder',
-  'analyzerPanel.remove': 'Retirer',
   'analyzerPanel.decodeAction': 'Décoder {label}',
   'analyzerPanel.removeAction': 'Retirer {label}',
   'analyzerPanel.cancelDecode': 'Annuler le décodage',

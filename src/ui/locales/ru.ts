@@ -154,8 +154,6 @@ export const ru: Messages = {
   'analyzerPanel.subCold': 'встроенных декодеров sigrok: {count}. Воркер прогревается (~850 мс, раз за сессию).',
   'analyzerPanel.decoding': 'декодирование…',
   'analyzerPanel.attached': 'Подключённые',
-  'analyzerPanel.decode': 'Декодировать',
-  'analyzerPanel.remove': 'Удалить',
   'analyzerPanel.decodeAction': 'Декодировать {label}',
   'analyzerPanel.removeAction': 'Удалить {label}',
   'analyzerPanel.cancelDecode': 'Отменить декодирование',

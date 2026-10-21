@@ -158,8 +158,6 @@ export const en = {
   'analyzerPanel.subCold': '{count} stock sigrok decoders. Worker warming up (~850 ms, once per session).',
   'analyzerPanel.decoding': 'decoding…',
   'analyzerPanel.attached': 'Attached',
-  'analyzerPanel.decode': 'Decode',
-  'analyzerPanel.remove': 'Remove',
   'analyzerPanel.decodeAction': 'Decode {label}',
   'analyzerPanel.removeAction': 'Remove {label}',
   'analyzerPanel.cancelDecode': 'Cancel decode',

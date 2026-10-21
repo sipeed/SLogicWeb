@@ -152,8 +152,6 @@ export const zhCN: Messages = {
   'analyzerPanel.subCold': 'sigrok 内置解码器：{count} 个。工作线程正在预热（约 850 ms，每次会话一次）。',
   'analyzerPanel.decoding': '解码中…',
   'analyzerPanel.attached': '已挂载',
-  'analyzerPanel.decode': '解码',
-  'analyzerPanel.remove': '移除',
   'analyzerPanel.decodeAction': '解码 {label}',
   'analyzerPanel.removeAction': '移除 {label}',
   'analyzerPanel.cancelDecode': '取消解码',
