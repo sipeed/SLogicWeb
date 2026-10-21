@@ -364,6 +364,18 @@ check(
     `seed@${seedBranchIndex}, preventDefault=${seedBranch.includes('event.preventDefault()')}`,
   );
 
+  const visibleIndicesIndex = src.indexOf('private visibleIndices()');
+  const visibleIndicesBody = visibleIndicesIndex >= 0
+    ? src.slice(visibleIndicesIndex, src.indexOf('private setActive', visibleIndicesIndex))
+    : '';
+  check(
+    'visible rows are enumerated in display (DOM) order so filtered navigation follows the ranking',
+    visibleIndicesBody.includes('this.group.children') &&
+      !visibleIndicesBody.includes('this.items.forEach'),
+    `body@${visibleIndicesIndex}, domOrder=${visibleIndicesBody.includes('this.group.children')}, ` +
+    `arrayOrder=${visibleIndicesBody.includes('this.items.forEach')}`,
+  );
+
   const searchHandlerIndex = src.indexOf('private onSearchKeyDown');
   const escapeBranchIndex = src.indexOf("if (key === 'Escape') {", searchHandlerIndex);
   const escapeBranch = escapeBranchIndex >= 0

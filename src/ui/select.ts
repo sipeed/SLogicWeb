@@ -92,6 +92,7 @@ export class SelectControl extends EventTarget {
   private readonly items: HTMLDivElement[] = [];
   private readonly checks: HTMLSpanElement[] = [];
   private readonly labels: HTMLSpanElement[] = [];
+  private readonly indicesByItem = new Map<HTMLDivElement, number>();
   private readonly labelId: string;
   private readonly listboxId: string;
   private readonly surfaceId: string;
@@ -206,6 +207,7 @@ export class SelectControl extends EventTarget {
       this.items.push(item);
       this.checks.push(check);
       this.labels.push(text);
+      this.indicesByItem.set(item, index);
     });
 
     popover.appendChild(group);
@@ -274,9 +276,11 @@ export class SelectControl extends EventTarget {
 
   private visibleIndices(): number[] {
     const visible: number[] = [];
-    this.items.forEach((item, index) => {
-      if (!item.hidden) visible.push(index);
-    });
+    for (const child of this.group.children) {
+      const item = child as HTMLDivElement;
+      const index = this.indicesByItem.get(item);
+      if (index !== undefined && !item.hidden) visible.push(index);
+    }
     return visible;
   }
 
