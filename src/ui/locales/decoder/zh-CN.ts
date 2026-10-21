@@ -180,7 +180,7 @@ export const zhCNDecoder: DecoderMessages = {
   'decoder.ook.opt.diffmanvar': '起始跳变',
   'decoder.parallel.opt.clock_edge': '采样所用的时钟边沿',
   'decoder.parallel.opt.reset_polarity': '复位线极性',
-  'decoder.parallel.opt.wordsize': '数据字长（# 总线周期）',
+  'decoder.parallel.opt.wordsize': '数据字长（总线周期数）',
   'decoder.parallel.opt.endianness': '数据字节序',
   'decoder.pjdl.opt.mode': '通信模式',
   'decoder.pjdl.opt.idle_add_us': '附加空闲时间（us）',

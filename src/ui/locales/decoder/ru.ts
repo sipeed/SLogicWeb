@@ -181,7 +181,7 @@ export const ruDecoder: DecoderMessages = {
   'decoder.ook.opt.diffmanvar': 'Переход в начале',
   'decoder.parallel.opt.clock_edge': 'Фронт тактового сигнала для выборки',
   'decoder.parallel.opt.reset_polarity': 'Полярность линии сброса',
-  'decoder.parallel.opt.wordsize': 'Размер слова данных (# тактов шины)',
+  'decoder.parallel.opt.wordsize': 'Размер слова данных (число тактов шины)',
   'decoder.parallel.opt.endianness': 'Порядок байтов данных',
   'decoder.pjdl.opt.mode': 'Режим связи',
   'decoder.pjdl.opt.idle_add_us': 'Добавленное время простоя (мкс)',

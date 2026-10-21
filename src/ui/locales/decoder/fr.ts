@@ -183,7 +183,7 @@ export const frDecoder: DecoderMessages = {
   'decoder.ook.opt.diffmanvar': 'Transition au début',
   'decoder.parallel.opt.clock_edge': 'Front d’horloge pour l’échantillonnage',
   'decoder.parallel.opt.reset_polarity': 'Polarité de la ligne de réinitialisation',
-  'decoder.parallel.opt.wordsize': 'Taille de mot des données (# cycles de bus)',
+  'decoder.parallel.opt.wordsize': 'Taille de mot des données (nombre de cycles de bus)',
   'decoder.parallel.opt.endianness': 'Boutisme des données',
   'decoder.pjdl.opt.mode': 'Mode de communication',
   'decoder.pjdl.opt.idle_add_us': 'Temps d’inactivité ajouté (µs)',
