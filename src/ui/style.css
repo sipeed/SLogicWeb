@@ -915,10 +915,14 @@ html.resizing { cursor: col-resize; user-select: none; }
 .select-item-check { width: 14px; flex: none; color: var(--primary); }
 .select-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.select-popover.select-searchable { max-width: min(420px, calc(100vw - 16px)); }
+.select-popover.select-searchable {
+  max-width: min(420px, calc(100vw - 16px));
+  padding-top: 0;
+}
 .select-search {
   position: sticky; top: 0;
-  padding-bottom: 4px; margin-bottom: 4px;
+  padding: 4px 0;
+  margin-bottom: 4px;
   background: var(--popover);
   border-bottom: 1px solid var(--border);
 }

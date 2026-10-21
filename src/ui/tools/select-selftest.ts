@@ -580,11 +580,12 @@ check(
   const searchRow = searchRowBody !== null &&
     searchRowBody.includes('position: sticky') &&
     searchRowBody.includes('top: 0') &&
+    searchRowBody.includes('padding: 4px 0') &&
     searchRowBody.includes('background: var(--popover)') &&
     searchRowBody.includes('border-bottom: 1px solid var(--border)');
-  const searchableWidth = (ruleBody('.select-popover.select-searchable') ?? '').includes(
-    'max-width: min(420px, calc(100vw - 16px))',
-  );
+  const searchableBody = ruleBody('.select-popover.select-searchable') ?? '';
+  const searchableWidth = searchableBody.includes('max-width: min(420px, calc(100vw - 16px))') &&
+    searchableBody.includes('padding-top: 0');
   const scrollMargin = /\.select-searchable \.select-item\s*\{[^}]*scroll-margin-top:\s*36px/.test(css);
   const hiddenRule = /\.select-item\[hidden\]\s*\{\s*display:\s*none/.test(css);
   const hitBody = ruleBody('.select-item-hit');
