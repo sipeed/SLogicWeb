@@ -154,7 +154,7 @@ check(
 const DESCRIPTION_CALL = 'desc.textContent = decoderDescriptionText(info);';
 const DECODER_I18N_IMPORT = "} from './decoderI18n.js';";
 const DESCRIPTION_IMPORT =
-  'decoderDescriptionText, decoderOptionLabel, decoderOptionValueTuples,';
+  'decoderDescriptionText, decoderLongNameText, decoderOptionLabel, decoderOptionValueTuples,';
 const RAW_DESCRIPTION_CALL = 'desc.textContent = info.desc;';
 check(
   'the decoder description note renders through the metadata resolver',
@@ -162,6 +162,23 @@ check(
     panel.includes(DESCRIPTION_IMPORT) && panel.includes(DECODER_I18N_IMPORT) &&
     !panel.includes(RAW_DESCRIPTION_CALL),
   `resolved=${panel.includes(DESCRIPTION_CALL)}, import=${panel.includes(DECODER_I18N_IMPORT)}, raw=${panel.includes(RAW_DESCRIPTION_CALL)}`,
+);
+
+const DETAIL_CLASS = "div('decoder-detail')";
+const DETAIL_CALL = 'longName.textContent = decoderLongNameText(info);';
+const detailIndex = panel.indexOf(DETAIL_CLASS);
+const detailRule = css.match(/\.decoder-detail\s*\{([^}]*)\}/)?.[1] ?? '';
+const detailTwin =
+  /:is\(html\[data-theme="dark"\], html\[data-theme="light"\]\) \.decoder-detail\s*\{[^}]*var\(--foreground\)[^}]*\}/.test(css);
+const detailRules = [...css.matchAll(/[^{}]*\.decoder-detail[^{}]*\{[^}]*\}/g)].map((m) => m[0]);
+check(
+  'the add page shows the decoder long name above its description',
+  detailIndex >= 0 && detailIndex < panel.indexOf(DESCRIPTION_CALL) &&
+    panel.includes(DETAIL_CALL) &&
+    /font-size:\s*11px/.test(detailRule) && /color:\s*var\(--text80\)/.test(detailRule) &&
+    detailTwin && detailRules.length === 2 &&
+    detailRules.every((rule) => !/#[0-9a-fA-F]{3,8}/.test(rule)),
+  `detail@${detailIndex}, desc@${panel.indexOf(DESCRIPTION_CALL)}, rule=${JSON.stringify(detailRule)}, twin=${detailTwin}, rules=${detailRules.length}`,
 );
 
 const OPTION_SELECT_CALL =

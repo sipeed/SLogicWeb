@@ -848,6 +848,7 @@ html.resizing { cursor: col-resize; user-select: none; }
 .panel-note { font-size: 10px; color: var(--text50); line-height: 1.5; white-space: pre-wrap; }
 .panel-note.error { color: var(--negative); }
 .panel-note.live { color: var(--text80); }
+.decoder-detail { font-size: 11px; color: var(--text80); line-height: 1.4; }
 
 .chip-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
 .chip {
@@ -1024,6 +1025,7 @@ html.resizing { cursor: col-resize; user-select: none; }
 :is(html[data-theme="dark"], html[data-theme="light"]) .advanced summary { color: var(--foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .panel-sub,
 :is(html[data-theme="dark"], html[data-theme="light"]) .panel-note { color: var(--muted-foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .decoder-detail { color: var(--foreground); }
 
 /* Dark theme: panel controls take the shadcn control shape - control radius, --input
    border, ground-level fields on the card. The segmented active state was first styled

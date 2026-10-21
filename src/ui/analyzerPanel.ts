@@ -21,7 +21,8 @@ import {
 import type { DecoderInfo } from '../decode/index.js';
 import { button, div, labelled, section } from './capturePanel.js';
 import {
-  decoderDescriptionText, decoderOptionLabel, decoderOptionValueTuples, decoderPickerLabel,
+  decoderDescriptionText, decoderLongNameText, decoderOptionLabel, decoderOptionValueTuples,
+  decoderPickerLabel,
 } from './decoderI18n.js';
 import { formatMountedAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
@@ -151,6 +152,10 @@ export class AnalyzerPanel {
       warn.textContent = t('analyzerPanel.stacked', { id: info.id, inputs: info.inputs.join(', ') });
       add.body.appendChild(warn);
     }
+
+    const longName = div('decoder-detail');
+    longName.textContent = decoderLongNameText(info);
+    add.body.appendChild(longName);
 
     const desc = div('panel-note');
     desc.textContent = decoderDescriptionText(info);
