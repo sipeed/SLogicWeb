@@ -184,3 +184,5 @@ export const zhCN: Messages = {
   'theme.light': '浅色',
   'theme.system': '跟随系统',
 };
+
+export { zhCNDecoder } from './decoder/zh-CN.js';

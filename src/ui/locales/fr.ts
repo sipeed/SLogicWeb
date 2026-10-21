@@ -186,3 +186,5 @@ export const fr: Messages = {
   'theme.light': 'Clair',
   'theme.system': 'Système',
 };
+
+export { frDecoder } from './decoder/fr.js';

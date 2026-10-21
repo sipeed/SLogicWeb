@@ -53,6 +53,17 @@ export const LOCALE_LABELS: Record<Locale, string> = {
  */
 const DICTS: Partial<Record<Locale, Messages>> = { en };
 
+export type DecoderMessages = Readonly<Record<string, string>>;
+
+interface LocaleCatalogPair {
+  readonly messages: Messages;
+  readonly decoder: DecoderMessages;
+}
+
+type NonDefaultLocale = Exclude<Locale, 'en'>;
+
+const DECODER_DICTS: Partial<Record<Locale, DecoderMessages>> = {};
+
 /**
  * One loader per non-default locale. The literal `import()` specifiers are what
  * make rollup emit one JS chunk per locale, fetched only when that language is
@@ -61,11 +72,52 @@ const DICTS: Partial<Record<Locale, Messages>> = { en };
  * `inlineDynamicImports` - see vite.config.ts - so `file://` performs no sibling
  * import.)
  */
-const LOADERS: Record<Exclude<Locale, 'en'>, () => Promise<Messages>> = {
-  'zh-CN': () => import('./locales/zh-CN.js').then((m) => m.zhCN),
-  ru: () => import('./locales/ru.js').then((m) => m.ru),
-  fr: () => import('./locales/fr.js').then((m) => m.fr),
+const LOADERS: Record<NonDefaultLocale, () => Promise<LocaleCatalogPair>> = {
+  'zh-CN': () => import('./locales/zh-CN.js').then(
+    (m) => ({ messages: m.zhCN, decoder: m.zhCNDecoder })),
+  ru: () => import('./locales/ru.js').then((m) => ({ messages: m.ru, decoder: m.ruDecoder })),
+  fr: () => import('./locales/fr.js').then((m) => ({ messages: m.fr, decoder: m.frDecoder })),
 };
+
+const LOADER_OVERRIDES = new Map<NonDefaultLocale, () => Promise<unknown>>();
+
+export function setLocaleLoaderForTest(
+  locale: NonDefaultLocale,
+  loader: (() => Promise<unknown>) | null,
+): void {
+  if (loader) LOADER_OVERRIDES.set(locale, loader);
+  else LOADER_OVERRIDES.delete(locale);
+}
+
+function assertMessageRecord(value: unknown, label: string): Record<string, string> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`[i18n] ${label} is not a message catalog`);
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    if (typeof record[key] !== 'string') {
+      throw new Error(`[i18n] ${label} value for ${key} is not a string`);
+    }
+  }
+  return record as Record<string, string>;
+}
+
+function registerCatalogPair(locale: Locale, raw: unknown): Messages {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error(`[i18n] ${locale} catalog pair is missing`);
+  }
+  const pair = raw as { messages?: unknown; decoder?: unknown };
+  const messages = assertMessageRecord(pair.messages, `${locale} messages`) as Messages;
+  const decoder = assertMessageRecord(pair.decoder, `${locale} decoder messages`);
+  DICTS[locale] = messages;
+  DECODER_DICTS[locale] = decoder;
+  return messages;
+}
+
+function loadCatalogPair(locale: NonDefaultLocale): Promise<Messages> {
+  const load = LOADER_OVERRIDES.get(locale) ?? LOADERS[locale];
+  return load().then((raw) => registerCatalogPair(locale, raw));
+}
 
 /** In-flight load promises, so a repeated pick issues one load per locale. */
 const INFLIGHT = new Map<Locale, Promise<Messages>>();
@@ -79,10 +131,9 @@ export function loadCatalog(locale: Locale): Promise<Messages> {
   if (cached) return Promise.resolve(cached);
   const pending = INFLIGHT.get(locale);
   if (pending) return pending;
-  const load = locale === 'en' ? Promise.resolve(en) : LOADERS[locale]();
+  const load = locale === 'en' ? Promise.resolve(en) : loadCatalogPair(locale);
   const promise = load.then(
     (dict) => {
-      DICTS[locale] = dict;
       INFLIGHT.delete(locale);
       return dict;
     },
@@ -220,6 +271,11 @@ export function onLocaleChange(cb: () => void): () => void {
 /** Translate a message key in the current locale, English as fallback. */
 export function t(key: MessageKey, vars?: MessageVars): string {
   return translate(DICTS[current], key, vars);
+}
+
+export function translateDecoder(key: string, fallback: string): string {
+  const dict = DECODER_DICTS[current];
+  return dict && Object.prototype.hasOwnProperty.call(dict, key) ? dict[key] : fallback;
 }
 
 /**

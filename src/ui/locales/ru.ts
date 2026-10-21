@@ -186,3 +186,5 @@ export const ru: Messages = {
   'theme.light': 'Светлая',
   'theme.system': 'Системная',
 };
+
+export { ruDecoder } from './decoder/ru.js';
