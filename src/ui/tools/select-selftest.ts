@@ -302,17 +302,17 @@ check(
   const anatomyNeedles = [
     'export class SelectControl extends EventTarget',
     "popover.setAttribute('popover', 'auto')",
-    "trigger.setAttribute('popovertarget', this.listboxId)",
+    "trigger.setAttribute('popovertarget', this.surfaceId)",
     "trigger.setAttribute('role', 'combobox')",
     "trigger.setAttribute('aria-haspopup', 'listbox')",
     "trigger.setAttribute('aria-expanded'",
     "trigger.setAttribute('aria-controls', this.listboxId)",
-    "popover.setAttribute('role', 'listbox')",
-    "popover.setAttribute('aria-labelledby', this.labelId)",
-    "group.setAttribute('role', 'group')",
+    "group.setAttribute('role', 'listbox')",
+    "group.setAttribute('aria-labelledby', this.labelId)",
+    'group.id = this.listboxId',
     "item.setAttribute('role', 'option')",
     "item.setAttribute('aria-selected'",
-    "this.trigger.setAttribute('aria-activedescendant'",
+    ".setAttribute('aria-activedescendant', this.items[index].id)",
     'this.items[index].scrollIntoView({ block: \'nearest\' })',
     'trigger.dataset.selectKey = key',
     "this.popover.showPopover()",
@@ -323,6 +323,55 @@ check(
     'the control realizes the combobox/listbox/option anatomy over a native popover',
     missingAnatomy.length === 0,
     `missing=${JSON.stringify(missingAnatomy)}`,
+  );
+
+  const searchNeedles = [
+    "import { fuzzyRank, highlightRuns } from './fuzzy.js';",
+    "if (this.search === null) trigger.setAttribute('role', 'combobox');",
+    "popover.classList.add('select-searchable')",
+    "searchRow.className = 'select-search'",
+    "input.setAttribute('role', 'combobox')",
+    "input.setAttribute('aria-autocomplete', 'list')",
+    "input.setAttribute('aria-controls', this.listboxId)",
+    "input.setAttribute('aria-label', search.label)",
+    "input.addEventListener('input'",
+    "input.addEventListener('keydown'",
+    "empty.className = 'select-empty'",
+    "empty.setAttribute('role', 'status')",
+    'item.hidden = !hit.has(index)',
+    'this.group.appendChild(this.items[rank.index])',
+    "span.className = 'select-item-hit'",
+    'labelEl.replaceChildren()',
+    "split('{query}')",
+    'moveActiveIndex(position, delta, visible.length)',
+    'this.searchInput?.focus()',
+  ];
+  const missingSearch = searchNeedles.filter((needle) => !src.includes(needle));
+  check(
+    'the opt-in search mode wires a combobox input, filtered hidden items, and hit painting',
+    missingSearch.length === 0,
+    `missing=${JSON.stringify(missingSearch)}`,
+  );
+
+  const searchHandlerIndex = src.indexOf('private onSearchKeyDown');
+  const escapeBranchIndex = src.indexOf("if (key === 'Escape') {", searchHandlerIndex);
+  const escapeBranch = escapeBranchIndex >= 0
+    ? src.slice(escapeBranchIndex, src.indexOf('return;', escapeBranchIndex))
+    : '';
+  const tabBranchIndex = src.indexOf("if (key === 'Tab') {", searchHandlerIndex);
+  const tabBranch = tabBranchIndex >= 0
+    ? src.slice(tabBranchIndex, src.indexOf('return;', tabBranchIndex))
+    : '';
+  check(
+    'the search field owns a two-stage Escape and a Tab close that never prevents default',
+    searchHandlerIndex >= 0 &&
+      escapeBranch.includes('event.preventDefault()') && escapeBranch.includes("input.value !== '')") &&
+      tabBranch.includes('this.close()') && tabBranch.includes('this.trigger.focus()') &&
+      !tabBranch.includes('preventDefault'),
+    `handler@${searchHandlerIndex}, escapePrevent=${escapeBranch.includes('event.preventDefault()')}, ` +
+    `escapeGuard=${escapeBranch.includes("input.value !== '')")}, ` +
+    `tabClose=${tabBranch.includes('this.close()')}, tabFocus=${tabBranch.includes('this.trigger.focus()')}, ` +
+    `tabNoPrevent=${!tabBranch.includes('preventDefault')}`,
   );
 
   const interactionNeedles = [
@@ -514,6 +563,31 @@ check(
     'long-list scrollbars use the shared border/muted-foreground token roles',
     scrollbarToken,
     `tokenScrollbars=${scrollbarToken}`,
+  );
+
+  const searchRowBody = ruleBody('.select-search');
+  const searchRow = searchRowBody !== null &&
+    searchRowBody.includes('position: sticky') &&
+    searchRowBody.includes('top: 0') &&
+    searchRowBody.includes('background: var(--popover)') &&
+    searchRowBody.includes('border-bottom: 1px solid var(--border)');
+  const searchableWidth = (ruleBody('.select-popover.select-searchable') ?? '').includes(
+    'max-width: min(420px, calc(100vw - 16px))',
+  );
+  const scrollMargin = /\.select-searchable \.select-item\s*\{[^}]*scroll-margin-top:\s*36px/.test(css);
+  const hiddenRule = /\.select-item\[hidden\]\s*\{\s*display:\s*none/.test(css);
+  const hitBody = ruleBody('.select-item-hit');
+  const hitRule = hitBody !== null &&
+    hitBody.includes('color: var(--primary)') &&
+    hitBody.includes('text-decoration: underline') &&
+    !hitBody.includes('font-weight');
+  const emptyRule = (ruleBody('.select-empty') ?? '').includes('color: var(--muted-foreground)');
+  const noSearchInputRule = !/\.select-search(?:able)?\s+input/.test(css) && !css.includes('.select-search-input');
+  check(
+    'the search surface CSS is additive and token-only, and the input inherits the shared .field rule',
+    searchRow && searchableWidth && scrollMargin && hiddenRule && hitRule && emptyRule && noSearchInputRule,
+    `searchRow=${searchRow}, width=${searchableWidth}, scrollMargin=${scrollMargin}, ` +
+    `hidden=${hiddenRule}, hit=${hitRule}, empty=${emptyRule}, noInputRule=${noSearchInputRule}`,
   );
 
   const tokenSurfaceNeedles = [

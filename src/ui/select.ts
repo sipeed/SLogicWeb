@@ -1,9 +1,21 @@
+import { fuzzyRank, highlightRuns } from './fuzzy.js';
+
 export interface SelectOption {
   readonly value: string;
   readonly label: string;
 }
 
 export type SelectOptionTuple = readonly [value: string, label: string];
+
+export interface SelectSearch {
+  readonly label: string;
+  readonly placeholder: string;
+  readonly empty: string;
+}
+
+export interface SelectConfig {
+  readonly search?: SelectSearch;
+}
 
 export const TYPEAHEAD_RESET_MS = 800;
 
@@ -69,13 +81,20 @@ export class SelectControl extends EventTarget {
   readonly el: HTMLDivElement;
   private readonly key: string;
   private readonly options: readonly SelectOption[];
+  private readonly labelTexts: readonly string[];
+  private readonly search: SelectSearch | null;
   private readonly trigger: HTMLButtonElement;
   private readonly valueEl: HTMLSpanElement;
   private readonly popover: HTMLDivElement;
+  private readonly group: HTMLDivElement;
+  private readonly searchInput: HTMLInputElement | null;
+  private readonly emptyEl: HTMLDivElement | null;
   private readonly items: HTMLDivElement[] = [];
   private readonly checks: HTMLSpanElement[] = [];
+  private readonly labels: HTMLSpanElement[] = [];
   private readonly labelId: string;
   private readonly listboxId: string;
+  private readonly surfaceId: string;
   private current: string;
   private active = -1;
   private disabledState = false;
@@ -87,16 +106,20 @@ export class SelectControl extends EventTarget {
     label: string,
     options: readonly SelectOptionTuple[],
     value: string,
+    config?: SelectConfig,
   ) {
     super();
     this.key = key;
     this.options = normalizeOptions(options);
+    this.labelTexts = this.options.map((option) => option.label);
+    this.search = config?.search ?? null;
     this.current = this.options.some((option) => option.value === value) ? value : '';
 
     const uid = ++nextId;
     const anchor = `--select-anchor-${uid}`;
     this.labelId = `select-${uid}-label`;
     this.listboxId = `select-${uid}-listbox`;
+    this.surfaceId = `select-${uid}-surface`;
     const triggerId = `select-${uid}-trigger`;
 
     const el = document.createElement('div');
@@ -112,11 +135,11 @@ export class SelectControl extends EventTarget {
     trigger.id = triggerId;
     trigger.className = 'select-trigger';
     trigger.dataset.selectKey = key;
-    trigger.setAttribute('role', 'combobox');
+    if (this.search === null) trigger.setAttribute('role', 'combobox');
     trigger.setAttribute('aria-haspopup', 'listbox');
     trigger.setAttribute('aria-expanded', 'false');
     trigger.setAttribute('aria-controls', this.listboxId);
-    trigger.setAttribute('popovertarget', this.listboxId);
+    trigger.setAttribute('popovertarget', this.surfaceId);
     trigger.style.setProperty('--select-anchor', anchor);
 
     const valueEl = document.createElement('span');
@@ -125,16 +148,40 @@ export class SelectControl extends EventTarget {
     trigger.append(valueEl, buildChevron());
 
     const popover = document.createElement('div');
-    popover.id = this.listboxId;
+    popover.id = this.surfaceId;
     popover.className = 'select-popover';
     popover.setAttribute('popover', 'auto');
-    popover.setAttribute('role', 'listbox');
-    popover.setAttribute('aria-labelledby', this.labelId);
     popover.style.setProperty('--select-anchor', anchor);
+
+    const search = this.search;
+    let searchInput: HTMLInputElement | null = null;
+    let emptyEl: HTMLDivElement | null = null;
+    if (search !== null) {
+      popover.classList.add('select-searchable');
+      const searchRow = document.createElement('div');
+      searchRow.className = 'select-search';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.setAttribute('role', 'combobox');
+      input.setAttribute('aria-expanded', 'true');
+      input.setAttribute('aria-controls', this.listboxId);
+      input.setAttribute('aria-autocomplete', 'list');
+      input.setAttribute('aria-label', search.label);
+      input.placeholder = search.placeholder;
+      input.autocomplete = 'off';
+      input.spellcheck = false;
+      input.addEventListener('input', () => this.applyQuery());
+      input.addEventListener('keydown', (event) => this.onSearchKeyDown(event));
+      searchRow.appendChild(input);
+      popover.appendChild(searchRow);
+      searchInput = input;
+    }
 
     const group = document.createElement('div');
     group.className = 'select-group';
-    group.setAttribute('role', 'group');
+    group.id = this.listboxId;
+    group.setAttribute('role', 'listbox');
+    group.setAttribute('aria-labelledby', this.labelId);
 
     this.options.forEach((option, index) => {
       const item = document.createElement('div');
@@ -158,15 +205,29 @@ export class SelectControl extends EventTarget {
       group.appendChild(item);
       this.items.push(item);
       this.checks.push(check);
+      this.labels.push(text);
     });
 
     popover.appendChild(group);
+
+    if (search !== null) {
+      const empty = document.createElement('div');
+      empty.className = 'select-empty';
+      empty.setAttribute('role', 'status');
+      empty.hidden = true;
+      popover.appendChild(empty);
+      emptyEl = empty;
+    }
+
     el.append(labelEl, trigger, popover);
 
     this.el = el;
     this.trigger = trigger;
     this.valueEl = valueEl;
     this.popover = popover;
+    this.group = group;
+    this.searchInput = searchInput;
+    this.emptyEl = emptyEl;
 
     popover.addEventListener('toggle', (event) => this.onToggle((event as ToggleEvent).newState));
     trigger.addEventListener('keydown', (event) => this.onTriggerKeyDown(event));
@@ -211,18 +272,100 @@ export class SelectControl extends EventTarget {
     return this.options.findIndex((option) => option.value === this.current);
   }
 
+  private visibleIndices(): number[] {
+    const visible: number[] = [];
+    this.items.forEach((item, index) => {
+      if (!item.hidden) visible.push(index);
+    });
+    return visible;
+  }
+
   private setActive(index: number): void {
     if (index < 0 || index >= this.options.length) return;
     this.active = index;
     this.items.forEach((item, i) => item.classList.toggle('active', i === index));
     if (this.isOpen()) {
-      this.trigger.setAttribute('aria-activedescendant', this.items[index].id);
+      const owner = this.searchInput ?? this.trigger;
+      owner.setAttribute('aria-activedescendant', this.items[index].id);
       this.items[index].scrollIntoView({ block: 'nearest' });
     }
   }
 
+  private clearActive(): void {
+    this.active = -1;
+    this.items.forEach((item) => item.classList.remove('active'));
+    this.trigger.removeAttribute('aria-activedescendant');
+    this.searchInput?.removeAttribute('aria-activedescendant');
+  }
+
   private moveActive(delta: number): void {
-    this.setActive(moveActiveIndex(this.active, delta, this.options.length));
+    if (this.search === null) {
+      this.setActive(moveActiveIndex(this.active, delta, this.options.length));
+      return;
+    }
+    const visible = this.visibleIndices();
+    const position = visible.indexOf(this.active);
+    const next = moveActiveIndex(position, delta, visible.length);
+    if (next >= 0) this.setActive(visible[next]);
+  }
+
+  private paintLabel(index: number, positions: readonly number[] | null): void {
+    const labelEl = this.labels[index];
+    const label = this.options[index].label;
+    if (positions === null || positions.length === 0) {
+      labelEl.textContent = label;
+      return;
+    }
+    labelEl.replaceChildren();
+    for (const run of highlightRuns(positions, label.length)) {
+      if (!run.hit) {
+        labelEl.appendChild(document.createTextNode(label.slice(run.start, run.start + run.length)));
+        continue;
+      }
+      const span = document.createElement('span');
+      span.className = 'select-item-hit';
+      span.textContent = label.slice(run.start, run.start + run.length);
+      labelEl.appendChild(span);
+    }
+  }
+
+  private restoreFullList(): void {
+    this.items.forEach((item, index) => {
+      item.hidden = false;
+      this.group.appendChild(item);
+      this.paintLabel(index, null);
+    });
+    if (this.emptyEl !== null) this.emptyEl.hidden = true;
+  }
+
+  private applyQuery(): void {
+    const input = this.searchInput;
+    const search = this.search;
+    if (input === null || search === null) return;
+    const query = input.value;
+    if (query === '') {
+      this.restoreFullList();
+      const selected = this.selectedIndex();
+      this.setActive(selected >= 0 ? selected : 0);
+      return;
+    }
+    const ranks = fuzzyRank(query, this.labelTexts);
+    const hit = new Set(ranks.map((rank) => rank.index));
+    this.items.forEach((item, index) => {
+      item.hidden = !hit.has(index);
+    });
+    for (const rank of ranks) {
+      this.group.appendChild(this.items[rank.index]);
+      this.paintLabel(rank.index, rank.positions);
+    }
+    if (this.emptyEl !== null) {
+      this.emptyEl.hidden = ranks.length > 0;
+      if (ranks.length === 0) {
+        this.emptyEl.textContent = search.empty.split('{query}').join(query);
+      }
+    }
+    if (ranks.length === 0) this.clearActive();
+    else this.setActive(ranks[0].index);
   }
 
   private onToggle(state: string): void {
@@ -232,11 +375,12 @@ export class SelectControl extends EventTarget {
       const selected = this.selectedIndex();
       const active = this.active >= 0 ? this.active : selected >= 0 ? selected : 0;
       this.setActive(active);
+      this.searchInput?.focus();
     } else {
-      this.active = -1;
-      this.items.forEach((item) => item.classList.remove('active'));
-      this.trigger.removeAttribute('aria-activedescendant');
+      this.clearActive();
       this.prefix = '';
+      if (this.search !== null) this.restoreFullList();
+      if (this.searchInput !== null) this.searchInput.value = '';
     }
   }
 
@@ -252,7 +396,9 @@ export class SelectControl extends EventTarget {
     if (key === 'Home' || key === 'End') {
       if (!this.isOpen()) return;
       event.preventDefault();
-      this.setActive(key === 'Home' ? 0 : this.options.length - 1);
+      const visible = this.visibleIndices();
+      if (visible.length === 0) return;
+      this.setActive(key === 'Home' ? visible[0] : visible[visible.length - 1]);
       return;
     }
     if (key === 'Enter' || key === ' ') {
@@ -268,6 +414,13 @@ export class SelectControl extends EventTarget {
     if (key === 'Escape') return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (key.length !== 1) return;
+    if (this.search !== null && this.searchInput !== null) {
+      this.open();
+      this.searchInput.focus();
+      this.searchInput.value = key;
+      this.applyQuery();
+      return;
+    }
     const now = Date.now();
     if (now - this.prefixAt > TYPEAHEAD_RESET_MS) this.prefix = '';
     this.prefix = nextTypeaheadPrefix(this.prefix, key);
@@ -276,6 +429,46 @@ export class SelectControl extends EventTarget {
     const from = this.active >= 0 ? this.active : this.selectedIndex();
     const match = matchPrefix(this.options, this.prefix, from);
     if (match >= 0) this.setActive(match);
+  }
+
+  private onSearchKeyDown(event: KeyboardEvent): void {
+    if (this.disabledState) return;
+    const input = this.searchInput;
+    if (input === null) return;
+    const key = event.key;
+    if (key === 'ArrowDown' || key === 'ArrowUp') {
+      event.preventDefault();
+      this.moveActive(key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+    if (key === 'Home' || key === 'End') {
+      const visible = this.visibleIndices();
+      if (visible.length === 0) return;
+      event.preventDefault();
+      this.setActive(key === 'Home' ? visible[0] : visible[visible.length - 1]);
+      return;
+    }
+    if (key === 'Enter') {
+      event.preventDefault();
+      if (this.active >= 0 && this.visibleIndices().includes(this.active)) this.commit(this.active);
+      return;
+    }
+    if (key === 'Escape') {
+      event.preventDefault();
+      if (input.value !== '') {
+        input.value = '';
+        this.applyQuery();
+        return;
+      }
+      this.close();
+      if (this.el.isConnected) this.trigger.focus();
+      return;
+    }
+    if (key === 'Tab') {
+      this.close();
+      this.trigger.focus();
+      return;
+    }
   }
 
   private commit(index: number): void {
@@ -317,6 +510,7 @@ export function selectControl(
   label: string,
   options: readonly SelectOptionTuple[],
   value: string,
+  config?: SelectConfig,
 ): SelectControl {
-  return new SelectControl(key, label, options, value);
+  return new SelectControl(key, label, options, value, config);
 }

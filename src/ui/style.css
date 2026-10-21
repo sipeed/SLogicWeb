@@ -915,6 +915,27 @@ html.resizing { cursor: col-resize; user-select: none; }
 .select-item-check { width: 14px; flex: none; color: var(--primary); }
 .select-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.select-popover.select-searchable { max-width: min(420px, calc(100vw - 16px)); }
+.select-search {
+  position: sticky; top: 0;
+  padding-bottom: 4px; margin-bottom: 4px;
+  background: var(--popover);
+  border-bottom: 1px solid var(--border);
+}
+.select-searchable .select-item { scroll-margin-top: 36px; }
+.select-item[hidden] { display: none; }
+.select-item-hit {
+  color: var(--primary);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.select-empty {
+  padding: 4px 8px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
 .segmented { display: flex; }
 .seg { flex: 1; border-radius: 0; }
 .seg:first-child { border-radius: 3px 0 0 3px; }
