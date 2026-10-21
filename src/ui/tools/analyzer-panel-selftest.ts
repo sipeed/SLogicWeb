@@ -45,8 +45,8 @@ const fs = (() => {
 })();
 if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
 
-const TEXT_MINI_COUNT = 2;
-const ANALYZER_ACT_NEEDLES = 1;
+const TEXT_MINI_COUNT = 1;
+const ANALYZER_ACT_NEEDLES = 3;
 
 const panel = fs.readFileSync('src/ui/analyzerPanel.ts', 'utf8');
 const css = fs.readFileSync('src/ui/style.css', 'utf8');
@@ -63,6 +63,12 @@ check(
   'the decode action is no longer a text button',
   !panel.includes("button(t('analyzerPanel.decode'"),
   `needle present=${panel.includes("button(t('analyzerPanel.decode'")}`,
+);
+
+check(
+  'the remove action is no longer a text button',
+  !panel.includes("button(t('analyzerPanel.remove'"),
+  `needle present=${panel.includes("button(t('analyzerPanel.remove'")}`,
 );
 
 check(
@@ -117,6 +123,12 @@ check(
   `got=${formatMessage(en['analyzerPanel.decodeAction'], { label: 'UART' })}`,
 );
 
+check(
+  'the remove action string interpolates the decoder label',
+  formatMessage(en['analyzerPanel.removeAction'], { label: 'UART' }) === 'Remove UART',
+  `got=${formatMessage(en['analyzerPanel.removeAction'], { label: 'UART' })}`,
+);
+
 const catalogs: Record<string, Record<string, string>> = { en, fr, ru, zhCN };
 const coverage = Object.entries(catalogs).map(([locale, dict]) => {
   const d = dict['analyzerPanel.decodeAction'];
@@ -140,6 +152,22 @@ check(
   'the decode click wiring still reaches onRedecode exactly once',
   count(panel, /this\.cb\.onRedecode\(a\.id\)/g) === 1,
   `count=${count(panel, /this\.cb\.onRedecode\(a\.id\)/g)}`,
+);
+
+const REMOVE_ARM_A = 'M18 6 6 18';
+const REMOVE_ARM_B = 'm6 6 12 12';
+check(
+  'the remove glyph keeps its cross geometry',
+  panel.includes(REMOVE_ARM_A) && panel.includes(REMOVE_ARM_B),
+  `armA=${panel.includes(REMOVE_ARM_A)}, armB=${panel.includes(REMOVE_ARM_B)}`,
+);
+
+check(
+  'the remove action names its decoder and carries the destructive variant',
+  panel.includes("t('analyzerPanel.removeAction', { label: a.label })") &&
+    panel.includes("actionButton('analyzer-act analyzer-act--remove',") &&
+    count(panel, /this\.cb\.onRemove\(a\.id\)/g) === 1,
+  `callsite=${panel.includes("t('analyzerPanel.removeAction', { label: a.label })")}, variant=${panel.includes("actionButton('analyzer-act analyzer-act--remove',")}, onRemove=${count(panel, /this\.cb\.onRemove\(a\.id\)/g)}`,
 );
 
 const actNeedles = count(panel, /analyzer-act/g);

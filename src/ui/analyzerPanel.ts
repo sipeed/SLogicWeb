@@ -88,7 +88,8 @@ export class AnalyzerPanel {
         re.disabled = !v.hasCapture || a.status === 'decoding';
         re.addEventListener('click', () => this.cb.onRedecode(a.id));
         row.appendChild(re);
-        const rm = button(t('analyzerPanel.remove'), 'mini');
+        const rm = actionButton('analyzer-act analyzer-act--remove',
+          t('analyzerPanel.removeAction', { label: a.label }), removeIcon());
         rm.addEventListener('click', () => this.cb.onRemove(a.id));
         row.appendChild(rm);
         s.body.appendChild(row);
@@ -251,6 +252,10 @@ function icon(...ds: readonly string[]): SVGSVGElement {
 
 function decodeIcon(): SVGSVGElement {
   return icon('M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8', 'M21 3v5h-5');
+}
+
+function removeIcon(): SVGSVGElement {
+  return icon('M18 6 6 18', 'm6 6 12 12');
 }
 
 function actionButton(cls: string, label: string, glyph: SVGSVGElement): HTMLButtonElement {
