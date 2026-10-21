@@ -83,7 +83,8 @@ export class AnalyzerPanel {
         st.textContent = a.status === 'decoding' ? t('analyzerPanel.decoding') : formatAnalyzerNote(a.note);
         st.classList.toggle('error', a.status === 'error');
         row.appendChild(st);
-        const re = button(t('analyzerPanel.decode'), 'mini');
+        const re = actionButton('analyzer-act',
+          t('analyzerPanel.decodeAction', { label: a.label }), decodeIcon());
         re.disabled = !v.hasCapture || a.status === 'decoding';
         re.addEventListener('click', () => this.cb.onRedecode(a.id));
         row.appendChild(re);
@@ -227,4 +228,37 @@ function coerce(type: 'int' | 'float' | 'str', v: string): string | number {
   if (type === 'str') return v;
   const n = Number(v);
   return Number.isFinite(n) ? (type === 'int' ? Math.round(n) : n) : v;
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function icon(...ds: readonly string[]): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  for (const d of ds) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+function decodeIcon(): SVGSVGElement {
+  return icon('M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8', 'M21 3v5h-5');
+}
+
+function actionButton(cls: string, label: string, glyph: SVGSVGElement): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = cls;
+  b.title = label;
+  b.setAttribute('aria-label', label);
+  b.appendChild(glyph);
+  return b;
 }
