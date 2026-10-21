@@ -28,7 +28,9 @@
  */
 
 import { t } from './i18n.js';
-import type { AnalyzerNote, CaptureLabel, CaptureSettings, StatusError } from './state.js';
+import type {
+  AnalyzerNote, AnalyzerStatus, CaptureLabel, CaptureSettings, StatusError,
+} from './state.js';
 
 const PS_PER = { s: 1e12, ms: 1e9, us: 1e6, ns: 1e3, ps: 1 } as const;
 type Unit = keyof typeof PS_PER;
@@ -215,4 +217,10 @@ export function formatAnalyzerNote(note: AnalyzerNote): string {
     case 'cancelled': return t('analyzerNote.cancelled');
     case 'error': return note.detail;
   }
+}
+
+export function formatMountedAnalyzerNote(note: AnalyzerNote, status: AnalyzerStatus): string {
+  if (status === 'decoding') return t('analyzerPanel.decoding');
+  if (note.kind === 'stats') return note.firstError ?? '';
+  return formatAnalyzerNote(note);
 }

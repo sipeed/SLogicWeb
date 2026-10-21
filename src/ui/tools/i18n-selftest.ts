@@ -45,8 +45,11 @@ import {
   formatMessage, getLocale, loadCatalog, LOCALE_LABELS, LOCALES, onLocaleChange,
   pickLocale, setLocale, t, translate, type Locale,
 } from '../i18n.js';
-import { formatAnalyzerNote, formatCaptureLabel, formatStatusError, formatTriggerSummary } from '../format.js';
-import type { AnalyzerNote, CaptureLabel, CaptureSettings } from '../state.js';
+import {
+  formatAnalyzerNote, formatCaptureLabel, formatMountedAnalyzerNote, formatStatusError,
+  formatTriggerSummary,
+} from '../format.js';
+import type { AnalyzerNote, AnalyzerStatus, CaptureLabel, CaptureSettings } from '../state.js';
 
 /** Same structural-typing trick as sr-selftest.ts: node access without @types/node. */
 const nodeProcess = (() => {
@@ -375,6 +378,27 @@ function check(name: string, pass: boolean, detail: string): void {
     bad.length === 0,
     bad.length === 0 ? `${cases.length}/7 variants match`
       : bad.map(([n, want]) => `${n.kind}: got ${JSON.stringify(formatAnalyzerNote(n))} want ${JSON.stringify(want)}`).join('; '));
+}
+
+{
+  const cases: [AnalyzerNote, AnalyzerStatus, string][] = [
+    [{ kind: 'stats', anns: 512, decodeMs: 41.6, wallMs: 87.4 }, 'done', ''],
+    [{ kind: 'stats', anns: 1, decodeMs: 2, wallMs: 3, firstError: 'uart: bad frame' },
+      'done', 'uart: bad frame'],
+    [{ kind: 'stats', anns: 512, decodeMs: 41.6, wallMs: 87.4 }, 'decoding', 'decoding…'],
+    [{ kind: 'pending' }, 'decoding', 'decoding…'],
+    [{ kind: 'pending' }, 'idle', 'not decoded'],
+    [{ kind: 'edges', count: 2048 }, 'done', '2,048 edges'],
+    [{ kind: 'timeout' }, 'error', 'timed out'],
+    [{ kind: 'cancelled' }, 'idle', 'cancelled'],
+    [{ kind: 'error', detail: 'worker exploded' }, 'error', 'worker exploded'],
+  ];
+  const bad = cases.filter(([note, status, want]) => formatMountedAnalyzerNote(note, status) !== want);
+  check('formatMountedAnalyzerNote hides statistics, keeps diagnostics, delegates the rest',
+    bad.length === 0,
+    bad.length === 0 ? `${cases.length}/9 cases match`
+      : bad.map(([n, s, want]) => `${n.kind}/${s}: got ` +
+        `${JSON.stringify(formatMountedAnalyzerNote(n, s))} want ${JSON.stringify(want)}`).join('; '));
 }
 
 // -------------------------------------------------------- trigger summary
