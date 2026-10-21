@@ -345,12 +345,23 @@ check(
     "split('{query}')",
     'moveActiveIndex(position, delta, visible.length)',
     'this.searchInput?.focus()',
+    'const owner = this.searchInput ?? this.trigger;',
   ];
   const missingSearch = searchNeedles.filter((needle) => !src.includes(needle));
   check(
     'the opt-in search mode wires a combobox input, filtered hidden items, and hit painting',
     missingSearch.length === 0,
     `missing=${JSON.stringify(missingSearch)}`,
+  );
+
+  const seedBranchIndex = src.indexOf('if (this.search !== null && this.searchInput !== null) {');
+  const seedBranch = seedBranchIndex >= 0
+    ? src.slice(seedBranchIndex, src.indexOf('this.open();', seedBranchIndex))
+    : '';
+  check(
+    'the closed-trigger character seed prevents the default text insertion that would double it',
+    seedBranchIndex >= 0 && seedBranch.includes('event.preventDefault()'),
+    `seed@${seedBranchIndex}, preventDefault=${seedBranch.includes('event.preventDefault()')}`,
   );
 
   const searchHandlerIndex = src.indexOf('private onSearchKeyDown');

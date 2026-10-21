@@ -415,6 +415,7 @@ export class SelectControl extends EventTarget {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if (key.length !== 1) return;
     if (this.search !== null && this.searchInput !== null) {
+      event.preventDefault();
       this.open();
       this.searchInput.focus();
       this.searchInput.value = key;
