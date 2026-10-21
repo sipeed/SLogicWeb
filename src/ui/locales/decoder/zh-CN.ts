@@ -243,7 +243,7 @@ export const zhCNDecoder: DecoderMessages = {
   'decoder.wiegand.opt.bitwidth_ms': '单个位宽（毫秒）',
   'decoder.optval.active-high': '高电平有效',
   'decoder.optval.active-low': '低电平有效',
-  'decoder.optval.any': '任意',
+  'decoder.optval.any': '任意边沿',
   'decoder.optval.auto': '自动',
   'decoder.optval.automatic': '自动检测',
   'decoder.optval.both': '双边沿',

@@ -246,7 +246,7 @@ export const frDecoder: DecoderMessages = {
   'decoder.wiegand.opt.bitwidth_ms': 'Largeur d’un bit en millisecondes',
   'decoder.optval.active-high': 'Actif à l’état haut',
   'decoder.optval.active-low': 'Actif à l’état bas',
-  'decoder.optval.any': 'Quelconque',
+  'decoder.optval.any': 'Tout front',
   'decoder.optval.auto': 'Auto',
   'decoder.optval.automatic': 'Détection automatique',
   'decoder.optval.both': 'Les deux fronts',
