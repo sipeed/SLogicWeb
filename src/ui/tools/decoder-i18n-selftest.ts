@@ -733,6 +733,31 @@ check('the reachable constrained inventory pins every raw option value occurrenc
       : missing.slice(0, 8).join('; '));
 }
 
+// The I2C address_format option's raw values are operation tokens whose shift
+// direction is ambiguous across vendors; upstream libsigrokdecode displays the
+// 7-bit slave address for 'shifted' (the wire byte right-shifted) and the raw
+// 8-bit address byte including the R/W bit for 'unshifted'. Pin the displayed
+// representation in every locale so the labels cannot silently regress to
+// literal token translations that carry no addressing meaning.
+{
+  const bad: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    const shifted = dict[decoderOptionValueKey('shifted')];
+    const unshifted = dict[decoderOptionValueKey('unshifted')];
+    if (shifted === undefined || !shifted.includes('7')) {
+      bad.push(`${locale}:shifted=${JSON.stringify(shifted)}`);
+    }
+    if (unshifted === undefined || !unshifted.includes('8')) {
+      bad.push(`${locale}:unshifted=${JSON.stringify(unshifted)}`);
+    }
+  }
+  check('I2C address format values name the displayed 7-bit/8-bit representation',
+    bad.length === 0,
+    bad.length === 0
+      ? `${NON_ENGLISH_CATALOGS.length} locales pin 7-bit shifted / 8-bit unshifted`
+      : bad.join('; '));
+}
+
 {
   const expected = new Set(OPTION_VALUE_KEYS);
   const stale: string[] = [];
