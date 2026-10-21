@@ -5,12 +5,13 @@ import { getDecoder, hydrateDecoders, isLogicDecoder, listDecoders } from '../..
 import {
   decoderDescriptionKey, decoderDescriptionText, decoderLongNameKey, decoderLongNameText,
   decoderOptionKey, decoderOptionLabel, decoderOptionValueKey, decoderOptionValueLabel,
-  decoderOptionValueTuples, decoderPickerLabel, PRESERVED_OPTION_VALUES,
-  type DecoderMetadata, type DecoderOptionMetadata,
+  decoderOptionValueTuples, decoderPickerLabel, PRESERVED_LONGNAME_DECODER_IDS,
+  PRESERVED_OPTION_VALUES, type DecoderMetadata, type DecoderOptionMetadata,
 } from '../decoderI18n.js';
+import { fuzzyMatch, fuzzyRank } from '../fuzzy.js';
 import {
   getLocale, loadCatalog, onLocaleChange, setLocale, setLocaleLoaderForTest, t,
-  translateDecoder, type DecoderMessages,
+  translateDecoder, type DecoderMessages, type Locale,
 } from '../i18n.js';
 import { en } from '../locales/en.js';
 import { fr, frDecoder } from '../locales/fr.js';
@@ -79,11 +80,15 @@ function usableTranslation(translation: string, source: string): boolean {
   return translation.trim() !== '' && !copiesSource(translation, source);
 }
 
+function localNameQuery(text: string): string {
+  return normalizeSpace(text.replace(/[./():,]/g, ' ')).split(' ')[0] ?? '';
+}
+
 const LOGIC_DECODERS = listDecoders()
   .filter(isLogicDecoder)
   .sort((a, b) => a.id.localeCompare(b.id));
 const REACHABLE_DECODER_COUNT = 68;
-const NON_ENGLISH_CATALOGS: readonly (readonly [string, DecoderMessages])[] = [
+const NON_ENGLISH_CATALOGS: readonly (readonly [Exclude<Locale, 'en'>, DecoderMessages])[] = [
   ['zh-CN', zhCNDecoder], ['ru', ruDecoder], ['fr', frDecoder],
 ];
 
@@ -340,6 +345,178 @@ check('the reachable picker inventory pins one description key per logic decoder
   check('decoders sharing one sigrok description share one translation in every locale',
     shapes.join('|') === 'cjtag+jtag|i2s+spdif' && inconsistent.length === 0,
     `${shapes.join(' | ')}${inconsistent.length ? ` — ${inconsistent.join('; ')}` : ''}`);
+}
+
+// --------------------------------------------------------- long-name inventory
+
+const LONGNAME_KEYS = LOGIC_DECODERS.map((d) => decoderLongNameKey(d.id));
+const EXPECTED_PRESERVED_LONGNAME_IDS: readonly string[] = [
+  'am230x', 'cec', 'em4100', 'em4305', 'flexray', 'ieee488', 'ir_irmp',
+  'ir_nec', 'ir_rc5', 'ir_rc6', 'ir_sirc', 'mcs48', 'microwire', 'ps2',
+  'sae_j1850_vpw', 'sda2506', 'sdq', 'st7735', 't55xx', 'tlc5620', 'usb_power_delivery',
+  'z80',
+];
+const TRANSLATED_LONGNAME_DECODERS = LOGIC_DECODERS
+  .filter((d) => !PRESERVED_LONGNAME_DECODER_IDS.has(d.id));
+const TRANSLATED_LONGNAME_KEYS = TRANSLATED_LONGNAME_DECODERS
+  .map((d) => decoderLongNameKey(d.id));
+const LONGNAME_PRESERVED_COUNT = 22;
+const LONGNAME_TRANSLATED_COUNT = 46;
+
+check('the reachable picker inventory pins one long-name key per logic decoder',
+  LOGIC_DECODERS.length === REACHABLE_DECODER_COUNT &&
+  LOGIC_DECODERS.every((d) => d.longname.trim() !== '') &&
+  new Set(LONGNAME_KEYS).size === REACHABLE_DECODER_COUNT &&
+  new Set([...LONGNAME_KEYS, ...DESCRIPTION_KEYS]).size === 2 * REACHABLE_DECODER_COUNT &&
+  !LONGNAME_KEYS.some((key) => key.includes('.opt.') || key.startsWith('decoder.optval.')),
+  `${LONGNAME_KEYS.length} reachable decoders, ${new Set(LONGNAME_KEYS).size} unique ` +
+  `long-name keys`);
+
+{
+  const production = [...PRESERVED_LONGNAME_DECODER_IDS].sort();
+  const expected = [...EXPECTED_PRESERVED_LONGNAME_IDS].sort();
+  const reachable = new Set(LOGIC_DECODERS.map((d) => d.id));
+  const unreachable = expected.filter((id) => !reachable.has(id));
+  check('the resolver long-name preserve classification equals the independent literal inventory',
+    production.join('|') === expected.join('|') && unreachable.length === 0,
+    production.join('|') === expected.join('|') && unreachable.length === 0
+      ? `${production.length} preserved decoder ids match the literal inventory`
+      : `production=${production.length} expected=${expected.length} ` +
+        `unreachable=${unreachable.join(',') || 'none'}`);
+}
+
+{
+  const preserved = [...PRESERVED_LONGNAME_DECODER_IDS];
+  const translated = TRANSLATED_LONGNAME_DECODERS.map((d) => d.id);
+  const overlap = translated.filter((id) => PRESERVED_LONGNAME_DECODER_IDS.has(id));
+  check('every reachable long name is either translated prose or preserved terminology',
+    preserved.length === LONGNAME_PRESERVED_COUNT &&
+    translated.length === LONGNAME_TRANSLATED_COUNT &&
+    preserved.length + translated.length === REACHABLE_DECODER_COUNT &&
+    overlap.length === 0,
+    `${preserved.length} preserved + ${translated.length} translated ` +
+    `= ${REACHABLE_DECODER_COUNT} reachable long names`);
+}
+
+{
+  const missing: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    for (const decoder of TRANSLATED_LONGNAME_DECODERS) {
+      const key = decoderLongNameKey(decoder.id);
+      if (!Object.prototype.hasOwnProperty.call(dict, key)) {
+        missing.push(`${locale}:${decoder.id}:missing`);
+      } else if (!usableTranslation(dict[key], decoder.longname)) {
+        missing.push(`${locale}:${decoder.id}:${JSON.stringify(dict[key])}`);
+      }
+    }
+  }
+  check('every descriptive decoder long name is translated in all non-English locales',
+    missing.length === 0,
+    missing.length === 0
+      ? `${TRANSLATED_LONGNAME_DECODERS.length} long names × ${NON_ENGLISH_CATALOGS.length} locales`
+      : missing.slice(0, 8).join('; '));
+}
+
+{
+  const expected = new Set(TRANSLATED_LONGNAME_KEYS);
+  const preservedKeys: string[] = [];
+  const stale: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    for (const decoder of LOGIC_DECODERS) {
+      const key = decoderLongNameKey(decoder.id);
+      if (PRESERVED_LONGNAME_DECODER_IDS.has(decoder.id) &&
+        Object.prototype.hasOwnProperty.call(dict, key)) {
+        preservedKeys.push(`${locale}:${key}`);
+      }
+    }
+    for (const key of Object.keys(dict)) {
+      if (key.endsWith('.longname') && !expected.has(key)) stale.push(`${locale}:${key}`);
+    }
+  }
+  check('preserved long names carry no catalog key and no stale long-name key survives',
+    preservedKeys.length === 0 && stale.length === 0 &&
+    new Set(TRANSLATED_LONGNAME_KEYS).size === TRANSLATED_LONGNAME_KEYS.length,
+    preservedKeys.length === 0 && stale.length === 0
+      ? `${expected.size} translated keys, no preserved-name keys`
+      : `preserved=${preservedKeys.join(',')} stale=${stale.join(',')}`);
+}
+
+{
+  const sets = NON_ENGLISH_CATALOGS.map(([, dict]) =>
+    Object.keys(dict).filter((key) => key.endsWith('.longname')).sort().join('\n'));
+  const counts = sets.map((set) => set.split('\n').filter(Boolean).length);
+  check('long-name keys match one-to-one across the non-English locales',
+    new Set(sets).size === 1 && counts.every((n) => n === LONGNAME_TRANSLATED_COUNT),
+    counts.join(' / '));
+}
+
+{
+  const groups = new Map<string, string[]>();
+  for (const decoder of LOGIC_DECODERS) {
+    const source = normalizeSpace(decoder.longname);
+    groups.set(source, [...(groups.get(source) ?? []), decoder.id]);
+  }
+  const repeated = [...groups.values()].filter((ids) => ids.length > 1);
+  const shapes = repeated.map((ids) => ids.slice().sort().join('+')).sort();
+  const inconsistent: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    for (const ids of repeated) {
+      const texts = ids.map((id) => dict[decoderLongNameKey(id)]);
+      if (new Set(texts).size !== 1) inconsistent.push(`${locale}:${ids.join('+')}`);
+    }
+  }
+  check('no two reachable long names share one source, so no translation could diverge',
+    shapes.join('|') === '' && inconsistent.length === 0,
+    repeated.length === 0
+      ? `${groups.size} distinct long names, none shared`
+      : `shared=${shapes.join(' | ')} ${inconsistent.join('; ')}`);
+}
+
+{
+  const I2C_INDEX = LOGIC_DECODERS.findIndex((d) => d.id === 'i2c');
+  const bad: string[] = [];
+  const summary: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    const switched = await setLocale(locale);
+    if (switched !== 'committed' || getLocale() !== locale) bad.push(`${locale}:switch=${switched}`);
+    const labels = LOGIC_DECODERS.map((d) => decoderPickerLabel(d));
+    LOGIC_DECODERS.forEach((decoder, i) => {
+      const text = decoderLongNameText(decoder);
+      if (labels[i] !== `${decoder.id} - ${text}`) {
+        bad.push(`${locale}:${decoder.id}:label=${JSON.stringify(labels[i])}`);
+      }
+      if (PRESERVED_LONGNAME_DECODER_IDS.has(decoder.id)) {
+        if (text !== decoder.longname) {
+          bad.push(`${locale}:${decoder.id}:preserved=${JSON.stringify(text)}`);
+        }
+      } else if (text !== dict[decoderLongNameKey(decoder.id)]) {
+        bad.push(`${locale}:${decoder.id}:text=${JSON.stringify(text)}`);
+      }
+      if (fuzzyMatch(decoder.id, labels[i]) === null) bad.push(`${locale}:${decoder.id}:id-search`);
+    });
+    if (new Set(labels).size !== labels.length) bad.push(`${locale}:duplicate-labels`);
+    if (fuzzyRank('i2c', labels)[0]?.index !== I2C_INDEX) bad.push(`${locale}:id-rank`);
+    for (const decoder of TRANSLATED_LONGNAME_DECODERS) {
+      const text = decoderLongNameText(decoder);
+      const index = LOGIC_DECODERS.indexOf(decoder);
+      if (fuzzyMatch(localNameQuery(text), labels[index]) === null) {
+        bad.push(`${locale}:${decoder.id}:name-search`);
+      }
+      if (decoder.id === 'i2c' &&
+        fuzzyRank(normalizeSpace(text.replace(/[./():,]/g, ' ')), labels)[0]?.index !== index) {
+        bad.push(`${locale}:${decoder.id}:name-rank`);
+      }
+    }
+    summary.push(`${locale}:${labels.length}`);
+  }
+  const restored = await setLocale('en');
+  const english = LOGIC_DECODERS.every((d) =>
+    decoderLongNameText(d) === d.longname && decoderPickerLabel(d) === `${d.id} - ${d.longname}`);
+  check('picker labels keep the raw id, localize the long name, and stay searchable',
+    bad.length === 0 && restored === 'committed' && getLocale() === 'en' && english,
+    bad.length === 0
+      ? `${summary.join(' ')}; ids searchable, localized names rank first`
+      : bad.slice(0, 8).join('; '));
 }
 
 // -------------------------------------------------------- option inventory

@@ -35,7 +35,15 @@ export function decoderDescriptionText(decoder: DecoderMetadata): string {
   return translateDecoder(decoderDescriptionKey(decoder.id), decoder.desc);
 }
 
+export const PRESERVED_LONGNAME_DECODER_IDS: ReadonlySet<string> = new Set([
+  'am230x', 'cec', 'em4100', 'em4305', 'flexray', 'ieee488', 'ir_irmp',
+  'ir_nec', 'ir_rc5', 'ir_rc6', 'ir_sirc', 'mcs48', 'microwire', 'ps2',
+  'sae_j1850_vpw', 'sda2506', 'sdq', 'st7735', 't55xx', 'tlc5620', 'usb_power_delivery',
+  'z80',
+]);
+
 export function decoderLongNameText(decoder: DecoderMetadata): string {
+  if (PRESERVED_LONGNAME_DECODER_IDS.has(decoder.id)) return decoder.longname;
   return translateDecoder(decoderLongNameKey(decoder.id), decoder.longname);
 }
 

@@ -152,15 +152,16 @@ check(
 );
 
 const DESCRIPTION_CALL = 'desc.textContent = decoderDescriptionText(info);';
+const DECODER_I18N_IMPORT = "} from './decoderI18n.js';";
 const DESCRIPTION_IMPORT =
-  "import { decoderDescriptionText, decoderOptionLabel, decoderOptionValueTuples } from './decoderI18n.js';";
+  'decoderDescriptionText, decoderOptionLabel, decoderOptionValueTuples,';
 const RAW_DESCRIPTION_CALL = 'desc.textContent = info.desc;';
 check(
   'the decoder description note renders through the metadata resolver',
   panel.includes(DESCRIPTION_CALL) &&
-    panel.includes(DESCRIPTION_IMPORT) &&
+    panel.includes(DESCRIPTION_IMPORT) && panel.includes(DECODER_I18N_IMPORT) &&
     !panel.includes(RAW_DESCRIPTION_CALL),
-  `resolved=${panel.includes(DESCRIPTION_CALL)}, import=${panel.includes(DESCRIPTION_IMPORT)}, raw=${panel.includes(RAW_DESCRIPTION_CALL)}`,
+  `resolved=${panel.includes(DESCRIPTION_CALL)}, import=${panel.includes(DECODER_I18N_IMPORT)}, raw=${panel.includes(RAW_DESCRIPTION_CALL)}`,
 );
 
 const OPTION_SELECT_CALL =
@@ -183,6 +184,17 @@ check(
     !panel.includes('(x) => [String(x), String(x)] as SelectOptionTuple,') &&
     !panel.includes('[decoderOptionValueLabel('),
   `tuples=${panel.includes('decoderOptionValueTuples(opt.values)')}, coerce=${count(panel, /coerce\(opt\.type, (sel|inp)\.value\)/g)}`,
+);
+
+const PICKER_CALL = '[d.id, decoderPickerLabel(d)] as SelectOptionTuple';
+const RAW_PICKER_LABEL = '${d.id} - ${d.longname}';
+check(
+  'the decoder picker renders a localized long name behind the raw decoder id',
+  panel.includes(PICKER_CALL) &&
+    panel.includes('decoderPickerLabel,') && panel.includes(DECODER_I18N_IMPORT) &&
+    panel.includes('this.chosen = pick.value;') &&
+    !panel.includes(RAW_PICKER_LABEL),
+  `resolved=${panel.includes(PICKER_CALL)}, raw=${panel.includes(RAW_PICKER_LABEL)}, rawValue=${panel.includes('this.chosen = pick.value;')}`,
 );
 
 check(
