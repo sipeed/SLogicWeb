@@ -976,6 +976,32 @@ html.resizing { cursor: col-resize; user-select: none; }
 .analyzer-status.error { color: var(--negative); }
 .ch-analyzer .error { color: var(--negative); }
 
+.analyzer-act {
+  flex: none;
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 18px;
+  padding: 0;
+  border: 1px solid var(--border-low);
+  border-radius: 3px;
+  background: var(--bg20);
+  color: var(--text50);
+  cursor: pointer;
+}
+.analyzer-act svg { display: block; width: 13px; height: 13px; }
+.analyzer-act:hover { border-color: var(--accent); color: var(--text80); }
+.analyzer-act--remove:hover { border-color: var(--negative); color: var(--negative); }
+
+:is(html[data-theme="dark"], html[data-theme="light"]) .analyzer-act {
+  background: var(--background); border-color: var(--input);
+  color: var(--muted-foreground); border-radius: calc(var(--radius) - 4px);
+}
+:is(html[data-theme="dark"], html[data-theme="light"]) .analyzer-act:hover {
+  border-color: var(--primary); color: var(--foreground);
+}
+:is(html[data-theme="dark"], html[data-theme="light"]) .analyzer-act--remove:hover {
+  border-color: var(--destructive); color: var(--destructive);
+}
+
 /* Dark theme: the side panel becomes a card stack (the shadcn Card composition) - the
    flat border-separated sections turn into outlined cards on a darker panel ground.
    The border shorthand replaces each section's border-bottom; spacing comes from the
