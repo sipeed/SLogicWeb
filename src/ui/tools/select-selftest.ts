@@ -346,6 +346,7 @@ check(
     'moveActiveIndex(position, delta, visible.length)',
     'this.searchInput?.focus()',
     'const owner = this.searchInput ?? this.trigger;',
+    'this.indicesByItem.set(item, index)',
   ];
   const missingSearch = searchNeedles.filter((needle) => !src.includes(needle));
   check(
