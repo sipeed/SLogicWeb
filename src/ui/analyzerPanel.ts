@@ -20,7 +20,7 @@ import {
 } from '../decode/index.js';
 import type { DecoderInfo } from '../decode/index.js';
 import { button, div, labelled, section } from './capturePanel.js';
-import { decoderDescriptionText } from './decoderI18n.js';
+import { decoderDescriptionText, decoderOptionLabel } from './decoderI18n.js';
 import { formatMountedAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
@@ -189,7 +189,8 @@ export class AnalyzerPanel {
         const optionValues: SelectOptionTuple[] = opt.values.map(
           (x) => [String(x), String(x)] as SelectOptionTuple,
         );
-        const sel = selectControl(`analyzer.option.${opt.id}`, opt.desc, optionValues, String(cur));
+        const sel = selectControl(
+          `analyzer.option.${opt.id}`, decoderOptionLabel(info.id, opt), optionValues, String(cur));
         sel.addEventListener('change', () => { this.draftOptions[opt.id] = coerce(opt.type, sel.value); });
         add.body.appendChild(sel.el);
       } else {
@@ -197,7 +198,7 @@ export class AnalyzerPanel {
         inp.type = opt.type === 'str' ? 'text' : 'number';
         inp.value = String(cur);
         inp.addEventListener('change', () => { this.draftOptions[opt.id] = coerce(opt.type, inp.value); });
-        add.body.appendChild(labelled(opt.desc, inp));
+        add.body.appendChild(labelled(decoderOptionLabel(info.id, opt), inp));
       }
     }
 

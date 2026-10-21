@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
 
-import { isLogicDecoder, listDecoders } from '../../decode/registry.js';
+import { getDecoder, hydrateDecoders, isLogicDecoder, listDecoders } from '../../decode/registry.js';
 import {
   decoderDescriptionKey, decoderDescriptionText, decoderLongNameKey, decoderLongNameText,
   decoderOptionKey, decoderOptionLabel, decoderOptionValueKey, decoderOptionValueLabel,
@@ -106,6 +106,14 @@ const NON_ENGLISH_CATALOGS: readonly (readonly [string, DecoderMessages])[] = [
   ];
   check('key builders emit the documented decoder metadata schema',
     built.join('|') === expected.join('|'), built.join(' | '));
+}
+
+{
+  check('option keys are per-decoder identities and never enter the optval namespace',
+    decoderOptionKey('uart', 'baudrate') === 'decoder.uart.opt.baudrate' &&
+    decoderOptionKey('uart', 'baudrate') !== decoderOptionKey('miller', 'baudrate') &&
+    !decoderOptionKey('uart', 'baudrate').startsWith('decoder.optval.'),
+    decoderOptionKey('uart', 'baudrate'));
 }
 
 {
@@ -334,8 +342,134 @@ check('the reachable picker inventory pins one description key per logic decoder
     `${shapes.join(' | ')}${inconsistent.length ? ` — ${inconsistent.join('; ')}` : ''}`);
 }
 
-// ---------------------------------------------------- atomic registration path
+// -------------------------------------------------------- option inventory
 
+await hydrateDecoders();
+
+interface ReachableOption {
+  readonly decoderId: string;
+  readonly optionId: string;
+  readonly desc: string;
+  readonly constrained: boolean;
+}
+
+const REACHABLE_OPTIONS: readonly ReachableOption[] = LOGIC_DECODERS.flatMap((d) =>
+  getDecoder(d.id).options.map((opt) => ({
+    decoderId: d.id,
+    optionId: opt.id,
+    desc: opt.desc,
+    constrained: opt.values.length > 0,
+  })));
+const OPTION_KEYS = REACHABLE_OPTIONS.map((o) => decoderOptionKey(o.decoderId, o.optionId));
+const REACHABLE_OPTION_COUNT = 123;
+const CONSTRAINED_OPTION_COUNT = 75;
+const FREE_OPTION_COUNT = 48;
+
+check('the reachable picker inventory pins every logic-decoder option identity',
+  REACHABLE_OPTIONS.length === REACHABLE_OPTION_COUNT &&
+  REACHABLE_OPTIONS.filter((o) => o.constrained).length === CONSTRAINED_OPTION_COUNT &&
+  REACHABLE_OPTIONS.filter((o) => !o.constrained).length === FREE_OPTION_COUNT &&
+  REACHABLE_OPTIONS.every((o) => o.optionId.trim() !== '' && o.desc.trim() !== '') &&
+  new Set(OPTION_KEYS).size === REACHABLE_OPTION_COUNT &&
+  !OPTION_KEYS.some((key) => key.startsWith('decoder.optval.')),
+  `${REACHABLE_OPTIONS.length} options, ${new Set(OPTION_KEYS).size} unique keys, ` +
+  `${REACHABLE_OPTIONS.filter((o) => o.constrained).length} constrained`);
+
+{
+  const missing: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    for (const option of REACHABLE_OPTIONS) {
+      const key = decoderOptionKey(option.decoderId, option.optionId);
+      if (!Object.prototype.hasOwnProperty.call(dict, key)) {
+        missing.push(`${locale}:${key}:missing`);
+      } else if (!usableTranslation(dict[key], option.desc)) {
+        missing.push(`${locale}:${key}:${JSON.stringify(dict[key])}`);
+      }
+    }
+  }
+  check('every reachable option label is translated in all non-English locales',
+    missing.length === 0,
+    missing.length === 0
+      ? `${REACHABLE_OPTION_COUNT} labels × ${NON_ENGLISH_CATALOGS.length} locales`
+      : missing.slice(0, 8).join('; '));
+}
+
+{
+  const expected = new Set(OPTION_KEYS);
+  const stale: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    for (const key of Object.keys(dict)) {
+      if (key.includes('.opt.') && !expected.has(key)) stale.push(`${locale}:${key}`);
+    }
+  }
+  check('decoder catalogs carry no stale, invented, or stacked-only option key',
+    stale.length === 0,
+    stale.length === 0 ? `${expected.size} reachable option identities covered` : stale.join('; '));
+}
+
+{
+  const sets = NON_ENGLISH_CATALOGS.map(([, dict]) =>
+    Object.keys(dict).filter((key) => key.includes('.opt.')).sort().join('\n'));
+  const counts = sets.map((set) => set.split('\n').filter(Boolean).length);
+  check('option keys match one-to-one across the non-English locales',
+    new Set(sets).size === 1 && counts.every((n) => n === REACHABLE_OPTION_COUNT),
+    counts.join(' / '));
+}
+
+{
+  const groups = new Map<string, string[]>();
+  for (const option of REACHABLE_OPTIONS) {
+    const source = normalizeSpace(option.desc);
+    groups.set(source, [...(groups.get(source) ?? []),
+      decoderOptionKey(option.decoderId, option.optionId)]);
+  }
+  const repeated = [...groups.entries()].filter(([, keys]) => keys.length > 1);
+  const sources = repeated.map(([source]) => source).sort();
+  const SHARED = [
+    'Averaging period', 'Baud rate', 'Bit order', 'Clock edge to sample on',
+    'Coil frequency', 'EM4100 decode', 'Polarity', 'Sample point (%)',
+    'Write gap min', 'Write one max',
+  ];
+  const inconsistent: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    for (const [source, keys] of repeated) {
+      const texts = keys.map((key) => dict[key]);
+      if (new Set(texts).size !== 1) inconsistent.push(`${locale}:${source}`);
+    }
+  }
+  check('options sharing one sigrok label share one translation in every locale',
+    sources.join('|') === SHARED.join('|') &&
+    repeated.reduce((n, [, keys]) => n + keys.length, 0) === 28 &&
+    inconsistent.length === 0,
+    `${sources.length} shared labels, 28 keys` +
+    `${inconsistent.length ? ` — ${inconsistent.join('; ')}` : ''}`);
+}
+
+{
+  const bad: string[] = [];
+  const perDecoder = new Map<string, string[]>();
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    perDecoder.clear();
+    for (const option of REACHABLE_OPTIONS) {
+      const label = dict[decoderOptionKey(option.decoderId, option.optionId)];
+      const bucket = perDecoder.get(option.decoderId) ?? [];
+      bucket.push(label);
+      perDecoder.set(option.decoderId, bucket);
+    }
+    for (const [decoderId, labels] of perDecoder) {
+      if (new Set(labels).size !== labels.length) {
+        bad.push(`${locale}:${decoderId}:${labels.length - new Set(labels).size}`);
+      }
+    }
+  }
+  check('localized option labels stay unique inside each decoder control group',
+    bad.length === 0,
+    bad.length === 0
+      ? `${new Set(REACHABLE_OPTIONS.map((o) => o.decoderId)).size} decoder groups × 3 locales`
+      : bad.join('; '));
+}
+
+// ---------------------------------------------------- atomic registration path
 {
   const attempts: [string, () => Promise<unknown>][] = [
     ['throwing decoder catalog', () => Promise.reject(new Error('decoder catalog unavailable'))],
@@ -400,13 +534,37 @@ check('the reachable picker inventory pins one description key per logic decoder
       : `ru=${ruMismatches.slice(0, 8).join(',')} en=${enMismatches.slice(0, 8).join(',')}`);
 }
 
+{
+  const committed = await setLocale('ru');
+  const ruLabelMismatches = REACHABLE_OPTIONS
+    .filter((o) => decoderOptionLabel(o.decoderId, { id: o.optionId, desc: o.desc })
+      !== ruDecoder[decoderOptionKey(o.decoderId, o.optionId)])
+    .map((o) => `${o.decoderId}.${o.optionId}`);
+  const ruSourceLeaks = REACHABLE_OPTIONS
+    .filter((o) => decoderOptionLabel(o.decoderId, { id: o.optionId, desc: o.desc }) === o.desc)
+    .map((o) => `${o.decoderId}.${o.optionId}`);
+  const restored = await setLocale('en');
+  const enLabelMismatches = REACHABLE_OPTIONS
+    .filter((o) => decoderOptionLabel(o.decoderId, { id: o.optionId, desc: o.desc }) !== o.desc)
+    .map((o) => `${o.decoderId}.${o.optionId}`);
+  check('the real registered catalog drives every option label and English stays byte-identical',
+    committed === 'committed' && restored === 'committed' &&
+    ruLabelMismatches.length === 0 && ruSourceLeaks.length === 0 &&
+    enLabelMismatches.length === 0,
+    ruLabelMismatches.length === 0 && enLabelMismatches.length === 0
+      ? `${REACHABLE_OPTION_COUNT} labels resolve in ru and fall through in en`
+      : `ru=${ruLabelMismatches.slice(0, 8).join(',')} ` +
+        `leaks=${ruSourceLeaks.slice(0, 8).join(',')} ` +
+        `en=${enLabelMismatches.slice(0, 8).join(',')}`);
+}
+
 // ------------------------------------------------ committed-locale render path
 
 {
   const frenchDecoder: DecoderMessages = {
     'decoder.i2c.desc': 'Bus série à deux fils.',
     'decoder.i2c.longname': 'Circuit intégré inter-IC',
-    'decoder.i2c.opt.address_format': 'Format d’adresse esclave affiché',
+    'decoder.i2c.opt.address_format': 'Format d’adresse esclave (double de test)',
     'decoder.optval.shifted': 'décalé',
   };
   const aliased = Object.keys(frenchDecoder).filter((key) => frDecoder[key] === frenchDecoder[key]);

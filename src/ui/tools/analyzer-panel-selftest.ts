@@ -152,7 +152,8 @@ check(
 );
 
 const DESCRIPTION_CALL = 'desc.textContent = decoderDescriptionText(info);';
-const DESCRIPTION_IMPORT = "import { decoderDescriptionText } from './decoderI18n.js';";
+const DESCRIPTION_IMPORT =
+  "import { decoderDescriptionText, decoderOptionLabel } from './decoderI18n.js';";
 const RAW_DESCRIPTION_CALL = 'desc.textContent = info.desc;';
 check(
   'the decoder description note renders through the metadata resolver',
@@ -160,6 +161,27 @@ check(
     panel.includes(DESCRIPTION_IMPORT) &&
     !panel.includes(RAW_DESCRIPTION_CALL),
   `resolved=${panel.includes(DESCRIPTION_CALL)}, import=${panel.includes(DESCRIPTION_IMPORT)}, raw=${panel.includes(RAW_DESCRIPTION_CALL)}`,
+);
+
+const OPTION_SELECT_CALL =
+  '`analyzer.option.${opt.id}`, decoderOptionLabel(info.id, opt), optionValues, String(cur));';
+const OPTION_INPUT_CALL = 'labelled(decoderOptionLabel(info.id, opt), inp)';
+const RAW_OPTION_READ = panel.includes('opt.desc');
+check(
+  'both option-control branches render their label through the metadata resolver',
+  panel.includes(OPTION_SELECT_CALL) &&
+    panel.includes(OPTION_INPUT_CALL) &&
+    !RAW_OPTION_READ,
+  `select=${panel.includes(OPTION_SELECT_CALL)}, input=${panel.includes(OPTION_INPUT_CALL)}, raw=${RAW_OPTION_READ}`,
+);
+
+check(
+  'constrained option values keep their raw string while only the label resolves',
+  panel.includes('(x) => [String(x), String(x)] as SelectOptionTuple,') &&
+    panel.includes('this.draftOptions[opt.id] = coerce(opt.type, sel.value);') &&
+    panel.includes('this.draftOptions[opt.id] = coerce(opt.type, inp.value);') &&
+    !panel.includes('decoderOptionValueLabel'),
+  `rawTuple=${panel.includes('(x) => [String(x), String(x)] as SelectOptionTuple,')}, coerce=${count(panel, /coerce\(opt\.type, (sel|inp)\.value\)/g)}`,
 );
 
 check(
