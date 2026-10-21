@@ -20,7 +20,7 @@ import {
 } from '../decode/index.js';
 import type { DecoderInfo } from '../decode/index.js';
 import { button, div, labelled, section } from './capturePanel.js';
-import { formatAnalyzerNote } from './format.js';
+import { formatMountedAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import { defaultChannelName, type AnalyzerState, type ChannelState } from './state.js';
@@ -80,7 +80,7 @@ export class AnalyzerPanel {
         row.appendChild(name);
         const st = document.createElement('span');
         st.className = 'analyzer-status';
-        st.textContent = a.status === 'decoding' ? t('analyzerPanel.decoding') : formatAnalyzerNote(a.note);
+        st.textContent = formatMountedAnalyzerNote(a.note, a.status);
         st.classList.toggle('error', a.status === 'error');
         row.appendChild(st);
         const re = actionButton('analyzer-act',

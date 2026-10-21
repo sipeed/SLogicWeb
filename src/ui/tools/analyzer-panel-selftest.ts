@@ -142,6 +142,15 @@ check(
   coverage.join(', '),
 );
 
+const MOUNTED_STATUS = 'st.textContent = formatMountedAnalyzerNote(a.note, a.status);';
+check(
+  'the mounted status span uses the mounted-row note formatter, not the generic one',
+  panel.includes(MOUNTED_STATUS) &&
+    panel.includes("st.className = 'analyzer-status';") &&
+    !panel.includes('formatAnalyzerNote(a.note)'),
+  `mounted=${panel.includes(MOUNTED_STATUS)}, span=${panel.includes("st.className = 'analyzer-status';")}, generic=${panel.includes('formatAnalyzerNote(a.note)')}`,
+);
+
 check(
   'the decode disabled condition is preserved verbatim',
   panel.includes("re.disabled = !v.hasCapture || a.status === 'decoding';"),
