@@ -79,6 +79,14 @@ function usableTranslation(translation: string, source: string): boolean {
   return translation.trim() !== '' && !copiesSource(translation, source);
 }
 
+const LOGIC_DECODERS = listDecoders()
+  .filter(isLogicDecoder)
+  .sort((a, b) => a.id.localeCompare(b.id));
+const REACHABLE_DECODER_COUNT = 68;
+const NON_ENGLISH_CATALOGS: readonly (readonly [string, DecoderMessages])[] = [
+  ['zh-CN', zhCNDecoder], ['ru', ruDecoder], ['fr', frDecoder],
+];
+
 // ------------------------------------------------------------------ key schema
 
 {
@@ -115,7 +123,7 @@ function usableTranslation(translation: string, source: string): boolean {
 }
 
 {
-  const ids = listDecoders().filter(isLogicDecoder).map((d) => d.id);
+  const ids = LOGIC_DECODERS.map((d) => d.id);
   const duplicates = ids.filter((id, i) => ids.indexOf(id) !== i);
   check('the reachable picker inventory reserves the optval namespace for value labels',
     ids.length > 0 && duplicates.length === 0 && !ids.includes('optval'),
@@ -253,6 +261,145 @@ function usableTranslation(translation: string, source: string): boolean {
     specifiers.join(', '));
 }
 
+// ---------------------------------------------------- description inventory
+
+const DESCRIPTION_KEYS = LOGIC_DECODERS.map((d) => decoderDescriptionKey(d.id));
+
+check('the reachable picker inventory pins one description key per logic decoder',
+  LOGIC_DECODERS.length === REACHABLE_DECODER_COUNT &&
+  LOGIC_DECODERS.every((d) => d.id.trim() !== '' && d.desc.trim() !== '') &&
+  new Set(LOGIC_DECODERS.map((d) => d.id)).size === REACHABLE_DECODER_COUNT &&
+  new Set(DESCRIPTION_KEYS).size === REACHABLE_DECODER_COUNT,
+  `${LOGIC_DECODERS.length} reachable decoders, ${new Set(DESCRIPTION_KEYS).size} unique description keys`);
+
+{
+  const missing: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    for (const decoder of LOGIC_DECODERS) {
+      const key = decoderDescriptionKey(decoder.id);
+      if (!Object.prototype.hasOwnProperty.call(dict, key)) {
+        missing.push(`${locale}:${decoder.id}:missing`);
+      } else if (!usableTranslation(dict[key], decoder.desc)) {
+        missing.push(`${locale}:${decoder.id}:${JSON.stringify(dict[key])}`);
+      }
+    }
+  }
+  check('every reachable decoder description is translated in all non-English locales',
+    missing.length === 0,
+    missing.length === 0
+      ? `${LOGIC_DECODERS.length} descriptions × ${NON_ENGLISH_CATALOGS.length} locales`
+      : missing.slice(0, 8).join('; '));
+}
+
+{
+  const reachable = new Set(LOGIC_DECODERS.map((d) => d.id));
+  const stale: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    for (const key of Object.keys(dict)) {
+      if (!key.endsWith('.desc')) continue;
+      const id = key.slice('decoder.'.length, key.length - '.desc'.length);
+      if (!key.startsWith('decoder.') || !reachable.has(id)) stale.push(`${locale}:${key}`);
+    }
+  }
+  check('decoder catalogs carry no stale, invented, or stacked-only description key',
+    stale.length === 0, stale.length === 0 ? `${reachable.size} reachable ids covered` : stale.join('; '));
+}
+
+{
+  const sets = NON_ENGLISH_CATALOGS.map(([, dict]) =>
+    Object.keys(dict).filter((key) => key.endsWith('.desc')).sort().join('\n'));
+  const counts = sets.map((set) => set.split('\n').filter(Boolean).length);
+  check('description keys match one-to-one across the non-English locales',
+    new Set(sets).size === 1 && counts.every((n) => n === REACHABLE_DECODER_COUNT),
+    counts.join(' / '));
+}
+
+{
+  const groups = new Map<string, string[]>();
+  for (const decoder of LOGIC_DECODERS) {
+    const source = normalizeSpace(decoder.desc);
+    groups.set(source, [...(groups.get(source) ?? []), decoder.id]);
+  }
+  const repeated = [...groups.values()].filter((ids) => ids.length > 1);
+  const shapes = repeated.map((ids) => ids.slice().sort().join('+')).sort();
+  const inconsistent: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    for (const ids of repeated) {
+      const texts = ids.map((id) => dict[decoderDescriptionKey(id)]);
+      if (new Set(texts).size !== 1) inconsistent.push(`${locale}:${ids.join('+')}`);
+    }
+  }
+  check('decoders sharing one sigrok description share one translation in every locale',
+    shapes.join('|') === 'cjtag+jtag|i2s+spdif' && inconsistent.length === 0,
+    `${shapes.join(' | ')}${inconsistent.length ? ` — ${inconsistent.join('; ')}` : ''}`);
+}
+
+// ---------------------------------------------------- atomic registration path
+
+{
+  const attempts: [string, () => Promise<unknown>][] = [
+    ['throwing decoder catalog', () => Promise.reject(new Error('decoder catalog unavailable'))],
+    ['absent decoder catalog', () => Promise.resolve({ messages: en })],
+    ['malformed decoder catalog',
+      () => Promise.resolve({ messages: en, decoder: { 'decoder.i2c.desc': 42 } })],
+  ];
+  const baselineLocale = getLocale();
+  const priorText = decoderDescriptionText(I2C);
+  const bad: string[] = [];
+  for (const [label, loader] of attempts) {
+    setLocaleLoaderForTest('ru', loader);
+    const first = await setLocale('ru');
+    const second = await setLocale('ru');
+    let cached = false;
+    try {
+      await loadCatalog('ru');
+      cached = true;
+    } catch {
+      cached = false;
+    }
+    const stayed = getLocale() === baselineLocale && decoderDescriptionText(I2C) === priorText;
+    if (first !== 'failed' || second !== 'failed' || cached || !stayed) {
+      bad.push(`${label}: first=${first} second=${second} cached=${cached} locale=${getLocale()}`);
+    }
+  }
+  setLocaleLoaderForTest('ru', null);
+  check('a partial shell/decoder load registers neither catalog and keeps the active locale',
+    bad.length === 0,
+    bad.length === 0 ? `${attempts.length} failure shapes stayed atomic` : bad.join('; '));
+}
+
+{
+  let loads = 0;
+  setLocaleLoaderForTest('ru', () => {
+    loads += 1;
+    return import('../locales/ru.js').then((m) => ({ messages: m.ru, decoder: m.ruDecoder }));
+  });
+  const first = await loadCatalog('ru');
+  const second = await loadCatalog('ru');
+  const committed = await setLocale('ru');
+  const translated = t('toolbar.start');
+  const fallback = translateDecoder('decoder.absent.desc', I2C.desc);
+  const ruMismatches = LOGIC_DECODERS
+    .filter((d) => decoderDescriptionText(d) !== ruDecoder[decoderDescriptionKey(d.id)])
+    .map((d) => d.id);
+  setLocaleLoaderForTest('ru', null);
+  const restored = await setLocale('en');
+  const enMismatches = LOGIC_DECODERS
+    .filter((d) => decoderDescriptionText(d) !== d.desc)
+    .map((d) => d.id);
+  check('a cached catalog pair loads once, commits, and keeps English source fallback',
+    loads === 1 && first === second && first === ru && committed === 'committed' &&
+    translated === ru['toolbar.start'] && fallback === I2C.desc &&
+    restored === 'committed' && decoderDescriptionText(I2C) === I2C.desc &&
+    decoderOptionValueLabel('shifted') === 'shifted',
+    `loads=${loads}, ru=${JSON.stringify(translated)}, en=${JSON.stringify(decoderDescriptionText(I2C))}`);
+  check('the real registered catalog drives every description and English stays byte-identical',
+    ruMismatches.length === 0 && enMismatches.length === 0 && restored === 'committed',
+    ruMismatches.length === 0 && enMismatches.length === 0
+      ? `${LOGIC_DECODERS.length} descriptions resolve in ru and fall through in en`
+      : `ru=${ruMismatches.slice(0, 8).join(',')} en=${enMismatches.slice(0, 8).join(',')}`);
+}
+
 // ------------------------------------------------ committed-locale render path
 
 {
@@ -262,6 +409,12 @@ function usableTranslation(translation: string, source: string): boolean {
     'decoder.i2c.opt.address_format': 'Format d’adresse esclave affiché',
     'decoder.optval.shifted': 'décalé',
   };
+  const aliased = Object.keys(frenchDecoder).filter((key) => frDecoder[key] === frenchDecoder[key]);
+  check('the injected listener catalog is a partial test double, not the shipping catalog',
+    frenchDecoder !== frDecoder && aliased.length === 0,
+    aliased.length === 0
+      ? `${Object.keys(frenchDecoder).length} injected keys differ from the leaf catalog`
+      : aliased.join(', '));
   interface Snapshot {
     locale: string;
     desc: string;
@@ -304,60 +457,6 @@ function usableTranslation(translation: string, source: string): boolean {
     second?.[0] === 'unshifted' && second[1] === 'unshifted' &&
     third?.[0] === '3' && third[1] === '3',
     JSON.stringify(tuples));
-}
-
-// ---------------------------------------------------- atomic registration path
-
-{
-  const attempts: [string, () => Promise<unknown>][] = [
-    ['throwing decoder catalog', () => Promise.reject(new Error('decoder catalog unavailable'))],
-    ['absent decoder catalog', () => Promise.resolve({ messages: en })],
-    ['malformed decoder catalog',
-      () => Promise.resolve({ messages: en, decoder: { 'decoder.i2c.desc': 42 } })],
-  ];
-  const priorText = decoderDescriptionText(I2C);
-  const bad: string[] = [];
-  for (const [label, loader] of attempts) {
-    setLocaleLoaderForTest('ru', loader);
-    const first = await setLocale('ru');
-    const second = await setLocale('ru');
-    let cached = false;
-    try {
-      await loadCatalog('ru');
-      cached = true;
-    } catch {
-      cached = false;
-    }
-    const stayed = getLocale() === 'fr' && decoderDescriptionText(I2C) === priorText;
-    if (first !== 'failed' || second !== 'failed' || cached || !stayed) {
-      bad.push(`${label}: first=${first} second=${second} cached=${cached} locale=${getLocale()}`);
-    }
-  }
-  setLocaleLoaderForTest('ru', null);
-  check('a partial shell/decoder load registers neither catalog and keeps the active locale',
-    bad.length === 0,
-    bad.length === 0 ? `${attempts.length} failure shapes stayed atomic` : bad.join('; '));
-}
-
-{
-  let loads = 0;
-  setLocaleLoaderForTest('ru', () => {
-    loads += 1;
-    return import('../locales/ru.js').then((m) => ({ messages: m.ru, decoder: m.ruDecoder }));
-  });
-  const first = await loadCatalog('ru');
-  const second = await loadCatalog('ru');
-  const committed = await setLocale('ru');
-  const translated = t('toolbar.start');
-  const fallback = translateDecoder('decoder.absent.desc', I2C.desc);
-  setLocaleLoaderForTest('ru', null);
-  const restored = await setLocale('en');
-  check('a cached catalog pair loads once, commits, and keeps English source fallback',
-    loads === 1 && first === second && first === ru && committed === 'committed' &&
-    translated === ru['toolbar.start'] && fallback === I2C.desc &&
-    restored === 'committed' && decoderDescriptionText(I2C) === I2C.desc &&
-    decoderOptionValueLabel('shifted') === 'shifted',
-    `loads=${loads}, ru=${JSON.stringify(translated)}, en=${JSON.stringify(decoderDescriptionText(I2C))}`);
 }
 
 // ---------------------------------------------------------------------- report

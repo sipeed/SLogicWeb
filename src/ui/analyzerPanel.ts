@@ -20,6 +20,7 @@ import {
 } from '../decode/index.js';
 import type { DecoderInfo } from '../decode/index.js';
 import { button, div, labelled, section } from './capturePanel.js';
+import { decoderDescriptionText } from './decoderI18n.js';
 import { formatMountedAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
@@ -150,7 +151,7 @@ export class AnalyzerPanel {
     }
 
     const desc = div('panel-note');
-    desc.textContent = info.desc;
+    desc.textContent = decoderDescriptionText(info);
     add.body.appendChild(desc);
 
     const enabled = v.channels.filter((c) => c.index < v.captureChannels);

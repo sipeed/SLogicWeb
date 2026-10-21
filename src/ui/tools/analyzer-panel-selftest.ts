@@ -151,6 +151,17 @@ check(
   `mounted=${panel.includes(MOUNTED_STATUS)}, span=${panel.includes("st.className = 'analyzer-status';")}, generic=${panel.includes('formatAnalyzerNote(a.note)')}`,
 );
 
+const DESCRIPTION_CALL = 'desc.textContent = decoderDescriptionText(info);';
+const DESCRIPTION_IMPORT = "import { decoderDescriptionText } from './decoderI18n.js';";
+const RAW_DESCRIPTION_CALL = 'desc.textContent = info.desc;';
+check(
+  'the decoder description note renders through the metadata resolver',
+  panel.includes(DESCRIPTION_CALL) &&
+    panel.includes(DESCRIPTION_IMPORT) &&
+    !panel.includes(RAW_DESCRIPTION_CALL),
+  `resolved=${panel.includes(DESCRIPTION_CALL)}, import=${panel.includes(DESCRIPTION_IMPORT)}, raw=${panel.includes(RAW_DESCRIPTION_CALL)}`,
+);
+
 check(
   'the decode disabled condition is preserved verbatim',
   panel.includes("re.disabled = !v.hasCapture || a.status === 'decoding';"),
