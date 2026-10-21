@@ -5,8 +5,8 @@ import { getDecoder, hydrateDecoders, isLogicDecoder, listDecoders } from '../..
 import {
   decoderDescriptionKey, decoderDescriptionText, decoderLongNameKey, decoderLongNameText,
   decoderOptionKey, decoderOptionLabel, decoderOptionValueKey, decoderOptionValueLabel,
-  decoderOptionValueTuples, decoderPickerLabel, type DecoderMetadata,
-  type DecoderOptionMetadata,
+  decoderOptionValueTuples, decoderPickerLabel, PRESERVED_OPTION_VALUES,
+  type DecoderMetadata, type DecoderOptionMetadata,
 } from '../decoderI18n.js';
 import {
   getLocale, loadCatalog, onLocaleChange, setLocale, setLocaleLoaderForTest, t,
@@ -351,6 +351,7 @@ interface ReachableOption {
   readonly optionId: string;
   readonly desc: string;
   readonly constrained: boolean;
+  readonly values: readonly (string | number)[];
 }
 
 const REACHABLE_OPTIONS: readonly ReachableOption[] = LOGIC_DECODERS.flatMap((d) =>
@@ -359,6 +360,7 @@ const REACHABLE_OPTIONS: readonly ReachableOption[] = LOGIC_DECODERS.flatMap((d)
     optionId: opt.id,
     desc: opt.desc,
     constrained: opt.values.length > 0,
+    values: opt.values,
   })));
 const OPTION_KEYS = REACHABLE_OPTIONS.map((o) => decoderOptionKey(o.decoderId, o.optionId));
 const REACHABLE_OPTION_COUNT = 123;
@@ -469,6 +471,108 @@ check('the reachable picker inventory pins every logic-decoder option identity',
       : bad.join('; '));
 }
 
+// ---------------------------------------------- option value classification
+
+const REACHABLE_OPTION_VALUES: readonly (string | number)[] =
+  REACHABLE_OPTIONS.flatMap((o) => o.values);
+const UNIQUE_OPTION_VALUES: readonly string[] =
+  [...new Set(REACHABLE_OPTION_VALUES.map((value) => String(value)))].sort();
+const CONSTRAINED_VALUE_OCCURRENCE_COUNT = 214;
+const UNIQUE_OPTION_VALUE_COUNT = 102;
+const EXPECTED_PRESERVED_OPTION_VALUES: readonly string[] = [
+  '-', '0', '0.5', '1', '1.5', '2', '3', '4', '5', '6', '7', '8', '9', '10', '16', '32',
+  '64', '1010', '1111', '2500000', '5000000', '10000000',
+  'A', 'B',
+  'BGR', 'BRG', 'GBR', 'GRB', 'RBG', 'RGB', 'RGB[W]', 'RGBW', 'RGWB', 'RWBG',
+  'am230x/rht', 'dht11', 'maplin_l95ar', 'SC52x2/HX22x2', 'xx1527',
+  'ascii', 'bin', 'dec', 'enum', 'eol', 'fixpoint', 'fixsigned', 'hex', 'ieee754', 'oct',
+  'big', 'little', 'lsb-first', 'msb-first',
+  'inch', 'mm',
+  'Diff Manchester', 'Manchester', 'NRZ', 'full-speed', 'low-speed',
+  'terse-auto', 'terse-ms', 'terse-ns', 'terse-ps', 'terse-s', 'terse-us',
+];
+const TRANSLATED_OPTION_VALUES: readonly string[] =
+  UNIQUE_OPTION_VALUES.filter((value) => !PRESERVED_OPTION_VALUES.has(value));
+const OPTION_VALUE_KEYS = TRANSLATED_OPTION_VALUES.map((value) => decoderOptionValueKey(value));
+const CONSTRAINED_OPTIONS = REACHABLE_OPTIONS.filter((option) => option.constrained);
+
+check('the reachable constrained inventory pins every raw option value occurrence',
+  REACHABLE_OPTION_VALUES.length === CONSTRAINED_VALUE_OCCURRENCE_COUNT &&
+  UNIQUE_OPTION_VALUES.length === UNIQUE_OPTION_VALUE_COUNT &&
+  REACHABLE_OPTION_VALUES.every((value) => String(value).trim() !== '') &&
+  CONSTRAINED_OPTIONS.every((option) => option.values.length > 0) &&
+  REACHABLE_OPTIONS.filter((option) => !option.constrained)
+    .every((option) => option.values.length === 0),
+  `${REACHABLE_OPTION_VALUES.length} occurrences, ${UNIQUE_OPTION_VALUES.length} unique, ` +
+  `${CONSTRAINED_OPTIONS.length} constrained options`);
+
+{
+  const production = [...PRESERVED_OPTION_VALUES].sort();
+  const expected = [...EXPECTED_PRESERVED_OPTION_VALUES].sort();
+  const reachable = new Set(UNIQUE_OPTION_VALUES);
+  const unreachable = expected.filter((value) => !reachable.has(value));
+  check('the resolver preserve classification equals the independent literal inventory',
+    production.join('|') === expected.join('|') && unreachable.length === 0,
+    production.join('|') === expected.join('|') && unreachable.length === 0
+      ? `${production.length} preserved values match the literal inventory`
+      : `production=${production.length} expected=${expected.length} ` +
+        `unreachable=${unreachable.join(',') || 'none'}`);
+}
+
+{
+  const overlap = TRANSLATED_OPTION_VALUES.filter((value) => PRESERVED_OPTION_VALUES.has(value));
+  check('every reachable raw value is either translated prose or preserved notation',
+    PRESERVED_OPTION_VALUES.size === 66 && TRANSLATED_OPTION_VALUES.length === 36 &&
+    PRESERVED_OPTION_VALUES.size + TRANSLATED_OPTION_VALUES.length === UNIQUE_OPTION_VALUES.length &&
+    overlap.length === 0,
+    `${PRESERVED_OPTION_VALUES.size} preserved + ${TRANSLATED_OPTION_VALUES.length} translated ` +
+    `= ${UNIQUE_OPTION_VALUES.length} reachable values`);
+}
+
+{
+  const missing: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    for (const raw of TRANSLATED_OPTION_VALUES) {
+      const key = decoderOptionValueKey(raw);
+      if (!Object.prototype.hasOwnProperty.call(dict, key)) {
+        missing.push(`${locale}:${key}:missing`);
+      } else if (!usableTranslation(dict[key], raw)) {
+        missing.push(`${locale}:${key}:${JSON.stringify(dict[key])}`);
+      }
+    }
+  }
+  check('every human-language constrained value is translated in all non-English locales',
+    missing.length === 0,
+    missing.length === 0
+      ? `${TRANSLATED_OPTION_VALUES.length} values × ${NON_ENGLISH_CATALOGS.length} locales`
+      : missing.slice(0, 8).join('; '));
+}
+
+{
+  const expected = new Set(OPTION_VALUE_KEYS);
+  const stale: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    for (const key of Object.keys(dict)) {
+      if (key.startsWith('decoder.optval.') && !expected.has(key)) stale.push(`${locale}:${key}`);
+    }
+  }
+  check('decoder catalogs carry no stale, preserved, or invented option value key',
+    stale.length === 0 && new Set(OPTION_VALUE_KEYS).size === OPTION_VALUE_KEYS.length &&
+    !OPTION_VALUE_KEYS.some((key) => key.includes('.opt.')),
+    stale.length === 0
+      ? `${expected.size} translated value keys, no preserved-value keys`
+      : stale.join('; '));
+}
+
+{
+  const sets = NON_ENGLISH_CATALOGS.map(([, dict]) =>
+    Object.keys(dict).filter((key) => key.startsWith('decoder.optval.')).sort().join('\n'));
+  const counts = sets.map((set) => set.split('\n').filter(Boolean).length);
+  check('option value keys match one-to-one across the non-English locales',
+    new Set(sets).size === 1 && counts.every((n) => n === TRANSLATED_OPTION_VALUES.length),
+    counts.join(' / '));
+}
+
 // ---------------------------------------------------- atomic registration path
 {
   const attempts: [string, () => Promise<unknown>][] = [
@@ -561,11 +665,62 @@ check('the reachable picker inventory pins every logic-decoder option identity',
 // ------------------------------------------------ committed-locale render path
 
 {
+  const valueLocales: readonly (readonly ['zh-CN' | 'ru' | 'fr', DecoderMessages])[] = [
+    ['zh-CN', zhCNDecoder], ['ru', ruDecoder], ['fr', frDecoder],
+  ];
+  const bad: string[] = [];
+  const summary: string[] = [];
+  for (const [locale, dict] of valueLocales) {
+    const switched = await setLocale(locale);
+    if (switched !== 'committed' || getLocale() !== locale) {
+      bad.push(`${locale}:switch=${switched}`);
+    }
+    const preservedLeaks = [...PRESERVED_OPTION_VALUES].filter((raw) =>
+      decoderOptionValueLabel(raw) !== raw ||
+      Object.prototype.hasOwnProperty.call(dict, decoderOptionValueKey(raw)));
+    if (preservedLeaks.length) {
+      bad.push(`${locale}:preserved=${preservedLeaks.slice(0, 5).join(',')}`);
+    }
+    let occurrences = 0;
+    for (const option of CONSTRAINED_OPTIONS) {
+      const built = decoderOptionValueTuples(option.values);
+      if (built.length !== option.values.length) {
+        bad.push(`${locale}:${option.decoderId}.${option.optionId}:length`);
+      }
+      const labels = new Set<string>();
+      built.forEach(([value, label], i) => {
+        const raw = String(option.values[i]);
+        const expected = PRESERVED_OPTION_VALUES.has(raw)
+          ? raw
+          : dict[decoderOptionValueKey(raw)];
+        if (value !== raw) bad.push(`${locale}:${option.decoderId}.${option.optionId}:value=${value}`);
+        if (label !== expected) {
+          bad.push(`${locale}:${option.decoderId}.${option.optionId}:label=${JSON.stringify(label)}`);
+        }
+        if (labels.has(label)) bad.push(`${locale}:${option.decoderId}:duplicate=${label}`);
+        labels.add(label);
+      });
+      occurrences += built.length;
+    }
+    summary.push(`${locale}:${occurrences}`);
+  }
+  const restored = await setLocale('en');
+  const englishPurity = CONSTRAINED_OPTIONS.every((option) =>
+    decoderOptionValueTuples(option.values).every(([value, label]) => value === label));
+  check('constrained tuples keep raw values and localized labels in every locale',
+    bad.length === 0 && restored === 'committed' && getLocale() === 'en' && englishPurity,
+    bad.length === 0
+      ? `${summary.join(' ')}; English labels equal raw values`
+      : bad.slice(0, 8).join('; '));
+}
+
+{
   const frenchDecoder: DecoderMessages = {
     'decoder.i2c.desc': 'Bus série à deux fils.',
     'decoder.i2c.longname': 'Circuit intégré inter-IC',
     'decoder.i2c.opt.address_format': 'Format d’adresse esclave (double de test)',
     'decoder.optval.shifted': 'décalé',
+    'decoder.optval.1.25': '1,25',
   };
   const aliased = Object.keys(frenchDecoder).filter((key) => frDecoder[key] === frenchDecoder[key]);
   check('the injected listener catalog is a partial test double, not the shipping catalog',
@@ -603,6 +758,12 @@ check('the reachable picker inventory pins every logic-decoder option identity',
     first.value === frenchDecoder['decoder.optval.shifted'] &&
     decoderPickerLabel(I2C) === `i2c - ${frenchDecoder['decoder.i2c.longname']}`,
     JSON.stringify(seen));
+  check('dot-bearing raw values resolve as whole keys, never split on the dot',
+    decoderOptionValueKey('1.25') === 'decoder.optval.1.25' &&
+    decoderOptionValueLabel('1.25') === frenchDecoder['decoder.optval.1.25'] &&
+    translateDecoder('decoder.optval.125', '1.25') === '1.25',
+    `${JSON.stringify(decoderOptionValueLabel('1.25'))} / ` +
+    `${JSON.stringify(translateDecoder('decoder.optval.125', '1.25'))}`);
 }
 
 {

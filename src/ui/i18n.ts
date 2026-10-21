@@ -85,8 +85,14 @@ export function setLocaleLoaderForTest(
   locale: NonDefaultLocale,
   loader: (() => Promise<unknown>) | null,
 ): void {
-  if (loader) LOADER_OVERRIDES.set(locale, loader);
-  else LOADER_OVERRIDES.delete(locale);
+  if (loader) {
+    LOADER_OVERRIDES.set(locale, loader);
+    delete DICTS[locale];
+    delete DECODER_DICTS[locale];
+    INFLIGHT.delete(locale);
+  } else {
+    LOADER_OVERRIDES.delete(locale);
+  }
 }
 
 function assertMessageRecord(value: unknown, label: string): Record<string, string> {

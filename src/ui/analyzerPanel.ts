@@ -20,7 +20,7 @@ import {
 } from '../decode/index.js';
 import type { DecoderInfo } from '../decode/index.js';
 import { button, div, labelled, section } from './capturePanel.js';
-import { decoderDescriptionText, decoderOptionLabel } from './decoderI18n.js';
+import { decoderDescriptionText, decoderOptionLabel, decoderOptionValueTuples } from './decoderI18n.js';
 import { formatMountedAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
@@ -186,9 +186,7 @@ export class AnalyzerPanel {
     for (const opt of info.options) {
       const cur = this.draftOptions[opt.id] ?? opt.default ?? '';
       if (opt.values.length) {
-        const optionValues: SelectOptionTuple[] = opt.values.map(
-          (x) => [String(x), String(x)] as SelectOptionTuple,
-        );
+        const optionValues: SelectOptionTuple[] = decoderOptionValueTuples(opt.values);
         const sel = selectControl(
           `analyzer.option.${opt.id}`, decoderOptionLabel(info.id, opt), optionValues, String(cur));
         sel.addEventListener('change', () => { this.draftOptions[opt.id] = coerce(opt.type, sel.value); });
