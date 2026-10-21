@@ -201,11 +201,11 @@ check(
   `themed=${themed}, missing=${JSON.stringify(themedTokens.filter((tok) => !themedBase.includes(tok)))}`,
 );
 
-const actBlock = css.slice(css.indexOf('.analyzer-act'), css.indexOf('.analyzer-act--remove:hover }') + 26);
+const actRules = [...css.matchAll(/[^{}]*\.analyzer-act[^{}]*\{[^}]*\}/g)].map((m) => m[0]);
 check(
-  'no raw hex inside the analyzer-act block (tokens only)',
-  !/#[0-9a-fA-F]{3,8}/.test(actBlock),
-  `hex=${/#[0-9a-fA-F]{3,8}/.test(actBlock)}`,
+  'no raw hex inside the analyzer-act rules (tokens only)',
+  actRules.length === 7 && actRules.every((rule) => !/#[0-9a-fA-F]{3,8}/.test(rule)),
+  `rules=${actRules.length}, hex=${actRules.filter((rule) => /#[0-9a-fA-F]{3,8}/.test(rule)).length}`,
 );
 
 console.log(results.map((result) => (
