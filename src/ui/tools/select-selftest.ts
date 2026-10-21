@@ -167,6 +167,14 @@ const fuzzyMatchCases: readonly FuzzyMatchCase[] = [
   { needle: 'ir nec', haystack: 'ir_nec - IR NEC', score: 72, positions: [0, 1, 2, 3, 4, 5] },
   { needle: 'rc6', haystack: 'ir_rc6 - IR RC-6', score: 36, positions: [3, 4, 5] },
   { needle: 'USB', haystack: 'usb_signalling - USB signalling', score: 36, positions: [0, 1, 2] },
+  { needle: 'ir6', haystack: 'ir_rc6 - IR RC-6', score: 29, positions: [0, 3, 5] },
+  {
+    needle: 'circuit',
+    haystack: 'i2c - Inter-Integrated Circuit',
+    score: 62,
+    positions: [23, 24, 25, 26, 27, 28, 29],
+  },
+  { needle: 'xy2100', haystack: 'xy2-100', score: 63, positions: [0, 1, 2, 4, 5, 6] },
   { needle: 'zzz', haystack: 'i2c - Inter-Integrated Circuit', score: null, positions: [] },
   { needle: '', haystack: 'i2c - Inter-Integrated Circuit', score: 0, positions: [] },
   {
@@ -271,7 +279,7 @@ check(
   const css = fs.readFileSync('src/ui/style.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
   const fuzzySrc = fs.readFileSync('src/ui/fuzzy.ts', 'utf8');
-  const fuzzyDomToken = /^(document|window)\./m.test(fuzzySrc);
+  const fuzzyDomToken = fuzzySrc.includes('document.') || fuzzySrc.includes('window.');
   const fuzzyMarkupToken = fuzzySrc.includes(['inner', 'HTML'].join(''));
   check(
     'the fuzzy matcher module performs no DOM access and no string-built markup',
