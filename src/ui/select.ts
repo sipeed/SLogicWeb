@@ -5,7 +5,7 @@ export interface SelectOption {
   readonly label: string;
 }
 
-export type SelectOptionTuple = readonly [value: string, label: string];
+export type SelectOptionTuple = readonly [value: string, label: string, search?: string];
 
 export interface SelectSearch {
   readonly label: string;
@@ -53,6 +53,13 @@ export function resolveLabel(options: readonly SelectOption[], value: string): s
   return '';
 }
 
+export function clipHighlightPositions(
+  positions: readonly number[],
+  length: number,
+): readonly number[] {
+  return positions.filter((position) => position < length);
+}
+
 function normalizeOptions(options: readonly SelectOptionTuple[]): readonly SelectOption[] {
   return options.map(([value, label]) => ({ value, label }));
 }
@@ -81,7 +88,7 @@ export class SelectControl extends EventTarget {
   readonly el: HTMLDivElement;
   private readonly key: string;
   private readonly options: readonly SelectOption[];
-  private readonly labelTexts: readonly string[];
+  private readonly searchTexts: readonly string[];
   private readonly search: SelectSearch | null;
   private readonly trigger: HTMLButtonElement;
   private readonly valueEl: HTMLSpanElement;
@@ -112,7 +119,7 @@ export class SelectControl extends EventTarget {
     super();
     this.key = key;
     this.options = normalizeOptions(options);
-    this.labelTexts = this.options.map((option) => option.label);
+    this.searchTexts = options.map((option) => option[2] ?? option[1]);
     this.search = config?.search ?? null;
     this.current = this.options.some((option) => option.value === value) ? value : '';
 
@@ -316,12 +323,13 @@ export class SelectControl extends EventTarget {
   private paintLabel(index: number, positions: readonly number[] | null): void {
     const labelEl = this.labels[index];
     const label = this.options[index].label;
-    if (positions === null || positions.length === 0) {
+    const hits = positions === null ? [] : clipHighlightPositions(positions, label.length);
+    if (hits.length === 0) {
       labelEl.textContent = label;
       return;
     }
     labelEl.replaceChildren();
-    for (const run of highlightRuns(positions, label.length)) {
+    for (const run of highlightRuns(hits, label.length)) {
       if (!run.hit) {
         labelEl.appendChild(document.createTextNode(label.slice(run.start, run.start + run.length)));
         continue;
@@ -353,7 +361,7 @@ export class SelectControl extends EventTarget {
       this.setActive(selected >= 0 ? selected : 0);
       return;
     }
-    const ranks = fuzzyRank(query, this.labelTexts);
+    const ranks = fuzzyRank(query, this.searchTexts);
     const hit = new Set(ranks.map((rank) => rank.index));
     this.items.forEach((item, index) => {
       item.hidden = !hit.has(index);

@@ -16,6 +16,7 @@ import {
 } from '../fuzzy.js';
 import {
   TYPEAHEAD_RESET_MS,
+  clipHighlightPositions,
   matchPrefix,
   moveActiveIndex,
   nextTypeaheadPrefix,
@@ -125,6 +126,28 @@ check(
     resolveLabel(prefixOptions, 'b') === 'Banana' &&
     resolveLabel(prefixOptions, 'x') === '',
   `ap=${JSON.stringify(resolveLabel(prefixOptions, 'ap'))}, x=${JSON.stringify(resolveLabel(prefixOptions, 'x'))}`,
+);
+
+const clipCases: readonly (readonly [readonly number[], number, readonly number[]])[] = [
+  [[], 5, []],
+  [[0, 1, 2], 3, [0, 1, 2]],
+  [[1, 4, 5], 3, [1]],
+  [[23, 24, 25, 26, 27, 28, 29], 3, []],
+  [[0, 3], 0, []],
+];
+const clipFailures = clipCases.filter(([positions, length, expected]) => {
+  const actual = clipHighlightPositions(positions, length);
+  return actual.length !== expected.length || actual.some((position, i) => position !== expected[i]);
+});
+check(
+  'highlight clipping keeps only positions inside the visible label',
+  clipFailures.length === 0,
+  clipFailures.length === 0
+    ? `all ${clipCases.length} literal cases matched`
+    : clipFailures
+      .map(([positions, length]) =>
+        `${JSON.stringify(positions)}/${length}=${JSON.stringify(clipHighlightPositions(positions, length))}`)
+      .join('; '),
 );
 
 check(
@@ -327,6 +350,10 @@ check(
 
   const searchNeedles = [
     "import { fuzzyRank, highlightRuns } from './fuzzy.js';",
+    'export type SelectOptionTuple = readonly [value: string, label: string, search?: string];',
+    'this.searchTexts = options.map((option) => option[2] ?? option[1]);',
+    'fuzzyRank(query, this.searchTexts)',
+    'clipHighlightPositions(positions, label.length)',
     "if (this.search === null) trigger.setAttribute('role', 'combobox');",
     "popover.classList.add('select-searchable')",
     "searchRow.className = 'select-search'",
