@@ -156,6 +156,8 @@ export const ru: Messages = {
   'analyzerPanel.attached': 'Подключённые',
   'analyzerPanel.decode': 'Декодировать',
   'analyzerPanel.remove': 'Удалить',
+  'analyzerPanel.decodeAction': 'Декодировать {label}',
+  'analyzerPanel.removeAction': 'Удалить {label}',
   'analyzerPanel.cancelDecode': 'Отменить декодирование',
   'analyzerPanel.add': 'Добавить',
   'analyzerPanel.decoder': 'Декодер',

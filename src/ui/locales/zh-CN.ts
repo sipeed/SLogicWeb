@@ -154,6 +154,8 @@ export const zhCN: Messages = {
   'analyzerPanel.attached': '已挂载',
   'analyzerPanel.decode': '解码',
   'analyzerPanel.remove': '移除',
+  'analyzerPanel.decodeAction': '解码 {label}',
+  'analyzerPanel.removeAction': '移除 {label}',
   'analyzerPanel.cancelDecode': '取消解码',
   'analyzerPanel.add': '添加',
   'analyzerPanel.decoder': '解码器',

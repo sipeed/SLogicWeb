@@ -156,6 +156,8 @@ export const fr: Messages = {
   'analyzerPanel.attached': 'Attachés',
   'analyzerPanel.decode': 'Décoder',
   'analyzerPanel.remove': 'Retirer',
+  'analyzerPanel.decodeAction': 'Décoder {label}',
+  'analyzerPanel.removeAction': 'Retirer {label}',
   'analyzerPanel.cancelDecode': 'Annuler le décodage',
   'analyzerPanel.add': 'Ajouter',
   'analyzerPanel.decoder': 'Décodeur',

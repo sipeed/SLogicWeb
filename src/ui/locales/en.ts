@@ -160,6 +160,8 @@ export const en = {
   'analyzerPanel.attached': 'Attached',
   'analyzerPanel.decode': 'Decode',
   'analyzerPanel.remove': 'Remove',
+  'analyzerPanel.decodeAction': 'Decode {label}',
+  'analyzerPanel.removeAction': 'Remove {label}',
   'analyzerPanel.cancelDecode': 'Cancel decode',
   'analyzerPanel.add': 'Add',
   'analyzerPanel.decoder': 'Decoder',
