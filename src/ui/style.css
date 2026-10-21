@@ -60,7 +60,7 @@
   --foreground: var(--text80);
   --card: var(--bg20);
   --card-foreground: var(--text80);
-  --popover: var(--bg20);
+  --popover: var(--bg30);
   --popover-foreground: var(--text80);
   --popover-hover: color-mix(in oklab, var(--popover) 92%, var(--popover-foreground));
   --secondary: var(--bg30);
