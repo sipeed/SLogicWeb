@@ -108,7 +108,13 @@ export class AnalyzerPanel {
     const pickOptions: SelectOptionTuple[] = logic.map(
       (d) => [d.id, `${d.id} - ${d.longname}`] as SelectOptionTuple,
     );
-    const pick = selectControl('analyzer.decoder', t('analyzerPanel.decoder'), pickOptions, this.chosen);
+    const pick = selectControl('analyzer.decoder', t('analyzerPanel.decoder'), pickOptions, this.chosen, {
+      search: {
+        label: t('analyzerPanel.decoderSearchLabel'),
+        placeholder: t('analyzerPanel.decoderSearchPlaceholder'),
+        empty: t('analyzerPanel.decoderNoMatch'),
+      },
+    });
     pick.addEventListener('change', () => {
       this.chosen = pick.value;
       this.draftChannels = {};

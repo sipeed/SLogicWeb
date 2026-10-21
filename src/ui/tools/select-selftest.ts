@@ -720,6 +720,26 @@ check(
     `missing=${JSON.stringify(missingDraft)}`,
   );
 
+  const searchConfigNeedles = [
+    'search: {',
+    "label: t('analyzerPanel.decoderSearchLabel')",
+    "placeholder: t('analyzerPanel.decoderSearchPlaceholder')",
+    "empty: t('analyzerPanel.decoderNoMatch')",
+  ];
+  const missingSearchConfig = searchConfigNeedles.filter((needle) => !analyzer.includes(needle));
+  const enCatalog = fs.readFileSync('src/ui/locales/en.ts', 'utf8');
+  const enNeedles = [
+    "'analyzerPanel.decoderSearchLabel': 'Search protocols'",
+    "'analyzerPanel.decoderSearchPlaceholder': 'Type to filter protocols'",
+    "'analyzerPanel.decoderNoMatch': 'No protocol matches \"{query}\"'",
+  ];
+  const missingEn = enNeedles.filter((needle) => !enCatalog.includes(needle));
+  check(
+    'the decoder picker opts into the search mode with translated, caller-owned strings',
+    missingSearchConfig.length === 0 && missingEn.length === 0,
+    `missingConfig=${JSON.stringify(missingSearchConfig)}, missingEn=${JSON.stringify(missingEn)}`,
+  );
+
   const nativeFactoryNeedle = ['export function ', 'select('].join('');
   const nativeCtorNeedle = ['createElement(', "'select'", ')'].join('');
   const sourceFiles = walk('src');

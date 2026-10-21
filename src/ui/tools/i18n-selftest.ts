@@ -441,6 +441,7 @@ const baseSettings: CaptureSettings = {
     'channels.resetName',
     'channels.triggerMode', 'channels.cancel',
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',
+    'analyzerPanel.decoderSearchLabel',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];
