@@ -750,6 +750,49 @@ check('the reachable constrained inventory pins every raw option value occurrenc
     counts.join(' / '));
 }
 
+// -------------------------------------------------------- expected key union
+
+const EXPECTED_DECODER_KEYS: readonly string[] = [
+  ...DESCRIPTION_KEYS,
+  ...TRANSLATED_LONGNAME_KEYS,
+  ...OPTION_KEYS,
+  ...OPTION_VALUE_KEYS,
+];
+const EXPECTED_DECODER_KEY_SET: ReadonlySet<string> = new Set(EXPECTED_DECODER_KEYS);
+const EXPECTED_DECODER_KEY_COUNT = REACHABLE_DECODER_COUNT + LONGNAME_TRANSLATED_COUNT +
+  REACHABLE_OPTION_COUNT + TRANSLATED_OPTION_VALUES.length;
+
+check('the four localized surfaces build one disjoint expected decoder key union',
+  EXPECTED_DECODER_KEY_SET.size === EXPECTED_DECODER_KEYS.length &&
+  EXPECTED_DECODER_KEY_SET.size === EXPECTED_DECODER_KEY_COUNT,
+  `${DESCRIPTION_KEYS.length} descriptions + ${TRANSLATED_LONGNAME_KEYS.length} long names + ` +
+  `${OPTION_KEYS.length} option labels + ${OPTION_VALUE_KEYS.length} value labels = ` +
+  `${EXPECTED_DECODER_KEY_COUNT} expected keys, ${EXPECTED_DECODER_KEYS.length} built, ` +
+  `${EXPECTED_DECODER_KEY_SET.size} unique`);
+
+{
+  const missing: string[] = [];
+  const extra: string[] = [];
+  const sizes: string[] = [];
+  for (const [locale, dict] of NON_ENGLISH_CATALOGS) {
+    const actual = new Set(Object.keys(dict));
+    for (const key of EXPECTED_DECODER_KEY_SET) {
+      if (!actual.has(key)) missing.push(`${locale}:${key}`);
+    }
+    for (const key of actual) {
+      if (!EXPECTED_DECODER_KEY_SET.has(key)) extra.push(`${locale}:${key}`);
+    }
+    if (actual.size !== EXPECTED_DECODER_KEY_SET.size) sizes.push(`${locale}:${actual.size}`);
+  }
+  check('every non-English decoder catalog key set equals the expected union exactly',
+    missing.length === 0 && extra.length === 0 && sizes.length === 0,
+    missing.length === 0 && extra.length === 0 && sizes.length === 0
+      ? `${NON_ENGLISH_CATALOGS.length} catalogs × ${EXPECTED_DECODER_KEY_SET.size} keys`
+      : `missing=${missing.slice(0, 8).join(',') || 'none'} ` +
+        `extra=${extra.slice(0, 8).join(',') || 'none'} ` +
+        `sizes=${sizes.join(',') || 'match'}`);
+}
+
 // ---------------------------------------------------- atomic registration path
 {
   const attempts: [string, () => Promise<unknown>][] = [
