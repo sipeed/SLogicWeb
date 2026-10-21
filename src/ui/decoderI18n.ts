@@ -48,7 +48,18 @@ export function decoderLongNameText(decoder: DecoderMetadata): string {
 }
 
 export function decoderPickerLabel(decoder: DecoderMetadata): string {
+  return decoder.id;
+}
+
+export function decoderPickerSearchText(decoder: DecoderMetadata): string {
   return `${decoder.id} - ${decoderLongNameText(decoder)}`;
+}
+
+export function decoderPickerOptions(
+  decoders: readonly DecoderMetadata[],
+): SelectOptionTuple[] {
+  return decoders.map((decoder): SelectOptionTuple =>
+    [decoder.id, decoderPickerLabel(decoder), decoderPickerSearchText(decoder)]);
 }
 
 export function decoderOptionLabel(decoderId: string, option: DecoderOptionMetadata): string {

@@ -22,7 +22,7 @@ import type { DecoderInfo } from '../decode/index.js';
 import { button, div, labelled, section } from './capturePanel.js';
 import {
   decoderDescriptionText, decoderLongNameText, decoderOptionLabel, decoderOptionValueTuples,
-  decoderPickerLabel,
+  decoderPickerOptions,
 } from './decoderI18n.js';
 import { formatMountedAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
@@ -111,9 +111,7 @@ export class AnalyzerPanel {
     const logic = listDecoders()
       .filter((d) => d.inputs.length === 1 && d.inputs[0] === 'logic')
       .sort((a, b) => a.id.localeCompare(b.id));
-    const pickOptions: SelectOptionTuple[] = logic.map(
-      (d) => [d.id, decoderPickerLabel(d)] as SelectOptionTuple,
-    );
+    const pickOptions = decoderPickerOptions(logic);
     const pick = selectControl('analyzer.decoder', t('analyzerPanel.decoder'), pickOptions, this.chosen, {
       search: {
         label: t('analyzerPanel.decoderSearchLabel'),

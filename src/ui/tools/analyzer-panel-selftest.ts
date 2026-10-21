@@ -203,13 +203,14 @@ check(
   `tuples=${panel.includes('decoderOptionValueTuples(opt.values)')}, coerce=${count(panel, /coerce\(opt\.type, (sel|inp)\.value\)/g)}`,
 );
 
-const PICKER_CALL = '[d.id, decoderPickerLabel(d)] as SelectOptionTuple';
+const PICKER_CALL = 'decoderPickerOptions(logic)';
 const RAW_PICKER_LABEL = '${d.id} - ${d.longname}';
 check(
-  'the decoder picker renders a localized long name behind the raw decoder id',
+  'the decoder picker renders the raw protocol id backed by the localized search corpus',
   panel.includes(PICKER_CALL) &&
-    panel.includes('decoderPickerLabel,') && panel.includes(DECODER_I18N_IMPORT) &&
+    panel.includes('decoderPickerOptions,') && panel.includes(DECODER_I18N_IMPORT) &&
     panel.includes('this.chosen = pick.value;') &&
+    !panel.includes('decoderPickerLabel') &&
     !panel.includes(RAW_PICKER_LABEL),
   `resolved=${panel.includes(PICKER_CALL)}, raw=${panel.includes(RAW_PICKER_LABEL)}, rawValue=${panel.includes('this.chosen = pick.value;')}`,
 );
