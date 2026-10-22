@@ -811,15 +811,19 @@ check(
     `noSelectSelector=${noNativeSelectSelector}, baseInput=${baseInputRule}, themedInput=${themedInputRule}`,
   );
 
-  const guardIndex = app.indexOf("closest('.select-field') !== null");
+  // The guard also skips textareas, contenteditables and the assistant panel; what this
+  // pins is that text fields and .select-field are excluded before any shortcut runs.
+  const guardIndex = app.indexOf("closest('.select-field");
   const fitIndex = app.indexOf("e.key === 'f'");
-  const inputGuard = app.indexOf('e.target instanceof HTMLInputElement');
+  const inputGuard = app.indexOf('target instanceof HTMLInputElement');
+  const textareaGuard = app.indexOf('target instanceof HTMLTextAreaElement');
   const shortcutGuard = guardIndex >= 0 && fitIndex >= 0 &&
-    inputGuard >= 0 && inputGuard < guardIndex && guardIndex < fitIndex;
+    inputGuard >= 0 && inputGuard < guardIndex && guardIndex < fitIndex &&
+    textareaGuard >= 0 && textareaGuard < fitIndex;
   check(
     'application shortcuts ignore key events from .select-field before f/Space/Escape handling',
     shortcutGuard,
-    `inputGuard@${inputGuard}, selectFieldGuard@${guardIndex}, fHandler@${fitIndex}`,
+    `inputGuard@${inputGuard}, textareaGuard@${textareaGuard}, selectFieldGuard@${guardIndex}, fHandler@${fitIndex}`,
   );
 }
 

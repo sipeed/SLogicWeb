@@ -927,6 +927,9 @@ OpenAI-compatible providers allow browser (CORS) requests at all - a relay cover
   nodes only, never innerHTML; HTML stays literal text; only http(s) links become links.
   Streaming re-renders the accumulated text at most once per animation frame. Single
   `_`/`__` emphasis only off word boundaries, so identifiers stay literal.
+- *Keyboard.* The plot's shortcuts (Space start/stop, f fit, Escape) ignored inputs and
+  selects but not textareas, so Space in the chat started a capture. They now also skip
+  textareas, contenteditables and anything inside `.assistant-panel`.
 - *Header.* One row: title, a gear (settings toggle) and a small New button.
 
 `src/ui/tools/assistant-selftest.ts` (81 checks) replays recorded SSE streams through

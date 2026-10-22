@@ -745,9 +745,15 @@ export class App {
     this.el.axis.addEventListener('pointercancel', axisEnd);
 
     window.addEventListener('keydown', (e) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
-      if (e.target instanceof HTMLElement && e.target.closest('.select-field') !== null) return;
-      if (e.target instanceof HTMLElement && e.target.closest('dialog[open]') !== null) return;
+      // Shortcuts belong to the plot. Typing anywhere else - a text field, the chat box,
+      // a contenteditable, anything inside the assistant (whose buttons keep focus
+      // after a click) or an open dialog - must not leak: Space would start a capture.
+      const target = e.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement ||
+          target instanceof HTMLTextAreaElement) return;
+      if (target instanceof HTMLElement &&
+          (target.isContentEditable || target.closest('.select-field, .assistant-panel') !== null)) return;
+      if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;
       if (e.key === 'f') { this.stack.zoomToFit(); this.dirty = true; }
       if (e.key === ' ') {
         e.preventDefault();
