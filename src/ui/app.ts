@@ -62,7 +62,7 @@ import {
   type CaptureLabel, type StatusError,
 } from './state.js';
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
-import { markerSnapRadii } from './markerGeometry.js';
+import { markerPointerCursor, markerSnapRadii, type MarkerCursor } from './markerGeometry.js';
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
 
@@ -149,6 +149,7 @@ export class App {
   private readonly markerA = new WaveformMarker('A', MEASURE_COLORS[0]!);
   private releaseMarkerPointer: () => void = () => {};
   private hover: HoverMeasurement | null = null;
+  private markerCursor: MarkerCursor = null;
 
   private dirty = true;
   private panel: 'device' | 'analyzers' | 'assistant' | null = 'device';
@@ -766,6 +767,7 @@ export class App {
       } else {
         this.stack.panPixels(e.deltaX * dpr);
       }
+      this.syncMarkerCursor(e.clientX - rect.left);
       this.setFollow(false);
       this.dirty = true;
     }, { passive: false });
@@ -781,6 +783,7 @@ export class App {
     let moved = 0;
     this.releaseMarkerPointer = () => {
       const id = this.markerA.pointerId;
+      this.syncMarkerCursor(null);
       if (id === null) return;
       this.markerA.cancelDrag();
       pointers.delete(id);
@@ -798,16 +801,22 @@ export class App {
         moved = 1000;   // a pinch never ends in a cursor placement
       } else if (pointers.size === 1) {
         this.stack.syncSize();
-        const grabbed = this.tryGrabMarker(e, plot.getBoundingClientRect());
+        const rect = plot.getBoundingClientRect();
+        const grabbed = this.tryGrabMarker(e, rect);
         dragging = !grabbed;
         lastX = e.clientX;
         downX = e.clientX;
         moved = 0;
-        if (grabbed) { this.hover = null; this.dirty = true; }
+        if (grabbed) {
+          this.hover = null;
+          this.syncMarkerCursor(e.clientX - rect.left);
+          this.dirty = true;
+        }
       }
     });
     plot.addEventListener('pointermove', (e) => {
       const rect = plot.getBoundingClientRect();
+      this.syncMarkerCursor(e.clientX - rect.left);
       if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.markerA.isDragging) {
         this.stack.syncSize();
@@ -853,6 +862,7 @@ export class App {
       pointers.delete(e.pointerId);
       const markerEnded = this.markerA.endDrag(e.pointerId);
       if (plot.hasPointerCapture(e.pointerId)) plot.releasePointerCapture(e.pointerId);
+      this.syncMarkerCursor(e.clientX - plot.getBoundingClientRect().left);
       if (markerEnded) { this.dirty = true; return; }
       if (pinch && pointers.size >= 2) {
         // Three fingers down and one lifted: the pinch pair changed identity, so the
@@ -876,6 +886,7 @@ export class App {
         const rect = plot.getBoundingClientRect();
         const s = Math.round(this.toSample(e.clientX - rect.left));
         this.markerA.setSample(s, this.store.length);
+        this.syncMarkerCursor(e.clientX - rect.left);
         this.dirty = true;
       }
     };
@@ -885,9 +896,14 @@ export class App {
       if (this.markerA.pointerId !== e.pointerId) return;
       pointers.delete(e.pointerId);
       this.markerA.cancelDrag();
+      this.syncMarkerCursor(null);
       this.dirty = true;
     });
-    plot.addEventListener('pointerleave', () => { this.hover = null; this.dirty = true; });
+    plot.addEventListener('pointerleave', () => {
+      this.hover = null;
+      this.syncMarkerCursor(null);
+      this.dirty = true;
+    });
     plot.addEventListener('dblclick', () => { this.stack.zoomToFit(); this.dirty = true; });
 
     // Dragging the axis pans, which is what a time ruler is for.
@@ -1078,6 +1094,17 @@ export class App {
 
   private setFollow(on: boolean): void {
     this.stack.setFollowLatest(on);
+  }
+
+  private syncMarkerCursor(pointerCssX: number | null): void {
+    const sample = this.markerA.sample;
+    const next = markerPointerCursor(
+      pointerCssX, sample === null ? null : this.toPx(sample), this.markerA.isDragging,
+    );
+    if (next === this.markerCursor) return;
+    this.markerCursor = next;
+    this.el.plot.classList.toggle('marker-grab', next === 'grab');
+    this.el.plot.classList.toggle('marker-grabbing', next === 'grabbing');
   }
 
   // ------------------------------------------------------------------ toolbar
@@ -1994,6 +2021,7 @@ export class App {
       started: this.markerA.started,
       pointerId: this.markerA.pointerId,
       channel: this.markerA.channel,
+      cursor: this.markerCursor,
     }),
     edges: (channel: number, lo: number, hi: number) => {
       const store = this.store;

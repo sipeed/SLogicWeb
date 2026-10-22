@@ -19,6 +19,17 @@ export function isMarkerGrab(pointerCssX: number, markerCssX: number): boolean {
   return Math.abs(pointerCssX - markerCssX) <= MARKER_GRAB_RADIUS_CSS;
 }
 
+export type MarkerCursor = 'grab' | 'grabbing' | null;
+
+export function markerPointerCursor(
+  pointerCssX: number | null, markerCssX: number | null, dragging: boolean,
+): MarkerCursor {
+  if (dragging) return 'grabbing';
+  if (pointerCssX === null || markerCssX === null) return null;
+  if (!Number.isFinite(pointerCssX) || !Number.isFinite(markerCssX)) return null;
+  return isMarkerGrab(pointerCssX, markerCssX) ? 'grab' : null;
+}
+
 export function clampMarkerSample(sample: number, captureLength: number): number | null {
   if (!Number.isFinite(sample) || !Number.isFinite(captureLength)) return null;
   if (captureLength < 1) return null;

@@ -844,6 +844,9 @@ html[data-theme="light"] .channel-color-custom { background: var(--bg30); }
   touch-action: pan-y;
 }
 
+#plot.marker-grab { cursor: grab; }
+#plot.marker-grabbing { cursor: grabbing; }
+
 #wave-stack { position: relative; }
 .wave-canvas { display: block; width: 100%; }
 

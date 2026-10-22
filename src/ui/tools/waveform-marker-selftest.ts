@@ -3,7 +3,7 @@
 
 import {
   MARKER_GRAB_RADIUS_CSS, MARKER_SNAP_RADIUS_CSS, clampMarkerSample, isMarkerGrab,
-  markerEdgeWindow, markerSnapRadii, nearestMarkerEdge,
+  markerEdgeWindow, markerPointerCursor, markerSnapRadii, nearestMarkerEdge,
 } from '../markerGeometry.js';
 import {
   WaveformMarker, type MarkerPaintTarget, type MarkerSnapContext,
@@ -211,6 +211,38 @@ function between(source: string, start: string, end: string): string {
     !isMarkerGrab(10, Number.POSITIVE_INFINITY),
     `nanX=${isMarkerGrab(Number.NaN, 10)}, nanMarker=${isMarkerGrab(10, Number.NaN)}, ` +
     `infiniteMarker=${isMarkerGrab(10, Number.POSITIVE_INFINITY)}`);
+}
+
+{
+  const inBand = markerPointerCursor(10, 12, false);
+  const atBoundary = markerPointerCursor(10, 14, false);
+  const pastBoundary = markerPointerCursor(10, 14.0001, false);
+  const mirrored = markerPointerCursor(14, 10, false);
+  check('the pointer announces grab inside the inclusive 4 CSS px band and nothing outside it',
+    inBand === 'grab' && atBoundary === 'grab' && pastBoundary === null && mirrored === 'grab',
+    `in=${String(inBand)}, at4=${String(atBoundary)}, past4=${String(pastBoundary)}, ` +
+    `mirrored=${String(mirrored)}`);
+
+  const nullPointer = markerPointerCursor(null, 12, false);
+  const nullMarker = markerPointerCursor(10, null, false);
+  const nanPointer = markerPointerCursor(Number.NaN, 12, false);
+  const nanMarker = markerPointerCursor(10, Number.NaN, false);
+  const infinitePointer = markerPointerCursor(Number.NEGATIVE_INFINITY, 12, false);
+  const infiniteMarker = markerPointerCursor(10, Number.POSITIVE_INFINITY, false);
+  check('absent or non-finite pointer and marker positions never announce a cursor',
+    nullPointer === null && nullMarker === null && nanPointer === null &&
+    nanMarker === null && infinitePointer === null && infiniteMarker === null,
+    `nullPointer=${String(nullPointer)}, nullMarker=${String(nullMarker)}, ` +
+    `nan=${String(nanPointer)},${String(nanMarker)}, ` +
+    `infinite=${String(infinitePointer)},${String(infiniteMarker)}`);
+
+  const draggedOutOfBand = markerPointerCursor(100, 0, true);
+  const draggedNullInputs = markerPointerCursor(null, null, true);
+  const control = markerPointerCursor(10, 12, false);
+  check('a live drag announces grabbing past the band and with absent inputs while the control stays grab',
+    draggedOutOfBand === 'grabbing' && draggedNullInputs === 'grabbing' && control === 'grab',
+    `dragged=${String(draggedOutOfBand)}, draggedNull=${String(draggedNullInputs)}, ` +
+    `control=${String(control)}`);
 }
 
 {
@@ -985,6 +1017,47 @@ function between(source: string, start: string, end: string): string {
     !hoverSource.includes('|B-A|') && !hoverSource.includes('cursorB'),
     `palette=${sharedPalette}, overlay=${sharedCursor}, hoverFreq=${hoverFreq}, ` +
     `freqReadout=${hoverFreqReadout}, len=${hoverSource.length}`);
+}
+
+{
+  const appSource = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const cssSource = fs.readFileSync('src/ui/style.css', 'utf8');
+  const cssCode = cssSource.replace(/\/\*[\s\S]*?\*\//g, '');
+
+  const grabRule = /#plot\.marker-grab\s*\{\s*cursor:\s*grab;\s*\}/.test(cssCode);
+  const grabbingRule = /#plot\.marker-grabbing\s*\{\s*cursor:\s*grabbing;\s*\}/.test(cssCode);
+  const baseCursor = /#plot\s*\{[^}]*?cursor:\s*url\("data:image\/svg\+xml,/.test(cssCode);
+  check('the plot advertises grab and grabbing through two native-keyword class rules over its image cursor',
+    grabRule && grabbingRule && baseCursor,
+    `grab=${grabRule}, grabbing=${grabbingRule}, baseCursor=${baseCursor}`);
+
+  const toggleGrab = appSource.includes("classList.toggle('marker-grab', next === 'grab')");
+  const toggleGrabbing =
+    appSource.includes("classList.toggle('marker-grabbing', next === 'grabbing')");
+  const syncBody = between(appSource, 'private syncMarkerCursor(', 'private wireToolbar(');
+  check('the cursor setter toggles both state classes, reuses the shared band, and schedules no repaint',
+    toggleGrab && toggleGrabbing &&
+    syncBody.includes('markerPointerCursor(') &&
+    syncBody.includes('sample === null ? null : this.toPx(sample), this.markerA.isDragging,') &&
+    syncBody.includes('if (next === this.markerCursor) return;') &&
+    !syncBody.includes('this.dirty') && !syncBody.includes('Math.abs('),
+    `grab=${toggleGrab}, grabbing=${toggleGrabbing}, len=${syncBody.length}, ` +
+    `dirty=${syncBody.includes('this.dirty')}, band=${syncBody.includes('Math.abs(')}`);
+
+  const syncCalls = appSource.match(/this\.syncMarkerCursor\(/g) ?? [];
+  check('every pointer entry, exit, release, wheel, and placement site resyncs the cursor',
+    syncCalls.length === 8, `calls=${syncCalls.length}`);
+
+  const syncAt = appSource.indexOf('private syncMarkerCursor(');
+  check('the cursor setter sits after setFollow so every hover slice keeps its bounds',
+    syncAt > appSource.indexOf('private setFollow(') &&
+    syncAt < appSource.indexOf('private wireToolbar('),
+    `sync=${syncAt}, follow=${appSource.indexOf('private setFollow(')}`);
+
+  const markerDebug = between(appSource, 'marker: () => ({', 'edges: (channel: number');
+  check('the debug readout exposes the live cursor state',
+    markerDebug.includes('cursor: this.markerCursor,'),
+    `len=${markerDebug.length}, cursor=${markerDebug.includes('cursor: this.markerCursor,')}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
