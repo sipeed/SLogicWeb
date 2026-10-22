@@ -765,6 +765,7 @@ html[data-theme="light"] .channel-color-custom { background: var(--bg30); }
   background: none; border: 0; border-radius: calc(var(--radius) - 2px);
   color: var(--popover-foreground); font: inherit; text-align: left; cursor: pointer;
   white-space: nowrap;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 .settings-item:hover, .settings-item.open { background: var(--popover-hover); }
 .settings-check { width: 14px; flex: none; color: var(--primary); }
@@ -881,6 +882,7 @@ html[data-theme="light"] .grid-canvas { mix-blend-mode: darken; }
   width: 2px;
   background: var(--text50);
   opacity: 0;
+  transition: opacity var(--motion-fast) var(--motion-ease);
 }
 #panel-resizer:hover::after,
 #panel-resizer.resizing::after,
@@ -954,6 +956,7 @@ html.resizing { cursor: col-resize; user-select: none; }
   border: 1px solid var(--border); border-radius: var(--radius);
   font: inherit; text-align: left; cursor: pointer;
   anchor-name: var(--select-anchor, none);
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 .select-trigger:hover { border-color: var(--input); }
 html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high); }
@@ -980,7 +983,7 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
 }
 @position-try --select-flip-inline { position-area: bottom span-left; }
 .select-popover::-webkit-scrollbar { width: 8px; height: 8px; }
-.select-popover::-webkit-scrollbar-thumb { background: var(--border-high); border-radius: 999px; }
+.select-popover::-webkit-scrollbar-thumb { background: var(--border-high); border-radius: 999px; transition: background-color var(--motion-fast) var(--motion-ease); }
 .select-popover::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }
 .select-popover::-webkit-scrollbar-track { background: transparent; }
 
@@ -991,6 +994,7 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
   border-radius: calc(var(--radius) - 2px);
   color: var(--popover-foreground);
   cursor: pointer; white-space: nowrap;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease);
 }
 .select-item:hover { background: var(--popover-hover); }
 .select-item.active { background: var(--popover-hover); outline: 2px solid var(--ring); outline-offset: -2px; }
@@ -1158,6 +1162,7 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
 :is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar-thumb {
   background: var(--border-high);
   border-radius: 999px;
+  transition: background-color var(--motion-fast) var(--motion-ease);
 }
 :is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area::-webkit-scrollbar-thumb:hover,
 :is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar-thumb:hover {

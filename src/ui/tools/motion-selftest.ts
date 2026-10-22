@@ -60,7 +60,7 @@ function flatRules(code: string): FlatRule[] {
   const re = /([^{}]+)\{([^{}]*)\}/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(code)) !== null) {
-    rules.push({ selector: (m[1] ?? '').trim(), body: m[2] ?? '', start: m.index });
+    rules.push({ selector: (m[1] ?? '').replace(/\s+/g, ' ').trim(), body: m[2] ?? '', start: m.index });
   }
   return rules;
 }
@@ -87,6 +87,12 @@ const MOTION_CONSUMERS: readonly string[] = [
   '.channel-settings-cancel',
   '.analyzer-act',
   '.ch-analyzer-x',
+  '.select-trigger',
+  '.select-item',
+  '.settings-item',
+  '#panel-resizer::after',
+  ':is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area::-webkit-scrollbar-thumb, :is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar-thumb',
+  '.select-popover::-webkit-scrollbar-thumb',
 ];
 
 const BUTTON_CONSUMERS: readonly string[] = [
@@ -99,6 +105,8 @@ const BUTTON_CONSUMERS: readonly string[] = [
   '.channel-settings-cancel',
   '.analyzer-act',
   '.ch-analyzer-x',
+  '.select-trigger',
+  '.settings-item',
 ];
 
 const NON_BUTTON_CONSUMERS: readonly string[] = [
@@ -106,6 +114,10 @@ const NON_BUTTON_CONSUMERS: readonly string[] = [
   '.tooltip.open',
   ':is(html[data-theme="dark"], html[data-theme="light"]) .ch-card',
   '.channel-trigger-option',
+  '.select-item',
+  '#panel-resizer::after',
+  ':is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area::-webkit-scrollbar-thumb, :is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar-thumb',
+  '.select-popover::-webkit-scrollbar-thumb',
 ];
 
 {
