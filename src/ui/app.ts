@@ -146,6 +146,7 @@ export class App {
   private abort: AbortController | null = null;
 
   private readonly markerA = new WaveformMarker('A', MEASURE_COLORS[0]!);
+  private releaseMarkerPointer: () => void = () => {};
   private hover: HoverMeasurement | null = null;
 
   private dirty = true;
@@ -777,25 +778,47 @@ export class App {
     let lastX = 0;
     let downX = 0;
     let moved = 0;
+    this.releaseMarkerPointer = () => {
+      const id = this.markerA.pointerId;
+      if (id === null) return;
+      this.markerA.cancelDrag();
+      pointers.delete(id);
+      if (plot.hasPointerCapture(id)) plot.releasePointerCapture(id);
+    };
     plot.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       plot.setPointerCapture(e.pointerId);
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()] as [{ x: number; y: number }, { x: number; y: number }];
+        this.markerA.cancelDrag();
         pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), midX: (a.x + b.x) / 2 };
         dragging = false;
         moved = 1000;   // a pinch never ends in a cursor placement
       } else if (pointers.size === 1) {
-        dragging = true;
+        this.stack.syncSize();
+        const grabbed = this.tryGrabMarker(e, plot.getBoundingClientRect());
+        dragging = !grabbed;
         lastX = e.clientX;
         downX = e.clientX;
         moved = 0;
+        if (grabbed) { this.hover = null; this.dirty = true; }
       }
     });
     plot.addEventListener('pointermove', (e) => {
       const rect = plot.getBoundingClientRect();
       if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (this.markerA.isDragging) {
+        this.stack.syncSize();
+        const consumed = this.markerA.move({
+          pointerId: e.pointerId,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          sample: this.toSample(e.clientX - rect.left),
+          captureLength: this.store.length,
+        });
+        if (consumed) { this.dirty = true; return; }
+      }
       if (pinch && pointers.size >= 2) {
         const [a, b] = [...pointers.values()] as [{ x: number; y: number }, { x: number; y: number }];
         const dist = Math.hypot(a.x - b.x, a.y - b.y);
@@ -825,7 +848,9 @@ export class App {
     });
     const end = (e: PointerEvent) => {
       pointers.delete(e.pointerId);
+      const markerEnded = this.markerA.endDrag(e.pointerId);
       if (plot.hasPointerCapture(e.pointerId)) plot.releasePointerCapture(e.pointerId);
+      if (markerEnded) { this.dirty = true; return; }
       if (pinch && pointers.size >= 2) {
         // Three fingers down and one lifted: the pinch pair changed identity, so the
         // baseline must be re-measured or the next move zooms by the pair difference.
@@ -847,12 +872,18 @@ export class App {
       if (moved < 3 && Math.abs(e.clientX - downX) < 3 && this.store.length > 0) {
         const rect = plot.getBoundingClientRect();
         const s = Math.round(this.toSample(e.clientX - rect.left));
-        this.markerA.sample = s;
+        this.markerA.setSample(s, this.store.length);
         this.dirty = true;
       }
     };
     plot.addEventListener('pointerup', end);
     plot.addEventListener('pointercancel', end);
+    plot.addEventListener('lostpointercapture', (e) => {
+      if (this.markerA.pointerId !== e.pointerId) return;
+      pointers.delete(e.pointerId);
+      this.markerA.cancelDrag();
+      this.dirty = true;
+    });
     plot.addEventListener('pointerleave', () => { this.hover = null; this.dirty = true; });
     plot.addEventListener('dblclick', () => { this.stack.zoomToFit(); this.dirty = true; });
 
@@ -897,7 +928,11 @@ export class App {
         e.preventDefault();
         this.primaryAction();
       }
-      if (e.key === 'Escape') { this.markerA.clear(); this.dirty = true; }
+      if (e.key === 'Escape') {
+        this.releaseMarkerPointer();
+        this.markerA.clear();
+        this.dirty = true;
+      }
     });
 
     // Drag and drop a capture file straight onto the window.
@@ -906,6 +941,28 @@ export class App {
       e.preventDefault();
       const files = [...(e.dataTransfer?.files ?? [])];
       if (files.length) void this.openFiles(files);
+    });
+  }
+
+  private rowAt(cssY: number): RowBox | null {
+    for (const box of this.stack.boxes()) {
+      if (cssY >= box.top && cssY < box.top + box.height) return box;
+    }
+    return null;
+  }
+
+  private tryGrabMarker(e: PointerEvent, rect: DOMRect): boolean {
+    const sample = this.markerA.sample;
+    if (sample === null) return false;
+    const row = this.rowAt(e.clientY - rect.top);
+    return this.markerA.tryGrab({
+      pointerId: e.pointerId,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      pointerCssX: e.clientX - rect.left,
+      markerCssX: this.toPx(sample),
+      channel: row?.spec.channel ?? null,
+      captureLength: this.store.length,
     });
   }
 
@@ -919,11 +976,8 @@ export class App {
     const store = this.store;
     if (store.length === 0) { this.dirty = true; return; }
 
-    let box = null;
-    for (const b of this.stack.boxes()) {
-      if (cssY >= b.top && cssY < b.top + b.height && b.spec.kind !== 'lane') { box = b; break; }
-    }
-    if (!box) { this.dirty = true; return; }
+    const box = this.rowAt(cssY);
+    if (!box || box.spec.kind === 'lane') { this.dirty = true; return; }
     if (box.spec.kind === 'analog') {
       const bv = this.busViews[box.spec.bus ?? -1];
       const s = Math.round(this.toSample(cssX));
@@ -1340,6 +1394,7 @@ export class App {
 
   private adoptCapture(store: SampleStore, names: string[], label: CaptureLabel): void {
     this.discardDecodeState();
+    this.releaseMarkerPointer();
     this.storeRef.set(store);
     this.channels = defaultChannels(store.channelCount);
     for (let i = 0; i < this.channels.length; i++) {
@@ -1447,6 +1502,7 @@ export class App {
       // The empty store is still rendered before Start is pressed. Grow it together with
       // the channel rows; otherwise row 16 of a newly-connected 32U3 is queried against
       // the initial 16-channel placeholder and WaveformRenderer rejects it as out of range.
+      this.releaseMarkerPointer();
       this.storeRef.set(createSampleStore(max, this.settings.samplerate));
     }
     if (this.store.length === 0 && max !== this.channels.length) {
@@ -1479,6 +1535,7 @@ export class App {
 
       const store = createSampleStore(cfg.channels, cfg.samplerate);
       this.discardDecodeState();
+      this.releaseMarkerPointer();
       this.storeRef.set(store);
       this.resetBusBuilds();
       this.channels = defaultChannels(cfg.channels);
@@ -1904,13 +1961,18 @@ export class App {
       this.dirty = true;
     },
     setMarker: (sample: number | null) => {
-      this.markerA.sample = sample;
+      this.releaseMarkerPointer();
+      this.markerA.setSample(sample, this.store.length);
       this.dirty = true;
     },
     marker: () => ({
       label: this.markerA.label,
       color: this.markerA.color,
       sample: this.markerA.sample,
+      dragging: this.markerA.isDragging,
+      started: this.markerA.started,
+      pointerId: this.markerA.pointerId,
+      channel: this.markerA.channel,
     }),
     hoverAt: (cssX: number, cssY: number) => this.updateHover(cssX, cssY),
     toggleChannel: (i: number, on: boolean) => this.setChannelEnabled(i, on),
