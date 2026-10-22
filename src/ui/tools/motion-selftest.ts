@@ -73,7 +73,21 @@ const code = css.replace(/\/\*[\s\S]*?\*\//g, '');
 const media = mediaRanges(code);
 const rules = flatRules(code);
 
-const MOTION_CONSUMERS: readonly string[] = ['.tooltip', '.tooltip.open'];
+const MOTION_CONSUMERS: readonly string[] = [
+  '.tooltip',
+  '.tooltip.open',
+  '#toolbar button.toolbar-item',
+  '.pill, .mini, .primary, .danger, .seg',
+  '.chip',
+];
+
+const BUTTON_CONSUMERS: readonly string[] = [
+  '#toolbar button.toolbar-item',
+  '.pill, .mini, .primary, .danger, .seg',
+  '.chip',
+];
+
+const NON_BUTTON_CONSUMERS: readonly string[] = ['.tooltip', '.tooltip.open'];
 
 {
   const declarers = rules.filter((r) => r.body.includes('--motion-fast: 120ms'));
@@ -141,10 +155,22 @@ const MOTION_CONSUMERS: readonly string[] = ['.tooltip', '.tooltip.open'];
 }
 
 {
-  const counts = MOTION_CONSUMERS.map((s) => rules.filter((r) => r.selector === s).length);
-  check('the adopted selectors stay in-place: exactly one rule per consumer selector',
+  const topLevel = rules.filter((r) => !media.some((range) => r.start > range.start && r.start < range.end));
+  const counts = MOTION_CONSUMERS.map((s) => topLevel.filter((r) => r.selector === s).length);
+  check('the adopted selectors stay in-place: exactly one top-level rule per consumer selector',
     counts.every((c) => c === 1),
     `counts=${JSON.stringify(Object.fromEntries(MOTION_CONSUMERS.map((s, i) => [s, counts[i]])))}`);
+}
+
+{
+  const topLevel = rules.filter((r) => !media.some((range) => r.start > range.start && r.start < range.end));
+  const transitionOf = (s: string): string =>
+    topLevel.find((r) => r.selector === s)?.body.match(/(?:^|;)\s*transition\s*:\s*([^;]+)/)?.[1] ?? '';
+  const missingVeil = BUTTON_CONSUMERS.filter((s) => !transitionOf(s).includes('box-shadow'));
+  const strayVeil = NON_BUTTON_CONSUMERS.filter((s) => transitionOf(s).includes('box-shadow'));
+  check('button-family transition lists carry box-shadow for the press veil; non-button lists omit it',
+    missingVeil.length === 0 && strayVeil.length === 0,
+    `missingVeil=${JSON.stringify(missingVeil)}, strayVeil=${JSON.stringify(strayVeil)}`);
 }
 
 {
