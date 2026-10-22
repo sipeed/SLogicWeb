@@ -202,6 +202,23 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     clampSource.length > 0 && !clampAutoArm,
     `slice=${clampSource.length}, autoArmInClamp=${clampAutoArm}`);
 
+  const shortcutStart = app.indexOf("window.addEventListener('keydown', (e) => {");
+  const shortcutEnd = shortcutStart >= 0 ? app.indexOf('\n    });', shortcutStart) : -1;
+  const shortcutBody = shortcutEnd > shortcutStart
+    ? app.slice(shortcutStart, shortcutEnd) : '';
+  const dialogGuardIndex = shortcutBody.indexOf("closest('dialog[open]') !== null");
+  const shortcutActions = [
+    shortcutBody.indexOf("e.key === 'f'"),
+    shortcutBody.indexOf("e.key === ' '"),
+    shortcutBody.indexOf("e.key === 'Escape'"),
+  ];
+  const dialogGuard = dialogGuardIndex >= 0 &&
+    shortcutActions.every((index) => index > dialogGuardIndex);
+  check('app-level shortcuts stay out of an open dialog',
+    dialogGuard,
+    `guard@${dialogGuardIndex}, actions=${JSON.stringify(shortcutActions)}, ` +
+    `body=${shortcutBody.length}`);
+
   const channelList = fs.readFileSync('src/ui/channelList.ts', 'utf8');
   const rowStart = channelList.indexOf('export class ChannelList');
   const rowSource = channelList.slice(rowStart, channelList.indexOf('function triggerModeName'));

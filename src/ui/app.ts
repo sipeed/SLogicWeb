@@ -737,6 +737,7 @@ export class App {
     window.addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
       if (e.target instanceof HTMLElement && e.target.closest('.select-field') !== null) return;
+      if (e.target instanceof HTMLElement && e.target.closest('dialog[open]') !== null) return;
       if (e.key === 'f') { this.stack.zoomToFit(); this.dirty = true; }
       if (e.key === ' ') {
         e.preventDefault();
