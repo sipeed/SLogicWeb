@@ -94,20 +94,6 @@ jobs:
                 sub_service/ota/src \
                 dist/ota/
 
-      # The CDN in front of slogic.sipeed.com keeps files for weeks. Every asset URL
-      # carries a content hash - Vite chunk names, the versioned pyodide/<hash>/ and
-      # decoders-<hash>.zip paths, the OTA pages' ?v=<hash> stamps - so purging the HTML
-      # pages alone updates everything. `/` and `/index.html` are separate CDN entries.
-      - name: List the CDN URLs to purge after this deploy
-        run: |
-          {
-            echo '### CDN: purge these URLs once the deploy is live'
-            echo
-            for path in / /index.html /ota/ /ota/index.html /ota/batch.html; do
-              echo "- https://slogic.sipeed.com${path}"
-            done
-          } >> "$GITHUB_STEP_SUMMARY"
-
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -123,3 +109,31 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  # Mainland visitors reach slogic.sipeed.com through Qiniu, which caches the origin's
+  # pages far longer than their max-age. Purge the unhashed URLs once Pages is live and
+  # wait until an edge serves this build; see .github/scripts/purge-qiniu-cdn.sh.
+  purge-cdn:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The exact files Pages just published: the edge is checked against these bytes.
+      - name: Download the Pages artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/pages
+
+      - name: Unpack the Pages artifact
+        run: |
+          mkdir -p "$RUNNER_TEMP/site"
+          tar -xf "$RUNNER_TEMP/pages/artifact.tar" -C "$RUNNER_TEMP/site"
+
+      - name: Purge the Qiniu CDN and verify an edge
+        env:
+          QINIU_ACCESS_KEY: ${{ secrets.QINIU_ACCESS_KEY }}
+          QINIU_SECRET_KEY: ${{ secrets.QINIU_SECRET_KEY }}
+        run: .github/scripts/purge-qiniu-cdn.sh "$RUNNER_TEMP/site"
