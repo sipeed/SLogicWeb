@@ -179,6 +179,14 @@ html[data-theme="light"] {
   :root { --motion-fast: 1ms; }
 }
 
+@keyframes motion-fade {
+  from { opacity: 0; }
+}
+
+@keyframes motion-pop {
+  from { opacity: 0; transform: scale(0.98); }
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -504,8 +512,12 @@ html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dar
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  animation: motion-pop var(--motion-fast) var(--motion-ease);
 }
-.channel-settings-dialog::backdrop { background: rgb(0 0 0 / 60%); }
+.channel-settings-dialog::backdrop {
+  background: rgb(0 0 0 / 60%);
+  animation: motion-fade var(--motion-fast) var(--motion-ease);
+}
 html[data-theme="light"] .channel-settings-dialog::backdrop { background: var(--backdrop); }
 .channel-settings-form { display: flex; flex-direction: column; gap: 16px; padding: 16px; }
 .channel-settings-header { display: flex; flex-direction: column; gap: 4px; }
@@ -601,6 +613,7 @@ html[data-theme="light"] .channel-color-custom { background: var(--bg30); }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  animation: motion-pop var(--motion-fast) var(--motion-ease);
 }
 .channel-color-palette:popover-open { display: flex; flex-direction: column; gap: 6px; }
 .channel-color-picker { display: contents; }
@@ -720,6 +733,7 @@ html[data-theme="light"] .channel-color-custom { background: var(--bg30); }
   background: var(--popover); color: var(--popover-foreground);
   border: 1px solid var(--border); border-radius: var(--radius);
   box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  animation: motion-pop var(--motion-fast) var(--motion-ease);
 }
 
 /* --------------------------------------------------------------------- tooltip */

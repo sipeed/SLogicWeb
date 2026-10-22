@@ -93,6 +93,17 @@ const MOTION_CONSUMERS: readonly string[] = [
   '#panel-resizer::after',
   ':is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area::-webkit-scrollbar-thumb, :is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar-thumb',
   '.select-popover::-webkit-scrollbar-thumb',
+  '.select-popover, .settings-menu, .settings-flyout',
+  '.channel-color-palette',
+  '.channel-settings-dialog',
+  '.channel-settings-dialog::backdrop',
+];
+
+const ENTRY_RULES: readonly string[] = [
+  '.select-popover, .settings-menu, .settings-flyout',
+  '.channel-color-palette',
+  '.channel-settings-dialog',
+  '.channel-settings-dialog::backdrop',
 ];
 
 const BUTTON_CONSUMERS: readonly string[] = [
@@ -175,13 +186,44 @@ const NON_BUTTON_CONSUMERS: readonly string[] = [
 }
 
 {
-  const keyframes = (code.match(/@keyframes/g) ?? []).length;
-  const animations = rules.filter((r) => /(^|;)\s*(-webkit-)?animation(-[\w]+)?\s*:/.test(r.body));
+  const names = [...code.matchAll(/@(?:-webkit-)?keyframes\s+([\w-]+)/g)].map((m) => m[1] ?? '').sort();
+  const fadeBody = code.includes('@keyframes motion-fade {\n  from { opacity: 0; }\n}');
+  const popBody = code.includes('@keyframes motion-pop {\n  from { opacity: 0; transform: scale(0.98); }\n}');
+  const outsideMedia = [...code.matchAll(/@(?:-webkit-)?keyframes/g)].every(
+    (m) => !media.some((range) => (m.index ?? -1) > range.start && (m.index ?? -1) < range.end),
+  );
+  check('exactly the two pinned keyframes with their exact bodies, outside every media block',
+    names.length === 2 && names[0] === 'motion-fade' && names[1] === 'motion-pop' && fadeBody && popBody && outsideMedia,
+    `names=${JSON.stringify(names)}, fadeBody=${fadeBody}, popBody=${popBody}, outsideMedia=${outsideMedia}`);
+}
+
+{
+  const animRules = rules.filter((r) => /(^|;)\s*(-webkit-)?animation(-[\w]+)?\s*:/.test(r.body)).map((r) => r.selector).sort();
+  const want = [...ENTRY_RULES].sort();
+  const listOk = animRules.length === want.length && animRules.every((s, i) => s === want[i]);
+  const bySelector = new Map(rules.map((r) => [r.selector, r.body]));
+  const timed = ENTRY_RULES.every((s) =>
+    /animation:\s*motion-(fade|pop) var\(--motion-fast\) var\(--motion-ease\);/.test(bySelector.get(s) ?? ''));
+  const forbidden = ['animation-fill-mode', '@starting-style', 'allow-discrete'].filter((s) => code.includes(s));
+  check('animation only in the pinned entry rules, token-timed, no fill-mode/starting-style/allow-discrete',
+    listOk && timed && forbidden.length === 0,
+    `animRules=${JSON.stringify(animRules)}, timed=${timed}, forbidden=${JSON.stringify(forbidden)}`);
+}
+
+{
+  const triple = '.select-popover, .settings-menu, .settings-flyout';
+  const occurrences = code.split(triple).length - 1;
+  const firstBody = rules.find((r) => r.selector === triple)?.body ?? '';
+  check('the shared surface triple selector occurs exactly once, ahead of the entry declarations',
+    occurrences === 1 && firstBody.includes('box-shadow: 0 8px 24px rgb(0 0 0 / 40%)'),
+    `occurrences=${occurrences}, firstMatchIsSurfaceRule=${firstBody.includes('box-shadow: 0 8px 24px rgb(0 0 0 / 40%)')}`);
+}
+
+{
   const stateOffenders = rules.filter((r) => /:(hover|active|focus-visible)\b/.test(r.selector)
     && /(^|;)\s*(-webkit-)?transition(-[\w]+)?\s*:/.test(r.body));
-  check('transitions-only contract: no keyframes, no animation, no transition inside state rules',
-    keyframes === 0 && animations.length === 0 && stateOffenders.length === 0,
-    `keyframes=${keyframes}, animationRules=[${animations.map((r) => r.selector.slice(0, 40)).join(' | ')}], ` +
+  check('no transition declaration inside any state-pseudo rule',
+    stateOffenders.length === 0,
     `stateOffenders=[${stateOffenders.map((r) => r.selector.slice(0, 40)).join(' | ')}]`);
 }
 
