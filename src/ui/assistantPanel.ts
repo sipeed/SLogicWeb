@@ -90,6 +90,8 @@ export class AssistantPanel {
     this.chrome.replaceChildren(this.header(s));
     if (this.settingsOpen) this.chrome.appendChild(this.settingsForm(s));
     if (!s.noticeAccepted) this.chrome.appendChild(this.notice());
+    // The empty-state hints are chrome, not history: rebuild them so they follow the locale.
+    this.log.querySelector('.assistant-empty')?.remove();
     if (this.log.childElementCount === 0) this.log.appendChild(this.emptyState());
     this.input.placeholder = t('assistant.placeholder');
     this.renderComposer();
