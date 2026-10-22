@@ -57,6 +57,10 @@ export class StoreRef implements SampleStore {
     return this.inner.edges(channel, startSample, endSample);
   }
 
+  sampleAt(channel: number, index: number): number {
+    return this.inner.sampleAt(channel, index);
+  }
+
   noteGap(startSample: number, endSample: number): void {
     this.inner.noteGap(startSample, endSample);
   }

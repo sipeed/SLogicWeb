@@ -73,6 +73,10 @@ export interface SampleStore {
   append(chunk: Uint8Array): void;
   query(channel: number, startSample: number, endSample: number, bins: number): ColumnView;
   edges(channel: number, startSample: number, endSample: number): Int32Array;
+  /** Level (0 or 1) of one channel at one sample. O(1) on the planar and interleaved
+   *  stores, O(log edges) on the RLE store. Throws outside [0, length). Inside a gap it
+   *  returns the store's filler, which is not data - check `gaps()` first. */
+  sampleAt(channel: number, index: number): number;
   /** Record that samples [startSample, endSample) are unknown (a transfer dropout).
    *  Gaps must not overlap; overlapping notes are merged. */
   noteGap(startSample: number, endSample: number): void;

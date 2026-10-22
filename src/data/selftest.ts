@@ -20,6 +20,7 @@ import { GAP_BIT } from './types.js';
 import { generateCapture, fillMacro, makeTileBlock, MACRO_SAMPLES } from './generator.js';
 import type { SampleStore, ColumnView } from './types.js';
 import { runSoftwareTriggerSuite } from './softwareTriggerSelftest.js';
+import { runBusValueSuite } from './busValueSelftest.js';
 
 export interface TestResult {
   name: string;
@@ -948,6 +949,8 @@ export function runFastSuite(log: Log): TestResult[] {
   const results: TestResult[] = [];
   log('software trigger');
   results.push(...runSoftwareTriggerSuite());
+  log('parallel bus value');
+  results.push(...runBusValueSuite());
   log('generator sanity');
   {
     const tile = makeTileBlock();

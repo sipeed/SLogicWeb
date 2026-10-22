@@ -23,6 +23,11 @@ export {
   type SoftwareTriggerStats,
 } from './softwareTrigger.js';
 export { runSoftwareTriggerSuite, type SoftwareTriggerTestResult } from './softwareTriggerSelftest.js';
+export {
+  BUS_LEAF, BusBuilder, BusPyramid, MAX_BUS_BITS, busRange, busSteps, busValue, latchedBefore,
+  readCode, validateBusSpec,
+  type BusClock, type BusEncoding, type BusSpec, type BusSteps,
+} from './busValue.js';
 export { generateCapture, fillMacro, makeTileBlock, CHANNEL_NAMES, MACRO_SAMPLES } from './generator.js';
 export type { GeneratorOptions } from './generator.js';
 export { runFastSuite, testNarrowGlitch, testGeneratedGlitch, formatResults } from './selftest.js';

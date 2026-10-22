@@ -499,3 +499,32 @@ used `B=1024`, which is not on the ladder at all.
 reduction: it loads at its 10 MSa/s grid rate with a virtual length of 1.2e9 (the only
 clamp left is 2^31). And `edgeCount()` over a whole capture is O(log) instead of O(scan):
 0.01 ms on 2M edges.
+
+## Parallel bus values (busValue.ts)
+
+`busSteps(store, spec, s, e)` gives a bus's value timeline over [s, e) as steps
+(position, value). Each value holds until the next step, and NaN means unknown.
+
+- **Asynchronous.** Read the n bits once at the range start. Then XOR each bit's edges
+  (`edges()`) into a per-sample mask and scan it once. This is linear in samples plus
+  edges, with no merge sort. After every gap the bits are re-read, because `edges()`
+  drops edges inside a gap.
+- **Clocked.** Take the clock's edges and read the bits at those with the active
+  direction (`sampleAt`, now on the SampleStore interface). An edge at a gap's end is
+  skipped, because its predecessor is gap filler and its direction is unknown. After a
+  gap the value is NaN until the next active edge. `latchedBefore` finds the value held
+  at a window's start by searching backwards in growing windows.
+
+`BusPyramid` keeps min/max per 1024-sample leaf and per 16x level, with NaN left out.
+`BusBuilder` fills it chunk by chunk, carrying the latched value across chunks; a slow
+clock (period longer than a leaf) is what exposes a lost carry, so the suite has one.
+
+`busValueSelftest.ts` checks every configuration against a per-sample brute force:
+- stores: planar, interleaved, RLE, and planar/RLE with gaps;
+- modes: async in all three encodings, clocked rising and falling, 1 bit, 32 bits;
+- windows starting at gap ends;
+- pyramids built in 2^20-sample chunks and in 4099-sample chunks.
+
+Known, not fixed here: `InterleavedSampleStore` (the 32-channel live store) cannot
+record gaps. `noteGap` throws, so a dropout during a 32-channel capture would throw from
+`appendLostSamples`.
