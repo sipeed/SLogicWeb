@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, type Plugin, type ServerOptions } from 'vite';
 
@@ -94,6 +97,74 @@ function requireRuntimeAssets(): Plugin {
         this.error(
           `the build would 404 at run time, missing:\n${missing.join('\n')}\n` +
           `Run \`npm run vendor -- <libsigrokdecode/decoders>\`.`);
+      }
+    },
+  };
+}
+
+/*
+ * Content-hashed paths for the two run-time assets the page fetches by a fixed name.
+ *
+ * slogic.sipeed.com sits behind a CDN that keeps files for weeks and allows only a few
+ * folder purges a day, but hundreds of single-URL purges. Everything else the page loads
+ * already has a content hash in its name (Vite's [name]-[hash] chunks) or is inlined
+ * into index.html, so once these two carry one as well, purging index.html alone updates
+ * the whole site: a changed file gets a new URL the CDN has never cached.
+ *
+ *   public/pyodide/*            -> dist/pyodide/<hash>/*    (Pyodide builds the .wasm,
+ *                                   stdlib and lock-file URLs from its indexURL, so the
+ *                                   version has to be a directory, not a ?v= query)
+ *   public/decoders/decoders.zip -> dist/decoders/decoders-<hash>.zip
+ *
+ * The paths reach the code as __LOGICWEB_RUNTIME_PATHS__ (app.ts, decode/worker.ts).
+ * Hosted builds only: the dev server serves public/ as-is, and the portable build embeds
+ * both assets in index.html.
+ */
+const PLAIN_RUNTIME_PATHS = { pyodide: 'pyodide/', decoders: 'decoders/decoders.zip' };
+
+function contentHash(paths: readonly string[]): string {
+  const h = createHash('sha256');
+  for (const p of paths) {
+    h.update(p.slice(p.lastIndexOf('/') + 1));
+    h.update(readFileSync(p));
+  }
+  return h.digest('hex').slice(0, 10);
+}
+
+function versionRuntimeAssets(): Plugin {
+  let paths = PLAIN_RUNTIME_PATHS;
+  return {
+    name: 'logicweb:version-runtime-assets',
+    config(_config, env) {
+      const pyDir = resolve(__dirname, 'public/pyodide');
+      const zip = resolve(__dirname, 'public/decoders/decoders.zip');
+      // Missing assets are requireRuntimeAssets' error to report; keep plain paths here.
+      if (env.command === 'build' && !portable && existsSync(pyDir) && existsSync(zip)) {
+        const pyFiles = readdirSync(pyDir).sort().map((f) => resolve(pyDir, f))
+          .filter((f) => statSync(f).isFile());
+        paths = {
+          pyodide: `pyodide/${contentHash(pyFiles)}/`,
+          decoders: `decoders/decoders-${contentHash([zip])}.zip`,
+        };
+      }
+      return { define: { __LOGICWEB_RUNTIME_PATHS__: JSON.stringify(paths) } };
+    },
+    closeBundle() {
+      if (paths === PLAIN_RUNTIME_PATHS) return;
+      const out = resolve(__dirname, 'dist');
+      const pyDir = resolve(out, 'pyodide');
+      const versioned = resolve(out, paths.pyodide);
+      if (!existsSync(versioned)) {
+        mkdirSync(versioned, { recursive: true });
+        for (const f of readdirSync(pyDir)) {
+          const from = resolve(pyDir, f);
+          if (statSync(from).isFile()) renameSync(from, resolve(versioned, f));
+        }
+      }
+      const zip = resolve(out, 'decoders/decoders.zip');
+      if (existsSync(zip)) renameSync(zip, resolve(out, paths.decoders));
+      if (!existsSync(resolve(versioned, 'pyodide.asm.wasm')) || !existsSync(resolve(out, paths.decoders))) {
+        this.error(`versioned runtime assets are incomplete: ${paths.pyodide}, ${paths.decoders}`);
       }
     },
   };
@@ -326,5 +397,8 @@ export default defineConfig({
     },
   },
 
-  plugins: [serveUiControlEntry(), requireRuntimeAssets(), emitLicense(), inlineEntryForFileOpen(), hostedWorkerFiles()],
+  plugins: [
+    serveUiControlEntry(), requireRuntimeAssets(), versionRuntimeAssets(), emitLicense(),
+    inlineEntryForFileOpen(), hostedWorkerFiles(),
+  ],
 });

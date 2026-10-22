@@ -108,8 +108,8 @@ A published deployment therefore carries, without needing the repository:
 | In `dist/` | Covers |
 |---|---|
 | `LICENSE.txt` | this project, and the GPL decoders in `decoders.zip` |
-| `pyodide/LICENSE-pyodide-MPL-2.0.txt` | the Pyodide runtime |
-| `pyodide/LICENSE-cpython-PSF.txt` | the CPython it embeds |
+| `pyodide/<hash>/LICENSE-pyodide-MPL-2.0.txt` | the Pyodide runtime (hosted build; `<hash>` versions the runtime for the CDN) |
+| `pyodide/<hash>/LICENSE-cpython-PSF.txt` | the CPython it embeds |
 | `THIRD_PARTY_LICENSES.txt` | Pyodide, CPython and the AI assistant's client libraries |
 | a `/*!` banner on every JS chunk | notice plus a link to the source |
 | per-file headers inside `decoders.zip` | each decoder's own licence |

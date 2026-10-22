@@ -44,6 +44,8 @@ interface PortableAssets {
 
 /** Injected by Vite only for `npm run dist`; null keeps dev-server reloads small. */
 declare const __LOGICWEB_PORTABLE_ASSETS__: PortableAssets | null;
+/** Where Pyodide and the decoder zip live; content-hashed in hosted builds (vite.config.ts). */
+declare const __LOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
 
 function decodeBase64(value: string): Uint8Array<ArrayBuffer> {
   const binary = atob(value);
@@ -136,8 +138,10 @@ let loading: Promise<PyodideAPI> | null = null;
  * point at /assets/pyodide/. That is why the build does not simply set `base: './'`.
  */
 let config = {
-  pyodideIndexURL: `${import.meta.env.BASE_URL}pyodide/`,
-  decodersURL: `${import.meta.env.BASE_URL}decoders/decoders.zip`,
+  // Content-hashed in hosted builds (versionRuntimeAssets in vite.config.ts); App passes
+  // the same paths resolved against the document, which is what normally wins.
+  pyodideIndexURL: `${import.meta.env.BASE_URL}${__LOGICWEB_RUNTIME_PATHS__.pyodide}`,
+  decodersURL: `${import.meta.env.BASE_URL}${__LOGICWEB_RUNTIME_PATHS__.decoders}`,
   edgeBudget: EDGE_BUDGET,
 };
 let loadMs = 0;

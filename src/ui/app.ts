@@ -58,6 +58,9 @@ import {
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
 
+/** Where Pyodide and the decoder zip live; content-hashed in hosted builds (vite.config.ts). */
+declare const __LOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
+
 /** A store that can also count edges without materialising them (PlanarSampleStore does). */
 type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number): number };
 
@@ -87,9 +90,10 @@ export class App {
   private readonly resizer: PanelResizer;
   private readonly decodeClient = sharedDecodeClient({
     // Resolve from the document, not from the worker script. This supports static sites
-    // hosted below a subdirectory and keeps all runtime files together in dist/.
-    pyodideIndexURL: new URL('./pyodide/', document.baseURI).href,
-    decodersURL: new URL('./decoders/decoders.zip', document.baseURI).href,
+    // hosted below a subdirectory and keeps all runtime files together in dist/. Hosted
+    // builds put a content hash in both paths (versionRuntimeAssets in vite.config.ts).
+    pyodideIndexURL: new URL(`./${__LOGICWEB_RUNTIME_PATHS__.pyodide}`, document.baseURI).href,
+    decodersURL: new URL(`./${__LOGICWEB_RUNTIME_PATHS__.decoders}`, document.baseURI).href,
   });
 
   private channels: ChannelState[] = defaultChannels(16);
