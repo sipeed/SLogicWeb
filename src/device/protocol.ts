@@ -122,6 +122,14 @@ const MAX_BASE_INDEX = 1;
  */
 const MAX_SAMPLERATE_DIVIDER = 0xff;
 
+/**
+ * Base clock the walk settles on whenever it can make the requested rate, as the
+ * vendor driver does. Both the 16U3 (index 0) and the 32U3 (index 1) offer it; the
+ * 32U3's 1400 MHz base is only used for rates 800 MHz cannot make, which in the
+ * offered table is 1400 MHz alone.
+ */
+const PREFERRED_BASE_MHZ = 800;
+
 /** Vref DAC transfer function, measured on S/N 202512261505 (api.c:1447). */
 const VREF_SLOPE = 0.005166; // volts per LSB
 const VREF_OFFSET = 0.4318; // volts at code 0
@@ -792,10 +800,12 @@ export async function configureChannels(
  * aux 0x02: samplerate.
  *
  * Payload layout: u16[0] base index, u16[1] base clock in MHz, u32[1] divider.
- * On S/N 202512261505 the device reports base index 0 / 800 MHz, and every rate
- * in the table divides 800 MHz exactly, so the base-index walk never runs. The
- * walk is implemented anyway, with the iteration cap the driver added: firmware
- * that keeps reporting the same base index otherwise spins forever.
+ * On S/N 202512261505 (16U3) the device reports base index 0 / 800 MHz, and
+ * every rate in the table divides 800 MHz exactly, so the walk never moves. A
+ * 32U3 reports 1400 MHz at index 0 and 800 MHz at index 1; the walk settles on
+ * 800 MHz for every rate it can make and moves to 1400 MHz only for 1400 MHz
+ * itself (PREFERRED_BASE_MHZ). The pass cap is the one the driver added:
+ * firmware that keeps reporting the same base index otherwise spins forever.
  *
  * One read -> write -> read cycle is not enough to trust the result here (NOTES
  * 8.11): the read-back lives in the same aux scratch buffer the write just filled.
@@ -878,6 +888,22 @@ async function programSamplerate(
   samplerateHz: number,
   trace: Tracer,
 ): Promise<SamplerateCycle> {
+  // A base is only usable if it divides the rate *and* the quotient fits the
+  // byte the sampler reads. Skipping a base for the second reason is what makes
+  // 5 MHz reachable on a 32U3: 1400/5 needs 280, 800/5 needs 160.
+  const fitsBase = (mhz: number) => mhz !== 0 && (mhz * 1e6) % samplerateHz === 0 &&
+    (mhz * 1e6) / samplerateHz - 1 <= MAX_SAMPLERATE_DIVIDER;
+  // The vendor driver prefers the 800 MHz base whenever it can make the rate and
+  // only falls back to another base when it cannot (slogic.c, aux_rate,
+  // PREFERRED_BASE_MHZ). On the 32U3 pair that leaves exactly one rate on the
+  // 1400 MHz base: 1400 MHz itself. Taking whichever base the device happens to
+  // report would put 50 MHz on 1400/28 after a 1400 MHz capture and on 800/16
+  // otherwise, i.e. the same setting would run off a different PLL depending on
+  // history.
+  let wantMHz = fitsBase(PREFERRED_BASE_MHZ) ? PREFERRED_BASE_MHZ : 0;
+  // Base clock per index as the device reported it during this walk.
+  const seen = new Map<number, number>();
+
   for (let pass = 0; pass < SAMPLERATE_BASE_PASSES; pass++) {
     await tx.readPayload();
     const baseIndex = tx.u16(0);
@@ -887,48 +913,63 @@ async function programSamplerate(
       dir: 'info',
       note: `samplerate base[${baseIndex}] = ${baseMHz} MHz, divider reg = ${tx.u32(1)}`,
     });
+    seen.set(baseIndex, baseMHz);
 
-    // A base is only usable if it divides the rate *and* the quotient fits the
-    // byte the sampler reads. Skipping a base for the second reason is what makes
-    // 5 MHz reachable on a 32U3: 1400/5 needs 280, 800/5 needs 160.
-    const fits = baseHz !== 0 && baseHz % samplerateHz === 0 &&
-      baseHz / samplerateHz - 1 <= MAX_SAMPLERATE_DIVIDER;
-    if (!fits) {
-      if (baseIndex >= MAX_BASE_INDEX) {
-        const why = baseHz === 0 || baseHz % samplerateHz !== 0
-          ? 'does not divide it'
-          : `needs divider ${baseHz / samplerateHz}, past the ${MAX_SAMPLERATE_DIVIDER} ` +
-            'the sampler honours';
+    if (fitsBase(baseMHz) && (wantMHz === 0 || baseMHz === wantMHz)) {
+      const divider = baseHz / samplerateHz;
+      tx.setU32(1, divider - 1);
+      await tx.writePayload();
+      await tx.readPayload();
+      if (!tx.verifyU32(1, divider - 1)) {
+        return {
+          kind: 'retry',
+          detail: `wrote divider ${divider - 1}, read back ${tx.u32(1)}`,
+        };
+      }
+      if (tx.u16(1) * 1e6 !== baseHz) {
+        return {
+          kind: 'retry',
+          detail: `base changed under us: ${tx.u16(1)} MHz after write, ${baseMHz} MHz before`,
+        };
+      }
+      return { kind: 'programmed', baseHz, baseMHz, divider };
+    }
+
+    let next: number;
+    if (seen.size > MAX_BASE_INDEX) {
+      // Every index has been read. Either the preferred base is not on this
+      // device (drop the preference and go to one that fits) or nothing fits.
+      const usable = [...seen].find(([, mhz]) => fitsBase(mhz));
+      if (!usable) {
+        const why = [...seen].sort(([a], [b]) => a - b).map(([i, mhz]) => {
+          const reason = mhz === 0 || (mhz * 1e6) % samplerateHz !== 0
+            ? 'does not divide it'
+            : `needs divider ${(mhz * 1e6) / samplerateHz}, past the ${MAX_SAMPLERATE_DIVIDER} ` +
+              'the sampler honours';
+          return `base[${i}] = ${mhz} MHz ${reason}`;
+        });
         return {
           kind: 'refused',
           error: new Error(
-            `could not configure ${samplerateHz / 1e6} MHz: base[${baseIndex}] = ${baseMHz} MHz ` +
-              `${why} and index ${MAX_BASE_INDEX} is the last one that exists`,
+            `could not configure ${samplerateHz / 1e6} MHz: ${why.join(', ')}, ` +
+              `and index ${MAX_BASE_INDEX} is the last one that exists`,
           ),
         };
       }
-      tx.setU16(0, baseIndex + 1);
-      await tx.writePayloadWord0();
-      continue;
+      wantMHz = 0;
+      if (usable[0] === baseIndex) {
+        // The base under us fits but was passed over for the preferred one that
+        // turned out not to exist: read again and take it.
+        continue;
+      }
+      next = usable[0];
+    } else {
+      // Walk 0 -> 1 -> 0: the device may be parked on the last index from the
+      // previous configuration, and the preferred base can sit below it.
+      next = baseIndex >= MAX_BASE_INDEX ? 0 : baseIndex + 1;
     }
-
-    const divider = baseHz / samplerateHz;
-    tx.setU32(1, divider - 1);
-    await tx.writePayload();
-    await tx.readPayload();
-    if (!tx.verifyU32(1, divider - 1)) {
-      return {
-        kind: 'retry',
-        detail: `wrote divider ${divider - 1}, read back ${tx.u32(1)}`,
-      };
-    }
-    if (tx.u16(1) * 1e6 !== baseHz) {
-      return {
-        kind: 'retry',
-        detail: `base changed under us: ${tx.u16(1)} MHz after write, ${baseMHz} MHz before`,
-      };
-    }
-    return { kind: 'programmed', baseHz, baseMHz, divider };
+    tx.setU16(0, next);
+    await tx.writePayloadWord0();
   }
 
   // The walk ran out of passes without the device ever reporting a usable base:

@@ -1656,3 +1656,29 @@ The watcher is armed for the next replug (`/tmp/lwcdp/wait-and-sweep.sh`): the r
 then the short-capture-at-a-slow-rate anomaly that every fresh board has shown so far (`bench 0.2 4
 10` delivers nothing while `bench 0.2 4 200` delivers 90%), then the geometry sweep last, because its
 slow rows are the ones that can wedge the board.
+
+### 8.28 The samplerate walk prefers 800 MHz, as the vendor driver does, 2026-10-22
+
+Before this change the walk took the first base that fitted, starting at whichever index the device
+was parked on. On a 32U3 (`idx 0 = 1400 MHz, idx 1 = 800 MHz`, 8.9) that made the base depend on
+history. A board left at index 0 ran 50 MHz as 1400/28, and the same board after a 5 MHz capture ran
+it as 800/16. The walk also never wrapped from index 1 back to 0. If the index is retained between
+configurations, then 1400 MHz after any 800-base rate was refused; that retention has not been
+checked on hardware.
+
+The vendor driver uses 800 MHz whenever it can make the rate (`slogic.c`, `aux_rate`,
+`PREFERRED_BASE_MHZ`) and wraps the index walk. `programSamplerate` now does the same:
+
+- It takes 800 MHz whenever 800 MHz divides the rate and the quotient fits the sampler byte.
+- It walks 0 -> 1 -> 0.
+- It drops the preference only after every index has been read and none is 800 MHz.
+
+Of the offered rates, only 1400 MHz runs off the 1400 MHz base. The 16U3 reports 800 MHz at index 0,
+so its walk does not move. Three new offline checks pin this:
+
+- Every rate except 1400 lands on 800 MHz, starting from either index.
+- 50 -> 1400 -> 50 -> 1400 -> 5 MHz on one device gives `800/16 1400/1 800/16 1400/1 800/160`.
+- A device without an 800 MHz base falls back to a base that fits.
+
+The walk has not yet been run on a real 32U3. The hardware runs still to do are 50, 16 and 1400 MHz,
+including 1400 directly after an 800-base rate.

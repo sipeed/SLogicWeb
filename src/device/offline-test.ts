@@ -595,6 +595,54 @@ async function main(): Promise<void> {
         `${ceiling4 / 1e6} MHz -> base ${top.baseHz / 1e6} MHz, divider ${top.divider}`);
     }
     {
+      // Vendor standard (slogic.c aux_rate, PREFERRED_BASE_MHZ): 800 MHz whenever it
+      // can make the rate, whichever index the device is parked on. Only 1400 MHz
+      // itself runs off the 1400 MHz base.
+      const parkedAt = (idx: number): Record<number, AuxModel> => {
+        const m = twoBase();
+        m[0x02]!.payload[0] = ((idx === 0 ? 1400 : 800) << 16) | idx;
+        return m;
+      };
+      const wrong: string[] = [];
+      for (const start of [0, 1]) {
+        for (const rate of SAMPLERATES_HZ) {
+          const r = await configureSamplerate(bus(parkedAt(start)).bus, rate);
+          const want = rate === 1400e6 ? 1400e6 : 800e6;
+          if (r.baseHz !== want || r.baseHz / r.divider !== rate) {
+            wrong.push(`${rate / 1e6} MHz from index ${start} -> ${r.baseHz / 1e6}/${r.divider}`);
+          }
+        }
+      }
+      check('800 MHz is preferred for every rate but 1400, from either index',
+        wrong.length === 0, wrong.join(', '));
+
+      // One device, consecutive configurations: 1400 after an 800-base rate has to
+      // walk back to index 0, and 50 MHz after 1400 has to walk back to 800.
+      const { bus: b } = bus(twoBase());
+      const got: string[] = [];
+      for (const rate of [50e6, 1400e6, 50e6, 1400e6, 5e6]) {
+        const r = await configureSamplerate(b, rate);
+        got.push(`${r.baseHz / 1e6}/${r.divider}`);
+      }
+      check('the base follows the rate across consecutive configurations',
+        got.join(' ') === '800/16 1400/1 800/16 1400/1 800/160', got.join(' '));
+    }
+    {
+      // A device without an 800 MHz base: the preference is dropped, not enforced.
+      const model: AuxModel = {
+        status: 0x00011002,
+        payload: [(1400 << 16) | 1, 0],
+        onWord0: (self, v) => {
+          const idx = v & 0xffff;
+          self.payload[0] = ((idx === 0 ? 1000 : 1400) << 16) | idx;
+        },
+      };
+      const r = await configureSamplerate(bus({ 0x02: model }).bus, 50e6);
+      check('without an 800 MHz base the walk falls back to one that fits',
+        (r.baseHz === 1000e6 && r.divider === 20) || (r.baseHz === 1400e6 && r.divider === 28),
+        `${r.baseHz / 1e6}/${r.divider}`);
+    }
+    {
       // Only the 1400 MHz base exists. 5 MHz needs 280 there, so the honest answer
       // is to refuse, not to write 280 and let the hardware truncate it.
       const { bus: b } = bus({
