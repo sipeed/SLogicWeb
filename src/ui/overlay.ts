@@ -450,6 +450,12 @@ export function paintMarkerChip(
   c.font = font;
   c.textBaseline = 'top';
   const w = c.measureText(label).width + 2 * padX;
+  c.strokeStyle = color;
+  c.lineWidth = 1;
+  c.beginPath();
+  c.moveTo(Math.round(x) + 0.5, top + height);
+  c.lineTo(Math.round(x) + 0.5, heightCss);
+  c.stroke();
   c.fillStyle = color;
   roundRect(c, x - w / 2, top, w, height, radius);
   c.fill();

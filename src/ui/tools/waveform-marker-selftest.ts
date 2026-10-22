@@ -1054,6 +1054,19 @@ function between(source: string, start: string, end: string): string {
     `overlay=${sharedCursor}, painter=${chipPainter}, len=${drawCursorSource.length}, ` +
     `roundRect=${drawCursorSource.includes('roundRect(')}, ` +
     `measure=${drawCursorSource.includes('measureText(label)')}`);
+  const chipSource = between(
+    overlaySource, 'export function paintMarkerChip(', '\nfunction roundRect(');
+  const connectorStroke = /strokeStyle\s*=\s*color/.test(chipSource) &&
+    /moveTo\(Math\.round\(x\) \+ 0\.5,\s*top \+ height\)/.test(chipSource) &&
+    /lineTo\(Math\.round\(x\) \+ 0\.5,\s*heightCss\)/.test(chipSource) &&
+    !chipSource.includes('setLineDash');
+  const connectorAt = chipSource.search(/\.stroke\(\)/);
+  const chipFillAt = chipSource.indexOf('roundRect(');
+  check('the axis chip paints a solid connector from its box to the axis bottom before the box',
+    connectorStroke && connectorAt >= 0 && chipFillAt > connectorAt &&
+    chipSource.includes('c.lineWidth = 1;'),
+    `len=${chipSource.length}, connector=${connectorStroke}, stroke=${connectorAt}, ` +
+    `fill=${chipFillAt}, dash=${chipSource.includes('setLineDash')}`);
   check('the shared palette, overlay cursor API, and hover frequency readout survive B removal',
     sharedPalette && sharedCursor && hoverFreq === 2 && hoverFreqReadout &&
     !hoverSource.includes('|B-A|') && !hoverSource.includes('cursorB'),
