@@ -26,7 +26,10 @@ import {
 } from '../decode/index.js';
 import type { ChannelEdges, DecodeRequest, DecodeResult } from '../decode/index.js';
 
+import type { AssistantHost, CaptureOutcome } from '../assistant/tools.js';
+
 import { AnalyzerPanel } from './analyzerPanel.js';
+import { AssistantPanel } from './assistantPanel.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
 import { CapturePanel } from './capturePanel.js';
 import { ChannelList, type ChannelCell, type ChannelConfiguration } from './channelList.js';
@@ -72,6 +75,12 @@ export class App {
   private readonly channelList: ChannelList;
   private readonly capturePanel: CapturePanel;
   private readonly analyzerPanel: AnalyzerPanel;
+  /** Holds the device and analyzer panels, which re-render by clearing it. */
+  private readonly panelHost: HTMLDivElement;
+  /** Built on first open and never cleared: it owns a conversation and a draft. */
+  private assistantPanel: AssistantPanel | null = null;
+  /** Resolved when the running capture stops (the assistant waits on a capture). */
+  private captureWaiters: (() => void)[] = [];
   private readonly settingsMenu: SettingsMenu;
   private readonly sidebarMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
@@ -124,7 +133,7 @@ export class App {
   private hover: HoverMeasurement | null = null;
 
   private dirty = true;
-  private panel: 'device' | 'analyzers' | null = 'device';
+  private panel: 'device' | 'analyzers' | 'assistant' | null = 'device';
   private paintedTheme: ThemeId;
   private palette: CanvasPalette;
   private readonly wheelIntent = new WheelIntent();
@@ -193,6 +202,7 @@ export class App {
     // so the cards space without margins. Under the default theme it styles nothing.
     panelHost.className = 'panel-host';
     this.el.side.appendChild(panelHost);
+    this.panelHost = panelHost;
     this.capturePanel = new CapturePanel(panelHost, {
       onSettings: (s) => {
         const next = clampSettings(s, this.rateCeilings);
@@ -918,6 +928,11 @@ export class App {
         onPick: () => this.selectPanel('analyzers'),
       },
       {
+        label: t('toolbar.sidebarAssistant'),
+        checked: this.panel === 'assistant',
+        onPick: () => this.selectPanel('assistant'),
+      },
+      {
         label: t('toolbar.sidebarNone'),
         checked: this.panel === null,
         onPick: () => this.selectPanel(null),
@@ -925,7 +940,7 @@ export class App {
     ];
   }
 
-  private selectPanel(p: 'device' | 'analyzers' | null): void {
+  private selectPanel(p: 'device' | 'analyzers' | 'assistant' | null): void {
     this.sidebarMenu.close('outside');
     this.panel = p;
     this.renderPanels();
@@ -940,6 +955,7 @@ export class App {
     applyStaticI18n(document);
     this.relayout();       // channel cells rebuild; an open channel dialog closes here
     this.renderPanels();   // side panels + toolbar chrome
+    this.assistantPanel?.render();  // its chrome only; the conversation is history
     this.renderStatus();   // status line
   }
 
@@ -953,7 +969,20 @@ export class App {
     this.renderToolbarState();
     if (this.panel === null) return;
 
-    const host = this.el.side.firstElementChild as HTMLElement;
+    // The assistant is mounted once and only shown or hidden: re-rendering it on every
+    // state change would drop a streaming answer, a pending approval and the draft.
+    const assistant = this.panel === 'assistant';
+    this.el.side.classList.toggle('assistant-mode', assistant);
+    this.panelHost.hidden = assistant;
+    if (assistant && !this.assistantPanel) {
+      this.assistantPanel = new AssistantPanel(this.assistantHost());
+      this.el.side.appendChild(this.assistantPanel.el);
+      this.assistantPanel.render();
+    }
+    if (this.assistantPanel) this.assistantPanel.el.hidden = !assistant;
+    if (assistant) return;
+
+    const host = this.panelHost;
     host.replaceChildren();
     if (this.panel === 'device') {
       this.capturePanel.render({
@@ -1418,6 +1447,9 @@ export class App {
     this.relayout();
     this.renderPanels();
     this.dirty = true;
+    const waiters = this.captureWaiters;
+    this.captureWaiters = [];
+    for (const w of waiters) w();
   }
 
   // ------------------------------------------------------------------ analyzers
@@ -1550,6 +1582,86 @@ export class App {
     }
   }
 
+  // ------------------------------------------------------------------ assistant
+
+  /** Enable exactly `list` (ignoring channels the device lacks), then re-derive the width. */
+  private setEnabledChannels(list: number[]): void {
+    const want = new Set(list.filter((i) => i >= 0 && i < this.channels.length));
+    if (want.size === 0) return;   // never zero rows
+    for (const c of this.channels) c.enabled = want.has(c.index);
+    this.afterChannelChange();
+  }
+
+  /**
+   * The app as the assistant sees it (src/assistant/tools.ts). Every method routes through
+   * the path a button or `debug` already uses, so a tool cannot reach a state the UI
+   * could not.
+   */
+  private assistantHost(): AssistantHost {
+    return {
+      snapshot: () => ({
+        connected: this.device !== null,
+        device: this.device?.name ?? null,
+        running: this.running,
+        stopping: this.stopping,
+        error: this.statusError ? formatStatusError(this.statusError) : '',
+        label: formatCaptureLabel(this.captureLabel),
+        samples: this.store.length,
+        samplerate: this.store.samplerate,
+        channelCount: this.store.channelCount,
+        triggerState: this.triggerState,
+        triggerSampleIndex: this.triggerSampleIndex,
+        settings: this.settings,
+        rateCeilings: this.rateCeilings,
+        enabledChannels: this.enabledChannels().map((c) => c.index),
+        channelNames: this.channels.map((c) => c.name),
+        view: { start: this.stack.view.start, end: this.stack.view.end },
+        decoderReady: this.decodeWarm,
+      }),
+      store: () => this.store,
+      analyzers: () => this.analyzers.map((a) => ({
+        decoderId: a.decoderId,
+        channels: a.channels,
+        options: a.options,
+        status: a.status,
+        note: formatAnalyzerNote(a.note),
+        result: a.result,
+      })),
+      applySettings: (patch, enabled) => {
+        if (enabled) this.setEnabledChannels(enabled);
+        this.debug.setSettings(patch);
+      },
+      startAndWait: async (timeoutMs, signal): Promise<CaptureOutcome> => {
+        const finished = new Promise<void>((r) => this.captureWaiters.push(r));
+        await this.startCapture();
+        if (!this.running) {
+          this.captureWaiters = [];
+          return 'not-started';
+        }
+        let timer = 0;
+        const outcome = await Promise.race([
+          finished.then(() => 'finished' as const),
+          new Promise<'timeout'>((r) => { timer = window.setTimeout(() => r('timeout'), timeoutMs); }),
+          new Promise<'timeout'>((r) => signal.addEventListener('abort', () => r('timeout'), { once: true })),
+        ]);
+        window.clearTimeout(timer);
+        return outcome;
+      },
+      stop: () => this.stopCapture(),
+      loadDemo: () => this.loadDemo(),
+      attach: (id, channels, options) => this.attachAnalyzer(id, channels, options),
+      removeAnalyzer: (index) => {
+        const a = this.analyzers[index];
+        if (!a) return false;
+        this.removeAnalyzer(a.id);
+        return true;
+      },
+      setViewportSeconds: (a, b) => this.debug.setViewportSeconds(a, b),
+      zoomToAnnotation: (analyzer, n) => this.debug.zoomToAnnotation(analyzer, n),
+      levelAt: (channel, sample) => levelAt(this.store, channel, sample),
+    };
+  }
+
   // ------------------------------------------------------------------ test surface
 
   /**
@@ -1583,7 +1695,7 @@ export class App {
       this.relayout();
       this.renderPanels();
     },
-    setPanel: (p: 'device' | 'analyzers' | null) => {
+    setPanel: (p: 'device' | 'analyzers' | 'assistant' | null) => {
       this.selectPanel(p);
     },
     setViewportSeconds: (a: number, b: number) => {

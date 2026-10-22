@@ -464,12 +464,15 @@ check(
 const sidebarChoiceNeedles = [
   "t('toolbar.sidebarDevice')",
   "t('toolbar.sidebarAnalyzers')",
+  "t('toolbar.sidebarAssistant')",
   "t('toolbar.sidebarNone')",
   "checked: this.panel === 'device'",
   "checked: this.panel === 'analyzers'",
+  "checked: this.panel === 'assistant'",
   'checked: this.panel === null',
   "this.selectPanel('device')",
   "this.selectPanel('analyzers')",
+  "this.selectPanel('assistant')",
   'this.selectPanel(null)',
 ];
 const missingSidebarChoices = sidebarChoiceNeedles.filter((needle) => !app.includes(needle));
@@ -487,26 +490,26 @@ const sidebarItemsEnd = sidebarItemsStart >= 0 ? app.indexOf('\n  }', sidebarIte
 const sidebarItemsBody = sidebarItemsStart >= 0 && sidebarItemsEnd > sidebarItemsStart
   ? app.slice(sidebarItemsStart, sidebarItemsEnd)
   : '';
-const setPanelStart = app.indexOf("setPanel: (p: 'device' | 'analyzers' | null) => {");
+const setPanelStart = app.indexOf("setPanel: (p: 'device' | 'analyzers' | 'assistant' | null) => {");
 const setPanelEnd = setPanelStart >= 0 ? app.indexOf('\n    },', setPanelStart) : -1;
 const setPanelBody = setPanelStart >= 0 && setPanelEnd > setPanelStart
   ? app.slice(setPanelStart, setPanelEnd)
   : '';
 const sidebarDelegations = sidebarItemsBody.match(/this\.selectPanel\(/g)?.length ?? 0;
-const sharedPanelPath = sidebarDelegations === 3 && setPanelBody.includes('this.selectPanel(');
+const sharedPanelPath = sidebarDelegations === 4 && setPanelBody.includes('this.selectPanel(');
 check(
-  'three checked direct choices drive the panel through one shared selection path',
+  'four checked direct choices drive the panel through one shared selection path',
   missingSidebarChoices.length === 0 && selectPanelShape && sharedPanelPath,
   `missing=${JSON.stringify(missingSidebarChoices)}, shape=${selectPanelShape}, shared=${sharedPanelPath}, delegations=${sidebarDelegations}`,
 );
 
 const sidebarRowCount = sidebarItemsBody.match(/onPick:/g)?.length ?? 0;
-const sidebarLeavesOnly = sidebarRowCount === 3 &&
+const sidebarLeavesOnly = sidebarRowCount === 4 &&
   !sidebarItemsBody.includes('children:') && !sidebarItemsBody.includes('hint:');
-const sidebarLabelsTranslated = ['sidebarDevice', 'sidebarAnalyzers', 'sidebarNone']
+const sidebarLabelsTranslated = ['sidebarDevice', 'sidebarAnalyzers', 'sidebarAssistant', 'sidebarNone']
   .every((key) => sidebarItemsBody.includes(`t('toolbar.${key}')`));
 check(
-  'the selector menu offers three direct leaf choices built with translated labels',
+  'the selector menu offers four direct leaf choices built with translated labels',
   sidebarLeavesOnly && sidebarLabelsTranslated,
   `rows=${sidebarRowCount}, leaves=${sidebarLeavesOnly}, translated=${sidebarLabelsTranslated}`,
 );

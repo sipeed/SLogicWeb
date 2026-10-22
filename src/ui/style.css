@@ -1224,3 +1224,144 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
 :is(html[data-theme="dark"], html[data-theme="light"]) .uictrl-card-actions .mini { background: transparent; }
 :is(html[data-theme="dark"], html[data-theme="light"]) .uictrl-card-actions .mini:hover { background: var(--secondary); }
 html[data-theme="light"] .uictrl-card-actions .mini:hover { background: var(--muted); }
+
+/* ---------------------------------------------------------------- AI assistant */
+
+/* The assistant fills the side panel as a column: chrome on top, the log scrolls, the
+   composer stays at the bottom. The panel itself stops scrolling so the composer never
+   leaves the screen. Both hosts toggle the `hidden` attribute, which any `display` rule
+   overrides - including the themed `.panel-host { display: flex }` card stack, whose
+   :is(html[...]) prefix outranks a plain `.panel-host[hidden]`. The id keeps this on top. */
+#side-panel > .panel-host[hidden], #side-panel > .assistant-panel[hidden] { display: none; }
+#side-panel.assistant-mode { display: flex; flex-direction: column; overflow: hidden; }
+#side-panel.assistant-mode.hidden { display: none; }
+.assistant-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.assistant-chrome {
+  flex: 0 1 auto; max-height: 60%; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px; padding: 8px;
+}
+.assistant-head .panel-sub { overflow-wrap: anywhere; margin-bottom: 0; }
+.assistant-title-row { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.assistant-title-row .panel-title { flex: 1; min-width: 0; margin-bottom: 0; }
+.assistant-act { width: 24px; height: 22px; }
+.assistant-act svg { width: 14px; height: 14px; }
+.assistant-act.on { border-color: var(--accent); color: var(--text80); }
+.assistant-new { height: 22px; }
+.assistant-check { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text80); }
+.assistant-check input { accent-color: var(--accent); }
+.assistant-notice .pill { align-self: flex-start; margin-top: 8px; }
+
+.assistant-log {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px; padding: 8px;
+}
+.assistant-empty { display: flex; flex-direction: column; gap: 6px; }
+.assistant-suggestion {
+  text-align: left; padding: 6px 8px; font: inherit; font-size: 11px; cursor: pointer;
+  background: transparent; color: var(--text80);
+  border: 1px dashed var(--border-high); border-radius: 4px;
+}
+.assistant-suggestion:hover { background: var(--panel); }
+.assistant-msg {
+  padding: 8px 10px; border-radius: 6px; font-size: 12px; line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.assistant-msg.user { align-self: flex-end; max-width: 90%; background: var(--accent); color: #fff; white-space: pre-wrap; }
+.assistant-msg.assistant { background: var(--bg10); color: var(--text); border: 1px solid var(--border-low); }
+.assistant-thinking summary { font-size: 10px; color: var(--text50); cursor: pointer; user-select: none; }
+.assistant-thinking-text {
+  margin: 4px 0 6px; max-height: 160px; overflow-y: auto;
+  font-size: 10px; line-height: 1.45; color: var(--text50);
+}
+
+/* Rendered Markdown (src/ui/markdown.ts) inside assistant messages. */
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md blockquote, .md .md-table { margin: 0 0 8px; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 10px 0 6px; line-height: 1.3; font-weight: 600; }
+.md h1 { font-size: 15px; }
+.md h2 { font-size: 14px; }
+.md h3 { font-size: 13px; }
+.md h4, .md h5, .md h6 { font-size: 12px; }
+.md ul, .md ol { padding-left: 18px; }
+.md li + li { margin-top: 2px; }
+.md li > ul, .md li > ol { margin: 2px 0 0; }
+.md code {
+  padding: 0 3px; border-radius: 3px; background: var(--bg00);
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.md pre {
+  padding: 6px 8px; overflow-x: auto; border-radius: 4px;
+  background: var(--bg00); border: 1px solid var(--border-low);
+}
+.md pre code { padding: 0; background: none; white-space: pre; }
+.md blockquote { padding-left: 8px; border-left: 2px solid var(--border-high); color: var(--text80); }
+.md hr { border: 0; border-top: 1px solid var(--border-low); margin: 8px 0; }
+.md a { color: var(--accent); }
+.md .md-table { overflow-x: auto; }
+.md table { border-collapse: collapse; font-size: 11px; }
+.md th, .md td { padding: 3px 6px; border: 1px solid var(--border-low); text-align: left; vertical-align: top; }
+.md th { background: var(--bg00); font-weight: 600; }
+.assistant-tool {
+  padding: 6px 8px; font-size: 11px; border-radius: 4px;
+  background: var(--bg10); border: 1px solid var(--border-low);
+}
+.assistant-tool[data-state="pending"] { border-color: var(--accent); }
+.assistant-tool-head { display: flex; align-items: center; gap: 6px; }
+.assistant-tool-head code { font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text); }
+.assistant-tool-status { margin-left: auto; font-size: 10px; color: var(--text50); }
+.assistant-tool[data-state="error"] .assistant-tool-status,
+.assistant-tool[data-state="declined"] .assistant-tool-status { color: var(--negative); }
+.assistant-tool pre {
+  margin: 4px 0 0; max-height: 180px; overflow: auto; color: var(--text80);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.assistant-tool summary { margin-top: 4px; font-size: 10px; color: var(--text50); cursor: pointer; user-select: none; }
+.assistant-approve { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.assistant-approve .panel-note { flex-basis: 100%; font-size: 11px; color: var(--text80); }
+.assistant-note { font-size: 11px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.assistant-note.muted { color: var(--text50); }
+.assistant-note.error {
+  color: var(--negative); padding: 6px 8px; border-radius: 4px;
+  border: 1px solid var(--negative);
+}
+.assistant-composer {
+  flex: 0 0 auto; display: flex; align-items: flex-end; gap: 6px;
+  padding: 8px; border-top: 1px solid var(--border-low);
+}
+.assistant-composer textarea {
+  flex: 1; min-width: 0; min-height: 44px; max-height: 40vh; resize: vertical;
+  padding: 6px; font: inherit; font-size: 12px;
+  background: var(--bg10); color: var(--text80);
+  border: 1px solid var(--border-low); border-radius: 3px;
+}
+:is(html[data-theme="dark"], html[data-theme="light"]) .assistant-msg.user {
+  background: var(--primary); color: var(--primary-foreground);
+}
+:is(html[data-theme="dark"], html[data-theme="light"]) .assistant-msg.assistant,
+:is(html[data-theme="dark"], html[data-theme="light"]) .assistant-tool {
+  background: var(--card); color: var(--card-foreground); border-color: var(--border);
+  border-radius: calc(var(--radius) - 2px);
+}
+:is(html[data-theme="dark"], html[data-theme="light"]) .assistant-composer { border-top-color: var(--border); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .md code,
+:is(html[data-theme="dark"], html[data-theme="light"]) .md pre,
+:is(html[data-theme="dark"], html[data-theme="light"]) .md th { background: var(--muted); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .md pre code { background: none; }
+:is(html[data-theme="dark"], html[data-theme="light"]) .md pre,
+:is(html[data-theme="dark"], html[data-theme="light"]) .md th,
+:is(html[data-theme="dark"], html[data-theme="light"]) .md td,
+:is(html[data-theme="dark"], html[data-theme="light"]) .md hr { border-color: var(--border); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .md a { color: var(--primary); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .assistant-act.on { border-color: var(--primary); color: var(--foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .assistant-composer textarea {
+  background: var(--background); color: var(--foreground); border-color: var(--input);
+  border-radius: calc(var(--radius) - 4px);
+}
+:is(html[data-theme="dark"], html[data-theme="light"]) .assistant-suggestion { border-color: var(--input); color: var(--foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .assistant-suggestion:hover { background: var(--muted); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .assistant-thinking summary,
+:is(html[data-theme="dark"], html[data-theme="light"]) .assistant-thinking-text,
+:is(html[data-theme="dark"], html[data-theme="light"]) .assistant-tool-status,
+:is(html[data-theme="dark"], html[data-theme="light"]) .assistant-note.muted { color: var(--muted-foreground); }

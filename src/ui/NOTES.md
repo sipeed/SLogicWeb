@@ -864,3 +864,71 @@ Node checks passed with 21/21 channel-layout results, 28/28 i18n results with th
 color label in translated probes, and 14/14 theme results including 15 unique valid
 presets and unchanged UI/renderer defaults. `tsc --noEmit` and the production Vite build
 also passed; only the pre-existing chunk-size warning remained.
+
+## 20. AI assistant sidebar
+
+A fourth sidebar choice (after Device, Analyzers) opens a chat with a model the user
+reaches with their **own API key**: Claude through the official `@anthropic-ai/sdk`, or
+any OpenAI-compatible chat-completions endpoint (OpenAI, DeepSeek, Qwen, Kimi, GLM or a
+relay). There is no server: the page calls the provider directly.
+
+**Layers.** `src/assistant/` is provider-neutral and DOM-free, so it runs under node:
+`settings.ts` (persistence), `tools.ts` (what the model may see and do, through an
+`AssistantHost` that App implements), `loop.ts` (model turn -> tools -> results), the two
+providers and `systemPrompt.ts`. `src/ui/assistantPanel.ts` is the view. App mounts it
+**once** and only toggles `hidden`: `renderPanels()` clears the other panels on every state
+change, which here would drop a streaming answer, a pending approval and the draft.
+
+**Tools.** Read tools (`get_state`, `get_channel_stats`, `get_edges`, `list_decoders`,
+`describe_decoder`, `get_annotations`) and view tools (`set_viewport`,
+`zoom_to_annotation`) run at once. Tools that change the capture (`set_capture_settings`,
+`start_capture`, `stop_capture`, `load_demo`, `attach_decoder`, `remove_decoder`) wait
+for the user's Allow on an approval card ("Allow all in this chat" skips the rest of the
+chat). Each tool goes through the path a button uses (`debug.setSettings`,
+`startCapture`, `attachAnalyzer`...), so the assistant cannot reach a state the UI cannot.
+Tools return compact summaries - statistics, a capped edge list, decoded annotations -
+never raw samples, and say when they truncated. `start_capture` resolves when
+`stopCapture` finishes (`captureWaiters`). Connecting a device stays the user's click: the
+WebUSB prompt needs a user gesture.
+
+**Loop invariants.** Every tool call of a turn gets exactly one result in one message,
+including declined, invalid (validated against the tool's JSON Schema before it runs) and
+cancelled calls - an unanswered call makes the next request fail. A turn that ended in a
+refusal, or hit `max_tokens` with a tool call, never runs its tools and is not appended
+(a truncated input can look valid). Claude's transcript is append-only.
+
+**Claude request.** `claude-opus-5-5` by default (Sonnet/Haiku 5.5 offered), adaptive
+thinking with `display: "summarized"` (shown as a collapsible "Thinking"), explicit
+`effort: "medium"`, top-level `cache_control` over a byte-stable system prompt and tool
+list, `eager_input_streaming` on every tool. On the official endpoint only, safety
+declines are retried server-side with `fallbacks: "default"`
+(`server-side-fallback-2026-07-01`); relays tend to reject unknown parameters. The SDK 1.x
+sends the key as `Authorization: Bearer`.
+
+**The lazy chunk.** The SDK (329 KB, 74 KB gzip) is imported on the first Claude message,
+so the entry grew only by the assistant itself (~43 KB). The SDK has dynamic imports of
+its own, which Vite wraps in its preload helper; left alone, rollup put that helper in the
+entry and the chunk imported the entry asset - which would boot a second App (0340d7a).
+`manualChunks` gives the helper a chunk of its own (hosted builds only - it conflicts with
+the portable build's `inlineDynamicImports`). `claude.ts` imports nothing at runtime but
+the SDK. `assistant-selftest` checks both, the latter against the built `dist/`.
+
+**Network and privacy.** A web page cannot use an HTTP or SOCKS5 proxy by itself; where
+the official endpoint is unreachable the user sets a **Base URL** (an API relay or reverse
+proxy) or turns on a system/browser proxy. The key stays in sessionStorage unless the
+user ticks "remember" (then localStorage), is never written into the settings record, and
+is redacted from any error text shown. A one-time notice explains that messages and the
+summaries the tools read go to the chosen provider. Untested so far: whether the official
+APIs accept the `null` origin of the portable build opened from `file://`, and which
+OpenAI-compatible providers allow browser (CORS) requests at all - a relay covers both.
+
+**Follow-ups after first use.**
+- *Markdown.* Answers and thinking summaries render through `src/ui/markdown.ts`: DOM
+  nodes only, never innerHTML; HTML stays literal text; only http(s) links become links.
+  Streaming re-renders the accumulated text at most once per animation frame. Single
+  `_`/`__` emphasis only off word boundaries, so identifiers stay literal.
+- *Header.* One row: title, a gear (settings toggle) and a small New button.
+
+`src/ui/tools/assistant-selftest.ts` (81 checks) replays recorded SSE streams through
+both real providers, runs every tool against the protocol demo capture, and drives the
+loop's approval, abort, refusal and truncation paths with a scripted provider.
