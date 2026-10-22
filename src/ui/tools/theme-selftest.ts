@@ -576,9 +576,9 @@ function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia
   const gridMinor: string = light.gridMinor;
   const gridMajor: string = light.gridMajor;
   const lightLiterals = axisMinor !== gridMinor && axisMajor !== gridMajor &&
-    gridMinor === '#EDE9DC' && gridMajor === '#F3EEE2' &&
-    axisMinor === '#D3C9AE' && axisMajor === '#C9BF9F' &&
-    light.warning === '#A67C00' && light.selection === '#1B7FA8';
+    gridMinor === '#eaeef2' && gridMajor === '#f6f8fa' &&
+    axisMinor === '#d1d9e0' && axisMajor === '#818b98' &&
+    light.warning === '#9a6700' && light.selection === '#0969da';
   const hex = /^#[0-9A-Fa-f]{6}$/;
   const bad: string[] = [];
   for (const id of ['dark', 'light'] as const) {
@@ -703,9 +703,9 @@ function rgb255ToHex([r, g, b]: [number, number, number]): string {
 
 {
   const darkBg = '#1B1B1C';
-  const beige = LIGHT_THEME.background;
+  const lightGround = LIGHT_THEME.background;
   const channelSet = [...new Set([...CHANNEL_COLORS, ...LOGIC2_CHANNEL_COLORS])];
-  const floors = channelSet.map((c) => Math.min(contrast(c, darkBg), contrast(c, beige)));
+  const floors = channelSet.map((c) => Math.min(contrast(c, darkBg), contrast(c, lightGround)));
   const minFloor = Math.min(...floors);
 
   let minPair = Infinity;
@@ -731,7 +731,7 @@ function rgb255ToHex([r, g, b]: [number, number, number]): string {
   const card = LIGHT_CHROME_TOKENS['--card']!;
   const bubbleInk = canvasPalette('light').bubbleInk;
   const analyzerFloors = ANALYZER_COLORS.map((c) => Math.min(
-    contrast(c, darkBg), contrast(c, beige), contrast(c, card), contrast(bubbleInk, c),
+    contrast(c, darkBg), contrast(c, lightGround), contrast(c, card), contrast(bubbleInk, c),
   ));
   const minAnalyzer = Math.min(...analyzerFloors);
   check('analyzer colors clear both plot grounds, the light card, and paper-ink-on-bubble',
