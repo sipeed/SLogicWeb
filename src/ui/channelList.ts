@@ -60,6 +60,18 @@ export interface ChannelListCallbacks {
   /** Move the channel at `from` in display order to `to`. */
   onReorder(from: number, to: number): void;
   onRemoveAnalyzer(id: string): void;
+  /** Open the editor for a parallel-bus view (its cell's gear). */
+  onEditBus?(id: string): void;
+}
+
+/** A parallel-bus (ADC) row's cell: a label for the analog row, not a channel. */
+export interface BusCell {
+  id: string;
+  name: string;
+  /** e.g. "D0–D11 · ↑D12". */
+  summary: string;
+  color: string;
+  heightCss: number;
 }
 
 const TRIGGER_MODES: readonly TriggerMode[] = ['falling', 'rising', 'edge', 'high', 'low', 'dont-care'];
@@ -347,6 +359,47 @@ export class ChannelList {
       const selector = `.ch-settings[data-channel="${channel}"]`;
       this.root.querySelector<HTMLButtonElement>(selector)?.focus();
     });
+  }
+
+  /**
+   * Put the bus cells above the channel cells, matching the analog rows at the top of
+   * the plot. Call after render(). They are not channels: not draggable, no `pos`, so
+   * drag reordering still numbers the channel cells alone.
+   */
+  renderBuses(cells: readonly BusCell[]): void {
+    for (const cell of [...cells].reverse()) {
+      const el = document.createElement('div');
+      el.className = 'ch-cell bus-cell';
+      el.style.height = `${cell.heightCss}px`;
+      const card = document.createElement('div');
+      card.className = 'ch-card';
+      const strip = document.createElement('div');
+      strip.className = 'ch-strip';
+      strip.style.background = cell.color;
+      const body = document.createElement('div');
+      body.className = 'ch-body';
+      const head = document.createElement('div');
+      head.className = 'ch-head';
+      const label = document.createElement('span');
+      label.className = 'ch-tag ch-tag--name';
+      label.textContent = cell.name;
+      head.appendChild(label);
+      const edit = document.createElement('button');
+      edit.type = 'button';
+      edit.className = 'bus-cell-edit';
+      edit.title = t('bus.editButton');
+      edit.setAttribute('aria-label', `${t('bus.editButton')} ${cell.name}`);
+      edit.appendChild(settingsIcon());
+      edit.addEventListener('click', () => this.cb.onEditBus?.(cell.id));
+      head.appendChild(edit);
+      const sub = document.createElement('div');
+      sub.className = 'bus-cell-sub';
+      sub.textContent = cell.summary;
+      body.append(head, sub);
+      card.append(strip, body);
+      el.appendChild(card);
+      this.root.prepend(el);
+    }
   }
 
   render(cells: readonly ChannelCell[]): void {

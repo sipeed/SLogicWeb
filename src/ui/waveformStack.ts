@@ -29,13 +29,16 @@ import type { SampleStore } from '../data/types.js';
 import { ROWS } from './metrics.js';
 
 export interface RowSpec {
-  kind: 'channel' | 'lane';
-  /** Capture channel index. A lane draws the same channel and is then painted over. */
+  kind: 'channel' | 'lane' | 'analog';
+  /** Capture channel index. A lane or analog row draws this channel and is then painted
+   *  over by the overlay. */
   channel: number;
   /** Whole CSS px. Non-integral heights would break the cross-canvas seam. */
   heightCss: number;
   /** For a lane, the index of the analyzer whose annotations go in it. */
   analyzer?: number;
+  /** For an analog row, the index of its parallel-bus view. */
+  bus?: number;
 }
 
 /** Row geometry the overlay needs, in CSS px from the top of the stack. */

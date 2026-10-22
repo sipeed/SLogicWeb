@@ -1371,3 +1371,57 @@ html[data-theme="light"] .uictrl-card-actions .mini:hover { background: var(--mu
 :is(html[data-theme="dark"], html[data-theme="light"]) .assistant-thinking-text,
 :is(html[data-theme="dark"], html[data-theme="light"]) .assistant-tool-status,
 :is(html[data-theme="dark"], html[data-theme="light"]) .assistant-note.muted { color: var(--muted-foreground); }
+
+/* ---------------------------------------------------------------- parallel bus (ADC) */
+
+/* The bus section has its own host below the analyzer panel's; `contents` lets its
+   head and sections join that host's card stack, and the host drops its top padding so
+   the two stacks read as one. */
+.bus-panel { display: contents; }
+:is(html[data-theme="dark"], html[data-theme="light"]) .bus-host { padding-top: 0; }
+.bus-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 11px; min-width: 0; }
+.bus-row .bus-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bus-sq { flex: none; width: 10px; height: 10px; border-radius: 2px; }
+.bus-name { flex: none; font-weight: 600; color: var(--text); }
+/* The summary takes its own line under the name, so the buttons cannot squeeze it away. */
+.bus-info {
+  order: 10; flex: 1 0 100%; min-width: 0; padding-left: 16px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; color: var(--text50);
+}
+.bus-btn {
+  flex: none; padding: 1px 6px; font: inherit; font-size: 11px; cursor: pointer;
+  background: transparent; color: var(--text80);
+  border: 1px solid var(--border-low); border-radius: 3px;
+}
+.bus-btn:hover { border-color: var(--accent); }
+.bus-btn--remove:hover { border-color: var(--negative); color: var(--negative); }
+.bus-perbit summary { font-size: 11px; color: var(--text80); cursor: pointer; user-select: none; }
+.bus-perbit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.bus-check { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text80); }
+.bus-check input { accent-color: var(--accent); }
+.bus-actions { display: flex; gap: 6px; }
+.bus-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* The bus's label cell in the channel column, shaped like a channel card. */
+.bus-cell .ch-head { padding-right: 2px; }
+.bus-cell-sub { font-size: 10px; line-height: 1.3; color: var(--text50); overflow-wrap: anywhere; }
+.bus-cell-edit {
+  flex: none; margin-left: auto; display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 18px; padding: 0; cursor: pointer;
+  border: 1px solid var(--border-low); border-radius: 3px; background: var(--bg20); color: var(--text50);
+}
+.bus-cell-edit:hover { border-color: var(--accent); color: var(--text80); }
+.bus-cell-edit svg { display: block; width: 14px; height: 14px; }
+
+:is(html[data-theme="dark"], html[data-theme="light"]) .bus-name { color: var(--foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .bus-info,
+:is(html[data-theme="dark"], html[data-theme="light"]) .bus-cell-sub { color: var(--muted-foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .bus-btn,
+:is(html[data-theme="dark"], html[data-theme="light"]) .bus-cell-edit {
+  background: var(--background); border-color: var(--input); color: var(--muted-foreground);
+  border-radius: calc(var(--radius) - 4px);
+}
+:is(html[data-theme="dark"], html[data-theme="light"]) .bus-btn:hover,
+:is(html[data-theme="dark"], html[data-theme="light"]) .bus-cell-edit:hover { border-color: var(--primary); color: var(--foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .bus-btn--remove:hover { border-color: var(--destructive); color: var(--destructive); }

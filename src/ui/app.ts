@@ -30,9 +30,15 @@ import type { AssistantHost, CaptureOutcome } from '../assistant/tools.js';
 
 import { AnalyzerPanel } from './analyzerPanel.js';
 import { AssistantPanel } from './assistantPanel.js';
+import { BusBuilder, validateBusSpec } from '../data/busValue.js';
+import { BusPanel, defaultBusConfig } from './busPanel.js';
+import {
+  analogFrame, busColor, busLabel, busSummary, busValueAt, busYRange, type AnalogFrame, type BusViewConfig,
+  type BusViewState,
+} from './busView.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
 import { CapturePanel } from './capturePanel.js';
-import { ChannelList, type ChannelCell, type ChannelConfiguration } from './channelList.js';
+import { ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration } from './channelList.js';
 import { computeChannelRowHeight } from './channelLayout.js';
 import {
   MAX_SAMPLES, createProtocolDemoCapture, levelAt, loadFiles, loadLwcap, saveLwcap,
@@ -84,6 +90,12 @@ export class App {
   private assistantPanel: AssistantPanel | null = null;
   /** Resolved when the running capture stops (the assistant waits on a capture). */
   private captureWaiters: (() => void)[] = [];
+  private readonly busPanel: BusPanel;
+  /** Parallel-bus (ADC) views, drawn as analog rows above the channels. */
+  private busViews: BusViewState[] = [];
+  private nextBus = 0;
+  /** When the analyzers panel last re-rendered for a bus build's progress. */
+  private busPanelAt = 0;
   private readonly settingsMenu: SettingsMenu;
   private readonly sidebarMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
@@ -202,6 +214,12 @@ export class App {
       onConfigure: (channel, config) => this.configureChannel(channel, config),
       onReorder: (from, to) => this.reorder(from, to),
       onRemoveAnalyzer: (id) => this.removeAnalyzer(id),
+      onEditBus: (id) => {
+        const bus = this.busViews.find((b) => b.id === id);
+        if (!bus) return;
+        this.busPanel.edit(bus);
+        this.selectPanel('analyzers');
+      },
     });
 
     const panelHost = document.createElement('div');
@@ -231,6 +249,17 @@ export class App {
       onRemove: (id) => this.removeAnalyzer(id),
       onRedecode: (id) => void this.runDecode(id),
       onCancel: () => this.abort?.abort(),
+    });
+    // Its own host: AnalyzerPanel clears panelHost whenever it re-renders itself (on
+    // decoder hydration, for one), which would wipe a section appended after it.
+    const busHost = document.createElement('div');
+    busHost.className = 'panel-host bus-host';
+    busHost.hidden = true;
+    this.el.side.appendChild(busHost);
+    this.busPanel = new BusPanel(busHost, {
+      onAdd: (cfg) => this.addBus(cfg),
+      onUpdate: (id, cfg) => this.updateBus(id, cfg),
+      onRemove: (id) => this.removeBus(id),
     });
 
     this.wireToolbar();
@@ -286,6 +315,101 @@ export class App {
     return this.order.map((i) => this.channels[i]!).filter((c) => c.enabled);
   }
 
+  /**
+   * The channels the plot shows: enabled ones, minus the source bits of a bus view that
+   * hides them. Display only - capture width and settings follow enabledChannels().
+   */
+  private visibleChannels(): ChannelState[] {
+    const hidden = new Set(this.busViews.filter((b) => b.hideSources).flatMap((b) => b.spec.bits));
+    return this.enabledChannels().filter((c) => !hidden.has(c.index));
+  }
+
+  // ------------------------------------------------------------------ bus views
+
+  private busCells(): BusCell[] {
+    return this.busViews.map((b) => ({
+      id: b.id, name: b.name, summary: busSummary(b.spec), color: b.color, heightCss: b.heightCss,
+    }));
+  }
+
+  private addBus(cfg: BusViewConfig): void {
+    const color = busColor(this.nextBus);
+    this.busViews.push({ ...cfg, color, id: `bus-${this.nextBus++}`, builder: null, builtFor: null, cache: null });
+    this.relayout();
+    this.renderPanels();
+  }
+
+  private updateBus(id: string, cfg: BusViewConfig): void {
+    const i = this.busViews.findIndex((b) => b.id === id);
+    if (i < 0) return;
+    this.busViews[i] = { ...cfg, color: this.busViews[i]!.color, id, builder: null, builtFor: null, cache: null };
+    this.relayout();
+    this.renderPanels();
+  }
+
+  private removeBus(id: string): void {
+    this.busViews = this.busViews.filter((b) => b.id !== id);
+    this.relayout();
+    this.renderPanels();
+  }
+
+  /** A new capture (or a growing one) invalidates every bus's overview and cache. */
+  private resetBusBuilds(): void {
+    for (const b of this.busViews) { b.builder = null; b.builtFor = null; b.cache = null; }
+  }
+
+  /**
+   * Build bus overviews a slice per frame once a capture is complete, so a 2^31-sample
+   * capture never blocks the page. One bus at a time; the panel shows progress.
+   */
+  private pumpBusBuilders(): void {
+    if (this.running || this.stopping || this.store.length === 0) return;
+    const store = this.store;
+    for (const b of this.busViews) {
+      if (b.builtFor !== store) {
+        b.builtFor = store;
+        b.cache = null;
+        b.builder = validateBusSpec(b.spec, store.channelCount).length ? null : new BusBuilder(store, b.spec);
+      }
+      if (!b.builder || b.builder.done) continue;
+      const done = b.builder.step(6);
+      this.dirty = true;
+      const now = performance.now();
+      if (this.panel === 'analyzers' && (done || now - this.busPanelAt > 300)) {
+        this.busPanelAt = now;
+        this.renderPanels();
+      }
+      return;
+    }
+  }
+
+  private drawBusRows(boxes: readonly RowBox[]): void {
+    const view = this.stack.view;
+    const store = this.store;
+    for (const box of boxes) {
+      if (box.spec.kind !== 'analog') continue;
+      const bv = this.busViews[box.spec.bus ?? -1];
+      if (!bv) continue;
+      // The analog row is a renderer row with a trace in it; cover it first.
+      this.overlay.fillLane(box.top, box.height);
+      const valid = store.length > 0 && validateBusSpec(bv.spec, store.channelCount).length === 0;
+      const frame: AnalogFrame = valid
+        ? analogFrame(store, bv, view.start, view.end, view.widthPx, this.running)
+        : { kind: 'empty', reason: 'no-capture' };
+      const note = frame.kind !== 'empty' ? ''
+        : frame.reason === 'live' ? t('bus.liveNote')
+          : store.length > 0 ? t('bus.badChannels') : '';
+      const r = busYRange(bv);
+      this.overlay.drawAnalog({
+        top: box.top, band: box.band, frame, yMin: r.min, yMax: r.max, color: bv.color,
+        // A combinational bus holds its value between bit changes: steps are the truth.
+        style: bv.spec.clock ? bv.style : 'step',
+        labels: { top: busLabel(bv, r.max), bottom: busLabel(bv, r.min) },
+        note,
+      });
+    }
+  }
+
   /** Commit one channel-dialog draft. Name and color metadata stay editable during
    * capture, while trigger modes retain the existing running/stopping lock. */
   private configureChannel(channel: number, config: ChannelConfiguration): void {
@@ -329,22 +453,31 @@ export class App {
     // Rows auto-fit the *visible* plot height (the scroll viewport minus the sticky
     // axis). When even minimum-height rows do not fit, the stack overflows and the
     // scroll area scrolls - phones get every channel instead of the first six.
+    // Analog (parallel-bus) rows sit above the channels and take their height first.
+    const analogRows: RowSpec[] = this.busViews.map((b, i) => ({
+      kind: 'analog' as const,
+      channel: Math.min(b.spec.bits[0] ?? 0, Math.max(0, this.store.channelCount - 1)),
+      heightCss: b.heightCss,
+      bus: i,
+    }));
+    const analogH = analogRows.reduce((sum, r) => sum + r.heightCss, 0);
     const axisH = this.el.axis.offsetHeight || 30;
-    const plotH = Math.max(120, (this.el.scroll.clientHeight || 630) - axisH);
-    const enabled = this.enabledChannels();
+    const plotH = Math.max(120, (this.el.scroll.clientHeight || 630) - axisH - analogH);
+    const enabled = this.visibleChannels();
     this.lanes = this.computeLanes(enabled);
     const channelColors = this.channels.map((channel) => channel.color);
 
     if (enabled.length === 0) {
-      this.stack.setRows([], channelColors);
+      this.stack.setRows(analogRows, channelColors);
       this.channelList.render([]);
+      this.channelList.renderBuses(this.busCells());
       this.dirty = true;
       return;
     }
 
     const base = computeChannelRowHeight(plotH, enabled.length, this.lanes.length);
 
-    const rows: RowSpec[] = [];
+    const rows: RowSpec[] = [...analogRows];
     const cells: ChannelCell[] = [];
     for (const c of enabled) {
       const mine = this.lanes.filter((l) => l.laneChannel === c.index);
@@ -369,6 +502,7 @@ export class App {
 
     this.stack.setRows(rows, channelColors);
     this.channelList.render(cells);
+    this.channelList.renderBuses(this.busCells());
     this.dirty = true;
   }
 
@@ -458,7 +592,7 @@ export class App {
   }
 
   private reorder(from: number, to: number): void {
-    const enabled = this.enabledChannels();
+    const enabled = this.visibleChannels();
     const moving = enabled[from];
     const target = enabled[to];
     if (!moving || !target) return;
@@ -473,6 +607,7 @@ export class App {
 
   private frame = (): void => {
     requestAnimationFrame(this.frame);
+    this.pumpBusBuilders();
     if (!this.dirty && !this.running) return;
     this.dirty = false;
     try {
@@ -513,6 +648,7 @@ export class App {
       top: b.top, band: b.band, isChannel: b.spec.kind === 'channel',
     })));
     this.drawLaneBubbles(boxes, wCss);
+    this.drawBusRows(boxes);
 
     if (this.triggerSampleIndex !== null) {
       this.overlay.drawTrigger(this.toPx(this.triggerSampleIndex));
@@ -790,9 +926,24 @@ export class App {
 
     let box = null;
     for (const b of this.stack.boxes()) {
-      if (cssY >= b.top && cssY < b.top + b.height && b.spec.kind === 'channel') { box = b; break; }
+      if (cssY >= b.top && cssY < b.top + b.height && b.spec.kind !== 'lane') { box = b; break; }
     }
     if (!box) { this.dirty = true; return; }
+    if (box.spec.kind === 'analog') {
+      const bv = this.busViews[box.spec.bus ?? -1];
+      const s = Math.round(this.toSample(cssX));
+      if (bv && s >= 0 && s < store.length && validateBusSpec(bv.spec, store.channelCount).length === 0) {
+        const v = busValueAt(store, bv.spec, s);
+        const raw = Number.isNaN(v) ? t('bus.unknown') : busLabel(bv, v);
+        this.hover = {
+          pointerX: cssX, rowTop: box.top, rowBand: box.band, color: bv.color,
+          widthX0: null, widthX1: null, periodX0: null, periodX1: null,
+          lines: [`${bv.name} = ${raw}`, ...(bv.fullScaleV !== null && !Number.isNaN(v) ? [`${t('bus.code')} ${v}`] : [])],
+        };
+      }
+      this.dirty = true;
+      return;
+    }
 
     const ch = box.spec.channel;
     const s = Math.round(this.toSample(cssX));
@@ -1007,6 +1158,7 @@ export class App {
     const assistant = this.panel === 'assistant';
     this.el.side.classList.toggle('assistant-mode', assistant);
     this.panelHost.hidden = assistant;
+    this.busPanel.hidden = this.panel !== 'analyzers';
     if (assistant && !this.assistantPanel) {
       this.assistantPanel = new AssistantPanel(this.assistantHost());
       this.el.side.appendChild(this.assistantPanel.el);
@@ -1044,6 +1196,7 @@ export class App {
         warm: this.decodeWarm,
         busy: this.decodeBusy,
       });
+      this.busPanel.render({ buses: this.busViews, channelCount: this.channels.length });
     }
   }
 
@@ -1212,6 +1365,7 @@ export class App {
     for (const a of this.analyzers) {
       a.result = null; a.index = null; a.status = 'idle'; a.note = { kind: 'pending' };
     }
+    this.resetBusBuilds();
     this.cursorA = null;
     this.cursorB = null;
     this.triggerState = 'off';
@@ -1337,6 +1491,7 @@ export class App {
       const store = createSampleStore(cfg.channels, cfg.samplerate);
       this.discardDecodeState();
       this.storeRef.set(store);
+      this.resetBusBuilds();
       this.channels = defaultChannels(cfg.channels);
       this.order = this.channels.map((c) => c.index);
       for (const a of this.analyzers) {
@@ -1730,6 +1885,16 @@ export class App {
       this.relayout();
       this.renderPanels();
     },
+    /** Add a parallel-bus view; missing fields take the panel's defaults. */
+    addBus: (cfg: Partial<BusViewConfig> & { spec: BusViewConfig['spec'] }) => {
+      this.addBus({ ...defaultBusConfig(this.channels.length), ...cfg });
+      return this.busViews[this.busViews.length - 1]!.id;
+    },
+    removeBus: (id: string) => this.removeBus(id),
+    buses: () => this.busViews.map((b) => ({
+      id: b.id, name: b.name, color: b.color, summary: busSummary(b.spec), hideSources: b.hideSources,
+      built: b.builder?.done ?? false, progress: b.builder?.progress ?? 0,
+    })),
     setPanel: (p: 'device' | 'analyzers' | 'assistant' | null) => {
       this.selectPanel(p);
     },

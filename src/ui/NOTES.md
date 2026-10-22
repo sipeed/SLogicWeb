@@ -263,7 +263,7 @@ Two other honest gaps:
 - **Cold decode.** `src/decode` is ~850 ms cold and 0.9-4.9 ms warm; a native tool is 119-682 ms
   every time. The shell calls `warmup()` on construction so the cold start is paid before
   a user asks for anything, but the first ~1 s after page load is slower than the bar.
-- **No analog channels, no data table, no marker pairs.** Software triggering is now
+- **No analog channels, no data table, no marker pairs.** (A parallel bus can now be drawn as an analog row - section 21 - but there are still no native analog channels.) Software triggering is now
   available beside each channel label. It is host-side (the SLogic firmware has no
   trigger register): a single bounded rolling pre-trigger buffer supports per-channel
   level/rising/falling/edge conditions combined with logical AND, and reports Waiting,
@@ -939,3 +939,56 @@ OpenAI-compatible providers allow browser (CORS) requests at all - a relay cover
 `src/ui/tools/assistant-selftest.ts` (81 checks) replays recorded SSE streams through
 both real providers, runs every tool against the protocol demo capture, and drives the
 loop's approval, abort, refusal and truncation paths with a scripted provider.
+
+## 21. Parallel bus (ADC) as an analog row
+
+The analyzers sidebar has a "Parallel bus / ADC" section. It turns n capture channels
+(bits, LSB first, contiguous or any wiring) into one value and draws it as an analog
+row above the channels. This reconstructs an ADC's output from its parallel data lines.
+
+**Reading** (`src/data/busValue.ts`; data NOTES has the detail).
+- With a clock channel, the value is latched on its active edge and held until the next
+  one. This is what DCLK means, and it hides the glitches of bits that switch a few
+  samples apart.
+- Without a clock, any bit change makes a new value. Those values are drawn as steps,
+  because a combinational value holds between changes.
+- Encodings: unsigned, two's complement, offset binary.
+- A full scale in volts relabels the axis: `V = offset + value / 2^n x full scale`.
+
+**Drawing** (`busView.ts`, `Overlay.drawAnalog`).
+- The analog row is a renderer row (`RowSpec.kind = 'analog'`), covered with `fillLane`
+  and drawn on the overlay. This is the same trick annotation lanes use.
+- Zoomed in to at most 256 samples per device pixel (and at most a 4 M-sample window),
+  it uses the exact value timeline for the window. That is points joined by lines (or
+  steps) while there are fewer values than pixels, otherwise a min/max bar per pixel
+  column.
+- Zoomed out, it uses the min/max pyramid, which `pumpBusBuilders` builds a 6 ms slice
+  per frame once a capture is complete. The part not built yet stays empty and fills in.
+- During a live capture there is no pyramid, so wide windows show a "zoom in" note.
+- Frames are cached by window, so hover redraws are free.
+- Trace colours are the vivid channel tones (`busColor`). The muted analyzer palette sank
+  into the grid as a 1 px trace.
+
+**MSB/LSB.** ADC data lines are often wired MSB-first.
+- The editor takes a width, a **start channel** (the lowest channel of the run) and a
+  **"start channel is the MSB"** checkbox. Unticked, the start channel is the LSB;
+  ticked, the same channels are read in reverse order (`runBits`).
+- `runStart` reads that state back from the bits, so a reversed bus opens with the box
+  ticked, and changing the width or the start channel keeps it ticked.
+- Each listed bus also has a one-click `MSB↔LSB` button that reverses its order at once
+  (`swapBusOrder`).
+- Summaries always read LSB first, so a reversed bus shows as `D11–D0`.
+- `bus-view-selftest` checks that a swap reads every code bit-reversed.
+
+**Hide source bits** removes those rows from the plot (`visibleChannels`). It is display
+only: `enabledChannels()` still decides the capture width, so hiding never changes what
+the next capture records. Drag reordering numbers the visible channel cells, and the bus
+cells above them are not draggable.
+
+**Panel placement.** `BusPanel` has its own host under the analyzers sidebar.
+AnalyzerPanel clears its host whenever it re-renders itself (on decoder hydration, for
+one), and a section appended after it disappeared at random until it had its own host.
+
+Hover over the analog row reads the value at the pointer (and volts when a full scale is
+set). Bus views are session state, like analyzers: not persisted, kept across captures,
+and rebuilt for each new one.

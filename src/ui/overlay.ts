@@ -18,6 +18,7 @@
  */
 
 import type { Bubble } from './annotationLayout.js';
+import type { AnalogFrame } from './busView.js';
 import { canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { BUBBLE, GRID, ROWS } from './metrics.js';
 import type { TickSet } from './timeAxis.js';
@@ -131,6 +132,110 @@ export class Overlay {
   fillLane(top: number, height: number): void {
     this.ctx.fillStyle = this.palette.bg;
     this.ctx.fillRect(0, top, this.wCss, height);
+  }
+
+  /**
+   * One parallel-bus (ADC) row: the value as an analog trace over the full-scale range.
+   *
+   * Column frames come in device pixels and are drawn there, one bar per pixel from the
+   * column's min to its max, stretched to meet the neighbouring column so a steep signal
+   * stays a connected line. Point frames are drawn in CSS px: joined by straight lines
+   * (`line`, an ADC's samples) or held as steps (`step`), with a dot per sample once they
+   * are far enough apart to see. NaN (a gap, or no latch yet) breaks the trace.
+   */
+  drawAnalog(o: {
+    top: number; band: number; frame: AnalogFrame; yMin: number; yMax: number;
+    color: string; style: 'line' | 'step'; labels: { top: string; bottom: string }; note: string;
+  }): void {
+    const c = this.ctx;
+    const pad = 6;
+    const h = Math.max(1, o.band - 2 * pad);
+    const y = (v: number) => o.top + pad + ((o.yMax - v) / (o.yMax - o.yMin || 1)) * h;
+    c.save();
+    c.beginPath();
+    c.rect(0, o.top, this.wCss, o.band);
+    c.clip();
+
+    // Zero line for signed encodings, and the full-scale labels.
+    if (o.yMin < 0 && o.yMax > 0) {
+      c.strokeStyle = this.palette.gridMajor;
+      c.setLineDash([3, 3]);
+      c.lineWidth = 1;
+      c.beginPath();
+      c.moveTo(0, Math.round(y(0)) + 0.5);
+      c.lineTo(this.wCss, Math.round(y(0)) + 0.5);
+      c.stroke();
+      c.setLineDash([]);
+    }
+
+    const f = o.frame;
+    c.fillStyle = o.color;
+    c.strokeStyle = o.color;
+    c.lineWidth = 1.25;
+    c.lineJoin = 'round';
+    if (f.kind === 'columns') {
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      const d = this.dpr;
+      for (let x = 0; x < f.min.length; x++) {
+        let lo = f.min[x]!;
+        let hi = f.max[x]!;
+        if (Number.isNaN(lo)) continue;
+        const pl = x > 0 ? f.min[x - 1]! : Number.NaN;
+        const ph = x > 0 ? f.max[x - 1]! : Number.NaN;
+        if (!Number.isNaN(pl)) {
+          if (ph < lo) lo = ph;
+          if (pl > hi) hi = pl;
+        }
+        const y0 = Math.floor(y(hi) * d);
+        const y1 = Math.ceil(y(lo) * d);
+        c.fillRect(x, y0, 1, Math.max(Math.round(d), y1 - y0));
+      }
+    } else if (f.kind === 'points') {
+      const d = this.dpr;
+      const xs: number[] = [];
+      const ys: number[] = [];
+      for (let i = 0; i < f.count; i++) { xs.push(f.x[i]! / d); ys.push(f.v[i]!); }
+      c.beginPath();
+      let open = false;
+      for (let i = 0; i < f.count; i++) {
+        const v = ys[i]!;
+        if (Number.isNaN(v)) { open = false; continue; }
+        const x = xs[i]!;
+        if (!open) { c.moveTo(x, y(v)); open = true; continue; }
+        if (o.style === 'step') c.lineTo(x, y(ys[i - 1]!));
+        c.lineTo(x, y(v));
+      }
+      // The last value holds to the right edge.
+      const last = ys[f.count - 1];
+      if (open && last !== undefined && !Number.isNaN(last)) c.lineTo(this.wCss, y(last));
+      c.stroke();
+      let minGap = Number.POSITIVE_INFINITY;
+      for (let i = 1; i < xs.length; i++) minGap = Math.min(minGap, xs[i]! - xs[i - 1]!);
+      if (minGap >= 8) {
+        for (let i = 0; i < f.count; i++) {
+          if (Number.isNaN(ys[i]!)) continue;
+          c.beginPath();
+          c.arc(xs[i]!, y(ys[i]!), 2, 0, 2 * Math.PI);
+          c.fill();
+        }
+      }
+    } else if (o.note) {
+      c.fillStyle = this.palette.text50;
+      c.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText(o.note, this.wCss / 2, o.top + o.band / 2);
+    }
+
+    c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    c.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
+    c.fillStyle = this.palette.text50;
+    c.textAlign = 'left';
+    c.textBaseline = 'top';
+    c.fillText(o.labels.top, 4, o.top + 2);
+    c.textBaseline = 'bottom';
+    c.fillText(o.labels.bottom, 4, o.top + o.band - 2);
+    c.restore();
   }
 
   drawDemoWatermark(channelHeightCss: number): void {
