@@ -49,11 +49,11 @@
  */
 
 import { DARK_THEME, LIGHT_THEME, LOGIC2_CHANNEL_COLORS } from '../../render/index.js';
+import { hexFromHsv, hsvFromHex } from '../colorMath.js';
 import { en } from '../locales/en.js';
 import { canvasPalette } from '../canvasPalette.js';
 import {
-  ANALYZER_COLORS, CHANNEL_COLORS, CHANNEL_COLOR_PRESETS, CHANNEL_PALETTE_COLORS, CHROME,
-  chipForeground, COLORS,
+  ANALYZER_COLORS, CHANNEL_COLORS, CHANNEL_COLOR_PRESETS, CHROME, chipForeground, COLORS,
   GRID, LIGHT_CHROME_TOKENS, ROWS,
 } from '../metrics.js';
 import { defaultChannels } from '../state.js';
@@ -739,16 +739,10 @@ function rgb255ToHex([r, g, b]: [number, number, number]): string {
       ANALYZER_COLORS.every((c) => contrast(bubbleInk, c) >= 3 && contrast(c, card) >= 3),
     `minAnalyzer=${minAnalyzer.toFixed(2)}`);
 
-  const paletteValid = CHANNEL_PALETTE_COLORS.every((c) => /^#[0-9A-F]{6}$/.test(c));
-  const paletteUnique = new Set(CHANNEL_PALETTE_COLORS).size === CHANNEL_PALETTE_COLORS.length;
-  const paletteDisjoint = CHANNEL_PALETTE_COLORS.every((c) => !CHANNEL_COLOR_PRESETS.includes(c));
-  const paletteFloors = CHANNEL_PALETTE_COLORS.map((c) => Math.min(contrast(c, darkBg), contrast(c, beige)));
-  const minPaletteFloor = Math.min(...paletteFloors);
-  check('palette colors are valid, unique, disjoint from the presets, and visible on both grounds',
-    CHANNEL_PALETTE_COLORS.length === 24 && paletteValid && paletteUnique && paletteDisjoint &&
-      minPaletteFloor >= 1.9,
-    `count=${CHANNEL_PALETTE_COLORS.length}, valid=${paletteValid}, unique=${paletteUnique}, ` +
-    `disjoint=${paletteDisjoint}, minFloor=${minPaletteFloor.toFixed(2)}`);
+  const namedRoundTrip = CHANNEL_COLOR_PRESETS.every((c) => hexFromHsv(hsvFromHex(c)) === c);
+  check('every named channel color survives an exact hex to hsv to hex round trip',
+    namedRoundTrip && CHANNEL_COLOR_PRESETS.length === 15,
+    `roundTrip=${namedRoundTrip}, count=${CHANNEL_COLOR_PRESETS.length}`);
 }
 
 {

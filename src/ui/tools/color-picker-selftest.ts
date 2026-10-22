@@ -22,6 +22,10 @@ const nodeProcess = (() => {
   return p;
 })();
 
+interface FsLike {
+  readFileSync(p: string, enc: 'utf8'): string;
+}
+
 interface TestResult {
   name: string;
   pass: boolean;
@@ -228,6 +232,49 @@ function check(name: string, pass: boolean, detail: string): void {
   check('gray is hue-free by construction, so hue survives only as picker state',
     grayA === '#808080' && grayB === '#808080' && hsvFromHex(grayA).h === 0,
     `grayA=${grayA}, grayB=${grayB}, rederivedHue=${hsvFromHex(grayA).h}`);
+}
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const pickerSource = fs.readFileSync('src/ui/colorPicker.ts', 'utf8');
+  const ariaSliders = (pickerSource.match(/setAttribute\('role', 'slider'\)/g) ?? []).length === 2 &&
+    (pickerSource.match(/\.tabIndex = 0/g) ?? []).length === 2 &&
+    pickerSource.includes("setAttribute('aria-valuetext'") &&
+    pickerSource.includes("setAttribute('aria-valuenow'") &&
+    pickerSource.includes("setAttribute('aria-orientation', 'horizontal'") &&
+    pickerSource.includes("t('channels.colorField')") &&
+    pickerSource.includes("t('channels.hue')");
+  const pointerModel = pickerSource.includes('setPointerCapture(event.pointerId)') &&
+    pickerSource.includes("this.wireDrag(this.field, 'field')") &&
+    pickerSource.includes("this.wireDrag(this.hueStrip, 'hue')") &&
+    pickerSource.includes("addEventListener('pointercancel'") &&
+    pickerSource.includes("addEventListener('lostpointercapture'") &&
+    pickerSource.includes('event.preventDefault()') &&
+    pickerSource.includes('event.stopPropagation()') &&
+    pickerSource.includes('.shiftKey') &&
+    pickerSource.includes('event.pointerId') &&
+    !pickerSource.includes('document.addEventListener') &&
+    !pickerSource.includes('window.addEventListener');
+  const noComments = !pickerSource.includes('//') && !pickerSource.includes('/*');
+  check('the picker widget keeps the pointer, keyboard, and aria contract comment-free',
+    ariaSliders && pointerModel && noComments,
+    `aria=${ariaSliders}, pointer=${pointerModel}, noComments=${noComments}`);
+
+  const styleSheet = fs.readFileSync('src/ui/style.css', 'utf8');
+  const sheet = /\.channel-color-field\s*\{[^}]*touch-action:\s*none/.test(styleSheet) &&
+    /\.channel-color-hue\s*\{[^}]*touch-action:\s*none/.test(styleSheet) &&
+    /\.channel-color-field\s*\{[^}]*border-radius:\s*calc\(var\(--radius\) - 4px\)/.test(styleSheet) &&
+    /\.channel-color-hue\s*\{[^}]*border-radius:\s*calc\(var\(--radius\) - 2px\)/.test(styleSheet) &&
+    /\.channel-color-field\s*\{[^}]*linear-gradient\(to top, #000, transparent\)/.test(styleSheet) &&
+    /\.channel-color-hue\s*\{[^}]*hsl\(0 100% 50%\) 0%/.test(styleSheet) &&
+    !styleSheet.includes('.channel-color-palette-grid') &&
+    !styleSheet.includes('.channel-color-palette-swatch') &&
+    !styleSheet.includes('.channel-color-palette-more') &&
+    !styleSheet.includes('.channel-color-palette-input');
+  check('the picker sheet is themed, touch-safe, and retires the matrix rules',
+    sheet,
+    `sheet=${sheet}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

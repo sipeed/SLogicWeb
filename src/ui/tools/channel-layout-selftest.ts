@@ -286,39 +286,49 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     staticFill && bareMark,
     `staticFill=${staticFill}, bareMark=${bareMark}`);
 
-  const paletteStructure = dialogSource.includes("div('channel-color-palette-grid')") &&
-    dialogSource.includes('for (const color of CHANNEL_PALETTE_COLORS)') &&
-    dialogSource.includes("'channel-color-palette-swatch'") &&
-    dialogSource.includes("'channel-color-palette-more'") &&
-    /swatch\.type = 'button'/.test(dialogSource) &&
-    /moreColorsButton\.type = 'button'/.test(dialogSource) &&
-    dialogSource.includes("typeof this.colorInput.showPicker === 'function'") &&
-    dialogSource.includes('this.colorInput.click();') &&
-    dialogSource.includes('for (const [color, swatch] of this.paletteSwatches)') &&
-    dialogSource.includes('this.moreColorsButton.focus();');
-  check('the custom swatch opens a swatch palette with a feature-gated native picker',
-    paletteStructure,
-    `paletteStructure=${paletteStructure}`);
-
-  const paletteA11y = !dialogSource.includes('paletteLabel') &&
-    !dialogSource.includes('channel-color-palette-label') &&
-    !dialogSource.includes('colorInput.id =') &&
+  const pickerStructure = dialogSource.includes('new HsvPicker(') &&
+    dialogSource.includes("this.customColorButton.setAttribute('popovertarget', this.colorPalette.id)") &&
+    dialogSource.includes('this.colorPalette.appendChild(this.colorPicker.element)') &&
     dialogSource.includes("this.colorPalette.setAttribute('aria-label', t('channels.customColor'))") &&
-    !dialogSource.includes("colorInput.addEventListener('input'") &&
-    dialogSource.includes("this.colorInput.className = 'channel-color-palette-input'") &&
-    dialogSource.includes('this.colorInput.tabIndex = -1;') &&
-    /\.channel-color-palette-input\s*\{[^}]*opacity:\s*0/.test(styleSheet) &&
-    !/\.channel-color-palette-input\s*\{[^}]*display:\s*none/.test(styleSheet);
-  check('the palette keeps an accessible name and a rendered hidden input without the strip',
-    paletteA11y,
-    `paletteA11y=${paletteA11y}`);
+    dialogSource.includes('this.colorPicker.renderStrings();') &&
+    !dialogSource.includes('CHANNEL_PALETTE_COLORS') &&
+    !dialogSource.includes('showPicker') &&
+    !dialogSource.includes('moreColorsButton') &&
+    !dialogSource.includes('paletteSwatches') &&
+    !/\.type\s*=\s*'color'/.test(dialogSource);
+  check('the custom swatch opens an in-app HSV picker with no matrix or native input',
+    pickerStructure,
+    `pickerStructure=${pickerStructure}`);
 
-  const paletteGridShape = /\.channel-color-palette-grid\s*\{[^}]*repeat\(8, minmax\(0, 1fr\)\)/.test(styleSheet) &&
-    !styleSheet.includes('.channel-color-palette-label') &&
-    !/\.channel-settings-color(?![\w-])/.test(styleSheet);
-  check('the palette grid keeps the 8-column shape and retires the strip styles',
-    paletteGridShape,
-    `paletteGridShape=${paletteGridShape}`);
+  const toggleStart = dialogSource.indexOf("this.colorPalette.addEventListener('toggle'");
+  const toggleEnd = toggleStart >= 0 ? dialogSource.indexOf('\n    });', toggleStart) : -1;
+  const toggleBody = toggleEnd > toggleStart ? dialogSource.slice(toggleStart, toggleEnd) : '';
+  const initIndex = toggleBody.indexOf('this.colorPicker.setColor(this.selectedColor)');
+  const focusIndex = toggleBody.indexOf('this.colorPicker.focus()');
+  const pickerLifecycle = initIndex >= 0 && focusIndex > initIndex &&
+    toggleBody.includes(':popover-open') &&
+    toggleBody.includes('this.colorPicker.endDrag();') &&
+    dialogSource.includes('this.selectedColor = hex;') &&
+    dialogSource.includes('this.syncColorSelection();');
+  check('the picker initializes before focus on open and ends drags on close',
+    pickerLifecycle,
+    `init@${initIndex}, focus@${focusIndex}, lifecycle=${pickerLifecycle}`);
+
+  const focusoutClose = dialogSource.includes("this.colorPalette.addEventListener('focusout'") &&
+    dialogSource.includes('event.relatedTarget') &&
+    dialogSource.includes('this.colorPalette.contains(next)') &&
+    dialogSource.includes('this.hideColorPalette();');
+  check('the picker closes when keyboard focus leaves it',
+    focusoutClose,
+    `focusoutClose=${focusoutClose}`);
+
+  const pickerSheet = /\.channel-color-field\s*\{[^}]*width:\s*100%/.test(styleSheet) &&
+    /\.channel-color-hue\s*\{[^}]*height:\s*12px/.test(styleSheet) &&
+    /\.channel-color-preview\s*\{[^}]*display:\s*grid/.test(styleSheet) &&
+    /\.channel-color-palette\s*\{[^}]*width:\s*252px/.test(styleSheet);
+  check('the picker keeps the popover geometry and full-width themed widgets',
+    pickerSheet,
+    `pickerSheet=${pickerSheet}`);
 
   const descriptionRemoved = !dialogSource.includes('aria-describedby') &&
     !dialogSource.includes('channel-settings-description') &&

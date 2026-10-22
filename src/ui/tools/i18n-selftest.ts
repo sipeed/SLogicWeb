@@ -445,12 +445,13 @@ const baseSettings: CaptureSettings = {
 }
 
 {
-  const retired = 'channels.dialogDescription';
+  const retired = ['channels.dialogDescription', 'channels.moreColors'];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
-  const present = Object.entries(dicts).filter(([, dict]) => Object.keys(dict).includes(retired));
-  check('the retired channel dialog description stays absent from every catalog',
+  const present = Object.entries(dicts).filter(([, dict]) =>
+    retired.some((key) => Object.keys(dict).includes(key)));
+  check('the retired channel dialog keys stay absent from every catalog',
     present.length === 0,
-    present.length === 0 ? `4 catalogs omit ${retired}` : present.map(([locale]) => locale).join(', '));
+    present.length === 0 ? `4 catalogs omit ${retired.length} keys` : present.map(([locale]) => locale).join(', '));
 }
 
 {
@@ -462,7 +463,7 @@ const baseSettings: CaptureSettings = {
     'toolbar.start', 'toolbar.demo', 'capture.demo', 'settings.language', 'settings.theme',
     'trigger.anyEdge',
     'channels.settings', 'channels.name', 'channels.color', 'channels.customColor',
-    'channels.moreColors',
+    'channels.colorField', 'channels.hue',
     'channels.resetName',
     'channels.triggerMode', 'channels.cancel',
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',
