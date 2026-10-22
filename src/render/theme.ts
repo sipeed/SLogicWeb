@@ -93,11 +93,11 @@ export const DARK_THEME: Theme = {
 };
 
 export const LIGHT_THEME: Theme = {
-  background: '#FDF6E3',
+  background: '#ffffff',
   channelColors: LOGIC2_CHANNEL_COLORS,
-  rowSeparatorColor: '#B4AB90',
+  rowSeparatorColor: '#818b98',
   rowSeparatorCssPx: 2,
-  noDataColor: '#6F6A5A',
+  noDataColor: '#59636e',
   noDataWashAlpha: 0.04,
   noDataBorderAlpha: 0.2,
   noDataBorderCssPx: 2,

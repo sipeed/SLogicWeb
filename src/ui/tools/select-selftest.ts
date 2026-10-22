@@ -567,6 +567,15 @@ check(
     `deadSelectFocus=${deadSelectFocus}, scopedFocusRule=${scopedFocusRule}`,
   );
 
+  const baseTriggerHover = /\.select-trigger:hover\s*\{\s*border-color:\s*var\(--input\);?\s*\}/.test(css);
+  const lightTriggerHover =
+    /html\[data-theme="light"\]\s+\.select-trigger:hover\s*\{\s*border-color:\s*var\(--border-high\);?\s*\}/.test(css);
+  check(
+    'the select trigger hover border steps off its rest border in the light theme',
+    baseTriggerHover && lightTriggerHover,
+    `baseTriggerHover=${baseTriggerHover}, lightTriggerHover=${lightTriggerHover}`,
+  );
+
   const rootFont = Number(/html,\s*body\s*\{[^}]*font:\s*([\d.]+)px/.exec(css)?.[1]);
   const defaultRadius = Number(/--radius:\s*([\d.]+)px/.exec(css)?.[1]);
   const darkRadiusRem = Number(

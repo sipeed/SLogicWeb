@@ -235,6 +235,14 @@ check(
   `missing=${JSON.stringify(missingControllerNeedles)}, dangling=${JSON.stringify(danglingIds)}`,
 );
 
+const lightMiniHover =
+  /html\[data-theme="light"\]\s+\.uictrl-card-actions \.mini:hover\s*\{\s*background:\s*var\(--muted\);?\s*\}/.test(css);
+check(
+  'the card-action mini hover steps off the light card fill (no light no-op)',
+  lightMiniHover,
+  `lightMiniHover=${lightMiniHover}`,
+);
+
 const tsconfigInclude = Array.isArray(tsconfig.include) ? tsconfig.include : [];
 check(
   'tsconfig.json includes the uictrl page in the tsc gate',

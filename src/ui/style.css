@@ -131,40 +131,40 @@ html[data-theme="dark"] {
 html[data-theme="light"] {
   color-scheme: light;       /* native checkbox/scrollbar render light */
 
-  --background: #FDF6E3;
-  --foreground: #57534A;
-  --card: #EEE8D5;
-  --card-foreground: #3C3836;
-  --popover: #F6F0DE;
-  --popover-foreground: #3C3836;
-  --secondary: #DED5BA;
-  --secondary-foreground: #3C3836;
-  --muted: #E6DEC6;
-  --muted-foreground: #6F6A5A;
+  --background: #ffffff;
+  --foreground: #1f2328;
+  --card: #f6f8fa;
+  --card-foreground: #1f2328;
+  --popover: #ffffff;
+  --popover-foreground: #1f2328;
+  --secondary: #f6f8fa;
+  --secondary-foreground: #1f2328;
+  --muted: #eaeef2;
+  --muted-foreground: #59636e;
   --primary: #775AD2;
-  --primary-foreground: #FFFFFF;
-  --destructive: #C43B2A;
-  --destructive-foreground: #FFFFFF;
-  --border: #DDD5BE;
-  --input: #CDC3A6;
+  --primary-foreground: #ffffff;
+  --destructive: #cf222e;
+  --destructive-foreground: #ffffff;
+  --border: #d1d9e0;
+  --input: #d1d9e0;
   --ring: #775AD2;
-  --shadow: oklch(0 0 0 / 18%);
-  --backdrop: rgb(0 0 0 / 35%);
+  --shadow: rgb(37 41 46 / 16%);
+  --backdrop: rgb(200 209 218 / 40%);
   --radius: 0.625rem;
-  --console-fg: #1F6B4A;
+  --console-fg: #116329;
 
-  --bg00: #E6DEC7;
-  --bg10: #FDF6E3;
+  --bg00: #eaeef2;
+  --bg10: #ffffff;
   --bg20: var(--card);
-  --bg30: #FFFDF4;
-  --panel: #DED5BB;
+  --bg30: #ffffff;
+  --panel: #eaeef2;
   --border-low: var(--border);
-  --border-high: #B4AB90;
-  --text: #3C3836;
-  --text80: #57534A;
-  --text50: #6F6A5A;
+  --border-high: #818b98;
+  --text: #1f2328;
+  --text80: #1f2328;
+  --text50: #59636e;
   --accent: #775AD2;
-  --negative: #B31246;
+  --negative: #d1242f;
   --stop: var(--destructive);
 }
 
@@ -929,6 +929,7 @@ html.resizing { cursor: col-resize; user-select: none; }
   anchor-name: var(--select-anchor, none);
 }
 .select-trigger:hover { border-color: var(--input); }
+html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high); }
 .select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .select-trigger-icon { width: 12px; height: 12px; flex: none; color: var(--muted-foreground); }
 
@@ -1222,3 +1223,4 @@ html.resizing { cursor: col-resize; user-select: none; }
 :is(html[data-theme="dark"], html[data-theme="light"]) .uictrl-field-input { border-radius: calc(var(--radius) - 4px); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .uictrl-card-actions .mini { background: transparent; }
 :is(html[data-theme="dark"], html[data-theme="light"]) .uictrl-card-actions .mini:hover { background: var(--secondary); }
+html[data-theme="light"] .uictrl-card-actions .mini:hover { background: var(--muted); }
