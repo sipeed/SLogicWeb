@@ -52,7 +52,6 @@ export const CHANNEL_COLOR_PRESETS: readonly string[] = [
   '#2DD4BF', // teal
 ];
 
-
 /** [CHOSEN] . */
 export const COLORS = {
   /** Darkest background, used for the toolbar's inactive areas. */

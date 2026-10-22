@@ -739,10 +739,11 @@ function rgb255ToHex([r, g, b]: [number, number, number]): string {
       ANALYZER_COLORS.every((c) => contrast(bubbleInk, c) >= 3 && contrast(c, card) >= 3),
     `minAnalyzer=${minAnalyzer.toFixed(2)}`);
 
-  const namedRoundTrip = CHANNEL_COLOR_PRESETS.every((c) => hexFromHsv(hsvFromHex(c)) === c);
+  const named = [...CHANNEL_COLORS, ...CHANNEL_COLOR_PRESETS, ...LOGIC2_CHANNEL_COLORS];
+  const roundTrips = named.filter((c) => hexFromHsv(hsvFromHex(c)) === c);
   check('every named channel color survives an exact hex to hsv to hex round trip',
-    namedRoundTrip && CHANNEL_COLOR_PRESETS.length === 15,
-    `roundTrip=${namedRoundTrip}, count=${CHANNEL_COLOR_PRESETS.length}`);
+    roundTrips.length === named.length && named.length === 31,
+    `roundTrips=${roundTrips.length}/${named.length}`);
 }
 
 {

@@ -266,7 +266,8 @@ function check(name: string, pass: boolean, detail: string): void {
     /\.channel-color-hue\s*\{[^}]*touch-action:\s*none/.test(styleSheet) &&
     /\.channel-color-field\s*\{[^}]*border-radius:\s*calc\(var\(--radius\) - 4px\)/.test(styleSheet) &&
     /\.channel-color-hue\s*\{[^}]*border-radius:\s*calc\(var\(--radius\) - 2px\)/.test(styleSheet) &&
-    /\.channel-color-field\s*\{[^}]*linear-gradient\(to top, #000, transparent\)/.test(styleSheet) &&
+    /\.channel-color-field\s*\{[^}]*background-image:\s*linear-gradient\(to top, #000, transparent\),\s*linear-gradient\(to right, #fff, transparent\)/.test(styleSheet) &&
+    /\.channel-color-field-thumb,\s*\.channel-color-hue-thumb\s*\{[^}]*border:\s*2px solid #FFFDF4[^}]*box-shadow:\s*0 0 0 1px #141415[^}]*pointer-events:\s*none/.test(styleSheet) &&
     /\.channel-color-hue\s*\{[^}]*hsl\(0 100% 50%\) 0%/.test(styleSheet) &&
     !styleSheet.includes('.channel-color-palette-grid') &&
     !styleSheet.includes('.channel-color-palette-swatch') &&
