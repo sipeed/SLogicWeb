@@ -128,9 +128,15 @@ export function fillAtlas(
   if (plan.dataBins > rowStride) {
     throw new Error(`plan wants ${plan.dataBins} bins but the atlas row is ${rowStride}`);
   }
+  // Zoomed in past one sample per column: ask for exactly one bin per sample and spread
+  // the samples over the columns ourselves (spreadSamples), so a transition is one column
+  // wide instead of as wide as its sample.
+  const samples = plan.queryEnd - plan.queryStart;
+  const zoomedIn = plan.dataBins > samples;
+  const bins = zoomedIn ? samples : plan.dataBins;
   for (let row = 0; row < channels.length; row++) {
     const ch = channels[row]!;
-    const view: ColumnView = store.query(ch, plan.queryStart, plan.queryEnd, plan.dataBins);
+    const view: ColumnView = store.query(ch, plan.queryStart, plan.queryEnd, bins);
     // Every channel in one frame must answer over the SAME sample range, or the live
     // edge gets a step in it: channel 0 drawn against a shorter capture than channel 15.
     //
@@ -141,8 +147,8 @@ export function fillAtlas(
     // feature [SOURCE] - breaks it, as does a length read from a SharedArrayBuffer that a
     // capture worker is writing. Checking the returned range costs two integer compares
     // per channel and turns a silent visual artefact into a loud failure.
-    if (view.bins !== plan.dataBins) {
-      throw new Error(`store returned ${view.bins} bins, asked for ${plan.dataBins}`);
+    if (view.bins !== bins) {
+      throw new Error(`store returned ${view.bins} bins, asked for ${bins}`);
     }
     if (view.startSample !== plan.queryStart || view.endSample !== plan.queryEnd) {
       throw new Error(
@@ -150,6 +156,37 @@ export function fillAtlas(
           `asked for [${plan.queryStart}, ${plan.queryEnd}) - the store's length moved mid-frame`,
       );
     }
-    atlas.set(view.packed.subarray(0, plan.dataBins), row * rowStride);
+    if (zoomedIn) {
+      spreadSamples(view.packed, samples, atlas.subarray(row * rowStride, row * rowStride + plan.dataBins));
+    } else {
+      atlas.set(view.packed.subarray(0, plan.dataBins), row * rowStride);
+    }
+  }
+}
+
+/**
+ * Spread one-byte-per-sample columns over more pixel columns than there are samples.
+ *
+ * Asked for more bins than samples, the store marks every bin of a transition sample as
+ * containing the transition (bit2), so at 10 px per sample an edge rendered as a solid
+ * block one sample wide - the sample-and-hold picture of a level that is only known
+ * per sample. What an edge means here is the instant the level changes, at the start
+ * of the sample whose level differs from the one before, so:
+ *
+ *   - column j shows the sample its left edge falls in, floor(j * samples / columns);
+ *   - only the FIRST column of a transition sample keeps bit2 - one full-height line;
+ *   - the sample's other columns show its steady level (bit2 cleared);
+ *   - gap (bit3) and level bits stay on every column of the sample.
+ *
+ * cpuRaster.ts applies the same rule, so the GPU/CPU comparison still checks it.
+ */
+export function spreadSamples(perSample: Uint8Array, samples: number, out: Uint8Array): void {
+  const columns = out.length;
+  let prev = -1;
+  for (let j = 0; j < columns; j++) {
+    const k = Math.min(samples - 1, Math.floor((j * samples) / columns));
+    const b = perSample[k]!;
+    out[j] = k === prev ? b & ~BIT_EDGE : b;
+    prev = k;
   }
 }

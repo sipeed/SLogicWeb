@@ -63,7 +63,11 @@ export function cpuRaster(o: CpuRasterOptions): { width: number; height: number;
       .map((v) => Math.round(v * 255));
 
     // Classify every column first; the transition bar consults its neighbours.
+    // Zoomed in past one sample per column, several columns share a sample: only the
+    // first of them carries a transition, so an edge is a line at the instant the level
+    // changes rather than a block as wide as the sample (spreadSamples in columns.ts).
     const bits = new Uint8Array(widthPx);
+    let prevC0 = -1;
     for (let x = 0; x < widthPx; x++) {
       let c0 = start + Math.floor((x * W) / widthPx);
       let c1 = start + Math.floor(((x + 1) * W) / widthPx);
@@ -73,7 +77,9 @@ export function cpuRaster(o: CpuRasterOptions): { width: number; height: number;
         bits[x] = 0;
         continue;
       }
-      bits[x] = store.query(ch, c0, c1, 1).packed[0]!;
+      const b = store.query(ch, c0, c1, 1).packed[0]!;
+      bits[x] = c0 === prevC0 ? b & ~4 : b;
+      prevC0 = c0;
     }
 
     // Row separator, flat over the bottom of the row pitch.

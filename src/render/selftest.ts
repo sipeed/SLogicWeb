@@ -445,6 +445,58 @@ function testGlitch(): void {
   return;
 }
 
+/**
+ * Zoomed in past one sample per pixel, a transition is a line, not a block. The store
+ * marks every bin of the transition sample, so at 20 px per sample the edge used to be
+ * drawn 20 px wide - sample-and-hold. Now exactly the edge-width columns at the start of
+ * the transition sample reach mid-height, with the old level before and the new after.
+ */
+function testZoomedInEdge(): void {
+  const CH = 3;
+  const EDGE_AT = 500;
+  const store = new PlanarSampleStore({ channelCount: 16, samplerate: 10_000_000 });
+  const words = new Uint16Array(1000);
+  for (let i = 0; i < words.length; i++) words[i] = i < EDGE_AT ? 1 << CH : 0;
+  store.append(new Uint8Array(words.buffer));
+
+  for (const dpr of [1, 2, 3]) {
+    const widthCss = 400;
+    const canvas = makeCanvas(widthCss, ROWH);
+    const r = new WaveformRenderer({ canvas, store, channels: [CH], devicePixelRatio: dpr, preserveDrawingBuffer: true });
+    r.resize(widthCss, ROWH);
+    r.setViewport(EDGE_AT - 10, EDGE_AT + 10);   // 20 samples on 400 CSS px
+    r.render();
+    const img = r.readPixels();
+    const geom = r.rowGeometry.rows[0]!;
+    const ew = r.rowGeometry.edgeWidth;
+    const midY = Math.floor((geom.yHiTop + geom.yLoTop) / 2);
+    const colour = parseHexColor(DARK_THEME.channelColors[CH % 8]!).map((v) => Math.round(v * 255));
+    const isColour = (x: number, y: number): boolean => {
+      const p = pixelAt(img, x, y);
+      return p.r === colour[0] && p.g === colour[1] && p.b === colour[2];
+    };
+    const lit: number[] = [];
+    for (let x = 0; x < img.width; x++) if (isColour(x, midY)) lit.push(x);
+    const expected = Math.round(img.width / 2);   // the edge sample starts mid-view
+    check(
+      `zoomed-in-edge-is-a-line-dpr-${dpr}`,
+      lit.length >= 1 && lit.length <= ew && lit.every((x) => Math.abs(x - expected) <= ew),
+      `lit ${lit.length} column(s) ${JSON.stringify(lit.slice(0, 8))}, edge width ${ew}, expected near ${expected} of ${img.width}`,
+    );
+    const left = Math.floor(img.width / 4);
+    const right = Math.floor((img.width * 3) / 4);
+    check(
+      `zoomed-in-levels-hold-either-side-dpr-${dpr}`,
+      isColour(left, geom.yHiTop) && !isColour(left, geom.yLoTop) &&
+        isColour(right, geom.yLoTop) && !isColour(right, geom.yHiTop),
+      `left@${left} hi=${isColour(left, geom.yHiTop)} lo=${isColour(left, geom.yLoTop)}, ` +
+        `right@${right} hi=${isColour(right, geom.yHiTop)} lo=${isColour(right, geom.yLoTop)}`,
+    );
+    r.dispose();
+    canvas.remove();
+  }
+}
+
 function testNoData(): void {
   const store = new PlanarSampleStore({ channelCount: 16, samplerate: 10_000_000 });
   for (const chunk of generateCapture({ totalSamples: 1_000_000, chunkSamples: 1 << 18 })) {
@@ -544,6 +596,7 @@ async function main(): Promise<void> {
     testNoData();
     testLiveAppend();
     testGlitch();
+    testZoomedInEdge();
   } catch (err) {
     check('selftest-crashed', false, String(err instanceof Error ? err.stack : err));
   }

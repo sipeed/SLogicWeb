@@ -382,3 +382,17 @@ gone, having been measured against the screenshots - see the verification sectio
 deliberately **does not delete it**. Nothing in `src/render` recursively removes any
 directory, including ones it created itself. The profile path is printed at the end of
 each run if you want to remove it by hand.
+
+## Edges when zoomed in past one sample per pixel
+
+Asked for more bins than samples, `SampleStore.query` marks every bin of a transition
+sample with bit2, so at 20 px per sample an edge was drawn as a solid bar 20 px wide - a
+sample-and-hold block instead of the instant the level changes. `fillAtlas` now asks for
+exactly one bin per sample in that case and `spreadSamples` lays the samples over the
+columns itself: a column shows the sample its left edge falls in, and only the FIRST
+column of a transition sample keeps bit2. The shader is unchanged and draws its usual
+edge-width full-height bar there, with the steady levels on either side. Gap bits stay on
+every column of a gap sample. `cpuRaster` applies the same rule, so the GPU/CPU
+comparison still covers it (`[123456, 123496)` is 16 px per sample), and
+`testZoomedInEdge` checks the line directly at dpr 1/2/3. On the old code that test lit
+20/40/60 columns - exactly one sample wide.
