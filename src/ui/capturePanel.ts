@@ -140,7 +140,10 @@ export class CapturePanel {
       const secs = document.createElement('input');
       secs.type = 'number';
       secs.min = '0.001';
-      secs.step = '0.1';
+      // A 1 ms step, aligned with the 1 ms minimum: every whole-millisecond duration is
+      // valid. With 0.1 the valid values were 0.001, 0.101, 0.201... - 0.002 or even 0.5
+      // were flagged invalid and the spinner jumped from 0.005 straight to 0.001.
+      secs.step = '0.001';
       secs.max = String(maxSeconds);
       secs.value = String(s.seconds);
       secs.addEventListener('change', () =>
