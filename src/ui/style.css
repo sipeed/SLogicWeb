@@ -168,6 +168,17 @@ html[data-theme="light"] {
   --stop: var(--destructive);
 }
 
+/* ------------------------------------------------------------------ motion */
+
+:root {
+  --motion-fast: 120ms;
+  --motion-ease: ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-fast: 1ms; }
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -719,9 +730,9 @@ html[data-theme="light"] .channel-color-custom { background: var(--bg30); }
   overflow-wrap: break-word;
   pointer-events: none;
   opacity: 0; visibility: hidden;
-  transition: opacity 120ms ease, visibility 0s linear 120ms;
+  transition: opacity var(--motion-fast) var(--motion-ease), visibility 0s linear var(--motion-fast);
 }
-.tooltip.open { opacity: 1; visibility: visible; transition: opacity 120ms ease; }
+.tooltip.open { opacity: 1; visibility: visible; transition: opacity var(--motion-fast) var(--motion-ease); }
 
 /* ---------------------------------------------------------------- settings menu */
 
