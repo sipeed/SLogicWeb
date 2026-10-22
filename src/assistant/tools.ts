@@ -18,6 +18,10 @@ import type { SampleStore } from '../data/types.js';
 import { getDecoder, hydrateDecoders, listDecoders } from '../decode/registry.js';
 import type { DecodeResult } from '../decode/types.js';
 import type { CaptureSettings, TriggerMode } from '../ui/state.js';
+import {
+  BUS_HEIGHTS, DEFAULT_BUS_HEIGHT, busLabel, busSummary, runBits, type BusViewConfig,
+} from '../ui/busView.js';
+import { busSteps, latchedBefore, validateBusSpec, MAX_BUS_BITS, type BusEncoding } from '../data/busValue.js';
 import type { ToolSpec } from './types.js';
 
 export interface HostSnapshot {
@@ -70,6 +74,17 @@ export interface AssistantHost {
   setViewportSeconds(startS: number, endS: number): void;
   zoomToAnnotation(analyzer: number, n: number): boolean;
   levelAt(channel: number, sample: number): 0 | 1;
+  /** Parallel-bus (ADC) views, in display order. */
+  buses(): readonly HostBus[];
+  addBus(cfg: BusViewConfig): void;
+  updateBus(index: number, cfg: BusViewConfig): void;
+  removeBus(index: number): void;
+}
+
+export interface HostBus {
+  config: BusViewConfig;
+  /** The zoomed-out overview is built (it builds in the background after a capture). */
+  built: boolean;
 }
 
 /** read: runs at once. view: only moves the view, runs at once. act: needs the user's OK. */
@@ -84,6 +99,9 @@ export interface AssistantTool extends ToolSpec {
 export const STATS_EDGE_CAP = 2_000_000;
 export const EDGE_LIST_MAX = 1000;
 export const ANNOTATION_LIST_MAX = 500;
+export const BUS_VALUE_MAX = 1000;
+/** Values a get_bus_values call reads for its min/max; a narrower range reads all. */
+const BUS_STATS_STEPS = 500_000;
 
 const TRIGGER_MODES: TriggerMode[] = ['low', 'high', 'rising', 'falling', 'edge', 'dont-care'];
 
@@ -241,8 +259,87 @@ function stateView(host: AssistantHost): Record<string, unknown> {
       options: a.options,
       annotations: a.result?.annotations.count ?? 0,
     })),
+    bus_views: host.buses().map((b, i) => busView(b, i)),
   };
 }
+
+function busView(b: HostBus, index: number): Record<string, unknown> {
+  const c = b.config;
+  return {
+    index,
+    name: c.name,
+    bits_lsb_first: c.spec.bits,
+    summary: busSummary(c.spec),
+    clock: c.spec.clock ? { channel: c.spec.clock.channel, edge: c.spec.clock.edge } : null,
+    encoding: c.spec.encoding,
+    full_scale_v: c.fullScaleV,
+    offset_v: c.offsetV,
+    style: c.style,
+    hide_sources: c.hideSources,
+    overview_ready: b.built,
+  };
+}
+
+function busAt(host: AssistantHost, index: unknown): HostBus {
+  const list = host.buses();
+  const i = typeof index === 'number' ? index : -1;
+  const b = list[i];
+  if (!b) throw new Error(`No bus view ${String(index)}; there are ${list.length} (indices 0-${list.length - 1}).`);
+  return b;
+}
+
+/**
+ * Apply the bus_* tool fields to a configuration. Bits come from an explicit `bits` list
+ * (LSB first) or from start_channel + width (+ msb_first), as in the panel.
+ */
+function busConfigFrom(i: Record<string, unknown>, base: BusViewConfig, channelCount: number): BusViewConfig {
+  const c: BusViewConfig = { ...base, spec: { ...base.spec } };
+  if (typeof i.name === 'string' && i.name.trim()) c.name = i.name.trim();
+  if (Array.isArray(i.bits)) {
+    c.spec.bits = i.bits as number[];
+  } else if (typeof i.start_channel === 'number' || typeof i.width === 'number' || typeof i.msb_first === 'boolean') {
+    const cur = c.spec.bits;
+    const start = typeof i.start_channel === 'number' ? i.start_channel : Math.min(...cur);
+    const width = typeof i.width === 'number' ? i.width : cur.length;
+    const msbFirst = typeof i.msb_first === 'boolean' ? i.msb_first : cur.length > 1 && cur[0]! > cur[1]!;
+    if (start + width > channelCount) {
+      throw new Error(`D${start}+${width} bits runs past D${channelCount - 1}; this capture has ${channelCount} channels.`);
+    }
+    c.spec.bits = runBits(start, width, channelCount, msbFirst);
+  }
+  if ('clock_channel' in i) {
+    c.spec.clock = i.clock_channel === null ? null : { channel: i.clock_channel as number, edge: c.spec.clock?.edge ?? 'rising' };
+  }
+  if ((i.clock_edge === 'rising' || i.clock_edge === 'falling') && c.spec.clock) c.spec.clock = { ...c.spec.clock, edge: i.clock_edge };
+  if (typeof i.encoding === 'string') c.spec.encoding = i.encoding as BusEncoding;
+  if ('full_scale_v' in i) c.fullScaleV = typeof i.full_scale_v === 'number' && i.full_scale_v !== 0 ? i.full_scale_v : null;
+  if (typeof i.offset_v === 'number') c.offsetV = i.offset_v;
+  if (i.style === 'line' || i.style === 'step') c.style = i.style;
+  if (typeof i.hide_sources === 'boolean') c.hideSources = i.hide_sources;
+  if (typeof i.height_px === 'number') c.heightCss = i.height_px;
+  const problems = validateBusSpec(c.spec, channelCount);
+  if (problems.length) throw new Error(`Invalid bus: ${problems.join('; ')}.`);
+  return c;
+}
+
+/** The fields add_bus_view and update_bus_view share. */
+const BUS_FIELDS: Record<string, unknown> = {
+  name: { type: 'string' },
+  bits: { type: 'array', items: { type: 'integer', minimum: 0 }, minItems: 1, maxItems: MAX_BUS_BITS,
+    description: 'Capture channels as bits, LSB FIRST. Use for arbitrary wiring; otherwise use start_channel + width.' },
+  start_channel: { type: 'integer', minimum: 0, description: 'Lowest channel of a run of consecutive channels.' },
+  width: { type: 'integer', minimum: 1, maximum: MAX_BUS_BITS, description: 'Number of bits in the run.' },
+  msb_first: { type: 'boolean', description: 'The start channel is the MSB (lines wired MSB-first). Default false: it is the LSB.' },
+  clock_channel: { type: ['integer', 'null'], minimum: 0,
+    description: 'Data clock (e.g. an ADC\'s DCLK): latch on its edge. null: no clock, any bit change is a new value.' },
+  clock_edge: { type: 'string', enum: ['rising', 'falling'], description: 'Clock edge that latches the data. Default rising.' },
+  encoding: { type: 'string', enum: ['unsigned', 'twos', 'offset'], description: 'unsigned, two\'s complement or offset binary.' },
+  full_scale_v: { type: ['number', 'null'], description: 'Volts for the full code range; volts = offset_v + value / 2^n * full_scale_v. null shows raw values.' },
+  offset_v: { type: 'number' },
+  style: { type: 'string', enum: ['line', 'step'], description: 'Clocked buses: dots joined by lines, or steps. Unclocked buses always draw steps.' },
+  hide_sources: { type: 'boolean', description: 'Hide the source bit rows (display only; the channels stay enabled for capture).' },
+  height_px: { type: 'integer', enum: [...BUS_HEIGHTS] },
+};
 
 function analyzerAt(host: AssistantHost, index: unknown): HostAnalyzer {
   const list = host.analyzers();
@@ -457,7 +554,8 @@ export const TOOLS: AssistantTool[] = [
       samplerate_hz: { type: 'number', exclusiveMinimum: 0 },
       threshold_v: { type: 'number', minimum: 0.1, maximum: 5 },
       mode: { type: 'string', enum: ['timer', 'free'], description: 'timer: stop after `seconds`. free: run until stopped.' },
-      seconds: { type: 'number', exclusiveMinimum: 0, description: 'Post-trigger capture length in timer mode.' },
+      seconds: { type: 'number', minimum: 0.001,
+        description: 'Post-trigger capture length in timer mode, from 0.001 s (1 ms) up to the sample-count limit.' },
       test_mode: { type: 'integer', enum: [0, 1, 2], description: '0 real pins, 1 USB max-speed pattern, 2 built-in signal simulator.' },
       trigger_enabled: { type: 'boolean' },
       trigger_modes: { type: 'object', additionalProperties: { type: 'string', enum: TRIGGER_MODES },
@@ -609,6 +707,112 @@ export const TOOLS: AssistantTool[] = [
       analyzerAt(host, i.analyzer);
       host.removeAnalyzer(i.analyzer as number);
       return { ok: true, remaining: host.analyzers().length };
+    },
+  },
+  {
+    name: 'add_bus_view',
+    description:
+      'Show a parallel bus - typically an ADC\'s data lines - as one analog row: n channels ' +
+      'combined into a value (LSB first), optionally latched on a clock channel\'s edge, ' +
+      'decoded as unsigned / two\'s complement / offset binary and optionally scaled to ' +
+      'volts. Give either start_channel + width (+ msb_first) or an explicit bits list.',
+    inputSchema: obj(BUS_FIELDS),
+    risk: 'act',
+    run: async (i, host) => {
+      if (!Array.isArray(i.bits) && typeof i.start_channel !== 'number') {
+        throw new Error('Give start_channel and width, or a bits list (LSB first).');
+      }
+      const channelCount = host.store().length ? host.store().channelCount : host.snapshot().channelNames.length;
+      const base: BusViewConfig = {
+        name: 'ADC', color: '', fullScaleV: null, offsetV: 0, style: 'line', heightCss: DEFAULT_BUS_HEIGHT,
+        hideSources: false, spec: { bits: [0], clock: null, encoding: 'unsigned' },
+      };
+      const cfg = busConfigFrom({ width: 8, ...i }, base, channelCount);
+      host.addBus(cfg);
+      const list = host.buses();
+      return busView(list[list.length - 1]!, list.length - 1);
+    },
+  },
+  {
+    name: 'update_bus_view',
+    description: 'Change a bus view (fields as in add_bus_view; only those given change).',
+    inputSchema: obj({ index: { type: 'integer', minimum: 0 }, ...BUS_FIELDS }, ['index']),
+    risk: 'act',
+    run: async (i, host) => {
+      const b = busAt(host, i.index);
+      const channelCount = host.store().length ? host.store().channelCount : host.snapshot().channelNames.length;
+      host.updateBus(i.index as number, busConfigFrom(i, b.config, channelCount));
+      return busView(host.buses()[i.index as number]!, i.index as number);
+    },
+  },
+  {
+    name: 'remove_bus_view',
+    description: 'Remove a bus view.',
+    inputSchema: obj({ index: { type: 'integer', minimum: 0 } }, ['index']),
+    risk: 'act',
+    run: async (i, host) => {
+      busAt(host, i.index);
+      host.removeBus(i.index as number);
+      return { ok: true, remaining: host.buses().length };
+    },
+  },
+  {
+    name: 'get_bus_values',
+    description:
+      'The values of a bus view over a time range: each change as {t_s, value} (and volts ' +
+      'when a full scale is set), capped at `limit`, plus the min and max over the range. ' +
+      'In clocked mode each entry is one latched sample. null means unknown (a capture gap, ' +
+      'or no clock edge yet).',
+    inputSchema: obj({
+      bus: { type: 'integer', minimum: 0, description: 'Index from get_state.bus_views.' },
+      start_s: seconds('Range start in seconds. Default: 0.'),
+      end_s: seconds('Range end in seconds. Default: end of capture.'),
+      limit: { type: 'integer', minimum: 1, maximum: BUS_VALUE_MAX, description: `Default 200, max ${BUS_VALUE_MAX}.` },
+    }, ['bus']),
+    risk: 'read',
+    run: async (i, host) => {
+      const cfg = busAt(host, i.bus).config;
+      const store = host.store();
+      const problems = validateBusSpec(cfg.spec, store.channelCount);
+      if (problems.length) throw new Error(`This capture cannot show the bus: ${problems.join('; ')}.`);
+      const { s, e, sr } = window(host, i.start_s, i.end_s);
+      const limit = (i.limit as number | undefined) ?? 200;
+      // Statistics read up to BUS_STATS_STEPS values; the list is the first `limit`.
+      const st = busSteps(store, cfg.spec, s, e, { carry: latchedBefore(store, cfg.spec, s), maxSteps: BUS_STATS_STEPS });
+      let min = Number.POSITIVE_INFINITY;
+      let max = Number.NEGATIVE_INFINITY;
+      for (let k = 0; k < st.count; k++) {
+        const v = st.val[k]!;
+        if (Number.isNaN(v)) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      const volts = cfg.fullScaleV !== null;
+      const values = [];
+      for (let k = 0; k < Math.min(limit, st.count); k++) {
+        const v = st.val[k]!;
+        const known = !Number.isNaN(v);
+        values.push({
+          t_s: num(st.pos[k]! / sr),
+          value: known ? v : null,
+          ...(volts ? { volts: known ? busLabel(cfg, v) : null } : {}),
+        });
+      }
+      return {
+        bus: cfg.name,
+        summary: busSummary(cfg.spec),
+        encoding: cfg.spec.encoding,
+        range_s: { start: num(s / sr), end: num(e / sr) },
+        changes_in_range: st.truncated ? `more than ${BUS_STATS_STEPS}` : st.count,
+        returned: values.length,
+        ...(values.length < st.count || st.truncated ? { truncated: true } : {}),
+        ...(min <= max ? {
+          min: volts ? busLabel(cfg, min) : min,
+          max: volts ? busLabel(cfg, max) : max,
+          ...(st.truncated ? { min_max_over: `the first ${BUS_STATS_STEPS} changes` } : {}),
+        } : { min: null, max: null }),
+        values,
+      };
     },
   },
 ];

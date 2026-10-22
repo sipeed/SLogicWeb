@@ -1849,6 +1849,17 @@ export class App {
       setViewportSeconds: (a, b) => this.debug.setViewportSeconds(a, b),
       zoomToAnnotation: (analyzer, n) => this.debug.zoomToAnnotation(analyzer, n),
       levelAt: (channel, sample) => levelAt(this.store, channel, sample),
+      // The same paths the bus panel uses.
+      buses: () => this.busViews.map((b) => ({ config: b, built: b.builder?.done ?? false })),
+      addBus: (cfg) => this.addBus(cfg),
+      updateBus: (index, cfg) => {
+        const b = this.busViews[index];
+        if (b) this.updateBus(b.id, cfg);
+      },
+      removeBus: (index) => {
+        const b = this.busViews[index];
+        if (b) this.removeBus(b.id);
+      },
     };
   }
 

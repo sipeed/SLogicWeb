@@ -24,8 +24,10 @@ import {
 } from '../../assistant/settings.js';
 import { SYSTEM_PROMPT } from '../../assistant/systemPrompt.js';
 import {
-  TOOLS, toolByName, toolSpecs, validate, type AssistantHost, type HostAnalyzer, type HostSnapshot,
+  TOOLS, toolByName, toolSpecs, validate, type AssistantHost, type HostAnalyzer, type HostBus, type HostSnapshot,
 } from '../../assistant/tools.js';
+import { busSteps } from '../../data/busValue.js';
+import type { BusViewConfig } from '../busView.js';
 import type { Provider, ProviderConfig, ToolResult, TurnResult } from '../../assistant/types.js';
 import { createProtocolDemoCapture, levelAt } from '../captureIO.js';
 import type { CaptureSettings } from '../state.js';
@@ -127,7 +129,7 @@ Object.assign(globalThis, { localStorage: local, sessionStorage: session });
     TOOLS.every((t) => t.inputSchema.type === 'object' && t.inputSchema.additionalProperties === false));
   check('act tools are exactly the ones that change the capture',
     TOOLS.filter((t) => t.risk === 'act').map((t) => t.name).sort().join(',') ===
-    'attach_decoder,load_demo,remove_decoder,set_capture_settings,start_capture,stop_capture');
+    'add_bus_view,attach_decoder,load_demo,remove_bus_view,remove_decoder,set_capture_settings,start_capture,stop_capture,update_bus_view');
 }
 
 // ------------------------------------------------------------------ 3. tools
@@ -178,6 +180,11 @@ class FakeHost implements AssistantHost {
   setViewportSeconds(a: number, b: number): void { this.view = { start: a * 16e6, end: b * 16e6 }; }
   zoomToAnnotation(): boolean { return true; }
   levelAt(ch: number, sample: number): 0 | 1 { return levelAt(this.store_, ch, sample); }
+  buses_: HostBus[] = [];
+  buses(): readonly HostBus[] { return this.buses_; }
+  addBus(cfg: BusViewConfig): void { this.buses_.push({ config: cfg, built: true }); }
+  updateBus(i: number, cfg: BusViewConfig): void { this.buses_[i] = { config: cfg, built: true }; }
+  removeBus(i: number): void { this.buses_.splice(i, 1); }
 }
 
 async function run(name: string, input: Record<string, unknown>, host: AssistantHost): Promise<{ ok: boolean; out: unknown; err: string }> {
@@ -296,6 +303,60 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
 
   const view = await run('set_viewport', { start_s: 0.0005, end_s: 0.001 }, host);
   check('set_viewport moves the view', view.ok && host.view.start === 8000 && host.view.end === 16000, JSON.stringify(host.view));
+}
+
+// ------------------------------------------------------------------ 3b. bus views and durations
+{
+  const set = toolByName('set_capture_settings')!.inputSchema;
+  check('a 1 ms timer capture is accepted, below that is not',
+    validate({ seconds: 0.001 }, set).length === 0 && validate({ seconds: 0.0005 }, set).length > 0);
+  check('the duration description tells the model the 1 ms minimum',
+    String((set.properties as Record<string, { description?: string }>).seconds?.description).includes('0.001 s'));
+
+  const host = new FakeHost();   // the 8-channel protocol demo
+  const added = await run('add_bus_view', { name: 'ADC', start_channel: 2, width: 4, msb_first: true, clock_channel: 7, encoding: 'twos' }, host);
+  const b0 = host.buses_[0]?.config;
+  check('add_bus_view: start + width + msb_first become bits LSB first',
+    added.ok && JSON.stringify(b0?.spec.bits) === '[5,4,3,2]' && b0?.spec.clock?.channel === 7 &&
+    b0?.spec.clock?.edge === 'rising' && b0?.spec.encoding === 'twos', `${added.err} ${JSON.stringify(b0?.spec)}`);
+  const past = await run('add_bus_view', { start_channel: 6, width: 4 }, host);
+  check('add_bus_view refuses a run past the last channel', !past.ok && /runs past D7/.test(past.err), past.err);
+  const none = await run('add_bus_view', { name: 'x' }, host);
+  check('add_bus_view needs channels', !none.ok && /start_channel/.test(none.err), none.err);
+  const clash = await run('add_bus_view', { bits: [0, 1], clock_channel: 1 }, host);
+  check('add_bus_view refuses a channel used twice', !clash.ok && /twice/.test(clash.err), clash.err);
+
+  const upd = await run('update_bus_view', { index: 0, clock_channel: null, encoding: 'unsigned', full_scale_v: 3.3 }, host);
+  const b1 = host.buses_[0]?.config;
+  check('update_bus_view changes only the fields given',
+    upd.ok && b1?.spec.clock === null && b1.spec.encoding === 'unsigned' && b1.fullScaleV === 3.3 &&
+    JSON.stringify(b1.spec.bits) === '[5,4,3,2]' && b1.name === 'ADC', `${upd.err} ${JSON.stringify(b1)}`);
+  const flip = await run('update_bus_view', { index: 0, msb_first: false }, host);
+  check('update_bus_view: msb_first flips the order over the same channels',
+    flip.ok && JSON.stringify(host.buses_[0]?.config.spec.bits) === '[2,3,4,5]', JSON.stringify(host.buses_[0]?.config.spec.bits));
+
+  const st = await run('get_state', {}, host);
+  const views = (st.out as { bus_views: { summary: string; full_scale_v: number }[] }).bus_views;
+  check('get_state lists the bus views', views.length === 1 && views[0]!.summary === 'D2–D5' && views[0]!.full_scale_v === 3.3, JSON.stringify(views));
+
+  await run('add_bus_view', { name: 'UART pair', bits: [6, 7] }, host);
+  const vals = await run('get_bus_values', { bus: 1, limit: 5 }, host);
+  const v = vals.out as { values: { t_s: number; value: number | null }[]; min: number; max: number; truncated?: boolean; changes_in_range: number };
+  const ref = busSteps(demo.store, { bits: [6, 7], clock: null, encoding: 'unsigned' }, 0, demo.store.length);
+  let mn = Infinity; let mx = -Infinity;
+  for (let k = 0; k < ref.count; k++) { mn = Math.min(mn, ref.val[k]!); mx = Math.max(mx, ref.val[k]!); }
+  check('get_bus_values matches busSteps, capped, with min and max',
+    vals.ok && v.values.length === 5 && v.truncated === true && v.changes_in_range === ref.count &&
+    v.values.every((x, k) => x.value === ref.val[k] && x.t_s === Number((ref.pos[k]! / demo.store.samplerate).toPrecision(6))) &&
+    v.min === mn && v.max === mx, `${vals.err} ${JSON.stringify(v).slice(0, 300)}`);
+  const volt = await run('get_bus_values', { bus: 0, limit: 3 }, host);
+  const vv = volt.out as { values: { volts?: string }[]; max: string };
+  check('get_bus_values reports volts when a full scale is set',
+    volt.ok && typeof vv.max === 'string' && / V$|mV$/.test(vv.max) && typeof vv.values[0]?.volts === 'string', JSON.stringify(vv).slice(0, 200));
+  const gone = await run('remove_bus_view', { index: 0 }, host);
+  check('remove_bus_view removes it', gone.ok && host.buses_.length === 1 && host.buses_[0]!.config.name === 'UART pair');
+  const missing = await run('get_bus_values', { bus: 9 }, host);
+  check('an unknown bus index is explained', !missing.ok && /No bus view 9/.test(missing.err), missing.err);
 }
 
 // ------------------------------------------------------------------ 4. loop

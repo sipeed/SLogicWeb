@@ -881,8 +881,10 @@ change, which here would drop a streaming answer, a pending approval and the dra
 
 **Tools.** Read tools (`get_state`, `get_channel_stats`, `get_edges`, `list_decoders`,
 `describe_decoder`, `get_annotations`) and view tools (`set_viewport`,
-`zoom_to_annotation`) run at once. Tools that change the capture (`set_capture_settings`,
-`start_capture`, `stop_capture`, `load_demo`, `attach_decoder`, `remove_decoder`) wait
+`zoom_to_annotation`) run at once, as does `get_bus_values` (a bus view's values over a
+range, capped, with min/max and volts). Tools that change the capture
+(`set_capture_settings`, `start_capture`, `stop_capture`, `load_demo`, `attach_decoder`,
+`remove_decoder`, `add_bus_view`, `update_bus_view`, `remove_bus_view`) wait
 for the user's Allow on an approval card ("Allow all in this chat" skips the rest of the
 chat). Each tool goes through the path a button uses (`debug.setSettings`,
 `startCapture`, `attachAnalyzer`...), so the assistant cannot reach a state the UI cannot.
@@ -896,6 +898,12 @@ including declined, invalid (validated against the tool's JSON Schema before it 
 cancelled calls - an unanswered call makes the next request fail. A turn that ended in a
 refusal, or hit `max_tokens` with a tool call, never runs its tools and is not appended
 (a truncated input can look valid). Claude's transcript is append-only.
+
+Bus views (section 21) reach the assistant through `AssistantHost.buses/addBus/updateBus/
+removeBus`, the panel's own paths. A bus is given as start_channel + width (+ msb_first)
+or an explicit LSB-first bits list. The system prompt names the timer minimum of 0.001 s
+(also the `seconds` schema minimum) and tells the model to suspect bit order or the latch
+edge when a reconstructed waveform looks like noise.
 
 **Claude request.** `claude-opus-5-5` by default (Sonnet/Haiku 5.5 offered), adaptive
 thinking with `display: "summarized"` (shown as a collapsible "Thinking"), explicit
