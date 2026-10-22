@@ -65,6 +65,30 @@ missing licence file does not otherwise break anything, which is exactly why it 
 fail loudly: the alternative is a build that works perfectly and quietly redistributes
 MPL-2.0 and PSF code with no notice attached.
 
+## AI assistant client libraries
+
+The AI assistant sidebar (`src/assistant/`) talks to Claude through the official
+**`@anthropic-ai/sdk`** (Apache-2.0 since 1.0; contributions before 1.0 stay under MIT, and
+the package ships both texts). It is bundled into `dist/` - a lazily loaded chunk in the
+hosted build, inlined in the portable one - together with the packages it pulls in. The
+build's source maps list exactly these, checked rather than assumed:
+
+| Package | Licence |
+|---|---|
+| `@anthropic-ai/sdk` | Apache-2.0 (and MIT for pre-1.0 contributions) |
+| `@opentelemetry/api` | Apache-2.0 |
+| `standardwebhooks` | MIT |
+| `@stablelib/base64` | MIT |
+| `fast-sha256` | Unlicense |
+
+All are permissive; Apache-2.0 is compatible with GPLv3 (not with GPLv2-only, which this
+project is not). `standardwebhooks` ships no licence file on npm, so its upstream text
+(`libraries/LICENSE` in the standard-webhooks repository) is committed under `licenses/`,
+as Pyodide's is. The build appends every one of these texts to `THIRD_PARTY_LICENSES.txt`
+(`ASSISTANT_LICENSES` in `vite.config.ts`). Re-check the source maps when bumping the SDK.
+
+The OpenAI-compatible provider is plain `fetch`; it adds no dependency.
+
 ## Everything else
 
 All remaining code in this repository is original work, with `manifest.ts` as the single
@@ -86,6 +110,7 @@ A published deployment therefore carries, without needing the repository:
 | `LICENSE.txt` | this project, and the GPL decoders in `decoders.zip` |
 | `pyodide/LICENSE-pyodide-MPL-2.0.txt` | the Pyodide runtime |
 | `pyodide/LICENSE-cpython-PSF.txt` | the CPython it embeds |
+| `THIRD_PARTY_LICENSES.txt` | Pyodide, CPython and the AI assistant's client libraries |
 | a `/*!` banner on every JS chunk | notice plus a link to the source |
 | per-file headers inside `decoders.zip` | each decoder's own licence |
 

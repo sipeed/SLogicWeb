@@ -108,6 +108,21 @@ function requireRuntimeAssets(): Plugin {
  * covers the bundled decoders, which are GPL and ship their per-file headers inside
  * decoders.zip but not the licence body.
  */
+/*
+ * The AI assistant's Claude client and the packages it pulls into the bundle (checked
+ * against the build's source maps; see NOTICE.md). All permissive and GPL-compatible.
+ * standardwebhooks ships no licence file on npm, so its upstream text is committed under
+ * licenses/, as Pyodide's is.
+ */
+const ASSISTANT_LICENSES: readonly [string, string][] = [
+  ['@anthropic-ai/sdk (Apache-2.0)', 'node_modules/@anthropic-ai/sdk/LICENSE'],
+  ['@anthropic-ai/sdk, contributions before 1.0 (MIT)', 'node_modules/@anthropic-ai/sdk/LICENSE-MIT'],
+  ['@opentelemetry/api (Apache-2.0)', 'node_modules/@opentelemetry/api/LICENSE'],
+  ['standardwebhooks (MIT)', 'licenses/standardwebhooks-LICENSE.txt'],
+  ['@stablelib/base64 (MIT)', 'node_modules/@stablelib/base64/LICENSE'],
+  ['fast-sha256 (Unlicense)', 'node_modules/fast-sha256/LICENSE'],
+];
+
 function emitLicense(): Plugin {
   return {
     name: 'logicweb:emit-license',
@@ -125,7 +140,9 @@ function emitLicense(): Plugin {
           'Pyodide\n=======\n\n' +
           readFileSync(resolve(__dirname, 'public/pyodide/LICENSE-pyodide-MPL-2.0.txt'), 'utf8') +
           '\n\nCPython embedded by Pyodide\n===========================\n\n' +
-          readFileSync(resolve(__dirname, 'public/pyodide/LICENSE-cpython-PSF.txt'), 'utf8'),
+          readFileSync(resolve(__dirname, 'public/pyodide/LICENSE-cpython-PSF.txt'), 'utf8') +
+          ASSISTANT_LICENSES.map(([name, path]) =>
+            `\n\n${name}\n${'='.repeat(name.length)}\n\n${readFileSync(resolve(__dirname, path), 'utf8')}`).join(''),
       });
       this.emitFile({
         type: 'asset',
@@ -296,7 +313,15 @@ export default defineConfig({
         // sibling executable file, and is opened over file:// - where a
         // separate chunk import cannot work. Folding dynamic imports back into
         // the entry keeps the single-file artifact intact and self-contained.
-        ...(portable ? { inlineDynamicImports: true } : {}),
+        ...(portable ? { inlineDynamicImports: true } : {
+          // The assistant's Claude client (src/assistant/providers/claude.ts) is a lazy
+          // chunk whose SDK has dynamic imports of its own, which Vite wraps in its
+          // preload helper. Left to rollup, that helper lands in the entry, so the chunk
+          // would import the entry asset - and evaluating the entry starts a second App
+          // (the 0340d7a failure). A chunk of its own keeps the helper import-free and
+          // shared. tools/assistant-selftest.ts checks the built chunks for this.
+          manualChunks: (id: string) => (id.includes('vite/preload-helper') ? 'preload-helper' : undefined),
+        }),
       },
     },
   },

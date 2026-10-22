@@ -23,6 +23,7 @@
     "vite": "^6.4.3"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.1.0",
     "pyodide": "^314.0.5"
   }
 }
