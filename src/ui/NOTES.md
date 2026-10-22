@@ -931,6 +931,10 @@ OpenAI-compatible providers allow browser (CORS) requests at all - a relay cover
   selects but not textareas, so Space in the chat started a capture. They now also skip
   textareas, contenteditables and anything inside `.assistant-panel`.
 - *Header.* One row: title, a gear (settings toggle) and a small New button.
+- *Time scale across resizes.* The view used to keep its sample range when the plot
+  width changed, so opening the sidebar squeezed the waveform and closing it stretched it.
+  `WaveformStack.syncSize` now keeps samples per CSS pixel (left edge fixed, or the right
+  edge in live follow mode) and shows more or less time instead.
 
 `src/ui/tools/assistant-selftest.ts` (81 checks) replays recorded SSE streams through
 both real providers, runs every tool against the protocol demo capture, and drives the

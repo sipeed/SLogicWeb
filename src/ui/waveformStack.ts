@@ -59,6 +59,8 @@ export class WaveformStack {
   private channelColors: string[] = [...DARK_THEME.channelColors];
   private baseTheme: Theme = DARK_THEME;
   private dpr: number;
+  /** Plot width in CSS px at the last syncSize; 0 until the first real measurement. */
+  private cssWidth = 0;
 
   constructor(
     private readonly container: HTMLElement,
@@ -170,7 +172,21 @@ export class WaveformStack {
     }
     this.dpr = dpr;
     const w = this.widthDevicePx;
-    if (w > 0) this.view.widthPx = w;
+    if (!(w > 0)) return;
+    this.view.widthPx = w;
+    // Keep the time scale when the plot changes width (sidebar opened, closed or dragged,
+    // window resized): the same time per pixel, more or less of it on screen. Keeping the
+    // sample range instead squeezed the waveform when the sidebar opened and stretched
+    // it when it closed. CSS px, so a browser zoom (a dpr change) is not a resize. Live
+    // follow mode anchors the newest sample; otherwise the left edge stays put.
+    const css = w / dpr;
+    const prev = this.cssWidth;
+    this.cssWidth = css;
+    if (prev > 0 && Math.abs(css - prev) >= 1 && this.store.length > 0) {
+      const span = (this.view.end - this.view.start) * (css / prev);
+      if (this.followLatest) this.setViewport(this.view.end - span, this.view.end);
+      else this.setViewport(this.view.start, this.view.start + span);
+    }
   }
 
   setViewport(start: number, end: number): void {
