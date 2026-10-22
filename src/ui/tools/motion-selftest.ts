@@ -79,15 +79,34 @@ const MOTION_CONSUMERS: readonly string[] = [
   '#toolbar button.toolbar-item',
   '.pill, .mini, .primary, .danger, .seg',
   '.chip',
+  '.ch-settings',
+  ':is(html[data-theme="dark"], html[data-theme="light"]) .ch-card',
+  '.channel-name-reset',
+  '.channel-color-swatch',
+  '.channel-trigger-option',
+  '.channel-settings-cancel',
+  '.analyzer-act',
+  '.ch-analyzer-x',
 ];
 
 const BUTTON_CONSUMERS: readonly string[] = [
   '#toolbar button.toolbar-item',
   '.pill, .mini, .primary, .danger, .seg',
   '.chip',
+  '.ch-settings',
+  '.channel-name-reset',
+  '.channel-color-swatch',
+  '.channel-settings-cancel',
+  '.analyzer-act',
+  '.ch-analyzer-x',
 ];
 
-const NON_BUTTON_CONSUMERS: readonly string[] = ['.tooltip', '.tooltip.open'];
+const NON_BUTTON_CONSUMERS: readonly string[] = [
+  '.tooltip',
+  '.tooltip.open',
+  ':is(html[data-theme="dark"], html[data-theme="light"]) .ch-card',
+  '.channel-trigger-option',
+];
 
 {
   const declarers = rules.filter((r) => r.body.includes('--motion-fast: 120ms'));
@@ -96,6 +115,14 @@ const NON_BUTTON_CONSUMERS: readonly string[] = ['.tooltip', '.tooltip.open'];
   check('the motion tokens are declared once on a top-level :root',
     decl !== null && decl.selector === ':root' && decl.body.includes('--motion-ease: ease;') && topLevel,
     `declarers=${declarers.length}, selector=${decl?.selector ?? '(none)'}, ease=${decl?.body.includes('--motion-ease: ease;') ?? false}, topLevel=${topLevel}`);
+}
+
+{
+  const fastDecls = rules.filter((r) => /(^|;)\s*--motion-fast\s*:/.test(r.body)).length;
+  const easeDecls = rules.filter((r) => /(^|;)\s*--motion-ease\s*:/.test(r.body)).length;
+  check('motion token declarations exist exactly at the two pinned sites (declaration + override)',
+    fastDecls === 2 && easeDecls === 1,
+    `fastDecls=${fastDecls}, easeDecls=${easeDecls}`);
 }
 
 {
@@ -116,7 +143,7 @@ const NON_BUTTON_CONSUMERS: readonly string[] = ['.tooltip', '.tooltip.open'];
 
 {
   const offenders = rules.filter((r) => r.selector.includes('data-theme')
-    && (r.body.includes('--motion-fast') || r.body.includes('--motion-ease')));
+    && /(^|;)\s*--motion-(fast|ease)\s*:/.test(r.body));
   check('no themed block redeclares a motion token',
     offenders.length === 0,
     `offenders=[${offenders.map((r) => r.selector.slice(0, 48)).join(' | ')}]`);

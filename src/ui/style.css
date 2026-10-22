@@ -430,6 +430,7 @@ html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dar
   background: var(--bg20);
   color: var(--text50);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 .ch-settings:hover { border-color: var(--accent); color: var(--text80); }
 .ch-settings svg { display: block; width: 14px; height: 14px; }
@@ -464,6 +465,7 @@ html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dar
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) - 2px);  /* [SOURCE] shadcn control radius idiom */
   overflow: hidden;                          /* clips the colour strip to the radius */
+  transition: background-color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
 }
 /* The reserved decoder strip: one fixed-height line in EVERY card, empty when no
    analyzer is attached, so attaching or removing a decoder never shifts the
@@ -543,6 +545,7 @@ html[data-theme="light"] .channel-settings-dialog::backdrop { background: var(--
   border: 1px solid var(--input);
   border-radius: calc(var(--radius) - 4px);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 .channel-name-reset:hover { border-color: var(--accent); color: var(--text80); }
 .channel-name-reset svg { display: block; width: 14px; height: 14px; }
@@ -567,6 +570,7 @@ html[data-theme="light"] .channel-settings-dialog::backdrop { background: var(--
   border: 1px solid var(--input);
   border-radius: calc(var(--radius) - 4px);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 .channel-color-swatch:hover { border-color: var(--primary); }
 .channel-color-swatch.selected,
@@ -689,6 +693,7 @@ html[data-theme="light"] .channel-color-custom { background: var(--bg30); }
   border: 1px solid var(--input);
   border-radius: calc(var(--radius) - 4px);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease);
 }
 .channel-trigger-option input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .channel-trigger-option svg { width: 24px; height: 16px; pointer-events: none; }
@@ -707,6 +712,7 @@ html[data-theme="light"] .channel-color-custom { background: var(--bg30); }
   border-radius: calc(var(--radius) - 4px);
   font: inherit;
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 .channel-settings-cancel:hover { background: var(--muted); }
 
@@ -789,6 +795,7 @@ html[data-theme="light"] .channel-color-custom { background: var(--bg30); }
 .ch-analyzer-x {
   background: none; border: none; color: var(--text50); cursor: pointer;
   padding: 0 2px; font-size: 11px; line-height: 1;
+  transition: color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 .ch-analyzer-x:hover { color: var(--negative); }
 
@@ -1061,6 +1068,7 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
   background: var(--bg20);
   color: var(--text50);
   cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 .analyzer-act svg { display: block; width: 13px; height: 13px; }
 .analyzer-act:hover { border-color: var(--accent); color: var(--text80); }
