@@ -960,9 +960,9 @@ function between(source: string, start: string, end: string): string {
     rowAtSource.includes('cssY >= box.top && cssY < box.top + box.height') &&
     grabMarkerSource.includes('const row = this.rowAt(e.clientY - rect.top);') &&
     hoverSource.includes('const box = this.rowAt(cssY);') &&
-    hoverSource.includes("if (!box || box.spec.kind !== 'channel')"),
+    hoverSource.includes("if (!box || box.spec.kind === 'lane')"),
     `rowAt=${rowAtSource.length}, grab=${grabMarkerSource.length}, hover=${hoverSource.length}`);
-  check('the marker press accepts channel and lane rows while hover stays channel-only',
+  check('the marker press accepts channel and lane rows while hover skips lane rows',
     grabMarkerSource.length > 0 && !grabMarkerSource.includes("kind === 'channel'") &&
     grabMarkerSource.includes('channel: row?.spec.channel ?? null,') &&
     grabMarkerSource.includes('captureLength: this.store.length,') &&
