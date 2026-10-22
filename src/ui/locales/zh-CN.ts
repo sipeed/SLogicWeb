@@ -35,6 +35,7 @@ export const zhCN: Messages = {
   'toolbar.fitTitle': '缩放以显示整个采集',
   'toolbar.sidebarTitle': '选择右侧边栏',
   'toolbar.themeTitle': '切换主题',
+  'toolbar.assistantTitle': 'AI 助手',
   'toolbar.sidebarDevice': '设备与采集设置',
   'toolbar.sidebarAnalyzers': '协议分析器',
   'toolbar.sidebarAssistant': 'AI 助手',

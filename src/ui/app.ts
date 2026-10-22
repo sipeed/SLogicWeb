@@ -134,6 +134,8 @@ export class App {
 
   private dirty = true;
   private panel: 'device' | 'analyzers' | 'assistant' | null = 'device';
+  /** What the toolbar's assistant button returns to when it closes the assistant. */
+  private panelBeforeAssistant: 'device' | 'analyzers' | null = 'device';
   private paintedTheme: ThemeId;
   private palette: CanvasPalette;
   private readonly wheelIntent = new WheelIntent();
@@ -146,7 +148,7 @@ export class App {
     hint: HTMLDivElement; transport: HTMLButtonElement;
     connect: HTMLButtonElement; open: HTMLButtonElement; save: HTMLButtonElement;
     fit: HTMLButtonElement; settings: HTMLButtonElement; sidebar: HTMLButtonElement;
-    theme: HTMLButtonElement;
+    theme: HTMLButtonElement; assistant: HTMLButtonElement;
     fileInput: HTMLInputElement;
   };
 
@@ -170,6 +172,7 @@ export class App {
       settings: must<HTMLButtonElement>('btn-settings'),
       sidebar: must<HTMLButtonElement>('btn-sidebar'),
       theme: must<HTMLButtonElement>('btn-theme'),
+      assistant: must<HTMLButtonElement>('btn-assistant'),
       fileInput: must<HTMLInputElement>('file-input'),
     };
 
@@ -889,6 +892,26 @@ export class App {
       this.sidebarMenu.close('outside');
       this.themeMenu.toggle(this.themeItems());
     });
+    this.el.assistant.addEventListener('click', () => {
+      this.channelList.closeDialog();
+      this.settingsMenu.close('outside');
+      this.themeMenu.close('outside');
+      this.toggleAssistant();
+    });
+  }
+
+  /**
+   * The toolbar shortcut to the assistant: open it, or put back the sidebar it replaced.
+   * Same selectPanel path as the sidebar menu, so the two can never disagree.
+   */
+  private toggleAssistant(): void {
+    if (this.panel === 'assistant') {
+      this.selectPanel(this.panelBeforeAssistant);
+      return;
+    }
+    this.panelBeforeAssistant = this.panel;
+    this.selectPanel('assistant');
+    this.assistantPanel?.focusInput();
   }
 
   /**
@@ -1049,6 +1072,8 @@ export class App {
     this.el.settings.setAttribute('aria-label', t('settings.title'));
     this.el.theme.setAttribute('aria-label', t('toolbar.themeTitle'));
     this.el.sidebar.setAttribute('aria-label', t('toolbar.sidebarTitle'));
+    this.el.assistant.setAttribute('aria-label', t('toolbar.assistantTitle'));
+    this.el.assistant.setAttribute('aria-pressed', String(this.panel === 'assistant'));
 
     const btn = this.el.transport;
     btn.setAttribute('aria-label', this.stopping ? t('toolbar.stopping')

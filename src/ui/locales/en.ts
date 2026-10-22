@@ -41,6 +41,7 @@ export const en = {
   'toolbar.fitTitle': 'Zoom to the whole capture',
   'toolbar.sidebarTitle': 'Choose right sidebar',
   'toolbar.themeTitle': 'Toggle theme',
+  'toolbar.assistantTitle': 'AI assistant',
   'toolbar.sidebarDevice': 'Device and capture settings',
   'toolbar.sidebarAnalyzers': 'Protocol analyzers',
   'toolbar.sidebarAssistant': 'AI assistant',

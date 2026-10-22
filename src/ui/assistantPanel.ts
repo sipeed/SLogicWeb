@@ -79,6 +79,11 @@ export class AssistantPanel {
     this.el.append(this.chrome, this.log, this.composer);
   }
 
+  /** Put the caret in the message box, unless the privacy notice still blocks it. */
+  focusInput(): void {
+    if (!this.input.disabled) this.input.focus({ preventScroll: true });
+  }
+
   /** Rebuild the chrome in the current locale and settings. The log is untouched. */
   render(): void {
     const s = getAssistantSettings();

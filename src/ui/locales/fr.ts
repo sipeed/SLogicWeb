@@ -37,6 +37,7 @@ export const fr: Messages = {
   'toolbar.fitTitle': 'Zoomer sur toute la capture',
   'toolbar.sidebarTitle': 'Choisir le panneau latéral droit',
   'toolbar.themeTitle': 'Changer de thème',
+  'toolbar.assistantTitle': 'Assistant IA',
   'toolbar.sidebarDevice': 'Appareil et réglages de capture',
   'toolbar.sidebarAnalyzers': 'Analyseurs de protocole',
   'toolbar.sidebarAssistant': 'Assistant IA',

@@ -37,6 +37,7 @@ export const ru: Messages = {
   'toolbar.fitTitle': 'Масштабировать на весь захват',
   'toolbar.sidebarTitle': 'Выбор правой боковой панели',
   'toolbar.themeTitle': 'Переключить тему',
+  'toolbar.assistantTitle': 'ИИ-ассистент',
   'toolbar.sidebarDevice': 'Устройство и настройки захвата',
   'toolbar.sidebarAnalyzers': 'Протокольные анализаторы',
   'toolbar.sidebarAssistant': 'ИИ-ассистент',

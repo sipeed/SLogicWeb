@@ -273,6 +273,7 @@ html[data-theme="light"] button:active { box-shadow: inset 0 0 0 999px rgb(0 0 0
 #toolbar .primary .toolbar-item-media,
 #toolbar .danger .toolbar-item-media { background: transparent; color: inherit; }
 #toolbar .toolbar-device.connected .toolbar-item-media { color: var(--primary); }
+#toolbar .toolbar-assistant[aria-pressed="true"] .toolbar-item-media { color: var(--primary); }
 #toolbar .toolbar-separator {
   align-self: center; flex: none; width: 1px; height: 28px; margin: 0 2px; background: var(--border);
 }
@@ -293,6 +294,11 @@ html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dar
   #toolbar .toolbar-separator,
   #toolbar .spacer { display: none; }
   #toolbar .toolbar-sidebar { margin-left: auto; }
+}
+
+/* Nine 38 px commands need 386 px; the smallest common phones are 360 px wide. */
+@media (max-width: 400px) {
+  #toolbar button.toolbar-item { width: 34px; height: 34px; padding: 3px; }
 }
 
 /* Dark theme: the toolbar drops to the shell's near-black ground and its hairline

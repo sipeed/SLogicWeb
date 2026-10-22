@@ -569,8 +569,8 @@ const handlers = (sink: { text: string; thinking: string }) => ({
   check('main.ts restores assistant settings before constructing App',
     init !== -1 && init < main.indexOf('new App()'));
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
-  check('the assistant is a sidebar choice, not a toolbar button',
-    app.includes("t('toolbar.sidebarAssistant')") && !fs.readFileSync('index.html', 'utf8').includes('assistant'));
+  check('the assistant opens from both the sidebar menu and its own toolbar button',
+    app.includes("t('toolbar.sidebarAssistant')") && fs.readFileSync('index.html', 'utf8').includes('id="btn-assistant"'));
   const claude = fs.readFileSync('src/assistant/providers/claude.ts', 'utf8');
   const runtimeImports = [...claude.matchAll(/^import\s+(?!type\b)[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);
   check('the lazy Claude provider imports nothing at runtime but the SDK',

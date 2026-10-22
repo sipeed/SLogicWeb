@@ -246,9 +246,10 @@ check(
 );
 
 const leftCommandIds = ['btn-connect', 'transport', 'btn-open', 'btn-save', 'btn-fit', 'btn-settings'];
+const assistantCommandId = 'btn-assistant';
 const themeCommandId = 'btn-theme';
 const sidebarCommandId = 'btn-sidebar';
-const commandIds = [...leftCommandIds, themeCommandId, sidebarCommandId];
+const commandIds = [...leftCommandIds, assistantCommandId, themeCommandId, sidebarCommandId];
 
 function commandMarkup(id: string): string {
   const idIndex = toolbar.indexOf(`id="${id}"`);
@@ -289,7 +290,7 @@ const sidebarMarkup = commandMarkup(sidebarCommandId);
 const separatorCount = toolbar.match(/role="separator"/g)?.length ?? 0;
 const verticalSeparatorCount = toolbar.match(/aria-orientation="vertical"/g)?.length ?? 0;
 check(
-  'eight icon-only commands expose shadcn anatomy, one media wrapper each, distinct decorative icons, and separators',
+  'nine icon-only commands expose shadcn anatomy, one media wrapper each, distinct decorative icons, and separators',
   anatomyFailures.length === 0 && iconSignatures.size === commandIds.length &&
     separatorCount === 2 && verticalSeparatorCount === 2,
   `failures=${JSON.stringify(anatomyFailures)}, icons=${iconSignatures.size}, separators=${separatorCount}/${verticalSeparatorCount}`,
@@ -326,13 +327,22 @@ check(
   `segment=${JSON.stringify(settingsToSpacer.replace(/\s+/g, ' '))}`,
 );
 
+// Right-hand group, in order: spacer, assistant, theme, sidebar.
+const assistantIndex = toolbar.indexOf(`id="${assistantCommandId}"`);
+const assistantButtonStart = assistantIndex >= 0 ? toolbar.lastIndexOf('<button', assistantIndex) : -1;
+const assistantButtonEnd = assistantIndex >= 0 ? toolbar.indexOf('</button>', assistantIndex) : -1;
+const spacerToAssistant = spacerIndex >= 0 && assistantButtonStart > spacerIndex
+  ? toolbar.slice(spacerIndex, assistantButtonStart) : '';
+const assistantDirectlyAfterSpacer = spacerToAssistant.length > 0 &&
+  !spacerToAssistant.includes('<button') && !spacerToAssistant.includes('role="separator"');
 const themeIndex = toolbar.indexOf('id="btn-theme"');
 const themeButtonStart = themeIndex >= 0 ? toolbar.lastIndexOf('<button', themeIndex) : -1;
 const themeButtonEnd = themeIndex >= 0 ? toolbar.indexOf('</button>', themeIndex) : -1;
 const themeAfterSpacer = spacerIndex >= 0 && themeButtonStart > spacerIndex;
-const spacerToTheme = themeAfterSpacer ? toolbar.slice(spacerIndex, themeButtonStart) : '';
-const themeDirectlyAfterSpacer = spacerToTheme.length > 0 &&
-  !spacerToTheme.includes('<button') && !spacerToTheme.includes('role="separator"');
+const assistantToTheme = assistantButtonEnd > assistantButtonStart && themeButtonStart > assistantButtonEnd
+  ? toolbar.slice(assistantButtonEnd, themeButtonStart) : '';
+const themeDirectlyAfterSpacer = assistantDirectlyAfterSpacer && assistantToTheme.length > 0 &&
+  !assistantToTheme.includes('<button') && !assistantToTheme.includes('role="separator"');
 
 const sidebarIndex = toolbar.indexOf(`id="${sidebarCommandId}"`);
 const sidebarButtonStart = sidebarIndex >= 0 ? toolbar.lastIndexOf('<button', sidebarIndex) : -1;
@@ -345,11 +355,27 @@ const lastButtonIndex = toolbar.lastIndexOf('<button');
 const sidebarIsFinalCommand = lastButtonIndex >= 0 && lastButtonIndex === sidebarButtonStart &&
   toolbar.indexOf('role="separator"', sidebarIndex) === -1;
 check(
-  'the theme mode button sits second from the right, between the spacer and the final sidebar selector',
+  'the assistant, theme and sidebar buttons follow the spacer in that order, sidebar last',
   themeAfterSpacer && themeDirectlyAfterSpacer && sidebarAfterTheme &&
     sidebarDirectlyAfterTheme && sidebarIsFinalCommand,
-  `spacer@${spacerIndex}, theme@${themeIndex}, sidebar@${sidebarIndex}, ` +
+  `spacer@${spacerIndex}, assistant@${assistantIndex}, theme@${themeIndex}, sidebar@${sidebarIndex}, ` +
   `afterSpacer=${themeDirectlyAfterSpacer}, between=${sidebarDirectlyAfterTheme}, final=${sidebarIsFinalCommand}`,
+);
+
+const assistantMarkup = commandMarkup(assistantCommandId);
+const assistantWiring = [
+  "this.el.assistant.addEventListener('click'",
+  'this.toggleAssistant();',
+  "this.selectPanel('assistant');",
+  'this.selectPanel(this.panelBeforeAssistant);',
+  "this.el.assistant.setAttribute('aria-pressed', String(this.panel === 'assistant'))",
+  "this.el.assistant.setAttribute('aria-label', t('toolbar.assistantTitle'))",
+].filter((needle) => !app.includes(needle));
+check(
+  'the assistant button is a toggle: aria-pressed, translated title, and the shared selectPanel path',
+  assistantMarkup.includes('aria-pressed="false"') && assistantMarkup.includes('aria-controls="side-panel"') &&
+    assistantMarkup.includes('data-i18n-title="toolbar.assistantTitle"') && assistantWiring.length === 0,
+  `missing=${JSON.stringify(assistantWiring)}`,
 );
 
 const disclosureNeedles = [
