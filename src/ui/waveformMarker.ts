@@ -6,7 +6,11 @@ import {
 } from './markerGeometry.js';
 
 export interface MarkerPaintTarget {
-  drawCursor(x: number, color: string, label: string): void;
+  drawCursor(x: number, color: string): void;
+}
+
+export interface MarkerChipTarget {
+  drawChip(x: number, color: string, label: string): void;
 }
 
 export interface MarkerGrabRequest {
@@ -85,7 +89,12 @@ export class WaveformMarker {
 
   draw(target: MarkerPaintTarget, toPx: (sample: number) => number): void {
     if (this.value === null) return;
-    target.drawCursor(toPx(this.value), this.color, this.label);
+    target.drawCursor(toPx(this.value), this.color);
+  }
+
+  drawChip(target: MarkerChipTarget, toPx: (sample: number) => number): void {
+    if (this.value === null) return;
+    target.drawChip(toPx(this.value), this.color, this.label);
   }
 
   tryGrab(request: MarkerGrabRequest): boolean {

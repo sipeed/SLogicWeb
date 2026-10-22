@@ -205,6 +205,13 @@ export const AXIS = {
   majorTickFraction: 0.5,
   /** [SOURCE] a 4x6 px left-pointing arrow marks a major tick pinned to x=0. */
   pinnedArrow: { w: 4, h: 6 },
+  markerChip: {
+    top: 1,
+    height: 14,
+    radius: 2,
+    padX: 4,
+    font: '10px -apple-system, BlinkMacSystemFont, sans-serif',
+  },
 } as const;
 
 /**

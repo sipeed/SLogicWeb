@@ -6,7 +6,7 @@ import {
   markerEdgeWindow, markerPointerCursor, markerSnapRadii, nearestMarkerEdge,
 } from '../markerGeometry.js';
 import {
-  WaveformMarker, type MarkerPaintTarget, type MarkerSnapContext,
+  WaveformMarker, type MarkerChipTarget, type MarkerPaintTarget, type MarkerSnapContext,
 } from '../waveformMarker.js';
 
 interface FsLike {
@@ -39,12 +39,23 @@ function check(name: string, pass: boolean, detail: string): void {
 interface DrawCall {
   x: number;
   color: string;
-  label: string;
 }
 
 function recordingTarget(calls: DrawCall[]): MarkerPaintTarget {
   return {
-    drawCursor: (x: number, color: string, label: string) => { calls.push({ x, color, label }); },
+    drawCursor: (x: number, color: string) => { calls.push({ x, color }); },
+  };
+}
+
+interface ChipCall {
+  x: number;
+  color: string;
+  label: string;
+}
+
+function recordingChipTarget(calls: ChipCall[]): MarkerChipTarget {
+  return {
+    drawChip: (x: number, color: string, label: string) => { calls.push({ x, color, label }); },
   };
 }
 
@@ -167,21 +178,40 @@ function between(source: string, start: string, end: string): string {
 
 {
   const calls: DrawCall[] = [];
+  const chipCalls: ChipCall[] = [];
   const target = recordingTarget(calls);
+  const chipTarget = recordingChipTarget(chipCalls);
   const marker = new WaveformMarker('A', '#CD427E');
   const toPx = (sample: number) => sample / 2 + 0.25;
 
   marker.draw(target, toPx);
-  check('an absent sample paints nothing',
-    calls.length === 0, `draws=${calls.length}`);
+  marker.drawChip(chipTarget, toPx);
+  check('an absent sample paints neither a line nor a chip',
+    calls.length === 0 && chipCalls.length === 0,
+    `draws=${calls.length}, chips=${chipCalls.length}`);
 
   marker.setSample(10, 1000);
   marker.draw(target, toPx);
-  const exact = calls.length === 1 && calls[0]!.x === 5.25 &&
-    calls[0]!.color === '#CD427E' && calls[0]!.label === 'A';
+  marker.drawChip(chipTarget, toPx);
+  const exact = calls.length === 1 && calls[0]!.x === 5.25 && calls[0]!.color === '#CD427E';
   check('one present sample produces exactly one draw at the supplied pixel',
     exact, `draws=${calls.length}, calls=${JSON.stringify(calls)}`);
 
+  const chipExact = chipCalls.length === 1 && chipCalls[0]!.x === 5.25 &&
+    chipCalls[0]!.color === '#CD427E' && chipCalls[0]!.label === 'A';
+  check('one present sample produces exactly one chip call carrying the label',
+    chipExact, `chips=${chipCalls.length}, calls=${JSON.stringify(chipCalls)}`);
+
+  marker.clear();
+  const clearedChips = chipCalls.length;
+  const clearedDraws = calls.length;
+  marker.draw(target, toPx);
+  marker.drawChip(chipTarget, toPx);
+  check('clearing the marker removes its chip as well as its line',
+    chipCalls.length === clearedChips && calls.length === clearedDraws,
+    `draws=${calls.length}, chips=${chipCalls.length}`);
+
+  marker.setSample(10, 1000);
   const controlCalls: DrawCall[] = [];
   const controlTarget = recordingTarget(controlCalls);
   marker.draw(controlTarget, toPx);
@@ -1011,12 +1041,34 @@ function between(source: string, start: string, end: string): string {
   const sharedPalette = metricsSource.includes(
     "export const MEASURE_COLORS: readonly string[] = ['#CD427E', '#00994D', '#2683D9', '#DB4C39'];");
   const sharedCursor = overlaySource.includes(
-    'drawCursor(x: number, color: string, label: string): void {');
+    'drawCursor(x: number, color: string): void {');
+  const drawCursorSource = between(
+    overlaySource, 'drawCursor(x: number, color: string): void {', 'drawTrigger(');
+  const chipPainter = overlaySource.includes(
+    'export function paintMarkerChip(') &&
+    overlaySource.includes('roundRect(c, x - w / 2, top, w, height, radius);');
+  check('the overlay cursor paints its line only and the axis chip painter owns the box',
+    sharedCursor && chipPainter && drawCursorSource.length > 0 &&
+    !drawCursorSource.includes('roundRect(') &&
+    !drawCursorSource.includes('measureText(label)'),
+    `overlay=${sharedCursor}, painter=${chipPainter}, len=${drawCursorSource.length}, ` +
+    `roundRect=${drawCursorSource.includes('roundRect(')}, ` +
+    `measure=${drawCursorSource.includes('measureText(label)')}`);
   check('the shared palette, overlay cursor API, and hover frequency readout survive B removal',
     sharedPalette && sharedCursor && hoverFreq === 2 && hoverFreqReadout &&
     !hoverSource.includes('|B-A|') && !hoverSource.includes('cursorB'),
     `palette=${sharedPalette}, overlay=${sharedCursor}, hoverFreq=${hoverFreq}, ` +
     `freqReadout=${hoverFreqReadout}, len=${hoverSource.length}`);
+
+  const axisCanvasSource = between(
+    appSource, 'private drawAxisCanvas(', 'private drawLaneSurfaces(');
+  const axisPaint = axisCanvasSource.indexOf(
+    'drawAxis(ctx, ticks, wCss, hCss, this.palette);');
+  const chipPaint = axisCanvasSource.indexOf('this.markerA.drawChip(');
+  check('the axis canvas paints the marker chip after the axis background fill',
+    axisCanvasSource.length > 0 && axisPaint >= 0 && chipPaint > axisPaint &&
+    axisCanvasSource.includes('paintMarkerChip(ctx, x, wCss, hCss, color, label, this.palette);'),
+    `len=${axisCanvasSource.length}, axis=${axisPaint}, chip=${chipPaint}`);
 }
 
 {

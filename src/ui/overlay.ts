@@ -20,7 +20,7 @@
 import type { Bubble } from './annotationLayout.js';
 import type { AnalogFrame } from './busView.js';
 import { canvasPalette, type CanvasPalette } from './canvasPalette.js';
-import { BUBBLE, GRID, ROWS } from './metrics.js';
+import { AXIS, BUBBLE, GRID, ROWS } from './metrics.js';
 import type { TickSet } from './timeAxis.js';
 
 export interface HoverMeasurement {
@@ -319,8 +319,8 @@ export class Overlay {
     }
   }
 
-  /** A vertical cursor with a chip carrying its label at the top of the stack. */
-  drawCursor(x: number, color: string, label: string): void {
+  /** A vertical cursor line at the top of the stack; its chip is painted in the axis. */
+  drawCursor(x: number, color: string): void {
     const c = this.ctx;
     if (x < -20 || x > this.wCss + 20) return;
     c.save();
@@ -330,14 +330,6 @@ export class Overlay {
     c.moveTo(Math.round(x) + 0.5, 0);
     c.lineTo(Math.round(x) + 0.5, this.hCss);
     c.stroke();
-    c.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-    c.textBaseline = 'top';
-    const w = c.measureText(label).width + 8;
-    c.fillStyle = color;
-    roundRect(c, x - w / 2, 0, w, 14, 2);
-    c.fill();
-    c.fillStyle = this.palette.bg;
-    c.fillText(label, x - w / 2 + 4, 2);
     c.restore();
   }
 
@@ -445,6 +437,25 @@ function triangle(c: CanvasRenderingContext2D, x: number, y: number, dx: number,
   c.lineTo(x, y + dx);
   c.closePath();
   c.fill();
+}
+
+export function paintMarkerChip(
+  ctx: CanvasRenderingContext2D, x: number, wCss: number, heightCss: number,
+  color: string, label: string, palette: CanvasPalette,
+): void {
+  if (heightCss <= 0 || x < -20 || x > wCss + 20) return;
+  const c = ctx;
+  const { top, height, radius, padX, font } = AXIS.markerChip;
+  c.save();
+  c.font = font;
+  c.textBaseline = 'top';
+  const w = c.measureText(label).width + 2 * padX;
+  c.fillStyle = color;
+  roundRect(c, x - w / 2, top, w, height, radius);
+  c.fill();
+  c.fillStyle = palette.bg;
+  c.fillText(label, x - w / 2 + padX, top + 2);
+  c.restore();
 }
 
 function roundRect(

@@ -52,7 +52,7 @@ import { getMode, getTheme, onThemeChange, setMode, THEME_MODES, THEME_MODE_LABE
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
 import { COLORS, MEASURE_COLORS, ROWS } from './metrics.js';
-import { Overlay, type HoverMeasurement } from './overlay.js';
+import { Overlay, paintMarkerChip, type HoverMeasurement } from './overlay.js';
 import { PanelResizer } from './panelResizer.js';
 import { StoreRef } from './storeRef.js';
 import {
@@ -677,6 +677,11 @@ export class App {
     if (!ctx) throw new Error('axis 2D context unavailable');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawAxis(ctx, ticks, wCss, hCss, this.palette);
+    this.markerA.drawChip({
+      drawChip: (x, color, label) => {
+        paintMarkerChip(ctx, x, wCss, hCss, color, label, this.palette);
+      },
+    }, (sample) => this.toPx(sample));
   }
 
   private drawLaneSurfaces(boxes: readonly RowBox[]): void {
