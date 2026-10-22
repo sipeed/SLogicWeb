@@ -2,9 +2,12 @@
 // Copyright (C) 2026 Daniel Tralamazza
 
 import {
-  MARKER_GRAB_RADIUS_CSS, clampMarkerSample, isMarkerGrab,
+  MARKER_GRAB_RADIUS_CSS, MARKER_SNAP_RADIUS_CSS, clampMarkerSample, isMarkerGrab,
+  markerEdgeWindow, markerSnapRadii, nearestMarkerEdge,
 } from '../markerGeometry.js';
-import { WaveformMarker, type MarkerPaintTarget } from '../waveformMarker.js';
+import {
+  WaveformMarker, type MarkerPaintTarget, type MarkerSnapContext,
+} from '../waveformMarker.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
@@ -74,8 +77,37 @@ function moveTo(
   clientY = 50,
   pointerId = 1,
   captureLength = 1000,
+  snap?: MarkerSnapContext | null,
 ): boolean {
-  return marker.move({ pointerId, clientX, clientY, sample, captureLength });
+  return marker.move({
+    pointerId, clientX, clientY, sample, captureLength, snap: snap ?? null,
+  });
+}
+
+interface EdgeReads {
+  count: number;
+  windows: Array<[number, number]>;
+}
+
+function snapContext(
+  edges: readonly number[],
+  exactRadiusSamples: number,
+  queryRadiusSamples: number,
+  reads: EdgeReads,
+): MarkerSnapContext {
+  return {
+    exactRadiusSamples,
+    queryRadiusSamples,
+    readEdges: (lo, hi) => {
+      reads.count++;
+      reads.windows.push([lo, hi]);
+      return edges.filter((edge) => edge >= lo && edge < hi);
+    },
+  };
+}
+
+function freshReads(): EdgeReads {
+  return { count: 0, windows: [] };
 }
 
 function between(source: string, start: string, end: string): string {
@@ -198,6 +230,116 @@ function between(source: string, start: string, end: string): string {
     `nanLength=${String(clampMarkerSample(5, Number.NaN))}`);
   check('control: the clamp helper is not always null',
     clampMarkerSample(5, 10) === 5, `actual=${String(clampMarkerSample(5, 10))}`);
+}
+
+{
+  check('the snap radius is the literal 6 CSS px',
+    MARKER_SNAP_RADIUS_CSS === 6, `radius=${MARKER_SNAP_RADIUS_CSS}`);
+
+  const exact = nearestMarkerEdge([100], 106, 6);
+  const past = nearestMarkerEdge([100], 106.0001, 6);
+  check('edge eligibility is the inclusive 6 sample radius at the exact boundary',
+    exact === 100 && past === null, `at6=${String(exact)}, past6=${String(past)}`);
+  check('control: an edge inside the radius is still selected',
+    nearestMarkerEdge([100], 103, 6) === 100,
+    `inside=${String(nearestMarkerEdge([100], 103, 6))}`);
+
+  const unit = markerSnapRadii(1, 1);
+  const fractionalDpr = markerSnapRadii(1.25, 1);
+  const retina = markerSnapRadii(2, 1);
+  const zoomedIn = markerSnapRadii(1, 0.5);
+  check('the exact radius converts 6 CSS px through DPR and samples per pixel',
+    unit?.exactRadiusSamples === 6 && unit?.queryRadiusSamples === 6 &&
+    fractionalDpr?.exactRadiusSamples === 7.5 && fractionalDpr?.queryRadiusSamples === 8 &&
+    retina?.exactRadiusSamples === 12 && retina?.queryRadiusSamples === 12 &&
+    zoomedIn?.exactRadiusSamples === 3 && zoomedIn?.queryRadiusSamples === 3,
+    `unit=${JSON.stringify(unit)}, fractional=${JSON.stringify(fractionalDpr)}, ` +
+    `retina=${JSON.stringify(retina)}, zoomedIn=${JSON.stringify(zoomedIn)}`);
+
+  const ceiled = markerSnapRadii(1.25, 0.5);
+  const narrow = ceiled?.exactRadiusSamples ?? 0;
+  const wide = ceiled?.queryRadiusSamples ?? 0;
+  const window = markerEdgeWindow(100, wide, 1000);
+  const eligible = nearestMarkerEdge([103], 100, narrow);
+  const excluded = nearestMarkerEdge([104], 100, narrow);
+  check('the ceiled query radius never widens exact-radius eligibility',
+    narrow === 3.75 && wide === 4 && window?.lo === 96 && window?.hi === 105 &&
+    eligible === 103 && excluded === null,
+    `exact=${narrow}, query=${wide}, window=${JSON.stringify(window)}, ` +
+    `eligible=${String(eligible)}, excluded=${String(excluded)}`);
+
+  check('invalid DPR or samples-per-pixel disables the snap radii',
+    markerSnapRadii(0, 1) === null && markerSnapRadii(1, 0) === null &&
+    markerSnapRadii(Number.NaN, 1) === null &&
+    markerSnapRadii(1, Number.POSITIVE_INFINITY) === null,
+    `dpr0=${String(markerSnapRadii(0, 1))}, spp0=${String(markerSnapRadii(1, 0))}, ` +
+    `nanDpr=${String(markerSnapRadii(Number.NaN, 1))}, ` +
+    `infiniteSpp=${String(markerSnapRadii(1, Number.POSITIVE_INFINITY))}`);
+  check('control: the same radii helper still returns finite radii',
+    markerSnapRadii(2, 2)?.queryRadiusSamples === 24,
+    `actual=${JSON.stringify(markerSnapRadii(2, 2))}`);
+}
+
+{
+  const inside = markerEdgeWindow(10, 3, 1000);
+  const atStart = markerEdgeWindow(0, 6, 1000);
+  const atEnd = markerEdgeWindow(999, 6, 1000);
+  const fractional = markerEdgeWindow(5.5, 2, 1000);
+  check('the query window is end-exclusive with the design floor arithmetic',
+    inside?.lo === 7 && inside?.hi === 14 &&
+    atStart?.lo === 0 && atStart?.hi === 7 &&
+    atEnd?.lo === 993 && atEnd?.hi === 1000 &&
+    fractional?.lo === 3 && fractional?.hi === 8,
+    `inside=${JSON.stringify(inside)}, start=${JSON.stringify(atStart)}, ` +
+    `end=${JSON.stringify(atEnd)}, fractional=${JSON.stringify(fractional)}`);
+
+  check('the query window rejects invalid centers, radii, and capture lengths',
+    markerEdgeWindow(Number.NaN, 3, 1000) === null &&
+    markerEdgeWindow(10, Number.NaN, 1000) === null &&
+    markerEdgeWindow(10, -1, 1000) === null &&
+    markerEdgeWindow(10, 3, 0) === null &&
+    markerEdgeWindow(10, 3, Number.NaN) === null,
+    `nan=${String(markerEdgeWindow(Number.NaN, 3, 1000))}, ` +
+    `nanRadius=${String(markerEdgeWindow(10, Number.NaN, 1000))}, ` +
+    `negative=${String(markerEdgeWindow(10, -1, 1000))}, ` +
+    `empty=${String(markerEdgeWindow(10, 3, 0))}`);
+  check('centers outside the capture domain never produce a query window',
+    markerEdgeWindow(-5, 10, 100) === null &&
+    markerEdgeWindow(2000, 3000, 100) === null &&
+    markerEdgeWindow(-0.5, 6, 100) === null &&
+    markerEdgeWindow(99.5, 6, 100) === null,
+    `below=${String(markerEdgeWindow(-5, 10, 100))}, ` +
+    `above=${String(markerEdgeWindow(2000, 3000, 100))}, ` +
+    `fractionalBelow=${String(markerEdgeWindow(-0.5, 6, 100))}, ` +
+    `fractionalAbove=${String(markerEdgeWindow(99.5, 6, 100))}`);
+  check('control: in-domain centers at both capture endpoints still produce a window',
+    markerEdgeWindow(0, 6, 100)?.lo === 0 && markerEdgeWindow(0, 6, 100)?.hi === 7 &&
+    markerEdgeWindow(99, 6, 100)?.lo === 93 && markerEdgeWindow(99, 6, 100)?.hi === 100,
+    `start=${JSON.stringify(markerEdgeWindow(0, 6, 100))}, ` +
+    `end=${JSON.stringify(markerEdgeWindow(99, 6, 100))}`);
+
+  check('the nearest edge wins and an equal distance keeps the earlier sample',
+    nearestMarkerEdge([100, 110], 105, 10) === 100 &&
+    nearestMarkerEdge([100, 110], 108, 10) === 110 &&
+    nearestMarkerEdge([110, 100], 105, 10) === 100,
+    `tie=${String(nearestMarkerEdge([100, 110], 105, 10))}, ` +
+    `nearer=${String(nearestMarkerEdge([100, 110], 108, 10))}, ` +
+    `unsortedTie=${String(nearestMarkerEdge([110, 100], 105, 10))}`);
+  check('empty or entirely out-of-radius edge lists select nothing',
+    nearestMarkerEdge([], 100, 6) === null &&
+    nearestMarkerEdge([50, 150], 100, 6) === null,
+    `empty=${String(nearestMarkerEdge([], 100, 6))}, ` +
+    `outside=${String(nearestMarkerEdge([50, 150], 100, 6))}`);
+  check('invalid nearest-edge inputs select nothing',
+    nearestMarkerEdge([100], Number.NaN, 6) === null &&
+    nearestMarkerEdge([100], 100, Number.NaN) === null &&
+    nearestMarkerEdge([100], 100, -1) === null,
+    `nanCenter=${String(nearestMarkerEdge([100], Number.NaN, 6))}, ` +
+    `nanRadius=${String(nearestMarkerEdge([100], 100, Number.NaN))}, ` +
+    `negative=${String(nearestMarkerEdge([100], 100, -1))}`);
+  check('control: a zero radius still selects an edge exactly under the center',
+    nearestMarkerEdge([100], 100, 0) === 100,
+    `actual=${String(nearestMarkerEdge([100], 100, 0))}`);
 }
 
 {
@@ -435,15 +577,158 @@ function between(source: string, start: string, end: string): string {
 }
 
 {
+  const reads = freshReads();
+  const marker = new WaveformMarker('A', '#CD427E');
+  marker.setSample(400, 1000);
+  grab(marker, { clientX: 100, clientY: 50, channel: 2 });
+  const snap = snapContext([402, 990], 6, 6, reads);
+  const consumed = moveTo(marker, 400, 120, 50, 1, 1000, snap);
+  check('an eligible edge inside the radius becomes the exact dragged sample',
+    consumed && marker.sample === 402 && reads.count === 1,
+    `consumed=${consumed}, sample=${String(marker.sample)}, reads=${reads.count}`);
+  check('the single edge query uses the ceiling-derived bounded window',
+    reads.windows.length === 1 && reads.windows[0]![0] === 394 && reads.windows[0]![1] === 407,
+    `windows=${JSON.stringify(reads.windows)}`);
+}
+
+{
+  const reads = freshReads();
+  const marker = new WaveformMarker('A', '#CD427E');
+  marker.setSample(400, 1000);
+  grab(marker);
+  moveTo(marker, 400, 120, 50, 1, 1000, snapContext([397, 403], 6, 6, reads));
+  check('a symmetric tie snaps to the earlier edge sample',
+    marker.sample === 397, `sample=${String(marker.sample)}`);
+
+  const elsewhere = new WaveformMarker('A', '#CD427E');
+  elsewhere.setSample(400, 1000);
+  grab(elsewhere);
+  const controlReads = freshReads();
+  moveTo(elsewhere, 400, 120, 50, 1, 1000, snapContext([396, 404], 6, 6, controlReads));
+  check('control: the same tie logic is not hard-wired to one side',
+    elsewhere.sample === 396, `sample=${String(elsewhere.sample)}`);
+}
+
+{
+  const reads = freshReads();
+  const marker = new WaveformMarker('A', '#CD427E');
+  marker.setSample(400, 1000);
+  grab(marker);
+  moveTo(marker, 400, 120, 50, 1, 1000, snapContext([407], 6, 7, reads));
+  check('an in-window edge outside the exact radius falls back to the pointer sample',
+    marker.sample === 400 && reads.count === 1 && reads.windows[0]![1] === 408,
+    `sample=${String(marker.sample)}, reads=${reads.count}, ` +
+    `windows=${JSON.stringify(reads.windows)}`);
+
+  const empty = new WaveformMarker('A', '#CD427E');
+  empty.setSample(400, 1000);
+  grab(empty);
+  const emptyReads = freshReads();
+  moveTo(empty, 420, 130, 50, 1, 1000, snapContext([], 6, 6, emptyReads));
+  check('no edges in the window falls back to the exact rounded pointer sample',
+    empty.sample === 420 && emptyReads.count === 1,
+    `sample=${String(empty.sample)}, reads=${emptyReads.count}`);
+}
+
+{
+  const reads = freshReads();
+  const marker = new WaveformMarker('A', '#CD427E');
+  marker.setSample(500, 1000);
+  grab(marker);
+  const snap = snapContext([], 6, 6, reads);
+  moveTo(marker, 500, 110, 50, 1, 1000, snap);
+  moveTo(marker, 520, 120, 50, 1, 1000, snap);
+  moveTo(marker, 540, 130, 50, 1, 1000, snap);
+  const bounded = reads.windows.every(([lo, hi]) => lo >= 0 && hi <= 1000 && hi - lo <= 13);
+  check('each eligible move performs exactly one bounded edge query',
+    reads.count === 3 && bounded,
+    `reads=${reads.count}, windows=${JSON.stringify(reads.windows)}, bounded=${bounded}`);
+}
+
+{
+  const reads = freshReads();
+  const marker = new WaveformMarker('A', '#CD427E');
+  marker.setSample(400, 1000);
+  grab(marker, { clientX: 100, clientY: 50 });
+  const snap = snapContext([402], 6, 6, reads);
+
+  const same = moveTo(marker, 402, 100, 50, 1, 1000, snap);
+  check('a same-coordinate pre-start move consumes without an edge query',
+    same && reads.count === 0 && marker.sample === 400 && !marker.started,
+    `consumed=${same}, reads=${reads.count}, sample=${String(marker.sample)}, ` +
+    `started=${marker.started}`);
+
+  const latched = moveTo(marker, 400, 120, 50, 1, 1000, snapContext([], 6, 6, reads));
+  const afterLatch = reads.count;
+  check('control: the first differing move is the one that queries',
+    latched && marker.started && afterLatch === 1 && marker.sample === 400,
+    `consumed=${latched}, started=${marker.started}, reads=${afterLatch}, ` +
+    `sample=${String(marker.sample)}`);
+
+  const nanMove = moveTo(marker, Number.NaN, 130, 50, 1, 1000, snap);
+  const infiniteMove = moveTo(marker, Number.POSITIVE_INFINITY, 140, 50, 1, 1000, snap);
+  const emptyMove = moveTo(marker, 300, 150, 50, 1, 0, snap);
+  const nanLengthMove = moveTo(marker, 300, 155, 50, 1, Number.NaN, snap);
+  check('non-finite or empty-capture moves never query and keep the last valid sample',
+    nanMove && infiniteMove && emptyMove && nanLengthMove &&
+    reads.count === afterLatch && marker.sample === 400,
+    `consumed=${nanMove},${infiniteMove},${emptyMove},${nanLengthMove}, ` +
+    `reads=${reads.count}, sample=${String(marker.sample)}`);
+
+  moveTo(marker, -5, 160, 50, 1, 1000, snap);
+  const below = marker.sample;
+  moveTo(marker, 5000, 170, 50, 1, 1000, snap);
+  const above = marker.sample;
+  check('out-of-domain raw samples clamp without an edge query',
+    below === 0 && above === 999 && reads.count === afterLatch,
+    `below=${String(below)}, above=${String(above)}, reads=${reads.count}`);
+
+  const badExact = moveTo(marker, 400, 180, 50, 1, 1000,
+    snapContext([402], Number.NaN, 6, reads));
+  const badExactReads = reads.count;
+  const badQuery = moveTo(marker, 400, 190, 50, 1, 1000,
+    snapContext([402], 6, Number.NaN, reads));
+  check('invalid snap radii disable snapping without querying and keep the pointer sample',
+    badExact && badQuery && badExactReads === afterLatch && reads.count === afterLatch &&
+    marker.sample === 400,
+    `consumed=${badExact},${badQuery}, reads=${reads.count}, sample=${String(marker.sample)}`);
+
+  const noContext = moveTo(marker, 402, 200, 50, 1, 1000, null);
+  check('a move without snap context follows the pointer and queries nothing',
+    noContext && marker.sample === 402 && reads.count === afterLatch,
+    `consumed=${noContext}, sample=${String(marker.sample)}, reads=${reads.count}`);
+
+  const ended = marker.endDrag(1);
+  const afterEnd = moveTo(marker, 800, 210, 50, 1, 1000, snapContext([402], 6, 6, reads));
+  check('a move after the session ended performs no query and is not consumed',
+    ended && !afterEnd && reads.count === afterLatch && marker.sample === 402,
+    `ended=${ended}, consumed=${afterEnd}, reads=${reads.count}, ` +
+    `sample=${String(marker.sample)}`);
+
+  grab(marker, { clientX: 100, clientY: 50 });
+  marker.cancelDrag();
+  const afterCancel = moveTo(marker, 800, 220, 50, 1, 1000, snapContext([402], 6, 6, reads));
+  check('a move after cancellation performs no query and is not consumed',
+    !afterCancel && reads.count === afterLatch,
+    `consumed=${afterCancel}, reads=${reads.count}`);
+}
+
+{
   const markerSource = fs.readFileSync('src/ui/waveformMarker.ts', 'utf8');
   const geometrySource = fs.readFileSync('src/ui/markerGeometry.ts', 'utf8');
   const appSource = fs.readFileSync('src/ui/app.ts', 'utf8');
 
   const markerImports = markerSource.match(/^import .*$/gm) ?? [];
+  const importSpecifiers = [...markerSource.matchAll(/from '([^']+)'/g)].map((m) => m[1]);
+  const geometryImport = between(markerSource, 'import {', "} from './markerGeometry.js';");
+  const geometryNames = (geometryImport.match(/[A-Za-z_$][\w$]*/g) ?? []).slice(1).sort();
   check('the marker class depends only on the pure geometry helpers',
-    markerImports.length === 1 &&
-    markerImports[0] === "import { clampMarkerSample, isMarkerGrab } from './markerGeometry.js';",
-    `imports=${JSON.stringify(markerImports)}`);
+    markerImports.length === 1 && markerImports[0] === 'import {' &&
+    importSpecifiers.length === 1 && importSpecifiers[0] === './markerGeometry.js' &&
+    geometryNames.join(',') ===
+      ['clampMarkerSample', 'isMarkerGrab', 'markerEdgeWindow', 'nearestMarkerEdge'].join(','),
+    `imports=${JSON.stringify(markerImports)}, specifiers=${JSON.stringify(importSpecifiers)}, ` +
+    `names=${JSON.stringify(geometryNames)}`);
 
   const forbidden = [
     'document', 'window', 'addEventListener', 'requestAnimationFrame', 'setInterval',
@@ -523,13 +808,58 @@ function between(source: string, start: string, end: string): string {
     markerMove >= 0 && markerMove < pinchAt && pinchAt >= 0 && pinchAt < panAt &&
     panAt >= 0 && panAt < hoverAt,
     `move=${markerMove}, pinch=${pinchAt}, pan=${panAt}, hover=${hoverAt}`);
-  check('the marker move branch never pans, zooms, or changes follow state',
+  const moveCalls = markerBranch.match(/this\.markerA\.move\(\{/g) ?? [];
+  const snapCalls = markerBranch.match(/snap: this\.markerSnap\(sample\),/g) ?? [];
+  check('the marker move branch supplies exactly one snap context to the single move',
+    moveCalls.length === 1 && snapCalls.length === 1 &&
+    markerBranch.indexOf('const sample = this.toSample(') >= 0 &&
+    markerBranch.indexOf('snap: this.markerSnap(sample),') >
+      markerBranch.indexOf('const sample = this.toSample('),
+    `moves=${moveCalls.length}, snaps=${snapCalls.length}, len=${markerBranch.length}`);
+  check('the marker move branch never pans, zooms, changes follow state, or queries edges itself',
     markerBranch.length > 0 && !markerBranch.includes('panPixels') &&
-    !markerBranch.includes('zoomAt') && !markerBranch.includes('setFollow'),
+    !markerBranch.includes('zoomAt') && !markerBranch.includes('setFollow') &&
+    !markerBranch.includes('store.edges('),
     `len=${markerBranch.length}, pan=${markerBranch.includes('panPixels')}, ` +
-    `zoom=${markerBranch.includes('zoomAt')}, follow=${markerBranch.includes('setFollow')}`);
+    `zoom=${markerBranch.includes('zoomAt')}, follow=${markerBranch.includes('setFollow')}, ` +
+    `branchEdges=${markerBranch.includes('store.edges(')}`);
+
+  const snapSource = between(appSource, 'private markerSnap(', 'private updateHover(');
+  const snapQueries = snapSource.match(/store\.edges\(/g) ?? [];
+  check('the snap context revalidates channel, domain, and radii then makes one bounded read',
+    snapSource.includes('const channel = this.markerA.channel;') &&
+    snapSource.includes('!Number.isInteger(channel) || channel < 0 || channel >= store.channelCount') &&
+    snapSource.includes('this.channels[channel]?.enabled !== true') &&
+    snapSource.includes('center < 0 || center > store.length - 1') &&
+    snapSource.includes('markerSnapRadii(') &&
+    snapSource.includes('globalThis.devicePixelRatio || 1, this.stack.view.samplesPerPixel') &&
+    snapQueries.length === 1 && snapSource.includes('readEdges: (lo, hi) => store.edges(channel, lo, hi),') &&
+    !snapSource.includes('while') && !snapSource.includes('win *= ') &&
+    !snapSource.includes('0, store.length)'),
+    `len=${snapSource.length}, queries=${snapQueries.length}, ` +
+    `loop=${snapSource.includes('while')}, widening=${snapSource.includes('win *= ')}`);
+
+  const snappedAt = markerSource.indexOf('private snappedSample(');
+  const snappedSource = snappedAt >= 0 ? markerSource.slice(snappedAt) : '';
+  const edgeReads = snappedSource.match(/snap\.readEdges\(/g) ?? [];
+  check('the class derives the window, queries once, and selects by exact radius',
+    edgeReads.length === 1 &&
+    snappedSource.includes('markerEdgeWindow(center, snap.queryRadiusSamples, captureLength)') &&
+    snappedSource.includes('snap.readEdges(edgeWindow.lo, edgeWindow.hi)') &&
+    snappedSource.includes('center, snap.exactRadiusSamples,') &&
+    snappedSource.includes('!Number.isFinite(snap.exactRadiusSamples) || snap.exactRadiusSamples < 0') &&
+    snappedSource.includes('!Number.isFinite(snap.queryRadiusSamples) || snap.queryRadiusSamples < 0') &&
+    snappedSource.includes('captureLength < 1 || center < 0 || center > captureLength - 1') &&
+    !snappedSource.includes('for (') && !snappedSource.includes('while'),
+    `len=${snappedSource.length}, reads=${edgeReads.length}, ` +
+    `loop=${snappedSource.includes('for (') || snappedSource.includes('while')}`);
 
   const endSource = between(appSource, 'const end = (e: PointerEvent) => {', "plot.addEventListener('pointerup', end);");
+  check('ordinary click placement writes through setSample without any snap context',
+    endSource.includes('this.markerA.setSample(s, this.store.length);') &&
+    !endSource.includes('markerSnap') && !endSource.includes('edges('),
+    `click=${endSource.includes('this.markerA.setSample(s, this.store.length);')}, ` +
+    `snap=${endSource.includes('markerSnap')}, edges=${endSource.includes('edges(')}`);
   const endRelease = 'const markerEnded = this.markerA.endDrag(e.pointerId);';
   const endDragAt = endSource.indexOf(endRelease);
   const deleteAt = endSource.indexOf('pointers.delete(e.pointerId);');
@@ -607,6 +937,21 @@ function between(source: string, start: string, end: string): string {
     debugSource.includes('channel: this.markerA.channel,') &&
     !debugSource.includes('cursorB'),
     `len=${debugSource.length}, markerSetters=${(debugSource.match(/set[A-Z]\w*: \(/g) ?? []).join(',')}`);
+
+  const debugEdges = between(
+    appSource, 'edges: (channel: number, lo: number, hi: number) => {', 'hoverAt:');
+  check('the debug edge reader guards the channel and integral bounds and rejects invalid input',
+    debugSource.includes('edges: (channel: number, lo: number, hi: number) => {') &&
+    debugEdges.includes('if (!Number.isInteger(channel) || channel < 0 || channel >= store.channelCount) return [];') &&
+    debugEdges.includes('if (!Number.isInteger(lo) || !Number.isInteger(hi)) return [];') &&
+    debugEdges.includes('const start = Math.max(0, lo);') &&
+    debugEdges.includes('const end = Math.min(store.length, hi);') &&
+    debugEdges.includes('if (start >= end) return [];') &&
+    debugEdges.includes('return Array.from(store.edges(channel, start, end));') &&
+    !debugEdges.includes('Math.floor(lo)') && !debugEdges.includes('Math.ceil(hi)') &&
+    !debugEdges.includes('cursorB'),
+    `len=${debugEdges.length}, window=${debugEdges.includes('store.edges(channel, start, end)')}, ` +
+    `floorLo=${debugEdges.includes('Math.floor(lo)')}, ceilHi=${debugEdges.includes('Math.ceil(hi)')}`);
 
   const rowAtSource = between(appSource, 'private rowAt(cssY: number)', 'private tryGrabMarker(');
   const grabMarkerSource = between(appSource, 'private tryGrabMarker(', 'private updateHover(');

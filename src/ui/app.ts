@@ -62,7 +62,8 @@ import {
   type CaptureLabel, type StatusError,
 } from './state.js';
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
-import { WaveformMarker } from './waveformMarker.js';
+import { markerSnapRadii } from './markerGeometry.js';
+import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
 
 /** Where Pyodide and the decoder zip live; content-hashed in hosted builds (vite.config.ts). */
@@ -810,12 +811,14 @@ export class App {
       if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.markerA.isDragging) {
         this.stack.syncSize();
+        const sample = this.toSample(e.clientX - rect.left);
         const consumed = this.markerA.move({
           pointerId: e.pointerId,
           clientX: e.clientX,
           clientY: e.clientY,
-          sample: this.toSample(e.clientX - rect.left),
+          sample,
           captureLength: this.store.length,
+          snap: this.markerSnap(sample),
         });
         if (consumed) { this.dirty = true; return; }
       }
@@ -964,6 +967,24 @@ export class App {
       channel: row?.spec.channel ?? null,
       captureLength: this.store.length,
     });
+  }
+
+  private markerSnap(center: number): MarkerSnapContext | null {
+    const channel = this.markerA.channel;
+    const store = this.store;
+    if (channel === null) return null;
+    if (!Number.isInteger(channel) || channel < 0 || channel >= store.channelCount) return null;
+    if (this.channels[channel]?.enabled !== true) return null;
+    if (!Number.isFinite(center) || center < 0 || center > store.length - 1) return null;
+    const radii = markerSnapRadii(
+      globalThis.devicePixelRatio || 1, this.stack.view.samplesPerPixel,
+    );
+    if (radii === null) return null;
+    return {
+      exactRadiusSamples: radii.exactRadiusSamples,
+      queryRadiusSamples: radii.queryRadiusSamples,
+      readEdges: (lo, hi) => store.edges(channel, lo, hi),
+    };
   }
 
   /**
@@ -1974,6 +1995,15 @@ export class App {
       pointerId: this.markerA.pointerId,
       channel: this.markerA.channel,
     }),
+    edges: (channel: number, lo: number, hi: number) => {
+      const store = this.store;
+      if (!Number.isInteger(channel) || channel < 0 || channel >= store.channelCount) return [];
+      if (!Number.isInteger(lo) || !Number.isInteger(hi)) return [];
+      const start = Math.max(0, lo);
+      const end = Math.min(store.length, hi);
+      if (start >= end) return [];
+      return Array.from(store.edges(channel, start, end));
+    },
     hoverAt: (cssX: number, cssY: number) => this.updateHover(cssX, cssY),
     toggleChannel: (i: number, on: boolean) => this.setChannelEnabled(i, on),
     rename: (i: number, name: string) => {

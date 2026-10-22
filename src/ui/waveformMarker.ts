@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
 
-import { clampMarkerSample, isMarkerGrab } from './markerGeometry.js';
+import {
+  clampMarkerSample, isMarkerGrab, markerEdgeWindow, nearestMarkerEdge,
+} from './markerGeometry.js';
 
 export interface MarkerPaintTarget {
   drawCursor(x: number, color: string, label: string): void;
@@ -17,12 +19,19 @@ export interface MarkerGrabRequest {
   captureLength: number;
 }
 
+export interface MarkerSnapContext {
+  exactRadiusSamples: number;
+  queryRadiusSamples: number;
+  readEdges(lo: number, hi: number): ArrayLike<number>;
+}
+
 export interface MarkerMoveRequest {
   pointerId: number;
   clientX: number;
   clientY: number;
   sample: number;
   captureLength: number;
+  snap?: MarkerSnapContext | null;
 }
 
 interface MarkerDragSession {
@@ -103,7 +112,8 @@ export class WaveformMarker {
       if (request.clientX === drag.pressX && request.clientY === drag.pressY) return true;
       drag.started = true;
     }
-    const next = clampMarkerSample(request.sample, request.captureLength);
+    const snapped = this.snappedSample(request.sample, request.captureLength, request.snap);
+    const next = snapped ?? clampMarkerSample(request.sample, request.captureLength);
     if (next !== null) this.value = next;
     return true;
   }
@@ -117,5 +127,20 @@ export class WaveformMarker {
 
   cancelDrag(): void {
     this.drag = null;
+  }
+
+  private snappedSample(
+    center: number, captureLength: number, snap: MarkerSnapContext | null | undefined,
+  ): number | null {
+    if (!snap) return null;
+    if (!Number.isFinite(snap.exactRadiusSamples) || snap.exactRadiusSamples < 0) return null;
+    if (!Number.isFinite(snap.queryRadiusSamples) || snap.queryRadiusSamples < 0) return null;
+    if (!Number.isFinite(center) || !Number.isFinite(captureLength)) return null;
+    if (captureLength < 1 || center < 0 || center > captureLength - 1) return null;
+    const edgeWindow = markerEdgeWindow(center, snap.queryRadiusSamples, captureLength);
+    if (edgeWindow === null) return null;
+    return nearestMarkerEdge(
+      snap.readEdges(edgeWindow.lo, edgeWindow.hi), center, snap.exactRadiusSamples,
+    );
   }
 }
