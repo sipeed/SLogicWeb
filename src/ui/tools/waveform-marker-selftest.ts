@@ -121,6 +121,55 @@ function recordingTarget(calls: DrawCall[]): MarkerPaintTarget {
     !/markers\s*[:=]|WaveformMarkers|MarkerManager/.test(markerSource + appSource),
     `markerSource=${/markers\s*[:=]|WaveformMarkers|MarkerManager/.test(markerSource)}, ` +
     `appSource=${/markers\s*[:=]|WaveformMarkers|MarkerManager/.test(appSource)}`);
+
+  const bTraces = ['cursorB', 'setCursors', "'B'", '|B-A|', '1/|B-A|']
+    .filter((token) => appSource.includes(token));
+  check('marker B leaves no state, draw, status segment, or debug parameter behind',
+    bTraces.length === 0, `traces=${JSON.stringify(bTraces)}`);
+
+  const aStatus = appSource.match(/parts\.push\(`A /g) ?? [];
+  check('the A status segment has exactly one producing path',
+    aStatus.length === 1, `segments=${aStatus.length}`);
+
+  const endStart = appSource.indexOf('const end = (e: PointerEvent) => {');
+  const endEnd = appSource.indexOf("plot.addEventListener('pointerup', end);");
+  const clickSource = endStart >= 0 && endEnd > endStart
+    ? appSource.slice(endStart, endEnd) : '';
+  check('plain and Shift click both place only the A marker',
+    clickSource.length > 0 && clickSource.includes('this.markerA.sample = s;') &&
+    !clickSource.includes('shiftKey'),
+    `len=${clickSource.length}, assigns=${clickSource.includes('this.markerA.sample = s;')}, ` +
+    `shift=${clickSource.includes('shiftKey')}`);
+
+  const debugStart = appSource.indexOf('readonly debug = {');
+  const hoverAt = appSource.indexOf('hoverAt: (cssX: number, cssY: number)', debugStart);
+  const debugSource = debugStart >= 0 && hoverAt > debugStart
+    ? appSource.slice(debugStart, hoverAt) : '';
+  check('the debug surface exposes one single-marker setter and readout',
+    debugSource.includes('setMarker: (sample: number | null) => {') &&
+    debugSource.includes('this.markerA.sample = sample;') &&
+    debugSource.includes('marker: () => ({') &&
+    debugSource.includes('sample: this.markerA.sample,') &&
+    !debugSource.includes('cursorB'),
+    `len=${debugSource.length}, markerSetters=${(debugSource.match(/set[A-Z]\w*: \(/g) ?? []).join(',')}`);
+
+  const overlaySource = fs.readFileSync('src/ui/overlay.ts', 'utf8');
+  const metricsSource = fs.readFileSync('src/ui/metrics.ts', 'utf8');
+  const hoverStart = appSource.indexOf('private updateHover(');
+  const hoverEnd = appSource.indexOf('private setFollow(', hoverStart);
+  const hoverSource = hoverStart >= 0 && hoverEnd > hoverStart
+    ? appSource.slice(hoverStart, hoverEnd) : '';
+  const hoverFreq = (hoverSource.match(/formatFreq\(/g) ?? []).length;
+  const hoverFreqReadout = hoverSource.includes("t('hover.freq'");
+  const sharedPalette = metricsSource.includes(
+    "export const MEASURE_COLORS: readonly string[] = ['#CD427E', '#00994D', '#2683D9', '#DB4C39'];");
+  const sharedCursor = overlaySource.includes(
+    'drawCursor(x: number, color: string, label: string): void {');
+  check('the shared palette, overlay cursor API, and hover frequency readout survive B removal',
+    sharedPalette && sharedCursor && hoverFreq === 2 && hoverFreqReadout &&
+    !hoverSource.includes('|B-A|') && !hoverSource.includes('cursorB'),
+    `palette=${sharedPalette}, overlay=${sharedCursor}, hoverFreq=${hoverFreq}, ` +
+    `freqReadout=${hoverFreqReadout}, len=${hoverSource.length}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

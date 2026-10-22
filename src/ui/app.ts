@@ -146,7 +146,6 @@ export class App {
   private abort: AbortController | null = null;
 
   private readonly markerA = new WaveformMarker('A', MEASURE_COLORS[0]!);
-  private cursorB: number | null = null;
   private hover: HoverMeasurement | null = null;
 
   private dirty = true;
@@ -659,9 +658,6 @@ export class App {
       this.overlay.drawLiveEdge(this.toPx(this.store.length));
     }
     this.markerA.draw(this.overlay, (sample) => this.toPx(sample));
-    if (this.cursorB !== null) {
-      this.overlay.drawCursor(this.toPx(this.cursorB), MEASURE_COLORS[2]!, 'B');
-    }
     if (this.hover) this.overlay.drawHover(this.hover);
 
     this.renderStatus();
@@ -847,11 +843,11 @@ export class App {
       // `touch-action: pan-y` that is every vertical scroll of the channel stack,
       // which has near-zero horizontal displacement and must not read as a click.
       if (e.type === 'pointercancel') return;
-      // A click, not a drag: place a cursor. Shift places B.
+      // A click, not a drag: place a cursor.
       if (moved < 3 && Math.abs(e.clientX - downX) < 3 && this.store.length > 0) {
         const rect = plot.getBoundingClientRect();
         const s = Math.round(this.toSample(e.clientX - rect.left));
-        if (e.shiftKey) this.cursorB = s; else this.markerA.sample = s;
+        this.markerA.sample = s;
         this.dirty = true;
       }
     };
@@ -901,11 +897,7 @@ export class App {
         e.preventDefault();
         this.primaryAction();
       }
-      if (e.key === 'Escape') {
-        this.markerA.clear();
-        this.cursorB = null;
-        this.dirty = true;
-      }
+      if (e.key === 'Escape') { this.markerA.clear(); this.dirty = true; }
     });
 
     // Drag and drop a capture file straight onto the window.
@@ -1264,12 +1256,6 @@ export class App {
     const origin = this.triggerSampleIndex ?? 0;
     const markerSample = this.markerA.sample;
     if (markerSample !== null) parts.push(`A ${formatDuration((markerSample - origin) / sr)}`);
-    if (this.cursorB !== null) parts.push(`B ${formatDuration((this.cursorB - origin) / sr)}`);
-    if (markerSample !== null && this.cursorB !== null) {
-      const d = Math.abs(this.cursorB - markerSample) / sr;
-      parts.push(`|B-A| ${formatDuration(d)}`);
-      if (d > 0) parts.push(`1/|B-A| ${formatFreq(1 / d)}`);
-    }
 
     this.el.status.replaceChildren();
     parts.forEach((p, i) => {
@@ -1371,7 +1357,6 @@ export class App {
     }
     this.resetBusBuilds();
     this.markerA.clear();
-    this.cursorB = null;
     this.triggerState = 'off';
     this.triggerSampleIndex = null;
     this.captureLabel = label;
@@ -1918,9 +1903,8 @@ export class App {
       this.stack.setViewport(a * sr, b * sr);
       this.dirty = true;
     },
-    setCursors: (a: number | null, b: number | null) => {
-      this.markerA.sample = a;
-      this.cursorB = b;
+    setMarker: (sample: number | null) => {
+      this.markerA.sample = sample;
       this.dirty = true;
     },
     marker: () => ({
