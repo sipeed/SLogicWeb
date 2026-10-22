@@ -468,7 +468,8 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     'this.drawLaneBubbles(boxes, wCss);',
     'this.overlay.drawTrigger(',
     'this.overlay.drawLiveEdge(',
-    'this.overlay.drawCursor(this.toPx(this.cursorA)',
+    'this.markerA.draw(this.overlay,',
+    'if (this.cursorB !== null) {',
     'this.overlay.drawCursor(this.toPx(this.cursorB)',
     'this.overlay.drawHover(this.hover);',
   ];

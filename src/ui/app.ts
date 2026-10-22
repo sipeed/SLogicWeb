@@ -62,6 +62,7 @@ import {
   type CaptureLabel, type StatusError,
 } from './state.js';
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
+import { WaveformMarker } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
 
 /** Where Pyodide and the decoder zip live; content-hashed in hosted builds (vite.config.ts). */
@@ -144,7 +145,7 @@ export class App {
   private readonly demoAnalyzers = new Set<string>();
   private abort: AbortController | null = null;
 
-  private cursorA: number | null = null;
+  private readonly markerA = new WaveformMarker('A', MEASURE_COLORS[0]!);
   private cursorB: number | null = null;
   private hover: HoverMeasurement | null = null;
 
@@ -657,9 +658,7 @@ export class App {
     if (this.running && this.store.length > 0) {
       this.overlay.drawLiveEdge(this.toPx(this.store.length));
     }
-    if (this.cursorA !== null) {
-      this.overlay.drawCursor(this.toPx(this.cursorA), MEASURE_COLORS[0]!, 'A');
-    }
+    this.markerA.draw(this.overlay, (sample) => this.toPx(sample));
     if (this.cursorB !== null) {
       this.overlay.drawCursor(this.toPx(this.cursorB), MEASURE_COLORS[2]!, 'B');
     }
@@ -852,7 +851,7 @@ export class App {
       if (moved < 3 && Math.abs(e.clientX - downX) < 3 && this.store.length > 0) {
         const rect = plot.getBoundingClientRect();
         const s = Math.round(this.toSample(e.clientX - rect.left));
-        if (e.shiftKey) this.cursorB = s; else this.cursorA = s;
+        if (e.shiftKey) this.cursorB = s; else this.markerA.sample = s;
         this.dirty = true;
       }
     };
@@ -902,7 +901,11 @@ export class App {
         e.preventDefault();
         this.primaryAction();
       }
-      if (e.key === 'Escape') { this.cursorA = null; this.cursorB = null; this.dirty = true; }
+      if (e.key === 'Escape') {
+        this.markerA.clear();
+        this.cursorB = null;
+        this.dirty = true;
+      }
     });
 
     // Drag and drop a capture file straight onto the window.
@@ -1259,10 +1262,11 @@ export class App {
     // Cursor positions share the axis's origin: T=0 is the trigger sample when there
     // is one, so a pre-trigger cursor reads as the negative time the axis shows.
     const origin = this.triggerSampleIndex ?? 0;
-    if (this.cursorA !== null) parts.push(`A ${formatDuration((this.cursorA - origin) / sr)}`);
+    const markerSample = this.markerA.sample;
+    if (markerSample !== null) parts.push(`A ${formatDuration((markerSample - origin) / sr)}`);
     if (this.cursorB !== null) parts.push(`B ${formatDuration((this.cursorB - origin) / sr)}`);
-    if (this.cursorA !== null && this.cursorB !== null) {
-      const d = Math.abs(this.cursorB - this.cursorA) / sr;
+    if (markerSample !== null && this.cursorB !== null) {
+      const d = Math.abs(this.cursorB - markerSample) / sr;
       parts.push(`|B-A| ${formatDuration(d)}`);
       if (d > 0) parts.push(`1/|B-A| ${formatFreq(1 / d)}`);
     }
@@ -1366,7 +1370,7 @@ export class App {
       a.result = null; a.index = null; a.status = 'idle'; a.note = { kind: 'pending' };
     }
     this.resetBusBuilds();
-    this.cursorA = null;
+    this.markerA.clear();
     this.cursorB = null;
     this.triggerState = 'off';
     this.triggerSampleIndex = null;
@@ -1915,10 +1919,15 @@ export class App {
       this.dirty = true;
     },
     setCursors: (a: number | null, b: number | null) => {
-      this.cursorA = a;
+      this.markerA.sample = a;
       this.cursorB = b;
       this.dirty = true;
     },
+    marker: () => ({
+      label: this.markerA.label,
+      color: this.markerA.color,
+      sample: this.markerA.sample,
+    }),
     hoverAt: (cssX: number, cssY: number) => this.updateHover(cssX, cssY),
     toggleChannel: (i: number, on: boolean) => this.setChannelEnabled(i, on),
     rename: (i: number, name: string) => {
