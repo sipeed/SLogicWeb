@@ -773,6 +773,22 @@ function rgb255ToHex([r, g, b]: [number, number, number]): string {
     `notched=${notched.join(',') || '(none)'}, majorDimmer=${majorDimmer}, gridVisible=${gridVisible}`);
 }
 
+{
+  const t = LIGHT_CHROME_TOKENS;
+  const inks: Array<[string, number]> = [
+    ['fg-on-bg', contrast(t['--text']!, t['--background']!)],
+    ['body-on-bg', contrast(t['--text80']!, t['--background']!)],
+    ['muted-on-bg', contrast(t['--muted-foreground']!, t['--background']!)],
+    ['on-primary', contrast(t['--primary-foreground']!, t['--primary']!)],
+    ['on-destructive', contrast(t['--destructive-foreground']!, t['--destructive']!)],
+    ['console-on-bg00', contrast(t['--console-fg']!, t['--bg00']!)],
+  ];
+  const minInk = Math.min(...inks.map(([, v]) => v));
+  check('the light chrome inks clear WCAG AA (4.5:1) on their grounds',
+    minInk >= 4.5,
+    `min=${minInk.toFixed(2)} (${inks.map(([k, v]) => `${k}=${v.toFixed(2)}`).join(', ')})`);
+}
+
 // ---------------------------------------------------------------------- report
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
