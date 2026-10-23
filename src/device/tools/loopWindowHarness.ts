@@ -207,8 +207,8 @@ export async function runLoopArm(options: LoopHarnessOptions): Promise<LoopArmRe
   if (options.transport === 'page') {
     const device = new ClockStreamDevice(bytesPerMs, options.fifoBytes ?? 262_144);
     const dev = new Slogic16U3(device as unknown as USBDevice);
-    await dev.open();
     try {
+      await dev.open();
       await dev.start(cfg, consumer.sink);
       await new Promise((r) => setTimeout(r, options.seconds * 1000));
       await dev.stop();
@@ -227,10 +227,17 @@ export async function runLoopArm(options: LoopHarnessOptions): Promise<LoopArmRe
     if (event.data?.kind !== 'harness-report') return;
     probe.dropped = event.data.droppedBytes ?? 0;
   });
-  const dev = await WorkerSlogicDevice.open(
-    { vendorId: 0x359f, productId: 0x3032, serial: 'clock' },
-    { spawn: () => worker, openTimeoutMs: 5000 },
-  );
+  let dev: WorkerSlogicDevice;
+  try {
+    dev = await WorkerSlogicDevice.open(
+      { vendorId: 0x359f, productId: 0x3032, serial: 'clock' },
+      { spawn: () => worker, openTimeoutMs: 5000 },
+    );
+  } catch (e) {
+    consumer.stop();
+    worker.terminate();
+    throw e;
+  }
   try {
     await dev.start(cfg, consumer.sink);
     await new Promise((r) => setTimeout(r, options.seconds * 1000));

@@ -77,6 +77,10 @@ function evalInPage(expression, timeoutMs) {
       const message = JSON.parse(event.data);
       if (message.id !== id) return;
       clearTimeout(timer);
+      if (message.result?.exceptionDetails) {
+        bad(new Error(`page evaluation failed: ${JSON.stringify(message.result.exceptionDetails)}`));
+        return;
+      }
       ok(message.result?.result?.value);
     };
     ws.send(JSON.stringify({
@@ -119,9 +123,9 @@ for (const cell of results) {
     const r = cell[armName];
     if (!r) continue;
     const head = `${(cell.rate / 1e6).toFixed(0).padStart(3)} MHz ${(cell.retention / cell.rate).toFixed(2).padStart(6)} s ` +
-      `${fmtSamples(cell.retention).padStart(8)} ${r.path.padEnd(7)} ${armName.padEnd(6)}`;
+      `${fmtSamples(cell.retention).padStart(8)} ${(r.path ?? '?').padEnd(7)} ${armName.padEnd(6)}`;
     if (r.error) {
-      console.log(`${head}${cell.control ? ' [control]' : ''} ABORTED after ${r.transfers} transfers: ${r.error.split(': ').slice(2).join(': ')}`);
+      console.log(`${head}${cell.control ? ' [control]' : ''} ABORTED after ${r.transfers ?? 0} transfers: ${r.error.split(': ').slice(2).join(': ')}`);
       continue;
     }
     console.log(`${head}${cell.control ? ' [control]' : '          '} ${(100 * r.sustainedMBps / r.expectedMBps).toFixed(1).padStart(6)}% ` +
