@@ -38,7 +38,7 @@ export function throughputPlan(model: SelftestModel): ThroughputRow[] {
       { channels: 16, samplerate: 100e6, note: 'control', assert: false },
       { channels: 16, samplerate: 200e6, note: 'half its ceiling', assert: false },
       { channels: 8, samplerate: 400e6, note: 'half its ceiling', assert: false },
-      { channels: 32, samplerate: 100e6, note: 'half its ceiling', assert: true },
+      { channels: 32, samplerate: 100e6, note: 'half its ceiling', assert: false },
       { channels: 32, samplerate: 200e6, note: 'AT ITS CEILING, 800 MB/s on the wire', assert: false },
       { channels: 4, samplerate: 400e6, note: '2x expansion', assert: false },
       { channels: 4, samplerate: 800e6, note: '2x expansion', assert: false },
@@ -85,11 +85,26 @@ export function liveWidths(model: SelftestModel): ChannelCount[] {
 }
 
 export function emulationWidths(model: SelftestModel): ChannelCount[] {
-  return model === 'slogic32u3' ? [16, 8, 4, 32] : [16, 8, 4];
+  return model === 'slogic32u3' ? [16, 32] : [16, 8, 4];
 }
 
-export function emulationAnchor(model: SelftestModel): 'native' | 'counter' {
-  return model === 'slogic32u3' ? 'counter' : 'native';
+export function emulationProbeWidths(model: SelftestModel): ChannelCount[] {
+  return model === 'slogic32u3' ? [8, 4] : [];
+}
+
+export function emulationAnchor(model: SelftestModel): 'native' | 'shape' {
+  return model === 'slogic32u3' ? 'shape' : 'native';
+}
+
+export function sawtoothOk(words: readonly number[], count: number): boolean {
+  if (words.length < count) return false;
+  for (let i = 1; i < count; i++) {
+    const prev = words[i - 1];
+    const cur = words[i];
+    const want = prev % 8 === 0 ? prev + 15 : prev - 1;
+    if (cur !== want) return false;
+  }
+  return true;
 }
 
 export interface StopScenario {

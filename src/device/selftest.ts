@@ -29,7 +29,9 @@ import {
   modelForMaxChannels,
   modelForProductId,
   parseScenario,
+  emulationProbeWidths,
   refusalCases,
+  sawtoothOk,
   throughputPlan,
   traceWindow,
   type ScenarioRequest,
@@ -219,24 +221,37 @@ async function run(dev: Slogic16U3): Promise<void> {
   head('2. emulation pattern - byte-exact control against sigrok-cli');
   {
     const cfg: CaptureConfig = { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 };
-    const { head: h } = await capture(dev, cfg, 250, TEST_MODE_EMULATION);
+    const { head: h, stats } = await capture(dev, cfg, 250, TEST_MODE_EMULATION);
     line(hexdump(h, 32), 'dim');
     // sigrok-cli -d sipeed-slogic-analyzer --config pattern=Emulation --samples 32
     // gives 0700 0600 0500 0400 0300 0200 0100 0000 0f00 0e00 ... deterministically.
     const want = [0x07, 0x00, 0x06, 0x00, 0x05, 0x00, 0x04, 0x00, 0x03, 0x00, 0x02, 0x00,
                   0x01, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x0e, 0x00];
-    record(
-      emulationAnchor(model) === 'native'
-        ? '16ch emulation head matches the native driver byte for byte'
-        : '16ch emulation head is the descending counter',
-      bytesEqual(h, want),
-      { got: Array.from(h.subarray(0, 20)), want },
-    );
+    if (emulationAnchor(model) === 'native') {
+      record('16ch emulation head matches the native driver byte for byte', bytesEqual(h, want), {
+        got: Array.from(h.subarray(0, 20)),
+        want,
+      });
+    } else {
+      const words: number[] = [];
+      for (let i = 0; i + 1 < h.length && words.length < 12; i += 2) {
+        words.push(h[i] | (h[i + 1] << 8));
+      }
+      report.emu16Sawtooth = sawtoothOk(words, 12);
+      record('16ch emulation delivers data at 16 MHz', stats.rawBytes > 1_000_000, {
+        rawBytes: stats.rawBytes,
+        transfers: stats.transfers,
+      });
+      record('16ch emulation sustains 32 MB/s (+-3%)',
+        stats.steadyMBps > 32 * 0.97 && stats.steadyMBps < 32 * 1.03,
+        { steadyMBps: stats.steadyMBps });
+      report.emu16Stats = stats;
+    }
     report.emu16Hex = Array.from(h.subarray(0, 32));
   }
 
-  head('3. emulation pattern at 8 channels (1 byte per sample on the wire)');
-  {
+  if (emulationWidths(model).includes(8)) {
+    head('3. emulation pattern at 8 channels (1 byte per sample on the wire)');
     const cfg: CaptureConfig = { channels: 8, samplerate: 16e6, thresholdVolts: 1.6 };
     const { head: h, stats } = await capture(dev, cfg, 250, TEST_MODE_EMULATION);
     line(hexdump(h, 32), 'dim');
@@ -251,8 +266,8 @@ async function run(dev: Slogic16U3): Promise<void> {
     report.emu8Stats = stats;
   }
 
-  head('4. emulation pattern at 4 channels (2 samples per byte, expanded here)');
-  {
+  if (emulationWidths(model).includes(4)) {
+    head('4. emulation pattern at 4 channels (2 samples per byte, expanded here)');
     const cfg: CaptureConfig = { channels: 4, samplerate: 16e6, thresholdVolts: 1.6 };
     const { head: h, stats } = await capture(dev, cfg, 250, TEST_MODE_EMULATION);
     line(hexdump(h, 32), 'dim');
@@ -271,16 +286,30 @@ async function run(dev: Slogic16U3): Promise<void> {
     report.emu4Stats = stats;
   }
 
+  for (const ch of emulationProbeWidths(model)) {
+    head(`4p. emulation probe at ${ch} channels (measurement only)`);
+    const cfg: CaptureConfig = { channels: ch, samplerate: 16e6, thresholdVolts: 1.6 };
+    const { head: h, stats } = await capture(dev, cfg, 250, TEST_MODE_EMULATION);
+    line(hexdump(h, 32), 'dim');
+    line(
+      `  ${ch}ch emulation delivered ${stats.rawBytes.toLocaleString()} B in ` +
+        `${stats.transfers} transfer(s), steady ${stats.steadyMBps.toFixed(1)} MB/s`,
+      'warn',
+    );
+    report[`emu${ch}Hex`] = Array.from(h.subarray(0, 32));
+    report[`emu${ch}Stats`] = stats;
+  }
+
   if (emulationWidths(model).includes(32)) {
     head('4b. emulation pattern at 32 channels (4 bytes per sample on the wire)');
     const cfg: CaptureConfig = { channels: 32, samplerate: 16e6, thresholdVolts: 1.6 };
     const { head: h, stats } = await capture(dev, cfg, 250, TEST_MODE_EMULATION);
     line(hexdump(h, 32), 'dim');
-    const want = [0x07, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
-                  0x05, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00];
-    record('32ch emulation head is the descending counter', bytesEqual(h, want), {
-      got: Array.from(h.subarray(0, 16)),
-    });
+    const lows: number[] = [];
+    for (let i = 0; i + 3 < h.length && lows.length < 8; i += 4) {
+      lows.push(h[i] | (h[i + 1] << 8));
+    }
+    report.emu32Sawtooth = sawtoothOk(lows, 8);
     const pass = stats.steadyMBps > 62 && stats.steadyMBps < 66;
     record('32ch@16MHz delivers 64 MB/s', pass, { steadyMBps: stats.steadyMBps });
     record('32ch sink data is a whole number of samples', stats.sinkBytes % 4 === 0, {

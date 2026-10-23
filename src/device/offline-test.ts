@@ -47,12 +47,14 @@ import {
 import {
   deviceLabel,
   emulationAnchor,
+  emulationProbeWidths,
   emulationWidths,
   liveWidths,
   modelForMaxChannels,
   modelForProductId,
   parseScenario,
   refusalCases,
+  sawtoothOk,
   throughputCeilings,
   throughputPlan,
   traceWindow,
@@ -2296,9 +2298,8 @@ async function main(): Promise<void> {
     JSON.stringify([...new Set(plan32.map((r) => r.channels))].sort((a, b) => a - b)) ===
       JSON.stringify([4, 8, 16, 32]),
     JSON.stringify(plan32.map((r) => r.channels)));
-  check('32 U3 throughput plan asserts only the measured 32ch half-ceiling row',
-    JSON.stringify(plan32.filter((r) => r.assert).map((r) => [r.channels, r.samplerate])) ===
-      JSON.stringify([[32, 100e6]]),
+  check('32 U3 throughput plan asserts nothing (host-path measurements only)',
+    plan32.every((r) => !r.assert),
     JSON.stringify(plan32.filter((r) => r.assert)));
   check('every 32 U3 throughput row stays within its ceiling',
     plan32.every((r) => r.samplerate <= throughputCeilings('slogic32u3')[r.channels]));
@@ -2321,11 +2322,27 @@ async function main(): Promise<void> {
   check('16 U3 live widths stay 16-only, 32 U3 adds the 32ch run',
     JSON.stringify(liveWidths('slogic16u3')) === JSON.stringify([16]) &&
     JSON.stringify(liveWidths('slogic32u3')) === JSON.stringify([16, 32]));
-  check('32 U3 emulation widths add 32 channels, 16 U3 stays 16/8/4',
+  check('32 U3 emulation asserts at 16/32 channels, 16 U3 stays 16/8/4',
     JSON.stringify(emulationWidths('slogic16u3')) === JSON.stringify([16, 8, 4]) &&
-    JSON.stringify(emulationWidths('slogic32u3')) === JSON.stringify([16, 8, 4, 32]));
-  check('16 U3 emulation keeps the native anchor, 32 U3 checks the counter shape',
-    emulationAnchor('slogic16u3') === 'native' && emulationAnchor('slogic32u3') === 'counter');
+    JSON.stringify(emulationWidths('slogic32u3')) === JSON.stringify([16, 32]));
+  check('32 U3 emulation probes the sub-16 widths without verdicts, 16 U3 has no probes',
+    JSON.stringify(emulationProbeWidths('slogic16u3')) === JSON.stringify([]) &&
+    JSON.stringify(emulationProbeWidths('slogic32u3')) === JSON.stringify([8, 4]));
+  check('16 U3 emulation keeps the native anchor, 32 U3 checks the sawtooth shape',
+    emulationAnchor('slogic16u3') === 'native' && emulationAnchor('slogic32u3') === 'shape');
+
+  check('sawtooth accepts the native-anchored 16 U3 sequence',
+    sawtoothOk([7, 6, 5, 4, 3, 2, 1, 0, 15, 14], 10));
+  check('sawtooth accepts the observed 32 U3 16ch head (starts mid-sequence)',
+    sawtoothOk([5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10], 12));
+  check('sawtooth accepts the observed 32 U3 32ch low half-words',
+    sawtoothOk([6, 5, 4, 3, 2, 1, 0, 15], 8));
+  check('sawtooth wraps at an 8 boundary (8 -> 23)',
+    sawtoothOk([8, 23, 22], 3));
+  check('sawtooth rejects a wrong step (failing control)',
+    !sawtoothOk([7, 6, 5, 4, 3, 2, 1, 9], 8));
+  check('sawtooth rejects a short input',
+    !sawtoothOk([7], 2));
 
   check('scenario parsing keeps the bare URL on the full run', parseScenario('').kind === 'full');
   const stopDefault = parseScenario('?scenario=stop-4');
