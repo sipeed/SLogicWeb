@@ -92,6 +92,17 @@ export function splitAroundGaps(
   return out;
 }
 
+export function shiftGapsFront(list: readonly GapSpan[], dropped: number): GapSpan[] {
+  let out: GapSpan[] = [];
+  for (const g of list) {
+    const startSample = g.startSample - dropped;
+    const endSample = g.endSample - dropped;
+    if (endSample <= 0) continue;
+    out = mergeGap(out, Math.max(0, startSample), endSample);
+  }
+  return out;
+}
+
 /**
  * Reconstruct one channel as (initial level, edge positions) from a store that may have
  * gaps, preserving the level on the far side of every gap.

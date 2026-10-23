@@ -112,6 +112,10 @@ export class InterleavedSampleStore implements SampleStore {
     }
   }
 
+  dropFront(_samples: number): void {
+    throw new Error('InterleavedSampleStore does not support drop-front retention');
+  }
+
   append(chunk: Uint8Array): void {
     const bps = this.bytesPerSample;
     if (chunk.byteLength % bps !== 0) throw new Error(`chunk of ${chunk.byteLength} bytes is not whole samples`);

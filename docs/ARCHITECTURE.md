@@ -64,6 +64,12 @@ export interface SampleStore {
   readonly samplerate: number;
   readonly length: number;                 // samples
   append(chunk: Uint8Array): void;
+  /** Forget the oldest `samples` (a multiple of DROP_FRONT_QUANTUM): every position
+   *  shifts down and `length` shrinks, so a loop capture keeps only the newest
+   *  window. Callers needing absolute positions keep their own drop offset.
+   *  Stores that cannot retain (imported captures, the interleaved 32-channel
+   *  layout) throw. */
+  dropFront(samples: number): void;
   /** Downsampled view for rendering: for each of `bins` pixel columns over
    *  [startSample, endSample), the low bit, the high bit and whether the column
    *  contains at least one edge. Must be O(bins), not O(samples). */

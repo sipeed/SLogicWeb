@@ -55,6 +55,7 @@ export class BitPlane {
   readonly blocks: Uint32Array[] = [];
   /** Number of bits that have been written. Bits past this are zero but meaningless. */
   bits = 0;
+  head = 0;
 
   constructor(blockBitsLog: number) {
     if (blockBitsLog < 5 || blockBitsLog > 30) throw new Error(`bad blockBitsLog ${blockBitsLog}`);
@@ -66,8 +67,20 @@ export class BitPlane {
 
   /** Allocate storage so that bit indices [0, n) exist. Does not change `bits`. */
   reserve(n: number): void {
-    const need = Math.ceil(n / this.blockBits);
+    const need = Math.ceil((n + this.head) / this.blockBits);
     while (this.blocks.length < need) this.blocks.push(new Uint32Array(this.blockWords));
+  }
+
+  dropFront(d: number): void {
+    if (!Number.isInteger(d) || d <= 0 || d % 32 !== 0) {
+      throw new Error(`dropFront drops a positive multiple of 32 bits, got ${d}`);
+    }
+    if (d > this.bits) throw new Error(`dropFront ${d} past written bits ${this.bits}`);
+    const h = this.head + d;
+    const whole = h >>> this.blockBitsLog;
+    if (whole) this.blocks.splice(0, whole);
+    this.head = h & this.blockMask;
+    this.bits -= d;
   }
 
   /** Allocate and mark [0, n) as written. */
@@ -77,16 +90,18 @@ export class BitPlane {
   }
 
   getBit(i: number): number {
-    const b = this.blocks[i >>> this.blockBitsLog];
+    const r = i + this.head;
+    const b = this.blocks[r >>> this.blockBitsLog];
     if (b === undefined) throw new Error(`bit ${i} out of range (bits=${this.bits})`);
-    return (b[(i & this.blockMask) >>> 5]! >>> (i & 31)) & 1;
+    return (b[(r & this.blockMask) >>> 5]! >>> (r & 31)) & 1;
   }
 
   setBit(i: number, v: number): void {
-    const b = this.blocks[i >>> this.blockBitsLog];
+    const r = i + this.head;
+    const b = this.blocks[r >>> this.blockBitsLog];
     if (b === undefined) throw new Error(`bit ${i} out of range (bits=${this.bits})`);
-    const w = (i & this.blockMask) >>> 5;
-    const m = 1 << (i & 31);
+    const w = (r & this.blockMask) >>> 5;
+    const m = 1 << (r & 31);
     if (v) b[w] |= m;
     else b[w] &= ~m;
   }
@@ -101,6 +116,8 @@ export class BitPlane {
     let state = 0;
     const bbl = this.blockBitsLog;
     const bb = this.blockBits;
+    a += this.head;
+    b += this.head;
     let blk = a >>> bbl;
     while (a < b) {
       const arr = this.blocks[blk];
@@ -157,6 +174,8 @@ export class BitPlane {
     if (a >= b) return false;
     const bbl = this.blockBitsLog;
     const bb = this.blockBits;
+    a += this.head;
+    b += this.head;
     let blk = a >>> bbl;
     while (a < b) {
       const arr = this.blocks[blk];

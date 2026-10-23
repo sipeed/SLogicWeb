@@ -49,6 +49,10 @@ export class StoreRef implements SampleStore {
     this.inner.append(chunk);
   }
 
+  dropFront(samples: number): void {
+    this.inner.dropFront(samples);
+  }
+
   query(channel: number, startSample: number, endSample: number, bins: number): ColumnView {
     return this.inner.query(channel, startSample, endSample, bins);
   }

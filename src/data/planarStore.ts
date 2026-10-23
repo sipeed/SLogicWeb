@@ -22,8 +22,8 @@
  */
 
 import { BitPlane, HAS_ONE, HAS_ZERO, HAS_BOTH } from './bitplane.js';
-import { assertGapBounds, mergeGap, splitAroundGaps } from './gaps.js';
-import { GAP_BIT } from './types.js';
+import { assertGapBounds, mergeGap, shiftGapsFront, splitAroundGaps } from './gaps.js';
+import { DROP_FRONT_QUANTUM, GAP_BIT } from './types.js';
 import { bytesPerSampleForChannels, isChannelCount, type ChannelCount } from '../types.js';
 import type { ColumnView, GapSpan, MemoryReport, SampleStore } from './types.js';
 
@@ -156,6 +156,29 @@ export class PlanarSampleStore implements SampleStore {
     this.updatePyramid(from, to);
   }
 
+  // ---------------------------------------------------------------- drop-front
+
+  dropFront(samples: number): void {
+    if (!Number.isInteger(samples) || samples < 0 || samples % DROP_FRONT_QUANTUM !== 0) {
+      throw new Error(`dropFront drops a non-negative multiple of ${DROP_FRONT_QUANTUM}, got ${samples}`);
+    }
+    if (samples > this.length) throw new Error(`dropFront ${samples} past length ${this.length}`);
+    if (samples === 0) return;
+    for (const plane of this.base) plane.dropFront(samples);
+    this.length -= samples;
+    this.validBins[0] = this.length;
+    this.gapList = shiftGapsFront(this.gapList, samples);
+    for (let k = 1; k <= MAX_LEVEL; k++) {
+      const bbl = levelBlockBitsLog(k);
+      for (let c = 0; c < this.channelCount; c++) {
+        this.hi[k]![c] = new BitPlane(bbl);
+        this.lo[k]![c] = new BitPlane(bbl);
+      }
+      this.validBins[k] = 0;
+    }
+    this.updatePyramid(0, this.length);
+  }
+
   // ---------------------------------------------------------------- gaps
 
   /**
@@ -195,6 +218,10 @@ export class PlanarSampleStore implements SampleStore {
     for (; si < n; si++) this.writeSample16(src[si]!, dstBit + si);
   }
 
+  private baseHead(): number {
+    return this.base[0]!.head;
+  }
+
   /**
    * The hot loop: 32 samples -> one word in each of 16 planes.
    *
@@ -215,11 +242,12 @@ export class PlanarSampleStore implements SampleStore {
     const planes = this.base;
     const bbl = BASE_BLOCK_BITS_LOG;
     const blockMask = (1 << bbl) - 1;
+    const hb = this.baseHead();
 
     while (si < siEnd) {
       // Stay inside one destination block so the 16 block references can be hoisted.
-      const blk = dstBit >>> bbl;
-      const wordInBlock = (dstBit & blockMask) >>> 5;
+      const blk = (hb + dstBit) >>> bbl;
+      const wordInBlock = ((hb + dstBit) & blockMask) >>> 5;
       const wordsLeftInBlock = (1 << (bbl - 5)) - wordInBlock;
       const wordsWanted = (siEnd - si) >>> 5;
       const words = Math.min(wordsLeftInBlock, wordsWanted);
@@ -291,6 +319,7 @@ export class PlanarSampleStore implements SampleStore {
     dstBit += head; // from here on dstBit tracks the current write position
 
     const bodyEnd = si + (((n - si) >>> 5) << 5);
+    const hb = this.baseHead();
     while (si < bodyEnd) {
       acc.fill(0);
       for (let g = 0; g < 8; g++) {
@@ -299,8 +328,8 @@ export class PlanarSampleStore implements SampleStore {
         const sh = g << 2;
         for (let c = 0; c < nch; c++) acc[c]! |= (imul((L >>> c) & M, G) >>> 28) << sh;
       }
-      const blk = dstBit >>> bbl;
-      const off = (dstBit & blockMask) >>> 5;
+      const blk = (hb + dstBit) >>> bbl;
+      const off = ((hb + dstBit) & blockMask) >>> 5;
       for (let c = 0; c < nch; c++) this.base[c]!.blocks[blk]![off] = acc[c]!;
       si += 32;
       dstBit += 32;
@@ -349,10 +378,11 @@ export class PlanarSampleStore implements SampleStore {
     const planes = this.base;
     const bbl = BASE_BLOCK_BITS_LOG;
     const blockMask = (1 << bbl) - 1;
+    const hb = this.baseHead();
 
     while (si < siEnd) {
-      const blk = dstBit >>> bbl;
-      const wordInBlock = (dstBit & blockMask) >>> 5;
+      const blk = (hb + dstBit) >>> bbl;
+      const wordInBlock = ((hb + dstBit) & blockMask) >>> 5;
       const wordsLeftInBlock = (1 << (bbl - 5)) - wordInBlock;
       const wordsWanted = (siEnd - si) >>> 5;
       const words = Math.min(wordsLeftInBlock, wordsWanted);
@@ -448,7 +478,7 @@ export class PlanarSampleStore implements SampleStore {
   private reduceOne(
     dstHi: BitPlane, dstLo: BitPlane, srcHi: BitPlane, srcLo: BitPlane, i: number, fromBase: boolean,
   ): void {
-    const sBit = i * 16;
+    const sBit = srcHi.head + i * 16;
     const bh = srcHi.blocks[sBit >>> srcHi.blockBitsLog]!;
     const oh = (sBit & srcHi.blockMask) >>> 5;
     const sh = bh[oh]! | 0;
@@ -467,7 +497,7 @@ export class PlanarSampleStore implements SampleStore {
 
   /** 32 aligned bins from the base plane: hi = any 1, lo = any 0. */
   private reduceGroupFromBase(dstHi: BitPlane, dstLo: BitPlane, src: BitPlane, i: number): void {
-    const sBit = i * 16;
+    const sBit = src.head + i * 16;
     const sArr = src.blocks[sBit >>> src.blockBitsLog]!;
     const sOff = (sBit & src.blockMask) >>> 5;
     let h = 0, l = 0;
@@ -489,7 +519,7 @@ export class PlanarSampleStore implements SampleStore {
   private reduceGroup(
     dstHi: BitPlane, dstLo: BitPlane, srcHi: BitPlane, srcLo: BitPlane, i: number,
   ): void {
-    const sBit = i * 16;
+    const sBit = srcHi.head + i * 16;
     const ah = srcHi.blocks[sBit >>> srcHi.blockBitsLog]!;
     const al = srcLo.blocks[sBit >>> srcLo.blockBitsLog]!;
     const oh = (sBit & srcHi.blockMask) >>> 5;
@@ -689,15 +719,18 @@ export class PlanarSampleStore implements SampleStore {
   ): number {
     const plane = this.base[channel]!;
     const blockWords = plane.blockWords;
+    const hb = plane.head;
     let n = outOff;
 
-    const wStart = s >>> 5;
-    const wEnd = (e - 1) >>> 5;
-    const firstMask = -1 << (s & 31);
-    const lastHi = ((e - 1) & 31) + 1;
+    const ps = s + hb;
+    const pe = e + hb;
+    const wStart = ps >>> 5;
+    const wEnd = (pe - 1) >>> 5;
+    const firstMask = -1 << (ps & 31);
+    const lastHi = ((pe - 1) & 31) + 1;
     const lastMask = lastHi === 32 ? -1 : ~(-1 << lastHi);
     // carry is the sample immediately below the first word; word 0 has no predecessor.
-    let carry = wStart === 0 ? 0 : plane.getBit(wStart * 32 - 1);
+    let carry = s === 0 ? 0 : plane.getBit(s - 1);
 
     let w = wStart;
     while (w <= wEnd) {
@@ -712,14 +745,14 @@ export class PlanarSampleStore implements SampleStore {
         if (x === 0) continue;
         if (w === wStart) x &= firstMask;
         if (w === wEnd) x &= lastMask;
-        if (w === 0) x &= ~1; // sample 0 has no predecessor
+        if (w * 32 === hb) x &= ~1; // sample 0 has no predecessor
         if (out === null) {
           let y = x - ((x >> 1) & 0x55555555);
           y = (y & 0x33333333) + ((y >> 2) & 0x33333333);
           y = (y + (y >> 4)) & 0x0f0f0f0f;
           n += Math.imul(y, 0x01010101) >> 24;
         } else {
-          const bitBase = w * 32;
+          const bitBase = w * 32 - hb;
           while (x !== 0) {
             const t = x & -x;
             out[n++] = bitBase + (31 - Math.clz32(t));

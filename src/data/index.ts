@@ -8,7 +8,7 @@
  */
 
 export type { SampleStore, ColumnView, MemoryReport, GapSpan } from './types.js';
-export { GAP_BIT } from './types.js';
+export { DROP_FRONT_QUANTUM, GAP_BIT } from './types.js';
 export { appendLostSamples, channelAcrossGaps } from './gaps.js';
 export { PlanarSampleStore, type PlanarStoreOptions } from './planarStore.js';
 export { InterleavedSampleStore } from './interleavedStore.js';

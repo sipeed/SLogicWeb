@@ -16,6 +16,7 @@
 import { PlanarSampleStore } from './planarStore.js';
 import { InterleavedSampleStore } from './interleavedStore.js';
 import { RleSampleStore } from './rleStore.js';
+import { BitPlane } from './bitplane.js';
 import { GAP_BIT } from './types.js';
 import { generateCapture, fillMacro, makeTileBlock, MACRO_SAMPLES } from './generator.js';
 import type { SampleStore, ColumnView } from './types.js';
@@ -944,6 +945,282 @@ function testBadArguments(store: SampleStore, tag: string): TestResult[] {
   }];
 }
 
+function dropFrontStream(n: number): Uint8Array {
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const v = Math.imul(i ^ 0x5bd1e995, 2654435761) >>> 0;
+    out[i] = ((v >>> 24) ^ (v >>> 13) ^ i) & 0xff;
+  }
+  return out;
+}
+
+function testDropFront(log: Log): TestResult[] {
+  const results: TestResult[] = [];
+
+  const equalStores = (a: SampleStore, b: SampleStore, label: string): void => {
+    const len = a.length;
+    let queryOk = b.length === len;
+    if (queryOk && len > 0) {
+      for (const [s, e, bins] of [[0, len, 997], [Math.floor(len / 3), Math.floor(len / 2), 513]] as const) {
+        if (!(e > s)) continue;
+        for (let c = 0; c < a.channelCount && queryOk; c++) {
+          const qa = a.query(c, s, e, bins);
+          const pa = qa.packed.slice();
+          const pb = b.query(c, s, e, bins).packed;
+          for (let i = 0; i < bins; i++) {
+            if ((pa[i]! & 7) !== (pb[i]! & 7)) { queryOk = false; break; }
+          }
+        }
+      }
+    }
+    results.push({
+      name: `dropFront query columns equal a fresh tail store (${label})`,
+      pass: queryOk,
+      detail: `length ${len}, channels ${a.channelCount}`,
+    });
+    let edgesOk = b.length === len;
+    if (edgesOk && len > 1) {
+      for (let c = 0; c < a.channelCount && edgesOk; c++) {
+        const ea = a.edges(c, 0, Math.min(len, 300_000));
+        const eb = b.edges(c, 0, Math.min(len, 300_000));
+        if (ea.length !== eb.length) { edgesOk = false; break; }
+        for (let i = 0; i < ea.length; i++) if (ea[i] !== eb[i]) { edgesOk = false; break; }
+      }
+    }
+    results.push({
+      name: `dropFront edges equal a fresh tail store (${label})`,
+      pass: edgesOk,
+      detail: `length ${len}`,
+    });
+    let atOk = b.length === len;
+    if (atOk && len > 0) {
+      for (const p of [0, 1, 511, 512, 513, len - 1, Math.floor(len / 2)]) {
+        if (p < 0 || p >= len) continue;
+        for (let c = 0; c < a.channelCount; c++) {
+          if (a.sampleAt(c, p) !== b.sampleAt(c, p)) { atOk = false; break; }
+        }
+      }
+    }
+    results.push({
+      name: `dropFront sampleAt equals a fresh tail store (${label})`,
+      pass: atOk,
+      detail: `length ${len}`,
+    });
+  };
+
+  {
+    const bytes = dropFrontStream(3_000_000);
+    const stepAt = 1_500_000;
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (bytes[i]! & 0xfe) | (i >= stepAt ? 1 : 0);
+    const dropped = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
+    for (let o = 0; o < 1_500_000; o += 4099) {
+      dropped.append(bytes.subarray(o, Math.min(o + 4099, 1_500_000)));
+    }
+    let keptFrom = 0;
+    let keptTo = 1_500_000;
+    const fresh = (): PlanarSampleStore => {
+      const s = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
+      s.append(bytes.subarray(keptFrom, keptTo));
+      return s;
+    };
+
+    dropped.dropFront(512);
+    keptFrom += 512;
+    equalStores(dropped, fresh(), 'after first 512 drop');
+
+    dropped.append(bytes.subarray(keptTo, 2_000_000));
+    keptTo = 2_000_000;
+    equalStores(dropped, fresh(), 'append after a drop');
+
+    dropped.dropFront(999_936);
+    keptFrom += 999_936;
+    equalStores(dropped, fresh(), 'after a 999936 drop');
+
+    dropped.append(bytes.subarray(keptTo, 3_000_000));
+    keptTo = 3_000_000;
+    dropped.dropFront(512);
+    keptFrom += 512;
+    equalStores(dropped, fresh(), 'drop after refilling');
+
+    const boundary = stepAt - keptFrom;
+    const col = (s: number, e: number): number => dropped.query(0, s, e, 1).packed[0]! & 7;
+    const across = col(boundary - 256, boundary + 256);
+    const before = col(boundary - 256, boundary);
+    const after = col(boundary, boundary + 256);
+    results.push({
+      name: 'dropFront rebuilt pyramid classifies a step boundary exactly',
+      pass: across === 5 && before === 0 && after === 7,
+      detail: `across ${across} (want 5), before ${before} (want 0), after ${after} (want 7)`,
+    });
+    const pyr = dropped.memory().pyramidBytes;
+    results.push({
+      name: 'dropFront republishes pyramid bins',
+      pass: pyr > 0,
+      detail: `pyramid bytes ${pyr} over length ${dropped.length}`,
+    });
+  }
+
+  for (const [cc, bps, chunk] of [[16, 2, 8198], [32, 4, 16396]] as const) {
+    const n = 1_200_000;
+    const raw = dropFrontStream(n * bps);
+    const first = 900_000 * bps;
+    const s = new PlanarSampleStore({ channelCount: cc as 16 | 32, samplerate: 100e6 });
+    for (let o = 0; o < first; o += chunk) s.append(raw.subarray(o, Math.min(o + chunk, first)));
+    const drop = 524_288;
+    s.dropFront(drop);
+    for (let o = first; o < raw.length; o += chunk) s.append(raw.subarray(o, Math.min(o + chunk, raw.length)));
+    const tail = new PlanarSampleStore({ channelCount: cc as 16 | 32, samplerate: 100e6 });
+    tail.append(raw.subarray(drop * bps));
+    equalStores(s, tail, `${cc}ch append after a drop`);
+  }
+
+  log('drop-front across a base block boundary (17M samples)');
+  {
+    const big = (1 << 24) + 65_536;
+    const bytes = dropFrontStream(big);
+    const s = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
+    s.append(bytes);
+    const before = s.memory().baseBytes;
+    s.dropFront(1 << 24);
+    const released = before - s.memory().baseBytes;
+    results.push({
+      name: 'dropFront releases whole base blocks',
+      pass: released === 4 * (1 << 21),
+      detail: `base bytes ${before} -> ${s.memory().baseBytes}`,
+    });
+    const tail = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
+    tail.append(bytes.subarray(1 << 24));
+    equalStores(s, tail, 'whole-block drop');
+  }
+
+  {
+    const bytes = dropFrontStream(12_000);
+    const g = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
+    g.append(bytes);
+    g.noteGap(1000, 2000);
+    g.noteGap(5000, 6000);
+    g.noteGap(9000, 10_000);
+    g.dropFront(4096);
+    const want1 = [{ startSample: 904, endSample: 1904 }, { startSample: 4904, endSample: 5904 }];
+    const got1 = g.gaps();
+    const gapsOk =
+      got1.length === want1.length &&
+      want1.every((w, i) => got1[i]!.startSample === w.startSample && got1[i]!.endSample === w.endSample);
+    results.push({
+      name: 'dropFront shifts gap spans and forgets dropped ones',
+      pass: gapsOk,
+      detail: JSON.stringify(got1),
+    });
+    const clip = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
+    clip.append(bytes.subarray(0, 4096));
+    clip.noteGap(100, 700);
+    clip.dropFront(512);
+    const got2 = clip.gaps();
+    const clipOk = got2.length === 1 && got2[0]!.startSample === 0 && got2[0]!.endSample === 188;
+    results.push({
+      name: 'dropFront clips a partially dropped gap at zero',
+      pass: clipOk,
+      detail: JSON.stringify(got2),
+    });
+    const query = clip.query(0, 0, clip.length, 64);
+    const gapBitsOk = (query.packed[0]! & GAP_BIT) !== 0;
+    results.push({
+      name: 'shifted gaps still flag query columns',
+      pass: gapBitsOk,
+      detail: `packed[0] = ${query.packed[0]}`,
+    });
+  }
+
+  {
+    const s = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
+    s.append(dropFrontStream(1000));
+    const cases: Array<[string, () => void]> = [
+      ['a non-multiple of the quantum', () => s.dropFront(500)],
+      ['a negative count', () => s.dropFront(-512)],
+      ['a non-integer', () => s.dropFront(512.5)],
+      ['more than the length', () => s.dropFront(1024)],
+    ];
+    const bad: string[] = [];
+    for (const [name, fn] of cases) {
+      let threw = false;
+      try { fn(); } catch { threw = true; }
+      if (!threw) bad.push(name);
+    }
+    let noop = true;
+    try { s.dropFront(0); } catch { noop = false; }
+    if (!noop) bad.push('zero drop');
+    if (s.length !== 1000) bad.push('length changed by refused drops');
+    results.push({
+      name: 'dropFront argument contract is enforced',
+      pass: bad.length === 0,
+      detail: bad.length === 0 ? `${cases.length + 1} cases behaved` : `failed: ${bad.join(', ')}`,
+    });
+    const rle = RleSampleStore.fromTransitions(16, 100e6, 4096,
+      Array.from({ length: 16 }, () => ({ initial: 0, transitions: new Float64Array(0) })));
+    let rleThrows = false;
+    try { rle.dropFront(512); } catch { rleThrows = true; }
+    const inter = new InterleavedSampleStore(100e6, 32);
+    inter.append(new Uint8Array(4096 * 4));
+    let interThrows = false;
+    try { inter.dropFront(512); } catch { interThrows = true; }
+    results.push({
+      name: 'immutable and interleaved stores refuse dropFront loudly',
+      pass: rleThrows && interThrows,
+      detail: `rle ${rleThrows ? 'threw' : 'accepted'}, interleaved ${interThrows ? 'threw' : 'accepted'}`,
+    });
+  }
+
+  {
+    const bit = (i: number): number => (Math.imul(i ^ 0x27d4eb2f, 2654435761) >>> 31) & 1;
+    const p = new BitPlane(6);
+    p.extendTo(1000);
+    for (let i = 0; i < 1000; i++) p.setBit(i, bit(i));
+    let droppedBits = 0;
+    let planeOk = true;
+    let blocksBefore = p.blocks.length;
+    const verify = (): void => {
+      for (let i = 0; i < p.bits; i++) {
+        if (p.getBit(i) !== bit(i + droppedBits)) { planeOk = false; return; }
+      }
+      const st = p.rangeState(0, Math.min(97, p.bits));
+      let want = 0;
+      for (let i = 0; i < Math.min(97, p.bits); i++) want |= bit(i + droppedBits) ? 1 : 2;
+      if (st !== want) planeOk = false;
+      if (p.anyOne(0, p.bits) !== (want & 1 ? true : false)) planeOk = false;
+    };
+    p.dropFront(32);
+    droppedBits += 32;
+    verify();
+    const released: number[] = [];
+    for (let k = 0; k < 10; k++) {
+      p.dropFront(64);
+      droppedBits += 64;
+      released.push(blocksBefore - p.blocks.length);
+      blocksBefore = p.blocks.length;
+      verify();
+    }
+    const shrank = released.some((d) => d > 0);
+    results.push({
+      name: 'BitPlane dropFront keeps bits, ranges and releases blocks',
+      pass: planeOk && shrank && p.bits === 1000 - droppedBits,
+      detail: `bits left ${p.bits}, block releases per drop ${released.join(',')}`,
+    });
+    const planeBad: string[] = [];
+    for (const [name, d] of [['31 bits', 31], ['zero', 0], ['past written', p.bits + 32]] as const) {
+      let threw = false;
+      try { p.dropFront(d as number); } catch { threw = true; }
+      if (!threw) planeBad.push(name as string);
+    }
+    results.push({
+      name: 'BitPlane dropFront argument contract is enforced',
+      pass: planeBad.length === 0,
+      detail: planeBad.length === 0 ? 'all refused' : `accepted: ${planeBad.join(', ')}`,
+    });
+  }
+
+  return results;
+}
+
 /** The full suite minus the 100M-sample cases, which are driven by the bench. */
 export function runFastSuite(log: Log): TestResult[] {
   const results: TestResult[] = [];
@@ -998,6 +1275,8 @@ export function runFastSuite(log: Log): TestResult[] {
   results.push(...testWideModes());
   log('live capture');
   results.push(...testLiveCapture());
+  log('drop-front retention');
+  results.push(...testDropFront(log));
   log('bad arguments');
   {
     const planar = new PlanarSampleStore({ channelCount: 16, samplerate: 100e6 });

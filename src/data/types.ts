@@ -66,11 +66,14 @@ export interface ColumnView {
 /** bit3 of `ColumnView.packed`: the column overlaps a span the store has no data for. */
 export const GAP_BIT = 8;
 
+export const DROP_FRONT_QUANTUM = 512;
+
 export interface SampleStore {
   readonly channelCount: number;
   readonly samplerate: number;
   readonly length: number;
   append(chunk: Uint8Array): void;
+  dropFront(samples: number): void;
   query(channel: number, startSample: number, endSample: number, bins: number): ColumnView;
   edges(channel: number, startSample: number, endSample: number): Int32Array;
   /** Level (0 or 1) of one channel at one sample. O(1) on the planar and interleaved
