@@ -406,7 +406,7 @@ function check(name: string, pass: boolean, detail: string): void {
 // -------------------------------------------------------- trigger summary
 
 const baseSettings: CaptureSettings = {
-  channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'timer', seconds: 1,
+  channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'timer', seconds: 1, loopSeconds: 1,
   testMode: 0, triggerEnableMask: true, softwareTrigger: true, triggerModes: {},
   triggerConditions: [], triggerChannel: 0,
   triggerKind: 'rising', triggerLevel: 1, preTriggerPercent: 10,

@@ -9,7 +9,8 @@
 
 import type { AnnotationIndex, DecodeResult } from '../decode/index.js';
 import { ANALYZER_COLORS, CHANNEL_COLORS } from './metrics.js';
-import type { ChannelCount } from '../types.js';
+import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
+import { DROP_FRONT_QUANTUM } from '../data/index.js';
 import type { MessageKey, MessageVars } from './i18n.js';
 
 export interface ChannelState {
@@ -59,8 +60,9 @@ export interface CaptureSettings {
   samplerate: number;
   thresholdVolts: number;
   /** 'free' runs until stopped or until the sample ceiling; 'timer' stops after seconds. */
-  mode: 'free' | 'timer';
+  mode: 'free' | 'timer' | 'loop';
   seconds: number;
+  loopSeconds: number;
   /** Hardware data source: normal pins, USB maximum-speed pattern, or simulator. */
   testMode: 0 | 1 | 2;
   /** Global trigger enable mask. Per-channel modes remain stored when this is false. */
@@ -81,6 +83,35 @@ export interface TriggerCondition {
   channel: number;
   kind: CaptureSettings['triggerKind'];
   level: 0 | 1;
+}
+
+export const LOOP_RETENTION_MAX_BYTES = 2 ** 30;
+export const LOOP_RETENTION_MAX_SAMPLES = 2 ** 29;
+
+export function maxLoopSeconds(channels: ChannelCount, samplerate: number): number {
+  return Math.min(LOOP_RETENTION_MAX_BYTES / bytesPerSampleForChannels(channels),
+    LOOP_RETENTION_MAX_SAMPLES) / samplerate;
+}
+
+export function clampLoopSeconds(loopSeconds: number, channels: ChannelCount, samplerate: number): number {
+  const max = maxLoopSeconds(channels, samplerate);
+  if (Number.isNaN(loopSeconds)) return Math.max(0.001, Math.floor(Math.min(1, max) * 1000) / 1000);
+  if (loopSeconds === Number.POSITIVE_INFINITY) return Math.max(0.001, Math.floor(max * 1000) / 1000);
+  if (!Number.isFinite(loopSeconds)) return 0.001;
+  return Math.max(0.001, Math.floor(Math.min(loopSeconds, max) * 1000) / 1000);
+}
+
+export function loopRetentionSamples(loopSeconds: number, channels: ChannelCount, samplerate: number): number {
+  const q = DROP_FRONT_QUANTUM;
+  return Math.max(q, Math.floor(Math.min(
+    clampLoopSeconds(loopSeconds, channels, samplerate) * samplerate,
+    LOOP_RETENTION_MAX_SAMPLES,
+  ) / q) * q);
+}
+
+export function loopDropSamples(length: number, retention: number): number {
+  if (!(retention > 0) || length < retention * 2) return 0;
+  return Math.floor((length - retention) / DROP_FRONT_QUANTUM) * DROP_FRONT_QUANTUM;
 }
 
 export type TriggerMode = 'low' | 'high' | 'rising' | 'falling' | 'edge' | 'dont-care';

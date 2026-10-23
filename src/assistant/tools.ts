@@ -33,6 +33,7 @@ export interface HostSnapshot {
   error: string;
   label: string;
   samples: number;
+  dropped: number;
   samplerate: number;
   channelCount: number;
   triggerState: 'off' | 'waiting' | 'triggered' | 'not-found';
@@ -216,6 +217,7 @@ function settingsView(s: CaptureSettings): Record<string, unknown> {
     threshold_v: s.thresholdVolts,
     mode: s.mode,
     seconds: s.seconds,
+    loop_seconds: s.loopSeconds,
     test_mode: s.testMode,
     trigger: {
       enabled: s.triggerEnableMask,
@@ -238,6 +240,7 @@ function stateView(host: AssistantHost): Record<string, unknown> {
     ...(st.error ? { error: st.error } : {}),
     capture: {
       samples: st.samples,
+      ...(st.dropped > 0 ? { dropped_samples: st.dropped } : {}),
       samplerate_hz: sr,
       duration_s: num(st.samples / sr),
       channels: st.channelCount,
@@ -553,9 +556,12 @@ export const TOOLS: AssistantTool[] = [
         description: 'Exactly these channels are enabled.' },
       samplerate_hz: { type: 'number', exclusiveMinimum: 0 },
       threshold_v: { type: 'number', minimum: 0.1, maximum: 5 },
-      mode: { type: 'string', enum: ['timer', 'free'], description: 'timer: stop after `seconds`. free: run until stopped.' },
+      mode: { type: 'string', enum: ['timer', 'free', 'loop'],
+        description: 'timer: stop after `seconds`. free: run until stopped. loop: run until stopped, keeping only the newest `loop_seconds`.' },
       seconds: { type: 'number', minimum: 0.001,
         description: 'Post-trigger capture length in timer mode, from 0.001 s (1 ms) up to the sample-count limit.' },
+      loop_seconds: { type: 'number', minimum: 0.001,
+        description: 'Retention window in loop mode, clamped to the loop memory budget.' },
       test_mode: { type: 'integer', enum: [0, 1, 2], description: '0 real pins, 1 USB max-speed pattern, 2 built-in signal simulator.' },
       trigger_enabled: { type: 'boolean' },
       trigger_modes: { type: 'object', additionalProperties: { type: 'string', enum: TRIGGER_MODES },
@@ -569,8 +575,9 @@ export const TOOLS: AssistantTool[] = [
       const patch: Partial<CaptureSettings> = {};
       if (typeof i.samplerate_hz === 'number') patch.samplerate = i.samplerate_hz;
       if (typeof i.threshold_v === 'number') patch.thresholdVolts = i.threshold_v;
-      if (i.mode === 'timer' || i.mode === 'free') patch.mode = i.mode;
+      if (i.mode === 'timer' || i.mode === 'free' || i.mode === 'loop') patch.mode = i.mode;
       if (typeof i.seconds === 'number') patch.seconds = i.seconds;
+      if (typeof i.loop_seconds === 'number') patch.loopSeconds = i.loop_seconds;
       if (i.test_mode === 0 || i.test_mode === 1 || i.test_mode === 2) patch.testMode = i.test_mode;
       if (typeof i.trigger_enabled === 'boolean') patch.triggerEnableMask = i.trigger_enabled;
       if (typeof i.pre_trigger_percent === 'number') patch.preTriggerPercent = i.pre_trigger_percent;
@@ -603,8 +610,8 @@ export const TOOLS: AssistantTool[] = [
     name: 'start_capture',
     description:
       'Start a capture on the connected device with the current settings and wait until ' +
-      'it stops (timer mode or trigger) or `timeout_s` passes. A free-running capture ' +
-      'keeps running after the timeout; call stop_capture to end it.',
+      'it stops (timer mode or trigger) or `timeout_s` passes. Free-running and loop ' +
+      'captures keep running after the timeout; call stop_capture to end them.',
     inputSchema: obj({
       timeout_s: { type: 'number', minimum: 1, maximum: 120, description: 'How long to wait. Default 15.' },
     }),

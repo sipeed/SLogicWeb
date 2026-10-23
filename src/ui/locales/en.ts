@@ -62,6 +62,7 @@ export const en = {
   // ------------------------------------------------------------- status
   'status.summary': '{samples} samples @ {rate}',
   'status.total': '{duration} total',
+  'status.loop': '{kept} kept · {total} total',
   'status.view': 'view {duration}',
 
   // -------------------------------------------------------- empty hint
@@ -124,7 +125,14 @@ export const en = {
   'capturePanel.capture': 'Capture',
   'capturePanel.freeRun': 'Free run',
   'capturePanel.timer': 'Timer',
+  'capturePanel.loop': 'Loop',
   'capturePanel.durationS': 'Duration (s)',
+  'capturePanel.retentionS': 'Keep newest (s)',
+  'capturePanel.retentionNote': 'Keeps the newest {samples} samples ({megabytes} MB); older ones are dropped while running.',
+  'capturePanel.loopCeilingNote': 'At {rate} the loop keeps up to {duration} ({megabytes} MB retained, about twice that while running).',
+  'capturePanel.loopDropped': '{samples} older samples dropped to keep the newest window',
+  'capturePanel.loopNo32': 'Loop mode is not available at 32 channels yet.',
+  'capturePanel.loopTriggerIgnored': 'The software trigger is ignored in loop mode.',
   'capturePanel.ceilingNote': 'Ceiling {samples} samples = {duration} at {rate}. A free run stops itself there.',
   'capturePanel.softwareTrigger': 'Software trigger',
   'capturePanel.enableTrigger': 'Enable software trigger',

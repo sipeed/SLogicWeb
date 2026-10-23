@@ -23,6 +23,7 @@ import { t } from './i18n.js';
 import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { CaptureSettings, ChannelState } from './state.js';
+import { clampLoopSeconds, loopRetentionSamples, maxLoopSeconds } from './state.js';
 import { MAX_SAMPLES } from './captureIO.js';
 
 const THRESHOLDS = [0.6, 0.9, 1.2, 1.5, 1.65, 1.8, 2.5, 3.3];
@@ -41,7 +42,7 @@ export interface CapturePanelView {
   running: boolean;
   stopping: boolean;
   /** Non-null while a capture is streaming. */
-  progress: { seconds: number; samples: number; bytes: number; lost: number } | null;
+  progress: { seconds: number; samples: number; bytes: number; lost: number; dropped: number } | null;
   maxSamplerateHz: Readonly<Record<number, number>>;
   triggerState: 'off' | 'waiting' | 'triggered' | 'not-found';
 }
@@ -49,11 +50,31 @@ export interface CapturePanelView {
 export class CapturePanel {
   private advancedOpen = false;
   private consoleLines: string[] = [];
+  private liveNote: HTMLElement | null = null;
+  private lostNote: HTMLElement | null = null;
+  private droppedNote: HTMLElement | null = null;
 
   constructor(
     private readonly root: HTMLElement,
     private readonly cb: CapturePanelCallbacks,
   ) {}
+
+  updateProgress(progress: NonNullable<CapturePanelView['progress']>): void {
+    if (!this.liveNote) return;
+    this.fillProgress(progress);
+  }
+
+  private fillProgress(progress: NonNullable<CapturePanelView['progress']>): void {
+    this.liveNote!.textContent = t('capturePanel.recording', {
+      seconds: progress.seconds.toFixed(2),
+      samples: progress.samples.toLocaleString(),
+      megabytes: (progress.bytes / 1e6).toFixed(1),
+    });
+    this.lostNote!.hidden = progress.lost <= 0;
+    this.lostNote!.textContent = t('capturePanel.dropped', { samples: progress.lost.toLocaleString() });
+    this.droppedNote!.hidden = progress.dropped <= 0;
+    this.droppedNote!.textContent = t('capturePanel.loopDropped', { samples: progress.dropped.toLocaleString() });
+  }
 
   render(v: CapturePanelView): void {
     const s = v.settings;
@@ -126,16 +147,22 @@ export class CapturePanel {
     // ---- mode
     const modeSec = section(t('capturePanel.capture'));
     const seg = div('segmented');
-    for (const [id, text] of [['free', t('capturePanel.freeRun')], ['timer', t('capturePanel.timer')]] as const) {
+    for (const [id, text] of [
+      ['free', t('capturePanel.freeRun')], ['timer', t('capturePanel.timer')], ['loop', t('capturePanel.loop')],
+    ] as const) {
       const b = document.createElement('button');
       b.className = 'seg' + (s.mode === id ? ' on' : '');
       b.textContent = text;
+      b.disabled = (id === 'loop' && (v.running || v.stopping || s.channels === 32)) ||
+        (id !== 'loop' && s.mode === 'loop' && (v.running || v.stopping));
       b.addEventListener('click', () => this.cb.onSettings({ ...s, mode: id }));
       seg.appendChild(b);
     }
     modeSec.body.appendChild(seg);
 
     const maxSeconds = MAX_SAMPLES / s.samplerate;
+    const bps = bytesPerSampleForChannels(s.channels);
+    const maxLoop = maxLoopSeconds(s.channels, s.samplerate);
     if (s.mode === 'timer') {
       const secs = document.createElement('input');
       secs.type = 'number';
@@ -150,14 +177,51 @@ export class CapturePanel {
         this.cb.onSettings({ ...s, seconds: Math.min(Number(secs.value), maxSeconds) }));
       modeSec.body.appendChild(labelled(t('capturePanel.durationS'), secs));
     }
+    if (s.mode === 'loop') {
+      const secs = document.createElement('input');
+      secs.type = 'number';
+      secs.min = '0.001';
+      secs.step = '0.001';
+      secs.max = String(maxLoop);
+      secs.value = String(s.loopSeconds);
+      secs.disabled = v.running || v.stopping;
+      secs.addEventListener('change', () => this.cb.onSettings({
+        ...s,
+        loopSeconds: clampLoopSeconds(Number(secs.value), s.channels, s.samplerate),
+      }));
+      modeSec.body.appendChild(labelled(t('capturePanel.retentionS'), secs));
+      if (s.channels === 32) {
+        const no32 = div('panel-note error');
+        no32.textContent = t('capturePanel.loopNo32');
+        modeSec.body.appendChild(no32);
+      }
+      const kept = loopRetentionSamples(s.loopSeconds, s.channels, s.samplerate);
+      const keep = div('panel-note');
+      keep.textContent = t('capturePanel.retentionNote', {
+        samples: kept.toLocaleString(),
+        megabytes: ((kept * bps) / 1e6).toFixed(1),
+      });
+      modeSec.body.appendChild(keep);
+    }
 
-    const limit = div('panel-note');
-    limit.textContent = t('capturePanel.ceilingNote', {
-      samples: MAX_SAMPLES.toLocaleString(),
-      duration: formatDuration(maxSeconds),
-      rate: formatRate(s.samplerate),
-    });
-    modeSec.body.appendChild(limit);
+    const limitText = s.mode === 'loop'
+      ? s.channels === 32
+        ? ''
+        : t('capturePanel.loopCeilingNote', {
+          duration: formatDuration(maxLoop),
+          rate: formatRate(s.samplerate),
+          megabytes: ((loopRetentionSamples(maxLoop, s.channels, s.samplerate) * bps) / 1e6).toFixed(0),
+        })
+      : t('capturePanel.ceilingNote', {
+        samples: MAX_SAMPLES.toLocaleString(),
+        duration: formatDuration(maxSeconds),
+        rate: formatRate(s.samplerate),
+      });
+    if (limitText) {
+      const limit = div('panel-note');
+      limit.textContent = limitText;
+      modeSec.body.appendChild(limit);
+    }
 
     const triggerSec = section(t('capturePanel.softwareTrigger'));
     const mask = document.createElement('input');
@@ -168,55 +232,65 @@ export class CapturePanel {
     mask.addEventListener('change', () => this.cb.onSettings({ ...s, triggerEnableMask: mask.checked }));
     triggerSec.body.hidden = !s.triggerEnableMask;
     if (s.triggerEnableMask) {
-      const preOptions: SelectOptionTuple[] = [
-        // Percent-notation options stay literal: they are notation, not prose.
-        ['0', t('capturePanel.noPreTrigger')], ['10', '10%'], ['25', '25%'], ['50', '50%'], ['75', '75%'],
-      ];
-      const pre = selectControl(
-        'capture.preTrigger',
-        t('capturePanel.preTriggerBuffer'),
-        preOptions,
-        String(s.preTriggerPercent),
-      );
-      pre.disabled = v.running || v.stopping;
-      pre.addEventListener('change', () => this.cb.onSettings({ ...s, preTriggerPercent: Number(pre.value) }));
-      triggerSec.body.appendChild(pre.el);
-
-      // The one mistake this section invites: enabling the trigger and never picking a
-      // condition, which silently arms nothing. Say what is armed, or what is missing.
-      const armed = div('panel-note');
-      if (s.triggerConditions.length === 0) {
-        armed.classList.add('error');
-        armed.textContent = t('capturePanel.noCondition');
-      } else {
-        const what = s.triggerConditions
-          .map((c) => `D${c.channel} ${c.kind === 'level'
-            ? t(c.level ? 'capturePanel.condHigh' : 'capturePanel.condLow')
-            : t(c.kind === 'rising' ? 'capturePanel.condRising'
-              : c.kind === 'falling' ? 'capturePanel.condFalling' : 'capturePanel.condEdge')}`)
-          .join(t('capturePanel.condJoiner'));
-        // The *effective* pre-trigger window, with the same clamps startCapture
-        // applies: percent of the post-trigger budget, capped by the 64 MiB retained
-        // prefix. Promising the raw percentage would overstate it exactly when the
-        // cap bites (e.g. 50% of 1 s at 16ch/200M is capped at ~167 ms).
-        const post = s.mode === 'timer'
-          ? Math.min(MAX_SAMPLES - 1, Math.round(s.seconds * s.samplerate))
-          : MAX_SAMPLES - 1;
-        const pre = Math.min(
-          Math.max(0, post - 1),
-          Math.max(0, Math.floor(post * s.preTriggerPercent / 100)),
-          Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bytesPerSampleForChannels(s.channels)),
-        );
-        const capped = pre < Math.floor(post * s.preTriggerPercent / 100);
-        armed.textContent = capped
-          ? t('capturePanel.armedCapped', {
-            what,
-            duration: formatDuration(pre / s.samplerate),
-            megabytes: MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / 1048576,
-          })
-          : t('capturePanel.armed', { what, duration: formatDuration(pre / s.samplerate) });
+      if (s.mode === 'loop') {
+        const ignored = div('panel-note');
+        ignored.textContent = t('capturePanel.loopTriggerIgnored');
+        triggerSec.body.appendChild(ignored);
       }
-      triggerSec.body.appendChild(armed);
+      if (s.mode !== 'loop') {
+        const preOptions: SelectOptionTuple[] = [
+          // Percent-notation options stay literal: they are notation, not prose.
+          ['0', t('capturePanel.noPreTrigger')], ['10', '10%'], ['25', '25%'], ['50', '50%'], ['75', '75%'],
+        ];
+        const pre = selectControl(
+          'capture.preTrigger',
+          t('capturePanel.preTriggerBuffer'),
+          preOptions,
+          String(s.preTriggerPercent),
+        );
+        pre.disabled = v.running || v.stopping;
+        pre.addEventListener('change', () => this.cb.onSettings({ ...s, preTriggerPercent: Number(pre.value) }));
+        triggerSec.body.appendChild(pre.el);
+
+        // The one mistake this section invites: enabling the trigger and never picking a
+        // condition, which silently arms nothing. Say what is armed, or what is missing.
+        const armed = div('panel-note');
+        if (s.triggerConditions.length === 0) {
+          armed.classList.add('error');
+          armed.textContent = t('capturePanel.noCondition');
+        } else {
+          const what = s.triggerConditions
+            .map((c) => `D${c.channel} ${c.kind === 'level'
+              ? t(c.level ? 'capturePanel.condHigh' : 'capturePanel.condLow')
+              : t(c.kind === 'rising' ? 'capturePanel.condRising'
+                : c.kind === 'falling' ? 'capturePanel.condFalling' : 'capturePanel.condEdge')}`)
+            .join(t('capturePanel.condJoiner'));
+          // The *effective* pre-trigger window, with the same clamps startCapture
+          // applies: percent of the post-trigger budget, capped by the 64 MiB retained
+          // prefix. Promising the raw percentage would overstate it exactly when the
+          // cap bites (e.g. 50% of 1 s at 16ch/200M is capped at ~167 ms).
+          const post = s.mode === 'timer'
+            ? Math.min(MAX_SAMPLES - 1, Math.round(s.seconds * s.samplerate))
+            : MAX_SAMPLES - 1;
+          const pre = Math.min(
+            Math.max(0, post - 1),
+            Math.max(0, Math.floor(post * s.preTriggerPercent / 100)),
+            Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bytesPerSampleForChannels(s.channels)),
+          );
+          const capped = pre < Math.floor(post * s.preTriggerPercent / 100);
+          armed.textContent = capped
+            ? t('capturePanel.armedCapped', {
+              what,
+              duration: formatDuration(pre / s.samplerate),
+              megabytes: MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / 1048576,
+            })
+            : t('capturePanel.armed', {
+              what,
+              duration: formatDuration(pre / s.samplerate),
+            });
+        }
+        triggerSec.body.appendChild(armed);
+      }
 
       if (v.triggerState === 'waiting') {
         const wait = div('panel-note live');
@@ -237,21 +311,17 @@ export class CapturePanel {
     // No Start/Stop here on purpose: the toolbar transport is the only one, so there is
     // no second control that can disagree with it about whether a capture may start.
     if (v.progress) {
-      const p = div('panel-note live');
-      p.textContent = t('capturePanel.recording', {
-        seconds: v.progress.seconds.toFixed(2),
-        samples: v.progress.samples.toLocaleString(),
-        megabytes: (v.progress.bytes / 1e6).toFixed(1),
-      });
-      modeSec.body.appendChild(p);
-      // A dropout that the user cannot see is nearly as bad as one that is not recorded:
-      // the samples are in the store as filler and drawn as NO_DATA, but the count is the
-      // only place the size of the loss is legible while the capture is still running.
-      if (v.progress.lost > 0) {
-        const d = div('panel-note error');
-        d.textContent = t('capturePanel.dropped', { samples: v.progress.lost.toLocaleString() });
-        modeSec.body.appendChild(d);
-      }
+      this.liveNote = div('panel-note live');
+      modeSec.body.appendChild(this.liveNote);
+      this.lostNote = div('panel-note error');
+      modeSec.body.appendChild(this.lostNote);
+      this.droppedNote = div('panel-note');
+      modeSec.body.appendChild(this.droppedNote);
+      this.fillProgress(v.progress);
+    } else {
+      this.liveNote = null;
+      this.lostNote = null;
+      this.droppedNote = null;
     }
     this.root.appendChild(modeSec.el);
     this.root.appendChild(triggerSec.el);

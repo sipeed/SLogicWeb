@@ -58,6 +58,7 @@ export const ru: Messages = {
   // ------------------------------------------------------------- status
   'status.summary': 'образцов: {samples} @ {rate}',
   'status.total': 'всего {duration}',
+  'status.loop': 'хранится {kept} · всего {total}',
   'status.view': 'вид {duration}',
 
   // -------------------------------------------------------- empty hint
@@ -120,7 +121,14 @@ export const ru: Messages = {
   'capturePanel.capture': 'Захват',
   'capturePanel.freeRun': 'Свободный режим',
   'capturePanel.timer': 'Таймер',
+  'capturePanel.loop': 'Цикл',
   'capturePanel.durationS': 'Длительность (с)',
+  'capturePanel.retentionS': 'Хранить последние (с)',
+  'capturePanel.retentionNote': 'Хранит последние {samples} отсчётов ({megabytes} МБ); более старые отбрасываются во время работы.',
+  'capturePanel.loopCeilingNote': 'При {rate} цикл хранит до {duration} ({megabytes} МБ, в работе примерно вдвое больше).',
+  'capturePanel.loopDropped': 'отброшено старых отсчётов ради новейшего окна: {samples}',
+  'capturePanel.loopNo32': 'Режим цикла пока недоступен на 32 каналах.',
+  'capturePanel.loopTriggerIgnored': 'Программный триггер игнорируется в режиме цикла.',
   'capturePanel.ceilingNote': 'Потолок: {samples} образцов = {duration} на {rate}. Свободный ход остановится сам на потолке.',
   'capturePanel.softwareTrigger': 'Программный триггер',
   'capturePanel.enableTrigger': 'Включить программный триггер',

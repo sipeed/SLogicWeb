@@ -37,7 +37,7 @@ import {
   type BusViewState,
 } from './busView.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
-import { CapturePanel } from './capturePanel.js';
+import { CapturePanel, type CapturePanelView } from './capturePanel.js';
 import { ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration } from './channelList.js';
 import { computeChannelRowHeight } from './channelLayout.js';
 import {
@@ -57,7 +57,8 @@ import { PanelResizer } from './panelResizer.js';
 import { StoreRef } from './storeRef.js';
 import {
   analyzerColor, defaultChannels, defaultChannelName, channelColor, DEFAULT_TRIGGER_MODE,
-  edgeTriggerAutoArms, modesToConditions, triggerModeFromCondition,
+  edgeTriggerAutoArms, clampLoopSeconds, loopDropSamples, loopRetentionSamples, modesToConditions,
+  triggerModeFromCondition,
   type AnalyzerState, type CaptureSettings, type ChannelState, type TriggerMode,
   type CaptureLabel, type StatusError,
 } from './state.js';
@@ -98,6 +99,7 @@ export class App {
   private nextBus = 0;
   /** When the analyzers panel last re-rendered for a bus build's progress. */
   private busPanelAt = 0;
+  private runningPanelAt = 0;
   private readonly settingsMenu: SettingsMenu;
   private readonly sidebarMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
@@ -119,6 +121,7 @@ export class App {
 
   private settings: CaptureSettings = {
     channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'timer', seconds: 1,
+    loopSeconds: 1,
     testMode: 0, triggerEnableMask: false, softwareTrigger: false, triggerModes: {},
     triggerConditions: [], triggerChannel: 0,
     triggerKind: 'rising', triggerLevel: 1, preTriggerPercent: 10,
@@ -133,6 +136,10 @@ export class App {
   private captureBytes = 0;
   /** Samples the device could not deliver, appended as filler and marked as gaps. */
   private lostSamples = 0;
+  private loopRetentionLen = 0;
+  private droppedTotal = 0;
+  private captureIsLoop = false;
+  private startMutatedCapture = false;
   private captureLimitSamples = 0;
   private triggerState: 'off' | 'waiting' | 'triggered' | 'not-found' = 'off';
   /** Trigger sample position in SampleStore; the time axis labels this sample T=0. */
@@ -611,6 +618,13 @@ export class App {
   private frame = (): void => {
     requestAnimationFrame(this.frame);
     this.pumpBusBuilders();
+    if (this.running && this.panel === 'device') {
+      const now = performance.now();
+      if (now - this.runningPanelAt > 500) {
+        this.runningPanelAt = now;
+        this.capturePanel.updateProgress(this.progressView());
+      }
+    }
     if (!this.dirty && !this.running) return;
     this.dirty = false;
     try {
@@ -1245,6 +1259,18 @@ export class App {
     this.renderStatus();   // status line
   }
 
+  private progressView(): NonNullable<CapturePanelView['progress']> {
+    return {
+      seconds: this.captureStart > 0 ? (performance.now() - this.captureStart) / 1000 : 0,
+      samples: this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length,
+      bytes: this.captureIsLoop
+        ? this.store.length * bytesPerSampleForChannels(this.store.channelCount)
+        : this.captureBytes,
+      lost: this.lostSamples,
+      dropped: this.droppedTotal,
+    };
+  }
+
   private renderPanels(): void {
     this.el.side.classList.toggle('hidden', this.panel === null);
     this.resizer.setHidden(this.panel === null);
@@ -1278,14 +1304,7 @@ export class App {
         deviceName: this.device?.name ?? null,
         running: this.running,
         stopping: this.stopping,
-        progress: this.running
-          ? {
-            seconds: this.captureStart > 0 ? (performance.now() - this.captureStart) / 1000 : 0,
-            samples: this.store.length,
-            bytes: this.captureBytes,
-            lost: this.lostSamples,
-          }
-          : null,
+        progress: this.running ? this.progressView() : null,
         maxSamplerateHz: this.rateCeilings,
         triggerState: this.triggerState,
       });
@@ -1354,8 +1373,14 @@ export class App {
     const parts: string[] = [];
     parts.push(formatCaptureLabel(this.captureLabel));
     if (store.length > 0) {
-      parts.push(t('status.summary', { samples: formatCount(store.length), rate: formatRate(sr) }));
-      parts.push(t('status.total', { duration: formatDuration(store.length / sr) }));
+      if (this.captureIsLoop && (this.running || this.droppedTotal > 0)) {
+        parts.push(t('status.loop', {
+          kept: formatCount(store.length), total: formatCount(store.length + this.droppedTotal),
+        }));
+      } else {
+        parts.push(t('status.summary', { samples: formatCount(store.length), rate: formatRate(sr) }));
+        parts.push(t('status.total', { duration: formatDuration(store.length / sr) }));
+      }
       parts.push(t('status.view', { duration: formatDuration((view.end - view.start) / sr) }));
     }
     // Cursor positions share the axis's origin: T=0 is the trigger sample when there
@@ -1467,6 +1492,8 @@ export class App {
     this.markerA.clear();
     this.triggerState = 'off';
     this.triggerSampleIndex = null;
+    this.droppedTotal = 0;
+    this.captureIsLoop = false;
     this.captureLabel = label;
     this.settings = clampSettings(
       { ...this.settings, channels: this.neededWidth() }, this.rateCeilings,
@@ -1573,6 +1600,7 @@ export class App {
     if (!this.device) { this.fail('error.start', new Error('no device connected')); return; }
     try {
       this.statusError = null;
+      this.startMutatedCapture = false;
       const cfg: CaptureConfig = {
         channels: this.settings.channels,
         samplerate: this.settings.samplerate,
@@ -1584,6 +1612,10 @@ export class App {
       const code = vrefCode(cfg.thresholdVolts);
       if (code === 0 || code === 1023) {
         throw new Error(`threshold ${cfg.thresholdVolts} V clips the DAC (code ${code})`);
+      }
+      const isLoop = this.settings.mode === 'loop';
+      if (isLoop && cfg.channels === 32) {
+        throw new Error('loop mode is not supported at 32 channels');
       }
 
       const store = createSampleStore(cfg.channels, cfg.samplerate);
@@ -1598,13 +1630,17 @@ export class App {
       }
       this.captureBytes = 0;
       this.lostSamples = 0;
+      this.droppedTotal = 0;
+      this.captureIsLoop = isLoop;
       this.triggerSampleIndex = null;
-      this.captureStart = this.settings.softwareTrigger ? 0 : performance.now();
+      const softwareTrigger = this.settings.softwareTrigger && !isLoop;
+      this.captureStart = softwareTrigger ? 0 : performance.now();
       const postTriggerSamples = this.settings.mode === 'timer'
         ? Math.min(MAX_SAMPLES - 1, Math.round(this.settings.seconds * cfg.samplerate))
         : MAX_SAMPLES - 1;
       this.captureLimitSamples = postTriggerSamples;
-      this.triggerState = this.settings.softwareTrigger ? 'waiting' : 'off';
+      this.startMutatedCapture = true;
+      this.triggerState = softwareTrigger ? 'waiting' : 'off';
       this.captureLabel = { kind: 'capturing', channels: cfg.channels, rate: cfg.samplerate };
       this.running = true;
       this.relayout();
@@ -1615,16 +1651,19 @@ export class App {
       this.renderPanels();
 
       const bytesPerSample = bytesPerSampleForChannels(cfg.channels);
+      this.loopRetentionLen = isLoop
+        ? loopRetentionSamples(this.settings.loopSeconds, cfg.channels, cfg.samplerate)
+        : 0;
       const triggerConditions = this.settings.triggerConditions.length
         ? this.settings.triggerConditions
         : [{ channel: this.settings.triggerChannel, kind: this.settings.triggerKind,
           level: this.settings.triggerLevel }];
-      const preTriggerSamples = this.settings.softwareTrigger ? Math.min(
+      const preTriggerSamples = softwareTrigger ? Math.min(
         Math.max(0, this.captureLimitSamples - 1),
         Math.max(0, Math.floor(postTriggerSamples * this.settings.preTriggerPercent / 100)),
         Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bytesPerSampleForChannels(cfg.channels)),
       ) : 0;
-      if (this.settings.softwareTrigger) {
+      if (softwareTrigger) {
         // Timer duration starts at the trigger sample. The store budget therefore
         // includes the retained prefix plus the requested post-trigger duration.
         // In free-run mode `post` is already the store ceiling, so this clamp trims
@@ -1637,6 +1676,13 @@ export class App {
         // block. Dropping them truncated every manually stopped capture by up to one
         // sink block (~10 ms at 32ch/200M).
         if (!this.running && !this.stopping) return;
+        if (isLoop) {
+          this.captureBytes += chunk.length;
+          store.append(chunk);
+          this.enforceLoopRetention(this.storeRef);
+          this.dirty = true;
+          return;
+        }
         const room = (this.captureLimitSamples - store.length) * bytesPerSample;
         if (room <= 0) { void this.stopCapture(); return; }
         // Count what is actually kept: a truncated tail chunk must not inflate the
@@ -1658,15 +1704,16 @@ export class App {
         if (!this.running && !this.stopping) return;
         // `pos` is not the anchor, but it is a free cross-check on the invariant, and a
         // silent divergence here would misplace every gap in the capture. Reported once.
-        if (pos !== store.length && this.lostSamples === 0) {
+        if (pos !== store.length + this.droppedTotal && this.lostSamples === 0) {
           this.fail('error.dropoutAccounting',
-            new Error(`device counted ${pos} samples delivered, store holds ${store.length}`));
+            new Error(`device counted ${pos} samples delivered, store holds ${store.length + this.droppedTotal}`));
         }
         const n = appendLostSamples(store, missing, this.captureLimitSamples);
         if (n === 0) return;
         this.lostSamples += n;
+        if (isLoop) { this.enforceLoopRetention(this.storeRef); return; }
         if (store.length >= this.captureLimitSamples) void this.stopCapture();
-      }, this.settings.softwareTrigger ? {
+      }, softwareTrigger ? {
         // The transport says when the capture has delivered everything it ever will
         // (trigger budget emitted, or the device stopped at its own length). This is
         // the stop signal that does not depend on this side's sample arithmetic
@@ -1702,17 +1749,35 @@ export class App {
         // Software-trigger mode cannot use it: where the trigger will land is not
         // known when the device is armed, and a limit there would stop the capture
         // before the trigger arrives.
-        deviceSampleLimit: this.captureLimitSamples,
+        ...(isLoop ? {} : { deviceSampleLimit: this.captureLimitSamples }),
         onEnd: () => { if (this.running) void this.stopCapture(); },
       });
     } catch (e) {
       this.running = false;
-      this.triggerState = 'off';
-      this.triggerSampleIndex = null;
+      if (this.startMutatedCapture) {
+        this.startMutatedCapture = false;
+        this.triggerState = 'off';
+        this.triggerSampleIndex = null;
+      }
       this.relayout();
       this.fail('error.startCapture', e);
       this.renderPanels();
     }
+  }
+
+  private enforceLoopRetention(store: SampleStore): void {
+    const drop = loopDropSamples(store.length, this.loopRetentionLen);
+    if (drop <= 0) return;
+    store.dropFront(drop);
+    this.droppedTotal += drop;
+    const markerSample = this.markerA.sample;
+    if (markerSample !== null && !this.markerA.isDragging) {
+      this.markerA.setSample(markerSample - drop >= 0 ? markerSample - drop : null, store.length);
+    }
+    if (this.triggerSampleIndex !== null) {
+      this.triggerSampleIndex = this.triggerSampleIndex - drop >= 0 ? this.triggerSampleIndex - drop : null;
+    }
+    this.hover = null;
   }
 
   private async stopCapture(): Promise<void> {
@@ -1795,6 +1860,7 @@ export class App {
     const stale = (): boolean => this.store !== store || !this.analyzers.includes(a);
     try {
       this.statusError = null;
+      if ((this.running || this.stopping) && this.captureIsLoop) throw new Error('decoders cannot run during a loop capture');
       if (store.length === 0) throw new Error('no capture to decode');
       // [src/decode/limits.ts] annotation spans are Int32Array, so 2^31-1 is a hard
       // ceiling - 10.7 s at 200 MSa/s, which this bench can actually reach.
@@ -1895,7 +1961,8 @@ export class App {
         stopping: this.stopping,
         error: this.statusError ? formatStatusError(this.statusError) : '',
         label: formatCaptureLabel(this.captureLabel),
-        samples: this.store.length,
+        samples: this.running && this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length,
+        dropped: this.droppedTotal,
         samplerate: this.store.samplerate,
         channelCount: this.store.channelCount,
         triggerState: this.triggerState,
@@ -2108,7 +2175,8 @@ export class App {
       transport: this.device instanceof WorkerSlogicDevice ? 'worker' : 'page',
       transportFallback: workerTransport.lastFallbackReason,
       warm: this.decodeWarm,
-      samples: this.store.length,
+      samples: this.running && this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length,
+      dropped: this.droppedTotal,
       samplerate: this.store.samplerate,
       channels: this.store.channelCount,
       triggerState: this.triggerState,
@@ -2168,6 +2236,7 @@ function clampSettings(
   }
   return {
     ...s, samplerate, seconds: Math.max(0.001, Math.min(s.seconds, max)),
+    loopSeconds: clampLoopSeconds(s.loopSeconds ?? 1, s.channels, samplerate),
     triggerEnableMask: s.triggerEnableMask ?? true,
     // Enable Mask is the sole global gate. Turning it off must not erase the
     // per-channel modes; turning it back on must restore the same conditions.

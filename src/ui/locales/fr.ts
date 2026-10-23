@@ -58,6 +58,7 @@ export const fr: Messages = {
   // ------------------------------------------------------------- status
   'status.summary': 'échantillons : {samples} @ {rate}',
   'status.total': 'total {duration}',
+  'status.loop': '{kept} conservés · {total} au total',
   'status.view': 'vue {duration}',
 
   // -------------------------------------------------------- empty hint
@@ -120,7 +121,14 @@ export const fr: Messages = {
   'capturePanel.capture': 'Capture',
   'capturePanel.freeRun': 'Marche libre',
   'capturePanel.timer': 'Minuteur',
+  'capturePanel.loop': 'Boucle',
   'capturePanel.durationS': 'Durée (s)',
+  'capturePanel.retentionS': 'Conserver (s)',
+  'capturePanel.retentionNote': 'Conserve les {samples} échantillons les plus récents ({megabytes} Mo) ; les plus anciens sont abandonnés en cours.',
+  'capturePanel.loopCeilingNote': 'À {rate}, la boucle conserve jusqu’à {duration} ({megabytes} Mo retenus, environ le double en cours).',
+  'capturePanel.loopDropped': '{samples} échantillons anciens abandonnés pour garder la fenêtre récente',
+  'capturePanel.loopNo32': 'Le mode boucle n’est pas encore disponible à 32 canaux.',
+  'capturePanel.loopTriggerIgnored': 'Le déclenchement logiciel est ignoré en mode boucle.',
   'capturePanel.ceilingNote': 'Plafond : {samples} échantillons = {duration} à {rate}. Une marche libre s’y arrête d’elle-même.',
   'capturePanel.softwareTrigger': 'Trigger logiciel',
   'capturePanel.enableTrigger': 'Activer le trigger logiciel',

@@ -56,6 +56,7 @@ export const zhCN: Messages = {
   // ------------------------------------------------------------- status
   'status.summary': '样本数 {samples} @ {rate}',
   'status.total': '共 {duration}',
+  'status.loop': '已保留 {kept} · 总计 {total}',
   'status.view': '视图 {duration}',
 
   // -------------------------------------------------------- empty hint
@@ -118,7 +119,14 @@ export const zhCN: Messages = {
   'capturePanel.capture': '采集',
   'capturePanel.freeRun': '自由运行',
   'capturePanel.timer': '定时',
+  'capturePanel.loop': '循环',
   'capturePanel.durationS': '时长 (s)',
+  'capturePanel.retentionS': '保留最新 (s)',
+  'capturePanel.retentionNote': '保留最新的 {samples} 个样本（{megabytes} MB）；运行中更旧的样本会被丢弃。',
+  'capturePanel.loopCeilingNote': '在 {rate} 下循环最多保留 {duration}（保留 {megabytes} MB，运行时峰值约为两倍）。',
+  'capturePanel.loopDropped': '为保留最新窗口已丢弃 {samples} 个较旧样本',
+  'capturePanel.loopNo32': '32 通道暂不支持循环模式。',
+  'capturePanel.loopTriggerIgnored': '循环模式下软件触发不生效。',
   'capturePanel.ceilingNote': '上限 {samples} 个样本 = 在 {rate} 下为 {duration}。自由运行会在到达上限时自行停止。',
   'capturePanel.softwareTrigger': '软件触发',
   'capturePanel.enableTrigger': '启用软件触发',
