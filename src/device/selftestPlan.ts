@@ -5,6 +5,7 @@ import {
   PID_SLOGIC32_U3,
   SUPPORTED_CHANNELS,
 } from './protocol.js';
+import { deriveStreamTuning } from './slogic16u3.js';
 
 export type SelftestModel = 'slogic16u3' | 'slogic32u3';
 
@@ -117,6 +118,25 @@ export interface StopScenario {
 
 export type ScenarioRequest = { kind: 'full' } | StopScenario;
 
+export interface ScenarioTiming {
+  wireBytesPerSec: number;
+  transferFillMs: number;
+  minRunMs: number;
+  reuseDeadlineMs: number;
+}
+
+export function scenarioTiming(channels: ChannelCount, mhz: number): ScenarioTiming {
+  const wireBytesPerSec = (mhz * 1e6 * channels) / 8;
+  const tuning = deriveStreamTuning({ channels, samplerate: mhz * 1e6, thresholdVolts: 1.6 });
+  const transferFillMs = (tuning.transferBytes / wireBytesPerSec) * 1000;
+  return {
+    wireBytesPerSec,
+    transferFillMs,
+    minRunMs: Math.ceil(2 * transferFillMs),
+    reuseDeadlineMs: Math.min(10000, Math.ceil(3 * transferFillMs + 500)),
+  };
+}
+
 export function traceWindow(
   length: number, shifted: number, stopAbs: number, radius: number,
 ): [number, number] {
@@ -149,6 +169,10 @@ export function parseScenario(search: string): ScenarioRequest {
   const mhzRaw = params.get('mhz');
   const mhz = mhzRaw === null ? 16 : Number(mhzRaw);
   if (!Number.isFinite(mhz) || mhz <= 0) throw new Error(`mhz must be positive, got "${mhzRaw}"`);
+  const minRunMs = scenarioTiming(channels, mhz).minRunMs;
+  if (ms < minRunMs) {
+    throw new Error(`ms ${ms} is shorter than two transfer fills (${minRunMs} ms) at this geometry`);
+  }
   const layer = params.get('layer') ?? 'page';
   if (layer !== 'page' && layer !== 'worker') {
     throw new Error(`layer must be "page" or "worker", got "${layer}"`);

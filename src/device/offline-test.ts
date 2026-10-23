@@ -55,6 +55,7 @@ import {
   parseScenario,
   refusalCases,
   sawtoothOk,
+  scenarioTiming,
   throughputCeilings,
   throughputPlan,
   traceWindow,
@@ -2376,6 +2377,17 @@ async function main(): Promise<void> {
     async () => { parseScenario('?scenario=stop-4&layer=sidecar'); }, 'page" or "worker');
   await expectThrow('out-of-range ms values are rejected',
     async () => { parseScenario('?scenario=stop-4&ms=5'); }, 'ms must be');
+  await expectThrow('a run shorter than two transfer fills is rejected',
+    async () => { parseScenario('?scenario=stop-4&ms=500'); }, 'two transfer fills');
+
+  const timing416 = scenarioTiming(4, 16);
+  check('scenario timing derives the 4ch/16MHz fill from the tuning geometry',
+    timing416.wireBytesPerSec === 8e6 && Math.round(timing416.transferFillMs) === 391 &&
+      timing416.minRunMs === 783 && timing416.reuseDeadlineMs === 1674,
+    JSON.stringify(timing416));
+  check('scenario timing shrinks with a faster geometry',
+    scenarioTiming(32, 200).transferFillMs < timing416.transferFillMs,
+    JSON.stringify(scenarioTiming(32, 200)));
 
   check('trace window centres on the stop point before the ring fills',
     JSON.stringify(traceWindow(150, 0, 100, 20)) === JSON.stringify([80, 120]),

@@ -31,6 +31,7 @@ import {
   parseScenario,
   emulationProbeWidths,
   refusalCases,
+  scenarioTiming,
   sawtoothOk,
   throughputPlan,
   traceWindow,
@@ -422,6 +423,7 @@ async function runStopScenario(
     bytes += chunk.length;
   };
 
+  const timing = scenarioTiming(scenario.channels, scenario.mhz);
   head(`stop scenario: ${scenario.channels} ch @ ${scenario.mhz} MHz, ${scenario.ms} ms of capture, then stop`);
   await dev.start(cfg, sink);
   await sleep(scenario.ms);
@@ -458,16 +460,22 @@ async function runStopScenario(
 
   let reuseError = '';
   const bytesBeforeReuse = bytes;
+  let reuseStats: unknown;
   try {
     await dev.start(cfg, sink);
-    await sleep(200);
-    await dev.stop();
+    const deadline = performance.now() + timing.reuseDeadlineMs;
+    while (bytes === bytesBeforeReuse && performance.now() < deadline) await sleep(50);
+    await stopWithBudget(dev, STOP_BUDGET_MS);
   } catch (e) {
     reuseError = String(e);
   }
+  const readStats = (dev as { getStats?: () => unknown }).getStats;
+  if (readStats) reuseStats = await Promise.resolve(readStats.call(dev)).catch(() => undefined);
   record('the device starts a new capture after stop', reuseError === '' && bytes > bytesBeforeReuse, {
     reuseError,
     reuseBytes: bytes - bytesBeforeReuse,
+    reuseDeadlineMs: timing.reuseDeadlineMs,
+    reuseStats,
   });
 
   await finish(hooks.close);
