@@ -27,20 +27,23 @@ import {
   emulationWidths,
   liveWidths,
   modelForMaxChannels,
+  modelForProductId,
   parseScenario,
   refusalCases,
   throughputPlan,
   traceWindow,
   type ScenarioRequest,
+  type SelftestModel,
   type StopScenario,
 } from './selftestPlan.js';
 import {
   Slogic16U3,
-  getGrantedDevices,
   expandPacked,
-  requestDevice,
 } from './slogic16u3.js';
-import type { CaptureConfig } from './types.js';
+import { USB_FILTERS } from './usbCore.js';
+import { WorkerSlogicDevice } from './workerTransport.js';
+import './usbWorkerSpawn.js';
+import type { CaptureConfig, Device } from './types.js';
 import { bytesPerSampleForChannels } from '../types.js';
 
 const RESULT_SINK = 'http://127.0.0.1:5177/result';
@@ -77,6 +80,20 @@ function hexdump(bytes: Uint8Array, count: number): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+async function stopWithBudget(dev: Device, budgetMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      dev.stop(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`stop did not finish within ${budgetMs} ms`)), budgetMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function bytesEqual(a: Uint8Array, b: number[]): boolean {
@@ -331,7 +348,7 @@ async function run(dev: Slogic16U3): Promise<void> {
     }
   }
 
-  await finish(dev);
+  await finish(() => dev.close());
 }
 
 function formatTrace(e: TraceEntry): string {
@@ -340,10 +357,17 @@ function formatTrace(e: TraceEntry): string {
   return `${e.dir}${where}${bytes}${e.note ? ` ${e.note}` : ''}`;
 }
 
-async function runStopScenario(dev: Slogic16U3, scenario: StopScenario): Promise<void> {
+interface ScenarioHooks {
+  subscribeTrace: (push: (text: string) => void) => void;
+  close: () => void | Promise<void>;
+}
+
+async function runStopScenario(
+  dev: Device, scenario: StopScenario, model: SelftestModel, hooks: ScenarioHooks,
+): Promise<void> {
   connectEl.hidden = true;
   report.device = { name: dev.name, serial: dev.serial };
-  report.model = modelForMaxChannels(dev.maxChannels);
+  report.model = model;
   report.scenario = `stop-${scenario.channels}`;
   report.layer = scenario.layer;
   line(`device: ${dev.name}  serial ${dev.serial}`, 'ok');
@@ -351,13 +375,13 @@ async function runStopScenario(dev: Slogic16U3, scenario: StopScenario): Promise
 
   const trace: string[] = [];
   let traceShifted = 0;
-  dev.onTrace = (e) => {
-    trace.push(formatTrace(e));
+  hooks.subscribeTrace((text) => {
+    trace.push(text);
     if (trace.length > 400) {
       trace.shift();
       traceShifted++;
     }
-  };
+  });
 
   const cfg: CaptureConfig = {
     channels: scenario.channels,
@@ -383,12 +407,7 @@ async function runStopScenario(dev: Slogic16U3, scenario: StopScenario): Promise
   let stopMs = NaN;
   let stopError = '';
   try {
-    await Promise.race([
-      dev.stop(),
-      sleep(STOP_BUDGET_MS).then(() => {
-        throw new Error(`stop did not finish within ${STOP_BUDGET_MS} ms`);
-      }),
-    ]);
+    await stopWithBudget(dev, STOP_BUDGET_MS);
     stopMs = performance.now() - stopStarted;
   } catch (e) {
     stopError = String(e);
@@ -422,10 +441,10 @@ async function runStopScenario(dev: Slogic16U3, scenario: StopScenario): Promise
     reuseBytes: bytes - bytesBeforeReuse,
   });
 
-  await finish(dev);
+  await finish(hooks.close);
 }
 
-async function finish(dev: Slogic16U3): Promise<void> {
+async function finish(close: () => void | Promise<void>): Promise<void> {
   head('done');
   const failed = checks.filter((c) => !c.pass);
   report.failed = failed.length;
@@ -435,7 +454,7 @@ async function finish(dev: Slogic16U3): Promise<void> {
   );
   for (const f of failed) line(`  FAILED: ${f.name}`, 'bad');
 
-  await dev.close();
+  await close();
 
   try {
     await fetch(RESULT_SINK, {
@@ -468,15 +487,12 @@ async function main(): Promise<void> {
       'warn',
     );
   }
-  const dispatch = (dev: Slogic16U3): Promise<void> =>
-    scenario.kind === 'full' ? run(dev) : runStopScenario(dev, scenario);
 
-  const granted = await getGrantedDevices();
+  const granted = (await navigator.usb.getDevices())
+    .filter((d) => USB_FILTERS.some((f) => f.vendorId === d.vendorId && f.productId === d.productId));
   if (granted.length > 0) {
     line(`permission already granted for ${granted.length} device(s); no click needed`, 'dim');
-    const dev = granted[0];
-    await dev.open();
-    await dispatch(dev);
+    await dispatch(granted[0], scenario);
     return;
   }
 
@@ -486,13 +502,53 @@ async function main(): Promise<void> {
   connectEl.addEventListener('click', () => {
     // Errors here must not be swallowed: an empty chooser or a cancelled pick
     // has to be visible.
-    requestDevice()
-      .then((d) => dispatch(d as Slogic16U3))
+    navigator.usb.requestDevice({ filters: USB_FILTERS })
+      .then((usb) => dispatch(usb, scenario))
       .catch((e) => {
         line(`connect failed: ${e}`, 'bad');
         console.error(e);
         connectEl.hidden = false;
       });
+  });
+}
+
+async function dispatch(usb: USBDevice, scenario: ScenarioRequest): Promise<void> {
+  if (scenario.kind === 'full') {
+    const dev = new Slogic16U3(usb);
+    await dev.open();
+    await run(dev);
+    return;
+  }
+  const model = modelForProductId(usb.productId);
+  if (scenario.layer === 'page') {
+    const dev = new Slogic16U3(usb);
+    await dev.open();
+    await runStopScenario(dev, scenario, model, {
+      subscribeTrace: (push) => {
+        dev.onTrace = (e) => push(formatTrace(e));
+      },
+      close: () => dev.close(),
+    });
+    return;
+  }
+  let worker: WorkerSlogicDevice;
+  try {
+    worker = await WorkerSlogicDevice.open({ vendorId: usb.vendorId, productId: usb.productId });
+  } catch (e) {
+    connectEl.hidden = true;
+    report.device = { name: usb.productName, serial: usb.serialNumber };
+    report.model = model;
+    report.scenario = `stop-${scenario.channels}`;
+    report.layer = scenario.layer;
+    record('worker transport opens the granted device', false, { error: String(e) });
+    await finish(() => {});
+    return;
+  }
+  await runStopScenario(worker, scenario, model, {
+    subscribeTrace: (push) => {
+      worker.onTrace = (message) => push(formatTrace(message.entry));
+    },
+    close: () => worker.terminate(),
   });
 }
 

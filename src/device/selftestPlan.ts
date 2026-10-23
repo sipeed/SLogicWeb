@@ -2,6 +2,7 @@ import type { ChannelCount } from '../types.js';
 import {
   MAX_SAMPLERATE_HZ,
   MAX_SAMPLERATE_HZ_SLOGIC32_U3,
+  PID_SLOGIC32_U3,
   SUPPORTED_CHANNELS,
 } from './protocol.js';
 
@@ -9,6 +10,10 @@ export type SelftestModel = 'slogic16u3' | 'slogic32u3';
 
 export function modelForMaxChannels(maxChannels: number): SelftestModel {
   return maxChannels > 16 ? 'slogic32u3' : 'slogic16u3';
+}
+
+export function modelForProductId(productId: number): SelftestModel {
+  return productId === PID_SLOGIC32_U3 ? 'slogic32u3' : 'slogic16u3';
 }
 
 export function deviceLabel(model: SelftestModel): string {
@@ -92,7 +97,7 @@ export interface StopScenario {
   channels: ChannelCount;
   ms: number;
   mhz: number;
-  layer: 'page';
+  layer: 'page' | 'worker';
 }
 
 export type ScenarioRequest = { kind: 'full' } | StopScenario;
@@ -130,6 +135,8 @@ export function parseScenario(search: string): ScenarioRequest {
   const mhz = mhzRaw === null ? 16 : Number(mhzRaw);
   if (!Number.isFinite(mhz) || mhz <= 0) throw new Error(`mhz must be positive, got "${mhzRaw}"`);
   const layer = params.get('layer') ?? 'page';
-  if (layer !== 'page') throw new Error(`layer "${layer}" is not available in this build`);
-  return { kind: 'stop', channels, ms, mhz, layer: 'page' };
+  if (layer !== 'page' && layer !== 'worker') {
+    throw new Error(`layer must be "page" or "worker", got "${layer}"`);
+  }
+  return { kind: 'stop', channels, ms, mhz, layer };
 }

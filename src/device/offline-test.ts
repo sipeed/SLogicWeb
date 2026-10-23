@@ -28,6 +28,8 @@ import {
   configureThreshold,
   decodeDeviceFlags,
   MAX_SAMPLERATE_HZ_SLOGIC32_U3,
+  PID_SLOGIC16_U3,
+  PID_SLOGIC32_U3,
   SAMPLERATES_HZ,
   sampleLengthForSamples,
   samplesForSampleLength,
@@ -48,6 +50,7 @@ import {
   emulationWidths,
   liveWidths,
   modelForMaxChannels,
+  modelForProductId,
   parseScenario,
   refusalCases,
   throughputCeilings,
@@ -2270,6 +2273,9 @@ async function main(): Promise<void> {
     modelForMaxChannels(16) === 'slogic16u3');
   check('selftest plan maps 32 channels to the 32 U3 model',
     modelForMaxChannels(32) === 'slogic32u3');
+  check('selftest plan maps the product ids to the same models',
+    modelForProductId(PID_SLOGIC16_U3) === 'slogic16u3' &&
+    modelForProductId(PID_SLOGIC32_U3) === 'slogic32u3');
   check('selftest plan labels name both models',
     deviceLabel('slogic16u3') === 'SLogic16 U3' && deviceLabel('slogic32u3') === 'SLogic32 U3');
 
@@ -2346,8 +2352,11 @@ async function main(): Promise<void> {
     async () => { parseScenario('?scenario=stop-3'); }, 'unsupported channel count');
   await expectThrow('channel counts beyond the device family are rejected',
     async () => { parseScenario('?scenario=stop-64'); }, 'unsupported channel count');
-  await expectThrow('the worker layer is not offered by this build',
-    async () => { parseScenario('?scenario=stop-4&layer=worker'); }, 'not available');
+  const stopWorker = parseScenario('?scenario=stop-4&layer=worker');
+  check('scenario parsing accepts the worker layer',
+    stopWorker.kind === 'stop' && stopWorker.layer === 'worker', JSON.stringify(stopWorker));
+  await expectThrow('unknown layers are rejected',
+    async () => { parseScenario('?scenario=stop-4&layer=sidecar'); }, 'page" or "worker');
   await expectThrow('out-of-range ms values are rejected',
     async () => { parseScenario('?scenario=stop-4&ms=5'); }, 'ms must be');
 
