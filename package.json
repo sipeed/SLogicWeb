@@ -15,7 +15,8 @@
     "preview:lan": "LOGICWEB_LAN=1 vite preview",
     "check": "tsc --noEmit",
     "bench:window": "node src/device/tools/window-bench.mjs",
-    "bench:geometry": "node src/device/tools/geometry-bench.mjs"
+    "bench:geometry": "node src/device/tools/geometry-bench.mjs",
+    "bench:loop": "node src/device/tools/loop-window-bench.mjs"
   },
   "devDependencies": {
     "@types/w3c-web-usb": "^1.0.14",
