@@ -23,10 +23,40 @@
  * applies it to every renderer, so all canvases share the same sample window.
  */
 
-import { DARK_THEME, ViewTransform, WaveformRenderer } from '../render/index.js';
-import type { Theme } from '../render/index.js';
+import { Canvas2dRenderer, DARK_THEME, ViewTransform, WaveformRenderer } from '../render/index.js';
+import type { FrameStats, Theme } from '../render/index.js';
 import type { SampleStore } from '../data/types.js';
 import { ROWS } from './metrics.js';
+
+/**
+ * The slice of a row renderer the stack drives. `WaveformRenderer` (WebGL2) is the
+ * primary; `Canvas2dRenderer` is the same contract rasterised in software for browsers
+ * whose WebGL2 is missing or blocked, so the shell boots and stays usable there.
+ */
+export type StackRenderer = Pick<
+  WaveformRenderer,
+  | 'widthDevicePx' | 'setTheme' | 'setChannels' | 'setRowHeights' | 'setDevicePixelRatio'
+  | 'syncCanvasSize' | 'setViewport' | 'viewport' | 'setFollowLatest' | 'followLatest'
+  | 'dispose'
+> & { render(): FrameStats };
+
+/** Cached one-canvas probe: WebGL2 either works on this page or it does not. */
+let webgl2Probe: boolean | null = null;
+function webgl2Available(): boolean {
+  if (webgl2Probe === null) {
+    try {
+      webgl2Probe = document.createElement('canvas').getContext('webgl2') !== null;
+    } catch {
+      webgl2Probe = false;
+    }
+    if (!webgl2Probe) {
+      console.info(
+        '[logicweb] WebGL2 is unavailable here; drawing waveforms with the slower Canvas 2D fallback',
+      );
+    }
+  }
+  return webgl2Probe;
+}
 
 export interface RowSpec {
   kind: 'channel' | 'lane' | 'analog';
@@ -54,7 +84,7 @@ const MAX_ROWS_PER_CANVAS = 16;
 
 export class WaveformStack {
   readonly view: ViewTransform;
-  private renderers: WaveformRenderer[] = [];
+  private renderers: StackRenderer[] = [];
   private canvases: HTMLCanvasElement[] = [];
   private rows: RowSpec[] = [];
   private groups: RowSpec[][] = [];
@@ -133,7 +163,8 @@ export class WaveformStack {
       canvas.className = 'wave-canvas';
       this.container.appendChild(canvas);
       this.canvases.push(canvas);
-      this.renderers.push(new WaveformRenderer({
+      const Renderer = webgl2Available() ? WaveformRenderer : Canvas2dRenderer;
+      this.renderers.push(new Renderer({
         canvas,
         store: this.store,
         theme,
@@ -208,8 +239,8 @@ export class WaveformStack {
     this.view.set(v.start, v.end);
   }
 
-  private activeRenderers(): WaveformRenderer[] {
-    const out: WaveformRenderer[] = [];
+  private activeRenderers(): StackRenderer[] {
+    const out: StackRenderer[] = [];
     for (let i = 0; i < this.renderers.length; i++) {
       if (this.groups[i]?.length) out.push(this.renderers[i]!);
     }

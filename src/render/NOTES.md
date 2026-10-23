@@ -396,3 +396,28 @@ every column of a gap sample. `cpuRaster` applies the same rule, so the GPU/CPU
 comparison still covers it (`[123456, 123496)` is 16 px per sample), and
 `testZoomedInEdge` checks the line directly at dpr 1/2/3. On the old code that test lit
 20/40/60 columns - exactly one sample wide.
+
+---
+
+## Canvas 2D fallback (`canvas2dRenderer.ts`)
+
+`[CHOSEN]` A browser whose WebGL2 is missing or blocked (GPU-blocklisted Chrome, a VM
+without pass-through) used to die in `new App()` with the red boot overlay, because
+`WaveformRenderer`'s constructor throws when `getContext('webgl2')` returns null.
+`Canvas2dRenderer` implements the same public contract rasterised in software, and
+`WaveformStack` picks between the two with a one-time probe canvas, so the shell boots
+and stays fully usable; only frame cost changes (one full-canvas `putImageData` instead
+of an instanced draw).
+
+Two deliberate properties:
+
+- It is fed by the PRODUCTION data path - `planColumns` + `fillAtlas` - not by the
+  per-column queries `cpuRaster` uses, so fractional zoom and the live-edge clamp behave
+  exactly as on the GPU path.
+- Its per-pixel painting is the same transcription of `FRAGMENT_SRC` that `cpuRaster`
+  carries (separator first, NO_DATA wash + top border, idle lines, neighbour-extended
+  edge bars), so a screenshot of the demo capture is pixel-identical to the WebGL2 one
+  (verified by side-by-side capture, 2026-10-22).
+
+The two files share no base class on purpose: the WebGL renderer is the hot path and
+stays untouched, and the fallback duplicates only the viewport/config bookkeeping.

@@ -146,3 +146,7 @@ WebUSB is Chromium-only. Chrome, Edge, Brave and Opera can drive the device; Fir
 Safari can still open `.sr` and `.lwcap` files and decode them. HTTPS from Pages satisfies
 the secure-context requirement, so capture works on a deployed site exactly as it does on
 `http://127.0.0.1`.
+
+A browser without WebGL2 (GPU-blocklisted Chrome, a VM without pass-through) no longer
+fails to boot: the waveform canvases fall back to a Canvas 2D rasteriser that draws the
+same picture, slower per frame.
