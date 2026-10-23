@@ -48,9 +48,11 @@ import {
   emulationWidths,
   liveWidths,
   modelForMaxChannels,
+  parseScenario,
   refusalCases,
   throughputCeilings,
   throughputPlan,
+  traceWindow,
 } from './selftestPlan.js';
 
 let failures = 0;
@@ -2318,6 +2320,46 @@ async function main(): Promise<void> {
     JSON.stringify(emulationWidths('slogic32u3')) === JSON.stringify([16, 8, 4, 32]));
   check('16 U3 emulation keeps the native anchor, 32 U3 checks the counter shape',
     emulationAnchor('slogic16u3') === 'native' && emulationAnchor('slogic32u3') === 'counter');
+
+  check('scenario parsing keeps the bare URL on the full run', parseScenario('').kind === 'full');
+  const stopDefault = parseScenario('?scenario=stop-4');
+  check('scenario parsing reads stop-4 with the documented defaults',
+    stopDefault.kind === 'stop' && stopDefault.channels === 4 &&
+      stopDefault.ms === 1000 && stopDefault.mhz === 16 && stopDefault.layer === 'page',
+    JSON.stringify(stopDefault));
+  const stopSuffixed = parseScenario('?scenario=stop-4ch');
+  check('scenario parsing accepts the ch-suffixed form',
+    stopSuffixed.kind === 'stop' && stopSuffixed.channels === 4, JSON.stringify(stopSuffixed));
+  const stopFull = parseScenario('?scenario=stop-32&ms=250&mhz=100');
+  check('scenario parsing reads explicit ms and mhz',
+    stopFull.kind === 'stop' && stopFull.channels === 32 && stopFull.ms === 250 && stopFull.mhz === 100,
+    JSON.stringify(stopFull));
+  await expectThrow('unknown scenario names are rejected',
+    async () => { parseScenario('?scenario=nope'); }, 'unknown scenario');
+  await expectThrow('near-miss scenario forms are rejected',
+    async () => { parseScenario('?scenario=stop-4c'); }, 'unknown scenario');
+  await expectThrow('unknown scenario parameters are rejected',
+    async () => { parseScenario('?scenario=stop-4&debug=1'); }, 'unknown scenario parameter');
+  await expectThrow('scenario parameters without a scenario are rejected',
+    async () => { parseScenario('?ms=250'); }, 'require a "scenario" key');
+  await expectThrow('unsupported channel counts are rejected',
+    async () => { parseScenario('?scenario=stop-3'); }, 'unsupported channel count');
+  await expectThrow('channel counts beyond the device family are rejected',
+    async () => { parseScenario('?scenario=stop-64'); }, 'unsupported channel count');
+  await expectThrow('the worker layer is not offered by this build',
+    async () => { parseScenario('?scenario=stop-4&layer=worker'); }, 'not available');
+  await expectThrow('out-of-range ms values are rejected',
+    async () => { parseScenario('?scenario=stop-4&ms=5'); }, 'ms must be');
+
+  check('trace window centres on the stop point before the ring fills',
+    JSON.stringify(traceWindow(150, 0, 100, 20)) === JSON.stringify([80, 120]),
+    JSON.stringify(traceWindow(150, 0, 100, 20)));
+  check('trace window follows the stop point after the ring overflows',
+    JSON.stringify(traceWindow(400, 200, 500, 20)) === JSON.stringify([280, 320]),
+    JSON.stringify(traceWindow(400, 200, 500, 20)));
+  check('trace window truncates to what survives when the stop point was evicted',
+    JSON.stringify(traceWindow(400, 600, 585, 20)) === JSON.stringify([0, 5]),
+    JSON.stringify(traceWindow(400, 600, 585, 20)));
 
   console.log(`\n${failures === 0 ? 'all offline checks passed' : failures + ' offline check(s) FAILED'}`);
   if (failures) failExit();

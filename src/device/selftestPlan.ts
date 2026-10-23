@@ -2,6 +2,7 @@ import type { ChannelCount } from '../types.js';
 import {
   MAX_SAMPLERATE_HZ,
   MAX_SAMPLERATE_HZ_SLOGIC32_U3,
+  SUPPORTED_CHANNELS,
 } from './protocol.js';
 
 export type SelftestModel = 'slogic16u3' | 'slogic32u3';
@@ -84,4 +85,51 @@ export function emulationWidths(model: SelftestModel): ChannelCount[] {
 
 export function emulationAnchor(model: SelftestModel): 'native' | 'counter' {
   return model === 'slogic32u3' ? 'counter' : 'native';
+}
+
+export interface StopScenario {
+  kind: 'stop';
+  channels: ChannelCount;
+  ms: number;
+  mhz: number;
+  layer: 'page';
+}
+
+export type ScenarioRequest = { kind: 'full' } | StopScenario;
+
+export function traceWindow(
+  length: number, shifted: number, stopAbs: number, radius: number,
+): [number, number] {
+  const stopIndex = stopAbs - shifted;
+  return [Math.max(0, stopIndex - radius), Math.min(length, Math.max(0, stopIndex + radius))];
+}
+
+export function parseScenario(search: string): ScenarioRequest {
+  const params = new URLSearchParams(search);
+  const keys = [...params.keys()];
+  if (keys.length === 0) return { kind: 'full' };
+  const allowed = new Set(['scenario', 'ms', 'mhz', 'layer']);
+  for (const key of keys) {
+    if (!allowed.has(key)) throw new Error(`unknown scenario parameter "${key}"`);
+  }
+  const scenario = params.get('scenario');
+  if (scenario === null) throw new Error('scenario parameters require a "scenario" key');
+  const match = /^stop-(\d+)(?:ch)?$/.exec(scenario);
+  if (!match) throw new Error(`unknown scenario "${scenario}"`);
+  const parsed = Number(match[1]);
+  if (!(SUPPORTED_CHANNELS as readonly number[]).includes(parsed)) {
+    throw new Error(`unsupported channel count ${match[1]}`);
+  }
+  const channels = parsed as ChannelCount;
+  const msRaw = params.get('ms');
+  const ms = msRaw === null ? 1000 : Number(msRaw);
+  if (!Number.isInteger(ms) || ms < 50 || ms > 10000) {
+    throw new Error(`ms must be an integer in [50, 10000], got "${msRaw}"`);
+  }
+  const mhzRaw = params.get('mhz');
+  const mhz = mhzRaw === null ? 16 : Number(mhzRaw);
+  if (!Number.isFinite(mhz) || mhz <= 0) throw new Error(`mhz must be positive, got "${mhzRaw}"`);
+  const layer = params.get('layer') ?? 'page';
+  if (layer !== 'page') throw new Error(`layer "${layer}" is not available in this build`);
+  return { kind: 'stop', channels, ms, mhz, layer: 'page' };
 }

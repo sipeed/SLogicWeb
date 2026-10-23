@@ -19,6 +19,7 @@ import {
   TEST_MODE_NORMAL,
   vrefCode,
   vrefVolts,
+  type TraceEntry,
 } from './protocol.js';
 import {
   deviceLabel,
@@ -26,8 +27,12 @@ import {
   emulationWidths,
   liveWidths,
   modelForMaxChannels,
+  parseScenario,
   refusalCases,
   throughputPlan,
+  traceWindow,
+  type ScenarioRequest,
+  type StopScenario,
 } from './selftestPlan.js';
 import {
   Slogic16U3,
@@ -70,6 +75,10 @@ function hexdump(bytes: Uint8Array, count: number): string {
   return rows.join('\n');
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 function bytesEqual(a: Uint8Array, b: number[]): boolean {
   if (a.length < b.length) return false;
   for (let i = 0; i < b.length; i++) if (a[i] !== b[i]) return false;
@@ -101,7 +110,7 @@ async function capture(
     { testMode },
   );
 
-  await new Promise((r) => setTimeout(r, ms));
+  await sleep(ms);
   await dev.stop();
 
   const stats = dev.getStats();
@@ -322,6 +331,101 @@ async function run(dev: Slogic16U3): Promise<void> {
     }
   }
 
+  await finish(dev);
+}
+
+function formatTrace(e: TraceEntry): string {
+  const where = e.addr === undefined ? '' : ` 0x${e.addr.toString(16).padStart(4, '0')}`;
+  const bytes = e.bytes === undefined ? '' : ` ${e.bytes}`;
+  return `${e.dir}${where}${bytes}${e.note ? ` ${e.note}` : ''}`;
+}
+
+async function runStopScenario(dev: Slogic16U3, scenario: StopScenario): Promise<void> {
+  connectEl.hidden = true;
+  report.device = { name: dev.name, serial: dev.serial };
+  report.model = modelForMaxChannels(dev.maxChannels);
+  report.scenario = `stop-${scenario.channels}`;
+  report.layer = scenario.layer;
+  line(`device: ${dev.name}  serial ${dev.serial}`, 'ok');
+  dev.onError = (e) => line(`  device error: ${e}`, 'bad');
+
+  const trace: string[] = [];
+  let traceShifted = 0;
+  dev.onTrace = (e) => {
+    trace.push(formatTrace(e));
+    if (trace.length > 400) {
+      trace.shift();
+      traceShifted++;
+    }
+  };
+
+  const cfg: CaptureConfig = {
+    channels: scenario.channels,
+    samplerate: scenario.mhz * 1e6,
+    thresholdVolts: 1.6,
+  };
+  let bytes = 0;
+  const sink = (chunk: Uint8Array): void => {
+    bytes += chunk.length;
+  };
+
+  head(`stop scenario: ${scenario.channels} ch @ ${scenario.mhz} MHz, ${scenario.ms} ms of capture, then stop`);
+  await dev.start(cfg, sink);
+  await sleep(scenario.ms);
+  const bytesAtStop = bytes;
+  let bytesAtStopResolve = bytes;
+  const traceAtStop = trace.length + traceShifted;
+  line(`  captured ${bytesAtStop.toLocaleString()} B before stop`);
+  record('the capture delivered data before stop', bytesAtStop > 0, { bytes: bytesAtStop });
+
+  const STOP_BUDGET_MS = 5000;
+  const stopStarted = performance.now();
+  let stopMs = NaN;
+  let stopError = '';
+  try {
+    await Promise.race([
+      dev.stop(),
+      sleep(STOP_BUDGET_MS).then(() => {
+        throw new Error(`stop did not finish within ${STOP_BUDGET_MS} ms`);
+      }),
+    ]);
+    stopMs = performance.now() - stopStarted;
+  } catch (e) {
+    stopError = String(e);
+  }
+  if (stopError === '') bytesAtStopResolve = bytes;
+  record('stop() completes within the budget', stopError === '', {
+    stopMs: Number.isNaN(stopMs) ? 'timeout' : Math.round(stopMs),
+    stopError,
+  });
+
+  await sleep(250);
+  record('the stream is silent after stop', bytes === bytesAtStopResolve, {
+    bytesAtStop,
+    bytesAtStopResolve,
+    bytesAfter: bytes,
+  });
+
+  report.trace = trace.slice(...traceWindow(trace.length, traceShifted, traceAtStop, 20));
+
+  let reuseError = '';
+  const bytesBeforeReuse = bytes;
+  try {
+    await dev.start(cfg, sink);
+    await sleep(200);
+    await dev.stop();
+  } catch (e) {
+    reuseError = String(e);
+  }
+  record('the device starts a new capture after stop', reuseError === '' && bytes > bytesBeforeReuse, {
+    reuseError,
+    reuseBytes: bytes - bytesBeforeReuse,
+  });
+
+  await finish(dev);
+}
+
+async function finish(dev: Slogic16U3): Promise<void> {
   head('done');
   const failed = checks.filter((c) => !c.pass);
   report.failed = failed.length;
@@ -351,12 +455,28 @@ async function main(): Promise<void> {
     return;
   }
 
+  let scenario: ScenarioRequest;
+  try {
+    scenario = parseScenario(location.search);
+  } catch (e) {
+    line(`bad scenario parameters: ${e}`, 'bad');
+    throw e;
+  }
+  if (scenario.kind !== 'full') {
+    line(
+      `scenario: stop-${scenario.channels}, ${scenario.ms} ms @ ${scenario.mhz} MHz, ${scenario.layer} layer`,
+      'warn',
+    );
+  }
+  const dispatch = (dev: Slogic16U3): Promise<void> =>
+    scenario.kind === 'full' ? run(dev) : runStopScenario(dev, scenario);
+
   const granted = await getGrantedDevices();
   if (granted.length > 0) {
     line(`permission already granted for ${granted.length} device(s); no click needed`, 'dim');
     const dev = granted[0];
     await dev.open();
-    await run(dev);
+    await dispatch(dev);
     return;
   }
 
@@ -367,7 +487,7 @@ async function main(): Promise<void> {
     // Errors here must not be swallowed: an empty chooser or a cancelled pick
     // has to be visible.
     requestDevice()
-      .then((d) => run(d as Slogic16U3))
+      .then((d) => dispatch(d as Slogic16U3))
       .catch((e) => {
         line(`connect failed: ${e}`, 'bad');
         console.error(e);
