@@ -15,12 +15,20 @@
  */
 
 import {
-  MAX_SAMPLERATE_HZ,
   TEST_MODE_EMULATION,
   TEST_MODE_NORMAL,
   vrefCode,
   vrefVolts,
 } from './protocol.js';
+import {
+  deviceLabel,
+  emulationAnchor,
+  emulationWidths,
+  liveWidths,
+  modelForMaxChannels,
+  refusalCases,
+  throughputPlan,
+} from './selftestPlan.js';
 import {
   Slogic16U3,
   getGrantedDevices,
@@ -28,6 +36,7 @@ import {
   requestDevice,
 } from './slogic16u3.js';
 import type { CaptureConfig } from './types.js';
+import { bytesPerSampleForChannels } from '../types.js';
 
 const RESULT_SINK = 'http://127.0.0.1:5177/result';
 
@@ -111,6 +120,9 @@ async function run(dev: Slogic16U3): Promise<void> {
   connectEl.hidden = true;
   report.device = { name: dev.name, serial: dev.serial };
   line(`device: ${dev.name}  serial ${dev.serial}`, 'ok');
+  const model = modelForMaxChannels(dev.maxChannels);
+  report.model = model;
+  line(`self-test plan: ${deviceLabel(model)}`, 'dim');
 
   dev.onError = (e) => line(`  device error: ${e}`, 'bad');
 
@@ -147,10 +159,11 @@ async function run(dev: Slogic16U3): Promise<void> {
     record('expandPacked(8ch) is a pass-through', expandPacked(raw3, 8) === raw3, {});
   }
 
-  // ---------------------------------------------------- 16 channel, the brief
-  head('1. 16 ch @ 16 MHz, 1.6 V threshold, 2 s of live capture');
-  {
-    const cfg: CaptureConfig = { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 };
+  const widths = liveWidths(model);
+  for (let w = 0; w < widths.length; w++) {
+    const ch = widths[w];
+    head(`${w === 0 ? '1' : '1b'}. ${ch} ch @ 16 MHz, 1.6 V threshold, 2 s of live capture`);
+    const cfg: CaptureConfig = { channels: ch, samplerate: 16e6, thresholdVolts: 1.6 };
     const { head: h, stats } = await capture(dev, cfg, 2000, TEST_MODE_NORMAL);
     line(`  bytes received : ${stats.rawBytes.toLocaleString()} raw / ${stats.sinkBytes.toLocaleString()} to sink`);
     line(`  transfers      : ${stats.transfers} (${stats.shortTransfers} short)`);
@@ -158,24 +171,20 @@ async function run(dev: Slogic16U3): Promise<void> {
     line(`  sustained      : ${stats.rawMBps.toFixed(2)} MB/s incl. start-up, ${stats.steadyMBps.toFixed(2)} MB/s steady`);
     line(`  first 64 bytes after the head drop:`);
     line(hexdump(h, 64), 'dim');
-    report.capture16 = { ...stats, headHex: Array.from(h.subarray(0, 32)) };
+    report[`capture${ch}`] = { ...stats, headHex: Array.from(h.subarray(0, 32)) };
 
-    // The device must produce 16e6 * 2 = 32 MB/s. Anything materially below
-    // that means samples were lost, not that the link is slow.
-    const expected = 32;
+    const bytesPerSample = bytesPerSampleForChannels(ch);
+    const expected = (16e6 * bytesPerSample) / 1e6;
     const pass = stats.steadyMBps > expected * 0.97 && stats.steadyMBps < expected * 1.03;
-    record(`16ch@16MHz delivers ${expected} MB/s (+-3%)`, pass, {
+    record(`${ch}ch@16MHz delivers ${expected} MB/s (+-3%)`, pass, {
       steadyMBps: stats.steadyMBps,
     });
-    // A 16-channel sample is 2 bytes, so a whole number of samples must have
-    // reached the sink. The head drop removes 4 bytes, i.e. 2 whole samples,
-    // exactly once - so raw and sink must differ by exactly 4.
     record(
-      'exactly 4 head bytes dropped across the whole acquisition',
+      `${ch}ch drops exactly 4 head bytes across the whole acquisition`,
       stats.rawBytes - stats.sinkBytes === 4,
       { raw: stats.rawBytes, sink: stats.sinkBytes, diff: stats.rawBytes - stats.sinkBytes },
     );
-    record('sink data is a whole number of 16-channel samples', stats.sinkBytes % 2 === 0, {
+    record(`${ch}ch sink data is a whole number of samples`, stats.sinkBytes % bytesPerSample === 0, {
       sinkBytes: stats.sinkBytes,
     });
   }
@@ -190,10 +199,13 @@ async function run(dev: Slogic16U3): Promise<void> {
     // gives 0700 0600 0500 0400 0300 0200 0100 0000 0f00 0e00 ... deterministically.
     const want = [0x07, 0x00, 0x06, 0x00, 0x05, 0x00, 0x04, 0x00, 0x03, 0x00, 0x02, 0x00,
                   0x01, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x0e, 0x00];
-    record('16ch emulation head matches the native driver byte for byte', bytesEqual(h, want), {
-      got: Array.from(h.subarray(0, 20)),
-      want,
-    });
+    record(
+      emulationAnchor(model) === 'native'
+        ? '16ch emulation head matches the native driver byte for byte'
+        : '16ch emulation head is the descending counter',
+      bytesEqual(h, want),
+      { got: Array.from(h.subarray(0, 20)), want },
+    );
     report.emu16Hex = Array.from(h.subarray(0, 32));
   }
 
@@ -233,37 +245,34 @@ async function run(dev: Slogic16U3): Promise<void> {
     report.emu4Stats = stats;
   }
 
+  if (emulationWidths(model).includes(32)) {
+    head('4b. emulation pattern at 32 channels (4 bytes per sample on the wire)');
+    const cfg: CaptureConfig = { channels: 32, samplerate: 16e6, thresholdVolts: 1.6 };
+    const { head: h, stats } = await capture(dev, cfg, 250, TEST_MODE_EMULATION);
+    line(hexdump(h, 32), 'dim');
+    const want = [0x07, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
+                  0x05, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00];
+    record('32ch emulation head is the descending counter', bytesEqual(h, want), {
+      got: Array.from(h.subarray(0, 16)),
+    });
+    const pass = stats.steadyMBps > 62 && stats.steadyMBps < 66;
+    record('32ch@16MHz delivers 64 MB/s', pass, { steadyMBps: stats.steadyMBps });
+    record('32ch sink data is a whole number of samples', stats.sinkBytes % 4 === 0, {
+      sinkBytes: stats.sinkBytes,
+    });
+    report.emu32Hex = Array.from(h.subarray(0, 32));
+    report.emu32Stats = stats;
+  }
+
   // ------------------------------------------------------- throughput ceiling
   head('5. sustained throughput at every capture width');
   {
-    // All three advertised ceilings are the SAME 400 MB/s on the wire - the device has one
-    // bandwidth budget and the per-width rate is that budget divided by the bit width
-    // (4x800, 8x400, 16x200 all give rate*ch/8 = 400 MB/s). Only the 16-channel column had
-    // ever been run; 4 and 8 were taken from api.c:134 and assumed.
-    //
-    // The 16-channel rows are the control: they reproduce a known result (399.57 MB/s at
-    // 200 MHz), so a change there means the machine or the link moved, not the width.
-    //
-    // The 4-channel rows are the ones under test. Below 8 channels the wire is bit-packed
-    // and expandPacked unpacks it in a scalar JS loop on the delivery path, so the consumer
-    // must move 8/nCh times as many bytes as the wire does. At 4 ch / 800 MHz that is 400
-    // MB/s in and 800 MB/s out. The half-ceiling rows localise a failure: if 800 falls
-    // short but 400 holds, the limit is our expansion, not the device or the link.
-    const plan: Array<{ ch: 4 | 8 | 16; rate: number; note: string }> = [
-      { ch: 16, rate: 50e6, note: 'control' },
-      { ch: 16, rate: 100e6, note: 'control' },
-      { ch: 16, rate: 200e6, note: 'control, at its ceiling' },
-      { ch: 8, rate: 200e6, note: 'half its ceiling' },
-      { ch: 8, rate: 400e6, note: 'AT ITS CEILING' },
-      { ch: 4, rate: 400e6, note: 'half its ceiling, 2x expansion' },
-      { ch: 4, rate: 800e6, note: 'AT ITS CEILING, 2x expansion' },
-    ];
     const results: Record<string, unknown>[] = [];
-    for (const p of plan) {
-      const cfg: CaptureConfig = { channels: p.ch, samplerate: p.rate, thresholdVolts: 1.6 };
-      const wire = (p.rate * p.ch) / 8 / 1e6;          // MB/s the device emits
-      const toSink = p.ch < 8 ? wire * (8 / p.ch) : wire; // MB/s after expandPacked
-      const label = `${(p.rate / 1e6).toString().padStart(3)} MHz x${String(p.ch).padStart(2)}`;
+    for (const p of throughputPlan(model)) {
+      const cfg: CaptureConfig = { channels: p.channels, samplerate: p.samplerate, thresholdVolts: 1.6 };
+      const wire = (p.samplerate * p.channels) / 8 / 1e6;  // MB/s the device emits
+      const toSink = p.channels < 8 ? wire * (8 / p.channels) : wire; // MB/s after expandPacked
+      const label = `${(p.samplerate / 1e6).toString().padStart(3)} MHz x${String(p.channels).padStart(2)}`;
       try {
         const { stats } = await capture(dev, cfg, 3000, TEST_MODE_NORMAL);
         const loss = 100 * (1 - stats.steadyMBps / wire);
@@ -273,22 +282,20 @@ async function run(dev: Slogic16U3): Promise<void> {
             `${stats.transfers} transfers, ${stats.shortTransfers} short  [${p.note}]`,
           loss > 3 || stats.shortTransfers > 0 ? 'bad' : 'ok',
         );
-        results.push({ channels: p.ch, rate: p.rate, wireMBps: wire, sinkMBps: toSink, ...stats });
-        // Only the ceiling rows are assertions; the half-ceiling rows exist to localise a
-        // failure and are reported without a verdict.
-        if (p.rate === MAX_SAMPLERATE_HZ[p.ch]) {
+        results.push({ channels: p.channels, rate: p.samplerate, wireMBps: wire, sinkMBps: toSink, ...stats });
+        if (p.assert) {
           record(
-            `${p.ch}ch@${p.rate / 1e6}MHz sustains its ${wire.toFixed(0)} MB/s ceiling (+-3%, no short transfers)`,
+            `${p.channels}ch@${p.samplerate / 1e6}MHz sustains ${wire.toFixed(0)} MB/s (+-3%, no short transfers)`,
             loss < 3 && stats.shortTransfers === 0,
-            { channels: p.ch, rate: p.rate, wireMBps: wire, steadyMBps: stats.steadyMBps, short: stats.shortTransfers },
+            { channels: p.channels, rate: p.samplerate, wireMBps: wire, steadyMBps: stats.steadyMBps, short: stats.shortTransfers },
           );
         }
       } catch (e) {
         line(`  ${label} : FAILED - ${e}`, 'bad');
-        results.push({ channels: p.ch, rate: p.rate, wireMBps: wire, error: String(e) });
-        if (p.rate === MAX_SAMPLERATE_HZ[p.ch]) {
-          record(`${p.ch}ch@${p.rate / 1e6}MHz sustains its ${wire.toFixed(0)} MB/s ceiling`, false,
-            { channels: p.ch, rate: p.rate, error: String(e) });
+        results.push({ channels: p.channels, rate: p.samplerate, wireMBps: wire, error: String(e) });
+        if (p.assert) {
+          record(`${p.channels}ch@${p.samplerate / 1e6}MHz sustains ${wire.toFixed(0)} MB/s`, false,
+            { channels: p.channels, rate: p.samplerate, error: String(e) });
         }
       }
     }
@@ -303,23 +310,16 @@ async function run(dev: Slogic16U3): Promise<void> {
   // ------------------------------------------------------------ error surface
   head('6. bad configuration is rejected, not silently clamped');
   {
-    let threw = '';
-    try {
-      await dev.start({ channels: 16, samplerate: 400e6, thresholdVolts: 1.6 }, () => {});
-      await dev.stop();
-    } catch (e) {
-      threw = String(e);
+    for (const rc of refusalCases(model)) {
+      let threw = '';
+      try {
+        await dev.start({ channels: rc.channels, samplerate: rc.samplerate, thresholdVolts: 1.6 }, () => {});
+        await dev.stop();
+      } catch (e) {
+        threw = String(e);
+      }
+      record(rc.label, threw.includes(rc.reason), { threw });
     }
-    record('400 MHz at 16 channels is refused', threw.includes('ceiling'), { threw });
-
-    threw = '';
-    try {
-      await dev.start({ channels: 16, samplerate: 33e6, thresholdVolts: 1.6 }, () => {});
-      await dev.stop();
-    } catch (e) {
-      threw = String(e);
-    }
-    record('an off-table samplerate is refused', threw.includes('unsupported samplerate'), { threw });
   }
 
   head('done');
@@ -361,7 +361,7 @@ async function main(): Promise<void> {
   }
 
   line('No device permission yet for this origin.', 'warn');
-  line('Click the button once and pick "SLogic16 U3" in the chooser.', 'warn');
+  line('Click the button once and pick your SLogic U3 in the chooser.', 'warn');
   connectEl.hidden = false;
   connectEl.addEventListener('click', () => {
     // Errors here must not be swallowed: an empty chooser or a cancelled pick

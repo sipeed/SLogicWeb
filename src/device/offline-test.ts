@@ -42,6 +42,16 @@ import { PlanarSampleStore, appendLostSamples } from '../data/index.js';
 import {
   ClockStreamDevice, FakeSlogic, recorded, recorded32, view, type AuxModel,
 } from './fakeUsb.js';
+import {
+  deviceLabel,
+  emulationAnchor,
+  emulationWidths,
+  liveWidths,
+  modelForMaxChannels,
+  refusalCases,
+  throughputCeilings,
+  throughputPlan,
+} from './selftestPlan.js';
 
 let failures = 0;
 
@@ -2253,6 +2263,61 @@ async function main(): Promise<void> {
     barrelSrc.length > 0 &&
     !/export\s*(\{[^}]*\}|\*)\s*from\s*['"]\.\/slogic16u3\.js['"]/.test(barrelSrc),
     'a value re-export from slogic16u3.js lets barrel consumers re-inline the driver');
+
+  check('selftest plan maps 16 channels to the 16 U3 model',
+    modelForMaxChannels(16) === 'slogic16u3');
+  check('selftest plan maps 32 channels to the 32 U3 model',
+    modelForMaxChannels(32) === 'slogic32u3');
+  check('selftest plan labels name both models',
+    deviceLabel('slogic16u3') === 'SLogic16 U3' && deviceLabel('slogic32u3') === 'SLogic32 U3');
+
+  const plan16 = throughputPlan('slogic16u3');
+  check('16 U3 throughput plan keeps the historical seven rows',
+    JSON.stringify(plan16.map((r) => [r.channels, r.samplerate])) ===
+      JSON.stringify([[16, 50e6], [16, 100e6], [16, 200e6], [8, 200e6], [8, 400e6], [4, 400e6], [4, 800e6]]),
+    JSON.stringify(plan16.map((r) => [r.channels, r.samplerate])));
+  check('16 U3 throughput plan asserts exactly the historical ceiling rows',
+    JSON.stringify(plan16.map((r) => r.assert)) ===
+      JSON.stringify([false, false, true, false, true, false, true]),
+    JSON.stringify(plan16.map((r) => r.assert)));
+  check('every 16 U3 throughput row stays within its ceiling',
+    plan16.every((r) => r.samplerate <= throughputCeilings('slogic16u3')[r.channels]));
+
+  const plan32 = throughputPlan('slogic32u3');
+  check('32 U3 throughput plan covers every channel width the model offers',
+    JSON.stringify([...new Set(plan32.map((r) => r.channels))].sort((a, b) => a - b)) ===
+      JSON.stringify([4, 8, 16, 32]),
+    JSON.stringify(plan32.map((r) => r.channels)));
+  check('32 U3 throughput plan asserts only the measured 32ch half-ceiling row',
+    JSON.stringify(plan32.filter((r) => r.assert).map((r) => [r.channels, r.samplerate])) ===
+      JSON.stringify([[32, 100e6]]),
+    JSON.stringify(plan32.filter((r) => r.assert)));
+  check('every 32 U3 throughput row stays within its ceiling',
+    plan32.every((r) => r.samplerate <= throughputCeilings('slogic32u3')[r.channels]));
+
+  check('16 U3 refusals keep the historical two cases',
+    JSON.stringify(refusalCases('slogic16u3').map((c) => [c.channels, c.samplerate, c.reason])) ===
+      JSON.stringify([[16, 400e6, 'ceiling'], [16, 33e6, 'unsupported samplerate']]),
+    JSON.stringify(refusalCases('slogic16u3')));
+  const ref32 = refusalCases('slogic32u3');
+  check('32 U3 ceiling refusals sit above the 32 U3 ceilings and on the samplerate table',
+    ref32.filter((c) => c.reason === 'ceiling').length === 2 &&
+      ref32.filter((c) => c.reason === 'ceiling').every((c) =>
+        c.samplerate > throughputCeilings('slogic32u3')[c.channels] &&
+        SAMPLERATES_HZ.includes(c.samplerate)) &&
+      ref32.some((c) => c.channels === 32),
+    JSON.stringify(ref32));
+  check('32 U3 refusals keep an off-table samplerate case',
+    ref32.some((c) => c.reason === 'unsupported samplerate' && !SAMPLERATES_HZ.includes(c.samplerate)));
+
+  check('16 U3 live widths stay 16-only, 32 U3 adds the 32ch run',
+    JSON.stringify(liveWidths('slogic16u3')) === JSON.stringify([16]) &&
+    JSON.stringify(liveWidths('slogic32u3')) === JSON.stringify([16, 32]));
+  check('32 U3 emulation widths add 32 channels, 16 U3 stays 16/8/4',
+    JSON.stringify(emulationWidths('slogic16u3')) === JSON.stringify([16, 8, 4]) &&
+    JSON.stringify(emulationWidths('slogic32u3')) === JSON.stringify([16, 8, 4, 32]));
+  check('16 U3 emulation keeps the native anchor, 32 U3 checks the counter shape',
+    emulationAnchor('slogic16u3') === 'native' && emulationAnchor('slogic32u3') === 'counter');
 
   console.log(`\n${failures === 0 ? 'all offline checks passed' : failures + ' offline check(s) FAILED'}`);
   if (failures) failExit();
