@@ -37,7 +37,7 @@ export interface BusViewConfig {
 
 export interface BusViewState extends BusViewConfig {
   id: string;
-  /** Built for `builtFor`; null until a finished capture is there to build from. */
+  /** Built for `builtFor`; null until there is a capture to build from. */
   builder: BusBuilder | null;
   builtFor: SampleStore | null;
   cache: { key: string; frame: AnalogFrame } | null;
@@ -126,7 +126,7 @@ export function busSummary(spec: BusSpec): string {
 
 /**
  * What to draw for one bus over [start, end) on `widthPx` device pixels. `live` means the
- * store is still growing, so no pyramid exists; wide windows then draw nothing.
+ * store is still growing; the pyramid then covers only what the builder has reached.
  */
 export function analogFrame(
   store: SampleStore, bv: BusViewState, start: number, end: number, widthPx: number, live: boolean,
@@ -172,7 +172,7 @@ function compute(
       return { kind: 'columns', min, max };
     }
   }
-  if (live || !bv.builder) return { kind: 'empty', reason: live ? 'live' : 'no-capture' };
+  if (!bv.builder) return { kind: 'empty', reason: live ? 'live' : 'no-capture' };
   const pyramid = bv.builder.pyramid;
   const min = new Float64Array(widthPx).fill(Number.NaN);
   const max = new Float64Array(widthPx).fill(Number.NaN);

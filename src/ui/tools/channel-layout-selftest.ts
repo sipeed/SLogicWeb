@@ -15,6 +15,8 @@
 
 import { computeChannelRowHeight } from '../channelLayout.js';
 import { ROWS } from '../metrics.js';
+import { analogFrame, type BusViewState } from '../busView.js';
+import { BusBuilder, PlanarSampleStore, type BusSpec } from '../../data/index.js';
 import { DEFAULT_TRIGGER_MODE, edgeTriggerAutoArms, isEdgeTriggerMode, modesToConditions,
   clampLoopSeconds, loopDropSamples, loopRetentionSamples, maxLoopSeconds, triggerModeFromCondition,
   type TriggerCondition, type TriggerMode } from '../state.js';
@@ -594,6 +596,69 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     segMatrix,
     `loopClause=${panel.includes("id === 'loop' && (v.running || v.stopping || s.channels === 32)")}, ` +
     `escapeClause=${panel.includes("id !== 'loop' && s.mode === 'loop' && (v.running || v.stopping)")}`);
+
+  const pumpStart = appSrc.indexOf('private pumpBusBuilders');
+  const pumpEnd = pumpStart >= 0 ? appSrc.indexOf('private drawBusRows', pumpStart) : -1;
+  const pumpSrc = pumpEnd > pumpStart ? appSrc.slice(pumpStart, pumpEnd) : '';
+  check('the bus builder pump follows a running capture',
+    pumpSrc.length > 0 &&
+    pumpSrc.includes('if (this.stopping || this.store.length === 0) return;') &&
+    pumpSrc.includes('b.builder.setLength(store.length);') &&
+    !pumpSrc.includes('if (this.running) b.builder.setLength') &&
+    pumpSrc.includes('b.builder.step(this.running ? 4 : 6)') &&
+    pumpSrc.includes('this.captureIsLoop ? this.loopRetentionLen * 2 : store.length'),
+    `guard=${pumpSrc.includes('if (this.stopping || this.store.length === 0) return;')}, ` +
+    `setLength=${pumpSrc.includes('b.builder.setLength(store.length);')}, ` +
+    `unguarded=${!pumpSrc.includes('if (this.running) b.builder.setLength')}, ` +
+    `budget=${pumpSrc.includes('b.builder.step(this.running ? 4 : 6)')}, ` +
+    `hint=${pumpSrc.includes('this.captureIsLoop ? this.loopRetentionLen * 2 : store.length')}`);
+
+  const enforceStart = appSrc.indexOf('private enforceLoopRetention');
+  const enforceEnd = enforceStart >= 0 ? appSrc.indexOf('private async stopCapture', enforceStart) : -1;
+  const enforceSrc = enforceEnd > enforceStart ? appSrc.slice(enforceStart, enforceEnd) : '';
+  check('a retention drop resets bus builders and invalidates their frame caches',
+    enforceSrc.includes('b.builder?.reset(store.length);') && enforceSrc.includes('b.cache = null;'),
+    `reset=${enforceSrc.includes('b.builder?.reset(store.length);')}, cache=${enforceSrc.includes('b.cache = null;')}`);
+
+  const adcStore = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
+  const adcWords = new Uint16Array(40_000);
+  for (let i = 0; i < adcWords.length; i++) adcWords[i] = Math.floor(i / 250) & 0xff;
+  adcStore.append(new Uint8Array(adcWords.buffer));
+  const adcSpec: BusSpec = { bits: [0, 1, 2, 3, 4, 5, 6, 7], clock: null, encoding: 'unsigned' };
+  const adcView = (): BusViewState => ({
+    id: 'bus-0', name: 'bus', spec: adcSpec, color: '#fff', fullScaleV: null, offsetV: 0,
+    style: 'line', heightCss: 120, hideSources: false, builder: null, builtFor: null, cache: null,
+  });
+  const adcAt = (i: number): number => Math.floor(i / 250) & 0xff;
+
+  const adcNoBuilder = analogFrame(adcStore, adcView(), 0, 40_000, 100, true);
+  check('analogFrame live without a builder stays the live placeholder',
+    adcNoBuilder.kind === 'empty' && adcNoBuilder.reason === 'live',
+    `kind=${adcNoBuilder.kind}`);
+
+  const adcBuilt = adcView();
+  adcBuilt.builder = new BusBuilder(adcStore, adcSpec);
+  while (!adcBuilt.builder.step(10)) { /* build */ }
+  const adcLiveFull = analogFrame(adcStore, adcBuilt, 0, 40_000, 100, true);
+  check('analogFrame live draws pyramid columns once built',
+    adcLiveFull.kind === 'columns' &&
+    adcLiveFull.min[0] === adcAt(0) && adcLiveFull.max[0] === adcAt(1_023) &&
+    adcLiveFull.min[99] === adcAt(38_912) && adcLiveFull.max[99] === adcAt(39_999),
+    adcLiveFull.kind === 'columns'
+      ? `c0=${adcLiveFull.min[0]}..${adcLiveFull.max[0]} c99=${adcLiveFull.min[99]}..${adcLiveFull.max[99]}`
+      : `kind=${adcLiveFull.kind}`);
+
+  const adcPartial = adcView();
+  adcPartial.builder = new BusBuilder(adcStore, adcSpec, adcStore.length, 4096);
+  adcPartial.builder.step(0);
+  const adcLivePart = analogFrame(adcStore, adcPartial, 0, 40_000, 100, true);
+  check('analogFrame live leaves columns past doneUpTo empty',
+    adcLivePart.kind === 'columns' &&
+    adcLivePart.min[0] === adcAt(0) && adcLivePart.max[10] === adcAt(4095) &&
+    Number.isNaN(adcLivePart.min[11]) && Number.isNaN(adcLivePart.max[99]),
+    adcLivePart.kind === 'columns'
+      ? `doneUpTo=${adcPartial.builder.pyramid.doneUpTo} c10=${adcLivePart.max[10]} c11=${adcLivePart.min[11]}`
+      : `kind=${adcLivePart.kind}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

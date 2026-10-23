@@ -258,6 +258,33 @@ export class BusPyramid {
     }
   }
 
+  growTo(length: number): BusPyramid {
+    if (length <= this.length) return this;
+    const next = new BusPyramid(length);
+    const shared = this.levels.length;
+    for (let l = 0; l < shared; l++) {
+      next.levels[l]!.min.set(this.levels[l]!.min);
+      next.levels[l]!.max.set(this.levels[l]!.max);
+    }
+    for (let l = shared; l < next.levels.length; l++) {
+      const child = next.levels[l - 1]!;
+      const own = next.levels[l]!;
+      for (let j = 0; j < own.min.length; j++) {
+        let mn = Number.POSITIVE_INFINITY;
+        let mx = Number.NEGATIVE_INFINITY;
+        const c1 = Math.min(child.min.length, (j + 1) * FAN);
+        for (let c = j * FAN; c < c1; c++) {
+          if (child.min[c]! < mn) mn = child.min[c]!;
+          if (child.max[c]! > mx) mx = child.max[c]!;
+        }
+        own.min[j] = mn;
+        own.max[j] = mx;
+      }
+    }
+    next.doneUpTo = this.doneUpTo;
+    return next;
+  }
+
   /** Fold steps covering [steps.pos[0], end) into the leaves, then their parents. */
   add(steps: BusSteps, end: number): void {
     if (steps.count === 0) return;
@@ -332,32 +359,52 @@ export class BusPyramid {
  * over animation frames: call `step()` until it returns true.
  */
 export class BusBuilder {
-  readonly pyramid: BusPyramid;
+  pyramid: BusPyramid;
   private next = 0;
   private carry = Number.NaN;
+  private len: number;
 
   /** `piece` is the chunk size; smaller only in tests, to cross many chunk boundaries. */
   constructor(
     private readonly store: SampleStore, private readonly spec: BusSpec,
-    readonly length = store.length, private readonly piece = PIECE,
+    length = store.length, private readonly piece = PIECE, capacity = length,
   ) {
-    this.pyramid = new BusPyramid(length);
+    this.len = length;
+    this.pyramid = new BusPyramid(Math.max(capacity, length));
+  }
+
+  get length(): number {
+    return this.len;
   }
 
   get done(): boolean {
-    return this.next >= this.length;
+    return this.next >= this.len;
   }
 
   /** Fraction of the capture processed, 0..1. */
   get progress(): number {
-    return this.length ? this.next / this.length : 1;
+    return this.len ? this.next / this.len : 1;
+  }
+
+  setLength(length: number): void {
+    this.len = length;
+    if (length > this.pyramid.length) {
+      this.pyramid = this.pyramid.growTo(Math.max(length, this.pyramid.length * 2));
+    }
+  }
+
+  reset(length: number): void {
+    this.len = length;
+    this.pyramid = new BusPyramid(Math.max(length, this.pyramid.length));
+    this.next = 0;
+    this.carry = Number.NaN;
   }
 
   /** Work for about `budgetMs`; true once the whole capture is in. */
   step(budgetMs = 8): boolean {
     const t0 = performance.now();
-    while (this.next < this.length) {
-      const e = Math.min(this.length, this.next + this.piece);
+    while (this.next < this.len) {
+      const e = Math.min(this.len, this.next + this.piece);
       const st = busSteps(this.store, this.spec, this.next, e, { carry: this.carry });
       this.pyramid.add(st, e);
       this.carry = st.carry;

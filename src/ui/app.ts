@@ -369,20 +369,24 @@ export class App {
   }
 
   /**
-   * Build bus overviews a slice per frame once a capture is complete, so a 2^31-sample
-   * capture never blocks the page. One bus at a time; the panel shows progress.
+   * Build bus overviews a slice per frame, following a growing capture, so a
+   * 2^31-sample capture never blocks the page. One bus at a time; the panel shows progress.
    */
   private pumpBusBuilders(): void {
-    if (this.running || this.stopping || this.store.length === 0) return;
+    if (this.stopping || this.store.length === 0) return;
     const store = this.store;
     for (const b of this.busViews) {
       if (b.builtFor !== store) {
         b.builtFor = store;
         b.cache = null;
-        b.builder = validateBusSpec(b.spec, store.channelCount).length ? null : new BusBuilder(store, b.spec);
+        b.builder = validateBusSpec(b.spec, store.channelCount).length ? null
+          : new BusBuilder(store, b.spec, store.length, undefined,
+            this.captureIsLoop ? this.loopRetentionLen * 2 : store.length);
       }
-      if (!b.builder || b.builder.done) continue;
-      const done = b.builder.step(6);
+      if (!b.builder) continue;
+      b.builder.setLength(store.length);
+      if (b.builder.done) continue;
+      const done = b.builder.step(this.running ? 4 : 6);
       this.dirty = true;
       const now = performance.now();
       if (this.panel === 'analyzers' && (done || now - this.busPanelAt > 300)) {
@@ -1770,6 +1774,10 @@ export class App {
     if (drop <= 0) return;
     store.dropFront(drop);
     this.droppedTotal += drop;
+    for (const b of this.busViews) {
+      b.builder?.reset(store.length);
+      b.cache = null;
+    }
     const markerSample = this.markerA.sample;
     if (markerSample !== null && !this.markerA.isDragging) {
       this.markerA.setSample(markerSample - drop >= 0 ? markerSample - drop : null, store.length);

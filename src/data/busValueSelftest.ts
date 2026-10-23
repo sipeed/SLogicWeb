@@ -11,7 +11,7 @@
  */
 
 import {
-  BUS_LEAF, BusBuilder, busRange, busSteps, busValue, latchedBefore, validateBusSpec,
+  BUS_LEAF, BusBuilder, BusPyramid, busRange, busSteps, busValue, latchedBefore, validateBusSpec,
   type BusEncoding, type BusSpec,
 } from './busValue.js';
 import { InterleavedSampleStore } from './interleavedStore.js';
@@ -244,6 +244,132 @@ export function runBusValueSuite(): BusTestResult[] {
       if (!got || got.min !== want.min || got.max !== want.max) bad = `leaf ${leaf}: ${JSON.stringify(got)} vs ${JSON.stringify(want)}`;
     }
     check('a slow clock holds its latched value across builder chunks', bad);
+  }
+
+  {
+    const rampStore = (): PlanarSampleStore => {
+      const s = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
+      const w16 = new Uint16Array(N);
+      for (let i = 0; i < N; i++) w16[i] = Math.floor(i / 250) & 0xff;
+      s.append(new Uint8Array(w16.buffer));
+      return s;
+    };
+    const rampSpec: BusSpec = { bits: [0, 1, 2, 3, 4, 5, 6, 7], clock: null, encoding: 'unsigned' };
+    const rampAt = (i: number): number => Math.floor(i / 250) & 0xff;
+    const rampDiff = (p: BusPyramid, off: number, len: number): string => {
+      let bad = '';
+      for (let leaf = 0; leaf * BUS_LEAF < len && !bad; leaf++) {
+        const s = leaf * BUS_LEAF;
+        const e = Math.min(len, s + BUS_LEAF);
+        const got = p.range(s, e);
+        const want = { min: rampAt(off + s), max: rampAt(off + e - 1) };
+        if (!got || got.min !== want.min || got.max !== want.max) {
+          bad = `leaf ${leaf}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`;
+        }
+      }
+      if (bad) return bad;
+      const all = p.range(0, len);
+      return all && all.min === rampAt(off) && all.max === rampAt(off + len - 1)
+        ? '' : `whole range ${JSON.stringify(all)} vs ${rampAt(off)}..${rampAt(off + len - 1)}`;
+    };
+    const build = (b: BusBuilder): string => {
+      let guard = 0;
+      while (!b.step(1)) if (++guard > 10_000) return 'builder never finished';
+      return '';
+    };
+
+    const gstore = rampStore();
+    const grown = new BusBuilder(gstore, rampSpec, 5_000, 4099);
+    const caps: number[] = [grown.pyramid.length];
+    const levelCounts: number[] = [grown.pyramid.levels.length];
+    let growBad = '';
+    for (const target of [9_000, 17_000, 33_000, N]) {
+      grown.setLength(target);
+      caps.push(grown.pyramid.length);
+      levelCounts.push(grown.pyramid.levels.length);
+      growBad = build(grown);
+      if (growBad) break;
+    }
+    check('a grown builder finishes every growth stage', growBad);
+    check('builder growth doubles capacity geometrically',
+      caps.join(',') === '5000,10000,20000,40000,40000' ? '' : caps.join(','));
+    check('builder growth adds a level across BUS_LEAF*FAN',
+      levelCounts.join(',') === '2,2,3,3,3' ? '' : levelCounts.join(','));
+    check('a grown pyramid is exact per leaf and overall', rampDiff(grown.pyramid, 0, N));
+    const fresh = new BusBuilder(rampStore(), rampSpec, N, 4099);
+    build(fresh);
+    const oddWindows: [number, number][] = [[1, 977], [8_999, 9_403], [12_345, 30_001], [N - 17, N]];
+    const oddBad = oddWindows
+      .filter(([s, e]) => JSON.stringify(grown.pyramid.range(s, e)) !== JSON.stringify(fresh.pyramid.range(s, e)))
+      .map(([s, e]) => `[${s},${e}): ${JSON.stringify(grown.pyramid.range(s, e))} vs ${JSON.stringify(fresh.pyramid.range(s, e))}`);
+    check('a grown pyramid matches a fresh build on odd windows', oddBad.join('; '));
+
+    gstore.dropFront(4096);
+    grown.reset(gstore.length);
+    const preStep = grown.pyramid.range(0, gstore.length);
+    check('reset clears built content and keeps the grown capacity',
+      grown.pyramid.length === 40_000 && grown.pyramid.doneUpTo === 0 && grown.progress === 0 && preStep === null
+        ? ''
+        : `capacity=${grown.pyramid.length} doneUpTo=${grown.pyramid.doneUpTo} range=${JSON.stringify(preStep)}`);
+    check('a reset builder finishes', build(grown));
+    check('a reset pyramid matches the shifted ramp', rampDiff(grown.pyramid, 4096, gstore.length));
+
+    const capHigh = new BusBuilder(rampStore(), rampSpec, 2_000, 4099, 50_000);
+    const capLow = new BusBuilder(rampStore(), rampSpec, 5_000, 4099, 1_000);
+    check('the constructor capacity hint sizes the pyramid, clamped to the length',
+      capHigh.pyramid.length === 50_000 && capLow.pyramid.length === 5_000
+        ? ''
+        : `high=${capHigh.pyramid.length} low=${capLow.pyramid.length}`);
+  }
+
+  {
+    const small = new BusPyramid(BUS_LEAF);
+    small.add({ pos: new Int32Array([0]), val: new Float64Array([7]), count: 1, truncated: false, carry: 7 }, BUS_LEAF);
+    small.doneUpTo = BUS_LEAF;
+    const big = small.growTo(512 * BUS_LEAF);
+    const wide = big.range(0, 512 * BUS_LEAF);
+    const deep = big.range(0, 4 * BUS_LEAF);
+    check('growTo recomputes new top levels and carries doneUpTo',
+      small.growTo(1) === small && big.length === 512 * BUS_LEAF && big.levels.length === 4 &&
+        big.doneUpTo === BUS_LEAF &&
+        wide !== null && wide.min === 7 && wide.max === 7 && deep !== null && deep.min === 7 && deep.max === 7
+        ? ''
+        : `wide=${JSON.stringify(wide)} levels=${big.levels.length} doneUpTo=${big.doneUpTo} deep=${JSON.stringify(deep)}`);
+  }
+
+  {
+    const SLOW = 4096;
+    const len = 40_000;
+    const w = new Uint16Array(len);
+    for (let i = 0; i < len; i++) w[i] = (Math.floor(i / SLOW) & 0xf) | ((i % SLOW >= SLOW / 2 ? 1 : 0) << 4);
+    const store = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
+    store.append(new Uint8Array(w.buffer));
+    const spec: BusSpec = { bits: [0, 1, 2, 3], clock: { channel: 4, edge: 'rising' }, encoding: 'unsigned' };
+    const b = new BusBuilder(store, spec, len, 4099);
+    let guard = 0;
+    while (!b.step(1)) if (++guard > 10_000) break;
+    store.dropFront(1536);
+    b.reset(store.length);
+    guard = 0;
+    while (!b.step(1)) if (++guard > 10_000) break;
+    let bad = '';
+    for (let leaf = 0; leaf * BUS_LEAF < store.length && !bad; leaf++) {
+      const s = leaf * BUS_LEAF;
+      const e = Math.min(store.length, s + BUS_LEAF);
+      const at = (i: number) => (i < 512 ? Number.NaN : Math.floor((i - 512) / SLOW) & 0xf);
+      let mn = Number.POSITIVE_INFINITY;
+      let mx = Number.NEGATIVE_INFINITY;
+      for (let i = s; i < e; i++) {
+        const v = at(i);
+        if (Number.isNaN(v)) continue;
+        mn = Math.min(mn, v);
+        mx = Math.max(mx, v);
+      }
+      const got = b.pyramid.range(s, e);
+      const want = mn <= mx ? { min: mn, max: mx } : null;
+      if (JSON.stringify(got) !== JSON.stringify(want)) bad = `leaf ${leaf}: ${JSON.stringify(got)} vs ${JSON.stringify(want)}`;
+    }
+    check('a reset rebuilds a clocked bus without a stale carry', bad);
   }
 
   check('validateBusSpec rejects reuse and out-of-range channels',
