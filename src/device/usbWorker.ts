@@ -17,6 +17,7 @@
  * the page falls back to its own transport when `open` cannot find the device.
  */
 
+import { createCommandQueue } from './commandQueue.js';
 import { Slogic16U3 } from './slogic16u3.js';
 import type { SampleSink } from './types.js';
 import type {
@@ -24,6 +25,8 @@ import type {
 } from './usbWorkerProtocol.js';
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
+
+type QueuedCommand = Exclude<ToWorker, { kind: 'ack' }>;
 
 let device: Slogic16U3 | null = null;
 /**
@@ -57,7 +60,7 @@ const sink: SampleSink = (chunk: Uint8Array): Promise<void> => {
   });
 };
 
-async function handle(message: ToWorker): Promise<void> {
+async function handle(message: QueuedCommand): Promise<void> {
   switch (message.kind) {
     case 'open': {
       const all = await navigator.usb.getDevices();
@@ -134,20 +137,29 @@ async function handle(message: ToWorker): Promise<void> {
       post({ kind: 'console', result: await device.usbControl(message.command) });
       return;
     }
-
-    case 'ack': {
-      const resolve = acks.get(message.id);
-      if (resolve) {
-        acks.delete(message.id);
-        resolve();
-      }
-      return;
-    }
   }
 }
 
-scope.onmessage = (event: MessageEvent<ToWorker>) => {
-  void handle(event.data).catch((error: unknown) => {
+function acknowledge(id: number): void {
+  const resolve = acks.get(id);
+  if (resolve) {
+    acks.delete(id);
+    resolve();
+  }
+}
+
+const commands = createCommandQueue<QueuedCommand>(
+  handle,
+  (error: unknown) => {
     post({ kind: 'failed', message: error instanceof Error ? error.message : String(error) });
-  });
+  },
+);
+
+scope.onmessage = (event: MessageEvent<ToWorker>) => {
+  const message = event.data;
+  if (message.kind === 'ack') {
+    acknowledge(message.id);
+    return;
+  }
+  void commands.push(message);
 };

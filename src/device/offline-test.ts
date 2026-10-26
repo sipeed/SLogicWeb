@@ -39,6 +39,7 @@ import {
   LoopStallWatch, Slogic16U3, deriveStreamTuning, expandPacked, type Stats,
 } from './slogic16u3.js';
 import { WorkerSlogicDevice } from './workerTransport.js';
+import { createCommandQueue } from './commandQueue.js';
 import type { FromWorker, ToWorker } from './usbWorkerProtocol.js';
 import { PlanarSampleStore, appendLostSamples } from '../data/index.js';
 import {
@@ -2398,6 +2399,56 @@ async function main(): Promise<void> {
   check('trace window truncates to what survives when the stop point was evicted',
     JSON.stringify(traceWindow(400, 600, 585, 20)) === JSON.stringify([0, 5]),
     JSON.stringify(traceWindow(400, 600, 585, 20)));
+
+  const order: string[] = [];
+  let releaseStart!: () => void;
+  const startGate = new Promise<void>((r) => { releaseStart = r; });
+  const failuresSeen: string[] = [];
+  const serial = createCommandQueue<string>(
+    async (message) => {
+      order.push(`begin:${message}`);
+      if (message === 'start') await startGate;
+      if (message === 'boom') throw new Error('handler rejected');
+      order.push(`end:${message}`);
+    },
+    (error) => { failuresSeen.push(error instanceof Error ? error.message : String(error)); },
+  );
+  const first = serial.push('start');
+  const second = serial.push('stop');
+  await new Promise((r) => setTimeout(r, 0));
+  check('a queued command does not begin before the command ahead of it settled',
+    order.join(',') === 'begin:start', order.join(','));
+  releaseStart();
+  await Promise.all([first, second]);
+  check('commands run one at a time in the order they were pushed',
+    order.join(',') === 'begin:start,end:start,begin:stop,end:stop', order.join(','));
+
+  await serial.push('boom');
+  await serial.push('stats');
+  check('a rejected handler is reported and the queue keeps running the next command',
+    failuresSeen.join(',') === 'handler rejected' && order[order.length - 2] === 'begin:stats' &&
+      order[order.length - 1] === 'end:stats',
+    `${failuresSeen.join(',')} | ${order.join(',')}`);
+
+  const stranded: string[] = [];
+  const logged: unknown[][] = [];
+  const reporting = createCommandQueue<string>(
+    async (message) => {
+      stranded.push(`run:${message}`);
+      if (message === 'boom') throw new Error('handler failed');
+    },
+    () => { throw new Error('report failed'); },
+  );
+  const realConsoleError = console.error;
+  console.error = (...args: unknown[]) => { logged.push(args); };
+  await reporting.push('boom');
+  await reporting.push('stop');
+  console.error = realConsoleError;
+  check('a throwing failure reporter does not strand the commands behind it',
+    stranded.join(',') === 'run:boom,run:stop', stranded.join(','));
+  check('an isolated failure report is logged rather than swallowed',
+    logged.length === 1 && String(logged[0]?.[1]).includes('report failed'),
+    JSON.stringify(logged));
 
   console.log(`\n${failures === 0 ? 'all offline checks passed' : failures + ' offline check(s) FAILED'}`);
   if (failures) failExit();
