@@ -13,6 +13,7 @@
 import { LoopStallWatch, USB_FILTERS } from './usbCore.js';
 import { Slogic16U3 } from './slogic16u3.js';
 import type { Stats, StartOptions } from './slogic16u3.js';
+import { TransportDeadError } from './types.js';
 import type {
   CaptureConfig, CaptureStartOptions, Device, DropoutSink, SampleSink,
 } from './types.js';
@@ -130,7 +131,7 @@ export class WorkerSlogicDevice implements Device {
     try {
       post(worker, { kind: 'open', filter });
       const message = await opened;
-      if (message.kind === 'failed') throw new Error(message.message);
+      if (message.kind === 'failed') throw failedReply(message);
       if (message.kind !== 'opened') throw new Error('the worker did not report a device');
       return new WorkerSlogicDevice(
         worker, message.name, message.serial, message.maxChannels, message.maxSamplerateHz,
@@ -170,7 +171,7 @@ export class WorkerSlogicDevice implements Device {
     }
     if (message.kind === 'failed') {
       this.pageStalls.stop();
-      throw new Error(message.message);
+      throw failedReply(message);
     }
   }
 
@@ -184,11 +185,13 @@ export class WorkerSlogicDevice implements Device {
     } catch (error) {
       this.terminate();
       const detail = error instanceof Error ? error.message : String(error);
-      throw new Error(`${detail}; the USB transport was reset, reconnect the device`);
+      throw new TransportDeadError(
+        `${detail}; the USB transport was reset`,
+      );
     } finally {
       this.pageStalls.stop();
     }
-    if (message.kind === 'failed') throw new Error(message.message);
+    if (message.kind === 'failed') throw failedReply(message);
   }
 
   /** Nothing on the page can use the device after this; the OS handle dies with it. */
@@ -205,7 +208,7 @@ export class WorkerSlogicDevice implements Device {
     );
     // A `failed` reply is the worker saying why the command threw; reporting it as "no
     // statistics" would hide the one sentence that matters.
-    if (message.kind === 'failed') throw new Error(message.message);
+    if (message.kind === 'failed') throw failedReply(message);
     if (message.kind !== 'stats') throw new Error('the worker answered with no statistics');
     return {
       ...message.stats,
@@ -228,7 +231,7 @@ export class WorkerSlogicDevice implements Device {
       // A `failed` reply is the worker saying why the command threw. Reporting it as "no
       // console result" hides the one sentence that matters - measured on hardware, where a
       // bench that aborted with a rate report looked like a protocol bug instead.
-      if (message.kind === 'failed') throw new Error(message.message);
+      if (message.kind === 'failed') throw failedReply(message);
       if (message.kind !== 'console') throw new Error('the worker answered with no console result');
       return bench
         ? `${message.result}\n  page       thread blocked ${this.pageStalls.count} time(s), ` +
@@ -372,6 +375,10 @@ function firstMessage(
       resolve(message);
     };
   });
+}
+
+function failedReply(message: { message: string; dead?: boolean }): Error {
+  return message.dead === true ? new TransportDeadError(message.message) : new Error(message.message);
 }
 
 function post(worker: Worker, message: ToWorker): void {

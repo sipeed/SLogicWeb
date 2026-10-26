@@ -15,8 +15,8 @@ import {
 import type { SampleStore } from '../data/types.js';
 import { bytesPerSampleForChannels, isChannelCount, type ChannelCount } from '../types.js';
 import {
-  MAX_SAMPLERATE_HZ, getGrantedDevicesOnBestThread, requestDeviceOnBestThread, vrefCode,
-  type CaptureConfig, type Device,
+  MAX_SAMPLERATE_HZ, TransportDeadError, getGrantedDevicesOnBestThread, requestDeviceOnBestThread,
+  vrefCode, type CaptureConfig, type Device,
 } from '../device/index.js';
 import { WorkerSlogicDevice, workerTransport } from '../device/workerTransport.js';
 import { WheelIntent, wheelSpanFactor } from '../render/index.js';
@@ -1547,19 +1547,41 @@ export class App {
     return epoch;
   }
 
+  private installDevice(d: Device, epoch: number): boolean {
+    if (epoch !== this.deviceEpoch && this.device !== null) {
+      d.terminate();
+      return false;
+    }
+    const previous = this.device;
+    this.deviceEpoch += 1;
+    if (previous && previous !== d) {
+      this.device = null;
+      previous.onError = null;
+      previous.terminate();
+      if (this.running || this.stopping) {
+        this.running = false;
+        this.stopping = false;
+        this.finishCapture();
+      }
+    }
+    d.onError = (e) => this.deviceFailed(e);
+    this.device = d;
+    this.noteTransport();
+    this.adoptDeviceChannels(d);
+    this.renderPanels();
+    return true;
+  }
+
   private async reconnectGranted(): Promise<void> {
     try {
       if (!navigator.usb) return;
-      const epoch = this.detachDevice();
-      const devs = await getGrantedDevicesOnBestThread();
-      const d = devs[0];
-      if (!d) return;
-      if (epoch !== this.deviceEpoch) { d.terminate(); return; }
-      d.onError = (e) => this.deviceFailed(e);
-      this.device = d;
-      this.noteTransport();
-      this.adoptDeviceChannels(d);
-      this.renderPanels();
+      let epoch = this.deviceEpoch;
+      let d = await acquireGranted();
+      if (!d) {
+        if (this.device !== null) epoch = this.detachDevice();
+        d = await acquireGranted();
+      }
+      if (d) this.installDevice(d, epoch);
     } catch (e) {
       // Not fatal: the device may be claimed by sigrok-cli, or unplugged.
       this.fail('error.reconnect', e);
@@ -1569,14 +1591,22 @@ export class App {
   private async connect(): Promise<void> {
     try {
       this.statusError = null;
-      const epoch = this.detachDevice();
-      const d = await requestDeviceOnBestThread();
-      if (epoch !== this.deviceEpoch) { d.terminate(); return; }
-      d.onError = (e) => this.deviceFailed(e);
-      this.device = d;
-      this.noteTransport();
-      this.adoptDeviceChannels(d);
-      this.renderPanels();
+      let epoch = this.deviceEpoch;
+      let d: Device;
+      try {
+        d = await requestDeviceOnBestThread();
+      } catch (error) {
+        if (cancelledByUser(error)) return;
+        if (this.device === null) throw error;
+        epoch = this.detachDevice();
+        try {
+          d = await requestDeviceOnBestThread();
+        } catch (retry) {
+          if (cancelledByUser(retry)) return;
+          throw retry;
+        }
+      }
+      this.installDevice(d, epoch);
     } catch (e) {
       this.fail('error.connect', e);
     }
@@ -1797,6 +1827,10 @@ export class App {
       }
       this.relayout();
       this.fail('error.startCapture', e);
+      if (e instanceof TransportDeadError && this.device === device) {
+        this.discardDevice();
+        void this.reconnectGranted();
+      }
       this.renderPanels();
     }
   }
@@ -2320,6 +2354,23 @@ function triggerSettingsChanged(a: CaptureSettings, b: CaptureSettings): boolean
     const y = b.triggerConditions[i];
     return !y || x.channel !== y.channel || x.kind !== y.kind || x.level !== y.level;
   });
+}
+
+async function acquireGranted(): Promise<Device | undefined> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const found = (await getGrantedDevicesOnBestThread())[0];
+      if (found) return found;
+    } catch (error) {
+      if (attempt === 2) throw error;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+  return undefined;
+}
+
+function cancelledByUser(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'NotFoundError';
 }
 
 function must<T extends HTMLElement>(id: string): T {

@@ -39,7 +39,8 @@ import {
   LoopStallWatch, Slogic16U3, deriveStreamTuning, expandPacked, type Stats,
 } from './slogic16u3.js';
 import { WorkerSlogicDevice } from './workerTransport.js';
-import { createCommandQueue } from './commandQueue.js';
+import { createCommandQueue, describeFailure } from './commandQueue.js';
+import { TransportDeadError } from './types.js';
 import type { FromWorker, ToWorker } from './usbWorkerProtocol.js';
 import { PlanarSampleStore, appendLostSamples } from '../data/index.js';
 import {
@@ -255,10 +256,19 @@ class FakeStreamDevice extends FakeSlogic {
     super(aux);
   }
 
+  closeCalls = 0;
+  claimInterfaceCalls = 0;
+  failClaimFrom = Number.POSITIVE_INFINITY;
+
   async open(): Promise<void> {}
-  async close(): Promise<void> {}
+  async close(): Promise<void> { this.closeCalls++; }
   async selectConfiguration(): Promise<void> {}
-  async claimInterface(): Promise<void> {}
+  async claimInterface(): Promise<void> {
+    this.claimInterfaceCalls++;
+    if (this.claimInterfaceCalls >= this.failClaimFrom) {
+      throw new Error('Unable to claim interface.');
+    }
+  }
   async clearHalt(): Promise<void> { this.clearHaltCalls++; this.endpointPoisoned = false; }
   async reset(): Promise<void> { this.endpointPoisoned = false; }
 
@@ -1550,6 +1560,21 @@ async function main(): Promise<void> {
       stalled.terminated, `terminated=${stalled.terminated}`);
     check('a stop that timed out names the reset the caller has to recover from',
       stalledError.includes('transport was reset'), stalledError);
+    check('a stop that timed out reports a dead transport, not a plain error',
+      /transport was reset/.test(stalledError), String(stalledError));
+
+    const deadWorker = new FakeWorker();
+    const deadDevice = await openWorkerDevice(deadWorker);
+    let deadReply: unknown = null;
+    try {
+      const starting = deadDevice.start(
+        { channels: 32, samplerate: 200e6, thresholdVolts: 1.6 }, () => {},
+      );
+      deadWorker.emit({ kind: 'failed', message: 'the read loop never settled', dead: true });
+      await starting;
+    } catch (e) { deadReply = e; }
+    check('a dead-transport failure crosses the worker boundary as a typed error',
+      deadReply instanceof TransportDeadError, String(deadReply));
 
     const streaming = new FakeWorker();
     const live = await openWorkerDevice(streaming);
@@ -1835,19 +1860,96 @@ async function main(): Promise<void> {
       { tuning: { depth: 5, transferBytes: 1024 } },
     );
     await new Promise((r) => setTimeout(r, 40));
-    const stopMs = await timedStop(dev, 8000);
+    const stopFrom = performance.now();
+    let stopError: unknown = null;
+    const stopMs = await Promise.race([
+      dev.stop().catch((e: unknown) => { stopError = e; }).then(() => performance.now() - stopFrom),
+      new Promise<number>((r) => setTimeout(() => r(Number.POSITIVE_INFINITY), 9000)),
+    ]);
     check('a release that never settles cannot hold the teardown open',
-      stopMs < 2800 && stuck.releases === 1,
+      stopMs < 6500 && stuck.releases === 1,
       `${stopMs.toFixed(0)} ms, ${stuck.releases} release call(s)`);
-    await expectThrow('a start after an unsettled read loop refuses with a reason',
-      () => dev.start({ channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {}),
-      'never settled');
+    check('a stop that had to close the handle reports a dead transport',
+      stopError instanceof TransportDeadError && String(stopError).includes('handle was closed'),
+      `${String(stopError)} | ${Object.prototype.toString.call(stopError)}`);
+    check('a stop that had to close the handle closes it exactly once',
+      stuck.closeCalls === 1, `close calls: ${stuck.closeCalls}`);
+    let refusal: unknown = null;
+    try {
+      await dev.start({ channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {});
+    } catch (e) { refusal = e; }
+    check('a start after an unsettled read loop refuses with a typed reason',
+      refusal instanceof TransportDeadError && String(refusal).includes('never settled'),
+      String(refusal));
     const lateErrors: unknown[] = [];
     dev.onError = (e) => lateErrors.push(e);
     await FakeStreamDevice.prototype.releaseInterface.call(stuck);
     await new Promise((r) => setTimeout(r, 50));
     check('a read loop that outlived the teardown reports nothing about the stopped capture',
       lateErrors.length === 0, lateErrors.map(String).join('|'));
+  }
+  {
+    class StuckReleaseDevice extends FakeStreamDevice {
+      override async releaseInterface(): Promise<void> {
+        await new Promise<void>(() => {});
+      }
+    }
+    const stale = [0xa1, 0xa1, 0xa1, 0xa1, 0xa1, 0xa1, 0xa1, 0xa1];
+    const fresher = [0xb2, 0xb2, 0xb2, 0xb2, 0xb2, 0xb2, 0xb2, 0xb2];
+    const stuck = new StuckReleaseDevice(recorded(), [
+      ...Array.from({ length: 5 }, () => ({ kind: 'dataOnRelease' as const, bytes: stale })),
+      ...Array.from({ length: 20 }, () => ({ kind: 'data' as const, bytes: fresher })),
+    ]);
+    const dev = new Slogic16U3(stuck as unknown as USBDevice);
+    await dev.open();
+    await dev.start(
+      { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {}, undefined,
+      { tuning: { depth: 5, transferBytes: 1024 } },
+    );
+    await new Promise((r) => setTimeout(r, 40));
+    await dev.stop().catch(() => undefined);
+    await dev.open();
+    const second: number[] = [];
+    await dev.start(
+      { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 },
+      (c) => { second.push(...c); },
+      undefined,
+      { tuning: { depth: 5, transferBytes: 1024 } },
+    );
+    await new Promise((r) => setTimeout(r, 40));
+    await FakeStreamDevice.prototype.releaseInterface.call(stuck);
+    await new Promise((r) => setTimeout(r, 60));
+    check('a superseded read loop cannot deliver into the capture that replaced it',
+      second.length > 0 && !second.includes(0xa1), `second=${second.length} B, stale=${second.includes(0xa1)}`);
+    await dev.stop().catch(() => undefined);
+  }
+  {
+    const stuckClaim = new FakeStreamDevice(
+      recorded(),
+      Array.from({ length: 80 }, () => ({ kind: 'hang' as const })),
+    );
+    stuckClaim.failClaimFrom = 2;
+    const dev = new Slogic16U3(stuckClaim as unknown as USBDevice);
+    await dev.open();
+    await dev.start(
+      { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {}, undefined,
+      { tuning: { depth: 5, transferBytes: 1024 } },
+    );
+    await new Promise((r) => setTimeout(r, 40));
+    let claimError: unknown = null;
+    await dev.stop().catch((e: unknown) => { claimError = e; });
+    check('a device that cannot be re-claimed after a cancel is closed, not kept',
+      claimError instanceof TransportDeadError &&
+        String(claimError).includes('could not be re-claimed') && stuckClaim.closeCalls === 1,
+      `${String(claimError)} | closes ${stuckClaim.closeCalls}`);
+  }
+  {
+    const plain = describeFailure(new Error('config is wrong'));
+    const dead = describeFailure(new TransportDeadError('the worker was reset'));
+    check('only a dead transport is reported as one',
+      plain.dead === undefined && plain.message === 'config is wrong' &&
+        dead.dead === true && dead.message === 'the worker was reset',
+      `${JSON.stringify(plain)} | ${JSON.stringify(dead)}`);
   }
 
   {

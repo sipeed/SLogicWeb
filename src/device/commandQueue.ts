@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
 
+import { TransportDeadError } from './types.js';
+
 export interface CommandQueue<T> {
   push(message: T): Promise<void>;
 }
@@ -20,5 +22,12 @@ export function createCommandQueue<T>(
         });
       return tail;
     },
+  };
+}
+
+export function describeFailure(error: unknown): { message: string; dead?: boolean } {
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    ...(error instanceof TransportDeadError ? { dead: true } : {}),
   };
 }

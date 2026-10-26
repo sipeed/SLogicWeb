@@ -76,7 +76,7 @@ export type FromWorker =
   | { kind: 'console'; result: string }
   | { kind: 'started' }
   | { kind: 'stopped' }
-  | { kind: 'failed'; message: string };
+  | { kind: 'failed'; message: string; dead?: boolean };
 
 /** What the worker's caller has to provide for `start`. */
 export interface WorkerStart {

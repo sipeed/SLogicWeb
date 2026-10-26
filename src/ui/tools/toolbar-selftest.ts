@@ -212,14 +212,34 @@ check(
 const detachFinishes = detachBody.includes('const epoch = this.discardDevice();') &&
   detachBody.includes('this.running = false;') && detachBody.includes('this.stopping = false;') &&
   detachBody.includes('this.finishCapture();');
-const acquisitionsRace = connectBody.includes('const epoch = this.detachDevice();') &&
-  connectBody.includes('if (epoch !== this.deviceEpoch) { d.terminate(); return; }') &&
-  reconnectBody.includes('const epoch = this.detachDevice();') &&
-  reconnectBody.includes('if (epoch !== this.deviceEpoch) { d.terminate(); return; }');
+const installBody = methodBody('private installDevice(d: Device, epoch: number): boolean {');
+const installReplaces = installBody.includes('if (epoch !== this.deviceEpoch && this.device !== null) {') &&
+  installBody.indexOf('d.terminate();') < installBody.indexOf('const previous = this.device;') &&
+  installBody.includes('previous.onError = null;') &&
+  installBody.includes('previous.terminate();') &&
+  installBody.includes('this.finishCapture();');
+const keepsOnCancel = connectBody.includes('if (cancelledByUser(error) || this.device === null) throw error;') &&
+  app.includes("return error instanceof DOMException && error.name === 'NotFoundError';");
+const acquireFirst = connectBody.indexOf('requestDeviceOnBestThread()') <
+    connectBody.indexOf('this.detachDevice()') &&
+  reconnectBody.indexOf('getGrantedDevicesOnBestThread()') <
+    reconnectBody.indexOf('this.detachDevice()') &&
+  connectBody.includes('this.installDevice(d, epoch);') &&
+  reconnectBody.includes('this.installDevice(d, epoch);');
 check(
-  'device acquisition discards the transport it replaces and drops a stale one',
-  detachFinishes && acquisitionsRace,
-  `detach=${detachFinishes}, race=${acquisitionsRace}`,
+  'device acquisition replaces the transport it supersedes and keeps a working one on failure',
+  detachFinishes && installReplaces && acquireFirst && keepsOnCancel,
+  `detach=${detachFinishes}, replace=${installReplaces}, acquireFirst=${acquireFirst}, ` +
+    `keepsOnCancel=${keepsOnCancel}`,
+);
+
+const startRecovers = startBody.includes('e instanceof TransportDeadError') &&
+  startBody.includes('this.discardDevice();') &&
+  startBody.includes('void this.reconnectGranted();');
+check(
+  'a dead transport on start is dropped and re-acquired, not reported forever',
+  startRecovers,
+  `recovers=${startRecovers}`,
 );
 
 const startIssuedTo = startBody.indexOf('const device = this.device;') >= 0 &&

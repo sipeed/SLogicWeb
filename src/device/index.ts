@@ -42,6 +42,7 @@ export {
 } from '../data/softwareTrigger.js';
 export { USB_FILTERS } from './usbCore.js';
 export type { StartOptions, Stats, StreamTuning } from './slogic16u3.js';
+export { TransportDeadError } from './types.js';
 export {
   MAX_SAMPLERATE_HZ,
   MAX_SAMPLERATE_HZ_SLOGIC32_U3,

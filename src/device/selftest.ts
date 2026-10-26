@@ -131,7 +131,11 @@ async function capture(
   );
 
   await sleep(ms);
-  await dev.stop();
+  try {
+    await dev.stop();
+  } catch (e) {
+    line(`  stop() reported a dead transport: ${String(e)}`, 'bad');
+  }
 
   const stats = dev.getStats();
   if (total !== stats.sinkBytes) {

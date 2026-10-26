@@ -20,6 +20,7 @@
  *   stop:  CTRL=stop                            (api.c:1497)
  */
 
+import { TransportDeadError } from './types.js';
 import type { CaptureConfig, CaptureStartOptions, Device, DropoutSink, SampleSink } from './types.js';
 import { SoftwareTrigger } from '../data/softwareTrigger.js';
 type SoftwareTriggerState = 'waiting' | 'triggered' | 'not-found';
@@ -445,6 +446,7 @@ export class Slogic16U3 implements Device {
   private stopping = false;
   private loopDone: Promise<void> | null = null;
   private loopUnsettled = false;
+  private captureGeneration = 0;
   private loopError: unknown = null;
   /**
    * When the read loop last completed a transfer. stop() waits for a drain that is
@@ -598,6 +600,23 @@ export class Slogic16U3 implements Device {
       ? this.tuning.transferBytes / this.expectedBytesPerMs
       : STOP_TIMEOUT_MS;
     return Math.min(STOP_TIMEOUT_MS, Math.max(DRAIN_FLOOR_MS, DRAIN_TRANSFER_FILLS * fillMs));
+  }
+
+  private async abandonTransport(loopDone: Promise<void>): Promise<void> {
+    await this.settleWithin(
+      this.usb.close().catch((e: unknown) => {
+        console.warn('[slogic] closing the device during a stuck teardown:', e);
+        return undefined;
+      }),
+      CONTROL_TIMEOUT_MS,
+      'closing the device handle to cancel a stuck read loop',
+    );
+    this.bus = null;
+    await this.settleWithin(
+      loopDone,
+      CONTROL_TIMEOUT_MS,
+      'the read loop settling after the device handle was closed',
+    );
   }
 
   private async settleWithin<T>(
@@ -846,6 +865,8 @@ export class Slogic16U3 implements Device {
     if (!this.usb.opened) await this.usb.open();
     if (this.usb.configuration === null) await this.usb.selectConfiguration(1);
     await this.usb.claimInterface(0);
+    this.loopUnsettled = false;
+    this.loopDone = null;
 
     const bus = new RegisterBus(this.usb, (e) => this.trace(e));
     this.bus = bus;
@@ -909,9 +930,8 @@ export class Slogic16U3 implements Device {
       throw new Error('start() called before the previous capture finished stopping');
     }
     if (this.loopUnsettled) {
-      throw new Error(
-        'the previous capture\'s read loop never settled after the interface was released; ' +
-        'reconnect the device',
+      throw new TransportDeadError(
+        'the previous capture\'s read loop never settled after the interface was released',
       );
     }
     assertValidConfig(cfg, this.maxSamplerateHz, this.maxChannels);
@@ -1039,7 +1059,8 @@ export class Slogic16U3 implements Device {
     const deviceWireBytes = this.armedDeviceSamples > 0
       ? Math.ceil(this.armedDeviceSamples * this.wireBytesPerSample(cfg.channels))
       : 0;
-    this.loopDone = this.readLoop(started, deviceWireBytes).catch(() => {});
+    const generation = ++this.captureGeneration;
+    this.loopDone = this.readLoop(generation, started, deviceWireBytes).catch(() => {});
     this.armNoDataWatchdog(cfg);
     this.armLoopStallWatch(started);
     this.trace({
@@ -1062,7 +1083,10 @@ export class Slogic16U3 implements Device {
    * re-submit until the next loop iteration. Sequence numbers retain endpoint order even
    * if the browser happens to resolve promise callbacks out of order.
    */
-  private async readLoop(started: number, deviceWireBytes = 0): Promise<void> {
+  private async readLoop(
+    generation: number, started: number, deviceWireBytes = 0,
+  ): Promise<void> {
+    const live = (): boolean => this.captureGeneration === generation && this.running;
     const { depth, transferBytes } = this.tuning!;
     const completed = new Map<number, CompletedTransfer>();
     const inFlight = new Set<Promise<void>>();
@@ -1268,11 +1292,11 @@ export class Slogic16U3 implements Device {
       // throughput invariant is that the USB queue is replenished before a completed
       // buffer reaches any consumer work, and `notify()` only resolves a promise, so the
       // arm below still runs first.
-      if (this.running && item.error === undefined && item.result?.status === 'ok' &&
+      if (live() && item.error === undefined && item.result?.status === 'ok' &&
           canArm()) {
         arm();
         this.rearmMs.push(performance.now() - item.completedAt);
-      } else if (this.running && deviceWireBytes === 0) {
+      } else if (live() && deviceWireBytes === 0) {
         noteLagStop();
       }
       notify();
@@ -1334,7 +1358,7 @@ export class Slogic16U3 implements Device {
       // other place a read is armed, and `canArm` keeps it inside the same two bounds, so a
       // synchronous sink still behaves exactly as it did before there was a cap (NOTES
       // 8.13).
-      if (this.running && canArm()) arm();
+      if (live() && canArm()) arm();
       return item;
     };
     const consume = async (item: CompletedTransfer, duringStop: boolean): Promise<void> => {
@@ -1397,12 +1421,17 @@ export class Slogic16U3 implements Device {
     for (let i = 0; i < depth; i++) arm();
 
     try {
-      while (this.running) {
+      while (live()) {
         const item = await takeNext();
         if (!item) break;
+        if (!live()) break;
         await consume(item, this.stopping);
       }
     } catch (e) {
+      if (!live()) {
+        this.trace({ dir: 'info', note: `a superseded read loop ended: ${String(e)}` });
+        throw e;
+      }
       // Report before draining, not after. Draining waits for transfers that
       // only settle once stop() releases the interface, so deferring the report
       // until then would hide the failure for as long as the caller keeps
@@ -1422,31 +1451,33 @@ export class Slogic16U3 implements Device {
       // stop() releases the interface, settling every request. Successful tail blocks
       // already returned by Chromium are still delivered in submission order.
       await Promise.allSettled([...inFlight]);
-      // The drain's consumers are asynchronous now that the sink may be, so each one is a
-      // promise that has to be observed. Left unobserved, a sink that rejects while the
-      // tail is being delivered becomes an unhandled rejection behind a capture that is
-      // already ending - measured in the rate model: the abort path killed the process
-      // instead of reporting through onError.
-      const draining: Promise<void>[] = [];
-      while (nextSequence < submitted) {
-        const item = completed.get(nextSequence);
-        if (!item) break;
-        completed.delete(nextSequence++);
-        draining.push(consume(item, true));
-      }
-      const drained = await Promise.allSettled(draining);
-      const failed = drained.find((r) => r.status === 'rejected');
-      if (failed) {
-        const reason: unknown = failed.reason;
-        console.error('[slogic] delivering the drained tail failed:', reason);
-        this.onError?.(reason);
-      }
-      // Everything the tail put in the coalescing block is the end of this capture.
-      try {
-        await this.flushSink();
-      } catch (reason) {
-        console.error('[slogic] delivering the coalesced tail failed:', reason);
-        this.onError?.(reason);
+      if (this.captureGeneration === generation) {
+        // The drain's consumers are asynchronous now that the sink may be, so each one is a
+        // promise that has to be observed. Left unobserved, a sink that rejects while the
+        // tail is being delivered becomes an unhandled rejection behind a capture that is
+        // already ending - measured in the rate model: the abort path killed the process
+        // instead of reporting through onError.
+        const draining: Promise<void>[] = [];
+        while (nextSequence < submitted) {
+          const item = completed.get(nextSequence);
+          if (!item) break;
+          completed.delete(nextSequence++);
+          draining.push(consume(item, true));
+        }
+        const drained = await Promise.allSettled(draining);
+        const failed = drained.find((r) => r.status === 'rejected');
+        if (failed) {
+          const reason: unknown = failed.reason;
+          console.error('[slogic] delivering the drained tail failed:', reason);
+          this.onError?.(reason);
+        }
+        // Everything the tail put in the coalescing block is the end of this capture.
+        try {
+          await this.flushSink();
+        } catch (reason) {
+          console.error('[slogic] delivering the coalesced tail failed:', reason);
+          this.onError?.(reason);
+        }
       }
     }
   }
@@ -1599,6 +1630,7 @@ export class Slogic16U3 implements Device {
 
   async stop(): Promise<void> {
     const loopDone = this.loopDone;
+    const generation = this.captureGeneration;
     if (!loopDone) {
       // Nothing was ever started, or it already stopped. Still make sure the
       // device is not left streaming.
@@ -1704,19 +1736,32 @@ export class Slogic16U3 implements Device {
           );
         if (loopSettled === null) {
           this.loopUnsettled = true;
-          void loopDone.then(
-            () => { this.loopUnsettled = false; },
-            () => { this.loopUnsettled = false; },
+          const settled = (): void => {
+            if (this.captureGeneration === generation) this.loopUnsettled = false;
+          };
+          void loopDone.then(settled, settled);
+          await this.abandonTransport(loopDone);
+          teardownError = new TransportDeadError(
+            'the read loop never settled after the interface was released, so the device ' +
+            'handle was closed',
           );
+        } else {
+          const claimed = await this.settleWithin(
+            this.usb.claimInterface(0).then(() => true, (e: unknown) => {
+              console.warn('[slogic] could not re-claim interface 0 after forced cancellation:', e);
+              return false;
+            }),
+            CONTROL_TIMEOUT_MS,
+            're-claiming interface 0 after a forced cancellation',
+          );
+          if (claimed !== true) {
+            await this.abandonTransport(loopDone);
+            teardownError = new TransportDeadError(
+              'the interface could not be re-claimed after the capture was cancelled, so the ' +
+              'device was closed',
+            );
+          }
         }
-        await this.settleWithin(
-          this.usb.claimInterface(0).catch((e: unknown) => {
-            console.warn('[slogic] could not re-claim interface 0 after forced cancellation:', e);
-            return undefined;
-          }),
-          CONTROL_TIMEOUT_MS,
-          're-claiming interface 0 after a forced cancellation',
-        );
       }
 
       // drain() has now processed every already-completed transfer. Only now is

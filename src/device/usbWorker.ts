@@ -17,7 +17,7 @@
  * the page falls back to its own transport when `open` cannot find the device.
  */
 
-import { createCommandQueue } from './commandQueue.js';
+import { createCommandQueue, describeFailure } from './commandQueue.js';
 import { Slogic16U3 } from './slogic16u3.js';
 import type { SampleSink } from './types.js';
 import type {
@@ -151,7 +151,7 @@ function acknowledge(id: number): void {
 const commands = createCommandQueue<QueuedCommand>(
   handle,
   (error: unknown) => {
-    post({ kind: 'failed', message: error instanceof Error ? error.message : String(error) });
+    post({ kind: 'failed', ...describeFailure(error) });
   },
 );
 

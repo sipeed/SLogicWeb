@@ -59,6 +59,13 @@ export type SampleSink = (chunk: Uint8Array) => void | Promise<void>;
  */
 export type DropoutSink = (samplePosition: number, missingSamples: number) => void;
 
+export class TransportDeadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TransportDeadError';
+  }
+}
+
 export interface Device {
   readonly name: string;
   readonly serial: string;
