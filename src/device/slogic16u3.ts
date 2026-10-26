@@ -31,6 +31,7 @@ import {
   EP_IN,
   MAX_SAMPLERATE_HZ,
   MAX_SAMPLERATE_HZ_SLOGIC32_U3,
+  CONTROL_TIMEOUT_MS,
   PID_SLOGIC16_U3,
   PID_SLOGIC32_U3,
   RegisterBus,
@@ -123,6 +124,8 @@ const SINK_CHUNK_BYTES = 8 * 1024 * 1024;
 
 /** How long stop() waits for in-flight transfers before forcing a USB reset. */
 const STOP_TIMEOUT_MS = 1500;
+const DRAIN_TRANSFER_FILLS = 2;
+const DRAIN_FLOOR_MS = 250;
 /**
  * Extra time a `bench` gives the device to finish the length it was programmed with
  * before `stop()` runs. The bench must never be the host that cuts a producing device off.
@@ -441,6 +444,7 @@ export class Slogic16U3 implements Device {
   private running = false;
   private stopping = false;
   private loopDone: Promise<void> | null = null;
+  private loopUnsettled = false;
   private loopError: unknown = null;
   /**
    * When the read loop last completed a transfer. stop() waits for a drain that is
@@ -586,7 +590,31 @@ export class Slogic16U3 implements Device {
 
   /** When a drain that is still delivering transfers would be considered stalled. */
   private queuedDrainDeadlineMs(): number {
-    return Math.max(this.lastCompletionAt, this.stoppingSince) + STOP_TIMEOUT_MS;
+    return Math.max(this.lastCompletionAt, this.stoppingSince) + this.drainBudgetMs();
+  }
+
+  private drainBudgetMs(): number {
+    const fillMs = this.expectedBytesPerMs > 0 && this.tuning
+      ? this.tuning.transferBytes / this.expectedBytesPerMs
+      : STOP_TIMEOUT_MS;
+    return Math.min(STOP_TIMEOUT_MS, Math.max(DRAIN_FLOOR_MS, DRAIN_TRANSFER_FILLS * fillMs));
+  }
+
+  private async settleWithin<T>(
+    promise: Promise<T>, ms: number, what: string,
+  ): Promise<T | null> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const expired = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        this.trace({ dir: 'info', note: `${what} did not settle within ${ms} ms; teardown continues` });
+        resolve(null);
+      }, ms);
+    });
+    try {
+      return await Promise.race([promise, expired]);
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+    }
   }
 
   /** Wire bytes per device sample: below 8 channels the firmware packs 8/channels
@@ -874,6 +902,12 @@ export class Slogic16U3 implements Device {
     if (this.stopping || this.loopDone) {
       throw new Error('start() called before the previous capture finished stopping');
     }
+    if (this.loopUnsettled) {
+      throw new Error(
+        'the previous capture\'s read loop never settled after the interface was released; ' +
+        'reconnect the device',
+      );
+    }
     assertValidConfig(cfg, this.maxSamplerateHz, this.maxChannels);
     if (!this.bus) throw new Error('start() called before open()');
     const bus = this.bus;
@@ -1077,6 +1111,7 @@ export class Slogic16U3 implements Device {
     this.stats.slowTransferLimit = depth;
 
     const observeCompletion = (bytes: number, at: number): void => {
+      if (this.cfg === null) return;
       const duration = lastCompletionAt === null ? expectedTransferMs : at - lastCompletionAt;
       // The device answered: whatever else happens, it is not the wedged-board state.
       this.clearNoDataWatchdog();
@@ -1297,6 +1332,7 @@ export class Slogic16U3 implements Device {
       return item;
     };
     const consume = async (item: CompletedTransfer, duringStop: boolean): Promise<void> => {
+      if (this.cfg === null) return;
       // libsigrok aborts the session the moment the host falls behind; a capture that
       // keeps running at half the device's rate is what kills the 32U3 endpoint.
       if (this.underrun && !duringStop) throw this.underrun;
@@ -1621,10 +1657,15 @@ export class Slogic16U3 implements Device {
       for (; !deviceSelfStopped;) {
         const remainingMs = this.queuedDrainDeadlineMs() - performance.now();
         if (remainingMs <= 0) break;
-        settled = await Promise.race([
-          loopDone.then(() => true),
-          new Promise<boolean>((r) => setTimeout(() => r(false), remainingMs)),
-        ]);
+        let drainTimer: ReturnType<typeof setTimeout> | null = null;
+        try {
+          settled = await Promise.race([
+            loopDone.then(() => true),
+            new Promise<boolean>((r) => { drainTimer = setTimeout(() => r(false), remainingMs); }),
+          ]);
+        } finally {
+          if (drainTimer !== null) clearTimeout(drainTimer);
+        }
         if (settled) break;
       }
       if (!settled) {
@@ -1633,21 +1674,43 @@ export class Slogic16U3 implements Device {
         // only releasing the interface cancels them - WebUSB has no abort on a transfer.
         if (!deviceSelfStopped) {
           console.warn(
-            `[slogic] read loop still had transfers in flight ${STOP_TIMEOUT_MS} ms after ` +
-              'capture stop; forcing endpoint cancellation',
+            `[slogic] read loop still had transfers in flight ${Math.round(this.drainBudgetMs())} ms ` +
+              'after capture stop; forcing endpoint cancellation',
           );
         }
-        try {
-          await this.usb.releaseInterface(0);
-        } catch (e) {
-          console.warn('[slogic] releaseInterface during forced cancellation:', e);
+        const released = await this.settleWithin(
+          this.usb.releaseInterface(0).catch((e: unknown) => {
+            console.warn('[slogic] releaseInterface during forced cancellation:', e);
+            return undefined;
+          }),
+          CONTROL_TIMEOUT_MS,
+          'releasing interface 0 to cancel the capture tail',
+        );
+        if (released === null) {
+          console.warn('[slogic] the interface release did not complete; the loop may still be alive');
         }
-        await loopDone;
-        try {
-          await this.usb.claimInterface(0);
-        } catch (e) {
-          console.warn('[slogic] could not re-claim interface 0 after forced cancellation:', e);
+        const loopSettled = released === null
+          ? null
+          : await this.settleWithin(
+            loopDone,
+            CONTROL_TIMEOUT_MS,
+            'the read loop settling after a forced cancellation',
+          );
+        if (loopSettled === null) {
+          this.loopUnsettled = true;
+          void loopDone.then(
+            () => { this.loopUnsettled = false; },
+            () => { this.loopUnsettled = false; },
+          );
         }
+        await this.settleWithin(
+          this.usb.claimInterface(0).catch((e: unknown) => {
+            console.warn('[slogic] could not re-claim interface 0 after forced cancellation:', e);
+            return undefined;
+          }),
+          CONTROL_TIMEOUT_MS,
+          're-claiming interface 0 after a forced cancellation',
+        );
       }
 
       // drain() has now processed every already-completed transfer. Only now is

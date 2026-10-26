@@ -86,6 +86,19 @@ function check(name: string, cond: boolean, detail = ''): void {
   }
 }
 
+async function timedStop(dev: { stop(): Promise<void> }, budgetMs: number): Promise<number> {
+  const from = performance.now();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      dev.stop().then(() => performance.now() - from),
+      new Promise<number>((r) => { timer = setTimeout(() => r(Number.POSITIVE_INFINITY), budgetMs); }),
+    ]);
+  } finally {
+    if (timer !== null) clearTimeout(timer);
+  }
+}
+
 async function expectThrow(name: string, fn: () => Promise<unknown>, substr: string): Promise<void> {
   let msg = '';
   try {
@@ -1771,6 +1784,57 @@ async function main(): Promise<void> {
       `errors=${errors.map(String).join('|') || 'none'} first=${first.length} second=${second.length}`);
     check('the endpoint is cleared before every run, not only after a failure',
       fake.clearHaltCalls >= 2, `clearHalt calls: ${fake.clearHaltCalls}`);
+  }
+  {
+    const fake = new FakeStreamDevice(
+      recorded(),
+      Array.from({ length: 80 }, () => ({ kind: 'hang' as const })),
+    );
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    await dev.open();
+    await dev.start(
+      { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {}, undefined,
+      { tuning: { depth: 5, transferBytes: 1024 } },
+    );
+    await new Promise((r) => setTimeout(r, 40));
+    const stopMs = await timedStop(dev, 6000);
+    check('a stop whose queue cannot drain is bounded by the geometry, not the terminal timeout',
+      stopMs < 1000, `${stopMs.toFixed(0)} ms with 1024 B reads`);
+    check('a stop whose queue cannot drain still cancels the tail through the release',
+      fake.releaseInterfaceCalls === 1, `release calls: ${fake.releaseInterfaceCalls}`);
+  }
+  {
+    class StuckReleaseDevice extends FakeStreamDevice {
+      releases = 0;
+      override async releaseInterface(): Promise<void> {
+        this.releases += 1;
+        await new Promise<void>(() => {});
+      }
+    }
+    const stuck = new StuckReleaseDevice(
+      recorded(),
+      Array.from({ length: 80 }, () => ({ kind: 'hang' as const })),
+    );
+    const dev = new Slogic16U3(stuck as unknown as USBDevice);
+    await dev.open();
+    await dev.start(
+      { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {}, undefined,
+      { tuning: { depth: 5, transferBytes: 1024 } },
+    );
+    await new Promise((r) => setTimeout(r, 40));
+    const stopMs = await timedStop(dev, 8000);
+    check('a release that never settles cannot hold the teardown open',
+      stopMs < 2800 && stuck.releases === 1,
+      `${stopMs.toFixed(0)} ms, ${stuck.releases} release call(s)`);
+    await expectThrow('a start after an unsettled read loop refuses with a reason',
+      () => dev.start({ channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {}),
+      'never settled');
+    const lateErrors: unknown[] = [];
+    dev.onError = (e) => lateErrors.push(e);
+    await FakeStreamDevice.prototype.releaseInterface.call(stuck);
+    await new Promise((r) => setTimeout(r, 50));
+    check('a read loop that outlived the teardown reports nothing about the stopped capture',
+      lateErrors.length === 0, lateErrors.map(String).join('|'));
   }
 
   {
