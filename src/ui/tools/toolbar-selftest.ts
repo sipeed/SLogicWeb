@@ -34,6 +34,9 @@ const app = fs.readFileSync('src/ui/app.ts', 'utf8');
 const capturePanel = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
 const settingsMenuSrc = fs.readFileSync('src/ui/settingsMenu.ts', 'utf8');
 const css = fs.readFileSync('src/ui/style.css', 'utf8');
+const deviceTypes = fs.readFileSync('src/device/types.ts', 'utf8');
+const pageTransport = fs.readFileSync('src/device/slogic16u3.ts', 'utf8');
+const workerTransportSrc = fs.readFileSync('src/device/workerTransport.ts', 'utf8');
 const metricsSrc = fs.readFileSync('src/ui/metrics.ts', 'utf8');
 const toolbarStart = html.indexOf('<div id="toolbar">');
 const mainStart = html.indexOf('<div id="main">');
@@ -178,6 +181,59 @@ const discardBody = methodBody('private discardDecodeState(): void {');
 const adoptBody = methodBody('private adoptCapture(');
 const startBody = methodBody('private async startCapture(): Promise<void> {');
 const runDecodeBody = methodBody('private async runDecode(id: string): Promise<void> {');
+
+const discardDeviceBody = methodBody('private discardDevice(): number {');
+const detachBody = methodBody('private detachDevice(): number {');
+const teardownBody =
+  methodBody('private async teardownDevice(device: Device | null): Promise<void> {');
+const stopCaptureBody = methodBody('private async stopCapture(): Promise<void> {');
+const connectBody = methodBody('private async connect(): Promise<void> {');
+const reconnectBody = methodBody('private async reconnectGranted(): Promise<void> {');
+
+const escapeHatch = /^ {2}terminate\(\): void;$/m.test(deviceTypes) &&
+  !/terminate\?\(\)/.test(deviceTypes) &&
+  pageTransport.includes('terminate(): void {') &&
+  workerTransportSrc.includes('terminate(): void {');
+const stopRecovers = teardownBody.includes("this.fail('error.stopCapture', e)") &&
+  teardownBody.indexOf('this.discardDevice();') >
+    teardownBody.indexOf("this.fail('error.stopCapture', e)") &&
+  teardownBody.includes('void this.reconnectGranted();') &&
+  teardownBody.includes('if (this.device === device)') &&
+  stopCaptureBody.includes('this.teardownDevice(this.device)');
+const discardTerminates = discardDeviceBody.includes('this.deviceEpoch += 1;') &&
+  discardDeviceBody.includes('device.onError = null;') &&
+  discardDeviceBody.includes('device.terminate();');
+check(
+  'a failed stop drops the transport and re-acquires it instead of leaving a dead button',
+  stopRecovers && discardTerminates && escapeHatch,
+  `recovers=${stopRecovers}, discard=${discardTerminates}, escape=${escapeHatch}`,
+);
+
+const detachFinishes = detachBody.includes('const epoch = this.discardDevice();') &&
+  detachBody.includes('this.running = false;') && detachBody.includes('this.stopping = false;') &&
+  detachBody.includes('this.finishCapture();');
+const acquisitionsRace = connectBody.includes('const epoch = this.detachDevice();') &&
+  connectBody.includes('if (epoch !== this.deviceEpoch) { d.terminate(); return; }') &&
+  reconnectBody.includes('const epoch = this.detachDevice();') &&
+  reconnectBody.includes('if (epoch !== this.deviceEpoch) { d.terminate(); return; }');
+check(
+  'device acquisition discards the transport it replaces and drops a stale one',
+  detachFinishes && acquisitionsRace,
+  `detach=${detachFinishes}, race=${acquisitionsRace}`,
+);
+
+const startIssuedTo = startBody.indexOf('const device = this.device;') >= 0 &&
+  startBody.includes('await device.start(cfg, (chunk) => {');
+const armingStop = ['if (!this.running) {', 'await this.stopPending',
+  'else if (this.device === device) await this.teardownDevice(device);']
+  .filter((needle) => !startBody.includes(needle));
+check(
+  'a stop that lands during arming tears down the device start() was issued to',
+  startIssuedTo && armingStop.length === 0 &&
+    startBody.indexOf('await this.stopPending') >
+      startBody.indexOf('await device.start(cfg, (chunk) => {'),
+  `issuedTo=${startIssuedTo}, missing=${JSON.stringify(armingStop)}`,
+);
 
 const ownershipDeclared = app.includes('private readonly demoAnalyzers = new Set<string>();');
 const ownsOnInsert = attachBody.includes('this.analyzers.push(a);') &&

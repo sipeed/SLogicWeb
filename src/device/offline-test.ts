@@ -1538,6 +1538,19 @@ async function main(): Promise<void> {
       `${silentError} after ${Date.now() - silentStart} ms`);
     check('a failed open terminates the worker it could not use', silent.terminated);
 
+    const stalled = new FakeWorker();
+    const stalledDevice = await openWorkerDevice(stalled);
+    const stalledFrom = Date.now();
+    let stalledError = '';
+    try { await stalledDevice.stop(); } catch (e) { stalledError = String(e); }
+    check('a stop the worker never answers is abandoned, not waited for',
+      stalledError.includes('did not answer "stopped"') && Date.now() - stalledFrom >= 150,
+      `${stalledError} after ${Date.now() - stalledFrom} ms`);
+    check('a stop that timed out terminates the worker it could not stop',
+      stalled.terminated, `terminated=${stalled.terminated}`);
+    check('a stop that timed out names the reset the caller has to recover from',
+      stalledError.includes('transport was reset'), stalledError);
+
     const streaming = new FakeWorker();
     const live = await openWorkerDevice(streaming);
     const chunks: number[][] = [];

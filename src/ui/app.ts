@@ -128,6 +128,8 @@ export class App {
   };
 
   private device: Device | null = null;
+  private deviceEpoch = 0;
+  private stopPending: Promise<void> | null = null;
   private rateCeilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ;
   private running = false;
   /** True while WebUSB transfers from the previous run are being cancelled and drained. */
@@ -1524,12 +1526,35 @@ export class App {
 
   // ------------------------------------------------------------------ device
 
+  private discardDevice(): number {
+    const device = this.device;
+    this.deviceEpoch += 1;
+    if (device) {
+      this.device = null;
+      device.onError = null;
+      device.terminate();
+    }
+    return this.deviceEpoch;
+  }
+
+  private detachDevice(): number {
+    const epoch = this.discardDevice();
+    if (this.running || this.stopping) {
+      this.running = false;
+      this.stopping = false;
+      this.finishCapture();
+    }
+    return epoch;
+  }
+
   private async reconnectGranted(): Promise<void> {
     try {
       if (!navigator.usb) return;
+      const epoch = this.detachDevice();
       const devs = await getGrantedDevicesOnBestThread();
       const d = devs[0];
       if (!d) return;
+      if (epoch !== this.deviceEpoch) { d.terminate(); return; }
       d.onError = (e) => this.deviceFailed(e);
       this.device = d;
       this.noteTransport();
@@ -1544,7 +1569,9 @@ export class App {
   private async connect(): Promise<void> {
     try {
       this.statusError = null;
+      const epoch = this.detachDevice();
       const d = await requestDeviceOnBestThread();
+      if (epoch !== this.deviceEpoch) { d.terminate(); return; }
       d.onError = (e) => this.deviceFailed(e);
       this.device = d;
       this.noteTransport();
@@ -1602,6 +1629,7 @@ export class App {
   private async startCapture(): Promise<void> {
     if (this.running || this.stopping) return;
     if (!this.device) { this.fail('error.start', new Error('no device connected')); return; }
+    const device = this.device;
     try {
       this.statusError = null;
       this.startMutatedCapture = false;
@@ -1674,7 +1702,7 @@ export class App {
         // the post-trigger window, not the prefix - the trigger keeps its full ring.
         this.captureLimitSamples = Math.min(MAX_SAMPLES - 1, postTriggerSamples + preTriggerSamples);
       }
-      await this.device.start(cfg, (chunk) => {
+      await device.start(cfg, (chunk) => {
         // Chunks arriving while `stopping` are the drained tail of this capture - the
         // reads that had already completed when stop began, plus the flushed coalescing
         // block. Dropping them truncated every manually stopped capture by up to one
@@ -1756,6 +1784,10 @@ export class App {
         ...(isLoop ? {} : { deviceSampleLimit: this.captureLimitSamples }),
         onEnd: () => { if (this.running) void this.stopCapture(); },
       });
+      if (!this.running) {
+        if (this.stopPending) await this.stopPending;
+        else if (this.device === device) await this.teardownDevice(device);
+      }
     } catch (e) {
       this.running = false;
       if (this.startMutatedCapture) {
@@ -1793,13 +1825,30 @@ export class App {
     this.running = false;
     this.stopping = true;
     this.renderPanels();
+    const pending = this.teardownDevice(this.device);
+    this.stopPending = pending;
     try {
-      await this.device?.stop();
-    } catch (e) {
-      this.fail('error.stopCapture', e);
+      await pending;
     } finally {
       this.stopping = false;
+      this.stopPending = null;
     }
+    this.finishCapture();
+  }
+
+  private async teardownDevice(device: Device | null): Promise<void> {
+    try {
+      await device?.stop();
+    } catch (e) {
+      this.fail('error.stopCapture', e);
+      if (this.device === device) {
+        this.discardDevice();
+        void this.reconnectGranted();
+      }
+    }
+  }
+
+  private finishCapture(): void {
     this.setFollow(false);
     const sr = this.store.samplerate;
     this.captureLabel = this.triggerState === 'not-found'

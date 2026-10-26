@@ -72,6 +72,7 @@ export interface Device {
     options?: CaptureStartOptions,
   ): Promise<void>;
   stop(): Promise<void>;
+  terminate(): void;
   /**
    * Fatal errors from the transport's background reader. Optional because a
    * third-party device need not have one; when present it is set by the UI, which is

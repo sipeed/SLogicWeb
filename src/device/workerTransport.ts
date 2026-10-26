@@ -181,6 +181,10 @@ export class WorkerSlogicDevice implements Device {
     let message: FromWorker;
     try {
       message = await stopped;
+    } catch (error) {
+      this.terminate();
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`${detail}; the USB transport was reset, reconnect the device`);
     } finally {
       this.pageStalls.stop();
     }

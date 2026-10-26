@@ -895,6 +895,12 @@ export class Slogic16U3 implements Device {
     this.bus = null;
   }
 
+  terminate(): void {
+    void this.close().catch((e: unknown) => {
+      console.warn('[slogic] close during terminate failed:', e);
+    });
+  }
+
   async start(
     cfg: CaptureConfig, sink: SampleSink, _onDropout?: DropoutSink, opts: StartOptions = {},
   ): Promise<void> {
