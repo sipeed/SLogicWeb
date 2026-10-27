@@ -953,6 +953,13 @@ html.resizing { cursor: col-resize; user-select: none; }
 .channel-banks { display: flex; flex-direction: column; gap: 8px; }
 .channel-bank { min-width: 0; }
 .channel-bank-head { display: flex; align-items: center; gap: 6px; min-height: 18px; margin-bottom: 4px; }
+.adc-button {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 18px; padding: 0; cursor: pointer;
+  background: var(--bg20); color: #4C9AFF; border: 1px solid #4C9AFF; border-radius: 3px;
+}
+.adc-button svg { display: block; width: 14px; height: 14px; }
+.adc-button.on { background: #4C9AFF; color: #141415; }
 .channel-bank-toggle { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
 .channel-bank-title { color: var(--text80); font-size: 10px; line-height: 1; white-space: nowrap; }
 .channel-bank-count { margin-left: auto; color: var(--text50); font-size: 10px; line-height: 1; white-space: nowrap; }
@@ -1151,6 +1158,10 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
   background: var(--background); border-color: var(--input);
   border-radius: calc(var(--radius) - 4px);
 }
+:is(html[data-theme="dark"], html[data-theme="light"]) .adc-button {
+  background: var(--background); border-color: #4C9AFF; color: #4C9AFF;
+}
+:is(html[data-theme="dark"], html[data-theme="light"]) .adc-button.on { background: #4C9AFF; color: #141415; }
 :is(html[data-theme="dark"], html[data-theme="light"]) .channel-bank-title { color: var(--foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .channel-enabled-count,
 :is(html[data-theme="dark"], html[data-theme="light"]) .channel-bank-count { color: var(--muted-foreground); }
@@ -1454,6 +1465,8 @@ html[data-theme="light"] .uictrl-card-actions .mini:hover { background: var(--mu
 .bus-btn--remove:hover { border-color: var(--negative); color: var(--negative); }
 .bus-perbit summary { font-size: 11px; color: var(--text80); cursor: pointer; user-select: none; }
 .bus-perbit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.bus-config-fields { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.bank-bus-enable { color: var(--text); font-size: 12px; }
 .bus-check { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text80); }
 .bus-check input { accent-color: var(--accent); }
 .bus-actions { display: flex; gap: 6px; }
@@ -1470,6 +1483,7 @@ html[data-theme="light"] .uictrl-card-actions .mini:hover { background: var(--mu
 .bus-cell-edit:hover { border-color: var(--accent); color: var(--text80); }
 .bus-cell-edit svg { display: block; width: 14px; height: 14px; }
 
+:is(html[data-theme="dark"], html[data-theme="light"]) .bank-bus-enable { color: var(--foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-name { color: var(--foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-info,
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-cell-sub { color: var(--muted-foreground); }

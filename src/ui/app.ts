@@ -31,14 +31,18 @@ import type { AssistantHost, CaptureOutcome } from '../assistant/tools.js';
 import { AnalyzerPanel } from './analyzerPanel.js';
 import { AssistantPanel } from './assistantPanel.js';
 import { BusBuilder, validateBusSpec } from '../data/busValue.js';
-import { BusPanel, defaultBusConfig } from './busPanel.js';
+import {
+  BankBusDialog, BusPanel, cloneBusConfig, defaultBankBusConfig, defaultBusConfig, normalizeBankBusConfig,
+} from './busPanel.js';
 import {
   analogFrame, busColor, busLabel, busSummary, busValueAt, busYRange, type AnalogFrame, type BusViewConfig,
   type BusViewState,
 } from './busView.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
 import { CapturePanel, type CapturePanelView } from './capturePanel.js';
-import { clearChannelBanks, toggleChannelBank } from './channelBanks.js';
+import {
+  CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, clearChannelBanks, toggleChannelBank,
+} from './channelBanks.js';
 import { ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration } from './channelList.js';
 import { computeChannelRowHeight } from './channelLayout.js';
 import {
@@ -95,8 +99,10 @@ export class App {
   /** Resolved when the running capture stops (the assistant waits on a capture). */
   private captureWaiters: (() => void)[] = [];
   private readonly busPanel: BusPanel;
+  private readonly bankBusDialog: BankBusDialog;
   /** Parallel-bus (ADC) views, drawn as analog rows above the channels. */
   private busViews: BusViewState[] = [];
+  private readonly bankBusDrafts = new Map<number, BusViewConfig>();
   private nextBus = 0;
   /** When the analyzers panel last re-rendered for a bus build's progress. */
   private busPanelAt = 0;
@@ -255,6 +261,7 @@ export class App {
       },
       onToggleChannel: (i, on) => this.setChannelEnabled(i, on),
       onToggleBank: (start) => this.setBankEnabled(start),
+      onOpenBank: (start) => this.openBankBus(start),
       onSetAllChannels: (on) => this.setAllChannels(on),
       onUsbControl: (command) => this.usbControl(command),
     });
@@ -274,6 +281,9 @@ export class App {
       onAdd: (cfg) => this.addBus(cfg),
       onUpdate: (id, cfg) => this.updateBus(id, cfg),
       onRemove: (id) => this.removeBus(id),
+    });
+    this.bankBusDialog = new BankBusDialog({
+      onConfirm: (start, cfg, enabled) => this.configureBankBus(start, cfg, enabled),
     });
 
     this.wireToolbar();
@@ -346,25 +356,58 @@ export class App {
     }));
   }
 
+  private syncBankChannels(): void {
+    for (const bus of this.busViews) {
+      if (busChannelBank(bus.spec) === null) continue;
+      for (const channel of bus.spec.bits) {
+        const c = this.channels[channel];
+        if (c) c.enabled = true;
+      }
+    }
+  }
+
   private addBus(cfg: BusViewConfig): void {
     const color = busColor(this.nextBus);
     this.busViews.push({ ...cfg, color, id: `bus-${this.nextBus++}`, builder: null, builtFor: null, cache: null });
-    this.relayout();
-    this.renderPanels();
+    this.syncBankChannels();
+    this.afterChannelChange();
   }
 
   private updateBus(id: string, cfg: BusViewConfig): void {
     const i = this.busViews.findIndex((b) => b.id === id);
     if (i < 0) return;
     this.busViews[i] = { ...cfg, color: this.busViews[i]!.color, id, builder: null, builtFor: null, cache: null };
-    this.relayout();
-    this.renderPanels();
+    this.syncBankChannels();
+    this.afterChannelChange();
   }
 
   private removeBus(id: string): void {
     this.busViews = this.busViews.filter((b) => b.id !== id);
-    this.relayout();
-    this.renderPanels();
+    this.afterChannelChange();
+  }
+
+  private openBankBus(start: number): void {
+    if (channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return;
+    const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
+    const config = active ?? this.bankBusDrafts.get(start) ?? defaultBankBusConfig(this.channels.length, start);
+    this.bankBusDialog.open(start, config, active !== undefined, this.channels.length);
+  }
+
+  private configureBankBus(start: number, config: BusViewConfig, enabled: boolean): void {
+    if (channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return;
+    const next = normalizeBankBusConfig(config, this.channels.length, start);
+    this.bankBusDrafts.set(start, cloneBusConfig(next));
+    if (enabled) {
+      const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
+      if (active) this.updateBus(active.id, next);
+      else this.addBus(next);
+      return;
+    }
+    const remaining = this.busViews.filter((b) => busChannelBank(b.spec) !== start);
+    if (remaining.length !== this.busViews.length) {
+      this.busViews = remaining;
+      this.afterChannelChange();
+    }
   }
 
   /** A new capture (or a growing one) invalidates every bus's overview and cache. */
@@ -1269,6 +1312,7 @@ export class App {
   /** Re-render every string in the shell after a locale change. */
   private retranslate(): void {
     this.settingsMenu.close('retranslate');
+    this.bankBusDialog.close();
     this.sidebarMenu.close('retranslate');
     this.themeMenu.close('retranslate');
     applyStaticI18n(document);
@@ -1322,6 +1366,7 @@ export class App {
       this.capturePanel.render({
         settings: this.settings,
         channels: this.channels,
+        buses: this.busViews,
         deviceName: this.device?.name ?? null,
         running: this.running,
         stopping: this.stopping,

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import type { BusSpec } from '../data/busValue.js';
+
 export const CHANNEL_BANK_SIZE = 8;
 
 export interface ChannelEnableState {
@@ -64,6 +66,14 @@ export function toggleChannelBank(
   const enabled = status.state !== 'all';
   const next = channels.map((c) => channelBankStart(c.index) === start ? enabled : c.enabled);
   return next.some(Boolean) ? next : null;
+}
+
+export function busChannelBank(spec: BusSpec): number | null {
+  if (spec.bits.length !== CHANNEL_BANK_SIZE) return null;
+  const sorted = [...spec.bits].sort((a, b) => a - b);
+  const start = sorted[0]!;
+  if (start % CHANNEL_BANK_SIZE !== 0) return null;
+  return sorted.every((channel, i) => channel === start + i) ? start : null;
 }
 
 export function clearChannelBanks(

@@ -20,11 +20,12 @@ import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import { formatDuration, formatRate } from './format.js';
 import {
-  channelBankIndices, channelBankRange, channelBankStarts, channelBankStatus,
+  busChannelBank, channelBankIndices, channelBankRange, channelBankStarts, channelBankStatus,
 } from './channelBanks.js';
 import { t } from './i18n.js';
 import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
+import type { BusViewState } from './busView.js';
 import type { CaptureSettings, ChannelState } from './state.js';
 import { clampLoopSamples, LOOP_WINDOW_QUANTUM, maxLoopSamples } from './state.js';
 import { MAX_SAMPLES } from './captureIO.js';
@@ -35,6 +36,7 @@ export interface CapturePanelCallbacks {
   onSettings(next: CaptureSettings): void;
   onToggleChannel(index: number, enabled: boolean): void;
   onToggleBank(start: number): void;
+  onOpenBank(start: number): void;
   onSetAllChannels(enabled: boolean): void;
   onUsbControl(command: string): Promise<string>;
 }
@@ -42,6 +44,7 @@ export interface CapturePanelCallbacks {
 export interface CapturePanelView {
   settings: CaptureSettings;
   channels: readonly ChannelState[];
+  buses: readonly BusViewState[];
   deviceName: string | null;
   running: boolean;
   stopping: boolean;
@@ -111,12 +114,21 @@ export class CapturePanel {
     chSec.header.append(total, all, clear);
 
     const banks = div('channel-banks');
+    const activeBanks = new Set<number>();
+    for (const bus of v.buses) {
+      const start = busChannelBank(bus.spec);
+      if (start !== null) activeBanks.add(start);
+    }
     for (const start of channelBankStarts(v.channels.length)) {
       const status = channelBankStatus(v.channels, start);
       const range = channelBankRange(start, v.channels.length);
       const bank = div('channel-bank');
       bank.dataset.bankStart = String(start);
       const head = div('channel-bank-head');
+      if (status.total === 8) {
+        head.appendChild(oscilloscopeButton(start, activeBanks.has(start), range,
+          () => this.cb.onOpenBank(start)));
+      }
       const toggle = document.createElement('input');
       toggle.type = 'checkbox';
       toggle.className = 'channel-bank-toggle';
@@ -462,6 +474,41 @@ export class CapturePanel {
     advanced.appendChild(body);
     this.root.appendChild(advanced);
   }
+}
+
+function oscilloscopeButton(
+  start: number, active: boolean, range: string, onOpen: () => void,
+): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'adc-button' + (active ? ' on' : '');
+  b.dataset.adcOpen = String(start);
+  b.dataset.adcActive = String(active);
+  b.setAttribute('aria-haspopup', 'dialog');
+  const state = t(active ? 'capturePanel.oscilloscopeEnabled' : 'capturePanel.oscilloscopeDisabled');
+  b.setAttribute('aria-label', t('capturePanel.oscilloscopeConfig', { range, state }));
+  b.title = b.getAttribute('aria-label')!;
+  const namespace = 'http://www.w3.org/2000/svg';
+  const icon = document.createElementNS(namespace, 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.setAttribute('fill', 'none');
+  icon.setAttribute('stroke', 'currentColor');
+  icon.setAttribute('stroke-width', '1.8');
+  icon.setAttribute('stroke-linecap', 'round');
+  icon.setAttribute('stroke-linejoin', 'round');
+  const screen = document.createElementNS(namespace, 'rect');
+  screen.setAttribute('x', '3');
+  screen.setAttribute('y', '4');
+  screen.setAttribute('width', '18');
+  screen.setAttribute('height', '16');
+  screen.setAttribute('rx', '2');
+  const waveform = document.createElementNS(namespace, 'path');
+  waveform.setAttribute('d', 'M6 14h3l2-5 3 7 2-4h2');
+  icon.append(screen, waveform);
+  b.appendChild(icon);
+  b.addEventListener('click', onOpen);
+  return b;
 }
 
 function nearest(list: number[], v: number): number {

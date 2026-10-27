@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  CHANNEL_BANK_SIZE, channelBankIndices, channelBankRange, channelBankStart, channelBankStarts,
+  CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankRange, channelBankStart, channelBankStarts,
   channelBankStatus, clearChannelBanks, toggleChannelBank, type ChannelEnableState,
 } from '../channelBanks.js';
 
@@ -118,6 +118,19 @@ check('bank start uses the absolute channel index',
 }
 
 {
+  const spec = (bits: number[]) => ({ bits, clock: null, encoding: 'unsigned' as const });
+  const recognized = busChannelBank(spec([0, 1, 2, 3, 4, 5, 6, 7])) === 0 &&
+    busChannelBank(spec([15, 14, 13, 12, 11, 10, 9, 8])) === 8 &&
+    busChannelBank(spec([31, 30, 29, 28, 27, 26, 25, 24])) === 24;
+  const rejected = busChannelBank(spec([0, 1, 2, 3])) === null &&
+    busChannelBank(spec([1, 2, 3, 4, 5, 6, 7, 8])) === null &&
+    busChannelBank(spec([0, 1, 2, 3, 4, 5, 6, 8])) === null &&
+    busChannelBank(spec([0, 1, 2, 3, 4, 5, 6, 6])) === null;
+  check('only eight aligned consecutive data bits identify an oscilloscope bank',
+    recognized && rejected, `recognized=${recognized}, rejected=${rejected}`);
+}
+
+{
   const input = channels([0, 1, 2, 3, 4, 5, 6, 7, 8], 16);
   const next = toggleChannelBank(input, 0, new Set([0]));
   check('bank toggle rejects a locked bank without mutating input', next === null && input[0]?.enabled === true,
@@ -153,6 +166,7 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
   if (!fs) throw new Error('node fs module unavailable');
   const panel = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const busPanel = fs.readFileSync('src/ui/busPanel.ts', 'utf8');
   const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
   const grouped = panel.includes('for (const start of channelBankStarts(v.channels.length))') &&
     panel.includes('channelBankStatus(v.channels, start)') &&
@@ -178,6 +192,23 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
   const focusContinuity = panel.includes('this.root.querySelector<HTMLInputElement>(`[data-bank-toggle="${start}"]`)?.focus');
   check('bank toggles resync rejected native state and retain keyboard focus after rebuild',
     rejectedSync && focusContinuity, `rejectedSync=${rejectedSync}, focusContinuity=${focusContinuity}`);
+
+  const iconStart = panel.indexOf('function oscilloscopeButton');
+  const icon = panel.slice(iconStart, panel.indexOf('function nearest', iconStart));
+  const iconOnly = iconStart >= 0 && icon.includes('createElementNS') &&
+    icon.includes("b.setAttribute('aria-haspopup', 'dialog')") && !icon.includes('textContent');
+  const sharedFields = (busPanel.match(/busConfigFields\(/g) ?? []).length >= 3 &&
+    busPanel.includes('fixedBankStart: null') && busPanel.includes('fixedBankStart: this.start') &&
+    busPanel.includes('fixed.readOnly = true') && busPanel.includes('clockOptions');
+  const nativeDialog = busPanel.includes('this.dialog.showModal()') &&
+    busPanel.indexOf("this.dialog.close('applied')") >= 0 &&
+    busPanel.indexOf("this.dialog.close('applied')") < busPanel.indexOf('this.cb.onConfirm(this.start');
+  const realState = panel.includes('buses: readonly BusViewState[]') &&
+    app.includes('buses: this.busViews') && app.includes('this.configureBankBus(start, cfg, enabled)') &&
+    app.includes('if (active) this.updateBus(active.id, next);') && app.includes('else this.addBus(next);');
+  check('the bank oscilloscope dialog reuses real fields and commits through actual bus state',
+    iconOnly && sharedFields && nativeDialog && realState,
+    `iconOnly=${iconOnly}, sharedFields=${sharedFields}, nativeDialog=${nativeDialog}, realState=${realState}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
