@@ -115,6 +115,8 @@ export const ru: Messages = {
   'capturePanel.digital': 'Цифровые каналы',
   'capturePanel.all': 'Все',
   'capturePanel.clear': 'Ничего',
+  'capturePanel.enabledCount': 'Включено каналов: {enabled}/{total}',
+  'capturePanel.bankToggle': '{range}: переключить всю группу каналов',
   'capturePanel.sampleRate': 'Частота выборки',
   'capturePanel.threshold': 'Порог',
   'capturePanel.dacNote': 'Код DAC {code} = фактически {volts} В. Ширина захвата: {channels} кан. (потолок {rate}).',

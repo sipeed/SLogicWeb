@@ -19,6 +19,9 @@ import { SAMPLERATES_HZ, vrefCode, vrefVolts } from '../device/index.js';
 import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import { formatDuration, formatRate } from './format.js';
+import {
+  channelBankIndices, channelBankRange, channelBankStarts, channelBankStatus,
+} from './channelBanks.js';
 import { t } from './i18n.js';
 import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
@@ -31,6 +34,7 @@ const THRESHOLDS = [0.6, 0.9, 1.2, 1.5, 1.65, 1.8, 2.5, 3.3];
 export interface CapturePanelCallbacks {
   onSettings(next: CaptureSettings): void;
   onToggleChannel(index: number, enabled: boolean): void;
+  onToggleBank(start: number): void;
   onSetAllChannels(enabled: boolean): void;
   onUsbControl(command: string): Promise<string>;
 }
@@ -92,28 +96,77 @@ export class CapturePanel {
 
     // ---- channels
     const chSec = section(t('capturePanel.digital'));
+    chSec.el.classList.add('digital-section');
     const all = button(t('capturePanel.all'), 'mini');
     all.addEventListener('click', () => this.cb.onSetAllChannels(true));
     const clear = button(t('capturePanel.clear'), 'mini');
     clear.addEventListener('click', () => this.cb.onSetAllChannels(false));
-    chSec.header.append(all, clear);
+    const enabledTotal = v.channels.filter((c) => c.enabled).length;
+    const total = document.createElement('span');
+    total.className = 'channel-enabled-count';
+    total.textContent = `${enabledTotal}/${v.channels.length}`;
+    total.setAttribute('aria-label', t('capturePanel.enabledCount', {
+      enabled: enabledTotal, total: v.channels.length,
+    }));
+    chSec.header.append(total, all, clear);
 
-    const grid = div('chip-grid');
-    for (const c of v.channels) {
-      const chip = document.createElement('button');
-      chip.className = 'chip' + (c.enabled ? ' on' : '');
-      chip.textContent = String(c.index);
-      chip.title = c.name;
-      if (c.enabled) {
-        chip.style.background = c.color;
-        chip.style.color = chipForeground(c.color);
-      } else {
-        chip.style.borderColor = c.color;
+    const banks = div('channel-banks');
+    for (const start of channelBankStarts(v.channels.length)) {
+      const status = channelBankStatus(v.channels, start);
+      const range = channelBankRange(start, v.channels.length);
+      const bank = div('channel-bank');
+      bank.dataset.bankStart = String(start);
+      const head = div('channel-bank-head');
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.className = 'channel-bank-toggle';
+      toggle.checked = status.state === 'all';
+      toggle.indeterminate = status.state === 'mixed';
+      toggle.dataset.bankToggle = String(start);
+      toggle.setAttribute('aria-label', t('capturePanel.bankToggle', { range }));
+      toggle.title = toggle.getAttribute('aria-label')!;
+      toggle.addEventListener('change', () => {
+        this.cb.onToggleBank(start);
+        if (toggle.isConnected) {
+          toggle.checked = status.state === 'all';
+          toggle.indeterminate = status.state === 'mixed';
+        } else {
+          this.root.querySelector<HTMLInputElement>(`[data-bank-toggle="${start}"]`)?.focus({ preventScroll: true });
+        }
+      });
+      const title = document.createElement('span');
+      title.className = 'channel-bank-title';
+      title.textContent = range;
+      const count = document.createElement('span');
+      count.className = 'channel-bank-count';
+      count.textContent = `${status.enabled}/${status.total}`;
+      head.append(toggle, title, count);
+
+      const grid = div('chip-grid channel-bank-grid');
+      grid.dataset.bankGrid = String(start);
+      grid.setAttribute('role', 'group');
+      grid.setAttribute('aria-label', range);
+      for (const index of channelBankIndices(start, v.channels.length)) {
+        const c = v.channels[index]!;
+        const chip = document.createElement('button');
+        chip.className = 'chip' + (c.enabled ? ' on' : '');
+        chip.textContent = `D${c.index}`;
+        chip.title = c.name;
+        chip.dataset.channel = String(c.index);
+        chip.setAttribute('aria-pressed', String(c.enabled));
+        if (c.enabled) {
+          chip.style.background = c.color;
+          chip.style.color = chipForeground(c.color);
+        } else {
+          chip.style.borderColor = c.color;
+        }
+        chip.addEventListener('click', () => this.cb.onToggleChannel(c.index, !c.enabled));
+        grid.appendChild(chip);
       }
-      chip.addEventListener('click', () => this.cb.onToggleChannel(c.index, !c.enabled));
-      grid.appendChild(chip);
+      bank.append(head, grid);
+      banks.appendChild(bank);
     }
-    chSec.body.appendChild(grid);
+    chSec.body.appendChild(banks);
 
     // ---- rate + threshold
     const rowRT = div('field-row');

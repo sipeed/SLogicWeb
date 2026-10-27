@@ -6,7 +6,9 @@ import {
 } from '../channelBanks.js';
 
 const nodeProcess = (() => {
-  const p = (globalThis as { process?: { exit(code: number): never } }).process;
+  const p = (globalThis as {
+    process?: { exit(code: number): never; getBuiltinModule?(id: string): unknown };
+  }).process;
   if (!p || typeof p.exit !== 'function') throw new Error('this entry point only runs under node');
   return p;
 })();
@@ -143,6 +145,40 @@ check('Clear restores every channel in locked banks and adds D0 when needed',
 check('Clear with D0 locked preserves that whole bank without an extra channel',
   enabled(clearChannelBanks(channels([0, 8], 16), new Set([0]))).join(',') === '0,1,2,3,4,5,6,7',
   enabled(clearChannelBanks(channels([0, 8], 16), new Set([0]))).join(','));
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as {
+    readFileSync(path: string, encoding: string): string;
+  } | undefined;
+  if (!fs) throw new Error('node fs module unavailable');
+  const panel = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
+  const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
+  const grouped = panel.includes('for (const start of channelBankStarts(v.channels.length))') &&
+    panel.includes('channelBankStatus(v.channels, start)') &&
+    panel.includes('channelBankIndices(start, v.channels.length)') &&
+    panel.includes("div('chip-grid channel-bank-grid')") &&
+    panel.includes('chSec.body.appendChild(banks)');
+  const accessible = panel.includes("toggle.type = 'checkbox'") &&
+    panel.includes("toggle.indeterminate = status.state === 'mixed'") &&
+    panel.includes("t('capturePanel.bankToggle', { range })") &&
+    panel.includes("chip.setAttribute('aria-pressed', String(c.enabled))");
+  const wired = app.includes('onToggleBank: (start) => this.setBankEnabled(start)') &&
+    app.includes('const next = toggleChannelBank(this.channels, start);') &&
+    app.includes('const next = clearChannelBanks(this.channels);');
+  const grid = sheet.includes('grid-template-columns: repeat(8, minmax(0, 1fr))') &&
+    sheet.includes('.channel-bank-head') && sheet.includes('.channel-bank-count');
+  check('the real Device panel renders accessible eight-channel banks through App state',
+    grouped && accessible && wired && grid,
+    `grouped=${grouped}, accessible=${accessible}, wired=${wired}, grid=${grid}`);
+
+  const rejectedBranch = panel.split('if (toggle.isConnected) {')[1]?.split('} else {')[0] ?? '';
+  const rejectedSync = rejectedBranch.includes("toggle.checked = status.state === 'all'") &&
+    rejectedBranch.includes("toggle.indeterminate = status.state === 'mixed'");
+  const focusContinuity = panel.includes('this.root.querySelector<HTMLInputElement>(`[data-bank-toggle="${start}"]`)?.focus');
+  check('bank toggles resync rejected native state and retain keyboard focus after rebuild',
+    rejectedSync && focusContinuity, `rejectedSync=${rejectedSync}, focusContinuity=${focusContinuity}`);
+}
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;

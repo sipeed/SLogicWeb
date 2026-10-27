@@ -119,6 +119,8 @@ export const en = {
   'capturePanel.digital': 'Digital',
   'capturePanel.all': 'All',
   'capturePanel.clear': 'Clear',
+  'capturePanel.enabledCount': '{enabled}/{total} channels enabled',
+  'capturePanel.bankToggle': '{range}: toggle all channels in this group',
   'capturePanel.sampleRate': 'Sample rate',
   'capturePanel.threshold': 'Threshold',
   'capturePanel.dacNote': 'DAC code {code} = {volts} V actual. Capture width {channels} ch (ceiling {rate}).',

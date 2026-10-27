@@ -113,6 +113,8 @@ export const zhCN: Messages = {
   'capturePanel.digital': '数字通道',
   'capturePanel.all': '全选',
   'capturePanel.clear': '清空',
+  'capturePanel.enabledCount': '已启用 {enabled}/{total} 个通道',
+  'capturePanel.bankToggle': '{range}：切换整组通道',
   'capturePanel.sampleRate': '采样率',
   'capturePanel.threshold': '阈值',
   'capturePanel.dacNote': 'DAC 码 {code} = 实际 {volts} V。采集宽度 {channels} 通道（上限 {rate}）。',

@@ -115,6 +115,8 @@ export const fr: Messages = {
   'capturePanel.digital': 'Canaux numériques',
   'capturePanel.all': 'Tous',
   'capturePanel.clear': 'Aucun',
+  'capturePanel.enabledCount': 'Canaux activés : {enabled}/{total}',
+  'capturePanel.bankToggle': '{range} : activer ou désactiver tout le groupe',
   'capturePanel.sampleRate': 'Fréquence d’échantillonnage',
   'capturePanel.threshold': 'Seuil',
   'capturePanel.dacNote': 'Code DAC {code} = {volts} V réel. Largeur de capture : {channels} canaux (plafond {rate}).',

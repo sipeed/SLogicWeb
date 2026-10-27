@@ -948,7 +948,16 @@ html.resizing { cursor: col-resize; user-select: none; }
 .panel-note.live { color: var(--text80); }
 .decoder-detail { font-size: 11px; color: var(--text80); line-height: 1.4; }
 
-.chip-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.digital-section .panel-section-head > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-enabled-count { flex: none; color: var(--text50); font-size: 10px; font-weight: 400; white-space: nowrap; }
+.channel-banks { display: flex; flex-direction: column; gap: 8px; }
+.channel-bank { min-width: 0; }
+.channel-bank-head { display: flex; align-items: center; gap: 6px; min-height: 18px; margin-bottom: 4px; }
+.channel-bank-toggle { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.channel-bank-title { color: var(--text80); font-size: 10px; line-height: 1; white-space: nowrap; }
+.channel-bank-count { margin-left: auto; color: var(--text50); font-size: 10px; line-height: 1; white-space: nowrap; }
+.chip-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+.channel-bank-grid .chip { min-width: 0; padding: 0; font-size: 10px; }
 .chip {
   height: 22px; border-radius: 3px; border: 1px solid var(--border-low);
   background: var(--bg10); font: 11px/1 inherit; cursor: pointer;
@@ -1142,6 +1151,9 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
   background: var(--background); border-color: var(--input);
   border-radius: calc(var(--radius) - 4px);
 }
+:is(html[data-theme="dark"], html[data-theme="light"]) .channel-bank-title { color: var(--foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .channel-enabled-count,
+:is(html[data-theme="dark"], html[data-theme="light"]) .channel-bank-count { color: var(--muted-foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .field input,
 :is(html[data-theme="dark"], html[data-theme="light"]) .usb-console-command input {
   background: var(--background); border-color: var(--input);
