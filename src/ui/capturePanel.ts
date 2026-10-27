@@ -20,7 +20,7 @@ import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import { formatDuration, formatRate } from './format.js';
 import {
-  busChannelBank, channelBankIndices, channelBankRange, channelBankStarts, channelBankStatus,
+  channelBankIndices, channelBankRange, channelBankStarts, channelBankStatus, lockedChannelBanks,
 } from './channelBanks.js';
 import { t } from './i18n.js';
 import { chipForeground } from './metrics.js';
@@ -114,14 +114,11 @@ export class CapturePanel {
     chSec.header.append(total, all, clear);
 
     const banks = div('channel-banks');
-    const activeBanks = new Set<number>();
-    for (const bus of v.buses) {
-      const start = busChannelBank(bus.spec);
-      if (start !== null) activeBanks.add(start);
-    }
+    const activeBanks = lockedChannelBanks(v.buses);
     for (const start of channelBankStarts(v.channels.length)) {
       const status = channelBankStatus(v.channels, start);
       const range = channelBankRange(start, v.channels.length);
+      const locked = activeBanks.has(start);
       const bank = div('channel-bank');
       bank.dataset.bankStart = String(start);
       const head = div('channel-bank-head');
@@ -135,7 +132,9 @@ export class CapturePanel {
       toggle.checked = status.state === 'all';
       toggle.indeterminate = status.state === 'mixed';
       toggle.dataset.bankToggle = String(start);
-      toggle.setAttribute('aria-label', t('capturePanel.bankToggle', { range }));
+      toggle.dataset.adcLocked = String(locked);
+      toggle.disabled = locked;
+      toggle.setAttribute('aria-label', t(locked ? 'capturePanel.bankLocked' : 'capturePanel.bankToggle', { range }));
       toggle.title = toggle.getAttribute('aria-label')!;
       toggle.addEventListener('change', () => {
         this.cb.onToggleBank(start);
@@ -156,16 +155,20 @@ export class CapturePanel {
 
       const grid = div('chip-grid channel-bank-grid');
       grid.dataset.bankGrid = String(start);
+      grid.dataset.adcLocked = String(locked);
       grid.setAttribute('role', 'group');
       grid.setAttribute('aria-label', range);
       for (const index of channelBankIndices(start, v.channels.length)) {
         const c = v.channels[index]!;
         const chip = document.createElement('button');
-        chip.className = 'chip' + (c.enabled ? ' on' : '');
+        chip.className = 'chip' + (c.enabled ? ' on' : '') + (locked ? ' adc-locked' : '');
         chip.textContent = `D${c.index}`;
-        chip.title = c.name;
+        chip.title = locked ? t('capturePanel.channelLocked', { name: c.name, range }) : c.name;
         chip.dataset.channel = String(c.index);
+        chip.dataset.adcLocked = String(locked);
+        chip.disabled = locked;
         chip.setAttribute('aria-pressed', String(c.enabled));
+        if (locked) chip.setAttribute('aria-label', chip.title);
         if (c.enabled) {
           chip.style.background = c.color;
           chip.style.color = chipForeground(c.color);
@@ -174,6 +177,16 @@ export class CapturePanel {
         }
         chip.addEventListener('click', () => this.cb.onToggleChannel(c.index, !c.enabled));
         grid.appendChild(chip);
+      }
+      if (locked) {
+        const overlay = document.createElement('span');
+        overlay.className = 'adc-channel-overlay';
+        overlay.dataset.adcOverlay = String(start);
+        const label = document.createElement('span');
+        label.className = 'adc-channel-overlay-label';
+        label.textContent = t('capturePanel.oscilloscopeActive');
+        overlay.appendChild(label);
+        grid.appendChild(overlay);
       }
       bank.append(head, grid);
       banks.appendChild(bank);

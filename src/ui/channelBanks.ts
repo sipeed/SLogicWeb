@@ -76,6 +76,15 @@ export function busChannelBank(spec: BusSpec): number | null {
   return sorted.every((channel, i) => channel === start + i) ? start : null;
 }
 
+export function lockedChannelBanks(buses: readonly { spec: BusSpec }[]): Set<number> {
+  const locked = new Set<number>();
+  for (const bus of buses) {
+    const start = busChannelBank(bus.spec);
+    if (start !== null) locked.add(start);
+  }
+  return locked;
+}
+
 export function clearChannelBanks(
   channels: readonly ChannelEnableState[],
   lockedBanks: ReadonlySet<number> = NO_LOCKED_BANKS,

@@ -2,8 +2,9 @@
 
 import {
   CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankRange, channelBankStart, channelBankStarts,
-  channelBankStatus, clearChannelBanks, toggleChannelBank, type ChannelEnableState,
+  channelBankStatus, clearChannelBanks, lockedChannelBanks, toggleChannelBank, type ChannelEnableState,
 } from '../channelBanks.js';
+import { defaultBankBusConfig, normalizeBankBusConfig } from '../busPanel.js';
 
 const nodeProcess = (() => {
   const p = (globalThis as {
@@ -160,6 +161,43 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
   enabled(clearChannelBanks(channels([0, 8], 16), new Set([0]))).join(','));
 
 {
+  const base = defaultBankBusConfig(16, 8);
+  const reversed = normalizeBankBusConfig({
+    ...base,
+    spec: {
+      bits: [15, 14, 13, 12, 11, 10, 9, 8],
+      clock: { channel: 3, edge: 'falling' },
+      encoding: 'twos',
+    },
+  }, 16, 8);
+  const inside = normalizeBankBusConfig({
+    ...base, spec: { ...base.spec, clock: { channel: 10, edge: 'rising' } },
+  }, 16, 8);
+  const outside = normalizeBankBusConfig({
+    ...base, spec: { ...base.spec, clock: { channel: 99, edge: 'rising' } },
+  }, 16, 8);
+  const normalized = base.spec.bits.join(',') === '8,9,10,11,12,13,14,15' &&
+    reversed.spec.bits.join(',') === '15,14,13,12,11,10,9,8' &&
+    reversed.spec.clock?.channel === 3 && reversed.spec.clock.edge === 'falling' &&
+    reversed.spec.encoding === 'twos' && inside.spec.clock === null && outside.spec.clock === null;
+  let invalid = false;
+  try { defaultBankBusConfig(4, 0); } catch (e) { invalid = e instanceof RangeError; }
+  check('fixed-bank config preserves bit order and drops invalid clock assignments',
+    normalized && invalid, `normalized=${normalized}, invalidStart=${invalid}`);
+}
+
+{
+  const spec = (bits: number[]) => ({ bits, clock: null, encoding: 'unsigned' as const });
+  const locked = lockedChannelBanks([
+    { spec: spec([15, 14, 13, 12, 11, 10, 9, 8]) },
+    { spec: spec([0, 1, 2, 3]) },
+    { spec: spec([1, 2, 3, 4, 5, 6, 7, 8]) },
+  ]);
+  check('locked banks derive only from real aligned eight-bit bus views',
+    locked.size === 1 && locked.has(8) && !locked.has(0), [...locked].join(','));
+}
+
+{
   const fs = nodeProcess.getBuiltinModule?.('fs') as {
     readFileSync(path: string, encoding: string): string;
   } | undefined;
@@ -175,11 +213,11 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     panel.includes('chSec.body.appendChild(banks)');
   const accessible = panel.includes("toggle.type = 'checkbox'") &&
     panel.includes("toggle.indeterminate = status.state === 'mixed'") &&
-    panel.includes("t('capturePanel.bankToggle', { range })") &&
+    panel.includes("'capturePanel.bankToggle'") &&
     panel.includes("chip.setAttribute('aria-pressed', String(c.enabled))");
   const wired = app.includes('onToggleBank: (start) => this.setBankEnabled(start)') &&
-    app.includes('const next = toggleChannelBank(this.channels, start);') &&
-    app.includes('const next = clearChannelBanks(this.channels);');
+    app.includes('const next = toggleChannelBank(this.channels, start, lockedChannelBanks(this.busViews));') &&
+    app.includes('const next = clearChannelBanks(this.channels, lockedChannelBanks(this.busViews));');
   const grid = sheet.includes('grid-template-columns: repeat(8, minmax(0, 1fr))') &&
     sheet.includes('.channel-bank-head') && sheet.includes('.channel-bank-count');
   check('the real Device panel renders accessible eight-channel banks through App state',
@@ -209,6 +247,14 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
   check('the bank oscilloscope dialog reuses real fields and commits through actual bus state',
     iconOnly && sharedFields && nativeDialog && realState,
     `iconOnly=${iconOnly}, sharedFields=${sharedFields}, nativeDialog=${nativeDialog}, realState=${realState}`);
+
+  const modelLock = (app.match(/lockedChannelBanks\(this.busViews\)/g) ?? []).length >= 4 &&
+    app.includes('locked.has(channelBankStart(c.index))');
+  const visualLock = panel.includes('toggle.disabled = locked') && panel.includes('chip.disabled = locked') &&
+    panel.includes("t('capturePanel.oscilloscopeActive')") &&
+    sheet.includes('pointer-events: none') && sheet.includes('brightness(0.88)');
+  check('active bus banks enforce model locks and render the non-interactive localized overlay',
+    modelLock && visualLock, `modelLock=${modelLock}, visualLock=${visualLock}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

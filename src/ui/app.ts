@@ -41,7 +41,8 @@ import {
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
 import { CapturePanel, type CapturePanelView } from './capturePanel.js';
 import {
-  CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, clearChannelBanks, toggleChannelBank,
+  CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankStart, clearChannelBanks,
+  lockedChannelBanks, toggleChannelBank,
 } from './channelBanks.js';
 import { ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration } from './channelList.js';
 import { computeChannelRowHeight } from './channelLayout.js';
@@ -616,13 +617,14 @@ export class App {
   private setChannelEnabled(index: number, enabled: boolean): void {
     const c = this.channels[index];
     if (!c) return;
+    if (!enabled && lockedChannelBanks(this.busViews).has(channelBankStart(index))) return;
     if (!enabled && this.enabledChannels().length <= 1) return;   // never zero rows
     c.enabled = enabled;
     this.afterChannelChange();
   }
 
   private setBankEnabled(start: number): void {
-    const next = toggleChannelBank(this.channels, start);
+    const next = toggleChannelBank(this.channels, start, lockedChannelBanks(this.busViews));
     if (!next) return;
     for (let i = 0; i < this.channels.length; i++) this.channels[i]!.enabled = next[i]!;
     this.afterChannelChange();
@@ -636,7 +638,7 @@ export class App {
     if (on) {
       for (const c of this.channels) c.enabled = true;
     } else {
-      const next = clearChannelBanks(this.channels);
+      const next = clearChannelBanks(this.channels, lockedChannelBanks(this.busViews));
       for (let i = 0; i < this.channels.length; i++) this.channels[i]!.enabled = next[i]!;
     }
     this.afterChannelChange();
@@ -2107,7 +2109,8 @@ export class App {
   private setEnabledChannels(list: number[]): void {
     const want = new Set(list.filter((i) => i >= 0 && i < this.channels.length));
     if (want.size === 0) return;   // never zero rows
-    for (const c of this.channels) c.enabled = want.has(c.index);
+    const locked = lockedChannelBanks(this.busViews);
+    for (const c of this.channels) c.enabled = want.has(c.index) || locked.has(channelBankStart(c.index));
     this.afterChannelChange();
   }
 

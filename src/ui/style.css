@@ -964,7 +964,18 @@ html.resizing { cursor: col-resize; user-select: none; }
 .channel-bank-title { color: var(--text80); font-size: 10px; line-height: 1; white-space: nowrap; }
 .channel-bank-count { margin-left: auto; color: var(--text50); font-size: 10px; line-height: 1; white-space: nowrap; }
 .chip-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+.channel-bank-grid { position: relative; }
 .channel-bank-grid .chip { min-width: 0; padding: 0; font-size: 10px; }
+.chip.adc-locked:disabled { opacity: 1; cursor: default; filter: grayscale(1) saturate(0.25) brightness(0.88); }
+.adc-channel-overlay {
+  position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center;
+  pointer-events: none; background: rgb(16 16 18 / 8%); border-radius: 3px;
+}
+.adc-channel-overlay-label {
+  max-width: calc(100% - 4px); padding: 2px 4px; border-radius: 3px;
+  background: rgb(16 16 18 / 72%); color: #FFFDF4;
+  font: 9px/1.1 -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; white-space: nowrap;
+}
 .chip {
   height: 22px; border-radius: 3px; border: 1px solid var(--border-low);
   background: var(--bg10); font: 11px/1 inherit; cursor: pointer;
@@ -1162,6 +1173,7 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
   background: var(--background); border-color: #4C9AFF; color: #4C9AFF;
 }
 :is(html[data-theme="dark"], html[data-theme="light"]) .adc-button.on { background: #4C9AFF; color: #141415; }
+html[data-theme="light"] .adc-button:not(.on) { border-color: #2F6FAF; color: #2F6FAF; }
 :is(html[data-theme="dark"], html[data-theme="light"]) .channel-bank-title { color: var(--foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .channel-enabled-count,
 :is(html[data-theme="dark"], html[data-theme="light"]) .channel-bank-count { color: var(--muted-foreground); }
