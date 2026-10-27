@@ -57,7 +57,7 @@ import { PanelResizer } from './panelResizer.js';
 import { StoreRef } from './storeRef.js';
 import {
   analyzerColor, defaultChannels, defaultChannelName, channelColor, DEFAULT_TRIGGER_MODE,
-  edgeTriggerAutoArms, clampLoopSeconds, loopDropSamples, loopRetentionSamples, modesToConditions,
+  edgeTriggerAutoArms, clampLoopSamples, DEFAULT_LOOP_SAMPLES, loopDropSamples, modesToConditions,
   triggerModeFromCondition,
   type AnalyzerState, type CaptureSettings, type ChannelState, type TriggerMode,
   type CaptureLabel, type StatusError,
@@ -121,7 +121,7 @@ export class App {
 
   private settings: CaptureSettings = {
     channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'timer', seconds: 1,
-    loopSeconds: 1,
+    loopSamples: DEFAULT_LOOP_SAMPLES,
     testMode: 0, triggerEnableMask: false, softwareTrigger: false, triggerModes: {},
     triggerConditions: [], triggerChannel: 0,
     triggerKind: 'rising', triggerLevel: 1, preTriggerPercent: 10,
@@ -1274,6 +1274,8 @@ export class App {
         : this.captureBytes,
       lost: this.lostSamples,
       dropped: this.droppedTotal,
+      kept: this.store.length,
+      limit: this.captureIsLoop ? this.loopRetentionLen : 0,
     };
   }
 
@@ -1676,10 +1678,6 @@ export class App {
         throw new Error(`threshold ${cfg.thresholdVolts} V clips the DAC (code ${code})`);
       }
       const isLoop = this.settings.mode === 'loop';
-      if (isLoop && cfg.channels === 32) {
-        throw new Error('loop mode is not supported at 32 channels');
-      }
-
       const store = createSampleStore(cfg.channels, cfg.samplerate);
       this.discardDecodeState();
       this.releaseMarkerPointer();
@@ -1695,7 +1693,7 @@ export class App {
       this.droppedTotal = 0;
       this.captureIsLoop = isLoop;
       this.triggerSampleIndex = null;
-      const softwareTrigger = this.settings.softwareTrigger && !isLoop;
+      const softwareTrigger = this.settings.softwareTrigger;
       this.captureStart = softwareTrigger ? 0 : performance.now();
       const postTriggerSamples = this.settings.mode === 'timer'
         ? Math.min(MAX_SAMPLES - 1, Math.round(this.settings.seconds * cfg.samplerate))
@@ -1714,18 +1712,21 @@ export class App {
 
       const bytesPerSample = bytesPerSampleForChannels(cfg.channels);
       this.loopRetentionLen = isLoop
-        ? loopRetentionSamples(this.settings.loopSeconds, cfg.channels, cfg.samplerate)
+        ? clampLoopSamples(this.settings.loopSamples, cfg.channels)
         : 0;
       const triggerConditions = this.settings.triggerConditions.length
         ? this.settings.triggerConditions
         : [{ channel: this.settings.triggerChannel, kind: this.settings.triggerKind,
           level: this.settings.triggerLevel }];
+      // The pre-trigger ring is a percent of the capture's own budget: the timer/free
+      // post-trigger length, or the loop window (the trigger's position inside it).
+      const preTriggerBase = isLoop ? this.loopRetentionLen : postTriggerSamples;
       const preTriggerSamples = softwareTrigger ? Math.min(
-        Math.max(0, this.captureLimitSamples - 1),
-        Math.max(0, Math.floor(postTriggerSamples * this.settings.preTriggerPercent / 100)),
+        Math.max(0, preTriggerBase - 1),
+        Math.max(0, Math.floor(preTriggerBase * this.settings.preTriggerPercent / 100)),
         Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bytesPerSampleForChannels(cfg.channels)),
       ) : 0;
-      if (softwareTrigger) {
+      if (softwareTrigger && !isLoop) {
         // Timer duration starts at the trigger sample. The store budget therefore
         // includes the retained prefix plus the requested post-trigger duration.
         // In free-run mode `post` is already the store ceiling, so this clamp trims
@@ -1776,6 +1777,10 @@ export class App {
         if (isLoop) { this.enforceLoopRetention(this.storeRef); return; }
         if (store.length >= this.captureLimitSamples) void this.stopCapture();
       }, softwareTrigger ? {
+        // A loop capture windows the triggered stream downstream of the trigger: the
+        // trigger's budget is unbounded (maxSamples Infinity), the store drops the
+        // front, and the trigger marker shifts with each drop until it falls off.
+        ...(isLoop ? { loop: true } : {}),
         // The transport says when the capture has delivered everything it ever will
         // (trigger budget emitted, or the device stopped at its own length). This is
         // the stop signal that does not depend on this side's sample arithmetic
@@ -1789,7 +1794,8 @@ export class App {
           channel: Math.min(triggerConditions[0]!.channel, cfg.channels - 1),
           kind: triggerConditions[0]!.kind,
           level: triggerConditions[0]!.level,
-          preTriggerSamples, maxSamples: this.captureLimitSamples,
+          preTriggerSamples,
+          maxSamples: isLoop ? Number.POSITIVE_INFINITY : this.captureLimitSamples,
           searchLimitSamples: Number.POSITIVE_INFINITY,
         },
         onTriggerState: (state, triggerSampleIndex) => {
@@ -1810,8 +1816,10 @@ export class App {
         // capture that never requires cutting off a device that is still producing.
         // Software-trigger mode cannot use it: where the trigger will land is not
         // known when the device is armed, and a limit there would stop the capture
-        // before the trigger arrives.
-        ...(isLoop ? {} : { deviceSampleLimit: this.captureLimitSamples }),
+        // before the trigger arrives. A loop capture is unbounded too - and opts out
+        // of the first-byte and underrun watchdogs, ending only on a manual stop or a
+        // device error (HSync semantics).
+        ...(isLoop ? { loop: true } : { deviceSampleLimit: this.captureLimitSamples }),
         onEnd: () => { if (this.running) void this.stopCapture(); },
       });
       if (!this.running) {
@@ -1840,10 +1848,9 @@ export class App {
     if (drop <= 0) return;
     store.dropFront(drop);
     this.droppedTotal += drop;
-    for (const b of this.busViews) {
-      b.builder?.reset(store.length);
-      b.cache = null;
-    }
+    // Bus builders need no reset: their frontier is absolute (BusBuilder skips ahead past
+    // the drop), and analogFrame's cache key carries store.droppedSamples, so a stale
+    // frame can never alias a new generation at the same length.
     const markerSample = this.markerA.sample;
     if (markerSample !== null && !this.markerA.isDragging) {
       this.markerA.setSample(markerSample - drop >= 0 ? markerSample - drop : null, store.length);
@@ -1951,14 +1958,21 @@ export class App {
     const stale = (): boolean => this.store !== store || !this.analyzers.includes(a);
     try {
       this.statusError = null;
-      if ((this.running || this.stopping) && this.captureIsLoop) throw new Error('decoders cannot run during a loop capture');
       if (store.length === 0) throw new Error('no capture to decode');
+      // A loop capture decodes as a snapshot: the edge extraction below is one
+      // synchronous pass on this thread, so no append or drop can interleave, and
+      // the result is labelled as not tracking the still-running capture. The flag is
+      // read here, not when the note is built: a decode that starts against a running
+      // window and finishes after the user stops is still a snapshot of an older window
+      // (`running`/`stopping` are both false by then, and the window slid meanwhile).
+      const snapshotDecode = this.captureIsLoop && (this.running || this.stopping);
       // [src/decode/limits.ts] annotation spans are Int32Array, so 2^31-1 is a hard
       // ceiling - 10.7 s at 200 MSa/s, which this bench can actually reach.
       if (store.length > MAX_SAMPLE) {
         throw new Error(
           `capture is ${formatCount(store.length)} samples; decode is limited to ` +
-          `${formatCount(MAX_SAMPLE)} (10.7 s at 200 MSa/s). Decode a sub-range instead.`);
+          `${formatCount(MAX_SAMPLE)} (10.7 s at 200 MSa/s).` +
+          (this.captureIsLoop ? ' Shrink the loop window instead.' : ' Decode a sub-range instead.'));
       }
       const used = [...new Set(Object.values(a.channels).filter((v) => v >= 0))];
       let edgeTotal = 0;
@@ -1972,8 +1986,8 @@ export class App {
       if (edgeTotal > EDGE_BUDGET) {
         throw new Error(
           `${formatCount(edgeTotal)} edges on the mapped channels exceeds the ` +
-          `${formatCount(EDGE_BUDGET)} decode budget. Disable a channel or zoom the ` +
-          `capture down.`);
+          `${formatCount(EDGE_BUDGET)} decode budget. Disable a channel or ` +
+          (this.captureIsLoop ? 'shrink the loop window.' : 'zoom the capture down.'));
       }
 
       a.status = 'decoding';
@@ -2007,6 +2021,7 @@ export class App {
         anns: result.annotations.count,
         decodeMs: result.decodeMs,
         wallMs: performance.now() - t0,
+        ...(snapshotDecode ? { snapshot: true as const } : {}),
         // The decoder's own first error is diagnostic payload: appended raw.
         ...(result.errors.length ? { firstError: result.errors[0]! } : {}),
       };
@@ -2327,7 +2342,7 @@ function clampSettings(
   }
   return {
     ...s, samplerate, seconds: Math.max(0.001, Math.min(s.seconds, max)),
-    loopSeconds: clampLoopSeconds(s.loopSeconds ?? 1, s.channels, samplerate),
+    loopSamples: clampLoopSamples(s.loopSamples ?? DEFAULT_LOOP_SAMPLES, s.channels),
     triggerEnableMask: s.triggerEnableMask ?? true,
     // Enable Mask is the sole global gate. Turning it off must not erase the
     // per-channel modes; turning it back on must restore the same conditions.

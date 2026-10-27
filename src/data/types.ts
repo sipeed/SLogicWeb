@@ -66,12 +66,21 @@ export interface ColumnView {
 /** bit3 of `ColumnView.packed`: the column overlaps a span the store has no data for. */
 export const GAP_BIT = 8;
 
-export const DROP_FRONT_QUANTUM = 512;
+/**
+ * Drop granularity: one packed 64-sample word, the same quantum HSync's loop uses.
+ * `BitPlane.dropFront` accepts any 32-multiple; `PlanarSampleStore` keeps its base
+ * planes 512-aligned internally (the `baseOrigin` cursor) so the 16-word group
+ * reduction never straddles a base block, regardless of the 64-sample quantum.
+ */
+export const DROP_FRONT_QUANTUM = 64;
 
 export interface SampleStore {
   readonly channelCount: number;
   readonly samplerate: number;
   readonly length: number;
+  /** Samples dropped from the front over the store's life (the loop window's left edge).
+   *  0 for stores that never drop. Absolute positions = relative + droppedSamples. */
+  readonly droppedSamples: number;
   append(chunk: Uint8Array): void;
   dropFront(samples: number): void;
   query(channel: number, startSample: number, endSample: number, bins: number): ColumnView;

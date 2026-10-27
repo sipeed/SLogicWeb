@@ -217,7 +217,7 @@ function settingsView(s: CaptureSettings): Record<string, unknown> {
     threshold_v: s.thresholdVolts,
     mode: s.mode,
     seconds: s.seconds,
-    loop_seconds: s.loopSeconds,
+    loop_samples: s.loopSamples,
     test_mode: s.testMode,
     trigger: {
       enabled: s.triggerEnableMask,
@@ -557,11 +557,11 @@ export const TOOLS: AssistantTool[] = [
       samplerate_hz: { type: 'number', exclusiveMinimum: 0 },
       threshold_v: { type: 'number', minimum: 0.1, maximum: 5 },
       mode: { type: 'string', enum: ['timer', 'free', 'loop'],
-        description: 'timer: stop after `seconds`. free: run until stopped. loop: run until stopped, keeping only the newest `loop_seconds`.' },
+        description: 'timer: stop after `seconds`. free: run until stopped. loop: run until stopped, keeping only the newest `loop_samples`.' },
       seconds: { type: 'number', minimum: 0.001,
         description: 'Post-trigger capture length in timer mode, from 0.001 s (1 ms) up to the sample-count limit.' },
-      loop_seconds: { type: 'number', minimum: 0.001,
-        description: 'Retention window in loop mode, clamped to the loop memory budget.' },
+      loop_samples: { type: 'number', minimum: 1024,
+        description: 'Retention window in loop mode, in samples; rounded up to a multiple of 1024 and clamped to the loop memory budget.' },
       test_mode: { type: 'integer', enum: [0, 1, 2], description: '0 real pins, 1 USB max-speed pattern, 2 built-in signal simulator.' },
       trigger_enabled: { type: 'boolean' },
       trigger_modes: { type: 'object', additionalProperties: { type: 'string', enum: TRIGGER_MODES },
@@ -577,7 +577,7 @@ export const TOOLS: AssistantTool[] = [
       if (typeof i.threshold_v === 'number') patch.thresholdVolts = i.threshold_v;
       if (i.mode === 'timer' || i.mode === 'free' || i.mode === 'loop') patch.mode = i.mode;
       if (typeof i.seconds === 'number') patch.seconds = i.seconds;
-      if (typeof i.loop_seconds === 'number') patch.loopSeconds = i.loop_seconds;
+      if (typeof i.loop_samples === 'number') patch.loopSamples = i.loop_samples;
       if (i.test_mode === 0 || i.test_mode === 1 || i.test_mode === 2) patch.testMode = i.test_mode;
       if (typeof i.trigger_enabled === 'boolean') patch.triggerEnableMask = i.trigger_enabled;
       if (typeof i.pre_trigger_percent === 'number') patch.preTriggerPercent = i.pre_trigger_percent;

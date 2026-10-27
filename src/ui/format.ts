@@ -211,7 +211,8 @@ export function formatAnalyzerNote(note: AnalyzerNote): string {
         decodeMs: Math.round(note.decodeMs),
         wallMs: Math.round(note.wallMs),
       });
-      return note.firstError ? `${base} · ${note.firstError}` : base;
+      const tagged = note.snapshot ? `${base} · ${t('analyzerNote.snapshot')}` : base;
+      return note.firstError ? `${tagged} · ${note.firstError}` : tagged;
     }
     case 'timeout': return t('analyzerNote.timeout');
     case 'cancelled': return t('analyzerNote.cancelled');
@@ -221,6 +222,11 @@ export function formatAnalyzerNote(note: AnalyzerNote): string {
 
 export function formatMountedAnalyzerNote(note: AnalyzerNote, status: AnalyzerStatus): string {
   if (status === 'decoding') return t('analyzerPanel.decoding');
-  if (note.kind === 'stats') return note.firstError ?? '';
+  // Statistics are hidden here, diagnostics are not - and neither is the snapshot tag:
+  // a result that does not track the capture is a warning, not a statistic.
+  if (note.kind === 'stats') {
+    const tag = note.snapshot ? t('analyzerNote.snapshot') : '';
+    return [tag, note.firstError].filter(Boolean).join(' · ');
+  }
   return formatAnalyzerNote(note);
 }

@@ -241,68 +241,112 @@ export function latchedBefore(store: SampleStore, spec: BusSpec, index: number, 
 /**
  * Min and max of the value per 1024-sample leaf and per 16x coarser level. NaN steps are
  * left out, so a leaf with no known value keeps min > max and reads as unknown.
+ *
+ * Loop-ready: bins are addressed in ABSOLUTE sample space - leaf bin b always covers
+ * absolute samples [b*BUS_LEAF, (b+1)*BUS_LEAF), however many samples the store has
+ * dropped from its front (`origin`, kept current by the owning BusBuilder). Each level
+ * is a ring: bin b lives at slot b % cap and counts only when stamp[slot] === b. A drop
+ * therefore moves nothing - stale slots are unreachable (queries clamp to the window)
+ * and are overwritten as the builder advances - and the pyramid is never rebuilt.
  */
 export class BusPyramid {
-  readonly levels: { min: Float64Array; max: Float64Array }[] = [];
-  /** Samples [0, doneUpTo) are in. */
+  readonly levels: { min: Float64Array; max: Float64Array; stamp: Float64Array }[] = [];
+  /** Samples [0, doneUpTo) are in (store-relative). */
   doneUpTo = 0;
+  /** Samples the store has dropped from its front; absolute bin = relative + origin. */
+  private origin = 0;
 
   constructor(readonly length: number) {
     let bins = Math.max(1, Math.ceil(length / BUS_LEAF));
     for (;;) {
-      const min = new Float64Array(bins).fill(Number.POSITIVE_INFINITY);
-      const max = new Float64Array(bins).fill(Number.NEGATIVE_INFINITY);
-      this.levels.push({ min, max });
+      // One slack slot per level: a window of `length` samples can straddle one more
+      // bin than it covers, and a ring must hold every live bin without aliasing.
+      const cap = bins + 1;
+      const min = new Float64Array(cap).fill(Number.POSITIVE_INFINITY);
+      const max = new Float64Array(cap).fill(Number.NEGATIVE_INFINITY);
+      const stamp = new Float64Array(cap).fill(Number.NaN);
+      this.levels.push({ min, max, stamp });
       if (bins === 1) break;
       bins = Math.ceil(bins / FAN);
     }
   }
 
+  /** Follow the store's drop frontier. */
+  setOrigin(dropped: number): void {
+    this.origin = dropped;
+  }
+
   growTo(length: number): BusPyramid {
     if (length <= this.length) return this;
     const next = new BusPyramid(length);
+    next.origin = this.origin;
+    next.doneUpTo = this.doneUpTo;
     const shared = this.levels.length;
     for (let l = 0; l < shared; l++) {
-      next.levels[l]!.min.set(this.levels[l]!.min);
-      next.levels[l]!.max.set(this.levels[l]!.max);
+      const from = this.levels[l]!;
+      const to = next.levels[l]!;
+      // Rehash: the ring slot of an absolute bin changes with the capacity.
+      for (let s = 0; s < from.stamp.length; s++) {
+        const b = from.stamp[s]!;
+        if (Number.isNaN(b)) continue;
+        const slot = b % to.stamp.length;
+        to.stamp[slot] = b;
+        to.min[slot] = from.min[s]!;
+        to.max[slot] = from.max[s]!;
+      }
     }
+    // New top levels are folded from the highest shared level's valid bins (their
+    // stamps are absolute), which is exact at any origin. Loop captures never growTo:
+    // their capacity is sized up front.
     for (let l = shared; l < next.levels.length; l++) {
       const child = next.levels[l - 1]!;
       const own = next.levels[l]!;
-      for (let j = 0; j < own.min.length; j++) {
-        let mn = Number.POSITIVE_INFINITY;
-        let mx = Number.NEGATIVE_INFINITY;
-        const c1 = Math.min(child.min.length, (j + 1) * FAN);
-        for (let c = j * FAN; c < c1; c++) {
-          if (child.min[c]! < mn) mn = child.min[c]!;
-          if (child.max[c]! > mx) mx = child.max[c]!;
+      for (let s = 0; s < child.stamp.length; s++) {
+        const b = child.stamp[s]!;
+        if (Number.isNaN(b)) continue;
+        const jp = Math.floor(b / FAN);
+        const slot = jp % own.stamp.length;
+        if (own.stamp[slot] !== jp) {
+          own.stamp[slot] = jp;
+          own.min[slot] = child.min[s]!;
+          own.max[slot] = child.max[s]!;
+        } else {
+          if (child.min[s]! < own.min[slot]!) own.min[slot] = child.min[s]!;
+          if (child.max[s]! > own.max[slot]!) own.max[slot] = child.max[s]!;
         }
-        own.min[j] = mn;
-        own.max[j] = mx;
       }
     }
-    next.doneUpTo = this.doneUpTo;
     return next;
   }
 
-  /** Fold steps covering [steps.pos[0], end) into the leaves, then their parents. */
+  /** Fold steps covering [steps.pos[0], end) into the leaves, then their parents.
+   *  Positions are store-relative; the leaf bins they land in are absolute. */
   add(steps: BusSteps, end: number): void {
     if (steps.count === 0) return;
+    const origin = this.origin;
     const leaf = this.levels[0]!;
-    const first = Math.floor(steps.pos[0]! / BUS_LEAF);
+    const putLeaf = (b: number, v: number): void => {
+      const slot = b % leaf.stamp.length;
+      if (leaf.stamp[slot] !== b) {
+        leaf.stamp[slot] = b;
+        leaf.min[slot] = v;
+        leaf.max[slot] = v;
+      } else {
+        if (v < leaf.min[slot]!) leaf.min[slot] = v;
+        if (v > leaf.max[slot]!) leaf.max[slot] = v;
+      }
+    };
+    const first = Math.floor((origin + steps.pos[0]!) / BUS_LEAF);
     let lastLeaf = first;
     for (let i = 0; i < steps.count; i++) {
       const v = steps.val[i]!;
       const p = steps.pos[i]!;
       const q = i + 1 < steps.count ? steps.pos[i + 1]! : end;
       if (q <= p) continue;
-      const b1 = Math.floor((q - 1) / BUS_LEAF);
+      const b1 = Math.floor((origin + q - 1) / BUS_LEAF);
       lastLeaf = Math.max(lastLeaf, b1);
       if (Number.isNaN(v)) continue;
-      for (let b = Math.floor(p / BUS_LEAF); b <= b1; b++) {
-        if (v < leaf.min[b]!) leaf.min[b] = v;
-        if (v > leaf.max[b]!) leaf.max[b] = v;
-      }
+      for (let b = Math.floor((origin + p) / BUS_LEAF); b <= b1; b++) putLeaf(b, v);
     }
     let lo = first;
     let hi = lastLeaf;
@@ -314,13 +358,17 @@ export class BusPyramid {
       for (let j = lo; j <= hi; j++) {
         let mn = Number.POSITIVE_INFINITY;
         let mx = Number.NEGATIVE_INFINITY;
-        const c1 = Math.min(child.min.length, (j + 1) * FAN);
-        for (let c = j * FAN; c < c1; c++) {
-          if (child.min[c]! < mn) mn = child.min[c]!;
-          if (child.max[c]! > mx) mx = child.max[c]!;
+        // Unstamped children read as unknown: exactly the pre-fill value.
+        for (let c = j * FAN; c < (j + 1) * FAN; c++) {
+          const slot = c % child.stamp.length;
+          if (child.stamp[slot] !== c) continue;
+          if (child.min[slot]! < mn) mn = child.min[slot]!;
+          if (child.max[slot]! > mx) mx = child.max[slot]!;
         }
-        own.min[j] = mn;
-        own.max[j] = mx;
+        const slot = j % own.stamp.length;
+        own.stamp[slot] = j;
+        own.min[slot] = mn;
+        own.max[slot] = mx;
       }
     }
   }
@@ -330,14 +378,17 @@ export class BusPyramid {
    * it may reach up to one leaf beyond either end. Null when nothing there is known.
    */
   range(start: number, end: number): { min: number; max: number } | null {
-    let lo = Math.max(0, Math.floor(start / BUS_LEAF));
-    let hi = Math.min(this.levels[0]!.min.length, Math.ceil(end / BUS_LEAF));
+    const origin = this.origin;
+    let lo = Math.floor((origin + Math.max(0, start)) / BUS_LEAF);
+    let hi = Math.ceil((origin + end) / BUS_LEAF);
     let mn = Number.POSITIVE_INFINITY;
     let mx = Number.NEGATIVE_INFINITY;
     const take = (l: number, b: number) => {
       const lv = this.levels[l]!;
-      if (lv.min[b]! < mn) mn = lv.min[b]!;
-      if (lv.max[b]! > mx) mx = lv.max[b]!;
+      const slot = b % lv.stamp.length;
+      if (lv.stamp[slot] !== b) return;
+      if (lv.min[slot]! < mn) mn = lv.min[slot]!;
+      if (lv.max[slot]! > mx) mx = lv.max[slot]!;
     };
     for (let l = 0; lo < hi; l++) {
       if (l + 1 < this.levels.length && hi - lo >= 2 * FAN) {
@@ -357,10 +408,15 @@ export class BusPyramid {
 /**
  * Builds a `BusPyramid` over a whole capture in slices, so a caller can spread the work
  * over animation frames: call `step()` until it returns true.
+ *
+ * The build frontier `nextAbs` is ABSOLUTE (store-relative + store.droppedSamples), so
+ * a loop drop never restarts the build: steps keep only the work of covering the new
+ * samples, and a frontier the window's left edge has overtaken skips forward (the
+ * value before the window is unknown - same rule as a gap's end).
  */
 export class BusBuilder {
   pyramid: BusPyramid;
-  private next = 0;
+  private nextAbs: number;
   private carry = Number.NaN;
   private len: number;
 
@@ -371,6 +427,8 @@ export class BusBuilder {
   ) {
     this.len = length;
     this.pyramid = new BusPyramid(Math.max(capacity, length));
+    this.nextAbs = store.droppedSamples;
+    this.pyramid.setOrigin(store.droppedSamples);
   }
 
   get length(): number {
@@ -378,40 +436,55 @@ export class BusBuilder {
   }
 
   get done(): boolean {
-    return this.next >= this.len;
+    return this.nextAbs >= this.store.droppedSamples + this.len;
   }
 
   /** Fraction of the capture processed, 0..1. */
   get progress(): number {
-    return this.len ? this.next / this.len : 1;
+    const D = this.store.droppedSamples;
+    if (this.len <= 0) return 1;
+    return Math.max(0, Math.min(1, (Math.min(this.nextAbs, D + this.len) - D) / this.len));
   }
 
   setLength(length: number): void {
     this.len = length;
+    // Keep the pyramid's window origin fresh even when the build is done: the app's
+    // pump calls setLength every frame, before analogFrame reads range().
+    this.pyramid.setOrigin(this.store.droppedSamples);
     if (length > this.pyramid.length) {
       this.pyramid = this.pyramid.growTo(Math.max(length, this.pyramid.length * 2));
+      this.pyramid.setOrigin(this.store.droppedSamples);
     }
   }
 
   reset(length: number): void {
     this.len = length;
     this.pyramid = new BusPyramid(Math.max(length, this.pyramid.length));
-    this.next = 0;
+    this.pyramid.setOrigin(this.store.droppedSamples);
+    this.nextAbs = this.store.droppedSamples;
     this.carry = Number.NaN;
   }
 
   /** Work for about `budgetMs`; true once the whole capture is in. */
   step(budgetMs = 8): boolean {
     const t0 = performance.now();
-    while (this.next < this.len) {
-      const e = Math.min(this.len, this.next + this.piece);
-      const st = busSteps(this.store, this.spec, this.next, e, { carry: this.carry });
-      this.pyramid.add(st, e);
+    const D = this.store.droppedSamples;
+    this.pyramid.setOrigin(D);
+    if (this.nextAbs < D) {
+      // The window's left edge outran the builder; everything below it is gone.
+      this.nextAbs = D;
+      this.carry = Number.NaN;
+    }
+    const absEnd = D + this.len;
+    while (this.nextAbs < absEnd) {
+      const e = Math.min(absEnd, this.nextAbs + this.piece);
+      const st = busSteps(this.store, this.spec, this.nextAbs - D, e - D, { carry: this.carry });
+      this.pyramid.add(st, e - D);
       this.carry = st.carry;
-      this.next = e;
-      this.pyramid.doneUpTo = e;
+      this.nextAbs = e;
       if (performance.now() - t0 >= budgetMs) break;
     }
+    this.pyramid.doneUpTo = Math.min(this.nextAbs, absEnd) - D;
     return this.done;
   }
 }

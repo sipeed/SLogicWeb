@@ -323,7 +323,12 @@ export class ClockStreamDevice extends FakeSlogic {
         resolve({ status: 'ok', data: new DataView(new ArrayBuffer(len)) });
       };
       if (immediate) {
-        complete();
+        // A real bulk IN never resolves in the caller's microtask: the completion
+        // crosses the browser-process boundary even when the FIFO already holds the
+        // bytes. Resolve from a macrotask so an oversubscribed host - a loop capture
+        // has no underrun watchdog to cut it off - still gets timer and rAF turns
+        // instead of wedging the thread on a synchronous completion conveyor.
+        setTimeout(complete, 0);
         return;
       }
       const entry = {

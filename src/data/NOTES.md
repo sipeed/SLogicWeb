@@ -528,3 +528,47 @@ clock (period longer than a leaf) is what exposes a lost carry, so the suite has
 Known, not fixed here: `InterleavedSampleStore` (the 32-channel live store) cannot
 record gaps. `noteGap` throws, so a dropout during a 32-channel capture would throw from
 `appendLostSamples`.
+
+## Loop-mode dropFront: absolute addressing, no rebuilds (2026-10-26)
+
+The loop capture used to rebuild every pyramid from zero on each window drop
+(`dropFront` = new planes + full `updatePyramid`), which at a 2x-hysteresis window and
+high rate showed up as a >100 ms stall per drop on the loop bench. The stores now do
+what HSync's `ChannelData` does: **the pyramids are addressed by absolute sample
+coordinates and never move**; a drop only advances cursors and lazily frees whole
+blocks.
+
+- `droppedSamples` (the `D` in the design) counts everything ever dropped, a double -
+  exact to 2^53, and loop runs are unbounded. Store-relative = absolute - D.
+- Level k bin j always covers absolute `[j * 16^k, (j+1) * 16^k)`. Each level keeps a
+  `levelHead` cursor of block-aligned released bins; a drop frees only whole blocks
+  already outside the window. **Bit-level indexing stays plane-local** (< 2^31, JS
+  int32 arithmetic); only double arithmetic touches absolute coordinates.
+- `dropFront` takes multiples of 64 (`DROP_FRONT_QUANTUM`, HSync's bit-packed word),
+  and the app drops with no hysteresis (`loopDropSamples`: `length > limit` drops the
+  excess floored to 64), so the retained length hugs the limit plus at most one
+  delivery chunk.
+- `BusPyramid` cannot splice (Float64Array), so it is a slot-stamp ring instead:
+  `slot = absBin % cap`, `cap = bins + 1` so a live bin and a stale one never share a
+  slot; `BusBuilder`'s frontier is absolute (`nextAbs`) and skips ahead when the
+  window passes it (the carry is forgotten: the value before the window is unknown).
+  Reads convert through the builder's window origin, so the *draw* refreshes it from the
+  store (`analogFrame` calls `pyramid.setOrigin(store.droppedSamples)`): trusting the
+  pump alone would leave a bus the one-slice-per-frame pump has not reached - or any bus
+  during the stop drain, when the pump returns early - reading bins the window has
+  already left, i.e. pre-drop data.
+  The ring costs one extra Float64Array of stamps per level (+50% over min/max alone,
+  ≈8 MiB per bus at a 2^30-sample window - inside the 2 GiB budget's headroom). The
+  builder's capacity hint stays at 2x the loop window: `growTo` rehash is only
+  collision-safe at origin 0, and the 2x pre-sizing keeps any rehash off the running
+  loop path (the retained length never exceeds limit + one delivery chunk, so 2x is
+  never actually reached).
+- `InterleavedSampleStore.dropFront` (32ch) mirrors the same scheme; loop is no longer
+  channel-count-limited.
+
+Measured on the loop bench (`npm run bench:loop`, quick sweep, VM host): per-drop cost
+0.0-0.3 ms at every rate (pre-refactor baseline ~113 ms at 200M), retained peak =
+limit + at most one delivery chunk, and no watchdog aborts in loop mode. The bench's
+`busBehindDrops` column counts drops that arrived while the bus builder was still
+covering the previous chunk - bus-view freshness lag, not drop cost; it is reported,
+not gated on.

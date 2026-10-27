@@ -320,6 +320,105 @@ export function runBusValueSuite(): BusTestResult[] {
       capHigh.pyramid.length === 50_000 && capLow.pyramid.length === 5_000
         ? ''
         : `high=${capHigh.pyramid.length} low=${capLow.pyramid.length}`);
+
+    // The loop path: a drop moves the window; the builder's absolute frontier means no
+    // reset, no rebuild - the pyramid just follows.
+    const loopStore = rampStore();
+    const loopBuilder = new BusBuilder(loopStore, rampSpec, N, 4099, N * 2);
+    check('a loop-window builder finishes', build(loopBuilder));
+    loopStore.dropFront(8192); // leaf-aligned: 8 x 1024
+    loopBuilder.setLength(loopStore.length); // the app's pump does this every frame
+    check('a finished builder stays done across a drop',
+      loopBuilder.done && loopBuilder.progress === 1
+        ? ''
+        : `done=${loopBuilder.done} progress=${loopBuilder.progress}`);
+    check('a dropped pyramid matches the shifted ramp without a reset',
+      rampDiff(loopBuilder.pyramid, 8192, loopStore.length));
+    // A mid-build drop overtakes the frontier: the builder skips to the window's left
+    // edge instead of rebuilding what it had.
+    const slowStore = rampStore();
+    const slow = new BusBuilder(slowStore, rampSpec, N, 4099, N * 2);
+    slow.step(1);
+    slow.step(1);
+    const builtBefore = slow.pyramid.doneUpTo;
+    slowStore.dropFront(20480);
+    slow.setLength(slowStore.length);
+    check('a drop past the frontier skips the builder forward',
+      build(slow) === '' && slow.done ? '' : `done=${slow.done} builtBefore=${builtBefore}`);
+    check('a skip-forward pyramid matches the shifted ramp',
+      rampDiff(slow.pyramid, 20480, slowStore.length));
+    check('the skipped builder reports full progress',
+      slow.progress === 1 ? '' : `progress=${slow.progress}`);
+
+    // A skip forgets the clocked carry too: the value before the window is unknown, not the
+    // one the frontier happened to hold (the frontier can be several clock edges behind).
+    const carryStore = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
+    {
+      const SLOW = 4096; // rising clock edges at 2048 + k*4096
+      const len = 40_000;
+      const w = new Uint16Array(len);
+      for (let i = 0; i < len; i++) w[i] = (Math.floor(i / SLOW) & 0xf) | ((i % SLOW >= SLOW / 2 ? 1 : 0) << 4);
+      carryStore.append(new Uint8Array(w.buffer));
+    }
+    const carrySpec: BusSpec = { bits: [0, 1, 2, 3], clock: { channel: 4, edge: 'rising' }, encoding: 'unsigned' };
+    const carried = new BusBuilder(carryStore, carrySpec, carryStore.length, 1_000, N * 2);
+    for (let i = 0; i < 8; i++) carried.step(0); // one piece each: frontier 8000, past the 6144 latch
+    carryStore.dropFront(24_576); // 64 multiple; the first edge left in the window is 26624
+    carried.setLength(carryStore.length);
+    check('a skip-forward builder finishes (clocked)', build(carried));
+    check('a skipped frontier forgets the clocked carry',
+      carried.pyramid.range(0, 2_048) === null
+        ? '' : `prefix=${JSON.stringify(carried.pyramid.range(0, 2_048))}`);
+    check('a skipped builder latches again at the first in-window clock edge',
+      JSON.stringify(carried.pyramid.range(2_048, 3_072)) === JSON.stringify({ min: 6, max: 6 })
+        ? '' : `${JSON.stringify(carried.pyramid.range(2_048, 3_072))} vs 6`);
+
+    // 64-sample drops are almost never leaf aligned, so the window origin (and with it the
+    // ring slot of every bin) moves off a leaf boundary. A window exactly as long as the
+    // ring's capacity is the tightest packing the design allows (one slack slot): if a
+    // live bin ever aliased a stale one, these leaves would come back wrong.
+    const R = 8 * BUS_LEAF + 512; // deliberately not a leaf multiple
+    const rampSlice = (from: number, to: number): Uint8Array => {
+      const w16 = new Uint16Array(to - from);
+      for (let i = from; i < to; i++) w16[i - from] = rampAt(i) & 0xffff;
+      return new Uint8Array(w16.buffer);
+    };
+    const slideStore = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
+    slideStore.append(rampSlice(0, R));
+    const slide = new BusBuilder(slideStore, rampSpec, slideStore.length, 2_500, R);
+    check('a tight-capacity sliding builder finishes', build(slide));
+    let slideD = 0;
+    let slideBad = '';
+    for (const step of [64, 960, 512, 448, 960, 192, 64, 960, 512, 320, 64, 960]) {
+      slideStore.dropFront(step);
+      slideStore.append(rampSlice(slideD + R, slideD + R + step));
+      slideD += step;
+      slide.setLength(slideStore.length); // exactly the ring's capacity: no growth
+      const stopped = build(slide);
+      if (stopped) { slideBad = `at D=${slideD}: ${stopped}`; break; }
+      // Every leaf fully inside the window is fully sampled, so its min/max is the ramp's.
+      for (let b = Math.ceil(slideD / BUS_LEAF); (b + 1) * BUS_LEAF <= slideD + slideStore.length; b++) {
+        const s = b * BUS_LEAF - slideD;
+        const got = slide.pyramid.range(s, s + BUS_LEAF);
+        const want = { min: rampAt(b * BUS_LEAF), max: rampAt((b + 1) * BUS_LEAF - 1) };
+        if (JSON.stringify(got) !== JSON.stringify(want)) {
+          slideBad = `D=${slideD} (origin%${BUS_LEAF}=${slideD % BUS_LEAF}) leaf ${b}: `
+            + `${JSON.stringify(got)} vs ${JSON.stringify(want)}`;
+          break;
+        }
+      }
+      // The partial window-start leaf keeps its slot too: with one slot too few it is the
+      // one the partial end leaf overwrites, and the first pixel of every frame goes blank.
+      // (This builder never skips its frontier, so the leaf is always known from before.)
+      if (!slideBad && slideD % BUS_LEAF !== 0) {
+        const firstLeafEnd = (Math.floor(slideD / BUS_LEAF) + 1) * BUS_LEAF - slideD;
+        if (slide.pyramid.range(0, firstLeafEnd) === null) {
+          slideBad = `D=${slideD}: the window-start leaf lost its ring slot`;
+        }
+      }
+      if (slideBad) break;
+    }
+    check('a window as long as the ring capacity keeps every leaf it covers exact', slideBad);
   }
 
   {

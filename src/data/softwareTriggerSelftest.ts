@@ -5,6 +5,7 @@
  */
 
 import {
+  MAX_SOFTWARE_TRIGGER_PREFIX_BYTES,
   SoftwareTrigger,
   type SoftwareTriggerConfig,
   type SoftwareTriggerKind,
@@ -142,6 +143,111 @@ export function runSoftwareTriggerSuite(): SoftwareTriggerTestResult[] {
       waiting.stats.inspectedSamples === 80,
     detail: `waiting=${waiting.waiting}, inspected=${waiting.stats.inspectedSamples}`,
   });
+
+  // The loop-capture form: maxSamples Infinity turns the match into an unbounded
+  // stream - `complete` never sets, and the windowing is the store's dropFront,
+  // downstream of the trigger.
+  const loopOut: number[] = [];
+  const loopTrigger = new SoftwareTrigger({
+    config: {
+      channels: 8, kind: 'rising', channel: 0, preTriggerSamples: 2,
+      maxSamples: Number.POSITIVE_INFINITY,
+    },
+    emit: (chunk) => loopOut.push(...chunk),
+  });
+  // Waiting phase: 10 idle samples, then the edge, then a long tail.
+  loopTrigger.feed(new Uint8Array(10).fill(0));
+  const loopWaiting = loopTrigger.waiting && loopTrigger.stats.emittedSamples === 0;
+  loopTrigger.feed(new Uint8Array([0, 1]));
+  const loopMatched = loopTrigger.stats.matched && loopTrigger.stats.triggerSampleIndex === 2;
+  loopTrigger.feed(new Uint8Array(97).fill(1));
+  loopTrigger.feed(new Uint8Array(300).fill(0));
+  results.push({
+    name: 'an unbounded (loop) trigger emits forever after the match and never completes',
+    pass: loopWaiting && loopMatched && !loopTrigger.stats.complete &&
+      loopTrigger.stats.emittedSamples === 2 + 1 + 97 + 300 &&
+      loopOut.length === 2 + 1 + 97 + 300 &&
+      loopOut[0] === 0 && loopOut[1] === 0 && loopOut[2] === 1,
+    detail: `waitingEmits=${loopWaiting}, T=${loopTrigger.stats.triggerSampleIndex}, ` +
+      `emitted=${loopTrigger.stats.emittedSamples}, complete=${loopTrigger.stats.complete}`,
+  });
+  results.push({
+    name: 'an unbounded trigger still honours finish() with no match',
+    pass: (() => {
+      const t = new SoftwareTrigger({
+        config: {
+          channels: 8, kind: 'rising', channel: 0, preTriggerSamples: 2,
+          maxSamples: Number.POSITIVE_INFINITY,
+        },
+        emit: () => {},
+      });
+      t.feed(new Uint8Array(64));
+      t.finish();
+      return t.stats.noTrigger && !t.waiting;
+    })(),
+    detail: 'finish() on a waiting loop trigger reports not-found',
+  });
+  {
+    let threw = '';
+    try {
+      new SoftwareTrigger({
+        config: { channels: 8, kind: 'rising', channel: 0, preTriggerSamples: 2, maxSamples: 0 },
+        emit: () => {},
+      });
+    } catch (e) { threw = String(e); }
+    results.push({
+      name: 'maxSamples still rejects zero (Infinity is the only non-integer allowed)',
+      pass: threw.includes('maxSamples'),
+      detail: threw || '<no throw>',
+    });
+  }
+  {
+    // The unbounded budget must not unbind the waiting prefix: `maxSamples - 1` is
+    // Infinity there, so the 64 MiB byte cap is the only term left in the min chain.
+    const capped = new SoftwareTrigger({
+      config: {
+        channels: 16, kind: 'rising', channel: 0, preTriggerSamples: 1e9,
+        maxSamples: Number.POSITIVE_INFINITY,
+      },
+      emit: () => {},
+    });
+    const want = Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bytesPerSampleForChannels(16));
+    results.push({
+      name: 'an unbounded trigger still bounds its waiting prefix to 64 MiB',
+      pass: capped.preTriggerSamples === want && capped.searchLimitSamples === Infinity,
+      detail: `pre=${capped.preTriggerSamples}, want=${want}, search=${capped.searchLimitSamples}`,
+    });
+  }
+  {
+    // Infinity arithmetic in emitPost: `remaining` never runs out, so the only bound is
+    // the fragment's whole-sample count and the sub-sample carry must still survive
+    // across feeds (1-byte fragments at 16ch). Emitted samples: the match at index 1 of
+    // [0,1,1,0,1] plus the three after it.
+    const out: number[] = [];
+    const t = new SoftwareTrigger({
+      config: {
+        channels: 16, kind: 'rising', channel: 0, preTriggerSamples: 0,
+        maxSamples: Number.POSITIVE_INFINITY,
+      },
+      emit: (chunk) => out.push(...chunk),
+    });
+    const raw = new Uint8Array([0, 0, 1, 0, 1, 0, 0, 0, 1, 0]);
+    t.feed(raw.subarray(0, 3));
+    t.feed(raw.subarray(3, 7));
+    // This fragment leaves the post-match range 1 byte short of a whole sample, which is
+    // emitPost()'s `available === 0` branch: under Infinity it must stash, not complete.
+    t.feed(raw.subarray(7, 9));
+    t.feed(raw.subarray(9, 10));
+    const words: number[] = [];
+    for (let i = 0; i + 1 < out.length; i += 2) words.push(out[i]! | (out[i + 1]! << 8));
+    results.push({
+      name: 'an unbounded trigger carries a sub-sample remainder across feeds',
+      pass: words.join(',') === '1,1,0,1' && t.stats.emittedSamples === 4 &&
+        t.stats.triggerSampleIndex === 0 && !t.stats.complete,
+      detail: `words=${words.join(',')}, emitted=${t.stats.emittedSamples}, ` +
+        `T=${t.stats.triggerSampleIndex}, complete=${t.stats.complete}`,
+    });
+  }
 
   const andRaw = new Uint8Array([0, 0, 2, 3, 2, 0, 2]);
   const andOutput: number[] = [];

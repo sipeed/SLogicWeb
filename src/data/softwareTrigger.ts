@@ -37,7 +37,11 @@ export interface SoftwareTriggerConfig {
   channel?: number;
   /** Number of samples retained immediately before the trigger sample. */
   preTriggerSamples: number;
-  /** Total samples emitted, including the retained prefix and trigger sample. */
+  /**
+   * Total samples emitted, including the retained prefix and trigger sample.
+   * `Infinity` is the loop-capture form: after the match the stream is unbounded,
+   * `complete` never sets, and the capture ends only on a manual stop.
+   */
   maxSamples: number;
   /** Optional waiting budget. Infinity means keep rolling the prefix until stopped. */
   searchLimitSamples?: number;
@@ -54,7 +58,8 @@ export interface SoftwareTriggerStats {
   triggerSampleIndex: number | null;
   /** True after finish() when no trigger condition matched. */
   noTrigger: boolean;
-  /** Whether maxSamples has been emitted and the caller can stop the device. */
+  /** Whether maxSamples has been emitted and the caller can stop the device. Never
+   * sets for an unbounded (loop) trigger, whose maxSamples is Infinity. */
   complete: boolean;
 }
 
@@ -84,8 +89,9 @@ function assertConfig(c: SoftwareTriggerConfig): void {
   if (!Number.isInteger(c.preTriggerSamples) || c.preTriggerSamples < 0) {
     throw new Error(`preTriggerSamples must be a non-negative integer, got ${c.preTriggerSamples}`);
   }
-  if (!Number.isInteger(c.maxSamples) || c.maxSamples < 1) {
-    throw new Error(`maxSamples must be a positive integer, got ${c.maxSamples}`);
+  if (c.maxSamples !== Number.POSITIVE_INFINITY &&
+      (!Number.isInteger(c.maxSamples) || c.maxSamples < 1)) {
+    throw new Error(`maxSamples must be a positive integer or Infinity, got ${c.maxSamples}`);
   }
   if (c.searchLimitSamples !== undefined && c.searchLimitSamples !== Infinity &&
       (!Number.isInteger(c.searchLimitSamples) || c.searchLimitSamples < 1)) {

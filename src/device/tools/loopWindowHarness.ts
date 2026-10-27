@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * The loop-window question, asked without a board: at each 8-channel rate, how large a
- * retained window can the page keep while it appends, drops, rebuilds the bus pyramid
- * and builds the live frame? Same transport arms as windowHarness.ts; the sink mirrors
- * the app's loop path (append, dropFront, builder reset, cache invalidation), and the
+ * retained window can the page keep while it appends, drops and builds the live frame?
+ * Same transport arms as windowHarness.ts; the sink mirrors the app's loop path
+ * (append, loopDropSamples, dropFront - no hysteresis, no builder reset), and the
  * pump does the app's per-frame work (builder setLength + 4 ms slices + analogFrame)
  * for the heaviest view: a user zoomed out to the full retained window.
  *
@@ -14,9 +14,10 @@ import { Slogic16U3, type Stats } from '../slogic16u3.js';
 import { WorkerSlogicDevice, type WorkerStats } from '../workerTransport.js';
 import { ClockStreamDevice } from '../fakeUsb.js';
 import {
-  BusBuilder, DROP_FRONT_QUANTUM, createSampleStore,
+  BusBuilder, createSampleStore,
   type BusSpec, type SampleStore,
 } from '../../data/index.js';
+import { loopDropSamples } from '../../ui/state.js';
 import { analogFrame, type BusViewState } from '../../ui/busView.js';
 import FakeUsbWorker from './fakeUsbWorker.js?worker&inline';
 
@@ -45,24 +46,31 @@ export interface LoopArmReport {
   /** Mean filled fraction of the drawn window over all frames. */
   filledColumns: number;
   drops: number;
-  /** Per-drop cost of dropFront + builder reset + cache invalidation, never amortized. */
+  /** Per-drop cost of dropFront alone, never amortized. */
   dropMsP95: number;
   dropMsMax: number;
-  /** Drops whose rebuild had not re-covered the store when the next drop arrived. */
-  rebuildMissedDrops: number;
-  /** Longest completed drop-to-covered stretch; only finished rebuilds count. */
-  rebuildMsMax: number;
-  /** True when the last drop's rebuild was still open at stop (rebuildMsMax censored). */
-  rebuildOpenAtStop: boolean;
-  /** store.length point-in-time at stop, and the peak the hysteresis reached. */
+  /**
+   * Drops that arrived while the bus builder had not yet covered the previous drop's
+   * appended bins. With no drop hysteresis every delivery chunk drops, so at high
+   * arrival rates this counts bus-view freshness lag (blank right-edge columns), not
+   * a drop pathology - drops themselves carry no rebuild since W1/W3.
+   */
+  busBehindDrops: number;
+  /** Longest completed drop-to-covered stretch; only finished catch-ups count. */
+  busCatchUpMsMax: number;
+  /** True when the last drop's catch-up was still open at stop. */
+  busBehindAtStop: boolean;
+  /** store.length point-in-time at stop, and the peak the window reached. */
   storeMB: number;
   peakStoreMB: number;
 }
 
 export interface LoopHarnessOptions {
   transport: 'page' | 'worker';
-  /** 8-channel sample rate; the scripted device offers samplerate/1000 bytes per ms. */
+  /** Sample rate; the scripted device offers samplerate x bytes-per-sample / 1000 bytes per ms. */
   samplerate: number;
+  /** Channel count: 8 exercises the planar store, 32 the interleaved store. */
+  channels?: 8 | 32;
   retentionSamples: number;
   seconds: number;
   widthPx?: number;
@@ -82,16 +90,17 @@ interface ConsumerState {
   frames: number;
   liveEdgeBlankFrames: number;
   filledSum: number;
-  rebuildMissedDrops: number;
-  rebuildMsMax: number;
-  rebuildOpenAtStop: boolean;
+  busBehindDrops: number;
+  busCatchUpMsMax: number;
+  busBehindAtStop: boolean;
   peakLength: number;
 }
 
 function startConsumer(options: LoopHarnessOptions): ConsumerState {
   const retention = options.retentionSamples;
   const widthPx = options.widthPx ?? 1600;
-  const store = createSampleStore(CHANNELS, options.samplerate);
+  const channels = options.channels ?? CHANNELS;
+  const store = createSampleStore(channels, options.samplerate);
   const display = options.display !== false;
   const spec: BusSpec = { bits: [0, 1, 2, 3, 4, 5, 6, 7], clock: null, encoding: 'unsigned' };
   const builder = new BusBuilder(store, spec, 0, undefined, retention * 2);
@@ -106,31 +115,30 @@ function startConsumer(options: LoopHarnessOptions): ConsumerState {
   const state: ConsumerState = {
     store,
     dropMs: [], drops: 0, frames: 0, liveEdgeBlankFrames: 0,
-    filledSum: 0, rebuildMissedDrops: 0, rebuildMsMax: 0, rebuildOpenAtStop: false,
+    filledSum: 0, busBehindDrops: 0, busCatchUpMsMax: 0, busBehindAtStop: false,
     peakLength: 0,
     sink(chunk: Uint8Array): void {
       store.append(chunk);
       state.peakLength = Math.max(state.peakLength, store.length);
-      if (!(retention > 0) || store.length < retention * 2) return;
-      const drop = Math.floor((store.length - retention) / DROP_FRONT_QUANTUM) * DROP_FRONT_QUANTUM;
+      // The app's policy, imported rather than mirrored: no hysteresis, every delivery
+      // drops the window back to the limit.
+      const drop = loopDropSamples(store.length, retention);
       if (drop <= 0) return;
       const t = performance.now();
       store.dropFront(drop);
-      if (display) {
-        builder.reset(store.length);
-        bv.cache = null;
-      }
+      // The app no longer resets bus builders on a drop: BusBuilder's frontier is
+      // absolute and analogFrame's cache key carries store.droppedSamples.
       state.dropMs.push(performance.now() - t);
       state.drops++;
       if (display) {
-        if (!caughtUp) state.rebuildMissedDrops++;
+        if (!caughtUp) state.busBehindDrops++;
         caughtUp = false;
       }
       lastDropAt = performance.now();
     },
     stop(): void {
       pumping = false;
-      if (display && !caughtUp) state.rebuildOpenAtStop = true;
+      if (display && !caughtUp) state.busBehindAtStop = true;
     },
   };
 
@@ -140,7 +148,7 @@ function startConsumer(options: LoopHarnessOptions): ConsumerState {
     builder.step(4);
     if (!caughtUp && builder.pyramid.doneUpTo >= store.length) {
       caughtUp = true;
-      state.rebuildMsMax = Math.max(state.rebuildMsMax, performance.now() - lastDropAt);
+      state.busCatchUpMsMax = Math.max(state.busCatchUpMsMax, performance.now() - lastDropAt);
     }
     const end = store.length;
     const frame = analogFrame(store, bv, Math.max(0, end - retention), end, widthPx, true);
@@ -171,14 +179,16 @@ function finish(
   return {
     transport,
     display: options.display !== false,
-    channels: CHANNELS,
+    channels: options.channels ?? CHANNELS,
     samplerate: options.samplerate,
     retentionSamples: retention,
     seconds: options.seconds,
     widthPx,
     path: retention / widthPx > 256 || retention > 4_000_000 ? 'pyramid' : 'exact',
     ...(error === undefined ? {} : { error }),
-    expectedMBps: options.samplerate / 1e6,
+    // Offered wire bytes, not samples: the driver gates on sustainedMBps / expectedMBps,
+    // so a 32-channel cell must divide by its 4 bytes per sample or it can never fail.
+    expectedMBps: (options.samplerate * ((options.channels ?? CHANNELS) >>> 3)) / 1e6,
     sustainedMBps: stats.steadyMBps,
     droppedBytes,
     threadStallMaxMs: stats.threadStallMaxMs,
@@ -190,17 +200,19 @@ function finish(
     drops: consumer.drops,
     dropMsP95: sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))]! : 0,
     dropMsMax: sorted.length ? sorted[sorted.length - 1]! : 0,
-    rebuildMissedDrops: consumer.rebuildMissedDrops,
-    rebuildMsMax: consumer.rebuildMsMax,
-    rebuildOpenAtStop: consumer.rebuildOpenAtStop,
+    busBehindDrops: consumer.busBehindDrops,
+    busCatchUpMsMax: consumer.busCatchUpMsMax,
+    busBehindAtStop: consumer.busBehindAtStop,
     storeMB: consumer.store.length / 1e6,
     peakStoreMB: consumer.peakLength / 1e6,
   };
 }
 
 export async function runLoopArm(options: LoopHarnessOptions): Promise<LoopArmReport> {
-  const bytesPerMs = options.samplerate / 1000;
-  const cfg = { channels: CHANNELS, samplerate: options.samplerate, thresholdVolts: 1.6 } as const;
+  const channels = options.channels ?? CHANNELS;
+  // The scripted device offers wire bytes: samples x bytesPerSample per second.
+  const bytesPerMs = (options.samplerate * (channels >>> 3)) / 1000;
+  const cfg = { channels, samplerate: options.samplerate, thresholdVolts: 1.6 } as const;
   const consumer = startConsumer(options);
   let error: string | undefined;
 
@@ -209,7 +221,7 @@ export async function runLoopArm(options: LoopHarnessOptions): Promise<LoopArmRe
     const dev = new Slogic16U3(device as unknown as USBDevice);
     try {
       await dev.open();
-      await dev.start(cfg, consumer.sink);
+      await dev.start(cfg, consumer.sink, undefined, { loop: true });
       await new Promise((r) => setTimeout(r, options.seconds * 1000));
       await dev.stop();
     } catch (e) {
@@ -239,7 +251,7 @@ export async function runLoopArm(options: LoopHarnessOptions): Promise<LoopArmRe
     throw e;
   }
   try {
-    await dev.start(cfg, consumer.sink);
+    await dev.start(cfg, consumer.sink, undefined, { loop: true });
     await new Promise((r) => setTimeout(r, options.seconds * 1000));
     await dev.stop();
   } catch (e) {

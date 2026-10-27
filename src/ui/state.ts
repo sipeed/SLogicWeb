@@ -33,7 +33,8 @@ export type AnalyzerStatus = 'idle' | 'decoding' | 'done' | 'error';
 export type AnalyzerNote =
   | { kind: 'pending' }
   | { kind: 'edges'; count: number }
-  | { kind: 'stats'; anns: number; decodeMs: number; wallMs: number; firstError?: string }
+  /** `snapshot`: decoded from a running loop window; the result does not track the capture. */
+  | { kind: 'stats'; anns: number; decodeMs: number; wallMs: number; firstError?: string; snapshot?: boolean }
   | { kind: 'timeout' }
   | { kind: 'cancelled' }
   | { kind: 'error'; detail: string };
@@ -62,7 +63,8 @@ export interface CaptureSettings {
   /** 'free' runs until stopped or until the sample ceiling; 'timer' stops after seconds. */
   mode: 'free' | 'timer' | 'loop';
   seconds: number;
-  loopSeconds: number;
+  /** Loop window as a sample count (HSync's SampleLimit), not a duration. */
+  loopSamples: number;
   /** Hardware data source: normal pins, USB maximum-speed pattern, or simulator. */
   testMode: 0 | 1 | 2;
   /** Global trigger enable mask. Per-channel modes remain stored when this is false. */
@@ -85,32 +87,49 @@ export interface TriggerCondition {
   level: 0 | 1;
 }
 
-export const LOOP_RETENTION_MAX_BYTES = 2 ** 30;
-export const LOOP_RETENTION_MAX_SAMPLES = 2 ** 29;
+/**
+ * Loop window budget (memory assessment in design §4.2, confirmed 2026-10-26): 2 GiB
+ * of packed sample bytes per capture and at most 2^30 samples, whichever bites first:
+ * 4ch 2^30 (512 MiB) · 8ch 2^30 (1 GiB) · 16ch 2^30 (2 GiB) · 32ch 2^29 (2 GiB).
+ * With ~13.4% pyramid overhead, UI and transfer buffers, the resident set stays around
+ * 2.6-2.9 GiB, under the ~4 GiB Chromium tab ceiling with ~1 GiB of GC headroom.
+ */
+export const LOOP_RETENTION_MAX_BYTES = 2 ** 31;
+export const LOOP_RETENTION_MAX_SAMPLES = 2 ** 30;
 
-export function maxLoopSeconds(channels: ChannelCount, samplerate: number): number {
-  return Math.min(LOOP_RETENTION_MAX_BYTES / bytesPerSampleForChannels(channels),
-    LOOP_RETENTION_MAX_SAMPLES) / samplerate;
-}
+/**
+ * The loop window is a sample count, rounded up to this quantum: HSync's SampleLimit
+ * semantics (`(limit + 1023) & !1023` in instrument.rs, MIN_SAMPLES = 1024 in
+ * setting.rs), so a window never silently keeps less than was asked.
+ */
+export const LOOP_WINDOW_QUANTUM = 1024;
+/** 1 s at the default 16 MHz; already a multiple of the quantum. */
+export const DEFAULT_LOOP_SAMPLES = 16_000_000;
 
-export function clampLoopSeconds(loopSeconds: number, channels: ChannelCount, samplerate: number): number {
-  const max = maxLoopSeconds(channels, samplerate);
-  if (Number.isNaN(loopSeconds)) return Math.max(0.001, Math.floor(Math.min(1, max) * 1000) / 1000);
-  if (loopSeconds === Number.POSITIVE_INFINITY) return Math.max(0.001, Math.floor(max * 1000) / 1000);
-  if (!Number.isFinite(loopSeconds)) return 0.001;
-  return Math.max(0.001, Math.floor(Math.min(loopSeconds, max) * 1000) / 1000);
-}
-
-export function loopRetentionSamples(loopSeconds: number, channels: ChannelCount, samplerate: number): number {
-  const q = DROP_FRONT_QUANTUM;
-  return Math.max(q, Math.floor(Math.min(
-    clampLoopSeconds(loopSeconds, channels, samplerate) * samplerate,
+export function maxLoopSamples(channels: ChannelCount): number {
+  const q = LOOP_WINDOW_QUANTUM;
+  return Math.floor(Math.min(
+    LOOP_RETENTION_MAX_BYTES / bytesPerSampleForChannels(channels),
     LOOP_RETENTION_MAX_SAMPLES,
-  ) / q) * q);
+  ) / q) * q;
 }
 
+export function clampLoopSamples(samples: number, channels: ChannelCount): number {
+  const q = LOOP_WINDOW_QUANTUM;
+  const max = maxLoopSamples(channels);
+  if (Number.isNaN(samples)) return Math.min(DEFAULT_LOOP_SAMPLES, max);
+  if (samples === Number.POSITIVE_INFINITY) return max;
+  if (!Number.isFinite(samples)) return q;
+  return Math.max(q, Math.min(Math.ceil(samples / q) * q, max));
+}
+
+/**
+ * No hysteresis (HSync's Ingest rule): the moment the window passes the limit the
+ * excess is dropped, so the retained length hugs the limit plus at most one delivery
+ * chunk. The drop itself is 64-sample quantised (DROP_FRONT_QUANTUM).
+ */
 export function loopDropSamples(length: number, retention: number): number {
-  if (!(retention > 0) || length < retention * 2) return 0;
+  if (!(retention > 0) || length <= retention) return 0;
   return Math.floor((length - retention) / DROP_FRONT_QUANTUM) * DROP_FRONT_QUANTUM;
 }
 

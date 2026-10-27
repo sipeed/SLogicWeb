@@ -17,6 +17,13 @@ export interface CaptureStartOptions {
   /** Optional bounded host-side trigger. Omit to preserve unfiltered streaming. */
   softwareTrigger?: import('../data/softwareTrigger.js').SoftwareTriggerConfig;
   /**
+   * DSView-style loop capture: an unbounded stream the host windows by dropping old
+   * samples. A loop capture ends only on a manual stop or a device error, so the
+   * transport leaves the first-byte watchdog disarmed and never aborts on an underrun
+   * (HSync semantics; the watchdogs stay on for every other capture).
+   */
+  loop?: boolean;
+  /**
    * Samples the device should deliver before it stops itself, when the capture
    * length is known before it is armed. The transport programmes the device's own
    * length register (R32_SAMPLE_LEN) so the capture can end without the host

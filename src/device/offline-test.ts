@@ -1083,6 +1083,50 @@ async function main(): Promise<void> {
       ended === 1, String(ended));
   }
   {
+    // Loop mode arms the trigger with an unbounded budget (maxSamples Infinity): the
+    // match emits the retained prefix and then streams forever - no `complete`, no
+    // onEnd - and the windowing happens downstream in the store's dropFront.
+    const head = [0xaa, 0xbb, 0xcc, 0xdd];
+    const fake = new FakeStreamDevice(recorded(), [
+      { kind: 'data', bytes: [...head, ...new Array<number>(1020).fill(0)] },
+      { kind: 'data', bytes: (() => { const b = new Array<number>(1024).fill(0); b[0] = 0; b[1] = 0; b[2] = 1; b[3] = 0; return b; })() },
+      { kind: 'data', bytes: new Array<number>(1024).fill(0xff) },
+      { kind: 'data', bytes: new Array<number>(1024).fill(0x55) },
+    ]);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    const chunks: number[] = [];
+    const states: string[] = [];
+    let ended = 0;
+    await dev.open();
+    await dev.start(
+      { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 },
+      (chunk) => { chunks.push(...chunk); }, undefined,
+      {
+        loop: true,
+        tuning: { depth: 4, transferBytes: 1024 },
+        softwareTrigger: {
+          channels: 16, channel: 0, kind: 'rising', preTriggerSamples: 4,
+          maxSamples: Number.POSITIVE_INFINITY,
+        },
+        onTriggerState: (state, index) =>
+          states.push(index === undefined ? state : `${state}@${index}`),
+        onEnd: () => { ended += 1; },
+      },
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    await dev.stop();
+    // The edge lands at the second sample of the second block; with 4 retained
+    // pre-trigger samples the trigger sample sits at index 4 of the emitted stream.
+    // Everything after it streams unbounded. 16ch is 2 bytes/sample: prefix 8 B,
+    // trigger sample 2 B, then 510 + 512 + 512 samples.
+    check('a loop trigger emits the prefix and then streams unbounded',
+      chunks.length === 2 * (4 + 1 + 510 + 512 + 512) && chunks[8] === 1 &&
+        states.join(',') === 'waiting,triggered@4',
+      `bytes=${chunks.length}, states=${states.join(',')}`);
+    check('a loop trigger capture never reports end-of-capture',
+      ended === 0, String(ended));
+  }
+  {
     // Same tail, timer mode: the device stops itself at R32_SAMPLE_LEN, and the last
     // sub-block of samples must reach the sink then - not when the user gives up and
     // presses stop - followed by exactly one onEnd.
@@ -2372,6 +2416,47 @@ async function main(): Promise<void> {
     check('the wedged board is reported once, through onError',
       errors.length === 1 && errors[0]!.includes('delivered no data'),
       `${errors.length}: ${errors[0] ?? ''}`);
+  }
+  {
+    // The same wedged board under StartOptions.loop: a loop capture ends only on a
+    // manual stop or a device error (HSync semantics), so the first-byte watchdog
+    // stays disarmed and stop() has nothing to re-throw.
+    const fake = new FakeStreamDevice(recorded32(), [], 0x3032);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    const errors: string[] = [];
+    dev.onError = (e) => errors.push(String(e));
+    await dev.open();
+    await dev.start({ channels: 32, samplerate: 100e6, thresholdVolts: 1.6 }, () => {},
+      undefined, { loop: true, tuning: { depth: 4, transferBytes: 1024 } });
+    await new Promise((r) => setTimeout(r, 900));
+    let stopError = '';
+    try { await dev.stop(); } catch (e) { stopError = String(e); }
+    check('a loop capture on a wedged board is not aborted by the first-byte watchdog',
+      stopError === '' && errors.length === 0,
+      stopError || errors[0] || '<no error>');
+  }
+  {
+    // And the slow-transfer watchdog: the same sustained shortfall that aborts a
+    // free/timer capture above is only recorded for a loop capture, never thrown -
+    // the host windows the stream by dropping, so falling behind is not fatal.
+    const block = new Array<number>(1024).fill(0);
+    const fake = new FakeStreamDevice(recorded(), Array.from({ length: 32 }, () => (
+      { kind: 'delayedData' as const, bytes: block, delayMs: 2 }
+    )));
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    await dev.open();
+    await dev.start(
+      { channels: 4, samplerate: 5e6, thresholdVolts: 1.6 }, () => {}, undefined,
+      { loop: true, tuning: { depth: 4, transferBytes: 1024 } },
+    );
+    await new Promise((r) => setTimeout(r, 80));
+    let failure: unknown = null;
+    try { await dev.stop(); } catch (e) { failure = e; }
+    const stats = dev.getStats();
+    check('a loop capture is not aborted when the host falls behind',
+      failure === null, failure instanceof Error ? failure.message : String(failure));
+    check('the slow transfers are still recorded for a loop capture',
+      stats.slowTransfers >= 4, `slow=${stats.slowTransfers}`);
   }
 
   console.log('\nbench: the bulk pipe measured without a sink');

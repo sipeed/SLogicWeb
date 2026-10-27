@@ -18,7 +18,8 @@ import { ROWS } from '../metrics.js';
 import { analogFrame, type BusViewState } from '../busView.js';
 import { BusBuilder, PlanarSampleStore, type BusSpec } from '../../data/index.js';
 import { DEFAULT_TRIGGER_MODE, edgeTriggerAutoArms, isEdgeTriggerMode, modesToConditions,
-  clampLoopSeconds, loopDropSamples, loopRetentionSamples, maxLoopSeconds, triggerModeFromCondition,
+  clampLoopSamples, DEFAULT_LOOP_SAMPLES, LOOP_WINDOW_QUANTUM, loopDropSamples, maxLoopSamples,
+  triggerModeFromCondition,
   type TriggerCondition, type TriggerMode } from '../state.js';
 
 /** Same node access idiom as the other UI self-tests, without requiring @types/node. */
@@ -482,90 +483,99 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
 }
 
 {
-  const secondsTable: Array<[number, number, number, number]> = [
-    [1, 16, 16e6, 1],
-    [0.0005, 16, 16e6, 0.001],
-    [Number.NaN, 16, 16e6, 1],
-    [Number.POSITIVE_INFINITY, 16, 16e6, 33.554],
-    [Number.NEGATIVE_INFINITY, 16, 16e6, 0.001],
-    [-5, 16, 16e6, 0.001],
-    [0, 16, 16e6, 0.001],
-    [1.2346, 16, 16e6, 1.234],
-    [100, 16, 16e6, 33.554],
-    [100, 8, 400e6, 1.342],
-  ];
-  const secondsBad = secondsTable
-    .filter(([v, ch, sr, want]) => clampLoopSeconds(v, ch as 16 | 8, sr) !== want)
-    .map(([v, ch, sr, want]) => `${v}@${ch}ch/${sr}: want ${want}, got ${clampLoopSeconds(v, ch as 16 | 8, sr)}`);
-  check('clampLoopSeconds clamps to the 1 ms floor and the memory budget',
-    secondsBad.length === 0,
-    secondsBad.length === 0 ? `${secondsTable.length} exact cases` : secondsBad.join('; '));
-
-  const samplesTable: Array<[number, number, number, number]> = [
-    [1, 16, 16e6, 16_000_000],
-    [0.001, 8, 400e6, 399_872],
-    [0.000001, 8, 100, 512],
-    [100, 16, 16e6, 536_863_744],
-    [100, 8, 400e6, 536_799_744],
+  const samplesTable: Array<[number, number, number]> = [
+    [16_000_000, 16, 16_000_000],
+    [1, 16, LOOP_WINDOW_QUANTUM],
+    [Number.NaN, 16, DEFAULT_LOOP_SAMPLES],
+    [Number.POSITIVE_INFINITY, 16, maxLoopSamples(16)],
+    [Number.NEGATIVE_INFINITY, 16, LOOP_WINDOW_QUANTUM],
+    [-5, 16, LOOP_WINDOW_QUANTUM],
+    [0, 16, LOOP_WINDOW_QUANTUM],
+    // Rounds up to the quantum, like HSync's (limit + 1023) & !1023: a window never
+    // silently keeps less than was asked.
+    [1025, 16, 2048],
+    [2048, 16, 2048],
+    [2 ** 30, 16, maxLoopSamples(16)],
+    [2 ** 30, 32, maxLoopSamples(32)],
+    [16_000_000, 32, 16_000_000],
   ];
   const samplesBad = samplesTable
-    .filter(([v, ch, sr, want]) => loopRetentionSamples(v, ch as 16 | 8, sr) !== want)
-    .map(([v, ch, sr, want]) => `${v}@${ch}ch/${sr}: want ${want}, got ${loopRetentionSamples(v, ch as 16 | 8, sr)}`);
-  check('loopRetentionSamples quantises to the drop quantum with a one-quantum floor',
+    .filter(([v, ch, want]) => clampLoopSamples(v, ch as 16 | 32) !== want)
+    .map(([v, ch, want]) => `${v}@${ch}ch: want ${want}, got ${clampLoopSamples(v, ch as 16 | 32)}`);
+  check('clampLoopSamples floors at the quantum, rounds up, clamps to the memory budget',
     samplesBad.length === 0,
     samplesBad.length === 0 ? `${samplesTable.length} exact cases` : samplesBad.join('; '));
 
-  const ceilingBad = ([[4, 800e6], [8, 400e6], [8, 200e6], [16, 200e6], [16, 16e6]] as const)
-    .filter(([ch, sr]) =>
-      2 * loopRetentionSamples(maxLoopSeconds(ch, sr), ch, sr) + (1 << 25) >= 2 ** 31);
-  check('the advertised loop maxima stay below the 2^31 store ceiling with hysteresis headroom',
+  const ceilingBad = ([4, 8, 16, 32] as const)
+    .filter((ch) => maxLoopSamples(ch) + (1 << 25) >= 2 ** 31);
+  check('the advertised loop maxima stay below the 2^31 store ceiling with one-chunk headroom',
     ceilingBad.length === 0,
     ceilingBad.length === 0
-      ? '2x retention plus a sink chunk < 2^31 at every advertised maximum'
-      : `violates: ${ceilingBad.map(([ch, sr]) => `${ch}ch/${sr}`).join(', ')}`);
+      ? 'limit plus a sink chunk < 2^31 at every width'
+      : `violates: ${ceilingBad.join(', ')}ch`);
+
+  // Design §4.2 (confirmed 2026-10-26): 2 GiB of packed bytes and 2^30 samples per
+  // capture. Literals, not a second copy of the clamp formula, so moving a budget
+  // constant turns this red. Packed bytes = samples * channels / 8 (one bit per sample).
+  const budgetTable: Array<[4 | 8 | 16 | 32, number, number]> = [
+    [4, 2 ** 30, 512],
+    [8, 2 ** 30, 1_024],
+    [16, 2 ** 30, 2_048],
+    [32, 2 ** 29, 2_048],
+  ];
+  const budgetBad = budgetTable
+    .filter(([ch, samples, mib]) => maxLoopSamples(ch) !== samples
+      || Math.round((maxLoopSamples(ch) * ch) / 8 / 2 ** 20) !== mib)
+    .map(([ch, samples, mib]) => `${ch}ch: want ${samples} samples / ${mib} MiB, got `
+      + `${maxLoopSamples(ch)} / ${Math.round((maxLoopSamples(ch) * ch) / 8 / 2 ** 20)} MiB`);
+  check('every width maxes out at the confirmed 2 GiB / 2^30 loop budget (design §4.2)',
+    budgetBad.length === 0,
+    budgetBad.length === 0
+      ? budgetTable.map(([ch, samples, mib]) => `${ch}ch ${samples} (${mib} MiB)`).join(', ')
+      : budgetBad.join('; '));
 
   const sweepBad: string[] = [];
-  for (const v of [0.0001, 0.001, 0.5, 1, 7.3, 33.554, 33.555, 100, 1e6]) {
-    for (const [ch, sr] of [[16, 16e6], [8, 400e6], [4, 800e6]] as const) {
-      const got = clampLoopSeconds(v, ch, sr);
-      const max = maxLoopSeconds(ch, sr);
-      if (!(got <= max)) sweepBad.push(`${v}@${ch}ch/${sr}: ${got} > ${max}`);
+  for (const v of [0, 1, 1024, 16_000_000, 536_870_911, 536_870_912, 1e12]) {
+    for (const ch of [4, 8, 16, 32] as const) {
+      const got = clampLoopSamples(v, ch);
+      const max = maxLoopSamples(ch);
+      if (!(got <= max)) sweepBad.push(`${v}@${ch}ch: ${got} > ${max}`);
+      if (got % LOOP_WINDOW_QUANTUM !== 0) sweepBad.push(`${v}@${ch}ch: ${got} not a multiple of ${LOOP_WINDOW_QUANTUM}`);
     }
   }
-  check('clampLoopSeconds never exceeds the budget ceiling',
+  check('clampLoopSamples never exceeds the budget ceiling and stays on the quantum',
     sweepBad.length === 0,
-    sweepBad.length === 0 ? '9 values x 3 geometries all at or under the ceiling' : sweepBad.join('; '));
+    sweepBad.length === 0 ? '7 values x 4 widths all clamped and quantised' : sweepBad.join('; '));
 
   const dropTable: Array<[number, number, number]> = [
-    [319_487, 159_744, 0],
+    [159_744, 159_744, 0],      // at the limit: nothing to drop
+    [159_745, 159_744, 0],      // 1 over, floored to the 64 quantum
+    [159_808, 159_744, 64],     // 64 over: dropped immediately, no hysteresis
     [319_488, 159_744, 159_744],
-    [319_999, 159_744, 159_744],
-    [320_000, 159_744, 160_256],
+    [319_999, 159_744, 160_192],
     [100, 0, 0],
     [-50, 159_744, 0],
   ];
   const dropBad = dropTable
     .filter(([len, ret, want]) => loopDropSamples(len, ret) !== want)
     .map(([len, ret, want]) => `(${len}, ${ret}): want ${want}, got ${loopDropSamples(len, ret)}`);
-  const quantumOk = dropTable.every(([len, ret]) => loopDropSamples(len, ret) % 512 === 0);
-  check('loopDropSamples drops only past 2x retention, floored to the quantum',
+  const quantumOk = dropTable.every(([len, ret]) => loopDropSamples(len, ret) % 64 === 0);
+  check('loopDropSamples drops the moment the window passes the limit, floored to the quantum',
     dropBad.length === 0 && quantumOk,
     dropBad.length === 0
-      ? `${dropTable.length} exact cases, every result a multiple of 512`
+      ? `${dropTable.length} exact cases, every result a multiple of 64`
       : dropBad.join('; '));
 
   const loopFs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
   if (!loopFs || typeof loopFs.readFileSync !== 'function') throw new Error('node fs module unavailable');
   const panel = loopFs.readFileSync('src/ui/capturePanel.ts', 'utf8');
   const panelLoop = panel.includes("['loop', t('capturePanel.loop')]") &&
-    panel.includes('loopRetentionSamples(') &&
-    panel.includes('maxLoopSeconds(') &&
-    panel.includes('loopRetentionSamples(maxLoop');
+    panel.includes('clampLoopSamples(') &&
+    panel.includes('maxLoopSamples(');
   check('the capture panel offers loop mode with the shared retention helpers',
     panelLoop,
     `segment=${panel.includes("['loop', t('capturePanel.loop')]")}, ` +
-    `helper=${panel.includes('loopRetentionSamples(')}, max=${panel.includes('maxLoopSeconds(')}, ` +
-    `budgetDerived=${panel.includes('loopRetentionSamples(maxLoop')}`);
+    `helper=${panel.includes('clampLoopSamples(')}, max=${panel.includes('maxLoopSamples(')}`);
 
   const appSrc = loopFs.readFileSync('src/ui/app.ts', 'utf8');
   const startStart = appSrc.indexOf('private async startCapture(');
@@ -579,12 +589,28 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `slice=${startSrc.length}, reset=${flagReset}, refusal=${firstRefusal}, set=${flagSet}`);
 
   const segMatrix =
-    panel.includes("id === 'loop' && (v.running || v.stopping || s.channels === 32)") &&
+    panel.includes("id === 'loop' && (v.running || v.stopping)") &&
+    !panel.includes("v.stopping || s.channels === 32") &&
+    // No 32-channel special case anywhere in the panel: loop is offered, sized and
+    // annotated identically at every width now that the interleaved store drops.
+    !panel.includes('s.channels === 32') &&
     panel.includes("id !== 'loop' && s.mode === 'loop' && (v.running || v.stopping)");
-  const decodeGuard = appSrc.includes('(this.running || this.stopping) && this.captureIsLoop');
-  check('the decode guard covers the loop stop drain',
-    decodeGuard,
-    `guard=${decodeGuard}`);
+  // W6: the loop decode ban is gone - a running loop decodes as a labelled snapshot,
+  // and the note carries the tag. The flag is read before the worker round trip, so a
+  // decode that outlives the running capture keeps its label.
+  const snapshotDecl = appSrc.indexOf(
+    'const snapshotDecode = this.captureIsLoop && (this.running || this.stopping)');
+  const snapshotAwait = appSrc.indexOf('await this.decodeClient.decode');
+  const snapshotDecode = !appSrc.includes('decoders cannot run during a loop capture') &&
+    snapshotDecl > 0 && snapshotAwait > snapshotDecl &&
+    appSrc.includes('...(snapshotDecode ? { snapshot: true as const } : {})') &&
+    !appSrc.includes('this.captureIsLoop && (this.running || this.stopping) ? { snapshot: true as const }');
+  check('a running loop decodes as a labelled snapshot',
+    snapshotDecode,
+    `throwGone=${!appSrc.includes('decoders cannot run during a loop capture')}, ` +
+    `declaredBeforeAwait=${snapshotDecl > 0 && snapshotAwait > snapshotDecl}, ` +
+    `snapshotTag=${appSrc.includes('...(snapshotDecode ? { snapshot: true as const } : {})')}, ` +
+    `lateFlagGone=${!appSrc.includes('this.captureIsLoop && (this.running || this.stopping) ? { snapshot: true as const }')}`);
   const progressSplit =
     appSrc.includes('samples: this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length') &&
     appSrc.includes('bytesPerSampleForChannels(this.store.channelCount)');
@@ -592,10 +618,39 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     progressSplit,
     `total=${appSrc.includes('samples: this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length')}, ` +
     `retained=${appSrc.includes('bytesPerSampleForChannels(this.store.channelCount)')}`);
-  check('the mode segment disable matrix locks loop while running or at 32ch',
+  check('the mode segment disable matrix locks loop while running (32ch loop unlocked)',
     segMatrix,
-    `loopClause=${panel.includes("id === 'loop' && (v.running || v.stopping || s.channels === 32)")}, ` +
+    `loopClause=${panel.includes("id === 'loop' && (v.running || v.stopping)")}, ` +
+    `no32Gone=${!panel.includes("v.stopping || s.channels === 32")}, ` +
+    `no32Branch=${!panel.includes('s.channels === 32')}, ` +
     `escapeClause=${panel.includes("id !== 'loop' && s.mode === 'loop' && (v.running || v.stopping)")}`);
+
+  const loopOpts = startSrc.includes(
+    'isLoop ? { loop: true } : { deviceSampleLimit: this.captureLimitSamples }');
+  check('a loop capture opts out of the device length limit and of the transport watchdogs',
+    loopOpts, `loopOption=${loopOpts}`);
+  // The transport side of that contract: the option must actually gate both watchdogs and
+  // be cleared on both stop paths, or a later capture inherits a loop capture's silence.
+  const devSrc = loopFs.readFileSync('src/device/slogic16u3.ts', 'utf8');
+  const gateFirstByte = devSrc.includes('if (!this.loopMode) this.armNoDataWatchdog(cfg)');
+  const gateUnderrun = devSrc.includes('slowCount >= depth && !this.underrun && !this.loopMode');
+  const gateSet = devSrc.includes('this.loopMode = opts.loop ?? false');
+  const gateResets = (devSrc.match(/this\.loopMode = false;/g) ?? []).length;
+  check('loop mode gates both watchdogs and is cleared on both stop paths',
+    gateFirstByte && gateUnderrun && gateSet && gateResets === 2,
+    `firstByte=${gateFirstByte}, underrun=${gateUnderrun}, set=${gateSet}, resets=${gateResets}`);
+
+  // The loop + software-trigger combination: the trigger branch must carry the loop
+  // flag too, the trigger budget must be unbounded (the store windows downstream),
+  // and the panel must not claim the trigger is ignored in loop mode.
+  const loopTrigger = startSrc.includes('...(isLoop ? { loop: true } : {})') &&
+    startSrc.includes('maxSamples: isLoop ? Number.POSITIVE_INFINITY : this.captureLimitSamples');
+  check('a loop capture arms the software trigger with an unbounded budget',
+    loopTrigger, `triggerBranch=${loopTrigger}`);
+  check('the panel no longer calls the loop trigger ignored',
+    !panel.includes('loopTriggerIgnored') &&
+    !appSrc.includes('const softwareTrigger = this.settings.softwareTrigger && !isLoop'),
+    `panelNote=${!panel.includes('loopTriggerIgnored')}, gateGone=${!appSrc.includes('const softwareTrigger = this.settings.softwareTrigger && !isLoop')}`);
 
   const pumpStart = appSrc.indexOf('private pumpBusBuilders');
   const pumpEnd = pumpStart >= 0 ? appSrc.indexOf('private drawBusRows', pumpStart) : -1;
@@ -616,9 +671,15 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const enforceStart = appSrc.indexOf('private enforceLoopRetention');
   const enforceEnd = enforceStart >= 0 ? appSrc.indexOf('private async stopCapture', enforceStart) : -1;
   const enforceSrc = enforceEnd > enforceStart ? appSrc.slice(enforceStart, enforceEnd) : '';
-  check('a retention drop resets bus builders and invalidates their frame caches',
-    enforceSrc.includes('b.builder?.reset(store.length);') && enforceSrc.includes('b.cache = null;'),
-    `reset=${enforceSrc.includes('b.builder?.reset(store.length);')}, cache=${enforceSrc.includes('b.cache = null;')}`);
+  check('a retention drop leaves bus builders on their absolute frontier (no reset)',
+    !enforceSrc.includes('b.builder?.reset') && !enforceSrc.includes('b.cache = null;'),
+    `resetGone=${!enforceSrc.includes('b.builder?.reset')}, cacheGone=${!enforceSrc.includes('b.cache = null;')}`);
+  // HSync's checked_sub: the trigger position is store-relative session state, so a drop
+  // shifts it left and clears it once the trigger sample itself leaves retention.
+  const triggerShift = enforceSrc.includes(
+    'this.triggerSampleIndex - drop >= 0 ? this.triggerSampleIndex - drop : null');
+  check('a retention drop shifts the trigger marker and clears it once it leaves the window',
+    triggerShift, `checkedSub=${triggerShift}`);
 
   const adcStore = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
   const adcWords = new Uint16Array(40_000);
@@ -659,6 +720,46 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     adcLivePart.kind === 'columns'
       ? `doneUpTo=${adcPartial.builder.pyramid.doneUpTo} c10=${adcLivePart.max[10]} c11=${adcLivePart.min[11]}`
       : `kind=${adcLivePart.kind}`);
+
+  // A drop can reach the store after the pump last called setLength: the one-bus-per-frame
+  // pump has not reached this bus yet, or the capture is in its stop drain (the pump
+  // returns early while stopping). analogFrame must draw the window the store NOW holds,
+  // not the bins the stale origin still points at.
+  {
+    const loopStore = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
+    const words = new Uint16Array(40_000);
+    for (let i = 0; i < words.length; i++) words[i] = Math.floor(i / 250) & 0xff;
+    loopStore.append(new Uint8Array(words.buffer));
+    const stale = adcView();
+    stale.builder = new BusBuilder(loopStore, adcSpec, loopStore.length, undefined, 80_000);
+    while (!stale.builder.step(10)) { /* build */ }
+    stale.builder.setLength(loopStore.length);
+    loopStore.dropFront(8_192); // leaf-aligned; the 32-column window slides 8 leaves
+    const noRefresh = analogFrame(loopStore, stale, 0, loopStore.length, 32, true);
+    const reference = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
+    reference.append(new Uint8Array(words.buffer, 8_192 * 2));
+    const fresh = adcView();
+    fresh.builder = new BusBuilder(reference, adcSpec, reference.length, undefined, 80_000);
+    while (!fresh.builder.step(10)) { /* build */ }
+    fresh.builder.setLength(reference.length);
+    const want = analogFrame(reference, fresh, 0, reference.length, 32, true);
+    const mismatches: string[] = [];
+    if (noRefresh.kind !== 'columns' || want.kind !== 'columns') {
+      mismatches.push(`kinds ${noRefresh.kind}/${want.kind}`);
+    } else {
+      for (let c = 0; c < 32; c++) {
+        if (noRefresh.min[c] !== want.min[c] || noRefresh.max[c] !== want.max[c]) {
+          mismatches.push(`c${c}: ${noRefresh.min[c]}..${noRefresh.max[c]} vs ${want.min[c]}..${want.max[c]}`);
+          break;
+        }
+      }
+    }
+    check('a frame drawn before the pump refreshes still reads the dropped window',
+      mismatches.length === 0,
+      mismatches.length === 0
+        ? `dropped 8192 with the origin stale: 32 columns match a fresh store (c0=${want.kind === 'columns' ? want.min[0] : '?'})`
+        : mismatches.join('; '));
+  }
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

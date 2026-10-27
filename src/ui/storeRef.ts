@@ -45,6 +45,10 @@ export class StoreRef implements SampleStore {
     return this.inner.length;
   }
 
+  get droppedSamples(): number {
+    return this.inner.droppedSamples;
+  }
+
   append(chunk: Uint8Array): void {
     this.inner.append(chunk);
   }

@@ -17,8 +17,19 @@
  * Geometric cost is 2 * (1/16 + 1/256 + ...) = 2/15 bits per sample per channel, i.e.
  * 13.3% on top of the base, and reduction from level k-1 to k is again word-parallel.
  *
+ * Pyramid bins are addressed in ABSOLUTE sample space - bin j of level k always covers
+ * absolute samples [j*16^k, (j+1)*16^k), however many samples have been dropped from
+ * the front. A drop therefore moves nothing: the base planes advance their head (as
+ * before), each pyramid level only releases whole plane blocks the dropped span fully
+ * covers, and no bin is ever rebuilt. This is the HSync (hsync-capture) scheme: the
+ * summary outlives the front of the window and dies block-wise, never by rebuild.
+ *
  * Bins are only published once complete (`validBins`), so append is strictly incremental:
  * nothing is ever recomputed, which is what makes this usable during a live capture.
+ *
+ * JS constraint: bitwise indexing truncates to int32, so every bit index handed to a
+ * BitPlane is plane-local (< 2^31). Absolute coordinates live only in double
+ * arithmetic (exact to 2^53), which a loop capture can never outgrow.
  */
 
 import { BitPlane, HAS_ONE, HAS_ZERO, HAS_BOTH } from './bitplane.js';
@@ -78,6 +89,11 @@ export class PlanarSampleStore implements SampleStore {
   readonly samplerate: number;
   length = 0;
 
+  /** Samples dropped from the front over the store's life. */
+  get droppedSamples(): number {
+    return this.droppedTotal;
+  }
+
   private readonly bytesPerSample: number;
   /** Query-time only, so the bench can sweep them on an already-built store. */
   snapColumns: boolean;
@@ -88,12 +104,35 @@ export class PlanarSampleStore implements SampleStore {
   /** hi[level][ch] / lo[level][ch] for level 1..MAX_LEVEL. Index 0 is unused. */
   private readonly hi: BitPlane[][] = [];
   private readonly lo: BitPlane[][] = [];
-  /** Number of complete bins published at each level. validBins[0] === length. */
+  /** Number of complete bins published at each level. Levels 1..MAX_LEVEL are ABSOLUTE
+   *  bin counts (bin j covers absolute samples [j*B, (j+1)*B)); index 0 is the store-relative
+   *  sample count and nothing reads it. */
   private readonly validBins: number[] = [];
   private readonly binSize: number[] = [];
 
   /** Unknown spans, sorted and non-overlapping. Empty means no gaps. */
   private gapList: GapSpan[] = [];
+
+  /**
+   * Samples dropped from the front over the store's life. Pyramid bins are absolute
+   * (see the header), so this is the only translation queries and appends need.
+   */
+  private droppedTotal = 0;
+  /**
+   * Absolute sample the base planes start at: `droppedTotal` rounded down to a
+   * 512-multiple, keeping every base `head` 512-aligned so the group reduction's
+   * 16-word reads never straddle a base block. The up-to-511 retained dropped
+   * samples cost at most 64 bytes per channel.
+   */
+  private baseOrigin = 0;
+  /** `droppedTotal - baseOrigin`, the offset of store sample 0 inside the base planes. */
+  private baseSkew = 0;
+  /**
+   * Absolute bin each pyramid level's storage starts at (block-aligned); bins below
+   * it have been released. Advances only when the dropped span covers a whole plane
+   * block, which is what makes dropFront O(levels * channels) instead of O(length).
+   */
+  private readonly levelHead: number[] = [];
 
   /** Scratch, reused by query() so the render loop does not allocate per column. */
   private scratchBins = 0;
@@ -117,6 +156,7 @@ export class PlanarSampleStore implements SampleStore {
     for (let c = 0; c < channelCount; c++) this.base.push(new BitPlane(BASE_BLOCK_BITS_LOG));
     this.binSize[0] = 1;
     this.validBins[0] = 0;
+    this.levelHead[0] = 0;
     for (let k = 1; k <= MAX_LEVEL; k++) {
       const bbl = levelBlockBitsLog(k);
       const h: BitPlane[] = [];
@@ -129,6 +169,7 @@ export class PlanarSampleStore implements SampleStore {
       this.lo[k] = l;
       this.binSize[k] = binSizeOf(k);
       this.validBins[k] = 0;
+      this.levelHead[k] = 0;
     }
   }
 
@@ -145,15 +186,16 @@ export class PlanarSampleStore implements SampleStore {
     const to = from + n;
     if (to > 0x7fffffff) throw new Error(`capture would exceed the 2^31 sample ceiling (${to})`);
 
-    for (let c = 0; c < this.channelCount; c++) this.base[c]!.extendTo(to);
-    if (bps === 1) this.writeBase8(chunk, n, from);
-    else if (bps === 2) this.writeBase16(chunk, n, from);
-    else if (bps === 4) this.writeBase32(chunk, n, from);
-    else this.writeBaseWide(chunk, n, from);
+    const dst = from + this.baseSkew;
+    for (let c = 0; c < this.channelCount; c++) this.base[c]!.extendTo(to + this.baseSkew);
+    if (bps === 1) this.writeBase8(chunk, n, dst);
+    else if (bps === 2) this.writeBase16(chunk, n, dst);
+    else if (bps === 4) this.writeBase32(chunk, n, dst);
+    else this.writeBaseWide(chunk, n, dst);
 
     this.length = to;
     this.validBins[0] = to;
-    this.updatePyramid(from, to);
+    this.updatePyramid(to);
   }
 
   // ---------------------------------------------------------------- drop-front
@@ -164,19 +206,35 @@ export class PlanarSampleStore implements SampleStore {
     }
     if (samples > this.length) throw new Error(`dropFront ${samples} past length ${this.length}`);
     if (samples === 0) return;
-    for (const plane of this.base) plane.dropFront(samples);
+    this.droppedTotal += samples;
     this.length -= samples;
     this.validBins[0] = this.length;
-    this.gapList = shiftGapsFront(this.gapList, samples);
-    for (let k = 1; k <= MAX_LEVEL; k++) {
-      const bbl = levelBlockBitsLog(k);
-      for (let c = 0; c < this.channelCount; c++) {
-        this.hi[k]![c] = new BitPlane(bbl);
-        this.lo[k]![c] = new BitPlane(bbl);
-      }
-      this.validBins[k] = 0;
+    // Base planes drop only on 512 boundaries, keeping `head` aligned for the group
+    // reduction; the sub-512 slack stays stored and is skipped via baseSkew.
+    const origin = this.droppedTotal - (this.droppedTotal % 512);
+    if (origin > this.baseOrigin) {
+      const d = origin - this.baseOrigin;
+      for (const plane of this.base) plane.dropFront(d);
+      this.baseOrigin = origin;
     }
-    this.updatePyramid(0, this.length);
+    this.baseSkew = this.droppedTotal - this.baseOrigin;
+    this.gapList = shiftGapsFront(this.gapList, samples);
+    // Pyramid bins are absolute, so a drop rebuilds nothing: each level releases
+    // only the whole plane blocks the dropped span fully covers. Bins in between
+    // stay stored (they summarize dropped samples, which queries never ask about).
+    for (let k = 1; k <= MAX_LEVEL; k++) {
+      const target = Math.floor(this.droppedTotal / this.binSize[k]!);
+      const blockBins = 1 << levelBlockBitsLog(k);
+      const releasable = target - (target % blockBins);
+      if (releasable > this.levelHead[k]!) {
+        const bins = releasable - this.levelHead[k]!;
+        for (let c = 0; c < this.channelCount; c++) {
+          this.hi[k]![c]!.dropFront(bins);
+          this.lo[k]![c]!.dropFront(bins);
+        }
+        this.levelHead[k] = releasable;
+      }
+    }
   }
 
   // ---------------------------------------------------------------- gaps
@@ -438,66 +496,78 @@ export class PlanarSampleStore implements SampleStore {
 
   // ---------------------------------------------------------------- pyramid
 
-  private updatePyramid(from: number, to: number): void {
+  /** Publish every bin that is complete at the new absolute end, level by level. */
+  private updatePyramid(to: number): void {
+    const absEnd = this.droppedTotal + to;
     for (let k = 1; k <= MAX_LEVEL; k++) {
       const B = this.binSize[k]!;
       const b0 = this.validBins[k]!;
-      const b1 = Math.floor(to / B);
+      const b1 = Math.floor(absEnd / B);
       if (b1 <= b0) break; // nothing complete at this level, so nothing above it either
       for (let c = 0; c < this.channelCount; c++) this.reduceRange(k, c, b0, b1);
       this.validBins[k] = b1;
     }
-    void from;
   }
 
   /**
    * Rebuild bins [b0, b1) of level k for one channel from level k-1 (or from the base
-   * plane when k === 1). Each output bin is exactly 16 source bits, which is half a word,
-   * so 32 output bins consume exactly 16 source words and never straddle a source block.
+   * plane when k === 1). b0/b1 are ABSOLUTE bin indices (bin j of level k covers
+   * absolute samples [j*16^k, (j+1)*16^k)). Each output bin is exactly 16 source
+   * bits, which is half a word, so 32 output bins consume exactly 16 source words
+   * and never straddle a source block: dst-local (i - dh) is 32-aligned because dh
+   * is block-aligned, and the source bit is 512-aligned because baseOrigin is a
+   * 512-multiple and pyramid levelHeads are block-aligned.
    */
   private reduceRange(level: number, ch: number, b0: number, b1: number): void {
     const dstHi = this.hi[level]![ch]!;
     const dstLo = this.lo[level]![ch]!;
-    dstHi.extendTo(b1);
-    dstLo.extendTo(b1);
+    const dh = this.levelHead[level]!;
+    dstHi.extendTo(b1 - dh);
+    dstLo.extendTo(b1 - dh);
     const fromBase = level === 1;
     const srcHi = fromBase ? this.base[ch]! : this.hi[level - 1]![ch]!;
     const srcLo = fromBase ? this.base[ch]! : this.lo[level - 1]![ch]!;
+    // Absolute bin where the source plane's storage starts: base planes keep the
+    // 512-aligned baseOrigin, pyramid planes their block-aligned levelHead.
+    const srcOrigin = fromBase ? this.baseOrigin : this.levelHead[level - 1]!;
 
     let i = b0;
-    const headEnd = Math.min(b1, (b0 + 31) & ~31);
-    for (; i < headEnd; i++) this.reduceOne(dstHi, dstLo, srcHi, srcLo, i, fromBase);
-    const tailStart = Math.max(headEnd, b1 & ~31);
+    const headEnd = Math.min(b1, Math.ceil(b0 / 32) * 32);
+    for (; i < headEnd; i++) this.reduceOne(dstHi, dstLo, srcHi, srcLo, i, dh, srcOrigin, fromBase);
+    const tailStart = Math.max(headEnd, Math.floor(b1 / 32) * 32);
     for (; i < tailStart; i += 32) {
-      if (fromBase) this.reduceGroupFromBase(dstHi, dstLo, srcHi, i);
-      else this.reduceGroup(dstHi, dstLo, srcHi, srcLo, i);
+      if (fromBase) this.reduceGroupFromBase(dstHi, dstLo, srcHi, i, dh, srcOrigin);
+      else this.reduceGroup(dstHi, dstLo, srcHi, srcLo, i, dh, srcOrigin);
     }
-    for (; i < b1; i++) this.reduceOne(dstHi, dstLo, srcHi, srcLo, i, fromBase);
+    for (; i < b1; i++) this.reduceOne(dstHi, dstLo, srcHi, srcLo, i, dh, srcOrigin, fromBase);
   }
 
   private reduceOne(
-    dstHi: BitPlane, dstLo: BitPlane, srcHi: BitPlane, srcLo: BitPlane, i: number, fromBase: boolean,
+    dstHi: BitPlane, dstLo: BitPlane, srcHi: BitPlane, srcLo: BitPlane,
+    i: number, dh: number, srcOrigin: number, fromBase: boolean,
   ): void {
-    const sBit = srcHi.head + i * 16;
+    const sBit = srcHi.head + i * 16 - srcOrigin;
     const bh = srcHi.blocks[sBit >>> srcHi.blockBitsLog]!;
     const oh = (sBit & srcHi.blockMask) >>> 5;
     const sh = bh[oh]! | 0;
     const hv = (sBit & 16) !== 0 ? sh >>> 16 : sh & 0xffff;
-    dstHi.setBit(i, hv !== 0 ? 1 : 0);
+    dstHi.setBit(i - dh, hv !== 0 ? 1 : 0);
     if (fromBase) {
-      dstLo.setBit(i, hv !== 0xffff ? 1 : 0);
+      dstLo.setBit(i - dh, hv !== 0xffff ? 1 : 0);
     } else {
       const bl = srcLo.blocks[sBit >>> srcLo.blockBitsLog]!;
       const ol = (sBit & srcLo.blockMask) >>> 5;
       const sl = bl[ol]! | 0;
       const lv = (sBit & 16) !== 0 ? sl >>> 16 : sl & 0xffff;
-      dstLo.setBit(i, lv !== 0 ? 1 : 0);
+      dstLo.setBit(i - dh, lv !== 0 ? 1 : 0);
     }
   }
 
   /** 32 aligned bins from the base plane: hi = any 1, lo = any 0. */
-  private reduceGroupFromBase(dstHi: BitPlane, dstLo: BitPlane, src: BitPlane, i: number): void {
-    const sBit = src.head + i * 16;
+  private reduceGroupFromBase(
+    dstHi: BitPlane, dstLo: BitPlane, src: BitPlane, i: number, dh: number, srcOrigin: number,
+  ): void {
+    const sBit = src.head + i * 16 - srcOrigin;
     const sArr = src.blocks[sBit >>> src.blockBitsLog]!;
     const sOff = (sBit & src.blockMask) >>> 5;
     let h = 0, l = 0;
@@ -511,15 +581,17 @@ export class PlanarSampleStore implements SampleStore {
       if (loHalf !== 0xffff) l |= 1 << b;
       if (hiHalf !== 0xffff) l |= 2 << b;
     }
-    dstHi.blocks[i >>> dstHi.blockBitsLog]![(i & dstHi.blockMask) >>> 5] = h;
-    dstLo.blocks[i >>> dstLo.blockBitsLog]![(i & dstLo.blockMask) >>> 5] = l;
+    const di = i - dh;
+    dstHi.blocks[di >>> dstHi.blockBitsLog]![(di & dstHi.blockMask) >>> 5] = h;
+    dstLo.blocks[di >>> dstLo.blockBitsLog]![(di & dstLo.blockMask) >>> 5] = l;
   }
 
   /** 32 aligned bins from a lower pyramid level: both planes are a plain OR. */
   private reduceGroup(
-    dstHi: BitPlane, dstLo: BitPlane, srcHi: BitPlane, srcLo: BitPlane, i: number,
+    dstHi: BitPlane, dstLo: BitPlane, srcHi: BitPlane, srcLo: BitPlane,
+    i: number, dh: number, srcOrigin: number,
   ): void {
-    const sBit = srcHi.head + i * 16;
+    const sBit = srcHi.head + i * 16 - srcOrigin;
     const ah = srcHi.blocks[sBit >>> srcHi.blockBitsLog]!;
     const al = srcLo.blocks[sBit >>> srcLo.blockBitsLog]!;
     const oh = (sBit & srcHi.blockMask) >>> 5;
@@ -534,14 +606,16 @@ export class PlanarSampleStore implements SampleStore {
       if ((sl & 0xffff) !== 0) l |= 1 << b;
       if (sl >>> 16 !== 0) l |= 2 << b;
     }
-    dstHi.blocks[i >>> dstHi.blockBitsLog]![(i & dstHi.blockMask) >>> 5] = h;
-    dstLo.blocks[i >>> dstLo.blockBitsLog]![(i & dstLo.blockMask) >>> 5] = l;
+    const di = i - dh;
+    dstHi.blocks[di >>> dstHi.blockBitsLog]![(di & dstHi.blockMask) >>> 5] = h;
+    dstLo.blocks[di >>> dstLo.blockBitsLog]![(di & dstLo.blockMask) >>> 5] = l;
   }
 
   // ---------------------------------------------------------------- query
 
   /**
-   * HAS_ONE | HAS_ZERO over samples [s0, s1), exactly - no rounding to bin boundaries.
+   * HAS_ONE | HAS_ZERO over ABSOLUTE samples [s0, s1), exactly - no rounding to bin
+   * boundaries. Callers translate store-relative positions by `droppedTotal`.
    *
    * Uses the deepest level whose bins fit, covers the aligned core there with one
    * word-parallel scan, and recurses one level down for the at most 15 leftover bins at
@@ -561,17 +635,18 @@ export class PlanarSampleStore implements SampleStore {
 
       const coreStart = a * B;
       const coreEnd = b * B;
+      const lh = this.levelHead[level]!;
       // Core first: it is the largest part of the column and it lives in the smallest,
       // hottest array, so a channel that is actually switching answers from cache and
       // never touches the two recursive tails.
       let st = 0;
-      if (this.hi[level]![ch]!.anyOne(a, b)) st |= HAS_ONE;
-      if (this.lo[level]![ch]!.anyOne(a, b)) st |= HAS_ZERO;
+      if (this.hi[level]![ch]!.anyOne(a - lh, b - lh)) st |= HAS_ONE;
+      if (this.lo[level]![ch]!.anyOne(a - lh, b - lh)) st |= HAS_ZERO;
       if (st !== HAS_BOTH && s0 < coreStart) st |= this.rangeState(ch, s0, coreStart, level - 1);
       if (st !== HAS_BOTH && coreEnd < s1) st |= this.rangeState(ch, coreEnd, s1, level - 1);
       return st;
     }
-    return this.base[ch]!.rangeState(s0, s1);
+    return this.base[ch]!.rangeState(s0 - this.baseOrigin, s1 - this.baseOrigin);
   }
 
   /** Deepest level whose bins are small enough to give a column at least CORE_BINS of them. */
@@ -603,6 +678,8 @@ export class PlanarSampleStore implements SampleStore {
     const width = e - s;
     const level = this.pickLevel(width / bins);
     const base = this.base[channel]!;
+    const D = this.droppedTotal;
+    const skew = this.baseSkew;
 
     if (bins !== this.scratchBins) {
       this.scratchBins = bins;
@@ -626,18 +703,19 @@ export class PlanarSampleStore implements SampleStore {
       let c0 = s + Math.floor((i * width) / bins);
       let c1 = s + Math.floor(((i + 1) * width) / bins);
       if (snap) {
-        if (i !== 0) c0 = Math.min(e - 1, Math.round(c0 / B) * B);
-        if (i !== bins - 1) c1 = Math.min(e, Math.round(c1 / B) * B);
+        // Bins live in absolute sample space, so snapping must round there too.
+        if (i !== 0) c0 = Math.min(e - 1, Math.round((c0 + D) / B) * B - D);
+        if (i !== bins - 1) c1 = Math.min(e, Math.round((c1 + D) / B) * B - D);
       }
       if (c1 <= c0) c1 = c0 + 1;
       if (c1 > e) c1 = e;
 
-      let st = this.rangeState(channel, c0, c1, level);
+      let st = this.rangeState(channel, c0 + D, c1 + D, level);
       const hv = (st & HAS_ONE) !== 0 ? 1 : 0;
       const lv = (st & HAS_ZERO) !== 0 ? 0 : 1;
       // Fold in the sample immediately before the column so an edge that lands exactly on
       // a column boundary is attributed to the column it enters instead of vanishing.
-      if (c0 > 0) st |= base.getBit(c0 - 1) !== 0 ? HAS_ONE : HAS_ZERO;
+      if (c0 > 0) st |= base.getBit(c0 - 1 + skew) !== 0 ? HAS_ONE : HAS_ZERO;
       const ev = st === HAS_BOTH ? 1 : 0;
 
       high[i] = hv;
@@ -720,17 +798,18 @@ export class PlanarSampleStore implements SampleStore {
     const plane = this.base[channel]!;
     const blockWords = plane.blockWords;
     const hb = plane.head;
+    const skew = this.baseSkew;
     let n = outOff;
 
-    const ps = s + hb;
-    const pe = e + hb;
+    const ps = s + skew + hb;
+    const pe = e + skew + hb;
     const wStart = ps >>> 5;
     const wEnd = (pe - 1) >>> 5;
     const firstMask = -1 << (ps & 31);
     const lastHi = ((pe - 1) & 31) + 1;
     const lastMask = lastHi === 32 ? -1 : ~(-1 << lastHi);
     // carry is the sample immediately below the first word; word 0 has no predecessor.
-    let carry = s === 0 ? 0 : plane.getBit(s - 1);
+    let carry = s === 0 ? 0 : plane.getBit(s - 1 + skew);
 
     let w = wStart;
     while (w <= wEnd) {
@@ -752,7 +831,7 @@ export class PlanarSampleStore implements SampleStore {
           y = (y + (y >> 4)) & 0x0f0f0f0f;
           n += Math.imul(y, 0x01010101) >> 24;
         } else {
-          const bitBase = w * 32 - hb;
+          const bitBase = w * 32 - hb - skew;
           while (x !== 0) {
             const t = x & -x;
             out[n++] = bitBase + (31 - Math.clz32(t));
@@ -787,6 +866,6 @@ export class PlanarSampleStore implements SampleStore {
   /** Exposed for tests: the raw sample bit, no pyramid involved. */
   sampleAt(channel: number, index: number): number {
     if (index < 0 || index >= this.length) throw new Error(`sample ${index} out of range`);
-    return this.base[channel]!.getBit(index);
+    return this.base[channel]!.getBit(index + this.baseSkew);
   }
 }

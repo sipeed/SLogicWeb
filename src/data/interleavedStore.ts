@@ -19,6 +19,7 @@
  * thread cannot keep up, while preserving the native interleaved words can.
  */
 
+import { DROP_FRONT_QUANTUM } from './types.js';
 import type { ColumnView, GapSpan, MemoryReport, SampleStore } from './types.js';
 import type { ChannelCount } from '../types.js';
 
@@ -69,6 +70,13 @@ class MaskLevel {
     }
   }
 
+  dropFrontBlocks(count: number): void {
+    if (count > 0) {
+      this.hi.splice(0, count);
+      this.lo.splice(0, count);
+    }
+  }
+
   byteLength(): number {
     return (this.hi.length + this.lo.length) * this.block * (this.wordBits >>> 3);
   }
@@ -78,6 +86,11 @@ export class InterleavedSampleStore implements SampleStore {
   readonly channelCount: ChannelCount;
   readonly samplerate: number;
   length = 0;
+
+  /** Samples dropped from the front over the store's life. */
+  get droppedSamples(): number {
+    return this.droppedTotal;
+  }
   /** Query-time only, so the bench can sweep it on an already-built store. */
   coreBins: number = DEFAULT_CORE_BINS;
 
@@ -87,6 +100,20 @@ export class InterleavedSampleStore implements SampleStore {
   private readonly levels: MaskLevel[] = [];
   private readonly validBins: number[] = [];
   private readonly binSize: number[] = [];
+
+  /**
+   * Loop drop cursors, the same scheme as PlanarSampleStore: pyramid bins are
+   * addressed in ABSOLUTE sample space, so a drop moves nothing - the base blocks
+   * advance a 512-aligned origin, each pyramid level releases only the whole blocks
+   * the dropped span fully covers, and no bin is ever rebuilt. `head` is the sample
+   * offset of absolute sample `baseOrigin` inside base block 0 (baseOrigin % 2^24).
+   */
+  private droppedTotal = 0;
+  private baseOrigin = 0;
+  private baseSkew = 0;
+  private head = 0;
+  /** Absolute bin each pyramid level's storage starts at (block-aligned). */
+  private readonly levelHead: number[] = [];
 
   private scratchBins = 0;
   private scratchLow = new Uint8Array(0);
@@ -105,15 +132,55 @@ export class InterleavedSampleStore implements SampleStore {
     this.samplerate = samplerate;
     this.binSize[0] = 1;
     this.validBins[0] = 0;
+    this.levelHead[0] = 0;
     for (let k = 1; k <= MAX_LEVEL; k++) {
       this.levels[k] = new MaskLevel(levelBlockLog(k), this.wordBits);
       this.binSize[k] = Math.pow(2, LEVEL_LOG * k);
       this.validBins[k] = 0;
+      this.levelHead[k] = 0;
     }
   }
 
-  dropFront(_samples: number): void {
-    throw new Error('InterleavedSampleStore does not support drop-front retention');
+  /**
+   * Base-block position of an ABSOLUTE sample: block 0 starts at absolute sample
+   * `baseOrigin - head`, so position p covers absolute sample `baseOrigin - head + p`.
+   */
+  private basePos(absSample: number): number {
+    return absSample - this.baseOrigin + this.head;
+  }
+
+  dropFront(samples: number): void {
+    if (!Number.isInteger(samples) || samples < 0 || samples % DROP_FRONT_QUANTUM !== 0) {
+      throw new Error(`dropFront drops a non-negative multiple of ${DROP_FRONT_QUANTUM}, got ${samples}`);
+    }
+    if (samples > this.length) throw new Error(`dropFront ${samples} past length ${this.length}`);
+    if (samples === 0) return;
+    this.droppedTotal += samples;
+    this.length -= samples;
+    this.validBins[0] = this.length;
+    // Base blocks drop only on 512 boundaries, keeping level-1's 16-sample bin reads
+    // aligned with the absolute bin grid; the sub-512 slack stays stored (baseSkew).
+    const origin = this.droppedTotal - (this.droppedTotal % 512);
+    if (origin > this.baseOrigin) {
+      const d = origin - this.baseOrigin;
+      const h = this.head + d;
+      const whole = Math.floor(h / BASE_BLOCK);
+      if (whole > 0) this.base.splice(0, whole);
+      this.head = h % BASE_BLOCK;
+      this.baseOrigin = origin;
+    }
+    this.baseSkew = this.droppedTotal - this.baseOrigin;
+    // Pyramid bins are absolute: release only the whole blocks the dropped span
+    // fully covers, one splice per level. No content is ever rebuilt.
+    for (let k = 1; k <= MAX_LEVEL; k++) {
+      const target = Math.floor(this.droppedTotal / this.binSize[k]!);
+      const blockBins = this.levels[k]!.block;
+      const releasable = target - (target % blockBins);
+      if (releasable > this.levelHead[k]!) {
+        this.levels[k]!.dropFrontBlocks((releasable - this.levelHead[k]!) / blockBins);
+        this.levelHead[k] = releasable;
+      }
+    }
   }
 
   append(chunk: Uint8Array): void {
@@ -125,14 +192,15 @@ export class InterleavedSampleStore implements SampleStore {
     const to = from + n;
     if (to > 0x7fffffff) throw new Error(`capture would exceed the 2^31 sample ceiling (${to})`);
 
-    while (this.base.length * BASE_BLOCK < to) this.base.push(words(this.wordBits, BASE_BLOCK));
+    const room = to + this.baseSkew + this.head;
+    while (this.base.length * BASE_BLOCK < room) this.base.push(words(this.wordBits, BASE_BLOCK));
 
     const src = (chunk.byteOffset & (bps - 1)) === 0
       ? wordsView(chunk, this.wordBits, n)
       : (() => { const t = words(this.wordBits, n); new Uint8Array(t.buffer).set(chunk); return t; })();
 
     let si = 0;
-    let dst = from;
+    let dst = from + this.baseSkew + this.head;
     while (si < n) {
       const blk = dst >>> BASE_BLOCK_LOG;
       const off = dst & BASE_BLOCK_MASK;
@@ -148,35 +216,40 @@ export class InterleavedSampleStore implements SampleStore {
   }
 
   private updatePyramid(to: number): void {
+    const absEnd = this.droppedTotal + to;
     for (let k = 1; k <= MAX_LEVEL; k++) {
       const B = this.binSize[k]!;
       const b0 = this.validBins[k]!;
-      const b1 = Math.floor(to / B);
+      const b1 = Math.floor(absEnd / B);
       if (b1 <= b0) break;
       const lv = this.levels[k]!;
-      lv.reserve(b1);
+      const dh = this.levelHead[k]!;
+      lv.reserve(b1 - dh);
       if (k === 1) {
         for (let i = b0; i < b1; i++) {
-          const s0 = i * 16;
+          const s0 = this.basePos(i * 16);
           const blk = s0 >>> BASE_BLOCK_LOG;
           const arr = this.base[blk]!;
           const off = s0 & BASE_BLOCK_MASK;
           let h = 0, l = 0;
           for (let j = 0; j < 16; j++) { const v = arr[off + j]!; h |= v; l |= ~v; }
-          lv.hi[i >>> lv.blockLog]![i & lv.mask] = h;
-          lv.lo[i >>> lv.blockLog]![i & lv.mask] = l;
+          const di = i - dh;
+          lv.hi[di >>> lv.blockLog]![di & lv.mask] = h;
+          lv.lo[di >>> lv.blockLog]![di & lv.mask] = l;
         }
       } else {
         const src = this.levels[k - 1]!;
+        const sh0 = this.levelHead[k - 1]!;
         for (let i = b0; i < b1; i++) {
-          const s0 = i * 16;
+          const s0 = i * 16 - sh0;
           const sBlk = s0 >>> src.blockLog;
           const sh = src.hi[sBlk]!, sl = src.lo[sBlk]!;
           const off = s0 & src.mask;
           let h = 0, l = 0;
           for (let j = 0; j < 16; j++) { h |= sh[off + j]!; l |= sl[off + j]!; }
-          lv.hi[i >>> lv.blockLog]![i & lv.mask] = h;
-          lv.lo[i >>> lv.blockLog]![i & lv.mask] = l;
+          const di = i - dh;
+          lv.hi[di >>> lv.blockLog]![di & lv.mask] = h;
+          lv.lo[di >>> lv.blockLog]![di & lv.mask] = l;
         }
       }
       this.validBins[k] = b1;
@@ -184,18 +257,20 @@ export class InterleavedSampleStore implements SampleStore {
   }
 
   private sampleBit(ch: number, i: number): number {
-    return (this.base[i >>> BASE_BLOCK_LOG]![i & BASE_BLOCK_MASK]! >>> ch) & 1;
+    const p = i + this.baseSkew + this.head;
+    return (this.base[p >>> BASE_BLOCK_LOG]![p & BASE_BLOCK_MASK]! >>> ch) & 1;
   }
 
+  /** HAS_ONE | HAS_ZERO over ABSOLUTE samples [s0, s1). */
   private baseState(ch: number, s0: number, s1: number): number {
     let st = 0;
-    let i = s0;
-    while (i < s1) {
-      const blk = i >>> BASE_BLOCK_LOG;
+    let p = this.basePos(s0);
+    const pEnd = this.basePos(s1);
+    while (p < pEnd) {
+      const blk = p >>> BASE_BLOCK_LOG;
       const arr = this.base[blk]!;
-      const stop = Math.min(s1, (blk + 1) * BASE_BLOCK);
-      let j = i & BASE_BLOCK_MASK;
-      for (; i < stop; i++, j++) {
+      const stop = Math.min(pEnd, (blk + 1) * BASE_BLOCK);
+      for (let j = p & BASE_BLOCK_MASK; p < stop; p++, j++) {
         st |= ((arr[j]! >>> ch) & 1) !== 0 ? HAS_ONE : HAS_ZERO;
         if (st === HAS_BOTH) return HAS_BOTH;
       }
@@ -203,12 +278,15 @@ export class InterleavedSampleStore implements SampleStore {
     return st;
   }
 
+  /** Bins [a, b) of a level, ABSOLUTE bin indices. */
   private levelState(level: number, ch: number, a: number, b: number): number {
     const lv = this.levels[level]!;
+    const lh = this.levelHead[level]!;
     let st = 0;
     for (let i = a; i < b; i++) {
-      const blk = i >>> lv.blockLog;
-      const off = i & lv.mask;
+      const local = i - lh;
+      const blk = local >>> lv.blockLog;
+      const off = local & lv.mask;
       if ((lv.hi[blk]![off]! >>> ch) & 1) st |= HAS_ONE;
       if ((lv.lo[blk]![off]! >>> ch) & 1) st |= HAS_ZERO;
       if (st === HAS_BOTH) return HAS_BOTH;
@@ -265,12 +343,13 @@ export class InterleavedSampleStore implements SampleStore {
     const low = this.scratchLow, high = this.scratchHigh;
     const edge = this.scratchEdge, packed = this.scratchPacked;
 
+    const D = this.droppedTotal;
     for (let i = 0; i < bins; i++) {
       const c0 = s + Math.floor((i * width) / bins);
       let c1 = s + Math.floor(((i + 1) * width) / bins);
       if (c1 <= c0) c1 = c0 + 1;
       if (c1 > e) c1 = e;
-      let st = this.rangeState(channel, c0, c1, level);
+      let st = this.rangeState(channel, c0 + D, c1 + D, level);
       const hv = (st & HAS_ONE) !== 0 ? 1 : 0;
       const lv = (st & HAS_ZERO) !== 0 ? 0 : 1;
       if (c0 > 0) st |= this.sampleBit(channel, c0 - 1) !== 0 ? HAS_ONE : HAS_ZERO;
@@ -286,16 +365,19 @@ export class InterleavedSampleStore implements SampleStore {
     const s = Math.max(1, Math.floor(startSample));
     const e = Math.min(this.length, Math.ceil(endSample));
     if (s >= e) return new Int32Array(0);
+    const skew = this.baseSkew + this.head;
     let out = new Int32Array(1024);
     let n = 0;
     let prev = this.sampleBit(channel, s - 1);
     let i = s;
-    while (i < e) {
-      const blk = i >>> BASE_BLOCK_LOG;
+    let p = i + skew;
+    const pEnd = e + skew;
+    while (p < pEnd) {
+      const blk = p >>> BASE_BLOCK_LOG;
       const arr = this.base[blk]!;
-      const stop = Math.min(e, (blk + 1) * BASE_BLOCK);
-      let j = i & BASE_BLOCK_MASK;
-      for (; i < stop; i++, j++) {
+      const stop = Math.min(pEnd, (blk + 1) * BASE_BLOCK);
+      let j = p & BASE_BLOCK_MASK;
+      for (; p < stop; p++, i++, j++) {
         const v = (arr[j]! >>> channel) & 1;
         if (v !== prev) {
           if (n === out.length) { const bigger = new Int32Array(out.length * 2); bigger.set(out); out = bigger; }

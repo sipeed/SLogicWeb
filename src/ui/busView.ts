@@ -132,7 +132,8 @@ export function analogFrame(
   store: SampleStore, bv: BusViewState, start: number, end: number, widthPx: number, live: boolean,
 ): AnalogFrame {
   if (store.length === 0 || widthPx <= 0 || !(end > start)) return { kind: 'empty', reason: 'no-capture' };
-  const key = [store.length, start, end, widthPx, bv.builder?.pyramid.doneUpTo ?? -1].join(':');
+  // droppedSamples distinguishes two loop generations at the same length/doneUpTo.
+  const key = [store.length, store.droppedSamples, start, end, widthPx, bv.builder?.pyramid.doneUpTo ?? -1].join(':');
   if (bv.cache?.key === key) return bv.cache.frame;
   const frame = compute(store, bv, start, end, widthPx, live);
   bv.cache = { key, frame };
@@ -174,6 +175,12 @@ function compute(
   }
   if (!bv.builder) return { kind: 'empty', reason: live ? 'live' : 'no-capture' };
   const pyramid = bv.builder.pyramid;
+  // The bins are absolute, so `range()` converts through the window origin the builder
+  // carries - refresh it from the store here rather than trusting the pump. A drop can
+  // land between the pump's `setLength` and this draw (a bus the one-bus-per-frame pump
+  // has not reached yet, or the stop drain, where the pump does not run at all), and a
+  // stale origin reads bins the window has already left, i.e. pre-drop data.
+  pyramid.setOrigin(store.droppedSamples);
   const min = new Float64Array(widthPx).fill(Number.NaN);
   const max = new Float64Array(widthPx).fill(Number.NaN);
   for (let c = 0; c < widthPx; c++) {

@@ -1093,6 +1093,145 @@ function testDropFront(log: Log): TestResult[] {
     equalStores(s, tail, 'whole-block drop');
   }
 
+  log('drop-front at the 64-sample loop quantum (randomized interleave)');
+  {
+    // Interleaved appends and drops at the loop quantum, including drops that are
+    // not 512-multiples (the retired quantum), then compare against a fresh store
+    // holding exactly the surviving tail. Pins the absolute-addressed pyramid:
+    // a coordinate bug shows up here as a query/edge mismatch.
+    let seed = 0x9e3779b9;
+    const rand = (n: number): number => {
+      seed = Math.imul(seed ^ (seed >>> 15), 2246822519) >>> 0;
+      seed = Math.imul(seed ^ (seed >>> 13), 3266489917) >>> 0;
+      seed = (seed ^ (seed >>> 16)) >>> 0;
+      return seed % n;
+    };
+    const totalSamples = 2_000_000;
+    const raw = dropFrontStream(totalSamples * 2); // 16ch, 2 bytes per sample
+    const s = new PlanarSampleStore({ channelCount: 16, samplerate: 100e6 });
+    let fed = 0;
+    let keptFrom = 0;
+    let drops = 0;
+    while (fed < totalSamples) {
+      const n = Math.min(1 + rand(9999), totalSamples - fed);
+      s.append(raw.subarray(fed * 2, (fed + n) * 2));
+      fed += n;
+      // Keep at least 100k samples so the comparisons stay meaty.
+      if (s.length > 100_000 + 64 && rand(3) === 0) {
+        const room = Math.floor((s.length - 100_000) / 64);
+        const d = 64 * Math.min(1 + rand(2000), room);
+        if (d > 0) {
+          s.dropFront(d);
+          keptFrom += d;
+          drops++;
+        }
+      }
+    }
+    const tail = new PlanarSampleStore({ channelCount: 16, samplerate: 100e6 });
+    tail.append(raw.subarray(keptFrom * 2, fed * 2));
+    equalStores(s, tail, `randomized 64-quantum drops (${drops} drops)`);
+    results.push({
+      name: 'randomized 64-quantum drops conserve the retained length',
+      pass: s.length === totalSamples - keptFrom,
+      detail: `keptFrom ${keptFrom} (base skew ${keptFrom % 512}), length ${s.length}`,
+    });
+  }
+
+  log('drop-front pyramid release accounting');
+  {
+    // Dropping one whole base block (2^24 samples) plus a 64-multiple tail releases
+    // exactly one block at pyramid levels 1-3 per plane and nothing above:
+    // level k block covers 2^24 samples for k <= 3, more above.
+    const big = (1 << 24) + 65_536;
+    const bytes = dropFrontStream(big);
+    const s = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
+    s.append(bytes);
+    const before = s.memory();
+    s.dropFront((1 << 24) + 64_000);
+    const after = s.memory();
+    const released = before.pyramidBytes - after.pyramidBytes;
+    const want = (2 ** 20 / 8 + 2 ** 16 / 8 + 2 ** 12 / 8) * 2 * 4;
+    results.push({
+      name: 'dropFront releases whole pyramid blocks, not contents',
+      pass: released === want,
+      detail: `pyramid bytes ${before.pyramidBytes} -> ${after.pyramidBytes} (released ${released}, want ${want})`,
+    });
+    const tail = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
+    tail.append(bytes.subarray((1 << 24) + 64_000));
+    equalStores(s, tail, 'pyramid-release drop');
+  }
+
+  log('drop-front: pyramid block release followed by more appends');
+  {
+    // The randomized test above stays under one 16.7M-sample level-1 block, so it never
+    // releases storage; the accounting test above releases but never appends again. This
+    // is the only path where reduceRange reads a source plane whose storage starts at a
+    // non-zero levelHead/baseOrigin, after a drop that leaves the base head neither zero
+    // nor equal to baseOrigin.
+    const before = (1 << 25) + 100_000;
+    const after = 1_000_000;
+    const drop = (1 << 24) + 512 * 300 + 192; // 512-aligned part plus a 64-quantum tail
+    const raw = dropFrontStream(before + after); // 4ch, 1 byte per sample
+    const s = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
+    s.append(raw.subarray(0, before));
+    const pyramidBefore = s.memory().pyramidBytes;
+    s.dropFront(drop);
+    const pyramidAfterDrop = s.memory().pyramidBytes;
+    s.append(raw.subarray(before, before + after));
+    const pyramidAfterAppend = s.memory().pyramidBytes;
+    results.push({
+      name: 'dropFront releases pyramid blocks before the next append',
+      pass: pyramidAfterDrop < pyramidBefore && pyramidAfterAppend < pyramidBefore,
+      detail: `pyramid ${pyramidBefore} -> ${pyramidAfterDrop} (drop ${drop}) -> ${pyramidAfterAppend} ` +
+        `after ${after} more appends, length ${s.length}`,
+    });
+    const tail = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
+    tail.append(raw.subarray(drop, before + after));
+    equalStores(s, tail, 'append after a pyramid block release');
+
+    // A second release past the next level-1 block, with the planes already shifted.
+    const second = (1 << 20) * 16 + 64;
+    s.dropFront(second);
+    const tail2 = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
+    tail2.append(raw.subarray(drop + second, before + after));
+    equalStores(s, tail2, 'append after a second pyramid block release');
+  }
+
+  log('drop-front: snapColumns rounds to absolute bins');
+  {
+    // Bins are absolute, so column snapping must round there too: a store that dropped a
+    // non-bin-aligned prefix must place every column boundary on the same ABSOLUTE bin as
+    // an undropped store over the same absolute window. A single-set-sample needle is the
+    // sharpest probe: with the drop at 64*1001 the level-2 (256-sample) bin grid is off by
+    // 64 samples in the store's own frame, and the needle sits between the two candidate
+    // column-0 boundaries, so relative-space rounding puts it in column 0 while the
+    // absolute rounding (and the undropped store) puts it in column 1.
+    const drop = 64 * 1001;
+    const length = 128_000;
+    const needle = 16_096;
+    const raw = new Uint8Array(drop + length); // 4ch, 1 byte per sample, all zero
+    raw[drop + needle] = 1;
+    const dropped = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6, snapColumns: true });
+    dropped.append(raw.subarray(0, drop));
+    dropped.dropFront(drop);
+    dropped.append(raw.subarray(drop));
+    const whole = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6, snapColumns: true });
+    whole.append(raw);
+    const bins = 8;
+    const fromDropped = dropped.query(0, 0, length, bins).packed.slice();
+    const fromWhole = whole.query(0, drop, drop + length, bins).packed;
+    const snapBad = Array.from({ length: bins }, (_, i) => i)
+      .filter((i) => fromDropped[i] !== fromWhole[i])
+      .map((i) => `column ${i}: ${fromDropped[i]} vs ${fromWhole[i]}`);
+    results.push({
+      name: 'snapColumns rounds to absolute bins after a drop',
+      pass: snapBad.length === 0 && fromWhole[0] === 0 && fromWhole[1] === 5,
+      detail: snapBad.length === 0
+        ? `needle in column 1 of ${bins}, packed ${Array.from(fromDropped).join(',')}`
+        : snapBad.join('; '),
+    });
+  }
+
   {
     const bytes = dropFrontStream(12_000);
     const g = new PlanarSampleStore({ channelCount: 4, samplerate: 100e6 });
@@ -1161,13 +1300,178 @@ function testDropFront(log: Log): TestResult[] {
     try { rle.dropFront(512); } catch { rleThrows = true; }
     const inter = new InterleavedSampleStore(100e6, 32);
     inter.append(new Uint8Array(4096 * 4));
-    let interThrows = false;
-    try { inter.dropFront(512); } catch { interThrows = true; }
+    let interRefusedBad = false;
+    try { inter.dropFront(100); } catch { interRefusedBad = true; }
     results.push({
-      name: 'immutable and interleaved stores refuse dropFront loudly',
-      pass: rleThrows && interThrows,
-      detail: `rle ${rleThrows ? 'threw' : 'accepted'}, interleaved ${interThrows ? 'threw' : 'accepted'}`,
+      name: 'rle refuses dropFront, interleaved enforces the quantum',
+      pass: rleThrows && interRefusedBad && inter.length === 4096,
+      detail: `rle ${rleThrows ? 'threw' : 'accepted'}, interleaved 100-sample drop ${
+        interRefusedBad ? 'refused' : 'accepted'}`,
     });
+  }
+
+  {
+    // The interleaved store shares the absolute-addressed drop scheme with the planar
+    // store; cross-check a randomized 64-quantum drop sequence at both widths against a
+    // fresh tail store.
+    let seed = 0x85ebca6b;
+    const rand = (n: number): number => {
+      seed = Math.imul(seed ^ (seed >>> 15), 2246822519) >>> 0;
+      seed = Math.imul(seed ^ (seed >>> 13), 3266489917) >>> 0;
+      seed = (seed ^ (seed >>> 16)) >>> 0;
+      return seed % n;
+    };
+    for (const cc of [16, 32] as const) {
+      const bps = cc >>> 3;
+      const totalSamples = 1_200_000;
+      const raw = dropFrontStream(totalSamples * bps);
+      const s = new InterleavedSampleStore(100e6, cc);
+      let fed = 0;
+      let keptFrom = 0;
+      let drops = 0;
+      while (fed < totalSamples) {
+        const n = Math.min(1 + rand(7777), totalSamples - fed);
+        s.append(raw.subarray(fed * bps, (fed + n) * bps));
+        fed += n;
+        if (s.length > 60_000 + 64 && rand(3) === 0) {
+          const room = Math.floor((s.length - 60_000) / 64);
+          const d = 64 * Math.min(1 + rand(1500), room);
+          if (d > 0) {
+            s.dropFront(d);
+            keptFrom += d;
+            drops++;
+          }
+        }
+      }
+      const tail = new InterleavedSampleStore(100e6, cc);
+      tail.append(raw.subarray(keptFrom * bps, fed * bps));
+      let ok = tail.length === s.length;
+      if (ok && s.length > 1) {
+        for (const [st, en, bins] of [[0, s.length, 997], [17, Math.floor(s.length / 2), 513]] as const) {
+          if (!(en > st)) continue;
+          for (let c = 0; c < cc && ok; c++) {
+            const qa = s.query(c, st, en, bins).packed.slice();
+            const qb = tail.query(c, st, en, bins).packed;
+            for (let i = 0; i < bins; i++) if ((qa[i]! & 7) !== (qb[i]! & 7)) { ok = false; break; }
+          }
+        }
+        for (let c = 0; c < cc && ok; c++) {
+          const ea = s.edges(c, 0, Math.min(s.length, 250_000));
+          const eb = tail.edges(c, 0, Math.min(s.length, 250_000));
+          if (ea.length !== eb.length) { ok = false; break; }
+          for (let i = 0; i < ea.length; i++) if (ea[i] !== eb[i]) { ok = false; break; }
+        }
+        if (ok) {
+          for (const p of [0, 1, 511, 512, 513, s.length - 1, Math.floor(s.length / 2)]) {
+            if (p < 0 || p >= s.length) continue;
+            for (let c = 0; c < cc; c++) {
+              if (s.sampleAt(c, p) !== tail.sampleAt(c, p)) { ok = false; break; }
+            }
+          }
+        }
+      }
+      results.push({
+        name: `interleaved dropFront equals a fresh tail store (${cc}ch, ${drops} drops)`,
+        pass: ok,
+        detail: `length ${s.length}, keptFrom ${keptFrom}`,
+      });
+    }
+  }
+
+  log('interleaved drop-front: base-block splice and pyramid block release');
+  {
+    // The randomized cross-check above never leaves one level-1 block (2^24 samples), so it
+    // never splices a base block and never releases pyramid storage - and those are the
+    // only codepaths where `head` and `levelHead` stop being zero. The planar store has the
+    // same test; the interleaved store keeps its own cursors over its own base layout, so it
+    // needs its own copy. 16 channels: the release arithmetic is per level and per bin and
+    // the word width only changes the byte count, while the randomized cases above already
+    // cover 32 channels.
+    const cc = 16;
+    const bps = cc >>> 3;
+    const wordBytes = 2; // 16-channel words are uint16
+    const drop = (1 << 24) + 512 * 300 + 192; // a whole base block plus a 64-quantum tail
+    const before = drop + 400_000;
+    const after = 1_000_000;
+    const raw = dropFrontStream((before + after) * bps);
+
+    const matchesTail = (
+      s: InterleavedSampleStore, tail: InterleavedSampleStore, label: string,
+    ): void => {
+      let ok = tail.length === s.length;
+      let detail = `length ${s.length}`;
+      if (ok && s.length > 1) {
+        for (const [st, en, bins] of [
+          [0, s.length, 997], [17, Math.floor(s.length / 2), 513], [0, Math.min(s.length, 65_537), 1021],
+          // Two columns over the whole window is ~700k samples per column, which is the
+          // only way to force the descent to level 4 - and level 4 is one of the levels
+          // the drop above releases, so this reads through a non-zero levelHead.
+          [0, s.length, 2],
+        ] as const) {
+          if (!(en > st)) continue;
+          for (let c = 0; c < s.channelCount && ok; c++) {
+            const qa = s.query(c, st, en, bins).packed.slice();
+            const qb = tail.query(c, st, en, bins).packed;
+            for (let i = 0; i < bins; i++) {
+              if ((qa[i]! & 7) !== (qb[i]! & 7)) {
+                ok = false; detail = `query c${c} [${st},${en}) bin ${i}`; break;
+              }
+            }
+          }
+        }
+        for (let c = 0; c < s.channelCount && ok; c++) {
+          const ea = s.edges(c, 0, Math.min(s.length, 250_000));
+          const eb = tail.edges(c, 0, Math.min(s.length, 250_000));
+          if (ea.length !== eb.length) {
+            ok = false; detail = `edges c${c} count ${ea.length} vs ${eb.length}`; break;
+          }
+          for (let i = 0; i < ea.length; i++) {
+            if (ea[i] !== eb[i]) { ok = false; detail = `edges c${c} #${i} ${ea[i]} vs ${eb[i]}`; break; }
+          }
+        }
+        for (const p of [0, 1, 511, 512, 513, s.length - 1, Math.floor(s.length / 2)]) {
+          if (p < 0 || p >= s.length) continue;
+          for (let c = 0; c < s.channelCount && ok; c++) {
+            if (s.sampleAt(c, p) !== tail.sampleAt(c, p)) { ok = false; detail = `sampleAt c${c} ${p}`; }
+          }
+        }
+      }
+      results.push({ name: `interleaved dropFront equals a fresh tail store (${label})`, pass: ok, detail });
+    };
+
+    const s = new InterleavedSampleStore(100e6, cc);
+    s.append(raw.subarray(0, before * bps));
+    const beforePyramid = s.memory().pyramidBytes;
+    s.dropFront(drop);
+    const afterDrop = s.memory();
+    s.append(raw.subarray(before * bps, (before + after) * bps));
+    const afterAppendPyramid = s.memory().pyramidBytes;
+    // A level-k block is 2^max(8, 24-4k) bins and a level-1 bin is 16 samples, so this
+    // drop (just over 2^24 samples) covers exactly one whole block at levels 1-4 and
+    // nothing above them. Two planes per level, uint16 words.
+    const wantReleased = (2 ** 20 + 2 ** 16 + 2 ** 12 + 2 ** 8) * 2 * wordBytes;
+    // One whole base block spliced: 2^24 uint16 samples per block, however much is left.
+    const wantBase = 2 ** 24 * wordBytes;
+    results.push({
+      name: 'interleaved dropFront splices a base block and releases pyramid blocks',
+      pass: beforePyramid - afterDrop.pyramidBytes === wantReleased &&
+        afterDrop.baseBytes === wantBase &&
+        afterAppendPyramid === afterDrop.pyramidBytes,
+      detail: `pyramid ${beforePyramid} -> ${afterDrop.pyramidBytes} (released ${
+        beforePyramid - afterDrop.pyramidBytes}, want ${wantReleased}) -> ${afterAppendPyramid} after ${
+        after} appends; base ${afterDrop.baseBytes} (want ${wantBase})`,
+    });
+    const tail = new InterleavedSampleStore(100e6, cc);
+    tail.append(raw.subarray(drop * bps, (before + after) * bps));
+    matchesTail(s, tail, 'after a base-block splice');
+
+    // A second, sub-block drop: `head` and the level heads are already shifted and no
+    // block is released, which is the steady loop shape (drops land between boundaries).
+    const second = 64 * 1001;
+    s.dropFront(second);
+    const tail2 = new InterleavedSampleStore(100e6, cc);
+    tail2.append(raw.subarray((drop + second) * bps, (before + after) * bps));
+    matchesTail(s, tail2, 'after a sub-block drop past a release');
   }
 
   {

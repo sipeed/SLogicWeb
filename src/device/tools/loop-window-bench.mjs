@@ -2,9 +2,9 @@
 /**
  * Sweeps the loop display window across the 8-channel rate table, running
  * `loopWindowHarness.ts` in a browser page: per cell both transport arms capture,
- * retain, drop, rebuild and draw for long enough to fire several drops. Prints the
- * cells as JSON, then a table with the scope bar (sustained >= 99% of offered, worst
- * stall < 100 ms) and the largest passing window per rate.
+ * retain, drop and draw for long enough to fire several drops. Prints the cells as
+ * JSON, then a table with the scope bar (sustained >= 99% of offered, worst
+ * stall < 100 ms, drop cost < 5 ms) and the largest passing window per rate.
  *
  * The harness needs a real browser and a dev server for the module graph, so this
  * attaches to an already-running Chromium that has the app open:
@@ -35,10 +35,10 @@ const cellRows = await new Promise((ok, bad) => {
   const expression = `(() => {
     return import('/src/ui/state.ts').then((m) => ${JSON.stringify(RATES)}.map((rate) => ({
       rate,
-      maxSeconds: m.maxLoopSeconds(8, rate),
       windows: ${JSON.stringify(WINDOWS_S)}
-        .filter((w) => w <= m.maxLoopSeconds(8, rate))
-        .map((w) => m.loopRetentionSamples(w, 8, rate)),
+        .map((w) => Math.round(w * rate))
+        .filter((s) => s > 0 && s <= m.maxLoopSamples(8))
+        .map((s) => m.clampLoopSamples(s, 8)),
     })));
   })()`;
   ws.onmessage = (event) => {
@@ -113,11 +113,15 @@ ws.close();
 
 console.log(JSON.stringify({ cells: results }, null, 2));
 
+// The scope bar: the transport keeps up, no stall freezes the page, and a drop is
+// cheap (the pre-refactor pathology was a >100 ms full pyramid rebuild per drop).
+// `busBehindDrops` is reported but not gated on: with per-chunk drops it measures
+// bus-view freshness lag at high arrival rates, not drop cost.
 const pass = (r) => r && !r.error && r.sustainedMBps >= 0.99 * r.expectedMBps &&
-  Math.max(r.threadStallMaxMs, r.pageStallMaxMs) < 100 && r.rebuildMissedDrops === 0;
+  Math.max(r.threadStallMaxMs, r.pageStallMaxMs) < 100 && r.dropMsMax < 5;
 const fmtSamples = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)} G` : `${(n / 1e6).toFixed(1)} M`);
 
-console.log('\nloop window sweep - scope bar: sustained >= 99% of offered, worst stall < 100 ms, no drop interval missed its rebuild');
+console.log('\nloop window sweep - scope bar: sustained >= 99% of offered, worst stall < 100 ms, drop cost < 5 ms');
 for (const cell of results) {
   for (const armName of ['page', 'worker']) {
     const r = cell[armName];
@@ -131,7 +135,7 @@ for (const cell of results) {
     console.log(`${head}${cell.control ? ' [control]' : '          '} ${(100 * r.sustainedMBps / r.expectedMBps).toFixed(1).padStart(6)}% ` +
       `stall ${Math.max(r.threadStallMaxMs, r.pageStallMaxMs).toFixed(1).padStart(6)} ms ` +
       `drops ${String(r.drops).padStart(3)} dropMax ${r.dropMsMax.toFixed(1).padStart(6)} ms ` +
-      `miss ${String(r.rebuildMissedDrops).padStart(2)} ` +
+      `busBehind ${String(r.busBehindDrops).padStart(3)} ` +
       `edgeBlank ${(r.display ? (100 * (r.frames ? r.liveEdgeBlankFrames / r.frames : 1)).toFixed(0).padStart(3) + '%' : '   -')} ` +
       `fill ${(r.display ? (100 * r.filledColumns).toFixed(0).padStart(3) + '%' : '  -')} ` +
       `peak ${(r.peakStoreMB / 1e3).toFixed(2).padStart(5)} GB ` +

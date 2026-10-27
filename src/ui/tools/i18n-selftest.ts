@@ -371,6 +371,8 @@ function check(name: string, pass: boolean, detail: string): void {
     [{ kind: 'stats', anns: 512, decodeMs: 41.6, wallMs: 87.4 }, '512 anns, 42 ms (87 ms wall)'],
     [{ kind: 'stats', anns: 1, decodeMs: 2, wallMs: 3, firstError: 'uart: bad frame' },
       '1 anns, 2 ms (3 ms wall) · uart: bad frame'],
+    [{ kind: 'stats', anns: 3, decodeMs: 1, wallMs: 2, snapshot: true },
+      '3 anns, 1 ms (2 ms wall) · snapshot of a running loop - does not track the capture'],
     [{ kind: 'timeout' }, 'timed out'],
     [{ kind: 'cancelled' }, 'cancelled'],
     [{ kind: 'error', detail: 'worker exploded' }, 'worker exploded'],
@@ -378,7 +380,7 @@ function check(name: string, pass: boolean, detail: string): void {
   const bad = cases.filter(([note, want]) => formatAnalyzerNote(note) !== want);
   check('formatAnalyzerNote renders every variant, diagnostics passing through raw',
     bad.length === 0,
-    bad.length === 0 ? `${cases.length}/7 variants match`
+    bad.length === 0 ? `${cases.length}/8 variants match`
       : bad.map(([n, want]) => `${n.kind}: got ${JSON.stringify(formatAnalyzerNote(n))} want ${JSON.stringify(want)}`).join('; '));
 }
 
@@ -387,6 +389,12 @@ function check(name: string, pass: boolean, detail: string): void {
     [{ kind: 'stats', anns: 512, decodeMs: 41.6, wallMs: 87.4 }, 'done', ''],
     [{ kind: 'stats', anns: 1, decodeMs: 2, wallMs: 3, firstError: 'uart: bad frame' },
       'done', 'uart: bad frame'],
+    [{ kind: 'stats', anns: 3, decodeMs: 1, wallMs: 2, snapshot: true },
+      'done', 'snapshot of a running loop - does not track the capture'],
+    // A snapshot that also reported a decoder error keeps both: the tag is a warning,
+    // and hiding it behind the diagnostic would claim the result tracks the capture.
+    [{ kind: 'stats', anns: 1, decodeMs: 2, wallMs: 3, firstError: 'uart: bad frame', snapshot: true },
+      'done', 'snapshot of a running loop - does not track the capture · uart: bad frame'],
     [{ kind: 'stats', anns: 512, decodeMs: 41.6, wallMs: 87.4 }, 'decoding', 'decoding…'],
     [{ kind: 'pending' }, 'decoding', 'decoding…'],
     [{ kind: 'pending' }, 'idle', 'not decoded'],
@@ -398,7 +406,7 @@ function check(name: string, pass: boolean, detail: string): void {
   const bad = cases.filter(([note, status, want]) => formatMountedAnalyzerNote(note, status) !== want);
   check('formatMountedAnalyzerNote hides statistics, keeps diagnostics, delegates the rest',
     bad.length === 0,
-    bad.length === 0 ? `${cases.length}/9 cases match`
+    bad.length === 0 ? `${cases.length}/11 cases match`
       : bad.map(([n, s, want]) => `${n.kind}/${s}: got ` +
         `${JSON.stringify(formatMountedAnalyzerNote(n, s))} want ${JSON.stringify(want)}`).join('; '));
 }
@@ -406,7 +414,7 @@ function check(name: string, pass: boolean, detail: string): void {
 // -------------------------------------------------------- trigger summary
 
 const baseSettings: CaptureSettings = {
-  channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'timer', seconds: 1, loopSeconds: 1,
+  channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'timer', seconds: 1, loopSamples: 16_000_000,
   testMode: 0, triggerEnableMask: true, softwareTrigger: true, triggerModes: {},
   triggerConditions: [], triggerChannel: 0,
   triggerKind: 'rising', triggerLevel: 1, preTriggerPercent: 10,

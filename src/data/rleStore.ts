@@ -208,6 +208,9 @@ export class RleSampleStore implements SampleStore {
     throw new Error('RleSampleStore is immutable - it exists for imported captures, not drop-front retention');
   }
 
+  /** RLE stores never drop. */
+  readonly droppedSamples = 0;
+
   noteGap(startSample: number, endSample: number): void {
     assertGapBounds(startSample, endSample, this.length);
     this.gapList = mergeGap(this.gapList, startSample, endSample);

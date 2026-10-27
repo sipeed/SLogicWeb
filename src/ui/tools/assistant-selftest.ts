@@ -123,7 +123,7 @@ Object.assign(globalThis, { localStorage: local, sessionStorage: session });
     validate({ trigger_modes: { 0: 'sideways' } }, set).length > 0);
   check('enum is enforced', validate({ mode: 'single' }, set).length > 0);
   check('loop mode is accepted by the settings schema',
-    validate({ mode: 'loop', loop_seconds: 2 }, set).length === 0);
+    validate({ mode: 'loop', loop_samples: 2048 }, set).length === 0);
   const attach = toolByName('attach_decoder')!.inputSchema;
   check('type unions accept either type',
     validate({ decoder: 'uart', channels: { rx: 6 }, options: { baudrate: 115200, parity: 'none' } }, attach).length === 0);
@@ -140,7 +140,7 @@ const UART = demo.channelNames.findIndex((n) => /uart/i.test(n) && /rx/i.test(n)
 
 function settings(): CaptureSettings {
   return {
-    channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'timer', seconds: 1, loopSeconds: 1,
+    channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'timer', seconds: 1, loopSamples: 16_000_000,
     testMode: 0,
     triggerEnableMask: false, softwareTrigger: false, triggerModes: { 2: 'high' }, triggerConditions: [],
     triggerChannel: 0, triggerKind: 'rising', triggerLevel: 1, preTriggerPercent: 10,
@@ -263,10 +263,10 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
     enabled_channels: [0, 1, 2, 3],
   }, host);
   const last = host.applied[host.applied.length - 1]!;
-  const setLoop = await run('set_capture_settings', { mode: 'loop', loop_seconds: 2 }, host);
+  const setLoop = await run('set_capture_settings', { mode: 'loop', loop_samples: 2_000_000 }, host);
   const lastLoop = host.applied[host.applied.length - 1]!;
   check('set_capture_settings maps loop fields',
-    setLoop.ok && lastLoop.patch.mode === 'loop' && lastLoop.patch.loopSeconds === 2,
+    setLoop.ok && lastLoop.patch.mode === 'loop' && lastLoop.patch.loopSamples === 2_000_000,
     JSON.stringify(lastLoop.patch));
   check('set_capture_settings maps fields and clears dont-care channels',
     set.ok && last.patch.mode === 'free' && last.patch.triggerEnableMask === true &&

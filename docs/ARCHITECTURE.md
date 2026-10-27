@@ -63,12 +63,16 @@ export interface SampleStore {
   readonly channelCount: number;
   readonly samplerate: number;
   readonly length: number;                 // samples
+  /** Samples dropped from the front over this store's life - the loop window's left
+   *  edge. Absolute position = store-relative position + droppedSamples. 0 for stores
+   *  that never drop (RLE/imported captures). */
+  readonly droppedSamples: number;
   append(chunk: Uint8Array): void;
   /** Forget the oldest `samples` (a multiple of DROP_FRONT_QUANTUM): every position
    *  shifts down and `length` shrinks, so a loop capture keeps only the newest
    *  window. Callers needing absolute positions keep their own drop offset.
-   *  Stores that cannot retain (imported captures, the interleaved 32-channel
-   *  layout) throw. */
+   *  Imported captures cannot retain and throw; every live width (planar 4/8/16ch
+   *  and interleaved 32ch) implements it, against absolute-addressed pyramids. */
   dropFront(samples: number): void;
   /** Downsampled view for rendering: for each of `bins` pixel columns over
    *  [startSample, endSample), the low bit, the high bit and whether the column

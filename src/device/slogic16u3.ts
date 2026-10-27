@@ -479,6 +479,8 @@ export class Slogic16U3 implements Device {
   private discard = false;
   /** Wire bytes the configured rate should deliver per millisecond. */
   private expectedBytesPerMs = 0;
+  /** Set by StartOptions.loop: no first-byte watchdog, no underrun abort. */
+  private loopMode = false;
   /** Set when the host fell behind for `depth` consecutive transfers. */
   private underrun: Error | null = null;
   private readonly transferMs = new Ring(TIMING_SAMPLES);
@@ -953,6 +955,7 @@ export class Slogic16U3 implements Device {
     this.triggerMatched = false;
     this.triggerNotFound = false;
     this.discard = opts.discard ?? false;
+    this.loopMode = opts.loop ?? false;
     this.triggerState = opts.onTriggerState ?? null;
     this.onCaptureEnd = opts.onEnd ?? null;
     this.captureEnded = false;
@@ -1061,7 +1064,9 @@ export class Slogic16U3 implements Device {
       : 0;
     const generation = ++this.captureGeneration;
     this.loopDone = this.readLoop(generation, started, deviceWireBytes).catch(() => {});
-    this.armNoDataWatchdog(cfg);
+    // A loop capture's only ends are a manual stop and a device error (HSync
+    // semantics), so the first-byte watchdog stays disarmed for it.
+    if (!this.loopMode) this.armNoDataWatchdog(cfg);
     this.armLoopStallWatch(started);
     this.trace({
       dir: 'info',
@@ -1177,7 +1182,9 @@ export class Slogic16U3 implements Device {
       // not evidence about the rate that caused the abort, and a healthy one among them
       // would reset the count the caller is about to read.
       if (!this.underrun) this.stats.slowTransfers = slowCount;
-      if (slowCount >= depth && !this.underrun) {
+      // A loop capture never trips this: its windowing drains the store by
+      // construction, and its only ends are a manual stop and a device error.
+      if (slowCount >= depth && !this.underrun && !this.loopMode) {
         this.underrun = new Error(
           `${this.name} overran the host: ${this.cfg!.channels}ch @ ` +
             `${this.cfg!.samplerate / 1e6} MHz offers ${(expectedBytesPerMs * 1000 / 1e6).toFixed(0)} MB/s ` +
@@ -1643,6 +1650,7 @@ export class Slogic16U3 implements Device {
       this.triggerState = null;
       this.triggerMatched = false;
       this.triggerNotFound = false;
+      this.loopMode = false;
       this.onCaptureEnd = null;
       this.sampleCarry = new Uint8Array(0);
       if (this.bus) await this.bus.writeCtrl(CTRL_STOP);
@@ -1773,6 +1781,7 @@ export class Slogic16U3 implements Device {
     } finally {
       this.loopDone = null;
       this.stopping = false;
+      this.loopMode = false;
       this.clearNoDataWatchdog();
       this.disarmLoopStallWatch();
       // Drop closures over the completed capture's store promptly. A multi-gigabyte
