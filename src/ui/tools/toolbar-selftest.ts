@@ -218,7 +218,10 @@ const installReplaces = installBody.includes('if (epoch !== this.deviceEpoch && 
   installBody.includes('previous.onError = null;') &&
   installBody.includes('previous.terminate();') &&
   installBody.includes('this.finishCapture();');
-const keepsOnCancel = connectBody.includes('if (cancelledByUser(error) || this.device === null) throw error;') &&
+const cancelReturnAt = connectBody.indexOf('if (cancelledByUser(error)) return;');
+const detachAt = connectBody.indexOf('epoch = this.detachDevice();');
+const keepsOnCancel = cancelReturnAt >= 0 && detachAt > cancelReturnAt &&
+  connectBody.includes('if (this.device === null) throw error;') &&
   app.includes("return error instanceof DOMException && error.name === 'NotFoundError';");
 const acquireFirst = connectBody.indexOf('requestDeviceOnBestThread()') <
     connectBody.indexOf('this.detachDevice()') &&
