@@ -81,7 +81,7 @@ declare const __LOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
 type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number): number };
 
 const BUS_CAPTURE_LOCK_ERROR = 'bank oscilloscope settings are locked while capture is running or stopping';
-const LOOP_DRAW_MIN_RATE_HZ = 80e6;
+const LOOP_SUSPEND_MIN_BYTES_PER_SEC = 160e6;
 
 interface Lane {
   analyzer: AnalyzerState;
@@ -737,7 +737,7 @@ export class App {
     requestAnimationFrame(this.frame);
     const now = performance.now();
     const highRateLoop = this.running && this.captureIsLoop &&
-      this.store.samplerate >= LOOP_DRAW_MIN_RATE_HZ;
+      this.store.samplerate * bytesPerSampleForChannels(this.store.channelCount) >= LOOP_SUSPEND_MIN_BYTES_PER_SEC;
     if (!highRateLoop) this.pumpBusBuilders();
     if (this.running && now - this.runningPanelAt > 500) {
       this.runningPanelAt = now;

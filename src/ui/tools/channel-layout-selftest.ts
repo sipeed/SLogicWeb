@@ -706,7 +706,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const frameEnd = frameStart >= 0 ? appSrc.indexOf('private draw()', frameStart) : -1;
   const frameSrc = frameEnd > frameStart ? appSrc.slice(frameStart, frameEnd) : '';
   const highRateGuard = frameSrc.includes('this.running && this.captureIsLoop &&') &&
-    frameSrc.includes('this.store.samplerate >= LOOP_DRAW_MIN_RATE_HZ');
+    frameSrc.includes('this.store.samplerate * bytesPerSampleForChannels(this.store.channelCount) >= LOOP_SUSPEND_MIN_BYTES_PER_SEC');
   const suspendAt = frameSrc.indexOf('if (highRateLoop) return;');
   const statusAt = frameSrc.indexOf('if (highRateLoop) this.renderStatus();');
   check('high-rate loop drawing yields to ingestion without suspending other captures',
@@ -714,7 +714,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     frameSrc.includes('if (!highRateLoop) this.pumpBusBuilders();') &&
     suspendAt < frameSrc.indexOf('this.dirty = false') &&
     frameSrc.includes('now - this.runningPanelAt > 500') &&
-    appSrc.includes('const LOOP_DRAW_MIN_RATE_HZ = 80e6;') &&
+    appSrc.includes('const LOOP_SUSPEND_MIN_BYTES_PER_SEC = 160e6;') &&
     !frameSrc.includes('loopDrawAfter'),
     `guard=${suspendAt >= 0}, status=${statusAt >= 0}, ordered=${statusAt >= 0 && statusAt < suspendAt}`);
   const startDrawAt = startSrc.indexOf('this.draw();');
