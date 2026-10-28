@@ -705,16 +705,23 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const frameStart = appSrc.indexOf('private frame =');
   const frameEnd = frameStart >= 0 ? appSrc.indexOf('private draw()', frameStart) : -1;
   const frameSrc = frameEnd > frameStart ? appSrc.slice(frameStart, frameEnd) : '';
-  const throttleAt = frameSrc.indexOf('now < this.loopDrawAfter');
-  check('high-rate loop drawing yields to ingestion without throttling other captures',
-    frameSrc.includes('this.running && this.captureIsLoop && this.store.samplerate >= LOOP_DRAW_MIN_RATE_HZ') &&
-    throttleAt >= 0 && throttleAt < frameSrc.indexOf('this.dirty = false') &&
-    frameSrc.includes('this.loopDrawAfter = now + LOOP_DRAW_INTERVAL_MS;') &&
+  const highRateGuard = frameSrc.includes('this.running && this.captureIsLoop &&') &&
+    frameSrc.includes('this.store.samplerate >= LOOP_DRAW_MIN_RATE_HZ');
+  const suspendAt = frameSrc.indexOf('if (highRateLoop) return;');
+  const statusAt = frameSrc.indexOf('if (highRateLoop) this.renderStatus();');
+  check('high-rate loop drawing yields to ingestion without suspending other captures',
+    highRateGuard && suspendAt >= 0 && statusAt >= 0 && statusAt < suspendAt &&
+    suspendAt < frameSrc.indexOf('this.dirty = false') &&
+    frameSrc.includes('now - this.runningPanelAt > 500') &&
     appSrc.includes('const LOOP_DRAW_MIN_RATE_HZ = 80e6;') &&
-    appSrc.includes('const LOOP_DRAW_INTERVAL_MS = 200;') &&
-    startSrc.includes('this.loopDrawAfter = 0;'),
-    `guard=${throttleAt >= 0}, ordered=${throttleAt >= 0 && throttleAt < frameSrc.indexOf('this.dirty = false')}, ` +
-    `reset=${startSrc.includes('this.loopDrawAfter = 0;')}`);
+    !frameSrc.includes('loopDrawAfter'),
+    `guard=${suspendAt >= 0}, status=${statusAt >= 0}, ordered=${statusAt >= 0 && statusAt < suspendAt}`);
+  const startDrawAt = startSrc.indexOf('this.draw();');
+  const startHintAt = startSrc.indexOf("this.el.hint.style.display = 'none';");
+  check('a new capture clears the previous frame before device streaming starts',
+    startDrawAt >= 0 && startSrc.indexOf('this.storeRef.set(store)') < startDrawAt &&
+    startDrawAt < startHintAt && startHintAt < startSrc.indexOf('await device.start'),
+    `draw=${startDrawAt >= 0}, hint=${startHintAt >= 0}, ordered=${startSrc.indexOf('this.storeRef.set(store)') < startDrawAt && startDrawAt < startHintAt && startHintAt < startSrc.indexOf('await device.start')}`);
 
   const enforceStart = appSrc.indexOf('private enforceLoopRetention');
   const enforceEnd = enforceStart >= 0 ? appSrc.indexOf('private async stopCapture', enforceStart) : -1;

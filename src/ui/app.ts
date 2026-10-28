@@ -82,7 +82,6 @@ type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number)
 
 const BUS_CAPTURE_LOCK_ERROR = 'bank oscilloscope settings are locked while capture is running or stopping';
 const LOOP_DRAW_MIN_RATE_HZ = 80e6;
-const LOOP_DRAW_INTERVAL_MS = 200;
 
 interface Lane {
   analyzer: AnalyzerState;
@@ -113,7 +112,6 @@ export class App {
   /** When the analyzers panel last re-rendered for a bus build's progress. */
   private busPanelAt = 0;
   private runningPanelAt = 0;
-  private loopDrawAfter = 0;
   private readonly settingsMenu: SettingsMenu;
   private readonly sidebarMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
@@ -739,17 +737,15 @@ export class App {
     requestAnimationFrame(this.frame);
     this.pumpBusBuilders();
     const now = performance.now();
-    if (this.running && this.panel === 'device') {
-      if (now - this.runningPanelAt > 500) {
-        this.runningPanelAt = now;
-        this.capturePanel.updateProgress(this.progressView());
-      }
+    const highRateLoop = this.running && this.captureIsLoop &&
+      this.store.samplerate >= LOOP_DRAW_MIN_RATE_HZ;
+    if (this.running && now - this.runningPanelAt > 500) {
+      this.runningPanelAt = now;
+      if (this.panel === 'device') this.capturePanel.updateProgress(this.progressView());
+      if (highRateLoop) this.renderStatus();
     }
     if (!this.dirty && !this.running) return;
-    if (this.running && this.captureIsLoop && this.store.samplerate >= LOOP_DRAW_MIN_RATE_HZ) {
-      if (now < this.loopDrawAfter) return;
-      this.loopDrawAfter = now + LOOP_DRAW_INTERVAL_MS;
-    }
+    if (highRateLoop) return;
     this.dirty = false;
     try {
       this.draw();
@@ -1822,7 +1818,6 @@ export class App {
       this.lostSamples = 0;
       this.droppedTotal = 0;
       this.captureIsLoop = isLoop;
-      this.loopDrawAfter = 0;
       this.triggerSampleIndex = null;
       const softwareTrigger = this.settings.softwareTrigger;
       this.captureStart = softwareTrigger ? 0 : performance.now();
@@ -1834,6 +1829,7 @@ export class App {
       this.triggerState = softwareTrigger ? 'waiting' : 'off';
       this.captureLabel = { kind: 'capturing', channels: cfg.channels, rate: cfg.samplerate };
       this.running = true;
+      this.runningPanelAt = 0;
       this.relayout();
       // Show a window rather than the whole (empty) capture, and follow the live edge.
       const span = Math.max(1000, Math.round(cfg.samplerate * 0.05));
@@ -1845,6 +1841,8 @@ export class App {
       this.loopRetentionLen = isLoop
         ? clampLoopSamples(this.settings.loopSamples, cfg.channels)
         : 0;
+      this.draw();
+      this.el.hint.style.display = 'none';
       const triggerConditions = this.settings.triggerConditions.length
         ? this.settings.triggerConditions
         : [{ channel: this.settings.triggerChannel, kind: this.settings.triggerKind,

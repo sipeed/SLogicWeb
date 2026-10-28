@@ -129,7 +129,7 @@ function workOf(options: LoopHarnessOptions): LoopConsumerWork {
   return options.work ?? (options.display === false ? 'store' : 'display');
 }
 
-function fillCounter16(chunk: Uint8Array): void {
+export function fillCounter16(chunk: Uint8Array): void {
   if (counter16Block === null) {
     counter16Block = new Uint8Array(65536 * 2);
     const view = new DataView(counter16Block.buffer);
