@@ -27,7 +27,7 @@ interface AppProbe {
   stopping: boolean;
   statusError: { what: string; detail: string } | null;
   droppedTotal: number;
-  store: { channelCount: number; length: number; droppedSamples: number; append(chunk: Uint8Array): void };
+  store: { channelCount: number; samplerate: number; length: number; droppedSamples: number; append(chunk: Uint8Array): void };
   channels: readonly { enabled: boolean }[];
   busViews: { builder: ProbeBuilder | null }[];
   debug: App['debug'];
@@ -38,11 +38,13 @@ interface AppProbe {
 }
 
 export interface AppLoopProbeOptions {
+  channels?: 8 | 16 | 32;
   samplerate: number;
   retentionSamples: number;
   seconds: number;
   stallMs?: number;
   minSustainedMBps?: number;
+  requireFullRate?: boolean;
   minDrawHz?: number;
   maxDrawHz?: number;
   stopBuildTimeoutMs?: number;
@@ -54,14 +56,16 @@ export interface AppLoopSample {
   rawBytes: number;
   dropped: number;
   kept: number;
-  queued: number;
+  peakQueued: number;
   steadyMBps: number;
   draws: number;
   running: boolean;
 }
 
 export interface AppLoopProbeReport {
+  channels: 8 | 16 | 32;
   samplerate: number;
+  expectedMBps: number;
   seconds: number;
   elapsedMs: number;
   samples: number;
@@ -70,8 +74,12 @@ export interface AppLoopProbeReport {
   dropped: number;
   kept: number;
   sustainedMBps: number;
+  fullRate: boolean;
+  requiresFullRate: boolean;
   peakQueuedTransfers: number;
   slowTransfers: number;
+  sinkMsP95: number;
+  maxIdleGapMs: number;
   maxQuietMs: number;
   draws: number;
   drawHz: number;
@@ -90,8 +98,10 @@ export interface AppLoopProbeReport {
 export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<AppLoopProbeReport> {
   const app = window.logicweb as unknown as AppProbe | undefined;
   if (!app) throw new Error('the App is not ready');
+  const channels = options.channels ?? 16;
   app.discardDevice();
-  const bytesPerMs = options.samplerate * bytesPerSampleForChannels(16) / 1000;
+  const bytesPerMs = options.samplerate * bytesPerSampleForChannels(channels) / 1000;
+  const expectedMBps = options.samplerate * bytesPerSampleForChannels(channels) / 1e6;
   const worker = new FakeUsbWorker({ name: String(bytesPerMs) });
   const dev = await WorkerSlogicDevice.open(
     { vendorId: 0x359f, productId: 0x3032, serial: 'clock' },
@@ -105,7 +115,7 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
   const originalStart = dev.start.bind(dev);
   dev.start = (cfg, sink, onDropout, startOptions) => originalStart(cfg, async chunk => {
     fillCounter16(chunk);
-    maxChunkSamples = Math.max(maxChunkSamples, chunk.byteLength / bytesPerSampleForChannels(16));
+    maxChunkSamples = Math.max(maxChunkSamples, chunk.byteLength / bytesPerSampleForChannels(channels));
     await sink(chunk);
     maxKept = Math.max(maxKept, app.store.length);
   }, onDropout, startOptions);
@@ -142,7 +152,7 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
       rawBytes: stats.rawBytes,
       dropped: progress.dropped,
       kept: progress.kept,
-      queued: stats.peakQueuedTransfers,
+      peakQueued: stats.peakQueuedTransfers,
       steadyMBps: stats.steadyMBps,
       draws: drawTimes.length,
       running: app.running,
@@ -164,7 +174,7 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
     window.addEventListener('error', onPageError);
     window.addEventListener('unhandledrejection', onUnhandledRejection);
     app.installDevice(dev, app.deviceEpoch);
-    for (let i = 16; i < app.channels.length; i++) app.debug.toggleChannel(i, false);
+    for (let i = channels; i < app.channels.length; i++) app.debug.toggleChannel(i, false);
     if (app.busViews.length === 0) {
       app.debug.addBus({
         name: 'loop-probe',
@@ -173,7 +183,7 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
       });
     }
     app.debug.setSettings({
-      channels: 16,
+      channels,
       samplerate: options.samplerate,
       testMode: 2,
       loopSamples: options.retentionSamples,
@@ -194,8 +204,10 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
     };
     restoreAppend = () => { captureStore.append = originalAppend; };
     const initial = app.progressView();
-    if (initial.limit !== options.retentionSamples || app.store.channelCount !== 16) {
-      throw new Error(`unexpected capture shape: channels=${app.store.channelCount} limit=${initial.limit}`);
+    if (initial.limit !== options.retentionSamples || app.store.channelCount !== channels ||
+        app.store.samplerate !== options.samplerate) {
+      throw new Error(`unexpected capture shape: channels=${app.store.channelCount} ` +
+        `rate=${app.store.samplerate} limit=${initial.limit}`);
     }
     await sample();
     timer = setInterval(poll, 1000);
@@ -231,12 +243,16 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
     }
     const stopBuildMs = performance.now() - stopStarted;
     const sustainedMBps = stats.steadyMBps;
+    const fullRate = sustainedMBps >= expectedMBps * 0.99;
     const pass = live && postStopExact && droppedConsistent && retentionBounded && pageErrors.length === 0 &&
-      sustainedMBps >= (options.minSustainedMBps ?? 0) &&
+      (options.requireFullRate !== true || fullRate) &&
+      sustainedMBps >= (options.minSustainedMBps ?? 0) && sustainedMBps <= expectedMBps * 1.02 &&
       (options.minDrawHz === undefined || drawHz >= options.minDrawHz) &&
       (options.maxDrawHz === undefined || drawHz <= options.maxDrawHz);
     return {
+      channels,
       samplerate: options.samplerate,
+      expectedMBps,
       seconds: options.seconds,
       elapsedMs,
       samples: beforeStop.samples,
@@ -245,8 +261,12 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
       dropped: beforeStop.dropped,
       kept: beforeStop.kept,
       sustainedMBps,
+      fullRate,
+      requiresFullRate: options.requireFullRate === true,
       peakQueuedTransfers: stats.peakQueuedTransfers,
       slowTransfers: stats.slowTransfers,
+      sinkMsP95: stats.sinkMsP95,
+      maxIdleGapMs: stats.maxIdleGapMs,
       maxQuietMs,
       draws: drawTimes.length,
       drawHz,
