@@ -18,6 +18,7 @@ import { InterleavedSampleStore } from './interleavedStore.js';
 import { RleSampleStore } from './rleStore.js';
 import { BitPlane } from './bitplane.js';
 import { GAP_BIT } from './types.js';
+import { appendLostSamples } from './gaps.js';
 import { generateCapture, fillMacro, makeTileBlock, MACRO_SAMPLES } from './generator.js';
 import type { SampleStore, ColumnView } from './types.js';
 import { runSoftwareTriggerSuite } from './softwareTriggerSelftest.js';
@@ -391,6 +392,113 @@ function testRleQuantization(): TestResult[] {
     detail: notThrown.length === 0 ? `${badInputs.length} bad-input cases all threw` : `did not throw: ${notThrown.join(', ')}`,
   });
 
+  return results;
+}
+
+function testInterleavedGapParity(): TestResult[] {
+  const results: TestResult[] = [];
+  const same = (a: ArrayLike<number>, b: ArrayLike<number>): boolean =>
+    a.length === b.length && Array.from(a).every((v, i) => v === b[i]);
+  for (const channels of [16, 32] as const) {
+    const total = 4096;
+    const bytes = channels / 8;
+    const planar = new PlanarSampleStore({ channelCount: channels, samplerate: 100e6 });
+    const interleaved = new InterleavedSampleStore(100e6, channels);
+    for (let from = 0; from < total; from += 257) {
+      const n = Math.min(257, total - from);
+      const chunk = new Uint8Array(n * bytes);
+      const view = new DataView(chunk.buffer);
+      for (let i = 0; i < n; i++) {
+        const value = Math.imul(from + i, 0x9e3779b1) >>> 0;
+        if (bytes === 2) view.setUint16(i * 2, value & 0xffff, true);
+        else view.setUint32(i * 4, value, true);
+      }
+      planar.append(chunk);
+      interleaved.append(chunk);
+    }
+    for (const store of [planar, interleaved]) {
+      store.noteGap(500, 1000);
+      store.noteGap(750, 1500);
+      store.noteGap(2000, 2001);
+    }
+    const wantedGaps = JSON.stringify([
+      { startSample: 500, endSample: 1500 },
+      { startSample: 2000, endSample: 2001 },
+    ]);
+    let invalidRejected = true;
+    for (const [start, end] of [[10, 5], [-1, 5], [0, total + 1]]) {
+      try { interleaved.noteGap(start, end); invalidRejected = false; } catch { }
+    }
+    const copy = interleaved.gaps() as { startSample: number; endSample: number }[];
+    copy[0]!.startSample = 0;
+    results.push({
+      name: `interleaved ${channels}ch merges, validates and defensively returns gaps`,
+      pass: JSON.stringify(interleaved.gaps()) === wantedGaps && invalidRejected &&
+        interleaved.gaps()[0]!.startSample === 500,
+      detail: JSON.stringify(interleaved.gaps()),
+    });
+
+    const cases = [[0, total, 64], [100, 2000, 37], [400, 1600, 31], [2000, 2048, 1]];
+    const compareColumns = (): string => {
+      for (const ch of [0, 3, 7, channels - 1]) {
+        for (const [s, e, bins] of cases) {
+          const a = planar.query(ch, s, e, bins);
+          const b = interleaved.query(ch, s, e, bins);
+          if (!same(a.low, b.low) || !same(a.high, b.high) ||
+              !same(a.edge, b.edge) || !same(a.packed, b.packed)) {
+            return `ch${ch} [${s},${e}) x${bins}`;
+          }
+        }
+      }
+      return '';
+    };
+    const compareEdges = (): string => {
+      for (const ch of [0, 3, 7, channels - 1]) {
+        const a = planar.edges(ch, 0, planar.length);
+        const b = interleaved.edges(ch, 0, interleaved.length);
+        const count = interleaved.edgeCount(ch, 0, interleaved.length);
+        if (!same(a, b) || count !== a.length || planar.edgeCount(ch, 0, planar.length) !== count) {
+          return `ch${ch}: ${a.length}/${b.length}/${count} edges`;
+        }
+      }
+      return '';
+    };
+    const queryFailure = compareColumns();
+    results.push({
+      name: `interleaved ${channels}ch gap query matches planar including bit3`,
+      pass: queryFailure === '',
+      detail: queryFailure || `${cases.length * 4} viewports matched`,
+    });
+    const edgeFailure = compareEdges();
+    results.push({
+      name: `interleaved ${channels}ch gap-filtered edges match planar`,
+      pass: edgeFailure === '',
+      detail: edgeFailure || '4 channels matched',
+    });
+
+    planar.dropFront(512);
+    interleaved.dropFront(512);
+    const droppedQueryFailure = compareColumns();
+    const droppedEdgeFailure = compareEdges();
+    results.push({
+      name: `interleaved ${channels}ch dropFront shifts gaps without changing query or edges`,
+      pass: JSON.stringify(interleaved.gaps()) === JSON.stringify(planar.gaps()) &&
+        droppedQueryFailure === '' && droppedEdgeFailure === '',
+      detail: droppedQueryFailure || droppedEdgeFailure || JSON.stringify(interleaved.gaps()),
+    });
+
+    const planarLost = appendLostSamples(planar, 128, planar.length + 128);
+    const interleavedLost = appendLostSamples(interleaved, 128, interleaved.length + 128);
+    const liveQueryFailure = compareColumns();
+    const liveEdgeFailure = compareEdges();
+    results.push({
+      name: `interleaved ${channels}ch live dropout append matches planar`,
+      pass: planarLost === 128 && interleavedLost === 128 &&
+        JSON.stringify(interleaved.gaps()) === JSON.stringify(planar.gaps()) &&
+        liveQueryFailure === '' && liveEdgeFailure === '',
+      detail: liveQueryFailure || liveEdgeFailure || JSON.stringify(interleaved.gaps()),
+    });
+  }
   return results;
 }
 
@@ -1573,6 +1681,8 @@ export function runFastSuite(log: Log): TestResult[] {
   results.push(...testRleQuantization());
   log('gap spans');
   results.push(...testGaps());
+  log('interleaved gap parity');
+  results.push(...testInterleavedGapParity());
   log('narrow channel modes');
   results.push(...testNarrowModes());
   log('wide channel modes');
@@ -1586,6 +1696,9 @@ export function runFastSuite(log: Log): TestResult[] {
     const planar = new PlanarSampleStore({ channelCount: 16, samplerate: 100e6 });
     planar.append(new Uint8Array(4096 * 2));
     results.push(...testBadArguments(planar, 'planar'));
+    const interleaved = new InterleavedSampleStore(100e6, 16);
+    interleaved.append(new Uint8Array(4096 * 2));
+    results.push(...testBadArguments(interleaved, 'interleaved'));
     const rle = RleSampleStore.fromTransitions(16, 100e6, 4096,
       Array.from({ length: 16 }, () => ({ initial: 0, transitions: new Float64Array(0) })));
     results.push(...testBadArguments(rle, 'rle'));

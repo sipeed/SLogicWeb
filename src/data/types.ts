@@ -85,6 +85,7 @@ export interface SampleStore {
   dropFront(samples: number): void;
   query(channel: number, startSample: number, endSample: number, bins: number): ColumnView;
   edges(channel: number, startSample: number, endSample: number): Int32Array;
+  edgeCount?(channel: number, startSample: number, endSample: number): number;
   /** Level (0 or 1) of one channel at one sample. O(1) on the planar and interleaved
    *  stores, O(log edges) on the RLE store. Throws outside [0, length). Inside a gap it
    *  returns the store's filler, which is not data - check `gaps()` first. */

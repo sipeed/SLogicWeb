@@ -77,7 +77,7 @@ import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
 /** Where Pyodide and the decoder zip live; content-hashed in hosted builds (vite.config.ts). */
 declare const __LOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
 
-/** A store that can also count edges without materialising them (PlanarSampleStore does). */
+/** A store that can also count edges without materialising them (native live stores do). */
 type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number): number };
 
 const BUS_CAPTURE_LOCK_ERROR = 'bank oscilloscope settings are locked while capture is running or stopping';

@@ -42,7 +42,9 @@ import { WorkerSlogicDevice } from './workerTransport.js';
 import { createCommandQueue, describeFailure } from './commandQueue.js';
 import { TransportDeadError } from './types.js';
 import type { FromWorker, ToWorker } from './usbWorkerProtocol.js';
-import { PlanarSampleStore, appendLostSamples } from '../data/index.js';
+import {
+  createSampleStore, InterleavedSampleStore, PlanarSampleStore, appendLostSamples,
+} from '../data/index.js';
 import {
   ClockStreamDevice, FakeSlogic, recorded, recorded32, view, type AuxModel,
 } from './fakeUsb.js';
@@ -413,6 +415,14 @@ async function main(): Promise<void> {
     const a = Uint8Array.of(1, 2, 3);
     return expandPacked(a, 8) === a;
   })());
+  const factory16 = createSampleStore(16, 100e6);
+  check('the sample factory keeps 16/32ch native and 4/8ch planar',
+    factory16 instanceof InterleavedSampleStore && factory16.channelCount === 16 &&
+    createSampleStore(32, 100e6) instanceof InterleavedSampleStore &&
+    createSampleStore(4, 100e6) instanceof PlanarSampleStore &&
+    createSampleStore(8, 100e6) instanceof PlanarSampleStore &&
+    createSampleStore(64, 100e6) instanceof PlanarSampleStore &&
+    createSampleStore(128, 100e6) instanceof PlanarSampleStore);
 
   console.log('\naux against recorded replies');
   {

@@ -3,8 +3,8 @@
 /**
  * The 32ch/200M question, asked without a board.
  *
- * Both arms run the same code the app runs - `Slogic16U3`, the same `PlanarSampleStore`
- * append the capture panel does, the same 3,129,344-byte transfers - against a device that
+ * Both arms run the same code the app runs - `Slogic16U3`, the same `createSampleStore`
+ * layout the capture panel uses, the same 3,129,344-byte transfers - against a device that
  * produces on its own clock with a FIFO behind it. The only difference between the arms is
  * which thread owns the read loop. What is measured is therefore not "is the browser fast
  * enough" in the abstract but whether the page's own stalls (NOTES 8.18: 20-38 ms while a
@@ -124,10 +124,9 @@ export async function runPageArm(options: HarnessOptions = {}): Promise<ArmRepor
   const samplerate = (options.bytesPerMs ?? 800_000) * 1000 / (channels / 8);
   const cfg = { channels, samplerate, thresholdVolts: 1.6 } as const;
   const budgetSamples = Math.floor(samplerate * seconds);
-  // `createSampleStore`, not `PlanarSampleStore`: at 32 channels the app deliberately uses
-  // the interleaved store, because a synchronous 32-plane transpose costs 8.5 ms per chunk
-  // against a 3.9 ms budget (measured in this harness's first run, which is how it got
-  // caught). The arms have to run the consumer the shipping app runs.
+  // `createSampleStore`, not `PlanarSampleStore`: at 16/32 channels the app deliberately
+  // uses the interleaved store to avoid a synchronous transpose. The arms have to run the
+  // consumer the shipping app runs.
   const store = createSampleStore(channels, samplerate);
   const device = new ClockStreamDevice(options.bytesPerMs ?? 800_000,
     options.fifoBytes ?? 262_144);

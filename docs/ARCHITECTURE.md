@@ -71,8 +71,8 @@ export interface SampleStore {
   /** Forget the oldest `samples` (a multiple of DROP_FRONT_QUANTUM): every position
    *  shifts down and `length` shrinks, so a loop capture keeps only the newest
    *  window. Callers needing absolute positions keep their own drop offset.
-   *  Imported captures cannot retain and throw; every live width (planar 4/8/16ch
-   *  and interleaved 32ch) implements it, against absolute-addressed pyramids. */
+   *  Imported captures cannot retain and throw; every live width (planar 4/8/64/128ch
+   *  and interleaved 16/32ch) implements it, against absolute-addressed pyramids. */
   dropFront(samples: number): void;
   /** Downsampled view for rendering: for each of `bins` pixel columns over
    *  [startSample, endSample), the low bit, the high bit and whether the column
@@ -80,6 +80,8 @@ export interface SampleStore {
   query(channel: number, startSample: number, endSample: number, bins: number): ColumnView;
   /** Exact edge positions, for cursors, measurement and decoders. */
   edges(channel: number, startSample: number, endSample: number): Int32Array;
+  /** Count-only edge preflight without materialising the result, when implemented. */
+  edgeCount?(channel: number, startSample: number, endSample: number): number;
   /** Record that samples [startSample, endSample) are unknown (a transfer dropout).
    *  Overlapping notes are merged. */
   noteGap(startSample: number, endSample: number): void;
@@ -112,12 +114,12 @@ the match reports no trigger and discards the ring.
 `query` being sublinear in sample count is the whole ballgame for the framerate metric.
 Build the mip pyramid on append. Two implementations satisfy the contract:
 
-- `PlanarSampleStore` - the live-capture store for 4/8/16/64/128-channel captures. One bit
+- `PlanarSampleStore` - the live-capture store for 4/8/64/128-channel captures. One bit
   per sample per channel plus a pyramid.
-- `InterleavedSampleStore` - the 32-channel live-capture store. It preserves native
-  little-endian uint32 samples and uses the same two-plane pyramid, avoiding a synchronous
-  32-channel transpose on the USB consumer path. `createSampleStore()` selects this layout
-  automatically for 32 channels.
+- `InterleavedSampleStore` - the 16/32-channel live-capture store. It preserves native
+  little-endian uint16/uint32 samples and uses the same two-plane pyramid, avoiding a
+  synchronous transpose on the USB consumer path. `createSampleStore()` selects this layout
+  automatically for 16 and 32 channels.
 - `RleSampleStore` - the import store, built from per-channel transition lists
   (`createTransitionStore()` quantises transition times to sample positions with the same
   rule the planar resample used: first sample at or after the transition, same-sample

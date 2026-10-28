@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
 /**
- * InterleavedSampleStore - native device-order storage used by the SLogic32 U3 live path.
+ * InterleavedSampleStore - native device-order storage.
  *
  * Same contract, same pyramid shape, same block allocator, same query descent. The only
  * difference is the layout of the two big arrays:
@@ -13,13 +13,10 @@
  *
  * What it cannot do is answer "is there a 1 anywhere in these 512 samples" with one
  * compare. It has to look at every sample, or every bin, one at a time.
- *
- * The 16-channel form remains the comparison baseline. The 32-channel form is also the
- * shipping SLogic32 U3 live store: at 800 MB/s, transposing every word on the USB/UI
- * thread cannot keep up, while preserving the native interleaved words can.
  */
 
-import { DROP_FRONT_QUANTUM } from './types.js';
+import { assertGapBounds, mergeGap, shiftGapsFront, splitAroundGaps } from './gaps.js';
+import { DROP_FRONT_QUANTUM, GAP_BIT } from './types.js';
 import type { ColumnView, GapSpan, MemoryReport, SampleStore } from './types.js';
 import type { ChannelCount } from '../types.js';
 
@@ -100,6 +97,7 @@ export class InterleavedSampleStore implements SampleStore {
   private readonly levels: MaskLevel[] = [];
   private readonly validBins: number[] = [];
   private readonly binSize: number[] = [];
+  private gapList: GapSpan[] = [];
 
   /**
    * Loop drop cursors, the same scheme as PlanarSampleStore: pyramid bins are
@@ -170,6 +168,7 @@ export class InterleavedSampleStore implements SampleStore {
       this.baseOrigin = origin;
     }
     this.baseSkew = this.droppedTotal - this.baseOrigin;
+    this.gapList = shiftGapsFront(this.gapList, samples);
     // Pyramid bins are absolute: release only the whole blocks the dropped span
     // fully covers, one splice per level. No content is ever rebuilt.
     for (let k = 1; k <= MAX_LEVEL; k++) {
@@ -344,6 +343,8 @@ export class InterleavedSampleStore implements SampleStore {
     const edge = this.scratchEdge, packed = this.scratchPacked;
 
     const D = this.droppedTotal;
+    const gaps = this.gapList;
+    let gp = 0;
     for (let i = 0; i < bins; i++) {
       const c0 = s + Math.floor((i * width) / bins);
       let c1 = s + Math.floor(((i + 1) * width) / bins);
@@ -355,19 +356,54 @@ export class InterleavedSampleStore implements SampleStore {
       if (c0 > 0) st |= this.sampleBit(channel, c0 - 1) !== 0 ? HAS_ONE : HAS_ZERO;
       const ev = st === HAS_BOTH ? 1 : 0;
       high[i] = hv; low[i] = lv; edge[i] = ev;
-      packed[i] = hv | (lv << 1) | (ev << 2);
+      while (gp < gaps.length && gaps[gp]!.endSample <= c0) gp++;
+      const gapHit = gp < gaps.length && gaps[gp]!.startSample < c1;
+      packed[i] = hv | (lv << 1) | (ev << 2) | (gapHit ? GAP_BIT : 0);
     }
     return { channel, startSample: s, endSample: e, bins, low, high, edge, packed };
   }
 
   edges(channel: number, startSample: number, endSample: number): Int32Array {
-    if (channel < 0 || channel >= this.channelCount || (channel | 0) !== channel) throw new Error(`channel ${channel} out of range`);
+    const segs = this.edgeSegments(channel, startSample, endSample);
+    if (segs === null) return new Int32Array(0);
+    let n = 0;
+    for (const [a, b] of segs) n += this.scanEdgesRange(channel, a, b, null, 0);
+    if (n === 0) return new Int32Array(0);
+    const out = new Int32Array(n);
+    let w = 0;
+    for (const [a, b] of segs) w += this.scanEdgesRange(channel, a, b, out, w);
+    if (w !== n) throw new Error(`edge count changed between passes: ${n} then ${w}`);
+    return out;
+  }
+
+  edgeCount(channel: number, startSample: number, endSample: number): number {
+    const segs = this.edgeSegments(channel, startSample, endSample);
+    if (segs === null) return 0;
+    let n = 0;
+    for (const [a, b] of segs) n += this.scanEdgesRange(channel, a, b, null, 0);
+    return n;
+  }
+
+  private edgeSegments(
+    channel: number, startSample: number, endSample: number,
+  ): Array<[number, number]> | null {
+    if (channel < 0 || channel >= this.channelCount || (channel | 0) !== channel) {
+      throw new Error(`channel ${channel} out of range 0..${this.channelCount - 1}`);
+    }
+    if (!Number.isFinite(startSample) || !Number.isFinite(endSample)) {
+      throw new Error(`edges range must be finite, got [${startSample}, ${endSample})`);
+    }
     const s = Math.max(1, Math.floor(startSample));
     const e = Math.min(this.length, Math.ceil(endSample));
-    if (s >= e) return new Int32Array(0);
+    if (s >= e) return null;
+    return splitAroundGaps(this.gapList, s, e);
+  }
+
+  private scanEdgesRange(
+    channel: number, s: number, e: number, out: Int32Array | null, outOff: number,
+  ): number {
     const skew = this.baseSkew + this.head;
-    let out = new Int32Array(1024);
-    let n = 0;
+    let n = outOff;
     let prev = this.sampleBit(channel, s - 1);
     let i = s;
     let p = i + skew;
@@ -380,26 +416,22 @@ export class InterleavedSampleStore implements SampleStore {
       for (; p < stop; p++, i++, j++) {
         const v = (arr[j]! >>> channel) & 1;
         if (v !== prev) {
-          if (n === out.length) { const bigger = new Int32Array(out.length * 2); bigger.set(out); out = bigger; }
-          out[n++] = i;
+          if (out !== null) out[n] = i;
+          n++;
           prev = v;
         }
       }
     }
-    return out.subarray(0, n);
+    return n - outOff;
   }
 
-  /**
-   * This store exists to be benchmarked against PlanarSampleStore, not shipped, so gaps
-   * are refused loudly rather than half-implemented. It is deliberately not part of the
-   * gap tests.
-   */
   noteGap(startSample: number, endSample: number): void {
-    throw new Error(`InterleavedSampleStore does not support gaps (got [${startSample}, ${endSample}))`);
+    assertGapBounds(startSample, endSample, this.length);
+    this.gapList = mergeGap(this.gapList, startSample, endSample);
   }
 
   gaps(): GapSpan[] {
-    return [];
+    return this.gapList.map((g) => ({ ...g }));
   }
 
   memory(): MemoryReport {

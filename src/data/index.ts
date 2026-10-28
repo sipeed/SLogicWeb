@@ -3,8 +3,7 @@
 /**
  * src/data - sample storage and multiresolution query.
  *
- * Call createSampleStore() rather than choosing a layout. It uses planar bit planes for
- * ordinary widths and native interleaved uint32 words for the 800 MB/s SLogic32 path.
+ * Call createSampleStore() rather than choosing a layout.
  */
 
 export type { SampleStore, ColumnView, MemoryReport, GapSpan } from './types.js';
@@ -44,9 +43,7 @@ import type { ChannelCount } from '../types.js';
  * their imports so the layout can change without touching them.
  */
 export function createSampleStore(channelCount: ChannelCount, samplerate: number): SampleStore {
-  // Keep SLogic32 U3 words interleaved. At 200 MSa/s, copying its native uint32 stream
-  // is fast enough to sustain USB while a synchronous 32-plane transpose is not.
-  if (channelCount === 32) return new InterleavedSampleStore(samplerate, 32);
+  if (channelCount === 16 || channelCount === 32) return new InterleavedSampleStore(samplerate, channelCount);
   return new PlanarSampleStore({ channelCount, samplerate });
 }
 
