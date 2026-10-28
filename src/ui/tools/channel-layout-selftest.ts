@@ -18,8 +18,8 @@ import { ROWS } from '../metrics.js';
 import { analogFrame, type BusViewState } from '../busView.js';
 import { BusBuilder, PlanarSampleStore, type BusSpec } from '../../data/index.js';
 import { DEFAULT_TRIGGER_MODE, edgeTriggerAutoArms, isEdgeTriggerMode, modesToConditions,
-  clampLoopSamples, DEFAULT_LOOP_SAMPLES, LOOP_WINDOW_QUANTUM, loopDropSamples, maxLoopSamples,
-  triggerModeFromCondition,
+  clampLoopSamples, DEFAULT_LOOP_SAMPLES, effectiveCaptureMode, LOOP_WINDOW_QUANTUM, loopDropSamples,
+  maxLoopSamples, triggerModeFromCondition,
   type TriggerCondition, type TriggerMode } from '../state.js';
 
 /** Same node access idiom as the other UI self-tests, without requiring @types/node. */
@@ -566,16 +566,31 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
       ? `${dropTable.length} exact cases, every result a multiple of 64`
       : dropBad.join('; '));
 
+  const modeCases = [
+    ['free', false, 'free'], ['timer', false, 'timer'], ['loop', false, 'free'],
+    ['free', true, 'loop'], ['timer', true, 'loop'], ['loop', true, 'loop'],
+  ] as const;
+  const modeBad = modeCases.filter(([stored, active, expected]) =>
+    effectiveCaptureMode(stored, active) !== expected);
+  check('effective capture mode forces Loop only for oscilloscopes and falls legacy Loop back to Free',
+    modeBad.length === 0,
+    modeBad.length === 0 ? modeCases.map(([stored, active, expected]) =>
+      `${stored}/${active ? 'scope' : 'stored'}→${expected}`).join(', ') : JSON.stringify(modeBad));
+
   const loopFs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
   if (!loopFs || typeof loopFs.readFileSync !== 'function') throw new Error('node fs module unavailable');
   const panel = loopFs.readFileSync('src/ui/capturePanel.ts', 'utf8');
-  const panelLoop = panel.includes("['loop', t('capturePanel.loop')]") &&
-    panel.includes('clampLoopSamples(') &&
-    panel.includes('maxLoopSamples(');
-  check('the capture panel offers loop mode with the shared retention helpers',
-    panelLoop,
-    `segment=${panel.includes("['loop', t('capturePanel.loop')]")}, ` +
-    `helper=${panel.includes('clampLoopSamples(')}, max=${panel.includes('maxLoopSamples(')}`);
+  const panelModes = !panel.includes("['loop', t('capturePanel.loop')]") &&
+    !panel.includes('capturePanel.retentionSamples') && !panel.includes('capturePanel.retentionNote') &&
+    !panel.includes('capturePanel.loopCeilingNote') && !panel.includes('maxLoopSamples(') &&
+    panel.includes("['free', t('capturePanel.freeRun')]") && panel.includes("['timer', t('capturePanel.timer')]") &&
+    panel.includes('b.disabled = v.oscilloscopeActive') && panel.includes('v.effectiveMode === id') &&
+    panel.includes("t('capturePanel.oscilloscopeTakeover')");
+  check('the capture panel offers only Free/Timer plus the oscilloscope takeover notice',
+    panelModes,
+    `noLoop=${!panel.includes("['loop', t('capturePanel.loop')]")}, ` +
+    `takeover=${panel.includes("t('capturePanel.oscilloscopeTakeover')")}, ` +
+    `effective=${panel.includes('v.effectiveMode === id')}`);
 
   const appSrc = loopFs.readFileSync('src/ui/app.ts', 'utf8');
   const startStart = appSrc.indexOf('private async startCapture(');
@@ -588,13 +603,16 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     startSrc.length > 0 && flagReset >= 0 && firstRefusal > flagReset && flagSet > firstRefusal,
     `slice=${startSrc.length}, reset=${flagReset}, refusal=${firstRefusal}, set=${flagSet}`);
 
-  const segMatrix =
-    panel.includes("id === 'loop' && (v.running || v.stopping)") &&
-    !panel.includes("v.stopping || s.channels === 32") &&
-    // No 32-channel special case anywhere in the panel: loop is offered, sized and
-    // annotated identically at every width now that the interleaved store drops.
-    !panel.includes('s.channels === 32') &&
-    panel.includes("id !== 'loop' && s.mode === 'loop' && (v.running || v.stopping)");
+  const scopeActivity = appSrc.split('private oscilloscopeActive()')[1]?.split('private addBus(')[0] ?? '';
+  const segMatrix = scopeActivity.includes('lockedChannelBanks(this.busViews, this.channels.length).size > 0') &&
+    panel.includes('b.disabled = v.oscilloscopeActive') &&
+    panel.includes("v.effectiveMode === 'timer'") && panel.includes("v.effectiveMode === 'loop'") &&
+    !panel.includes("s.mode === 'loop'") && !panel.includes('s.channels === 32') &&
+    startSrc.includes('const mode = effectiveCaptureMode(this.settings.mode, this.oscilloscopeActive())') &&
+    startSrc.includes("const isLoop = mode === 'loop'") &&
+    startSrc.includes("const postTriggerSamples = mode === 'timer'") &&
+    !startSrc.includes('this.settings.mode ===') &&
+    appSrc.includes('effectiveMode: effectiveCaptureMode(this.settings.mode, oscilloscopeActive)');
   // W6: the loop decode ban is gone - a running loop decodes as a labelled snapshot,
   // and the note carries the tag. The flag is read before the worker round trip, so a
   // decode that outlives the running capture keeps its label.
@@ -618,12 +636,28 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     progressSplit,
     `total=${appSrc.includes('samples: this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length')}, ` +
     `retained=${appSrc.includes('bytesPerSampleForChannels(this.store.channelCount)')}`);
-  check('the mode segment disable matrix locks loop while running (32ch loop unlocked)',
+  check('the panel, trigger budget and real start path share effective mode without mutating stored mode',
     segMatrix,
-    `loopClause=${panel.includes("id === 'loop' && (v.running || v.stopping)")}, ` +
-    `no32Gone=${!panel.includes("v.stopping || s.channels === 32")}, ` +
-    `no32Branch=${!panel.includes('s.channels === 32')}, ` +
-    `escapeClause=${panel.includes("id !== 'loop' && s.mode === 'loop' && (v.running || v.stopping)")}`);
+    `panel=${panel.includes('b.disabled = v.oscilloscopeActive')}, ` +
+    `start=${startSrc.includes('const mode = effectiveCaptureMode(this.settings.mode, this.oscilloscopeActive())')}, ` +
+    `storedBypass=${!startSrc.includes('this.settings.mode ===')}`);
+
+  const busPanel = loopFs.readFileSync('src/ui/busPanel.ts', 'utf8');
+  const addBus = appSrc.split('private addBus(')[1]?.split('private updateBus(')[0] ?? '';
+  const updateBus = appSrc.split('private updateBus(')[1]?.split('private removeBus(')[0] ?? '';
+  const removeBus = appSrc.split('private removeBus(')[1]?.split('private bankCaptureSettings(')[0] ?? '';
+  const scopeLocks = addBus.includes('(this.running || this.stopping) && busChannelBank(cfg.spec) !== null') &&
+    updateBus.includes('busChannelBank(current.spec) !== null || busChannelBank(cfg.spec) !== null') &&
+    removeBus.includes('(this.running || this.stopping) && busChannelBank(current.spec) !== null') &&
+    busPanel.includes('remove.disabled = v.captureLocked && busChannelBank(b.spec) !== null') &&
+    busPanel.includes('v.captureLocked && (editingBank || busChannelBank(current.spec) !== null)') &&
+    appSrc.includes('if (this.addBus(cfg) === null) throw new Error(BUS_CAPTURE_LOCK_ERROR)') &&
+    appSrc.includes('if (b && !this.updateBus(b.id, cfg)) throw new Error(BUS_CAPTURE_LOCK_ERROR)') &&
+    appSrc.includes('if (b && !this.removeBus(b.id)) throw new Error(BUS_CAPTURE_LOCK_ERROR)');
+  check('running and stopping lock bank additions, edits and removal in both the view and App model',
+    scopeLocks, `add=${addBus.includes('busChannelBank(cfg.spec)')}, ` +
+    `update=${updateBus.includes('busChannelBank(cfg.spec)')}, remove=${removeBus.includes('busChannelBank(current.spec)')}, ` +
+    `panel=${busPanel.includes('v.captureLocked')}`);
 
   const loopOpts = startSrc.includes(
     'isLoop ? { loop: true } : { deviceSampleLimit: this.captureLimitSamples }');

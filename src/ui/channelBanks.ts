@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import type { BusSpec } from '../data/busValue.js';
+import { validateBusSpec, type BusSpec } from '../data/busValue.js';
 
 export const CHANNEL_BANK_SIZE = 8;
 
@@ -76,11 +76,16 @@ export function busChannelBank(spec: BusSpec): number | null {
   return sorted.every((channel, i) => channel === start + i) ? start : null;
 }
 
-export function lockedChannelBanks(buses: readonly { spec: BusSpec }[]): Set<number> {
+export function lockedChannelBanks(
+  buses: readonly { spec: BusSpec }[], channelCount?: number,
+): Set<number> {
   const locked = new Set<number>();
   for (const bus of buses) {
     const start = busChannelBank(bus.spec);
-    if (start !== null) locked.add(start);
+    if (start === null || (channelCount !== undefined && validateBusSpec(bus.spec, channelCount).length > 0)) {
+      continue;
+    }
+    locked.add(start);
   }
   return locked;
 }

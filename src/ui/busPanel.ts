@@ -30,6 +30,7 @@ export interface BusPanelView {
   buses: readonly BusViewState[];
   /** Channels a bus may use: the current capture's, or the device's when there is none. */
   channelCount: number;
+  captureLocked: boolean;
 }
 
 export interface BusPanelCallbacks {
@@ -369,6 +370,7 @@ export class BusPanel {
         const edit = button(t('bus.editButton'), 'bus-btn');
         edit.addEventListener('click', () => this.cb.onEdit(b.id));
         const remove = button(t('bus.remove'), 'bus-btn bus-btn--remove');
+        remove.disabled = v.captureLocked && busChannelBank(b.spec) !== null;
         remove.addEventListener('click', () => this.cb.onRemove(b.id));
         row.append(edit, remove);
         s.body.appendChild(row);
@@ -396,7 +398,8 @@ export class BusPanel {
       },
     });
     s.body.appendChild(fields.el);
-    const problems = validateBusSpec(fields.read().spec, v.channelCount);
+    const current = fields.read();
+    const problems = validateBusSpec(current.spec, v.channelCount);
     if (problems.length) {
       const err = div('panel-note error');
       err.textContent = problems.join('\n');
@@ -405,8 +408,12 @@ export class BusPanel {
 
     const actions = div('bus-actions');
     const go = button(t(this.editing ? 'bus.save' : 'bus.addButton'), 'pill primary');
-    go.disabled = problems.length > 0;
+    const editingBank = this.editing !== null && v.buses
+      .some((bus) => bus.id === this.editing && busChannelBank(bus.spec) !== null);
+    go.disabled = problems.length > 0 ||
+      (v.captureLocked && (editingBank || busChannelBank(current.spec) !== null));
     go.addEventListener('click', () => {
+      if (go.disabled) return;
       const cfg = fields.read();
       if (this.editing) this.cb.onUpdate(this.editing, cfg);
       else this.cb.onAdd(cfg);

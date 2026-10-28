@@ -81,6 +81,13 @@ export interface CaptureSettings {
   preTriggerPercent: number;
 }
 
+export function effectiveCaptureMode(
+  storedMode: CaptureSettings['mode'], oscilloscopeActive: boolean,
+): CaptureSettings['mode'] {
+  if (oscilloscopeActive) return 'loop';
+  return storedMode === 'loop' ? 'free' : storedMode;
+}
+
 export interface TriggerCondition {
   channel: number;
   kind: CaptureSettings['triggerKind'];

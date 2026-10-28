@@ -458,11 +458,13 @@ const baseSettings: CaptureSettings = {
   const retired = [
     'channels.dialogDescription', 'channels.moreColors', 'bus.fixedBits',
     'bus.bankEnabledNote', 'bus.bankDisableNote', 'bus.bankDisabledNote',
+    'capturePanel.loop', 'capturePanel.retentionSamples', 'capturePanel.retentionNote',
+    'capturePanel.loopCeilingNote',
   ];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const present = Object.entries(dicts).filter(([, dict]) =>
     retired.some((key) => Object.keys(dict).includes(key)));
-  check('the retired channel and bank dialog keys stay absent from every catalog',
+  check('the retired channel, bank and capture-panel keys stay absent from every catalog',
     present.length === 0,
     present.length === 0 ? `4 catalogs omit ${retired.length} keys` : present.map(([locale]) => locale).join(', '));
 }

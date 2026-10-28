@@ -211,13 +211,22 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
 
 {
   const spec = (bits: number[]) => ({ bits, clock: null, encoding: 'unsigned' as const });
+  const bankZero = spec([0, 1, 2, 3, 4, 5, 6, 7]);
   const locked = lockedChannelBanks([
     { spec: spec([15, 14, 13, 12, 11, 10, 9, 8]) },
     { spec: spec([0, 1, 2, 3]) },
     { spec: spec([1, 2, 3, 4, 5, 6, 7, 8]) },
   ]);
-  check('locked banks derive only from real aligned eight-bit bus views',
-    locked.size === 1 && locked.has(8) && !locked.has(0), [...locked].join(','));
+  const narrow = lockedChannelBanks([{ spec: bankZero }], 4);
+  const valid = lockedChannelBanks([{ spec: bankZero }], 8);
+  const clocked = { ...bankZero, clock: { channel: 8, edge: 'rising' as const } };
+  const clockNarrow = lockedChannelBanks([{ spec: clocked }], 8);
+  const clockWide = lockedChannelBanks([{ spec: clocked }], 16);
+  check('locked banks require an aligned eight-bit bus whose whole spec is valid at the current width',
+    locked.size === 1 && locked.has(8) && !locked.has(0) && narrow.size === 0 &&
+    valid.size === 1 && valid.has(0) && clockNarrow.size === 0 && clockWide.size === 1 && clockWide.has(0),
+    `base=${[...locked]}, narrow=${[...narrow]}, valid=${[...valid]}, ` +
+    `clockNarrow=${[...clockNarrow]}, clockWide=${[...clockWide]}`);
 }
 
 {
@@ -239,8 +248,8 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     panel.includes("'capturePanel.bankToggle'") &&
     panel.includes("chip.setAttribute('aria-pressed', String(c.enabled))");
   const wired = app.includes('onToggleBank: (start) => this.setBankEnabled(start)') &&
-    app.includes('const next = toggleChannelBank(this.channels, start, lockedChannelBanks(this.busViews));') &&
-    app.includes('const next = clearChannelBanks(this.channels, lockedChannelBanks(this.busViews));');
+    app.includes('const next = toggleChannelBank(this.channels, start, lockedChannelBanks(this.busViews, this.channels.length));') &&
+    app.includes('const next = clearChannelBanks(this.channels, lockedChannelBanks(this.busViews, this.channels.length));');
   const grid = sheet.includes('grid-template-columns: repeat(8, minmax(0, 1fr))') &&
     sheet.includes('.channel-bank-head') && sheet.includes('.channel-bank-count');
   check('the real Device panel renders accessible eight-channel banks through App state',
@@ -281,7 +290,10 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
 
   const globalLoop = dialog.includes('loopSamplesFromTime') && dialog.includes('maxLoopTimeValue') &&
     dialog.includes('formatDuration(samples / context.samplerate)') &&
-    app.includes('this.settings = this.bankCaptureSettings(start, loopSamples);') &&
+    app.includes('this.settings = this.bankCaptureSettings(start, loopSamples, next);') &&
+    app.includes('this.bankCaptureSettings(start, this.settings.loopSamples, config)') &&
+    app.includes('channelWidthForProbes(config.spec.clock.channel + 1)') &&
+    app.includes('activeBanks.has(bank) && bus.spec.clock') &&
     app.includes('captureChannels: preview.channels') && app.includes('samplerate: preview.samplerate');
   const updateBus = app.split('private updateBus(')[1]?.split('private removeBus(')[0] ?? '';
   const names = busPanel.includes("t('bus.defaultName')") &&
@@ -303,9 +315,10 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     globalLoop && names && locks && noBankSwap && bankEditor,
     `globalLoop=${globalLoop}, names=${names}, locks=${locks}, noBankSwap=${noBankSwap}, bankEditor=${bankEditor}`);
 
-  const modelLock = (app.match(/lockedChannelBanks\(this.busViews\)/g) ?? []).length >= 4 &&
+  const modelLock = (app.match(/lockedChannelBanks\(this.busViews, this.channels.length\)/g) ?? []).length >= 4 &&
     app.includes('locked.has(channelBankStart(c.index))');
-  const visualLock = panel.includes('toggle.disabled = locked') && panel.includes('chip.disabled = locked') &&
+  const visualLock = panel.includes('lockedChannelBanks(v.buses, v.channels.length)') &&
+    panel.includes('toggle.disabled = locked') && panel.includes('chip.disabled = locked') &&
     panel.includes("t('capturePanel.oscilloscopeActive')") &&
     sheet.includes('pointer-events: none') && sheet.includes('brightness(0.88)');
   check('active bus banks enforce model locks and render the non-interactive localized overlay',

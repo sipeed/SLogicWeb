@@ -27,7 +27,7 @@ import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
 import type { CaptureSettings, ChannelState } from './state.js';
-import { clampLoopSamples, LOOP_WINDOW_QUANTUM, maxLoopSamples } from './state.js';
+import { clampLoopSamples } from './state.js';
 import { MAX_SAMPLES } from './captureIO.js';
 
 const THRESHOLDS = [0.6, 0.9, 1.2, 1.5, 1.65, 1.8, 2.5, 3.3];
@@ -43,6 +43,8 @@ export interface CapturePanelCallbacks {
 
 export interface CapturePanelView {
   settings: CaptureSettings;
+  effectiveMode: CaptureSettings['mode'];
+  oscilloscopeActive: boolean;
   channels: readonly ChannelState[];
   buses: readonly BusViewState[];
   deviceName: string | null;
@@ -114,7 +116,7 @@ export class CapturePanel {
     chSec.header.append(total, all, clear);
 
     const banks = div('channel-banks');
-    const activeBanks = lockedChannelBanks(v.buses);
+    const activeBanks = lockedChannelBanks(v.buses, v.channels.length);
     for (const start of channelBankStarts(v.channels.length)) {
       const status = channelBankStatus(v.channels, start);
       const range = channelBankRange(start, v.channels.length);
@@ -236,24 +238,20 @@ export class CapturePanel {
     const modeSec = section(t('capturePanel.capture'));
     const seg = div('segmented');
     for (const [id, text] of [
-      ['free', t('capturePanel.freeRun')], ['timer', t('capturePanel.timer')], ['loop', t('capturePanel.loop')],
+      ['free', t('capturePanel.freeRun')], ['timer', t('capturePanel.timer')],
     ] as const) {
       const b = document.createElement('button');
-      b.className = 'seg' + (s.mode === id ? ' on' : '');
+      b.className = 'seg' + (v.effectiveMode === id ? ' on' : '');
       b.textContent = text;
-      b.disabled = (id === 'loop' && (v.running || v.stopping)) ||
-        (id !== 'loop' && s.mode === 'loop' && (v.running || v.stopping));
+      b.dataset.captureMode = id;
+      b.disabled = v.oscilloscopeActive;
       b.addEventListener('click', () => this.cb.onSettings({ ...s, mode: id }));
       seg.appendChild(b);
     }
     modeSec.body.appendChild(seg);
 
     const maxSeconds = MAX_SAMPLES / s.samplerate;
-    // The loop window's memory is the bit-packed store, one bit per channel-sample;
-    // the byte-aligned wire width would double-count a 4-channel capture.
-    const packedMB = (samples: number): string =>
-      ((samples * s.channels) / 8 / 1e6).toFixed(0);
-    if (s.mode === 'timer') {
+    if (!v.oscilloscopeActive && v.effectiveMode === 'timer') {
       const secs = document.createElement('input');
       secs.type = 'number';
       secs.min = '0.001';
@@ -267,45 +265,18 @@ export class CapturePanel {
         this.cb.onSettings({ ...s, seconds: Math.min(Number(secs.value), maxSeconds) }));
       modeSec.body.appendChild(labelled(t('capturePanel.durationS'), secs));
     }
-    if (s.mode === 'loop') {
-      // The loop window is a sample count (HSync's SampleLimit), not a duration: what
-      // is kept is exactly what is asked, whatever the samplerate.
-      const maxSamples = maxLoopSamples(s.channels);
-      const win = document.createElement('input');
-      win.type = 'number';
-      win.min = String(LOOP_WINDOW_QUANTUM);
-      win.step = String(LOOP_WINDOW_QUANTUM);
-      win.max = String(maxSamples);
-      win.value = String(s.loopSamples);
-      win.disabled = v.running || v.stopping;
-      win.addEventListener('change', () => this.cb.onSettings({
-        ...s,
-        loopSamples: clampLoopSamples(Number(win.value), s.channels),
-      }));
-      modeSec.body.appendChild(labelled(t('capturePanel.retentionSamples'), win));
-      const kept = clampLoopSamples(s.loopSamples, s.channels);
-      const keep = div('panel-note');
-      keep.textContent = t('capturePanel.retentionNote', {
-        samples: kept.toLocaleString(),
-        megabytes: packedMB(kept),
-        duration: formatDuration(kept / s.samplerate),
-      });
-      modeSec.body.appendChild(keep);
-    }
-
-    const limitText = s.mode === 'loop'
-      ? t('capturePanel.loopCeilingNote', {
-        samples: maxLoopSamples(s.channels).toLocaleString(),
-        megabytes: packedMB(maxLoopSamples(s.channels)),
-      })
-      : t('capturePanel.ceilingNote', {
+    if (v.oscilloscopeActive) {
+      const takeover = div('panel-note oscilloscope-takeover');
+      takeover.dataset.oscilloscopeTakeover = '';
+      takeover.textContent = t('capturePanel.oscilloscopeTakeover');
+      modeSec.body.appendChild(takeover);
+    } else {
+      const limit = div('panel-note');
+      limit.textContent = t('capturePanel.ceilingNote', {
         samples: MAX_SAMPLES.toLocaleString(),
         duration: formatDuration(maxSeconds),
         rate: formatRate(s.samplerate),
       });
-    if (limitText) {
-      const limit = div('panel-note');
-      limit.textContent = limitText;
       modeSec.body.appendChild(limit);
     }
 
@@ -350,9 +321,9 @@ export class CapturePanel {
         // mode), capped by the 64 MiB retained prefix. Promising the raw percentage
         // would overstate it exactly when the cap bites (e.g. 50% of 1 s at
         // 16ch/200M is capped at ~167 ms).
-        const post = s.mode === 'timer'
+        const post = v.effectiveMode === 'timer'
           ? Math.min(MAX_SAMPLES - 1, Math.round(s.seconds * s.samplerate))
-          : s.mode === 'loop'
+          : v.effectiveMode === 'loop'
             ? clampLoopSamples(s.loopSamples, s.channels)
             : MAX_SAMPLES - 1;
         const pre = Math.min(

@@ -64,8 +64,8 @@ import { PanelResizer } from './panelResizer.js';
 import { StoreRef } from './storeRef.js';
 import {
   analyzerColor, defaultChannels, defaultChannelName, channelColor, DEFAULT_TRIGGER_MODE,
-  edgeTriggerAutoArms, clampLoopSamples, DEFAULT_LOOP_SAMPLES, loopDropSamples, modesToConditions,
-  triggerModeFromCondition,
+  edgeTriggerAutoArms, clampLoopSamples, DEFAULT_LOOP_SAMPLES, effectiveCaptureMode, loopDropSamples,
+  modesToConditions, triggerModeFromCondition,
   type AnalyzerState, type CaptureSettings, type ChannelState, type TriggerMode,
   type CaptureLabel, type StatusError,
 } from './state.js';
@@ -79,6 +79,8 @@ declare const __LOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
 
 /** A store that can also count edges without materialising them (PlanarSampleStore does). */
 type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number): number };
+
+const BUS_CAPTURE_LOCK_ERROR = 'bank oscilloscope settings are locked while capture is running or stopping';
 
 interface Lane {
   analyzer: AnalyzerState;
@@ -373,41 +375,61 @@ export class App {
     this.selectPanel('analyzers');
   }
 
-  private addBus(cfg: BusViewConfig): void {
-    const color = busColor(this.nextBus);
-    this.busViews.push({ ...cfg, color, id: `bus-${this.nextBus++}`, builder: null, builtFor: null, cache: null });
-    this.syncBankChannels();
-    this.afterChannelChange();
+  private oscilloscopeActive(): boolean {
+    return lockedChannelBanks(this.busViews, this.channels.length).size > 0;
   }
 
-  private updateBus(id: string, cfg: BusViewConfig, preserveDefaultName = false): void {
+  private addBus(cfg: BusViewConfig): string | null {
+    if ((this.running || this.stopping) && busChannelBank(cfg.spec) !== null) return null;
+    const color = busColor(this.nextBus);
+    const id = `bus-${this.nextBus++}`;
+    this.busViews.push({ ...cfg, color, id, builder: null, builtFor: null, cache: null });
+    this.syncBankChannels();
+    this.afterChannelChange();
+    return id;
+  }
+
+  private updateBus(id: string, cfg: BusViewConfig, preserveDefaultName = false): boolean {
     const i = this.busViews.findIndex((b) => b.id === id);
-    if (i < 0) return;
+    if (i < 0) return false;
     const current = this.busViews[i]!;
+    if ((this.running || this.stopping) &&
+      (busChannelBank(current.spec) !== null || busChannelBank(cfg.spec) !== null)) return false;
     const next = cloneBusConfig(cfg);
     if (!preserveDefaultName && next.name !== current.name) delete next.usesDefaultName;
     this.busViews[i] = { ...next, color: current.color, id, builder: null, builtFor: null, cache: null };
     this.syncBankChannels();
     this.afterChannelChange();
+    return true;
   }
 
-  private removeBus(id: string): void {
+  private removeBus(id: string): boolean {
+    const current = this.busViews.find((bus) => bus.id === id);
+    if (!current) return false;
+    if ((this.running || this.stopping) && busChannelBank(current.spec) !== null) return false;
     this.busViews = this.busViews.filter((b) => b.id !== id);
     this.afterChannelChange();
+    return true;
   }
 
-  private bankCaptureSettings(start: number, loopSamples: number): CaptureSettings {
+  private bankCaptureSettings(start: number, loopSamples: number, config: BusViewConfig): CaptureSettings {
     const bankWidth = channelWidthForProbes(start + CHANNEL_BANK_SIZE);
+    const clockWidth = config.spec.clock ? channelWidthForProbes(config.spec.clock.channel + 1) : bankWidth;
     const currentWidth = this.neededWidth();
-    const channels = bankWidth > currentWidth ? bankWidth : currentWidth;
+    let channels = bankWidth;
+    if (clockWidth > channels) channels = clockWidth;
+    if (currentWidth > channels) channels = currentWidth;
     return clampSettings({ ...this.settings, channels, loopSamples }, this.rateCeilings);
   }
 
   private openBankBus(start: number): boolean {
     if (channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return false;
     const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
-    const config = active ?? this.bankBusDrafts.get(start) ?? defaultBankBusConfig(this.channels.length, start);
-    const preview = this.bankCaptureSettings(start, this.settings.loopSamples);
+    const config = normalizeBankBusConfig(
+      active ?? this.bankBusDrafts.get(start) ?? defaultBankBusConfig(this.channels.length, start),
+      this.channels.length, start,
+    );
+    const preview = this.bankCaptureSettings(start, this.settings.loopSamples, config);
     this.bankBusDialog.open(start, config, active !== undefined, this.channels.length, {
       channels: this.channels,
       loopSamples: preview.loopSamples,
@@ -424,7 +446,7 @@ export class App {
     const next = normalizeBankBusConfig(config, this.channels.length, start);
     this.bankBusDrafts.set(start, cloneBusConfig(next));
     if (enabled) {
-      this.settings = this.bankCaptureSettings(start, loopSamples);
+      this.settings = this.bankCaptureSettings(start, loopSamples, next);
       const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
       if (active) this.updateBus(active.id, next, true);
       else this.addBus(next);
@@ -643,14 +665,14 @@ export class App {
   private setChannelEnabled(index: number, enabled: boolean): void {
     const c = this.channels[index];
     if (!c) return;
-    if (!enabled && lockedChannelBanks(this.busViews).has(channelBankStart(index))) return;
+    if (!enabled && lockedChannelBanks(this.busViews, this.channels.length).has(channelBankStart(index))) return;
     if (!enabled && this.enabledChannels().length <= 1) return;   // never zero rows
     c.enabled = enabled;
     this.afterChannelChange();
   }
 
   private setBankEnabled(start: number): void {
-    const next = toggleChannelBank(this.channels, start, lockedChannelBanks(this.busViews));
+    const next = toggleChannelBank(this.channels, start, lockedChannelBanks(this.busViews, this.channels.length));
     if (!next) return;
     for (let i = 0; i < this.channels.length; i++) this.channels[i]!.enabled = next[i]!;
     this.afterChannelChange();
@@ -664,7 +686,7 @@ export class App {
     if (on) {
       for (const c of this.channels) c.enabled = true;
     } else {
-      const next = clearChannelBanks(this.channels, lockedChannelBanks(this.busViews));
+      const next = clearChannelBanks(this.channels, lockedChannelBanks(this.busViews, this.channels.length));
       for (let i = 0; i < this.channels.length; i++) this.channels[i]!.enabled = next[i]!;
     }
     this.afterChannelChange();
@@ -687,7 +709,12 @@ export class App {
 
   /** Narrowest capture width that covers every enabled channel. */
   private neededWidth(): ChannelCount {
-    const hi = Math.max(0, ...this.enabledChannels().map((c) => c.index));
+    const activeBanks = lockedChannelBanks(this.busViews, this.channels.length);
+    const clockChannels = this.busViews.flatMap((bus) => {
+      const bank = busChannelBank(bus.spec);
+      return bank !== null && activeBanks.has(bank) && bus.spec.clock ? [bus.spec.clock.channel] : [];
+    });
+    const hi = Math.max(0, ...this.enabledChannels().map((c) => c.index), ...clockChannels);
     return hi < 4 ? 4 : hi < 8 ? 8 : hi < 16 ? 16 : hi < 32 ? 32 : hi < 64 ? 64 : 128;
   }
 
@@ -1395,8 +1422,11 @@ export class App {
     const host = this.panelHost;
     host.replaceChildren();
     if (this.panel === 'device') {
+      const oscilloscopeActive = this.oscilloscopeActive();
       this.capturePanel.render({
         settings: this.settings,
+        effectiveMode: effectiveCaptureMode(this.settings.mode, oscilloscopeActive),
+        oscilloscopeActive,
         channels: this.channels,
         buses: this.busViews,
         deviceName: this.device?.name ?? null,
@@ -1415,7 +1445,9 @@ export class App {
         warm: this.decodeWarm,
         busy: this.decodeBusy,
       });
-      this.busPanel.render({ buses: this.busViews, channelCount: this.channels.length });
+      this.busPanel.render({
+        buses: this.busViews, channelCount: this.channels.length, captureLocked: this.running || this.stopping,
+      });
     }
   }
 
@@ -1767,7 +1799,8 @@ export class App {
       if (code === 0 || code === 1023) {
         throw new Error(`threshold ${cfg.thresholdVolts} V clips the DAC (code ${code})`);
       }
-      const isLoop = this.settings.mode === 'loop';
+      const mode = effectiveCaptureMode(this.settings.mode, this.oscilloscopeActive());
+      const isLoop = mode === 'loop';
       const store = createSampleStore(cfg.channels, cfg.samplerate);
       this.discardDecodeState();
       this.releaseMarkerPointer();
@@ -1785,7 +1818,7 @@ export class App {
       this.triggerSampleIndex = null;
       const softwareTrigger = this.settings.softwareTrigger;
       this.captureStart = softwareTrigger ? 0 : performance.now();
-      const postTriggerSamples = this.settings.mode === 'timer'
+      const postTriggerSamples = mode === 'timer'
         ? Math.min(MAX_SAMPLES - 1, Math.round(this.settings.seconds * cfg.samplerate))
         : MAX_SAMPLES - 1;
       this.captureLimitSamples = postTriggerSamples;
@@ -2139,7 +2172,7 @@ export class App {
   private setEnabledChannels(list: number[]): void {
     const want = new Set(list.filter((i) => i >= 0 && i < this.channels.length));
     if (want.size === 0) return;   // never zero rows
-    const locked = lockedChannelBanks(this.busViews);
+    const locked = lockedChannelBanks(this.busViews, this.channels.length);
     for (const c of this.channels) c.enabled = want.has(c.index) || locked.has(channelBankStart(c.index));
     this.afterChannelChange();
   }
@@ -2214,14 +2247,16 @@ export class App {
       levelAt: (channel, sample) => levelAt(this.store, channel, sample),
       // The same paths the bus panel uses.
       buses: () => this.busViews.map((b) => ({ config: b, built: b.builder?.done ?? false })),
-      addBus: (cfg) => this.addBus(cfg),
+      addBus: (cfg) => {
+        if (this.addBus(cfg) === null) throw new Error(BUS_CAPTURE_LOCK_ERROR);
+      },
       updateBus: (index, cfg) => {
         const b = this.busViews[index];
-        if (b) this.updateBus(b.id, cfg);
+        if (b && !this.updateBus(b.id, cfg)) throw new Error(BUS_CAPTURE_LOCK_ERROR);
       },
       removeBus: (index) => {
         const b = this.busViews[index];
-        if (b) this.removeBus(b.id);
+        if (b && !this.removeBus(b.id)) throw new Error(BUS_CAPTURE_LOCK_ERROR);
       },
     };
   }
@@ -2260,10 +2295,8 @@ export class App {
       this.renderPanels();
     },
     /** Add a parallel-bus view; missing fields take the panel's defaults. */
-    addBus: (cfg: Partial<BusViewConfig> & { spec: BusViewConfig['spec'] }) => {
-      this.addBus({ ...defaultBusConfig(this.channels.length), ...cfg });
-      return this.busViews[this.busViews.length - 1]!.id;
-    },
+    addBus: (cfg: Partial<BusViewConfig> & { spec: BusViewConfig['spec'] }) =>
+      this.addBus({ ...defaultBusConfig(this.channels.length), ...cfg }),
     removeBus: (id: string) => this.removeBus(id),
     buses: () => this.busViews.map((b) => ({
       id: b.id, name: b.name, color: b.color, summary: busSummary(b.spec), hideSources: b.hideSources,
