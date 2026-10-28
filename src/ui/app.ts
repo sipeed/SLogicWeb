@@ -735,10 +735,10 @@ export class App {
 
   private frame = (): void => {
     requestAnimationFrame(this.frame);
-    this.pumpBusBuilders();
     const now = performance.now();
     const highRateLoop = this.running && this.captureIsLoop &&
       this.store.samplerate >= LOOP_DRAW_MIN_RATE_HZ;
+    if (!highRateLoop) this.pumpBusBuilders();
     if (this.running && now - this.runningPanelAt > 500) {
       this.runningPanelAt = now;
       if (this.panel === 'device') this.capturePanel.updateProgress(this.progressView());

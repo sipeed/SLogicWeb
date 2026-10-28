@@ -711,6 +711,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const statusAt = frameSrc.indexOf('if (highRateLoop) this.renderStatus();');
   check('high-rate loop drawing yields to ingestion without suspending other captures',
     highRateGuard && suspendAt >= 0 && statusAt >= 0 && statusAt < suspendAt &&
+    frameSrc.includes('if (!highRateLoop) this.pumpBusBuilders();') &&
     suspendAt < frameSrc.indexOf('this.dirty = false') &&
     frameSrc.includes('now - this.runningPanelAt > 500') &&
     appSrc.includes('const LOOP_DRAW_MIN_RATE_HZ = 80e6;') &&
