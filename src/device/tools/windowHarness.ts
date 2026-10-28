@@ -124,8 +124,8 @@ export async function runPageArm(options: HarnessOptions = {}): Promise<ArmRepor
   const samplerate = (options.bytesPerMs ?? 800_000) * 1000 / (channels / 8);
   const cfg = { channels, samplerate, thresholdVolts: 1.6 } as const;
   const budgetSamples = Math.floor(samplerate * seconds);
-  // `createSampleStore`, not `PlanarSampleStore`: at 16/32 channels the app deliberately
-  // uses the interleaved store to avoid a synchronous transpose. The arms have to run the
+  // `createSampleStore`, not `PlanarSampleStore`: at 8-32 channels the app deliberately
+  // uses the interleaved store to avoid synchronous sample rearrangement. The arms run the
   // consumer the shipping app runs.
   const store = createSampleStore(channels, samplerate);
   const device = new ClockStreamDevice(options.bytesPerMs ?? 800_000,

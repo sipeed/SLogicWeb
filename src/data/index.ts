@@ -43,7 +43,9 @@ import type { ChannelCount } from '../types.js';
  * their imports so the layout can change without touching them.
  */
 export function createSampleStore(channelCount: ChannelCount, samplerate: number): SampleStore {
-  if (channelCount === 16 || channelCount === 32) return new InterleavedSampleStore(samplerate, channelCount);
+  if (channelCount === 8 || channelCount === 16 || channelCount === 32) {
+    return new InterleavedSampleStore(samplerate, channelCount);
+  }
   return new PlanarSampleStore({ channelCount, samplerate });
 }
 

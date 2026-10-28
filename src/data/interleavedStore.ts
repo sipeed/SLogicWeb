@@ -6,8 +6,8 @@
  * Same contract, same pyramid shape, same block allocator, same query descent. The only
  * difference is the layout of the two big arrays:
  *
- *   - base: device order, one uint16/uint32 per sample. This is the memcpy case - append
- *     is a straight copy with no transpose.
+ *   - base: byte-aligned order, one uint8/uint16/uint32 per sample. This is the memcpy
+ *     case - append is a straight copy with no sample rearrangement.
  *   - pyramid: per bin, one word each for "some channel was high" and "some channel was
  *     low". That is 2 bits per channel per bin, exactly what the planar pyramid costs.
  *
@@ -18,9 +18,9 @@
 import { assertGapBounds, mergeGap, shiftGapsFront, splitAroundGaps } from './gaps.js';
 import { DROP_FRONT_QUANTUM, GAP_BIT } from './types.js';
 import type { ColumnView, GapSpan, MemoryReport, SampleStore } from './types.js';
-import type { ChannelCount } from '../types.js';
+import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
 
-const BASE_BLOCK_LOG = 24; // 2^24 samples per block = 32 MiB of uint16 for 16 channels
+const BASE_BLOCK_LOG = 24; // 2^24 samples per base block
 const BASE_BLOCK = 1 << BASE_BLOCK_LOG;
 const BASE_BLOCK_MASK = BASE_BLOCK - 1;
 const LEVEL_LOG = 4;
@@ -40,10 +40,11 @@ function levelBlockLog(level: number): number {
   return Math.max(8, BASE_BLOCK_LOG - LEVEL_LOG * level);
 }
 
-type WordArray = Uint16Array | Uint32Array;
+type WordBits = 8 | 16 | 32;
+type WordArray = Uint8Array | Uint16Array | Uint32Array;
 
-function words(bits: 16 | 32, length: number): WordArray {
-  return bits === 16 ? new Uint16Array(length) : new Uint32Array(length);
+function words(bits: WordBits, length: number): WordArray {
+  return bits === 8 ? new Uint8Array(length) : bits === 16 ? new Uint16Array(length) : new Uint32Array(length);
 }
 
 class MaskLevel {
@@ -53,7 +54,7 @@ class MaskLevel {
   readonly hi: WordArray[] = [];
   readonly lo: WordArray[] = [];
 
-  constructor(blockLog: number, private readonly wordBits: 16 | 32) {
+  constructor(blockLog: number, private readonly wordBits: WordBits) {
     this.blockLog = blockLog;
     this.block = 1 << blockLog;
     this.mask = this.block - 1;
@@ -92,8 +93,8 @@ export class InterleavedSampleStore implements SampleStore {
   coreBins: number = DEFAULT_CORE_BINS;
 
   private readonly base: WordArray[] = [];
-  private readonly wordBits: 16 | 32;
-  private readonly bytesPerSample: 2 | 4;
+  private readonly wordBits: WordBits;
+  private readonly bytesPerSample: 1 | 2 | 4;
   private readonly levels: MaskLevel[] = [];
   private readonly validBins: number[] = [];
   private readonly binSize: number[] = [];
@@ -119,14 +120,14 @@ export class InterleavedSampleStore implements SampleStore {
   private scratchEdge = new Uint8Array(0);
   private scratchPacked = new Uint8Array(0);
 
-  constructor(samplerate: number, channelCount: 16 | 32 = 16) {
+  constructor(samplerate: number, channelCount: 8 | 16 | 32 = 16) {
     if (!(samplerate > 0)) throw new Error(`samplerate must be positive, got ${samplerate}`);
-    if (channelCount !== 16 && channelCount !== 32) {
-      throw new Error(`interleaved channelCount must be 16 or 32, got ${channelCount}`);
+    if (channelCount !== 8 && channelCount !== 16 && channelCount !== 32) {
+      throw new Error(`interleaved channelCount must be 8, 16 or 32, got ${channelCount}`);
     }
     this.channelCount = channelCount;
-    this.wordBits = channelCount;
-    this.bytesPerSample = channelCount >>> 3 as 2 | 4;
+    this.wordBits = channelCount === 8 ? 8 : channelCount;
+    this.bytesPerSample = bytesPerSampleForChannels(channelCount) as 1 | 2 | 4;
     this.samplerate = samplerate;
     this.binSize[0] = 1;
     this.validBins[0] = 0;
@@ -230,8 +231,14 @@ export class InterleavedSampleStore implements SampleStore {
           const blk = s0 >>> BASE_BLOCK_LOG;
           const arr = this.base[blk]!;
           const off = s0 & BASE_BLOCK_MASK;
-          let h = 0, l = 0;
-          for (let j = 0; j < 16; j++) { const v = arr[off + j]!; h |= v; l |= ~v; }
+          const h = arr[off]! | arr[off + 1]! | arr[off + 2]! | arr[off + 3]! |
+            arr[off + 4]! | arr[off + 5]! | arr[off + 6]! | arr[off + 7]! |
+            arr[off + 8]! | arr[off + 9]! | arr[off + 10]! | arr[off + 11]! |
+            arr[off + 12]! | arr[off + 13]! | arr[off + 14]! | arr[off + 15]!;
+          const l = ~(arr[off]! & arr[off + 1]! & arr[off + 2]! & arr[off + 3]! &
+            arr[off + 4]! & arr[off + 5]! & arr[off + 6]! & arr[off + 7]! &
+            arr[off + 8]! & arr[off + 9]! & arr[off + 10]! & arr[off + 11]! &
+            arr[off + 12]! & arr[off + 13]! & arr[off + 14]! & arr[off + 15]!);
           const di = i - dh;
           lv.hi[di >>> lv.blockLog]![di & lv.mask] = h;
           lv.lo[di >>> lv.blockLog]![di & lv.mask] = l;
@@ -244,8 +251,14 @@ export class InterleavedSampleStore implements SampleStore {
           const sBlk = s0 >>> src.blockLog;
           const sh = src.hi[sBlk]!, sl = src.lo[sBlk]!;
           const off = s0 & src.mask;
-          let h = 0, l = 0;
-          for (let j = 0; j < 16; j++) { h |= sh[off + j]!; l |= sl[off + j]!; }
+          const h = sh[off]! | sh[off + 1]! | sh[off + 2]! | sh[off + 3]! |
+            sh[off + 4]! | sh[off + 5]! | sh[off + 6]! | sh[off + 7]! |
+            sh[off + 8]! | sh[off + 9]! | sh[off + 10]! | sh[off + 11]! |
+            sh[off + 12]! | sh[off + 13]! | sh[off + 14]! | sh[off + 15]!;
+          const l = sl[off]! | sl[off + 1]! | sl[off + 2]! | sl[off + 3]! |
+            sl[off + 4]! | sl[off + 5]! | sl[off + 6]! | sl[off + 7]! |
+            sl[off + 8]! | sl[off + 9]! | sl[off + 10]! | sl[off + 11]! |
+            sl[off + 12]! | sl[off + 13]! | sl[off + 14]! | sl[off + 15]!;
           const di = i - dh;
           lv.hi[di >>> lv.blockLog]![di & lv.mask] = h;
           lv.lo[di >>> lv.blockLog]![di & lv.mask] = l;
@@ -443,7 +456,7 @@ export class InterleavedSampleStore implements SampleStore {
       pyramidBytes,
       totalBytes: baseBytes + pyramidBytes,
       overhead: baseBytes === 0 ? 0 : pyramidBytes / baseBytes,
-      slackBytes: baseBytes - this.length * 2,
+      slackBytes: baseBytes - this.length * this.bytesPerSample,
     };
   }
 
@@ -453,8 +466,10 @@ export class InterleavedSampleStore implements SampleStore {
   }
 }
 
-function wordsView(chunk: Uint8Array, bits: 16 | 32, length: number): WordArray {
-  return bits === 16
-    ? new Uint16Array(chunk.buffer, chunk.byteOffset, length)
-    : new Uint32Array(chunk.buffer, chunk.byteOffset, length);
+function wordsView(chunk: Uint8Array, bits: WordBits, length: number): WordArray {
+  return bits === 8
+    ? new Uint8Array(chunk.buffer, chunk.byteOffset, length)
+    : bits === 16
+      ? new Uint16Array(chunk.buffer, chunk.byteOffset, length)
+      : new Uint32Array(chunk.buffer, chunk.byteOffset, length);
 }

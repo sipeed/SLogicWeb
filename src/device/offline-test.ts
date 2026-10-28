@@ -416,11 +416,11 @@ async function main(): Promise<void> {
     return expandPacked(a, 8) === a;
   })());
   const factory16 = createSampleStore(16, 100e6);
-  check('the sample factory keeps 16/32ch native and 4/8ch planar',
+  check('the sample factory keeps 8-32ch native and 4/64/128ch planar',
     factory16 instanceof InterleavedSampleStore && factory16.channelCount === 16 &&
-    createSampleStore(32, 100e6) instanceof InterleavedSampleStore &&
+    ([8, 16, 32] as const).every(ch =>
+      createSampleStore(ch, 100e6) instanceof InterleavedSampleStore) &&
     createSampleStore(4, 100e6) instanceof PlanarSampleStore &&
-    createSampleStore(8, 100e6) instanceof PlanarSampleStore &&
     createSampleStore(64, 100e6) instanceof PlanarSampleStore &&
     createSampleStore(128, 100e6) instanceof PlanarSampleStore);
 

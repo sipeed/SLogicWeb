@@ -19,6 +19,7 @@ import { RleSampleStore } from './rleStore.js';
 import { BitPlane } from './bitplane.js';
 import { GAP_BIT } from './types.js';
 import { appendLostSamples } from './gaps.js';
+import { bytesPerSampleForChannels } from '../types.js';
 import { generateCapture, fillMacro, makeTileBlock, MACRO_SAMPLES } from './generator.js';
 import type { SampleStore, ColumnView } from './types.js';
 import { runSoftwareTriggerSuite } from './softwareTriggerSelftest.js';
@@ -399,9 +400,9 @@ function testInterleavedGapParity(): TestResult[] {
   const results: TestResult[] = [];
   const same = (a: ArrayLike<number>, b: ArrayLike<number>): boolean =>
     a.length === b.length && Array.from(a).every((v, i) => v === b[i]);
-  for (const channels of [16, 32] as const) {
+  for (const channels of [8, 16, 32] as const) {
     const total = 4096;
-    const bytes = channels / 8;
+    const bytes = bytesPerSampleForChannels(channels);
     const planar = new PlanarSampleStore({ channelCount: channels, samplerate: 100e6 });
     const interleaved = new InterleavedSampleStore(100e6, channels);
     for (let from = 0; from < total; from += 257) {
@@ -410,7 +411,8 @@ function testInterleavedGapParity(): TestResult[] {
       const view = new DataView(chunk.buffer);
       for (let i = 0; i < n; i++) {
         const value = Math.imul(from + i, 0x9e3779b1) >>> 0;
-        if (bytes === 2) view.setUint16(i * 2, value & 0xffff, true);
+        if (bytes === 1) view.setUint8(i, value & 0xff);
+        else if (bytes === 2) view.setUint16(i * 2, value & 0xffff, true);
         else view.setUint32(i * 4, value, true);
       }
       planar.append(chunk);
@@ -439,8 +441,9 @@ function testInterleavedGapParity(): TestResult[] {
     });
 
     const cases = [[0, total, 64], [100, 2000, 37], [400, 1600, 31], [2000, 2048, 1]];
+    const testChannels = channels === 8 ? [0, 3, 7] : [0, 3, 7, channels - 1];
     const compareColumns = (): string => {
-      for (const ch of [0, 3, 7, channels - 1]) {
+      for (const ch of testChannels) {
         for (const [s, e, bins] of cases) {
           const a = planar.query(ch, s, e, bins);
           const b = interleaved.query(ch, s, e, bins);
@@ -453,7 +456,7 @@ function testInterleavedGapParity(): TestResult[] {
       return '';
     };
     const compareEdges = (): string => {
-      for (const ch of [0, 3, 7, channels - 1]) {
+      for (const ch of testChannels) {
         const a = planar.edges(ch, 0, planar.length);
         const b = interleaved.edges(ch, 0, interleaved.length);
         const count = interleaved.edgeCount(ch, 0, interleaved.length);
@@ -467,13 +470,13 @@ function testInterleavedGapParity(): TestResult[] {
     results.push({
       name: `interleaved ${channels}ch gap query matches planar including bit3`,
       pass: queryFailure === '',
-      detail: queryFailure || `${cases.length * 4} viewports matched`,
+      detail: queryFailure || `${cases.length * testChannels.length} viewports matched`,
     });
     const edgeFailure = compareEdges();
     results.push({
       name: `interleaved ${channels}ch gap-filtered edges match planar`,
       pass: edgeFailure === '',
-      detail: edgeFailure || '4 channels matched',
+      detail: edgeFailure || `${testChannels.length} channels matched`,
     });
 
     planar.dropFront(512);
@@ -497,6 +500,13 @@ function testInterleavedGapParity(): TestResult[] {
         JSON.stringify(interleaved.gaps()) === JSON.stringify(planar.gaps()) &&
         liveQueryFailure === '' && liveEdgeFailure === '',
       detail: liveQueryFailure || liveEdgeFailure || JSON.stringify(interleaved.gaps()),
+    });
+    const memory = interleaved.memory();
+    const expectedSlack = memory.baseBytes - interleaved.length * bytes;
+    results.push({
+      name: `interleaved ${channels}ch memory slack uses its native sample width`,
+      pass: memory.slackBytes === expectedSlack && memory.slackBytes >= 0,
+      detail: `slack ${memory.slackBytes}, expected ${expectedSlack}`,
     });
   }
   return results;
@@ -1429,7 +1439,7 @@ function testDropFront(log: Log): TestResult[] {
       seed = (seed ^ (seed >>> 16)) >>> 0;
       return seed % n;
     };
-    for (const cc of [16, 32] as const) {
+    for (const cc of [8, 16, 32] as const) {
       const bps = cc >>> 3;
       const totalSamples = 1_200_000;
       const raw = dropFrontStream(totalSamples * bps);
