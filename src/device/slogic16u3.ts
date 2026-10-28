@@ -95,6 +95,10 @@ const MAX_SAFE_QUEUED_BYTES = LIBSIGROK_TRANSFER_BYTES * LIBSIGROK_TRANSFER_DEPT
 const FAST_READ_BYTES = 768 * 1024;
 /** 16 x 786,432 B is 12 MiB, inside the 14.92 MiB the usbfs budget allows. */
 const FAST_READ_DEPTH = 16;
+const MEDIUM_READ_BYTES = 320 * 1024;
+const MEDIUM_READ_DEPTH = 24;
+const MEDIUM_READ_MIN_BYTES_PER_SEC = 160e6;
+const MEDIUM_READ_MAX_BYTES_PER_SEC = 320e6;
 /**
  * Above this line rate the large reads demonstrably stop sustaining the pipe (they were
  * measured at 396-530 MB/s against an 800 MB/s producer), so a capture that asks for more
@@ -367,20 +371,26 @@ export function expandPacked(src: Uint8Array, channels: number): Uint8Array {
 export function deriveStreamTuning(cfg: CaptureConfig, want: Partial<StreamTuning> = {}): StreamTuning {
   const lineRate = (cfg.samplerate * cfg.channels) / 8;
   const fastReads = lineRate > LARGE_READ_CEILING_BYTES_PER_SEC;
+  const mediumReads = lineRate > MEDIUM_READ_MIN_BYTES_PER_SEC &&
+    lineRate <= MEDIUM_READ_MAX_BYTES_PER_SEC;
   const transferBytes =
     want.transferBytes && want.transferBytes > 0
       ? want.transferBytes
-      : fastReads
-        ? FAST_READ_BYTES
-        : LIBSIGROK_TRANSFER_BYTES;
+      : mediumReads
+        ? MEDIUM_READ_BYTES
+        : fastReads
+          ? FAST_READ_BYTES
+          : LIBSIGROK_TRANSFER_BYTES;
   // This is deliberately the result of the native driver's real allocation probe,
   // not its much larger initial request. Linux commonly limits usbfs to 16 MiB per
   // process; exceeding that budget makes Chromium report every transfer as NetworkError.
   const depth = want.depth && want.depth > 0
     ? want.depth
-    : fastReads
-      ? FAST_READ_DEPTH
-      : LIBSIGROK_TRANSFER_DEPTH;
+    : mediumReads
+      ? MEDIUM_READ_DEPTH
+      : fastReads
+        ? FAST_READ_DEPTH
+        : LIBSIGROK_TRANSFER_DEPTH;
   if (transferBytes % PACKET_BYTES !== 0) {
     throw new Error(
       `transferBytes ${transferBytes} is not a multiple of the ${PACKET_BYTES}-byte packet size`,
@@ -412,7 +422,7 @@ export function deriveStreamTuning(cfg: CaptureConfig, want: Partial<StreamTunin
   // explicit tuning is a measurement or a test and gets its reads delivered one for one.
   const coalesceBytes: number | undefined = want.coalesceBytes && want.coalesceBytes > 0
     ? want.coalesceBytes
-    : fastReads
+    : mediumReads || fastReads
       ? SINK_CHUNK_BYTES
       : undefined;
   return {

@@ -1220,17 +1220,31 @@ async function main(): Promise<void> {
       `ended=${endedBeforeStop}, samples=${samplesBeforeStop} of ${wanted}`);
   }
   {
-    // Match the result of libsigrok's allocation probe under Linux's common
-    // 16 MiB usbfs URB budget: five 3,129,344-byte requests fit, larger queues fail.
-    const at100 = deriveStreamTuning(
-      { channels: 32, samplerate: 100e6, thresholdVolts: 1.6 },
+    const mediumCases = [
+      { channels: 4, samplerate: 400e6 },
+      { channels: 8, samplerate: 200e6 },
+      { channels: 16, samplerate: 100e6 },
+      { channels: 16, samplerate: 160e6 },
+      { channels: 32, samplerate: 50e6 },
+      { channels: 32, samplerate: 80e6 },
+    ] as const;
+    for (const cfg of mediumCases) {
+      const tuning = deriveStreamTuning({ ...cfg, thresholdVolts: 1.6 });
+      check(`${cfg.channels}ch@${cfg.samplerate / 1e6}M uses the measured full-rate medium geometry`,
+        tuning.transferBytes === 320 * 1024 && tuning.depth === 24 &&
+          tuning.lagChunks === 96 && tuning.coalesceBytes === 8 * 1024 * 1024 &&
+          tuning.transferBytes * tuning.depth <= 8 * 1024 * 1024,
+        JSON.stringify(tuning));
+    }
+    const at80 = deriveStreamTuning(
+      { channels: 16, samplerate: 80e6, thresholdVolts: 1.6 },
     );
+    check('16ch@80M keeps the large-read geometry at the lower boundary',
+      at80.transferBytes === 3_129_344 && at80.depth === 5 && at80.coalesceBytes === undefined,
+      JSON.stringify(at80));
     const at200 = deriveStreamTuning(
       { channels: 32, samplerate: 200e6, thresholdVolts: 1.6 },
     );
-    check('32ch@100M uses libsigrok trained transfer geometry',
-      at100.transferBytes === 3_129_344 && at100.depth === 5,
-      JSON.stringify(at100));
     // 800 MB/s is above what libsigrok's 3,129,344-byte reads sustain through WebUSB, and
     // 1 MiB is where the host falls off (NOTES 8.26), so the geometry for this rate has to
     // be a small-read deep queue instead - still inside the same usbfs budget.
