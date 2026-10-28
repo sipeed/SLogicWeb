@@ -702,6 +702,20 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `budget=${pumpSrc.includes('b.builder.step(this.running ? 4 : 6)')}, ` +
     `hint=${pumpSrc.includes('this.captureIsLoop ? this.loopRetentionLen * 2 : store.length')}`);
 
+  const frameStart = appSrc.indexOf('private frame =');
+  const frameEnd = frameStart >= 0 ? appSrc.indexOf('private draw()', frameStart) : -1;
+  const frameSrc = frameEnd > frameStart ? appSrc.slice(frameStart, frameEnd) : '';
+  const throttleAt = frameSrc.indexOf('now < this.loopDrawAfter');
+  check('high-rate loop drawing yields to ingestion without throttling other captures',
+    frameSrc.includes('this.running && this.captureIsLoop && this.store.samplerate >= LOOP_DRAW_MIN_RATE_HZ') &&
+    throttleAt >= 0 && throttleAt < frameSrc.indexOf('this.dirty = false') &&
+    frameSrc.includes('this.loopDrawAfter = now + LOOP_DRAW_INTERVAL_MS;') &&
+    appSrc.includes('const LOOP_DRAW_MIN_RATE_HZ = 80e6;') &&
+    appSrc.includes('const LOOP_DRAW_INTERVAL_MS = 200;') &&
+    startSrc.includes('this.loopDrawAfter = 0;'),
+    `guard=${throttleAt >= 0}, ordered=${throttleAt >= 0 && throttleAt < frameSrc.indexOf('this.dirty = false')}, ` +
+    `reset=${startSrc.includes('this.loopDrawAfter = 0;')}`);
+
   const enforceStart = appSrc.indexOf('private enforceLoopRetention');
   const enforceEnd = enforceStart >= 0 ? appSrc.indexOf('private async stopCapture', enforceStart) : -1;
   const enforceSrc = enforceEnd > enforceStart ? appSrc.slice(enforceStart, enforceEnd) : '';

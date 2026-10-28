@@ -81,6 +81,8 @@ declare const __LOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
 type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number): number };
 
 const BUS_CAPTURE_LOCK_ERROR = 'bank oscilloscope settings are locked while capture is running or stopping';
+const LOOP_DRAW_MIN_RATE_HZ = 80e6;
+const LOOP_DRAW_INTERVAL_MS = 200;
 
 interface Lane {
   analyzer: AnalyzerState;
@@ -111,6 +113,7 @@ export class App {
   /** When the analyzers panel last re-rendered for a bus build's progress. */
   private busPanelAt = 0;
   private runningPanelAt = 0;
+  private loopDrawAfter = 0;
   private readonly settingsMenu: SettingsMenu;
   private readonly sidebarMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
@@ -735,14 +738,18 @@ export class App {
   private frame = (): void => {
     requestAnimationFrame(this.frame);
     this.pumpBusBuilders();
+    const now = performance.now();
     if (this.running && this.panel === 'device') {
-      const now = performance.now();
       if (now - this.runningPanelAt > 500) {
         this.runningPanelAt = now;
         this.capturePanel.updateProgress(this.progressView());
       }
     }
     if (!this.dirty && !this.running) return;
+    if (this.running && this.captureIsLoop && this.store.samplerate >= LOOP_DRAW_MIN_RATE_HZ) {
+      if (now < this.loopDrawAfter) return;
+      this.loopDrawAfter = now + LOOP_DRAW_INTERVAL_MS;
+    }
     this.dirty = false;
     try {
       this.draw();
@@ -1815,6 +1822,7 @@ export class App {
       this.lostSamples = 0;
       this.droppedTotal = 0;
       this.captureIsLoop = isLoop;
+      this.loopDrawAfter = 0;
       this.triggerSampleIndex = null;
       const softwareTrigger = this.settings.softwareTrigger;
       this.captureStart = softwareTrigger ? 0 : performance.now();

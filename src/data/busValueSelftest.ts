@@ -338,11 +338,14 @@ export function runBusValueSuite(): BusTestResult[] {
     // edge instead of rebuilding what it had.
     const slowStore = rampStore();
     const slow = new BusBuilder(slowStore, rampSpec, N, 4099, N * 2);
-    slow.step(1);
-    slow.step(1);
+    slow.step(0);
+    slow.step(0);
     const builtBefore = slow.pyramid.doneUpTo;
     slowStore.dropFront(20480);
     slow.setLength(slowStore.length);
+    check('an outrun builder yields before rebuilding expired work',
+      !slow.step(1) && slow.pyramid.doneUpTo === 0 && slow.progress === 0
+        ? '' : `doneUpTo=${slow.pyramid.doneUpTo} progress=${slow.progress}`);
     check('a drop past the frontier skips the builder forward',
       build(slow) === '' && slow.done ? '' : `done=${slow.done} builtBefore=${builtBefore}`);
     check('a skip-forward pyramid matches the shifted ramp',
@@ -469,6 +472,25 @@ export function runBusValueSuite(): BusTestResult[] {
       if (JSON.stringify(got) !== JSON.stringify(want)) bad = `leaf ${leaf}: ${JSON.stringify(got)} vs ${JSON.stringify(want)}`;
     }
     check('a reset rebuilds a clocked bus without a stale carry', bad);
+  }
+
+  {
+    const len = 200_000;
+    const w = new Uint16Array(len);
+    for (let i = 0; i < len; i++) w[i] = i;
+    const store = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
+    store.append(new Uint8Array(w.buffer));
+    const spec: BusSpec = { bits: [0, 1, 2, 3, 4, 5, 6, 7], clock: null, encoding: 'unsigned' };
+    const b = new BusBuilder(store, spec, len);
+    b.step(0);
+    check('a zero-budget builder step yields after one bounded piece',
+      b.pyramid.doneUpTo === 65_536 ? '' : `doneUpTo=${b.pyramid.doneUpTo}`);
+    let guard = 0;
+    while (!b.step(0)) if (++guard > 10) break;
+    const all = b.pyramid.range(0, len);
+    check('bounded builder pieces preserve the complete bus range',
+      b.done && all?.min === 0 && all.max === 255
+        ? '' : `done=${b.done} guard=${guard} range=${JSON.stringify(all)}`);
   }
 
   check('validateBusSpec rejects reuse and out-of-range channels',

@@ -42,8 +42,7 @@ export const MAX_BUS_BITS = 32;
 export const BUS_LEAF = 1024;
 const FAN = 16;
 
-/** Samples handled per piece, bounding the per-sample toggle mask to 4 MB. */
-const PIECE = 1 << 20;
+const PIECE = 64 * 1024;
 
 /** Problems with a spec for a store of `channelCount` channels; empty when valid. */
 export function validateBusSpec(spec: BusSpec, channelCount: number): string[] {
@@ -474,6 +473,8 @@ export class BusBuilder {
       // The window's left edge outran the builder; everything below it is gone.
       this.nextAbs = D;
       this.carry = Number.NaN;
+      this.pyramid.doneUpTo = 0;
+      return false;
     }
     const absEnd = D + this.len;
     while (this.nextAbs < absEnd) {
