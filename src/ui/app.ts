@@ -13,7 +13,7 @@ import {
   appendLostSamples, createSampleStore, MAX_SOFTWARE_TRIGGER_PREFIX_BYTES,
 } from '../data/index.js';
 import type { SampleStore } from '../data/types.js';
-import { bytesPerSampleForChannels, isChannelCount, type ChannelCount } from '../types.js';
+import { bytesPerSampleForChannels, channelWidthForProbes, isChannelCount, type ChannelCount } from '../types.js';
 import {
   MAX_SAMPLERATE_HZ, TransportDeadError, getGrantedDevicesOnBestThread, requestDeviceOnBestThread,
   vrefCode, type CaptureConfig, type Device,
@@ -33,6 +33,7 @@ import { AssistantPanel } from './assistantPanel.js';
 import { BusBuilder, validateBusSpec } from '../data/busValue.js';
 import {
   BankBusDialog, BusPanel, cloneBusConfig, defaultBankBusConfig, defaultBusConfig, normalizeBankBusConfig,
+  retranslateBankBusConfig,
 } from './busPanel.js';
 import {
   analogFrame, busColor, busLabel, busSummary, busValueAt, busYRange, type AnalogFrame, type BusViewConfig,
@@ -234,12 +235,7 @@ export class App {
       onConfigure: (channel, config) => this.configureChannel(channel, config),
       onReorder: (from, to) => this.reorder(from, to),
       onRemoveAnalyzer: (id) => this.removeAnalyzer(id),
-      onEditBus: (id) => {
-        const bus = this.busViews.find((b) => b.id === id);
-        if (!bus) return;
-        this.busPanel.edit(bus);
-        this.selectPanel('analyzers');
-      },
+      onEditBus: (id) => this.editBus(id),
     });
 
     const panelHost = document.createElement('div');
@@ -280,11 +276,12 @@ export class App {
     this.el.side.appendChild(busHost);
     this.busPanel = new BusPanel(busHost, {
       onAdd: (cfg) => this.addBus(cfg),
+      onEdit: (id) => this.editBus(id),
       onUpdate: (id, cfg) => this.updateBus(id, cfg),
       onRemove: (id) => this.removeBus(id),
     });
     this.bankBusDialog = new BankBusDialog({
-      onConfirm: (start, cfg, enabled) => this.configureBankBus(start, cfg, enabled),
+      onConfirm: (start, cfg, enabled, loopSamples) => this.configureBankBus(start, cfg, enabled, loopSamples),
     });
 
     this.wireToolbar();
@@ -367,6 +364,15 @@ export class App {
     }
   }
 
+  private editBus(id: string): void {
+    const bus = this.busViews.find((candidate) => candidate.id === id);
+    if (!bus) return;
+    const bank = busChannelBank(bus.spec);
+    if (bank !== null && this.openBankBus(bank)) return;
+    this.busPanel.edit(bus);
+    this.selectPanel('analyzers');
+  }
+
   private addBus(cfg: BusViewConfig): void {
     const color = busColor(this.nextBus);
     this.busViews.push({ ...cfg, color, id: `bus-${this.nextBus++}`, builder: null, builtFor: null, cache: null });
@@ -374,10 +380,13 @@ export class App {
     this.afterChannelChange();
   }
 
-  private updateBus(id: string, cfg: BusViewConfig): void {
+  private updateBus(id: string, cfg: BusViewConfig, preserveDefaultName = false): void {
     const i = this.busViews.findIndex((b) => b.id === id);
     if (i < 0) return;
-    this.busViews[i] = { ...cfg, color: this.busViews[i]!.color, id, builder: null, builtFor: null, cache: null };
+    const current = this.busViews[i]!;
+    const next = cloneBusConfig(cfg);
+    if (!preserveDefaultName && next.name !== current.name) delete next.usesDefaultName;
+    this.busViews[i] = { ...next, color: current.color, id, builder: null, builtFor: null, cache: null };
     this.syncBankChannels();
     this.afterChannelChange();
   }
@@ -387,20 +396,37 @@ export class App {
     this.afterChannelChange();
   }
 
-  private openBankBus(start: number): void {
-    if (channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return;
-    const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
-    const config = active ?? this.bankBusDrafts.get(start) ?? defaultBankBusConfig(this.channels.length, start);
-    this.bankBusDialog.open(start, config, active !== undefined, this.channels.length);
+  private bankCaptureSettings(start: number, loopSamples: number): CaptureSettings {
+    const bankWidth = channelWidthForProbes(start + CHANNEL_BANK_SIZE);
+    const currentWidth = this.neededWidth();
+    const channels = bankWidth > currentWidth ? bankWidth : currentWidth;
+    return clampSettings({ ...this.settings, channels, loopSamples }, this.rateCeilings);
   }
 
-  private configureBankBus(start: number, config: BusViewConfig, enabled: boolean): void {
-    if (channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return;
+  private openBankBus(start: number): boolean {
+    if (channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return false;
+    const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
+    const config = active ?? this.bankBusDrafts.get(start) ?? defaultBankBusConfig(this.channels.length, start);
+    const preview = this.bankCaptureSettings(start, this.settings.loopSamples);
+    this.bankBusDialog.open(start, config, active !== undefined, this.channels.length, {
+      channels: this.channels,
+      loopSamples: preview.loopSamples,
+      captureChannels: preview.channels,
+      samplerate: preview.samplerate,
+      locked: this.running || this.stopping,
+    });
+    return true;
+  }
+
+  private configureBankBus(start: number, config: BusViewConfig, enabled: boolean, loopSamples: number): void {
+    if (this.running || this.stopping ||
+      channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return;
     const next = normalizeBankBusConfig(config, this.channels.length, start);
     this.bankBusDrafts.set(start, cloneBusConfig(next));
     if (enabled) {
+      this.settings = this.bankCaptureSettings(start, loopSamples);
       const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
-      if (active) this.updateBus(active.id, next);
+      if (active) this.updateBus(active.id, next, true);
       else this.addBus(next);
       return;
     }
@@ -1317,6 +1343,10 @@ export class App {
     this.bankBusDialog.close();
     this.sidebarMenu.close('retranslate');
     this.themeMenu.close('retranslate');
+    this.busViews = this.busViews.map((bus) => retranslateBankBusConfig(bus));
+    for (const [start, draft] of this.bankBusDrafts) {
+      this.bankBusDrafts.set(start, retranslateBankBusConfig(draft));
+    }
     applyStaticI18n(document);
     this.relayout();       // channel cells rebuild; an open channel dialog closes here
     this.renderPanels();   // side panels + toolbar chrome

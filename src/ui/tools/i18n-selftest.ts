@@ -455,13 +455,24 @@ const baseSettings: CaptureSettings = {
 }
 
 {
-  const retired = ['channels.dialogDescription', 'channels.moreColors'];
+  const retired = [
+    'channels.dialogDescription', 'channels.moreColors', 'bus.fixedBits',
+    'bus.bankEnabledNote', 'bus.bankDisableNote', 'bus.bankDisabledNote',
+  ];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const present = Object.entries(dicts).filter(([, dict]) =>
     retired.some((key) => Object.keys(dict).includes(key)));
-  check('the retired channel dialog keys stay absent from every catalog',
+  check('the retired channel and bank dialog keys stay absent from every catalog',
     present.length === 0,
     present.length === 0 ? `4 catalogs omit ${retired.length} keys` : present.map(([locale]) => locale).join(', '));
+}
+
+{
+  const names = [en['bus.defaultName'], zhCN['bus.defaultName'], ru['bus.defaultName'], fr['bus.defaultName']];
+  check('the bank default waveform name is localized in all four catalogs',
+    names.join('|') === 'Analog waveform|模拟波形|Аналоговая форма волны|Forme d’onde analogique' &&
+    zhCN['bus.dragToOrder'] === '拖动即可调整解码顺序',
+    names.join(' | '));
 }
 
 {
@@ -478,6 +489,7 @@ const baseSettings: CaptureSettings = {
     'channels.triggerMode', 'channels.cancel',
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',
     'analyzerPanel.decoderSearchLabel',
+    'bus.defaultName', 'bus.enableBank', 'bus.dragToOrder', 'bus.globalCapture', 'bus.advanced',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];

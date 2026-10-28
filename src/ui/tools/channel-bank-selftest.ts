@@ -176,14 +176,37 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
   const outside = normalizeBankBusConfig({
     ...base, spec: { ...base.spec, clock: { channel: 99, edge: 'rising' } },
   }, 16, 8);
+  const shuffled = normalizeBankBusConfig({
+    ...base,
+    spec: { ...base.spec, bits: [10, 15, 8, 12, 9, 14, 11, 13] },
+  }, 16, 8);
+  const repaired = normalizeBankBusConfig({
+    ...base,
+    spec: { ...base.spec, bits: [10, 10, 99, 8, 7, -1, 12] },
+  }, 16, 8);
   const normalized = base.spec.bits.join(',') === '8,9,10,11,12,13,14,15' &&
     reversed.spec.bits.join(',') === '15,14,13,12,11,10,9,8' &&
+    shuffled.spec.bits.join(',') === '10,15,8,12,9,14,11,13' &&
+    repaired.spec.bits.join(',') === '10,8,12,9,11,13,14,15' &&
     reversed.spec.clock?.channel === 3 && reversed.spec.clock.edge === 'falling' &&
     reversed.spec.encoding === 'twos' && inside.spec.clock === null && outside.spec.clock === null;
   let invalid = false;
   try { defaultBankBusConfig(4, 0); } catch (e) { invalid = e instanceof RangeError; }
-  check('fixed-bank config preserves bit order and drops invalid clock assignments',
+  check('fixed-bank config preserves arbitrary order, repairs invalid bits and drops invalid clocks',
     normalized && invalid, `normalized=${normalized}, invalidStart=${invalid}`);
+}
+
+{
+  const base = defaultBankBusConfig(16, 0);
+  const custom = normalizeBankBusConfig({ ...base, name: '  CUSTOM  ', usesDefaultName: false }, 16, 0);
+  const blank = normalizeBankBusConfig({ ...base, name: ' ', usesDefaultName: false }, 16, 0);
+  const defaults = base.name === 'Analog waveform' && base.usesDefaultName === true &&
+    blank.name === 'Analog waveform' && blank.usesDefaultName === true;
+  const customized = custom.name === 'CUSTOM' && custom.usesDefaultName !== true;
+  check('bank names track the default marker while custom and blank drafts keep distinct semantics',
+    defaults && customized,
+    `base=${base.name}/${base.usesDefaultName}, custom=${custom.name}/${custom.usesDefaultName}, ` +
+    `blank=${blank.name}/${blank.usesDefaultName}`);
 }
 
 {
@@ -235,18 +258,50 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
   const icon = panel.slice(iconStart, panel.indexOf('function nearest', iconStart));
   const iconOnly = iconStart >= 0 && icon.includes('createElementNS') &&
     icon.includes("b.setAttribute('aria-haspopup', 'dialog')") && !icon.includes('textContent');
-  const sharedFields = (busPanel.match(/busConfigFields\(/g) ?? []).length >= 3 &&
-    busPanel.includes('fixedBankStart: null') && busPanel.includes('fixedBankStart: this.start') &&
-    busPanel.includes('fixed.readOnly = true') && busPanel.includes('clockOptions');
+  const dialog = busPanel.split('export class BankBusDialog')[1] ?? '';
+  const sharedFields = busPanel.includes('function busAdvancedFields') &&
+    (busPanel.match(/busAdvancedFields\(/g) ?? []).length >= 3 && busPanel.includes('bankStart: null') &&
+    dialog.includes('bankStart: this.start') && busPanel.includes('clockOptions');
+  const sortable = dialog.includes('new OscilloscopeChannelGrid') &&
+    dialog.includes('config.spec = { ...config.spec, bits }') &&
+    !dialog.includes("t('bus.msbFirst')") && !dialog.includes("t('bus.perBit')") &&
+    !dialog.includes('runBits(') && !dialog.includes('bankEnabledNote');
+  const disclosures = dialog.includes('details?.el.remove()') &&
+    dialog.includes("document.createElement('details')") && dialog.includes("t('bus.advanced')");
   const nativeDialog = busPanel.includes('this.dialog.showModal()') &&
     busPanel.indexOf("this.dialog.close('applied')") >= 0 &&
     busPanel.indexOf("this.dialog.close('applied')") < busPanel.indexOf('this.cb.onConfirm(this.start');
   const realState = panel.includes('buses: readonly BusViewState[]') &&
-    app.includes('buses: this.busViews') && app.includes('this.configureBankBus(start, cfg, enabled)') &&
-    app.includes('if (active) this.updateBus(active.id, next);') && app.includes('else this.addBus(next);');
-  check('the bank oscilloscope dialog reuses real fields and commits through actual bus state',
-    iconOnly && sharedFields && nativeDialog && realState,
-    `iconOnly=${iconOnly}, sharedFields=${sharedFields}, nativeDialog=${nativeDialog}, realState=${realState}`);
+    app.includes('buses: this.busViews') && app.includes('this.configureBankBus(start, cfg, enabled, loopSamples)') &&
+    app.includes('if (active) this.updateBus(active.id, next, true);') && app.includes('else this.addBus(next);');
+  check('the bank dialog uses shared advanced fields and a sortable draft without legacy bit controls',
+    iconOnly && sharedFields && sortable && disclosures && nativeDialog && realState,
+    `iconOnly=${iconOnly}, sharedFields=${sharedFields}, sortable=${sortable}, ` +
+    `disclosures=${disclosures}, nativeDialog=${nativeDialog}, realState=${realState}`);
+
+  const globalLoop = dialog.includes('loopSamplesFromTime') && dialog.includes('maxLoopTimeValue') &&
+    dialog.includes('formatDuration(samples / context.samplerate)') &&
+    app.includes('this.settings = this.bankCaptureSettings(start, loopSamples);') &&
+    app.includes('captureChannels: preview.channels') && app.includes('samplerate: preview.samplerate');
+  const updateBus = app.split('private updateBus(')[1]?.split('private removeBus(')[0] ?? '';
+  const names = busPanel.includes("t('bus.defaultName')") &&
+    app.includes('retranslateBankBusConfig(bus)') && app.includes('retranslateBankBusConfig(draft)') &&
+    updateBus.includes('if (!preserveDefaultName && next.name !== current.name) delete next.usesDefaultName;') &&
+    app.includes('this.updateBus(active.id, next, true)');
+  const locks = dialog.includes('enable.disabled = context.locked') &&
+    dialog.includes('confirm.disabled = context.locked') && dialog.includes('disabled: context.locked') &&
+    app.includes('if (this.running || this.stopping ||') && app.includes('locked: this.running || this.stopping');
+  const noBankSwap = busPanel.includes('if (busChannelBank(b.spec) === null) {');
+  const editBus = app.split('private editBus(')[1]?.split('private addBus(')[0] ?? '';
+  const bankEditor = editBus.includes('const bank = busChannelBank(bus.spec)') &&
+    editBus.includes('bank !== null && this.openBankBus(bank)') && editBus.includes('this.busPanel.edit(bus)') &&
+    app.includes('private openBankBus(start: number): boolean') &&
+    app.includes('length !== CHANNEL_BANK_SIZE) return false;') && app.includes('return true;') &&
+    app.includes('onEditBus: (id) => this.editBus(id)') && app.includes('onEdit: (id) => this.editBus(id)') &&
+    busPanel.includes("edit.addEventListener('click', () => this.cb.onEdit(b.id))");
+  check('App wires global loop, localized names, capture locks and bank-only editing without reversal shortcuts',
+    globalLoop && names && locks && noBankSwap && bankEditor,
+    `globalLoop=${globalLoop}, names=${names}, locks=${locks}, noBankSwap=${noBankSwap}, bankEditor=${bankEditor}`);
 
   const modelLock = (app.match(/lockedChannelBanks\(this.busViews\)/g) ?? []).length >= 4 &&
     app.includes('locked.has(channelBankStart(c.index))');

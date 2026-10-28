@@ -1508,6 +1508,27 @@ html[data-theme="light"] .uictrl-card-actions .mini:hover { background: var(--mu
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-cell-edit:hover { border-color: var(--primary); color: var(--foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-btn--remove:hover { border-color: var(--destructive); color: var(--destructive); }
 
+.bank-bus-channel-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.bank-bus-field-label { color: var(--muted-foreground); font-size: 11px; font-weight: 600; }
+.bank-bus-drag-note { margin: 0; }
+.bank-bus-loop {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--background);
+}
+.bank-bus-loop-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 600; }
+.bank-bus-global {
+  flex: none; padding: 2px 6px; border-radius: calc(var(--radius) - 2px);
+  background: var(--primary); color: var(--primary-foreground); font-size: 10px; font-weight: 500;
+}
+.bank-bus-loop-row { display: grid; grid-template-columns: minmax(0, 1fr) 96px; align-items: end; gap: 8px; }
+.bank-bus-loop-value { min-width: 0; }
+.bank-bus-loop-input { width: 100%; min-width: 0; }
+.bank-bus-loop-limit,
+.bank-bus-loop-effective { margin: 0; overflow-wrap: anywhere; }
+.bank-bus-advanced { padding-top: 10px; border-top: 1px solid var(--border); }
+.bank-bus-advanced > summary { color: var(--muted-foreground); font-size: 11px; font-weight: 600; cursor: pointer; }
+.bank-bus-advanced .bus-config-fields { margin-top: 10px; }
+
 /* --------------------------------------------------- oscilloscope channel grid */
 .oscilloscope-channel-grid {
   position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));

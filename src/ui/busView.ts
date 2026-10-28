@@ -23,6 +23,7 @@ export type BusDrawStyle = 'line' | 'step';
 
 export interface BusViewConfig {
   name: string;
+  usesDefaultName?: boolean;
   spec: BusSpec;
   color: string;
   /** Volts for the full code range (2^n LSB); null shows raw values. */
