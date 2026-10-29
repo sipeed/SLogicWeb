@@ -525,7 +525,7 @@ const captureDerivation = constructorBody.includes('const triggerConditions = mo
   constructorBody.includes('triggerKind: first?.kind ?? \'rising\'') &&
   constructorBody.includes('triggerLevel: first?.level ?? 1') &&
   constructorBody.includes('channels: this.neededWidth()') &&
-  constructorBody.includes('}, this.rateCeilings);');
+  constructorBody.includes('}, this.rateCeilings, this.scopeMinSamplerate());');
 const sharedSettingsPath = app.includes('onSettings: (s) => this.applySettings(s)') &&
   app.includes('this.applySettings({ ...this.settings, ...s });') &&
   app.includes('private applySettings(s: CaptureSettings): void {');
@@ -552,7 +552,7 @@ const busMutationWiring = ['addBus', 'updateBus', 'removeBus'].every((name) => {
 });
 check('restored views get fresh IDs/null runtime and all generic/bank mutations share normalized writes',
   busRestoreWiring && busMutationWiring &&
-  app.includes('this.settings = clampSettings({ ...this.settings, loopSamples }, this.rateCeilings);'),
+  app.includes('{ ...this.settings, loopSamples }, this.rateCeilings, this.scopeMinSamplerate(),'),
   `restore=${busRestoreWiring}, mutations=${busMutationWiring}`);
 
 const html = fs.readFileSync('index.html', 'utf8');

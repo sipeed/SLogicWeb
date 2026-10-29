@@ -23,6 +23,7 @@ import {
   type LoopTimeUnit,
 } from './loopTime.js';
 import { OscilloscopeChannelGrid } from './oscilloscopeChannels.js';
+import type { ScopeEnableVerdict } from './scopeRateLimits.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { ChannelState } from './state.js';
 
@@ -441,6 +442,7 @@ export interface BankBusDialogOpenContext {
   captureChannels: ChannelCount;
   samplerate: number;
   locked: boolean;
+  enableBlock: ScopeEnableVerdict | null;
 }
 
 interface BankBusDetails {

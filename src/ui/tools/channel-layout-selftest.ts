@@ -659,6 +659,39 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `update=${updateBus.includes('busChannelBank(cfg.spec)')}, remove=${removeBus.includes('busChannelBank(current.spec)')}, ` +
     `panel=${busPanel.includes('v.captureLocked')}`);
 
+  const clampFloor = appSrc.includes(
+    'const samplerate = Math.max(minSamplerate, Math.min(s.samplerate, ceilings[s.channels] ?? 200e6));') &&
+    appSrc.includes('minSamplerate = 0,');
+  const floorHelper = appSrc.includes('private scopeMinSamplerate(): number {') &&
+    appSrc.includes('return this.oscilloscopeActive() ? SCOPE_MIN_SAMPLERATE_HZ : 0;');
+  const floorSites = (appSrc.match(/this\.scopeMinSamplerate\(\)/g) ?? []).length;
+  const bankRaise = appSrc.includes(
+    '{ ...this.settings, channels, loopSamples }, this.rateCeilings, SCOPE_MIN_SAMPLERATE_HZ,');
+  check('clampSettings enforces the oscilloscope rate floor at every App clamp site and raises it for bank settings',
+    clampFloor && floorHelper && floorSites === 8 && bankRaise,
+    `clampFloor=${clampFloor}, helper=${floorHelper}, sites=${floorSites}, bankRaise=${bankRaise}`);
+
+  const verdictGate = addBus.includes('this.scopeEnableBlock(bank, cfg.spec.clock?.channel ?? null) !== null') &&
+    addBus.includes('validateBusSpec(cfg.spec, this.channels.length).length === 0') &&
+    updateBus.includes('targetBank !== busChannelBank(current.spec)') &&
+    updateBus.includes('this.scopeEnableBlock(targetBank, next.spec.clock?.channel ?? null) !== null');
+  const configureBank = appSrc.split('private configureBankBus(')[1]?.split('private ')[0] ?? '';
+  const configureGate = configureBank.includes('active === undefined &&') &&
+    configureBank.includes('this.scopeEnableBlock(start, next.spec.clock?.channel ?? null) !== null) return;');
+  const openBank = appSrc.split('private openBankBus(')[1]?.split('private ')[0] ?? '';
+  const dialogContext = openBank.includes('enableBlock:') && openBank.includes('this.scopeEnableBlock(start, config.spec.clock?.channel ?? null)') &&
+    busPanel.includes('enableBlock: ScopeEnableVerdict | null;');
+  check('scope rate gates guard addBus, updateBus, configureBankBus and feed the dialog context',
+    verdictGate && configureGate && dialogContext,
+    `verdictGate=${verdictGate}, configureGate=${configureGate}, dialogContext=${dialogContext}`);
+
+  const assistantGate = appSrc.includes('throw new Error(scopeRateLimitMessage(block))') &&
+    appSrc.includes('throw new Error(scopeRateBlockMessage(block))') &&
+    appSrc.includes('scopeRateBlockAt(') &&
+    appSrc.includes('s.samplerate !== undefined && this.oscilloscopeActive()');
+  check('assistant bus and settings writes fail loudly on scope rate limits instead of clamping silently',
+    assistantGate, `assistantGate=${assistantGate}`);
+
   const loopOpts = startSrc.includes(
     'isLoop ? { loop: true } : { deviceSampleLimit: this.captureLimitSamples }');
   check('a loop capture opts out of the device length limit and of the transport watchdogs',
