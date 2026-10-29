@@ -462,7 +462,8 @@ export class App {
     const next = cloneBusConfig(cfg);
     if (!preserveDefaultName && next.name !== current.name) delete next.usesDefaultName;
     const targetBank = busChannelBank(next.spec);
-    if (targetBank !== null && targetBank !== busChannelBank(current.spec) &&
+    if (targetBank !== null &&
+      !lockedChannelBanks(this.busViews, this.channels.length).has(targetBank) &&
       validateBusSpec(next.spec, this.channels.length).length === 0 &&
       this.scopeEnableBlock(targetBank, next.spec.clock?.channel ?? null) !== null) return false;
     this.busViews[i] = { ...next, color: current.color, id, builder: null, builtFor: null, cache: null };
@@ -506,7 +507,7 @@ export class App {
       captureChannels: preview.channels,
       samplerate: preview.samplerate,
       locked: this.running || this.stopping,
-      enableBlock: active !== undefined
+      enableBlock: lockedChannelBanks(this.busViews, this.channels.length).has(start)
         ? null
         : this.scopeEnableBlock(start, config.spec.clock?.channel ?? null),
     });
@@ -520,7 +521,7 @@ export class App {
     this.bankBusDrafts.set(start, cloneBusConfig(next));
     if (enabled) {
       const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
-      if (active === undefined &&
+      if (!lockedChannelBanks(this.busViews, this.channels.length).has(start) &&
         this.scopeEnableBlock(start, next.spec.clock?.channel ?? null) !== null) return;
       this.settings = this.bankCaptureSettings(start, loopSamples, next);
       if (active) this.updateBus(active.id, next, true);
@@ -2436,7 +2437,7 @@ export class App {
         const b = this.busViews[index];
         if (b && !(this.running || this.stopping)) {
           const bank = busChannelBank(cfg.spec);
-          if (bank !== null && bank !== busChannelBank(b.spec) &&
+          if (bank !== null && !lockedChannelBanks(this.busViews, this.channels.length).has(bank) &&
             validateBusSpec(cfg.spec, this.channels.length).length === 0) {
             const block = this.scopeEnableBlock(bank, cfg.spec.clock?.channel ?? null);
             if (block !== null) throw new Error(scopeRateLimitMessage(block));

@@ -673,19 +673,23 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
 
   const verdictGate = addBus.includes('this.scopeEnableBlock(bank, cfg.spec.clock?.channel ?? null) !== null') &&
     addBus.includes('validateBusSpec(cfg.spec, this.channels.length).length === 0') &&
-    updateBus.includes('targetBank !== busChannelBank(current.spec)') &&
+    updateBus.includes('!lockedChannelBanks(this.busViews, this.channels.length).has(targetBank)') &&
     updateBus.includes('this.scopeEnableBlock(targetBank, next.spec.clock?.channel ?? null) !== null');
   const configureBank = appSrc.split('private configureBankBus(')[1]?.split('private ')[0] ?? '';
-  const configureGate = configureBank.includes('active === undefined &&') &&
+  const configureGate = configureBank.includes('!lockedChannelBanks(this.busViews, this.channels.length).has(start) &&') &&
     configureBank.includes('this.scopeEnableBlock(start, next.spec.clock?.channel ?? null) !== null) return;');
   const openBank = appSrc.split('private openBankBus(')[1]?.split('private ')[0] ?? '';
-  const dialogContext = openBank.includes('enableBlock:') && openBank.includes('this.scopeEnableBlock(start, config.spec.clock?.channel ?? null)') &&
+  const dialogContext = openBank.includes(
+    'enableBlock: lockedChannelBanks(this.busViews, this.channels.length).has(start)') &&
+    !openBank.includes('enableBlock: active !== undefined') &&
+    openBank.includes('this.scopeEnableBlock(start, config.spec.clock?.channel ?? null)') &&
     busPanel.includes('enableBlock: ScopeEnableVerdict | null;');
   check('scope rate gates guard addBus, updateBus, configureBankBus and feed the dialog context',
     verdictGate && configureGate && dialogContext,
     `verdictGate=${verdictGate}, configureGate=${configureGate}, dialogContext=${dialogContext}`);
 
   const assistantGate = appSrc.includes('throw new Error(scopeRateLimitMessage(block))') &&
+    appSrc.includes('bank !== null && !lockedChannelBanks(this.busViews, this.channels.length).has(bank)') &&
     appSrc.includes('throw new Error(scopeRateBlockMessage(block))') &&
     appSrc.includes('scopeRateBlockAt(') &&
     appSrc.includes('s.samplerate !== undefined && this.oscilloscopeActive()');
