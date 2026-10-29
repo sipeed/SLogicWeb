@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  MAX_SAMPLERATE_HZ, MAX_SAMPLERATE_HZ_SLOGIC32_U3, SAMPLERATES_HZ,
+  MAX_SAMPLERATE_HZ, MAX_SAMPLERATE_HZ_SLOGIC32_U3, MAX_SAMPLERATE_HZ_SLOGIC32_U3_5G, SAMPLERATES_HZ,
 } from '../../device/index.js';
 import {
   SCOPE_MIN_SAMPLERATE_HZ, maxScopesAtRate, maxWidthAtRate, scopeEnableVerdict, scopeRateBlockAt,
@@ -24,6 +24,7 @@ function check(name: string, pass: boolean, detail: string): void {
 
 const SL16 = MAX_SAMPLERATE_HZ;
 const SL32 = MAX_SAMPLERATE_HZ_SLOGIC32_U3;
+const SL32_5G = MAX_SAMPLERATE_HZ_SLOGIC32_U3_5G;
 
 check('scope floor is a real device samplerate', SAMPLERATES_HZ.includes(SCOPE_MIN_SAMPLERATE_HZ),
   `floor=${SCOPE_MIN_SAMPLERATE_HZ}`);
@@ -61,6 +62,30 @@ check('scope floor is a real device samplerate', SAMPLERATES_HZ.includes(SCOPE_M
   const bad = table.filter(([rate, dev, want]) => maxScopesAtRate(rate, SL32, dev) !== want);
   check('maxScopesAtRate SLogic32 table incl. device-width clamp', bad.length === 0,
     bad.map(([r, d, w]) => `${r}/${d}->${maxScopesAtRate(r, SL32, d)}!=${w}`).join(',') || 'exact');
+}
+{
+  const table: [number, number][] = [
+    [100e6, 4], [200e6, 2], [400e6, 1], [800e6, 0], [1.4e9, 0],
+  ];
+  const bad = table.filter(([rate, want]) => maxScopesAtRate(rate, SL32_5G, 32) !== want);
+  check('maxScopesAtRate SLogic32 on a 5 Gbps link halves the table', bad.length === 0,
+    bad.map(([r, w]) => `${r}->${maxScopesAtRate(r, SL32_5G, 32)}!=${w}`).join(',') || 'exact');
+  const verdict = scopeEnableVerdict({
+    start: 8, clockChannel: null, currentWidth: 8, rate: 400e6, ceilings: SL32_5G, deviceChannels: 32,
+  });
+  const verdict800 = scopeEnableVerdict({
+    start: 8, clockChannel: null, currentWidth: 8, rate: 800e6, ceilings: SL32_5G, deviceChannels: 32,
+  });
+  const options = optionSummary(SAMPLERATES_HZ, 32, SL32_5G, true);
+  const options8 = optionSummary(SAMPLERATES_HZ, 8, SL32_5G, true);
+  check('5 Gbps link: second bank blocks at 400M and 1.4G leaves the dropdown',
+    !verdict.ok && verdict.requiredWidth === 16 && verdict.maxRate === 200e6 &&
+    !verdict800.ok && verdict800.maxScopes === 0 &&
+    options === '5:floor,8:floor,10:floor,16:floor,20:floor,25:floor,32:floor,40:floor,50:floor,80:floor,' +
+      '100:on,160:ceiling,200:ceiling,400:ceiling,800:ceiling' &&
+    options8 === '5:floor,8:floor,10:floor,16:floor,20:floor,25:floor,32:floor,40:floor,50:floor,80:floor,' +
+      '100:on,160:on,200:on,400:on,800:ceiling',
+    `verdict=${JSON.stringify(verdict)}, options=${options}, options8=${options8}`);
 }
 
 function verdictEq(v: ScopeEnableVerdict, want: ScopeEnableVerdict): string | null {

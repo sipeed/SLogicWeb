@@ -2738,6 +2738,71 @@ async function main(): Promise<void> {
     logged.length === 1 && String(logged[0]?.[1]).includes('report failed'),
     JSON.stringify(logged));
 
+  {
+    const slow = new ClockStreamDevice(400_000);
+    const slowDev = new Slogic16U3(slow as unknown as USBDevice);
+    await slowDev.open();
+    await slowDev.probeLinkClass();
+    check('a 5 Gbps-class link drops the 32U3 ceilings to the halved table',
+      slowDev.maxSamplerateHz[4] === 800e6 && slowDev.maxSamplerateHz[32] === 100e6,
+      JSON.stringify(slowDev.maxSamplerateHz));
+    slow.release();
+
+    const mid = new ClockStreamDevice(500_000);
+    const midDev = new Slogic16U3(mid as unknown as USBDevice);
+    await midDev.open();
+    const probeWarnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => { probeWarnings.push(args.map(String).join(' ')); };
+    try {
+      await midDev.probeLinkClass();
+    } finally {
+      console.warn = realWarn;
+    }
+    check('a measured rate below the 10 Gbps threshold downgrades on the measurement itself',
+      midDev.maxSamplerateHz[32] === 100e6 &&
+      probeWarnings.filter((w) => w.includes('link probe')).length === 0,
+      `warnings=${JSON.stringify(probeWarnings)}, table=${JSON.stringify(midDev.maxSamplerateHz)}`);
+    mid.release();
+
+    const fast = new ClockStreamDevice(800_000);
+    const fastDev = new Slogic16U3(fast as unknown as USBDevice);
+    await fastDev.open();
+    await fastDev.probeLinkClass();
+    check('a 10 Gbps-class link keeps the full 32U3 ceiling table',
+      fastDev.maxSamplerateHz[4] === MAX_SAMPLERATE_HZ_SLOGIC32_U3[4] &&
+      fastDev.maxSamplerateHz[32] === 200e6, JSON.stringify(fastDev.maxSamplerateHz));
+    fast.release();
+
+    const wedged = new FakeStreamDevice(recorded32(), [], 0x3032);
+    const wedgedDev = new Slogic16U3(wedged as unknown as USBDevice);
+    await wedgedDev.open();
+    wedged.holdCtrl = true;
+    await wedgedDev.probeLinkClass();
+    check('a failed probe falls back to the 5 Gbps ceiling table',
+      wedgedDev.maxSamplerateHz[4] === 800e6 && wedgedDev.maxSamplerateHz[32] === 100e6,
+      JSON.stringify(wedgedDev.maxSamplerateHz));
+
+    const narrow = new FakeStreamDevice(recorded(), []);
+    const narrowDev = new Slogic16U3(narrow as unknown as USBDevice);
+    await narrowDev.open();
+    await narrowDev.probeLinkClass();
+    check('a 16-channel model never probes and keeps its link-independent table',
+      narrowDev.maxSamplerateHz[16] === 200e6 && narrowDev.maxSamplerateHz[4] === 800e6 &&
+      narrowDev.maxSamplerateHz[32] === undefined && narrow.transferInCalls === 0,
+      `calls=${narrow.transferInCalls}, table=${JSON.stringify(narrowDev.maxSamplerateHz)}`);
+
+    const driverSrc = fs?.readFileSync(`${procFs?.cwd?.() ?? ''}/src/device/slogic16u3.ts`, 'utf8') ?? '';
+    const workerSrc = fs?.readFileSync(`${procFs?.cwd?.() ?? ''}/src/device/usbWorker.ts`, 'utf8') ?? '';
+    const probeWired = wtSrc.includes('await device.probeLinkClass();') &&
+      workerSrc.includes('await instance.probeLinkClass();') &&
+      driverSrc.includes('if (this.maxChannels !== 32) return;') &&
+      (driverSrc.match(/this\.rateCeilings = MAX_SAMPLERATE_HZ_SLOGIC32_U3_5G;/g) ?? []).length === 3 &&
+      driverSrc.includes('if (mbps < LINK_PROBE_10G_MIN_MBPS)');
+    check('the link probe runs on both real connection paths and only downgrades',
+      probeWired, `probeWired=${probeWired}`);
+  }
+
   console.log(`\n${failures === 0 ? 'all offline checks passed' : failures + ' offline check(s) FAILED'}`);
   if (failures) failExit();
 }

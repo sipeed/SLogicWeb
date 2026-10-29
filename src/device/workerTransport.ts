@@ -389,6 +389,7 @@ function post(worker: Worker, message: ToWorker): void {
 export async function openInPage(usb: USBDevice): Promise<Device> {
   const device = new Slogic16U3(usb);
   await device.open();
+  await device.probeLinkClass();
   return device;
 }
 

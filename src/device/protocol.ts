@@ -174,6 +174,13 @@ export const MAX_SAMPLERATE_HZ_SLOGIC32_U3: Record<number, number> = {
   32: 200e6,
 };
 
+export const MAX_SAMPLERATE_HZ_SLOGIC32_U3_5G: Record<number, number> = {
+  4: 800e6,
+  8: 400e6,
+  16: 200e6,
+  32: 100e6,
+};
+
 export const SUPPORTED_CHANNELS = [4, 8, 16, 32] as const;
 
 /**
