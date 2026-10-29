@@ -5,7 +5,7 @@ import {
 } from '../../device/index.js';
 import {
   SCOPE_MIN_SAMPLERATE_HZ, maxScopesAtRate, maxWidthAtRate, scopeEnableVerdict, scopeRateBlockAt,
-  type ScopeEnableVerdict,
+  scopeRateOptions, type ScopeEnableVerdict,
 } from '../scopeRateLimits.js';
 
 const nodeProcess = (() => {
@@ -144,6 +144,37 @@ function verdictEq(v: ScopeEnableVerdict, want: ScopeEnableVerdict): string | nu
   });
   check('SLogic16 every device rate agrees with the width/scopes derivation', everyRate.every(Boolean),
     `${everyRate.filter(Boolean).length}/${everyRate.length}`);
+}
+
+function optionSummary(
+  rates: readonly number[], width: number, ceilings: Readonly<Record<number, number>>, active: boolean,
+): string {
+  return scopeRateOptions(rates, width, ceilings, active)
+    .map((option) => `${option.rate / 1e6}:${option.block === null ? 'on' : option.block.kind}`)
+    .join(',');
+}
+
+{
+  const legacy = optionSummary(SAMPLERATES_HZ, 16, SL16, false);
+  check('inactive scope keeps the legacy ceiling-filtered option set',
+    legacy === '5:on,8:on,10:on,16:on,20:on,25:on,32:on,40:on,50:on,80:on,100:on,160:on,200:on', legacy);
+  const scope16 = optionSummary(SAMPLERATES_HZ, 16, SL16, true);
+  check('SLogic16 scope at 16ch lists up to the device cap with floor and ceiling blocks',
+    scope16 === '5:floor,8:floor,10:floor,16:floor,20:floor,25:floor,32:floor,40:floor,50:floor,80:floor,' +
+      '100:on,160:on,200:on,400:ceiling,800:ceiling', scope16);
+  const scope8of32 = optionSummary(SAMPLERATES_HZ, 8, SL32, true);
+  check('SLogic32 scope at 8ch reaches 800M and caps 1.4G as a ceiling block',
+    scope8of32 === '5:floor,8:floor,10:floor,16:floor,20:floor,25:floor,32:floor,40:floor,50:floor,80:floor,' +
+      '100:on,160:on,200:on,400:on,800:on,1400:ceiling', scope8of32);
+  const scope32 = optionSummary(SAMPLERATES_HZ, 32, SL32, true);
+  check('SLogic32 scope at 32ch allows exactly the 100M-200M window',
+    scope32 === '5:floor,8:floor,10:floor,16:floor,20:floor,25:floor,32:floor,40:floor,50:floor,80:floor,' +
+      '100:on,160:on,200:on,400:ceiling,800:ceiling,1400:ceiling', scope32);
+  const empty = scopeRateOptions(SAMPLERATES_HZ, 16, {}, true).length === 0 &&
+    optionSummary(SAMPLERATES_HZ, 16, {}, false) === '5:on,8:on,10:on,16:on,20:on,25:on,32:on,40:on,50:on,80:on,' +
+      '100:on,160:on,200:on';
+  check('empty ceilings fall back to the 200M legacy ceiling and never list options when scoped',
+    empty, `empty=${empty}`);
 }
 
 {

@@ -145,6 +145,8 @@ export const en = {
   'capturePanel.sampleRate': 'Sample rate',
   'capturePanel.threshold': 'Threshold',
   'capturePanel.dacNote': 'DAC code {code} = {volts} V actual. Capture width {channels} ch (ceiling {rate}).',
+  'capturePanel.rateScopeFloor': 'Oscilloscope mode needs at least {min}',
+  'capturePanel.rateScopeCeiling': '{channels} ch caps at {rate}; close an oscilloscope bank or disable channels',
   'capturePanel.capture': 'Capture',
   'capturePanel.freeRun': 'Free run',
   'capturePanel.timer': 'Timer',

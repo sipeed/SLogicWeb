@@ -141,6 +141,8 @@ export const fr: Messages = {
   'capturePanel.sampleRate': 'Fréquence d’échantillonnage',
   'capturePanel.threshold': 'Seuil',
   'capturePanel.dacNote': 'Code DAC {code} = {volts} V réel. Largeur de capture : {channels} canaux (plafond {rate}).',
+  'capturePanel.rateScopeFloor': 'Le mode oscilloscope exige au moins {min}',
+  'capturePanel.rateScopeCeiling': '{channels} canaux plafonnent à {rate} ; fermez un oscilloscope ou désactivez des canaux',
   'capturePanel.capture': 'Capture',
   'capturePanel.freeRun': 'Marche libre',
   'capturePanel.timer': 'Minuteur',

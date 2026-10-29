@@ -24,6 +24,7 @@ import {
 } from './channelBanks.js';
 import { t } from './i18n.js';
 import { chipForeground } from './metrics.js';
+import { SCOPE_MIN_SAMPLERATE_HZ, scopeRateOptions } from './scopeRateLimits.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
 import type { CaptureSettings, ChannelState } from './state.js';
@@ -196,9 +197,18 @@ export class CapturePanel {
     // ---- rate + threshold
     const rowRT = div('field-row');
     const ceiling = v.maxSamplerateHz[s.channels] ?? 200e6;
-    const rateOptions: SelectOptionTuple[] = SAMPLERATES_HZ
-      .filter((r) => r <= ceiling)
-      .map((r) => [String(r), formatRate(r)]);
+    const rateOptions: SelectOptionTuple[] = scopeRateOptions(
+      SAMPLERATES_HZ, s.channels, v.maxSamplerateHz, v.oscilloscopeActive,
+    ).map((option): SelectOptionTuple => {
+      if (option.block === null) return [String(option.rate), formatRate(option.rate)];
+      const note = option.block.kind === 'floor'
+        ? t('capturePanel.rateScopeFloor', { min: formatRate(SCOPE_MIN_SAMPLERATE_HZ) })
+        : t('capturePanel.rateScopeCeiling', {
+          channels: option.block.width, rate: formatRate(option.block.maxRate),
+        });
+      const label = formatRate(option.rate);
+      return [String(option.rate), label, label, { disabled: true, note }];
+    });
     const rate = selectControl(
       'capture.sampleRate',
       t('capturePanel.sampleRate'),

@@ -692,6 +692,19 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   check('assistant bus and settings writes fail loudly on scope rate limits instead of clamping silently',
     assistantGate, `assistantGate=${assistantGate}`);
 
+  const panelRate = panel.includes(
+    'scopeRateOptions(\n      SAMPLERATES_HZ, s.channels, v.maxSamplerateHz, v.oscilloscopeActive,\n    )') &&
+    panel.includes("t('capturePanel.rateScopeFloor', { min: formatRate(SCOPE_MIN_SAMPLERATE_HZ) })") &&
+    panel.includes("t('capturePanel.rateScopeCeiling', {") &&
+    panel.includes('{ disabled: true, note }');
+  const enCatalog = loopFs.readFileSync('src/ui/locales/en.ts', 'utf8');
+  const rateKeys = enCatalog.includes("'capturePanel.rateScopeFloor'") &&
+    enCatalog.includes("'capturePanel.rateScopeCeiling'") &&
+    enCatalog.match(/'capturePanel\.rateScopeFloor': '[^']*\{min\}/) !== null &&
+    enCatalog.match(/'capturePanel\.rateScopeCeiling': '[^']*\{channels\}[^']*\{rate\}/) !== null;
+  check('the rate dropdown lists every device rate with disabled reasons only while a scope is active',
+    panelRate && rateKeys, `panelRate=${panelRate}, rateKeys=${rateKeys}`);
+
   const loopOpts = startSrc.includes(
     'isLoop ? { loop: true } : { deviceSampleLimit: this.captureLimitSamples }');
   check('a loop capture opts out of the device length limit and of the transport watchdogs',

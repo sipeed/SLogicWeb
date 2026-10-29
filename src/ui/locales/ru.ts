@@ -141,6 +141,8 @@ export const ru: Messages = {
   'capturePanel.sampleRate': 'Частота выборки',
   'capturePanel.threshold': 'Порог',
   'capturePanel.dacNote': 'Код DAC {code} = фактически {volts} В. Ширина захвата: {channels} кан. (потолок {rate}).',
+  'capturePanel.rateScopeFloor': 'Режиму осциллографа нужно не менее {min}',
+  'capturePanel.rateScopeCeiling': '{channels} кан. — максимум {rate}; отключите осциллограф или лишние каналы',
   'capturePanel.capture': 'Захват',
   'capturePanel.freeRun': 'Свободный режим',
   'capturePanel.timer': 'Таймер',

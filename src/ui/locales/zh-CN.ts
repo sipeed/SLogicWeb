@@ -139,6 +139,8 @@ export const zhCN: Messages = {
   'capturePanel.sampleRate': '采样率',
   'capturePanel.threshold': '阈值',
   'capturePanel.dacNote': 'DAC 码 {code} = 实际 {volts} V。采集宽度 {channels} 通道（上限 {rate}）。',
+  'capturePanel.rateScopeFloor': '示波器模式最低需要 {min}',
+  'capturePanel.rateScopeCeiling': '{channels} 通道最高 {rate}；关闭一组示波器或减少已启用通道',
   'capturePanel.capture': '采集',
   'capturePanel.freeRun': '自由运行',
   'capturePanel.timer': '定时',

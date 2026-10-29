@@ -70,3 +70,22 @@ export function scopeRateBlockAt(
   if (rate > maxRate) return { kind: 'ceiling', width, maxRate };
   return null;
 }
+
+export interface ScopeRateOption {
+  readonly rate: number;
+  readonly block: ScopeRateBlock | null;
+}
+
+export function scopeRateOptions(
+  rates: readonly number[], width: number, ceilings: Readonly<Record<number, number>>,
+  scopeActive: boolean,
+): ScopeRateOption[] {
+  if (!scopeActive) {
+    const ceiling = ceilings[width] ?? 200e6;
+    return rates.filter((rate) => rate <= ceiling).map((rate) => ({ rate, block: null }));
+  }
+  const deviceMax = Math.max(0, ...Object.values(ceilings));
+  return rates
+    .filter((rate) => rate <= deviceMax)
+    .map((rate) => ({ rate, block: scopeRateBlockAt(rate, width, ceilings, true) }));
+}
