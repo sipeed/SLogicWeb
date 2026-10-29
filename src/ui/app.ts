@@ -1606,6 +1606,8 @@ export class App {
       });
       this.busPanel.render({
         buses: this.busViews, channelCount: this.channels.length, captureLocked: this.running || this.stopping,
+        samplerate: this.settings.samplerate, captureChannels: this.settings.channels,
+        rateCeilings: this.rateCeilings,
       });
     }
   }

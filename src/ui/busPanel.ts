@@ -23,7 +23,7 @@ import {
   type LoopTimeUnit,
 } from './loopTime.js';
 import { OscilloscopeChannelGrid } from './oscilloscopeChannels.js';
-import type { ScopeEnableVerdict } from './scopeRateLimits.js';
+import { scopeEnableVerdict, type ScopeEnableVerdict } from './scopeRateLimits.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { ChannelState } from './state.js';
 
@@ -32,6 +32,9 @@ export interface BusPanelView {
   /** Channels a bus may use: the current capture's, or the device's when there is none. */
   channelCount: number;
   captureLocked: boolean;
+  samplerate: number;
+  captureChannels: ChannelCount;
+  rateCeilings: Readonly<Record<number, number>>;
 }
 
 export interface BusPanelCallbacks {
@@ -407,11 +410,36 @@ export class BusPanel {
       s.body.appendChild(err);
     }
 
+    const draftBank = busChannelBank(current.spec);
+    let scopeBlock: ScopeEnableVerdict | null = null;
+    if (problems.length === 0 && draftBank !== null) {
+      const verdict = scopeEnableVerdict({
+        start: draftBank,
+        clockChannel: current.spec.clock?.channel ?? null,
+        currentWidth: v.captureChannels,
+        rate: v.samplerate,
+        ceilings: v.rateCeilings,
+        deviceChannels: v.channelCount,
+      });
+      if (!verdict.ok) scopeBlock = verdict;
+    }
+    if (scopeBlock !== null) {
+      const err = div('panel-note error');
+      err.dataset.scopeRateNote = '';
+      err.textContent = t('bus.scopeRateLimited', {
+        rate: formatRate(scopeBlock.effectiveRate),
+        channels: scopeBlock.maxWidth,
+        width: scopeBlock.requiredWidth,
+        maxRate: formatRate(scopeBlock.maxRate),
+      });
+      s.body.appendChild(err);
+    }
+
     const actions = div('bus-actions');
     const go = button(t(this.editing ? 'bus.save' : 'bus.addButton'), 'pill primary');
     const editingBank = this.editing !== null && v.buses
       .some((bus) => bus.id === this.editing && busChannelBank(bus.spec) !== null);
-    go.disabled = problems.length > 0 ||
+    go.disabled = problems.length > 0 || scopeBlock !== null ||
       (v.captureLocked && (editingBank || busChannelBank(current.spec) !== null));
     go.addEventListener('click', () => {
       if (go.disabled) return;

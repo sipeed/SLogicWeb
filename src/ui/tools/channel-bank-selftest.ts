@@ -307,6 +307,26 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
   check('the bank dialog blocks enable attempts with a lazy reason note and a submit guard',
     enableGate && rateLimitedKey, `enableGate=${enableGate}, rateLimitedKey=${rateLimitedKey}`);
 
+  const editorGate = busPanel.includes('samplerate: number;') &&
+    busPanel.includes('captureChannels: ChannelCount;') &&
+    busPanel.includes('rateCeilings: Readonly<Record<number, number>>;') &&
+    busPanel.includes('if (problems.length === 0 && draftBank !== null) {') &&
+    busPanel.includes('scopeEnableVerdict({') &&
+    busPanel.includes('currentWidth: v.captureChannels') &&
+    busPanel.includes('rate: v.samplerate') &&
+    busPanel.includes('ceilings: v.rateCeilings') &&
+    busPanel.includes('deviceChannels: v.channelCount') &&
+    busPanel.includes("err.textContent = t('bus.scopeRateLimited', {") &&
+    busPanel.includes('formatRate(scopeBlock.effectiveRate)') &&
+    busPanel.includes('channels: scopeBlock.maxWidth') &&
+    busPanel.includes('width: scopeBlock.requiredWidth') &&
+    busPanel.includes('formatRate(scopeBlock.maxRate)') &&
+    busPanel.includes('go.disabled = problems.length > 0 || scopeBlock !== null ||') &&
+    (busPanel.match(/err\.dataset\.scopeRateNote = '';/g) ?? []).length === 1 &&
+    app.includes('samplerate: this.settings.samplerate, captureChannels: this.settings.channels');
+  check('the generic bus editor blocks rate-limited bank drafts with the shared reason note',
+    editorGate, `editorGate=${editorGate}`);
+
   const globalLoop = dialog.includes('loopSamplesFromTime') && dialog.includes('maxLoopTimeValue') &&
     dialog.includes('formatDuration(samples / context.samplerate)') &&
     app.includes('this.settings = this.bankCaptureSettings(start, loopSamples, next);') &&
