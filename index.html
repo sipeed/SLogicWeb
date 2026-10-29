@@ -33,6 +33,15 @@
     } catch {
     }
   </script>
+  <script>
+    try {
+      const workspace = JSON.parse(localStorage.getItem('logicweb.workspace') ?? 'null');
+      if (workspace?.version === 1 && workspace.detailedLabels === false) {
+        document.documentElement.setAttribute('data-toolbar-labels', 'off');
+      }
+    } catch {
+    }
+  </script>
   <link rel="stylesheet" href="/src/ui/style.css" />
 </head>
 <body>

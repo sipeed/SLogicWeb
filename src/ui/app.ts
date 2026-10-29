@@ -56,6 +56,9 @@ import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, set
   type Locale, type MessageKey, type MessageVars } from './i18n.js';
 import { getMode, getTheme, onThemeChange, setMode, THEME_MODES, THEME_MODE_LABEL_KEYS,
   type ThemeId } from './theme.js';
+import {
+  readWorkspaceSnapshot, WORKSPACE_SCHEMA_VERSION, writeWorkspaceSnapshot,
+} from './workspacePreferences.js';
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
 import { COLORS, MEASURE_COLORS, ROWS } from './metrics.js';
@@ -224,6 +227,8 @@ export class App {
     // and <html lang> follows the stored locale - both before the first paint.
     document.documentElement.lang = getLocale();
     applyStaticI18n(document);
+    const workspace = readWorkspaceSnapshot();
+    if (workspace) this.detailedLabels = workspace.detailedLabels;
     this.reflectDetailedLabels();
 
     this.settingsMenu = new SettingsMenu(must<HTMLButtonElement>('btn-settings'));
@@ -1345,6 +1350,7 @@ export class App {
           this.pendingToolbarViewport = { start, end, follow };
           this.detailedLabels = !this.detailedLabels;
           this.reflectDetailedLabels();
+          this.persistWorkspace();
           this.relayout();
         },
       },
@@ -1362,6 +1368,13 @@ export class App {
   private reflectDetailedLabels(): void {
     if (this.detailedLabels) document.documentElement.removeAttribute('data-toolbar-labels');
     else document.documentElement.setAttribute('data-toolbar-labels', 'off');
+  }
+
+  private persistWorkspace(): void {
+    writeWorkspaceSnapshot({
+      version: WORKSPACE_SCHEMA_VERSION,
+      detailedLabels: this.detailedLabels,
+    });
   }
 
   private themeItems(): SettingsMenuItem[] {
