@@ -688,7 +688,8 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     verdictGate && configureGate && dialogContext,
     `verdictGate=${verdictGate}, configureGate=${configureGate}, dialogContext=${dialogContext}`);
 
-  const assistantGate = appSrc.includes('throw new Error(scopeRateLimitMessage(block))') &&
+  const assistantGate = appSrc.includes('throw new Error(scopeRateLimitMessage(') &&
+    (appSrc.match(/scopeEnableUpgradable\(bank, cfg\.spec\.clock\?\.channel \?\? null\)/g) ?? []).length === 2 &&
     appSrc.includes('bank !== null && !lockedChannelBanks(this.busViews, this.channels.length).has(bank)') &&
     appSrc.includes('throw new Error(scopeRateBlockMessage(block))') &&
     appSrc.includes('scopeRateBlockAt(') &&
@@ -708,6 +709,27 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     enCatalog.match(/'capturePanel\.rateScopeCeiling': '[^']*\{channels\}[^']*\{rate\}/) !== null;
   check('the rate dropdown lists every device rate with disabled reasons only while a scope is active',
     panelRate && rateKeys, `panelRate=${panelRate}, rateKeys=${rateKeys}`);
+
+  const upgradableHelper = appSrc.split('private scopeEnableUpgradable(')[1]?.split('private ')[0] ?? '';
+  const fullTableParity = upgradableHelper.includes('ceilings: this.rateCeilingsFull') &&
+    upgradableHelper.includes('currentWidth: this.neededWidth()') &&
+    upgradableHelper.includes('rate: this.settings.samplerate') &&
+    upgradableHelper.includes('deviceChannels: this.channels.length');
+  const floorFirst = panel.indexOf("option.block.kind === 'floor'") !== -1 &&
+    panel.indexOf("option.block.kind === 'floor'") < panel.indexOf("'capturePanel.rateScopeCeilingUpgradable'");
+  const upgradePath = panel.includes('maxSamplerateHzFull: Readonly<Record<number, number>>;') &&
+    panel.includes("t('capturePanel.rateScopeCeilingUpgradable', {") &&
+    panel.includes('scopeRateBlockAt(option.rate, s.channels, v.maxSamplerateHzFull, true) === null') &&
+    floorFirst &&
+    fullTableParity &&
+    appSrc.includes('rateCeilingsFull = device.maxChannels === 32 ? MAX_SAMPLERATE_HZ_SLOGIC32_U3 : MAX_SAMPLERATE_HZ') &&
+    appSrc.includes('maxSamplerateHzFull: this.rateCeilingsFull') &&
+    appSrc.includes('rateCeilingsFull: this.rateCeilingsFull') &&
+    appSrc.includes('enableUpgradable: this.scopeEnableUpgradable(start, config.spec.clock?.channel ?? null)');
+  const enUpgradable = enCatalog.includes("'capturePanel.rateScopeCeilingUpgradable'") &&
+    enCatalog.includes("'bus.scopeRateLimitedUpgradable'");
+  check('rate-limited surfaces name the 10 Gbps unlock path only when the full table lifts the block',
+    upgradePath && enUpgradable, `upgradePath=${upgradePath}, enUpgradable=${enUpgradable}`);
 
   const loopOpts = startSrc.includes(
     'isLoop ? { loop: true } : { deviceSampleLimit: this.captureLimitSamples }');

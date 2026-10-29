@@ -297,7 +297,9 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     dialog.includes("div('panel-note error')") &&
     dialog.includes('enableLabel.after(blockNote);') &&
     dialog.includes('if (enabled && enableBlock !== null) {') &&
-    dialog.includes("t('bus.scopeRateLimited', {") &&
+    dialog.includes("'bus.scopeRateLimitedUpgradable'") &&
+    dialog.includes(": 'bus.scopeRateLimited',") &&
+    dialog.includes('context.enableUpgradable ?') &&
     dialog.includes('formatRate(enableBlock.effectiveRate)') &&
     dialog.includes('formatRate(enableBlock.maxRate)') &&
     dialog.includes('if (blockNote === null) {') &&
@@ -316,7 +318,9 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     busPanel.includes('rate: v.samplerate') &&
     busPanel.includes('ceilings: v.rateCeilings') &&
     busPanel.includes('deviceChannels: v.channelCount') &&
-    busPanel.includes("err.textContent = t('bus.scopeRateLimited', {") &&
+    busPanel.includes("t(scopeUpgradable ? 'bus.scopeRateLimitedUpgradable' : 'bus.scopeRateLimited', {") &&
+    busPanel.includes('const verdict = scopeEnableVerdict({ ...verdictArgs, ceilings: v.rateCeilings });') &&
+    busPanel.includes('scopeUpgradable = scopeEnableVerdict({ ...verdictArgs, ceilings: v.rateCeilingsFull }).ok;') &&
     busPanel.includes('formatRate(scopeBlock.effectiveRate)') &&
     busPanel.includes('channels: scopeBlock.maxWidth') &&
     busPanel.includes('width: scopeBlock.requiredWidth') &&

@@ -35,6 +35,7 @@ export interface BusPanelView {
   samplerate: number;
   captureChannels: ChannelCount;
   rateCeilings: Readonly<Record<number, number>>;
+  rateCeilingsFull: Readonly<Record<number, number>>;
 }
 
 export interface BusPanelCallbacks {
@@ -412,21 +413,25 @@ export class BusPanel {
 
     const draftBank = busChannelBank(current.spec);
     let scopeBlock: ScopeEnableVerdict | null = null;
+    let scopeUpgradable = false;
     if (problems.length === 0 && draftBank !== null) {
-      const verdict = scopeEnableVerdict({
+      const verdictArgs = {
         start: draftBank,
         clockChannel: current.spec.clock?.channel ?? null,
         currentWidth: v.captureChannels,
         rate: v.samplerate,
-        ceilings: v.rateCeilings,
         deviceChannels: v.channelCount,
-      });
-      if (!verdict.ok) scopeBlock = verdict;
+      };
+      const verdict = scopeEnableVerdict({ ...verdictArgs, ceilings: v.rateCeilings });
+      if (!verdict.ok) {
+        scopeBlock = verdict;
+        scopeUpgradable = scopeEnableVerdict({ ...verdictArgs, ceilings: v.rateCeilingsFull }).ok;
+      }
     }
     if (scopeBlock !== null) {
       const err = div('panel-note error');
       err.dataset.scopeRateNote = '';
-      err.textContent = t('bus.scopeRateLimited', {
+      err.textContent = t(scopeUpgradable ? 'bus.scopeRateLimitedUpgradable' : 'bus.scopeRateLimited', {
         rate: formatRate(scopeBlock.effectiveRate),
         channels: scopeBlock.maxWidth,
         width: scopeBlock.requiredWidth,
@@ -471,6 +476,7 @@ export interface BankBusDialogOpenContext {
   samplerate: number;
   locked: boolean;
   enableBlock: ScopeEnableVerdict | null;
+  enableUpgradable: boolean;
 }
 
 interface BankBusDetails {
@@ -670,12 +676,15 @@ export class BankBusDialog {
       if (blockNote === null) {
         blockNote = div('panel-note error');
         blockNote.dataset.scopeRateNote = '';
-        blockNote.textContent = t('bus.scopeRateLimited', {
-          rate: formatRate(enableBlock.effectiveRate),
-          channels: enableBlock.maxWidth,
-          width: enableBlock.requiredWidth,
-          maxRate: formatRate(enableBlock.maxRate),
-        });
+        blockNote.textContent = t(
+          context.enableUpgradable ? 'bus.scopeRateLimitedUpgradable' : 'bus.scopeRateLimited',
+          {
+            rate: formatRate(enableBlock.effectiveRate),
+            channels: enableBlock.maxWidth,
+            width: enableBlock.requiredWidth,
+            maxRate: formatRate(enableBlock.maxRate),
+          },
+        );
         enableLabel.after(blockNote);
       }
     };

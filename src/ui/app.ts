@@ -15,8 +15,8 @@ import {
 import type { SampleStore } from '../data/types.js';
 import { bytesPerSampleForChannels, channelWidthForProbes, isChannelCount, type ChannelCount } from '../types.js';
 import {
-  MAX_SAMPLERATE_HZ, TransportDeadError, getGrantedDevicesOnBestThread, requestDeviceOnBestThread,
-  vrefCode, type CaptureConfig, type Device,
+  MAX_SAMPLERATE_HZ, MAX_SAMPLERATE_HZ_SLOGIC32_U3, TransportDeadError, getGrantedDevicesOnBestThread,
+  requestDeviceOnBestThread, vrefCode, type CaptureConfig, type Device,
 } from '../device/index.js';
 import { WorkerSlogicDevice, workerTransport } from '../device/workerTransport.js';
 import { WheelIntent, wheelSpanFactor } from '../render/index.js';
@@ -89,10 +89,11 @@ type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number)
 
 const BUS_CAPTURE_LOCK_ERROR = 'bank oscilloscope settings are locked while capture is running or stopping';
 
-function scopeRateLimitMessage(block: ScopeEnableVerdict): string {
+function scopeRateLimitMessage(block: ScopeEnableVerdict, upgradable: boolean): string {
   return `enabling this oscilloscope bank needs ${block.requiredWidth} channels at ` +
     `${formatRate(block.effectiveRate)}, which caps at ${formatRate(block.maxRate)}; ` +
-    `lower the sample rate to ${formatRate(block.maxRate)} or below first`;
+    `lower the sample rate to ${formatRate(block.maxRate)} or below first` +
+    (upgradable ? '; a 10 Gbps port and cable would allow it' : '');
 }
 
 function scopeRateBlockMessage(block: ScopeRateBlock): string {
@@ -162,6 +163,7 @@ export class App {
   private deviceEpoch = 0;
   private stopPending: Promise<void> | null = null;
   private rateCeilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ;
+  private rateCeilingsFull: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ;
   private running = false;
   /** True while WebUSB transfers from the previous run are being cancelled and drained. */
   private stopping = false;
@@ -440,6 +442,17 @@ export class App {
     return verdict.ok ? null : verdict;
   }
 
+  private scopeEnableUpgradable(start: number, clockChannel: number | null): boolean {
+    return scopeEnableVerdict({
+      start,
+      clockChannel,
+      currentWidth: this.neededWidth(),
+      rate: this.settings.samplerate,
+      ceilings: this.rateCeilingsFull,
+      deviceChannels: this.channels.length,
+    }).ok;
+  }
+
   private addBus(cfg: BusViewConfig): string | null {
     if ((this.running || this.stopping) && busChannelBank(cfg.spec) !== null) return null;
     const bank = busChannelBank(cfg.spec);
@@ -510,6 +523,7 @@ export class App {
       enableBlock: lockedChannelBanks(this.busViews, this.channels.length).has(start)
         ? null
         : this.scopeEnableBlock(start, config.spec.clock?.channel ?? null),
+      enableUpgradable: this.scopeEnableUpgradable(start, config.spec.clock?.channel ?? null),
     });
     return true;
   }
@@ -1594,6 +1608,7 @@ export class App {
         stopping: this.stopping,
         progress: this.running ? this.progressView() : null,
         maxSamplerateHz: this.rateCeilings,
+        maxSamplerateHzFull: this.rateCeilingsFull,
         triggerState: this.triggerState,
       });
     } else {
@@ -1608,7 +1623,7 @@ export class App {
       this.busPanel.render({
         buses: this.busViews, channelCount: this.channels.length, captureLocked: this.running || this.stopping,
         samplerate: this.settings.samplerate, captureChannels: this.settings.channels,
-        rateCeilings: this.rateCeilings,
+        rateCeilings: this.rateCeilings, rateCeilingsFull: this.rateCeilingsFull,
       });
     }
   }
@@ -1931,6 +1946,7 @@ export class App {
   /** Grow the channel model when a wider SLogic board is connected. */
   private adoptDeviceChannels(device: Device): void {
     this.rateCeilings = device.maxSamplerateHz ?? MAX_SAMPLERATE_HZ;
+    this.rateCeilingsFull = device.maxChannels === 32 ? MAX_SAMPLERATE_HZ_SLOGIC32_U3 : MAX_SAMPLERATE_HZ;
     const max = device.maxChannels ?? this.channels.length;
     if (!isChannelCount(max)) {
       throw new Error(`device reported unsupported channel count ${max}`);
@@ -2429,7 +2445,11 @@ export class App {
         if (!(this.running || this.stopping) && bank !== null &&
           validateBusSpec(cfg.spec, this.channels.length).length === 0) {
           const block = this.scopeEnableBlock(bank, cfg.spec.clock?.channel ?? null);
-          if (block !== null) throw new Error(scopeRateLimitMessage(block));
+          if (block !== null) {
+            throw new Error(scopeRateLimitMessage(
+              block, this.scopeEnableUpgradable(bank, cfg.spec.clock?.channel ?? null),
+            ));
+          }
         }
         if (this.addBus(cfg) === null) throw new Error(BUS_CAPTURE_LOCK_ERROR);
       },
@@ -2440,7 +2460,11 @@ export class App {
           if (bank !== null && !lockedChannelBanks(this.busViews, this.channels.length).has(bank) &&
             validateBusSpec(cfg.spec, this.channels.length).length === 0) {
             const block = this.scopeEnableBlock(bank, cfg.spec.clock?.channel ?? null);
-            if (block !== null) throw new Error(scopeRateLimitMessage(block));
+            if (block !== null) {
+              throw new Error(scopeRateLimitMessage(
+                block, this.scopeEnableUpgradable(bank, cfg.spec.clock?.channel ?? null),
+              ));
+            }
           }
         }
         if (b && !this.updateBus(b.id, cfg)) throw new Error(BUS_CAPTURE_LOCK_ERROR);

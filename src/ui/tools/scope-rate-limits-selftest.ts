@@ -88,6 +88,60 @@ check('scope floor is a real device samplerate', SAMPLERATES_HZ.includes(SCOPE_M
     `verdict=${JSON.stringify(verdict)}, options=${options}, options8=${options8}`);
 }
 
+{
+  const blocked5g = (width: number, rate: number) => scopeRateBlockAt(rate, width, SL32_5G, true) !== null;
+  const liftedFull = (width: number, rate: number) => scopeRateBlockAt(rate, width, SL32, true) === null;
+  const upgradable = blocked5g(8, 800e6) && liftedFull(8, 800e6) &&
+    blocked5g(16, 400e6) && liftedFull(16, 400e6) &&
+    !(blocked5g(32, 400e6) && liftedFull(32, 400e6)) &&
+    blocked5g(32, 400e6) && !liftedFull(32, 400e6);
+  const enable = scopeEnableVerdict({
+    start: 8, clockChannel: null, currentWidth: 8, rate: 400e6, ceilings: SL32_5G, deviceChannels: 32,
+  });
+  const enableFull = scopeEnableVerdict({
+    start: 8, clockChannel: null, currentWidth: 8, rate: 400e6, ceilings: SL32, deviceChannels: 32,
+  });
+  check('a 5 Gbps block is upgradable only when the full table lifts it',
+    upgradable && !enable.ok && enableFull.ok,
+    `upgradable=${upgradable}, enable=${enable.ok}, enableFull=${enableFull.ok}`);
+}
+
+{
+  const blockHits = (cur: Readonly<Record<number, number>>, full: Readonly<Record<number, number>>) => {
+    const hits: string[] = [];
+    for (const width of [4, 8, 16, 32]) {
+      for (const rate of SAMPLERATES_HZ) {
+        const block = scopeRateBlockAt(rate, width, cur, true);
+        if (block === null || block.kind !== 'ceiling') continue;
+        if (scopeRateBlockAt(rate, width, full, true) === null) hits.push(`${width}@${rate / 1e6}`);
+      }
+    }
+    return hits;
+  };
+  const enableHits = (
+    cur: Readonly<Record<number, number>>, full: Readonly<Record<number, number>>, deviceChannels: number,
+  ) => {
+    const hits: string[] = [];
+    for (let start = 0; start + 8 <= deviceChannels; start += 8) {
+      for (const width of [4, 8, 16, 32]) {
+        for (const rate of SAMPLERATES_HZ) {
+          const args = { start, clockChannel: null, currentWidth: width, rate, deviceChannels };
+          if (scopeEnableVerdict({ ...args, ceilings: cur }).ok) continue;
+          if (scopeEnableVerdict({ ...args, ceilings: full }).ok) hits.push(`${start}/${width}@${rate / 1e6}`);
+        }
+      }
+    }
+    return hits;
+  };
+  const fiveG = blockHits(SL32_5G, SL32).join(',');
+  const fiveGEnable = enableHits(SL32_5G, SL32, 32).length > 0;
+  const equalTables = blockHits(SL16, SL16).length + blockHits(SL32, SL32).length +
+    enableHits(SL16, SL16, 16).length + enableHits(SL32, SL32, 32).length;
+  check('the 10 Gbps hint set is exactly the 5 Gbps blocks the full table lifts, and never fires on equal tables',
+    fiveG === '4@1400,8@800,16@400,32@160,32@200' && fiveGEnable && equalTables === 0,
+    `fiveG=${fiveG}, fiveGEnable=${fiveGEnable}, equalTables=${equalTables}`);
+}
+
 function verdictEq(v: ScopeEnableVerdict, want: ScopeEnableVerdict): string | null {
   const keys = ['ok', 'effectiveRate', 'requiredWidth', 'bankWidth', 'maxRate', 'maxScopes', 'maxWidth'] as const;
   const diff = keys.filter((k) => v[k] !== want[k]);
