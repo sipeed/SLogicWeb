@@ -74,7 +74,7 @@ check(
 );
 
 const stateNeedles = [
-  "this.el.connect.setAttribute('aria-label', deviceName ?? t('toolbar.device'))",
+  "deviceName ? `${t('toolbar.device')}: ${deviceName}` : t('toolbar.device')",
   'this.el.connect.disabled = !webusbAvailable',
   'this.el.connect.title =',
   "t('toolbar.noWebusb')",
@@ -360,6 +360,15 @@ for (const id of commandIds) {
   if (retired.length > 0) anatomyFailures.push(`${id}:label(${retired.join(',')})`);
   const mediaCount = markup.match(/class="toolbar-item-media"/g)?.length ?? 0;
   if (mediaCount !== 1) anatomyFailures.push(`${id}:media=${mediaCount}`);
+  const labelCount = markup.match(/class="toolbar-item-label"/g)?.length ?? 0;
+  if (labelCount !== 1) anatomyFailures.push(`${id}:labels=${labelCount}`);
+  const labelText = /<span class="toolbar-item-label" aria-hidden="true" data-i18n="toolbar\.short[A-Za-z]+">([^<]+)<\/span>/.exec(markup)?.[1];
+  if (labelText === undefined) anatomyFailures.push(`${id}:short-label`);
+  const mediaAt = markup.indexOf('class="toolbar-item-media"');
+  const labelAt = markup.indexOf('class="toolbar-item-label"');
+  if (mediaAt < 0 || labelAt < mediaAt) anatomyFailures.push(`${id}:label-order`);
+  const allText = markup.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (allText !== labelText) anatomyFailures.push(`${id}:extra-text`);
   if (!/\saria-label="[^"]+"/.test(markup)) anatomyFailures.push(`${id}:aria-label`);
   const icon = iconBody(markup);
   if (icon) iconSignatures.add(icon);
@@ -369,7 +378,7 @@ const sidebarMarkup = commandMarkup(sidebarCommandId);
 const separatorCount = toolbar.match(/role="separator"/g)?.length ?? 0;
 const verticalSeparatorCount = toolbar.match(/aria-orientation="vertical"/g)?.length ?? 0;
 check(
-  'nine icon-only commands expose shadcn anatomy, one media wrapper each, distinct decorative icons, and separators',
+  'nine commands expose shadcn anatomy, one media wrapper and decorative short label each, distinct icons, and separators',
   anatomyFailures.length === 0 && iconSignatures.size === commandIds.length &&
     separatorCount === 2 && verticalSeparatorCount === 2,
   `failures=${JSON.stringify(anatomyFailures)}, icons=${iconSignatures.size}, separators=${separatorCount}/${verticalSeparatorCount}`,
@@ -641,6 +650,57 @@ check(
   `settings=${settingsClosesSidebar}, sidebar=${sidebarClosesSettings}`,
 );
 
+const settingsItemsBody = methodBody('private settingsItems(');
+const detailedLabelsToggle = settingsItemsBody.includes("label: t('settings.detailedLabels')") &&
+  settingsItemsBody.includes('checked: this.detailedLabels') &&
+  settingsItemsBody.includes('this.detailedLabels = !this.detailedLabels;') &&
+  settingsItemsBody.includes('this.reflectDetailedLabels();');
+const detailedLabelsDefault = app.includes('private detailedLabels = true;');
+const constructorBody = methodBody('constructor() {');
+const detailedLabelsReflection = app.includes("document.documentElement.removeAttribute('data-toolbar-labels')") &&
+  app.includes("document.documentElement.setAttribute('data-toolbar-labels', 'off')") &&
+  (app.match(/this\.reflectDetailedLabels\(\);/g)?.length ?? 0) === 2 &&
+  constructorBody.includes('this.reflectDetailedLabels();') &&
+  settingsItemsBody.includes('this.reflectDetailedLabels();');
+check(
+  'settings owns a checked default-on detailed-label toggle that only reflects chrome state',
+  detailedLabelsToggle && detailedLabelsDefault && detailedLabelsReflection,
+  `toggle=${detailedLabelsToggle}, default=${detailedLabelsDefault}, reflection=${detailedLabelsReflection}`,
+);
+
+const viewportRestoreOrder = [
+  'const { start, end } = this.stack.view;',
+  'const follow = this.stack.followLatest;',
+  'this.pendingToolbarViewport = { start, end, follow };',
+  'this.reflectDetailedLabels();',
+  'this.relayout();',
+].map((needle) => settingsItemsBody.indexOf(needle));
+const noTransientWidthSync = !settingsItemsBody.includes('this.stack.syncSize();');
+const noImmediateViewportMutation = !settingsItemsBody.includes('this.stack.setViewport') &&
+  !settingsItemsBody.includes('this.stack.setFollowLatest');
+const drawBody = methodBody('private draw(): void {');
+const frameRestoreOrder = [
+  'this.pendingToolbarViewport = null;',
+  'this.stack.view.start === pendingViewport.start',
+  'this.stack.syncSize();',
+  'this.stack.setViewport(pendingViewport.start, pendingViewport.end);',
+  'this.stack.setFollowLatest(pendingViewport.follow);',
+].map((needle) => drawBody.indexOf(needle));
+const followRestored = drawBody.includes('this.stack.setFollowLatest(pendingViewport.follow);');
+const relayoutBody = methodBody('private relayout(): void {');
+const overlayLayoutSyncs = relayoutBody.match(
+  /this\.overlay\.syncSize\(this\.el\.plot\.clientWidth, this\.el\.plot\.clientHeight\);/g,
+)?.length ?? 0;
+check(
+  'layout refreshes overlay geometry and the frame restores viewport/follow only when no newer command won',
+  viewportRestoreOrder.every((index) => index >= 0) && noTransientWidthSync && noImmediateViewportMutation &&
+    followRestored && overlayLayoutSyncs === 2 &&
+    viewportRestoreOrder.every((index, i) => i === 0 || index > viewportRestoreOrder[i - 1]!) &&
+    frameRestoreOrder.every((index) => index >= 0) &&
+    frameRestoreOrder.every((index, i) => i === 0 || index > frameRestoreOrder[i - 1]!),
+  `toggle=${JSON.stringify(viewportRestoreOrder)}, frame=${JSON.stringify(frameRestoreOrder)}, noSync=${noTransientWidthSync}, immediate=${!noImmediateViewportMutation}, follow=${followRestored}, overlay=${overlayLayoutSyncs}`,
+);
+
 const railMarkupAbsent = !html.includes('id="rail"') && !html.includes('rail-btn') &&
   !html.includes('rail-device') && !html.includes('rail-analyzers') &&
   !toolbar.includes('rail');
@@ -657,7 +717,7 @@ check(
 
 const directButtonTranslations = commandIds.filter((id) => /<button\b[^>]*\sdata-i18n\s*=/.test(commandMarkup(id)));
 const dynamicNames = [
-  "this.el.connect.setAttribute('aria-label', deviceName ?? t('toolbar.device'))",
+  "deviceName ? `${t('toolbar.device')}: ${deviceName}` : t('toolbar.device')",
   "this.el.open.setAttribute('aria-label', t('toolbar.open'))",
   "this.el.save.setAttribute('aria-label', t('toolbar.save'))",
   "this.el.fit.setAttribute('aria-label', t('toolbar.fit'))",
@@ -684,6 +744,15 @@ check(
   `direct=${JSON.stringify(directButtonTranslations)}, missingNames=${JSON.stringify(missingDynamicNames)}, ` +
     `transportName=${dynamicTransportName}, retired=${JSON.stringify(retiredVisibleLabelTargets)}, ` +
     `retiredDescription=${JSON.stringify(retiredTransportDescription)}, classes=${preservedClasses}`,
+);
+
+const dynamicTransportLabel = app.includes("label.textContent = this.stopping ? t('toolbar.shortStopping')") &&
+  app.includes(": this.running ? t('toolbar.shortStop')") &&
+  app.includes(": this.device ? t('toolbar.shortStart') : t('toolbar.shortDemo');");
+check(
+  'the visual transport shorthand follows stopping, running, connected and demo states',
+  dynamicTransportLabel,
+  `dynamic=${dynamicTransportLabel}`,
 );
 
 const toolbarSummaryAbsent = !toolbar.includes('toolbar-session') &&
@@ -717,13 +786,20 @@ check(
 
 const labelClassCounts = ['toolbar-item-content', 'toolbar-item-title', 'toolbar-item-description']
   .map((needle) => toolbar.split(needle).length - 1);
-const visibleTextNodes = commandIds.filter((id) => (
-  /<button\b[^>]*>([\s\S]*?)<\/button>/.exec(commandMarkup(id))?.[1] ?? ''
-).replace(/<[^>]*>/g, ' ').trim() !== '');
+const shortLabelKeys = commandIds.map((id) => (
+  /class="toolbar-item-label" aria-hidden="true" data-i18n="([^"]+)"/.exec(commandMarkup(id))?.[1] ?? ''
+));
+const shortLabelsComplete = shortLabelKeys.every((key) => /^toolbar\.short[A-Za-z]+$/.test(key)) &&
+  new Set(shortLabelKeys).size === commandIds.length;
+const offLabelRule = css.includes('#toolbar .toolbar-item-label { display: none; }');
+const onToolbarSizing = css.includes('html:not([data-toolbar-labels="off"]) #toolbar {\n  height: max(var(--toolbar-height, 0px), min-content);\n}');
+const onButtonRule = /html:not\(\[data-toolbar-labels="off"\]\) #toolbar button\.toolbar-item \{[^}]*flex-direction: column;[^}]*width: auto;[^}]*height: 58px;/s.test(css);
+const onLabelRule = /html:not\(\[data-toolbar-labels="off"\]\) #toolbar \.toolbar-item-label \{[^}]*display: block;[^}]*white-space: nowrap;/s.test(css);
 check(
-  'no toolbar command contains a visible text node or a label subtree',
-  visibleTextNodes.length === 0 && labelClassCounts.every((count) => count === 0),
-  `text=${JSON.stringify(visibleTextNodes)}, labelClasses=${JSON.stringify(labelClassCounts)}`,
+  'every command has a unique concise label; default-on layout and icon-only off layout are both explicit',
+  shortLabelsComplete && labelClassCounts.every((count) => count === 0) &&
+    offLabelRule && onToolbarSizing && onButtonRule && onLabelRule,
+  `keys=${JSON.stringify(shortLabelKeys)}, retired=${JSON.stringify(labelClassCounts)}, off=${offLabelRule}, sizing=${onToolbarSizing}, on=${onButtonRule && onLabelRule}`,
 );
 
 const retiredDescriptionStyles = [
@@ -840,7 +916,7 @@ const mediaWrapperKept = ['flex: none;', 'width: 28px;', 'height: 28px;']
 const desktopFitsMedia = desktopWidth !== null && desktopPadding !== null &&
   desktopWidth - 2 * desktopPadding - buttonBorderPx === mediaBoxPx;
 check(
-  'every toolbar command is a 44x44 desktop square centering the retained 28x28 media wrapper',
+  'icon-only base/off rules keep every command a 44x44 desktop square with the retained 28x28 media wrapper',
   desktopWidth === 44 && desktopHeight === 44 && desktopPadding === 7 &&
     desktopFitsMedia && mediaWrapperKept &&
     desktopButtonRule.includes('flex: 0 0 auto;') &&
@@ -864,7 +940,7 @@ const deviceOverrideAbsent = !/^\s*#toolbar button\.toolbar-device\s*\{/m.test(c
 const textEraSizing = ['fit-content', 'max-width', 'text-overflow', 'white-space', 'text-align']
   .filter((needle) => desktopButtonRule.includes(needle) || mobileButtonRule.includes(needle));
 check(
-  'toolbar button rules retire the device min-height override and text-era intrinsic sizing',
+  'icon-only base/off button rules retire the device min-height override and text-era intrinsic sizing',
   deviceOverrideAbsent && textEraSizing.length === 0,
   `deviceOverrideAbsent=${deviceOverrideAbsent}, textEra=${JSON.stringify(textEraSizing)}`,
 );

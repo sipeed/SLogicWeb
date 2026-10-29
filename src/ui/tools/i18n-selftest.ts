@@ -243,6 +243,9 @@ function check(name: string, pass: boolean, detail: string): void {
 
   const expectedText = [
     'emptyHint.line1', 'emptyHint.line2',
+    'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortOpen', 'toolbar.shortSave',
+    'toolbar.shortFit', 'toolbar.shortSettings', 'toolbar.shortAssistant', 'toolbar.shortTheme',
+    'toolbar.shortSidebar',
   ];
   const expectedTitles = [
     'toolbar.startTitle', 'toolbar.openTitle', 'toolbar.saveTitle', 'toolbar.fitTitle',
@@ -484,6 +487,9 @@ const baseSettings: CaptureSettings = {
   // clean FAIL, not a crash.
   const probes: (keyof Messages)[] = [
     'toolbar.start', 'toolbar.demo', 'capture.demo', 'settings.language', 'settings.theme',
+    'settings.detailedLabels', 'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortStop',
+    'toolbar.shortStopping', 'toolbar.shortDemo', 'toolbar.shortOpen', 'toolbar.shortSave',
+    'toolbar.shortFit', 'toolbar.shortSettings', 'toolbar.shortTheme', 'toolbar.shortSidebar',
     'trigger.anyEdge',
     'channels.settings', 'channels.name', 'channels.color', 'channels.customColor',
     'channels.colorField', 'channels.hue',
@@ -507,6 +513,39 @@ const baseSettings: CaptureSettings = {
     bad.length === 0,
     bad.length === 0 ? LOCALES.map((l) => `${l}=${dicts[l]?.['toolbar.start'] ?? 'English'}`).join(', ')
       : bad.join('; '));
+}
+
+{
+  const shortKeys = (Object.keys(en) as (keyof Messages)[]).filter((key) => key.startsWith('toolbar.short'));
+  const bad = shortKeys.filter((key) => {
+    const hanCount = zhCN[key].match(/\p{Script=Han}/gu)?.length ?? 0;
+    return hanCount === 0 || hanCount > 4;
+  });
+  check('every Chinese toolbar shorthand contains one to four Han characters',
+    shortKeys.length >= 12 && bad.length === 0,
+    bad.length === 0 ? `${shortKeys.length} concise labels` : bad.join(', '));
+}
+
+{
+  const namePairs: [keyof Messages, keyof Messages][] = [
+    ['toolbar.shortDevice', 'toolbar.device'], ['toolbar.shortStart', 'toolbar.start'],
+    ['toolbar.shortStop', 'toolbar.stop'], ['toolbar.shortStopping', 'toolbar.stopping'],
+    ['toolbar.shortDemo', 'toolbar.demo'], ['toolbar.shortOpen', 'toolbar.open'],
+    ['toolbar.shortSave', 'toolbar.save'], ['toolbar.shortFit', 'toolbar.fit'],
+    ['toolbar.shortSettings', 'settings.title'], ['toolbar.shortAssistant', 'toolbar.assistantTitle'],
+    ['toolbar.shortTheme', 'toolbar.themeTitle'], ['toolbar.shortSidebar', 'toolbar.sidebarTitle'],
+  ];
+  const catalogs: Record<Locale, Messages> = { en, 'zh-CN': zhCN, ru, fr };
+  const bad: string[] = [];
+  for (const locale of LOCALES) {
+    for (const [shortKey, nameKey] of namePairs) {
+      const short = catalogs[locale][shortKey].toLocaleLowerCase();
+      const name = catalogs[locale][nameKey].toLocaleLowerCase();
+      if (!name.includes(short)) bad.push(`${locale}:${shortKey} is absent from ${nameKey}`);
+    }
+  }
+  check('every visual toolbar shorthand is contained in its full accessible name',
+    bad.length === 0, bad.join('; ') || `${LOCALES.length} locales × ${namePairs.length} commands`);
 }
 
 // ------------------------------------------- async catalog loader + switch path

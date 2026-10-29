@@ -115,6 +115,8 @@ export class App {
   private readonly settingsMenu: SettingsMenu;
   private readonly sidebarMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
+  private detailedLabels = true;
+  private pendingToolbarViewport: { start: number; end: number; follow: boolean } | null = null;
   private readonly resizer: PanelResizer;
   private readonly decodeClient = sharedDecodeClient({
     // Resolve from the document, not from the worker script. This supports static sites
@@ -220,6 +222,7 @@ export class App {
     // and <html lang> follows the stored locale - both before the first paint.
     document.documentElement.lang = getLocale();
     applyStaticI18n(document);
+    this.reflectDetailedLabels();
 
     this.settingsMenu = new SettingsMenu(must<HTMLButtonElement>('btn-settings'));
     this.sidebarMenu = new SettingsMenu(this.el.sidebar, 'sidebar-menu');
@@ -582,6 +585,7 @@ export class App {
       this.stack.setRows(analogRows, channelColors);
       this.channelList.render([]);
       this.channelList.renderBuses(this.busCells());
+      this.overlay.syncSize(this.el.plot.clientWidth, this.el.plot.clientHeight);
       this.dirty = true;
       return;
     }
@@ -614,6 +618,7 @@ export class App {
     this.stack.setRows(rows, channelColors);
     this.channelList.render(cells);
     this.channelList.renderBuses(this.busCells());
+    this.overlay.syncSize(this.el.plot.clientWidth, this.el.plot.clientHeight);
     this.dirty = true;
   }
 
@@ -755,7 +760,15 @@ export class App {
   };
 
   private draw(): void {
+    const pendingViewport = this.pendingToolbarViewport;
+    this.pendingToolbarViewport = null;
+    const restorePending = pendingViewport !== null &&
+      this.stack.view.start === pendingViewport.start && this.stack.view.end === pendingViewport.end;
     this.stack.syncSize();
+    if (restorePending && pendingViewport) {
+      this.stack.setViewport(pendingViewport.start, pendingViewport.end);
+      this.stack.setFollowLatest(pendingViewport.follow);
+    }
     const wCss = this.el.plot.clientWidth;
     const hCss = this.el.plot.clientHeight;
     this.overlay.syncSize(wCss, hCss);
@@ -1313,6 +1326,18 @@ export class App {
   private settingsItems(): SettingsMenuItem[] {
     return [
       {
+        label: t('settings.detailedLabels'),
+        checked: this.detailedLabels,
+        onPick: () => {
+          const { start, end } = this.stack.view;
+          const follow = this.stack.followLatest;
+          this.pendingToolbarViewport = { start, end, follow };
+          this.detailedLabels = !this.detailedLabels;
+          this.reflectDetailedLabels();
+          this.relayout();
+        },
+      },
+      {
         label: t('settings.language'),
         hint: `${LOCALE_LABELS[getLocale()]} ▸`,
         children: LOCALES.map((l) => ({
@@ -1325,6 +1350,11 @@ export class App {
         })),
       },
     ];
+  }
+
+  private reflectDetailedLabels(): void {
+    if (this.detailedLabels) document.documentElement.removeAttribute('data-toolbar-labels');
+    else document.documentElement.setAttribute('data-toolbar-labels', 'off');
   }
 
   private themeItems(): SettingsMenuItem[] {
@@ -1472,7 +1502,8 @@ export class App {
   private renderToolbarState(): void {
     const webusbAvailable = typeof navigator !== 'undefined' && !!navigator.usb;
     const deviceName = this.device?.name ?? null;
-    this.el.connect.setAttribute('aria-label', deviceName ?? t('toolbar.device'));
+    this.el.connect.setAttribute('aria-label',
+      deviceName ? `${t('toolbar.device')}: ${deviceName}` : t('toolbar.device'));
     this.el.connect.disabled = !webusbAvailable;
     this.el.connect.title = !webusbAvailable ? t('toolbar.noWebusb')
       : deviceName ? t('toolbar.reconnect') : t('toolbar.connectHint');
@@ -1490,6 +1521,12 @@ export class App {
     btn.setAttribute('aria-label', this.stopping ? t('toolbar.stopping')
       : this.running ? t('toolbar.stop')
         : this.device ? t('toolbar.start') : t('toolbar.demo'));
+    const label = btn.querySelector<HTMLElement>('.toolbar-item-label');
+    if (label) {
+      label.textContent = this.stopping ? t('toolbar.shortStopping')
+        : this.running ? t('toolbar.shortStop')
+          : this.device ? t('toolbar.shortStart') : t('toolbar.shortDemo');
+    }
     btn.classList.toggle('primary', !this.running);
     btn.classList.toggle('danger', this.running);
     btn.disabled = this.stopping || this.demoBusy;
