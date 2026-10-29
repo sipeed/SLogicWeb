@@ -3,6 +3,7 @@ import {
   WORKSPACE_SCHEMA_VERSION, WORKSPACE_STORAGE_KEY, writeWorkspaceSnapshot,
   type WorkspaceSnapshotV1,
 } from '../workspacePreferences.js';
+import { defaultChannelName, defaultChannels } from '../state.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
@@ -131,6 +132,98 @@ check('literal false and true survive parsing without coercion',
     'undefined storage');
 }
 
+for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
+  const parsed = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    channels: Array.from({ length: capacity }, () => ({})),
+  }));
+  check(`supported ${capacity}-channel capacity restores with a complete natural order`,
+    parsed?.channels?.length === capacity && parsed.order?.length === capacity &&
+    parsed.order.every((index, i) => index === i) && parsed.channels.every((channel, i) =>
+      channel.name === defaultChannelName(i) && channel.enabled),
+    `capacity=${capacity}, order=${parsed?.order?.length}`);
+}
+
+{
+  const parsed = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    channels: [
+      { name: '  Alpha  ', color: '#A1b2C3', enabled: false },
+      { name: '   ', color: 'red', enabled: 'false' },
+      null,
+      { name: 'D4', color: '#123456', enabled: true },
+    ],
+    order: [0, 0, 99, -1, 1.5, 2],
+  }));
+  const defaults = defaultChannels(4);
+  check('channel fields sanitize independently and order becomes a first-unique complete permutation',
+    parsed?.channels?.[0]?.name === 'Alpha' && parsed.channels[0].color === '#A1b2C3' &&
+    !parsed.channels[0].enabled && parsed.channels[1]?.name === defaultChannelName(1) &&
+    parsed.channels[1].color === defaults[1]!.color && parsed.channels[1].enabled &&
+    parsed.channels[2]?.name === defaultChannelName(2) && parsed.channels[2]?.color === defaults[2]!.color &&
+    parsed.channels[3]?.name === 'D4' && parsed.channels[3]?.color === '#123456' &&
+    JSON.stringify(parsed.order) === '[0,2,1,3]',
+    JSON.stringify(parsed));
+}
+
+{
+  const parsed = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    channels: Array.from({ length: 8 }, () => ({ enabled: false })),
+    order: [7, 7, 3],
+  }));
+  check('all-disabled input restores one safe enabled channel without losing absolute order repair',
+    parsed?.channels?.[0]?.enabled === true && parsed.channels.slice(1).every((channel) => !channel.enabled) &&
+    JSON.stringify(parsed.order) === '[7,3,0,1,2,4,5,6]',
+    JSON.stringify(parsed));
+}
+
+{
+  const invalidCapacities = [[], Array(3).fill(null), Array(5).fill(null), Array(1000).fill(null), { length: 4 }, null];
+  const bounded = invalidCapacities.every((channels) => {
+    const parsed = parseWorkspaceSnapshot(JSON.stringify({ version: 1, channels }));
+    return parsed?.channels?.length === 16 && parsed.order?.length === 16;
+  });
+  const explicitFallback = parseWorkspaceSnapshot(JSON.stringify({ version: 1, channels: [] }), 4);
+  check('invalid or excessive channel capacities use the bounded factory fallback',
+    bounded && explicitFallback?.channels?.length === 4 && explicitFallback.order?.join(',') === '0,1,2,3',
+    `${invalidCapacities.length} invalid shapes + explicit fallback`);
+}
+
+{
+  const data = new Map<string, string>();
+  defineStorage({
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => { data.set(key, value); },
+  });
+  const channels = defaultChannels(32).map(({ name, color, enabled }, index) => ({
+    name: index === 31 ? 'Upper clock' : name,
+    color: index === 31 ? '#ABCDEF' : color,
+    enabled: index % 3 === 0 ? enabled : false,
+  }));
+  const order = Array.from({ length: 32 }, (_, index) => 31 - index);
+  const wrote = writeWorkspaceSnapshot({ version: 1, detailedLabels: false, channels, order });
+  const restored = readWorkspaceSnapshot();
+  check('32-channel custom upper identity, selection and reversed absolute order round-trip',
+    wrote && restored?.channels?.length === 32 && restored.channels[31]?.name === 'Upper clock' &&
+    restored.channels[31].color === '#ABCDEF' && restored.channels[31].enabled === false &&
+    restored.channels[0]?.enabled === true && restored.order?.[0] === 31 && restored.order[31] === 0,
+    JSON.stringify({ wrote, upper: restored?.channels?.[31], order: restored?.order }));
+}
+
+{
+  const channel = { name: 'D0', color: '#010203', enabled: true, index: 0 };
+  const serialized = serializeWorkspaceSnapshot({
+    version: 1,
+    detailedLabels: true,
+    channels: [channel],
+    order: [0],
+  });
+  check('channel serialization keeps array identity but excludes derived index/runtime fields',
+    serialized === '{"version":1,"detailedLabels":true,"channels":[{"name":"D0","color":"#010203","enabled":true}],"order":[0]}',
+    serialized);
+}
+
 const app = fs.readFileSync('src/ui/app.ts', 'utf8');
 const constructorStart = app.indexOf('constructor() {');
 const constructorEnd = constructorStart >= 0
@@ -159,25 +252,46 @@ const toggleOrder = [
   'this.persistWorkspace();',
   'this.relayout();',
 ].map((needle) => settingsBody.indexOf(needle));
-const persistCalls = app.match(/this\.persistWorkspace\(\);/g) ?? [];
 const retranslateStart = app.indexOf('private retranslate(): void {');
 const retranslateEnd = retranslateStart >= 0 ? app.indexOf('\n  }', retranslateStart) : -1;
 const retranslateBody = retranslateStart >= 0 && retranslateEnd > retranslateStart
   ? app.slice(retranslateStart, retranslateEnd) : '';
-check('only the real label toggle writes, immediately after reflection and before layout',
+check('the real label toggle writes immediately after reflection and retranslation stays write-free',
   toggleOrder.every((index, i) => index >= 0 && (i === 0 || index > toggleOrder[i - 1])) &&
-  persistCalls.length === 1 && !retranslateBody.includes('persistWorkspace'),
-  `order=${JSON.stringify(toggleOrder)}, calls=${persistCalls.length}`);
+  !retranslateBody.includes('persistWorkspace'),
+  `order=${JSON.stringify(toggleOrder)}`);
 
 const persistStart = app.indexOf('private persistWorkspace(): void {');
 const persistEnd = persistStart >= 0 ? app.indexOf('\n  }', persistStart) : -1;
 const persistBody = persistStart >= 0 && persistEnd > persistStart
   ? app.slice(persistStart, persistEnd) : '';
-check('the App snapshot boundary writes canonical version and current label state through the storage module',
-  persistBody.includes('writeWorkspaceSnapshot({') &&
-  persistBody.includes('version: WORKSPACE_SCHEMA_VERSION') &&
-  persistBody.includes('detailedLabels: this.detailedLabels') && !app.includes('localStorage'),
+const snapshotStart = app.indexOf('private workspaceSnapshot(): WorkspaceSnapshotV1 {');
+const snapshotBody = snapshotStart >= 0 && persistStart > snapshotStart
+  ? app.slice(snapshotStart, persistStart) : '';
+check('the App snapshot boundary serializes canonical labels/channels/order and caches only successful writes',
+  snapshotBody.includes('version: WORKSPACE_SCHEMA_VERSION') &&
+  snapshotBody.includes('detailedLabels: this.detailedLabels') &&
+  snapshotBody.includes('channels: this.channels.map') && snapshotBody.includes('order: [...this.order]') &&
+  persistBody.includes('serializeWorkspaceSnapshot(snapshot)') &&
+  persistBody.includes('if (serialized === this.lastWorkspaceSnapshot) return;') &&
+  persistBody.includes('if (writeWorkspaceSnapshot(snapshot)) this.lastWorkspaceSnapshot = serialized;') &&
+  constructorBody.includes('this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(this.workspaceSnapshot());') &&
+  !app.includes('localStorage'),
   persistBody.replace(/\s+/g, ' ').trim());
+
+const writeMethods = ['afterChannelChange', 'configureChannel', 'reorder', 'adoptCapture', 'adoptDeviceChannels', 'startCapture'];
+const missingWriteMethods = writeMethods.filter((name) => {
+  const syncStart = app.indexOf(`private ${name}(`);
+  const start = syncStart >= 0 ? syncStart : app.indexOf(`private async ${name}(`);
+  const end = start >= 0 ? app.indexOf('\n  }', start) : -1;
+  const body = start >= 0 && end > start ? app.slice(start, end) : '';
+  return !body.includes('this.persistWorkspace();');
+});
+check('all committed channel paths share the writer and the initial empty store covers the whole channel model',
+  missingWriteMethods.length === 0 && constructorBody.includes(
+    'createSampleStore(channelWidthForProbes(this.channels.length), this.settings.samplerate)') &&
+  !constructorBody.includes('createSampleStore(this.settings.channels, this.settings.samplerate)'),
+  `missing=${JSON.stringify(missingWriteMethods)}`);
 
 const html = fs.readFileSync('index.html', 'utf8');
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);

@@ -57,7 +57,8 @@ import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, set
 import { getMode, getTheme, onThemeChange, setMode, THEME_MODES, THEME_MODE_LABEL_KEYS,
   type ThemeId } from './theme.js';
 import {
-  readWorkspaceSnapshot, WORKSPACE_SCHEMA_VERSION, writeWorkspaceSnapshot,
+  readWorkspaceSnapshot, serializeWorkspaceSnapshot, WORKSPACE_SCHEMA_VERSION, writeWorkspaceSnapshot,
+  type WorkspaceSnapshotV1,
 } from './workspacePreferences.js';
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
@@ -120,6 +121,7 @@ export class App {
   private readonly languageMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
   private detailedLabels = true;
+  private lastWorkspaceSnapshot: string | null = null;
   private pendingToolbarViewport: { start: number; end: number; follow: boolean } | null = null;
   private readonly resizer: PanelResizer;
   private readonly decodeClient = sharedDecodeClient({
@@ -228,7 +230,13 @@ export class App {
     document.documentElement.lang = getLocale();
     applyStaticI18n(document);
     const workspace = readWorkspaceSnapshot();
-    if (workspace) this.detailedLabels = workspace.detailedLabels;
+    if (workspace) {
+      this.detailedLabels = workspace.detailedLabels;
+      this.channels = (workspace.channels ?? defaultChannels(16)).map((channel, index) => ({ ...channel, index }));
+      this.order = workspace.order ?? this.channels.map((channel) => channel.index);
+    }
+    this.settings = clampSettings({ ...this.settings, channels: this.neededWidth() }, this.rateCeilings);
+    this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(this.workspaceSnapshot());
     this.reflectDetailedLabels();
 
     this.settingsMenu = new SettingsMenu(must<HTMLButtonElement>('btn-settings'));
@@ -238,7 +246,7 @@ export class App {
     this.el.theme.dataset.mode = getMode();
     this.resizer = new PanelResizer(this.el.resizer, this.el.side, this.el.main);
 
-    this.storeRef = new StoreRef(createSampleStore(16, 16e6));
+    this.storeRef = new StoreRef(createSampleStore(channelWidthForProbes(this.channels.length), this.settings.samplerate));
     this.stack = new WaveformStack(this.el.waveStack, this.storeRef);
     this.overlay = new Overlay(this.el.plot);
     this.paintedTheme = getTheme();
@@ -561,6 +569,7 @@ export class App {
       this.settings = next;
     }
 
+    this.persistWorkspace();
     this.relayout();
     this.renderPanels();
     this.dirty = true;
@@ -718,6 +727,7 @@ export class App {
     this.settings = clampSettings(
       { ...this.settings, channels: this.neededWidth() }, this.rateCeilings,
     );
+    this.persistWorkspace();
     this.relayout();
     this.renderPanels();
   }
@@ -742,6 +752,7 @@ export class App {
     const dst = this.order.indexOf(target.index);
     this.order.splice(src, 1);
     this.order.splice(dst, 0, moving.index);
+    this.persistWorkspace();
     this.relayout();
   }
 
@@ -1370,11 +1381,20 @@ export class App {
     else document.documentElement.setAttribute('data-toolbar-labels', 'off');
   }
 
-  private persistWorkspace(): void {
-    writeWorkspaceSnapshot({
+  private workspaceSnapshot(): WorkspaceSnapshotV1 {
+    return {
       version: WORKSPACE_SCHEMA_VERSION,
       detailedLabels: this.detailedLabels,
-    });
+      channels: this.channels.map(({ name, color, enabled }) => ({ name, color, enabled })),
+      order: [...this.order],
+    };
+  }
+
+  private persistWorkspace(): void {
+    const snapshot = this.workspaceSnapshot();
+    const serialized = serializeWorkspaceSnapshot(snapshot);
+    if (serialized === this.lastWorkspaceSnapshot) return;
+    if (writeWorkspaceSnapshot(snapshot)) this.lastWorkspaceSnapshot = serialized;
   }
 
   private themeItems(): SettingsMenuItem[] {
@@ -1690,6 +1710,7 @@ export class App {
     this.settings = clampSettings(
       { ...this.settings, channels: this.neededWidth() }, this.rateCeilings,
     );
+    this.persistWorkspace();
     this.relayout();
     this.stack.zoomToFit();
     this.renderPanels();
@@ -1839,6 +1860,7 @@ export class App {
     this.settings = clampSettings(
       { ...this.settings, channels: max }, this.rateCeilings,
     );
+    this.persistWorkspace();
     this.relayout();
   }
 
@@ -1870,6 +1892,7 @@ export class App {
       this.resetBusBuilds();
       this.channels = defaultChannels(cfg.channels);
       this.order = this.channels.map((c) => c.index);
+      this.persistWorkspace();
       for (const a of this.analyzers) {
         a.result = null; a.index = null; a.status = 'idle'; a.note = { kind: 'pending' };
       }
