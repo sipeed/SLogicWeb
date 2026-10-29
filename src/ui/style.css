@@ -1070,6 +1070,10 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
 .select-item.active { background: var(--popover-hover); outline: 2px solid var(--ring); outline-offset: -2px; }
 .select-item-check { width: 14px; flex: none; color: var(--primary); }
 .select-item-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-item--disabled { opacity: 0.55; cursor: default; }
+.select-item--disabled:hover { background: none; }
+.select-item-body { min-width: 0; display: flex; flex-direction: column; }
+.select-item-note { font-size: 10px; color: var(--muted-foreground); white-space: normal; line-height: 1.4; }
 
 .select-popover.select-searchable {
   max-width: min(420px, calc(100vw - 16px));
