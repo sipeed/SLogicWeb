@@ -30,6 +30,7 @@ export interface ScopeEnableVerdict {
   readonly bankWidth: number;
   readonly maxRate: number;
   readonly maxScopes: number;
+  readonly maxWidth: number;
 }
 
 export function scopeEnableVerdict(args: {
@@ -54,6 +55,7 @@ export function scopeEnableVerdict(args: {
     bankWidth,
     maxRate,
     maxScopes: maxScopesAtRate(effectiveRate, args.ceilings, args.deviceChannels),
+    maxWidth: Math.min(maxWidthAtRate(effectiveRate, args.ceilings), Math.max(0, args.deviceChannels)),
   };
 }
 

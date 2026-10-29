@@ -16,7 +16,7 @@ import {
 } from './busView.js';
 import { button, div, labelled, section } from './capturePanel.js';
 import { CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankRange } from './channelBanks.js';
-import { formatCount, formatDuration } from './format.js';
+import { formatCount, formatDuration, formatRate } from './format.js';
 import { t, type MessageKey } from './i18n.js';
 import {
   DEFAULT_LOOP_TIME_UNIT, isLoopTimeUnit, loopSamplesFromTime, loopTimeFromSamples, maxLoopTimeValue,
@@ -635,6 +635,23 @@ export class BankBusDialog {
     enable.dataset.adcEnable = '';
     enableLabel.append(enable, document.createTextNode(t('bus.enableBank')));
 
+    const enableBlock = context.enableBlock;
+    let blockNote: HTMLDivElement | null = null;
+    const showBlockNote = (): void => {
+      if (enableBlock === null) return;
+      if (blockNote === null) {
+        blockNote = div('panel-note error');
+        blockNote.dataset.scopeRateNote = '';
+        blockNote.textContent = t('bus.scopeRateLimited', {
+          rate: formatRate(enableBlock.effectiveRate),
+          channels: enableBlock.maxWidth,
+          width: enableBlock.requiredWidth,
+          maxRate: formatRate(enableBlock.maxRate),
+        });
+        enableLabel.after(blockNote);
+      }
+    };
+
     const actions = div('channel-settings-actions');
     const cancel = button(t('bus.cancel'), 'pill');
     cancel.type = 'button';
@@ -655,12 +672,23 @@ export class BankBusDialog {
       details ??= this.createDetails(config, context);
       if (details.el.parentNode !== form) form.insertBefore(details.el, actions);
     };
-    enable.addEventListener('change', syncDetails);
+    enable.addEventListener('change', () => {
+      if (enable.checked && enableBlock !== null) {
+        enable.checked = false;
+        showBlockNote();
+        return;
+      }
+      syncDetails();
+    });
 
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       if (context.locked || !form.reportValidity()) return;
       const enabled = enable.checked;
+      if (enabled && enableBlock !== null) {
+        showBlockNote();
+        return;
+      }
       const current = enabled
         ? (details ??= this.createDetails(config, context)).read()
         : { config, loopSamples: context.loopSamples };

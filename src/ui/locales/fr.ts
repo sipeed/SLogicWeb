@@ -217,6 +217,7 @@ export const fr: Messages = {
   'bus.bankDialogTitle': '{range} : mode oscilloscope',
   'bus.defaultName': 'Forme d’onde analogique',
   'bus.enableBank': 'Activer le mode oscilloscope',
+  'bus.scopeRateLimited': '{rate} prend en charge au plus {channels} canaux ; cet oscilloscope en exige {width} - abaissez la fréquence d’échantillonnage à {maxRate} ou moins.',
   'bus.channelOrder': 'Canaux et ordre de décodage',
   'bus.dragToOrder': 'Faites glisser pour modifier l’ordre de décodage',
   'bus.loopWindow': 'Fenêtre temporelle de boucle',

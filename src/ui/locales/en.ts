@@ -221,6 +221,7 @@ export const en = {
   'bus.bankDialogTitle': '{range} oscilloscope mode',
   'bus.defaultName': 'Analog waveform',
   'bus.enableBank': 'Enable oscilloscope mode',
+  'bus.scopeRateLimited': '{rate} supports at most {channels} channels; enabling this oscilloscope bank needs {width} channels - lower the sample rate to {maxRate} or below.',
   'bus.channelOrder': 'Channels and decoding order',
   'bus.dragToOrder': 'Drag to adjust the decoding order',
   'bus.loopWindow': 'Loop time window',

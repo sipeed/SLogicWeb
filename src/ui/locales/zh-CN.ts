@@ -215,6 +215,7 @@ export const zhCN: Messages = {
   'bus.bankDialogTitle': '{range} 示波器模式',
   'bus.defaultName': '模拟波形',
   'bus.enableBank': '启用示波器模式',
+  'bus.scopeRateLimited': '{rate} 下最高支持 {channels} 通道；开启本组示波器需要 {width} 通道，请将采样率降至 {maxRate} 或更低。',
   'bus.channelOrder': '通道与解码顺序',
   'bus.dragToOrder': '拖动即可调整解码顺序',
   'bus.loopWindow': '循环时间窗口',

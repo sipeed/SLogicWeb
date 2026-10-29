@@ -217,6 +217,7 @@ export const ru: Messages = {
   'bus.bankDialogTitle': '{range}: режим осциллографа',
   'bus.defaultName': 'Аналоговая форма волны',
   'bus.enableBank': 'Включить режим осциллографа',
+  'bus.scopeRateLimited': '{rate} поддерживает не более {channels} каналов; для этого осциллографа нужно {width} - снизьте частоту выборки до {maxRate} или ниже.',
   'bus.channelOrder': 'Каналы и порядок декодирования',
   'bus.dragToOrder': 'Перетащите, чтобы изменить порядок декодирования',
   'bus.loopWindow': 'Временное окно цикла',

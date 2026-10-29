@@ -64,7 +64,7 @@ check('scope floor is a real device samplerate', SAMPLERATES_HZ.includes(SCOPE_M
 }
 
 function verdictEq(v: ScopeEnableVerdict, want: ScopeEnableVerdict): string | null {
-  const keys = ['ok', 'effectiveRate', 'requiredWidth', 'bankWidth', 'maxRate', 'maxScopes'] as const;
+  const keys = ['ok', 'effectiveRate', 'requiredWidth', 'bankWidth', 'maxRate', 'maxScopes', 'maxWidth'] as const;
   const diff = keys.filter((k) => v[k] !== want[k]);
   return diff.length === 0 ? null : diff.map((k) => `${k}=${String(v[k])}!=${String(want[k])}`).join(',');
 }
@@ -73,40 +73,40 @@ function verdictEq(v: ScopeEnableVerdict, want: ScopeEnableVerdict): string | nu
   const cases: [string, Parameters<typeof scopeEnableVerdict>[0], ScopeEnableVerdict][] = [
     ['floor raise keeps enable ok at tight ceiling',
       { start: 0, clockChannel: null, currentWidth: 16, rate: 16e6, ceilings: SL16, deviceChannels: 16 },
-      { ok: true, effectiveRate: 100e6, requiredWidth: 16, bankWidth: 8, maxRate: 200e6, maxScopes: 2 }],
+      { ok: true, effectiveRate: 100e6, requiredWidth: 16, bankWidth: 8, maxRate: 200e6, maxScopes: 2, maxWidth: 16 }],
     ['rate exactly at the floor',
       { start: 0, clockChannel: null, currentWidth: 8, rate: 100e6, ceilings: SL16, deviceChannels: 16 },
-      { ok: true, effectiveRate: 100e6, requiredWidth: 8, bankWidth: 8, maxRate: 400e6, maxScopes: 2 }],
+      { ok: true, effectiveRate: 100e6, requiredWidth: 8, bankWidth: 8, maxRate: 400e6, maxScopes: 2, maxWidth: 16 }],
     ['800M supports no bank on SLogic16',
       { start: 0, clockChannel: null, currentWidth: 4, rate: 800e6, ceilings: SL16, deviceChannels: 16 },
-      { ok: false, effectiveRate: 800e6, requiredWidth: 8, bankWidth: 8, maxRate: 400e6, maxScopes: 0 }],
+      { ok: false, effectiveRate: 800e6, requiredWidth: 8, bankWidth: 8, maxRate: 400e6, maxScopes: 0, maxWidth: 4 }],
     ['second bank needs 16ch at 400M on SLogic16',
       { start: 8, clockChannel: null, currentWidth: 8, rate: 400e6, ceilings: SL16, deviceChannels: 16 },
-      { ok: false, effectiveRate: 400e6, requiredWidth: 16, bankWidth: 16, maxRate: 200e6, maxScopes: 1 }],
+      { ok: false, effectiveRate: 400e6, requiredWidth: 16, bankWidth: 16, maxRate: 200e6, maxScopes: 1, maxWidth: 8 }],
     ['rate exactly at the required ceiling stays ok',
       { start: 8, clockChannel: null, currentWidth: 8, rate: 200e6, ceilings: SL16, deviceChannels: 16 },
-      { ok: true, effectiveRate: 200e6, requiredWidth: 16, bankWidth: 16, maxRate: 200e6, maxScopes: 2 }],
+      { ok: true, effectiveRate: 200e6, requiredWidth: 16, bankWidth: 16, maxRate: 200e6, maxScopes: 2, maxWidth: 16 }],
     ['external clock above the bank widens the requirement',
       { start: 0, clockChannel: 8, currentWidth: 8, rate: 400e6, ceilings: SL16, deviceChannels: 16 },
-      { ok: false, effectiveRate: 400e6, requiredWidth: 16, bankWidth: 16, maxRate: 200e6, maxScopes: 1 }],
+      { ok: false, effectiveRate: 400e6, requiredWidth: 16, bankWidth: 16, maxRate: 200e6, maxScopes: 1, maxWidth: 8 }],
     ['external clock inside the bank changes nothing',
       { start: 0, clockChannel: 7, currentWidth: 8, rate: 400e6, ceilings: SL16, deviceChannels: 16 },
-      { ok: true, effectiveRate: 400e6, requiredWidth: 8, bankWidth: 8, maxRate: 400e6, maxScopes: 1 }],
+      { ok: true, effectiveRate: 400e6, requiredWidth: 8, bankWidth: 8, maxRate: 400e6, maxScopes: 1, maxWidth: 8 }],
     ['unrelated enabled channels dominate the requirement',
       { start: 0, clockChannel: null, currentWidth: 32, rate: 400e6, ceilings: SL32, deviceChannels: 32 },
-      { ok: false, effectiveRate: 400e6, requiredWidth: 32, bankWidth: 8, maxRate: 200e6, maxScopes: 2 }],
+      { ok: false, effectiveRate: 400e6, requiredWidth: 32, bankWidth: 8, maxRate: 200e6, maxScopes: 2, maxWidth: 16 }],
     ['SLogic32 third bank at 400M needs 32ch',
       { start: 16, clockChannel: null, currentWidth: 16, rate: 400e6, ceilings: SL32, deviceChannels: 32 },
-      { ok: false, effectiveRate: 400e6, requiredWidth: 32, bankWidth: 32, maxRate: 200e6, maxScopes: 2 }],
+      { ok: false, effectiveRate: 400e6, requiredWidth: 32, bankWidth: 32, maxRate: 200e6, maxScopes: 2, maxWidth: 16 }],
     ['SLogic32 second bank at 800M stays blocked, first is fine',
       { start: 0, clockChannel: null, currentWidth: 8, rate: 800e6, ceilings: SL32, deviceChannels: 32 },
-      { ok: true, effectiveRate: 800e6, requiredWidth: 8, bankWidth: 8, maxRate: 800e6, maxScopes: 1 }],
+      { ok: true, effectiveRate: 800e6, requiredWidth: 8, bankWidth: 8, maxRate: 800e6, maxScopes: 1, maxWidth: 8 }],
     ['widths without a ceiling entry block everything',
       { start: 56, clockChannel: null, currentWidth: 64, rate: 100e6, ceilings: SL32, deviceChannels: 128 },
-      { ok: false, effectiveRate: 100e6, requiredWidth: 64, bankWidth: 64, maxRate: 0, maxScopes: 4 }],
+      { ok: false, effectiveRate: 100e6, requiredWidth: 64, bankWidth: 64, maxRate: 0, maxScopes: 4, maxWidth: 32 }],
     ['SLogic32 first bank is blocked at 1.4G',
       { start: 0, clockChannel: null, currentWidth: 4, rate: 1.4e9, ceilings: SL32, deviceChannels: 32 },
-      { ok: false, effectiveRate: 1.4e9, requiredWidth: 8, bankWidth: 8, maxRate: 800e6, maxScopes: 0 }],
+      { ok: false, effectiveRate: 1.4e9, requiredWidth: 8, bankWidth: 8, maxRate: 800e6, maxScopes: 0, maxWidth: 4 }],
   ];
   const bad = cases.flatMap(([name, args, want]) => {
     const diff = verdictEq(scopeEnableVerdict(args), want);

@@ -288,6 +288,25 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     `iconOnly=${iconOnly}, sharedFields=${sharedFields}, sortable=${sortable}, ` +
     `disclosures=${disclosures}, nativeDialog=${nativeDialog}, realState=${realState}`);
 
+  const enableGate = dialog.includes('const enableBlock = context.enableBlock;') &&
+    dialog.includes('enable.disabled = context.locked;') &&
+    !dialog.includes('enable.disabled = context.locked ||') &&
+    dialog.includes('enable.checked = false;') &&
+    dialog.includes('showBlockNote();') &&
+    dialog.includes("blockNote.dataset.scopeRateNote = '';") &&
+    dialog.includes("div('panel-note error')") &&
+    dialog.includes('enableLabel.after(blockNote);') &&
+    dialog.includes('if (enabled && enableBlock !== null) {') &&
+    dialog.includes("t('bus.scopeRateLimited', {") &&
+    dialog.includes('formatRate(enableBlock.effectiveRate)') &&
+    dialog.includes('formatRate(enableBlock.maxRate)') &&
+    dialog.includes('if (blockNote === null) {') &&
+    (dialog.match(/showBlockNote\(\);/g) ?? []).length === 2;
+  const enCatalog2 = fs.readFileSync('src/ui/locales/en.ts', 'utf8');
+  const rateLimitedKey = /'bus\.scopeRateLimited': '[^']*\{rate\}[^']*\{channels\}[^']*\{width\}[^']*\{maxRate\}[^']*'/.test(enCatalog2);
+  check('the bank dialog blocks enable attempts with a lazy reason note and a submit guard',
+    enableGate && rateLimitedKey, `enableGate=${enableGate}, rateLimitedKey=${rateLimitedKey}`);
+
   const globalLoop = dialog.includes('loopSamplesFromTime') && dialog.includes('maxLoopTimeValue') &&
     dialog.includes('formatDuration(samples / context.samplerate)') &&
     app.includes('this.settings = this.bankCaptureSettings(start, loopSamples, next);') &&
