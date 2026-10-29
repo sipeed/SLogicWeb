@@ -41,6 +41,7 @@ export const en = {
   'toolbar.shortFit': 'Fit',
   'toolbar.shortSettings': 'Settings',
   'toolbar.shortAssistant': 'Assistant',
+  'toolbar.shortLanguage': 'Language',
   'toolbar.shortTheme': 'Theme',
   'toolbar.shortSidebar': 'Sidebar',
   'toolbar.startTitle': 'Start a capture on the connected device',
@@ -53,6 +54,8 @@ export const en = {
   'toolbar.fitTitle': 'Zoom to the whole capture',
   'toolbar.sidebarTitle': 'Choose right sidebar',
   'toolbar.themeTitle': 'Toggle theme',
+  'toolbar.languageTitle': 'Choose language',
+  'toolbar.switchGroup': 'Language and theme',
   'toolbar.assistantTitle': 'AI assistant',
   'toolbar.sidebarDevice': 'Device and capture settings',
   'toolbar.sidebarAnalyzers': 'Protocol analyzers',
@@ -320,7 +323,7 @@ export const en = {
 
   // -------------------------------------------------------- settings menu
   'settings.title': 'Settings',
-  'settings.titleHint': 'Language and display preferences',
+  'settings.titleHint': 'Display preferences',
   'settings.detailedLabels': 'Detailed labels',
   'settings.language': 'Language',
   'settings.theme': 'Theme',

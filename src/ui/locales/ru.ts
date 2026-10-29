@@ -37,6 +37,7 @@ export const ru: Messages = {
   'toolbar.shortFit': 'Вписать',
   'toolbar.shortSettings': 'Настройки',
   'toolbar.shortAssistant': 'Ассистент',
+  'toolbar.shortLanguage': 'Язык',
   'toolbar.shortTheme': 'Тема',
   'toolbar.shortSidebar': 'Панели',
   'toolbar.startTitle': 'Начать захват на подключённом устройстве',
@@ -49,6 +50,8 @@ export const ru: Messages = {
   'toolbar.fitTitle': 'Масштабировать на весь захват',
   'toolbar.sidebarTitle': 'Выбор правой боковой панели',
   'toolbar.themeTitle': 'Тема: выбор режима',
+  'toolbar.languageTitle': 'Выбор языка',
+  'toolbar.switchGroup': 'Язык и тема',
   'toolbar.assistantTitle': 'ИИ-ассистент',
   'toolbar.sidebarDevice': 'Устройство и настройки захвата',
   'toolbar.sidebarAnalyzers': 'Протокольные анализаторы',
@@ -316,7 +319,7 @@ export const ru: Messages = {
 
   // -------------------------------------------------------- settings menu
   'settings.title': 'Настройки',
-  'settings.titleHint': 'Язык и параметры отображения',
+  'settings.titleHint': 'Параметры отображения',
   'settings.detailedLabels': 'Подробные подписи',
   'settings.language': 'Язык',
   'settings.theme': 'Тема',

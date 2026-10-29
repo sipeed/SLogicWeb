@@ -114,6 +114,7 @@ export class App {
   private runningPanelAt = 0;
   private readonly settingsMenu: SettingsMenu;
   private readonly sidebarMenu: SettingsMenu;
+  private readonly languageMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
   private detailedLabels = true;
   private pendingToolbarViewport: { start: number; end: number; follow: boolean } | null = null;
@@ -190,7 +191,7 @@ export class App {
     hint: HTMLDivElement; transport: HTMLButtonElement;
     connect: HTMLButtonElement; open: HTMLButtonElement; save: HTMLButtonElement;
     fit: HTMLButtonElement; settings: HTMLButtonElement; sidebar: HTMLButtonElement;
-    theme: HTMLButtonElement; assistant: HTMLButtonElement;
+    language: HTMLButtonElement; theme: HTMLButtonElement; assistant: HTMLButtonElement;
     fileInput: HTMLInputElement;
   };
 
@@ -213,6 +214,7 @@ export class App {
       fit: must<HTMLButtonElement>('btn-fit'),
       settings: must<HTMLButtonElement>('btn-settings'),
       sidebar: must<HTMLButtonElement>('btn-sidebar'),
+      language: must<HTMLButtonElement>('btn-language'),
       theme: must<HTMLButtonElement>('btn-theme'),
       assistant: must<HTMLButtonElement>('btn-assistant'),
       fileInput: must<HTMLInputElement>('file-input'),
@@ -226,6 +228,7 @@ export class App {
 
     this.settingsMenu = new SettingsMenu(must<HTMLButtonElement>('btn-settings'));
     this.sidebarMenu = new SettingsMenu(this.el.sidebar, 'sidebar-menu');
+    this.languageMenu = new SettingsMenu(this.el.language, 'language-menu');
     this.themeMenu = new SettingsMenu(this.el.theme, 'theme-menu');
     this.el.theme.dataset.mode = getMode();
     this.resizer = new PanelResizer(this.el.resizer, this.el.side, this.el.main);
@@ -313,6 +316,7 @@ export class App {
       this.el.theme.dataset.mode = getMode();
       this.settingsMenu.close('theme');
       this.sidebarMenu.close('theme');
+      this.languageMenu.close('theme');
       this.themeMenu.close('theme');
     });
 
@@ -1281,24 +1285,36 @@ export class App {
       // Keep the channel dialog and this transient menu from competing for focus.
       this.channelList.closeDialog();
       this.sidebarMenu.close('outside');
+      this.languageMenu.close('outside');
       this.themeMenu.close('outside');
       this.settingsMenu.toggle(this.settingsItems());
     });
     this.el.sidebar.addEventListener('click', () => {
       this.channelList.closeDialog();
       this.settingsMenu.close('outside');
+      this.languageMenu.close('outside');
       this.themeMenu.close('outside');
       this.sidebarMenu.toggle(this.sidebarItems());
+    });
+    this.el.language.addEventListener('click', () => {
+      this.channelList.closeDialog();
+      this.settingsMenu.close('outside');
+      this.sidebarMenu.close('outside');
+      this.themeMenu.close('outside');
+      this.languageMenu.toggle(this.languageItems());
     });
     this.el.theme.addEventListener('click', () => {
       this.channelList.closeDialog();
       this.settingsMenu.close('outside');
       this.sidebarMenu.close('outside');
+      this.languageMenu.close('outside');
       this.themeMenu.toggle(this.themeItems());
     });
     this.el.assistant.addEventListener('click', () => {
       this.channelList.closeDialog();
       this.settingsMenu.close('outside');
+      this.sidebarMenu.close('outside');
+      this.languageMenu.close('outside');
       this.themeMenu.close('outside');
       this.toggleAssistant();
     });
@@ -1318,11 +1334,6 @@ export class App {
     this.assistantPanel?.focusInput();
   }
 
-  /**
-   * The settings menu's content. Built fresh on every open, so the Language row's
-   * hint and the flyout's checkmark always reflect the current locale, and C6's extra
-   * locales appear with zero changes here - LOCALES/LOCALE_LABELS are the registry.
-   */
   private settingsItems(): SettingsMenuItem[] {
     return [
       {
@@ -1337,19 +1348,15 @@ export class App {
           this.relayout();
         },
       },
-      {
-        label: t('settings.language'),
-        hint: `${LOCALE_LABELS[getLocale()]} ▸`,
-        children: LOCALES.map((l) => ({
-          label: LOCALE_LABELS[l],
-          checked: l === getLocale(),
-          // Async now: the catalog may need fetching. Only a catalog load
-          // failure is surfaced through the status-error path; a pick superseded
-          // by a newer one is a normal outcome, not an error.
-          onPick: () => { void setLocale(l).then((r) => { if (r === 'failed') this.fail('error.localeLoad', l); }); },
-        })),
-      },
     ];
+  }
+
+  private languageItems(): SettingsMenuItem[] {
+    return LOCALES.map((l) => ({
+      label: LOCALE_LABELS[l],
+      checked: l === getLocale(),
+      onPick: () => { void setLocale(l).then((r) => { if (r === 'failed') this.fail('error.localeLoad', l); }); },
+    }));
   }
 
   private reflectDetailedLabels(): void {
@@ -1402,6 +1409,7 @@ export class App {
     this.settingsMenu.close('retranslate');
     this.bankBusDialog.close();
     this.sidebarMenu.close('retranslate');
+    this.languageMenu.close('retranslate');
     this.themeMenu.close('retranslate');
     this.busViews = this.busViews.map((bus) => retranslateBankBusConfig(bus));
     for (const [start, draft] of this.bankBusDrafts) {
@@ -1512,6 +1520,7 @@ export class App {
     this.el.save.setAttribute('aria-label', t('toolbar.save'));
     this.el.fit.setAttribute('aria-label', t('toolbar.fit'));
     this.el.settings.setAttribute('aria-label', t('settings.title'));
+    this.el.language.setAttribute('aria-label', t('toolbar.languageTitle'));
     this.el.theme.setAttribute('aria-label', t('toolbar.themeTitle'));
     this.el.sidebar.setAttribute('aria-label', t('toolbar.sidebarTitle'));
     this.el.assistant.setAttribute('aria-label', t('toolbar.assistantTitle'));

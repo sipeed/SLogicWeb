@@ -244,16 +244,16 @@ function check(name: string, pass: boolean, detail: string): void {
   const expectedText = [
     'emptyHint.line1', 'emptyHint.line2',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortOpen', 'toolbar.shortSave',
-    'toolbar.shortFit', 'toolbar.shortSettings', 'toolbar.shortAssistant', 'toolbar.shortTheme',
-    'toolbar.shortSidebar',
+    'toolbar.shortFit', 'toolbar.shortSettings', 'toolbar.shortAssistant', 'toolbar.shortLanguage',
+    'toolbar.shortTheme', 'toolbar.shortSidebar',
   ];
   const expectedTitles = [
     'toolbar.startTitle', 'toolbar.openTitle', 'toolbar.saveTitle', 'toolbar.fitTitle',
-    'toolbar.sidebarTitle', 'toolbar.themeTitle', 'toolbar.assistantTitle', 'settings.titleHint',
-    'panel.resizeTitle',
+    'toolbar.sidebarTitle', 'toolbar.themeTitle', 'toolbar.languageTitle', 'toolbar.assistantTitle',
+    'settings.titleHint', 'panel.resizeTitle',
   ];
   const expectedAriaLabels = [
-    'panel.resizeLabel',
+    'panel.resizeLabel', 'toolbar.switchGroup',
   ];
 
   const missingTextKeys = expectedText.filter((k) => !textFound.has(k));
@@ -303,6 +303,7 @@ function check(name: string, pass: boolean, detail: string): void {
     ['btn-fit', 'toolbar.fit'],
     ['btn-settings', 'settings.title'],
     ['btn-assistant', 'toolbar.assistantTitle'],
+    ['btn-language', 'toolbar.languageTitle'],
     ['btn-theme', 'toolbar.themeTitle'],
     ['btn-sidebar', 'toolbar.sidebarTitle'],
   ];
@@ -489,7 +490,8 @@ const baseSettings: CaptureSettings = {
     'toolbar.start', 'toolbar.demo', 'capture.demo', 'settings.language', 'settings.theme',
     'settings.detailedLabels', 'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortStop',
     'toolbar.shortStopping', 'toolbar.shortDemo', 'toolbar.shortOpen', 'toolbar.shortSave',
-    'toolbar.shortFit', 'toolbar.shortSettings', 'toolbar.shortTheme', 'toolbar.shortSidebar',
+    'toolbar.shortFit', 'toolbar.shortSettings', 'toolbar.shortLanguage', 'toolbar.shortTheme',
+    'toolbar.shortSidebar',
     'trigger.anyEdge',
     'channels.settings', 'channels.name', 'channels.color', 'channels.customColor',
     'channels.colorField', 'channels.hue',
@@ -533,7 +535,8 @@ const baseSettings: CaptureSettings = {
     ['toolbar.shortDemo', 'toolbar.demo'], ['toolbar.shortOpen', 'toolbar.open'],
     ['toolbar.shortSave', 'toolbar.save'], ['toolbar.shortFit', 'toolbar.fit'],
     ['toolbar.shortSettings', 'settings.title'], ['toolbar.shortAssistant', 'toolbar.assistantTitle'],
-    ['toolbar.shortTheme', 'toolbar.themeTitle'], ['toolbar.shortSidebar', 'toolbar.sidebarTitle'],
+    ['toolbar.shortLanguage', 'toolbar.languageTitle'], ['toolbar.shortTheme', 'toolbar.themeTitle'],
+    ['toolbar.shortSidebar', 'toolbar.sidebarTitle'],
   ];
   const catalogs: Record<Locale, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];

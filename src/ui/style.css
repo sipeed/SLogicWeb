@@ -228,6 +228,7 @@ html, body {
 }
 
 #toolbar .spacer { flex: 1 1 12px; min-width: 0; }
+#toolbar .toolbar-switch-group { display: flex; align-items: center; flex: none; gap: 6px; }
 
 .pill, .mini, .primary, .danger, .seg {
   background: var(--bg20);
@@ -312,13 +313,14 @@ html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dar
 
 @media (max-width: 760px) {
   #toolbar { gap: 4px; padding: 6px; }
+  #toolbar .toolbar-switch-group { gap: 4px; }
   #toolbar button.toolbar-item { width: 38px; height: 38px; padding: 4px; }
   #toolbar .toolbar-separator,
   #toolbar .spacer { display: none; }
   #toolbar .toolbar-sidebar { margin-left: auto; }
 }
 
-/* Nine 38 px commands need 386 px; the smallest common phones are 360 px wide. */
+/* Ten 38 px commands need 428 px; the smallest common phones are 360 px wide. */
 @media (max-width: 400px) {
   #toolbar button.toolbar-item { width: 34px; height: 34px; padding: 3px; }
 }

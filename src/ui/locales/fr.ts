@@ -37,6 +37,7 @@ export const fr: Messages = {
   'toolbar.shortFit': 'Ajuster',
   'toolbar.shortSettings': 'Paramètres',
   'toolbar.shortAssistant': 'Assistant',
+  'toolbar.shortLanguage': 'Langue',
   'toolbar.shortTheme': 'Thème',
   'toolbar.shortSidebar': 'Panneau',
   'toolbar.startTitle': 'Démarrer une capture sur l’appareil connecté',
@@ -49,6 +50,8 @@ export const fr: Messages = {
   'toolbar.fitTitle': 'Zoomer sur toute la capture',
   'toolbar.sidebarTitle': 'Choisir le panneau latéral droit',
   'toolbar.themeTitle': 'Changer de thème',
+  'toolbar.languageTitle': 'Choisir la langue',
+  'toolbar.switchGroup': 'Langue et thème',
   'toolbar.assistantTitle': 'Assistant IA',
   'toolbar.sidebarDevice': 'Appareil et réglages de capture',
   'toolbar.sidebarAnalyzers': 'Analyseurs de protocole',
@@ -316,7 +319,7 @@ export const fr: Messages = {
 
   // -------------------------------------------------------- settings menu
   'settings.title': 'Paramètres',
-  'settings.titleHint': 'Langue et préférences d’affichage',
+  'settings.titleHint': 'Préférences d’affichage',
   'settings.detailedLabels': 'Libellés détaillés',
   'settings.language': 'Langue',
   'settings.theme': 'Thème',

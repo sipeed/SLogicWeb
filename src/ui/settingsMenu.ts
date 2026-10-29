@@ -25,6 +25,14 @@
  * reverse pointer path; this guard also covers programmatic entry.
  */
 
+const SETTINGS_MENU_VIEWPORT_MARGIN = 6;
+
+export function settingsMenuRight(anchorRight: number, menuWidth: number, viewportWidth: number): number {
+  const maxRight = Math.max(SETTINGS_MENU_VIEWPORT_MARGIN,
+    viewportWidth - menuWidth - SETTINGS_MENU_VIEWPORT_MARGIN);
+  return Math.min(Math.max(SETTINGS_MENU_VIEWPORT_MARGIN, viewportWidth - anchorRight), maxRight);
+}
+
 export interface SettingsMenuItem {
   /** Display text, already translated by the caller (t() at build time). */
   label: string;
@@ -64,8 +72,9 @@ export class SettingsMenu {
 
     // Right-align to the anchor's right edge; width stays content-driven.
     const rect = this.anchor.getBoundingClientRect();
+    const menuWidth = menu.offsetWidth;
     menu.style.top = `${Math.round(rect.bottom + 4)}px`;
-    menu.style.right = `${Math.round(window.innerWidth - rect.right)}px`;
+    menu.style.right = `${Math.round(settingsMenuRight(rect.right, menuWidth, window.innerWidth))}px`;
 
     this.menu = menu;
     this.anchor.setAttribute('aria-expanded', 'true');

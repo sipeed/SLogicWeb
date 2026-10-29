@@ -1,4 +1,4 @@
-export {};
+import { settingsMenuRight } from '../settingsMenu.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
@@ -326,9 +326,10 @@ check(
 
 const leftCommandIds = ['btn-connect', 'transport', 'btn-open', 'btn-save', 'btn-fit', 'btn-settings'];
 const assistantCommandId = 'btn-assistant';
+const languageCommandId = 'btn-language';
 const themeCommandId = 'btn-theme';
 const sidebarCommandId = 'btn-sidebar';
-const commandIds = [...leftCommandIds, assistantCommandId, themeCommandId, sidebarCommandId];
+const commandIds = [...leftCommandIds, assistantCommandId, languageCommandId, themeCommandId, sidebarCommandId];
 
 function commandMarkup(id: string): string {
   const idIndex = toolbar.indexOf(`id="${id}"`);
@@ -374,11 +375,62 @@ for (const id of commandIds) {
   if (icon) iconSignatures.add(icon);
   else anatomyFailures.push(`${id}:icon`);
 }
+const languageMarkup = commandMarkup(languageCommandId);
+const languageDisclosure = languageMarkup.includes('aria-controls="language-menu"') &&
+  languageMarkup.includes('aria-expanded="false"') &&
+  languageMarkup.includes('data-i18n-title="toolbar.languageTitle"') &&
+  /\saria-label="[^"]+"/.test(languageMarkup);
+const languageWiringNeedles = [
+  "new SettingsMenu(this.el.language, 'language-menu')",
+  'this.languageMenu.toggle(this.languageItems())',
+  "this.el.language.addEventListener('click'",
+  "this.languageMenu.close('outside')",
+  "this.languageMenu.close('retranslate')",
+  "this.languageMenu.close('theme')",
+  "this.el.language.setAttribute('aria-label', t('toolbar.languageTitle'))",
+];
+const missingLanguageWiring = languageWiringNeedles.filter((needle) => !app.includes(needle));
+const languageItemsBody = methodBody('private languageItems(');
+const languageItemsShape = languageItemsBody.includes('LOCALES.map') &&
+  languageItemsBody.includes('label: LOCALE_LABELS[l]') &&
+  languageItemsBody.includes('checked: l === getLocale()') &&
+  languageItemsBody.includes('setLocale(l).then') &&
+  languageItemsBody.includes("this.fail('error.localeLoad', l)") &&
+  !languageItemsBody.includes('children') && !languageItemsBody.includes('hint');
+check(
+  'the language disclosure reuses a distinct settings menu with four direct native-name choices',
+  languageDisclosure && missingLanguageWiring.length === 0 && languageItemsShape,
+  `disclosure=${languageDisclosure}, missing=${JSON.stringify(missingLanguageWiring)}, items=${languageItemsShape}`,
+);
+
+const menuRightCases = [
+  { viewport: 1280, anchor: 1100, width: 150, expected: 180 },
+  { viewport: 400, anchor: 65, width: 147, expected: 247 },
+  { viewport: 400, anchor: 399, width: 150, expected: 6 },
+  { viewport: 320, anchor: 176, width: 147, expected: 144 },
+  { viewport: 390, anchor: 65, width: 147, expected: 237 },
+  { viewport: 360, anchor: 123, width: 147, expected: 207 },
+];
+const menuRightFailures = menuRightCases.flatMap((item) => {
+  const right = settingsMenuRight(item.anchor, item.width, item.viewport);
+  const left = item.viewport - right - item.width;
+  return right === item.expected && (left >= 6 || item.viewport - right === item.anchor)
+    ? [] : [`${item.viewport}/${item.anchor}: right=${right}, left=${left}, expected=${item.expected}`];
+});
+const menuPositioningWired = settingsMenuSrc.includes('const menuWidth = menu.offsetWidth;') &&
+  settingsMenuSrc.includes('settingsMenuRight(rect.right, menuWidth, window.innerWidth)') &&
+  !settingsMenuSrc.includes('menu.style.right = `${Math.round(window.innerWidth - rect.right)}px`');
+check(
+  'settings menus preserve right alignment and clamp both horizontal viewport edges',
+  menuRightFailures.length === 0 && menuPositioningWired,
+  `failures=${JSON.stringify(menuRightFailures)}, wired=${menuPositioningWired}`,
+);
+
 const sidebarMarkup = commandMarkup(sidebarCommandId);
 const separatorCount = toolbar.match(/role="separator"/g)?.length ?? 0;
 const verticalSeparatorCount = toolbar.match(/aria-orientation="vertical"/g)?.length ?? 0;
 check(
-  'nine commands expose shadcn anatomy, one media wrapper and decorative short label each, distinct icons, and separators',
+  'ten commands expose shadcn anatomy, one media wrapper and decorative short label each, distinct icons, and separators',
   anatomyFailures.length === 0 && iconSignatures.size === commandIds.length &&
     separatorCount === 2 && verticalSeparatorCount === 2,
   `failures=${JSON.stringify(anatomyFailures)}, icons=${iconSignatures.size}, separators=${separatorCount}/${verticalSeparatorCount}`,
@@ -415,7 +467,6 @@ check(
   `segment=${JSON.stringify(settingsToSpacer.replace(/\s+/g, ' '))}`,
 );
 
-// Right-hand group, in order: spacer, assistant, theme, sidebar.
 const assistantIndex = toolbar.indexOf(`id="${assistantCommandId}"`);
 const assistantButtonStart = assistantIndex >= 0 ? toolbar.lastIndexOf('<button', assistantIndex) : -1;
 const assistantButtonEnd = assistantIndex >= 0 ? toolbar.indexOf('</button>', assistantIndex) : -1;
@@ -423,31 +474,50 @@ const spacerToAssistant = spacerIndex >= 0 && assistantButtonStart > spacerIndex
   ? toolbar.slice(spacerIndex, assistantButtonStart) : '';
 const assistantDirectlyAfterSpacer = spacerToAssistant.length > 0 &&
   !spacerToAssistant.includes('<button') && !spacerToAssistant.includes('role="separator"');
-const themeIndex = toolbar.indexOf('id="btn-theme"');
-const themeButtonStart = themeIndex >= 0 ? toolbar.lastIndexOf('<button', themeIndex) : -1;
-const themeButtonEnd = themeIndex >= 0 ? toolbar.indexOf('</button>', themeIndex) : -1;
-const themeAfterSpacer = spacerIndex >= 0 && themeButtonStart > spacerIndex;
-const assistantToTheme = assistantButtonEnd > assistantButtonStart && themeButtonStart > assistantButtonEnd
-  ? toolbar.slice(assistantButtonEnd, themeButtonStart) : '';
-const themeDirectlyAfterSpacer = assistantDirectlyAfterSpacer && assistantToTheme.length > 0 &&
-  !assistantToTheme.includes('<button') && !assistantToTheme.includes('role="separator"');
+const switchGroupStart = toolbar.indexOf('<div class="toolbar-switch-group"');
+const switchGroupClose = switchGroupStart >= 0 ? toolbar.indexOf('</div>', switchGroupStart) : -1;
+const switchGroupEnd = switchGroupClose >= 0 ? switchGroupClose + '</div>'.length : -1;
+const switchGroupMarkup = switchGroupStart >= 0 && switchGroupEnd > switchGroupStart
+  ? toolbar.slice(switchGroupStart, switchGroupEnd) : '';
+const languageIndex = switchGroupMarkup.indexOf(`id="${languageCommandId}"`);
+const themeIndex = switchGroupMarkup.indexOf(`id="${themeCommandId}"`);
+const switchGroupButtons = switchGroupMarkup.match(/<button\b/g)?.length ?? 0;
+const switchGroupOrder = languageIndex >= 0 && themeIndex > languageIndex && switchGroupButtons === 2;
+const switchGroupAccessible = switchGroupMarkup.includes('role="group"') &&
+  switchGroupMarkup.includes('aria-label="Language and theme"') &&
+  switchGroupMarkup.includes('data-i18n-aria-label="toolbar.switchGroup"');
+const assistantToGroup = assistantButtonEnd > assistantButtonStart && switchGroupStart > assistantButtonEnd
+  ? toolbar.slice(assistantButtonEnd, switchGroupStart) : '';
+const groupDirectlyAfterAssistant = assistantDirectlyAfterSpacer && assistantToGroup.length > 0 &&
+  !assistantToGroup.includes('<button') && !assistantToGroup.includes('role="separator"');
 
 const sidebarIndex = toolbar.indexOf(`id="${sidebarCommandId}"`);
 const sidebarButtonStart = sidebarIndex >= 0 ? toolbar.lastIndexOf('<button', sidebarIndex) : -1;
-const sidebarAfterTheme = themeButtonStart >= 0 && sidebarButtonStart > themeButtonStart;
-const themeToSidebar = sidebarAfterTheme && themeButtonEnd > themeButtonStart
-  ? toolbar.slice(themeButtonEnd, sidebarButtonStart) : '';
-const sidebarDirectlyAfterTheme = themeToSidebar.length > 0 &&
-  !themeToSidebar.includes('<button') && !themeToSidebar.includes('role="separator"');
+const groupToSidebar = switchGroupEnd > switchGroupStart && sidebarButtonStart > switchGroupEnd
+  ? toolbar.slice(switchGroupEnd, sidebarButtonStart) : '';
+const sidebarDirectlyAfterGroup = groupToSidebar.length > 0 &&
+  !groupToSidebar.includes('<button') && !groupToSidebar.includes('role="separator"');
 const lastButtonIndex = toolbar.lastIndexOf('<button');
 const sidebarIsFinalCommand = lastButtonIndex >= 0 && lastButtonIndex === sidebarButtonStart &&
   toolbar.indexOf('role="separator"', sidebarIndex) === -1;
 check(
-  'the assistant, theme and sidebar buttons follow the spacer in that order, sidebar last',
-  themeAfterSpacer && themeDirectlyAfterSpacer && sidebarAfterTheme &&
-    sidebarDirectlyAfterTheme && sidebarIsFinalCommand,
-  `spacer@${spacerIndex}, assistant@${assistantIndex}, theme@${themeIndex}, sidebar@${sidebarIndex}, ` +
-  `afterSpacer=${themeDirectlyAfterSpacer}, between=${sidebarDirectlyAfterTheme}, final=${sidebarIsFinalCommand}`,
+  'assistant, the language/theme group and sidebar follow the spacer in that order, sidebar last',
+  switchGroupOrder && switchGroupAccessible && groupDirectlyAfterAssistant &&
+    sidebarDirectlyAfterGroup && sidebarIsFinalCommand,
+  `spacer@${spacerIndex}, assistant@${assistantIndex}, group@${switchGroupStart}, sidebar@${sidebarIndex}, ` +
+  `groupOrder=${switchGroupOrder}, accessible=${switchGroupAccessible}, afterAssistant=${groupDirectlyAfterAssistant}, ` +
+  `between=${sidebarDirectlyAfterGroup}, final=${sidebarIsFinalCommand}`,
+);
+
+const switchGroupRule = /#toolbar \.toolbar-switch-group \{([\s\S]*?)\}/.exec(css)?.[1] ?? '';
+const switchGroupRules = [...css.matchAll(/#toolbar \.toolbar-switch-group[^{}]*\{([^{}]*)\}/g)]
+  .map((match) => match[1]);
+const switchGroupPlain = switchGroupRule.includes('display: flex') && switchGroupRules.length >= 2 &&
+  switchGroupRules.every((rule) => !/(background|border|border-radius|overflow)\s*:/.test(rule));
+check(
+  'the language/theme wrapper groups ordinary unclipped buttons without pill decoration',
+  switchGroupPlain,
+  `plain=${switchGroupPlain}, rules=${switchGroupRules.length}`,
 );
 
 const assistantMarkup = commandMarkup(assistantCommandId);
@@ -628,26 +698,53 @@ check(
   `rows=${sidebarRowCount}, leaves=${sidebarLeavesOnly}, translated=${sidebarLabelsTranslated}`,
 );
 
-const settingsHandlerStart = app.indexOf("must<HTMLButtonElement>('btn-settings').addEventListener('click'");
-const settingsHandlerEnd = settingsHandlerStart >= 0 ? app.indexOf('\n    });', settingsHandlerStart) : -1;
-const settingsHandler = settingsHandlerStart >= 0 && settingsHandlerEnd > settingsHandlerStart
-  ? app.slice(settingsHandlerStart, settingsHandlerEnd)
-  : '';
-const sidebarHandlerStart = app.indexOf("this.el.sidebar.addEventListener('click'");
-const sidebarHandlerEnd = sidebarHandlerStart >= 0 ? app.indexOf('\n    });', sidebarHandlerStart) : -1;
-const sidebarHandler = sidebarHandlerStart >= 0 && sidebarHandlerEnd > sidebarHandlerStart
-  ? app.slice(sidebarHandlerStart, sidebarHandlerEnd)
-  : '';
-const settingsClosesSidebar = settingsHandler.includes("this.sidebarMenu.close('outside')") &&
-  settingsHandler.includes('this.settingsMenu.toggle(this.settingsItems())') &&
-  settingsHandler.includes('this.channelList.closeDialog()');
-const sidebarClosesSettings = sidebarHandler.includes("this.settingsMenu.close('outside')") &&
-  sidebarHandler.includes('this.sidebarMenu.toggle(this.sidebarItems())') &&
-  sidebarHandler.includes('this.channelList.closeDialog()');
+const toolbarHandler = (needle: string): string => {
+  const start = app.indexOf(needle);
+  const end = start >= 0 ? app.indexOf('\n    });', start) : -1;
+  return start >= 0 && end > start ? app.slice(start, end) : '';
+};
+const settingsHandler = toolbarHandler("must<HTMLButtonElement>('btn-settings').addEventListener('click'");
+const sidebarHandler = toolbarHandler("this.el.sidebar.addEventListener('click'");
+const languageHandler = toolbarHandler("this.el.language.addEventListener('click'");
+const themeHandler = toolbarHandler("this.el.theme.addEventListener('click'");
+const assistantHandler = toolbarHandler("this.el.assistant.addEventListener('click'");
+const menuHandlerCases = [
+  { name: 'settings', body: settingsHandler, menu: 'settingsMenu', items: 'settingsItems', others: ['sidebarMenu', 'languageMenu', 'themeMenu'] },
+  { name: 'sidebar', body: sidebarHandler, menu: 'sidebarMenu', items: 'sidebarItems', others: ['settingsMenu', 'languageMenu', 'themeMenu'] },
+  { name: 'language', body: languageHandler, menu: 'languageMenu', items: 'languageItems', others: ['settingsMenu', 'sidebarMenu', 'themeMenu'] },
+  { name: 'theme', body: themeHandler, menu: 'themeMenu', items: 'themeItems', others: ['settingsMenu', 'sidebarMenu', 'languageMenu'] },
+];
+const menuHandlerFailures: string[] = [];
+for (const item of menuHandlerCases) {
+  if (!item.body.includes('this.channelList.closeDialog()') ||
+      !item.body.includes(`this.${item.menu}.toggle(this.${item.items}())`)) {
+    menuHandlerFailures.push(`${item.name}:open`);
+  }
+  for (const other of item.others) {
+    if (!item.body.includes(`this.${other}.close('outside')`)) menuHandlerFailures.push(`${item.name}:${other}`);
+  }
+}
+const assistantClosesMenus = ['settingsMenu', 'sidebarMenu', 'languageMenu', 'themeMenu']
+  .every((menu) => assistantHandler.includes(`this.${menu}.close('outside')`));
+const assistantOpensSharedPath = assistantHandler.includes('this.channelList.closeDialog()') &&
+  assistantHandler.includes('this.toggleAssistant()');
 check(
-  'opening either toolbar menu closes the other menu and the channel dialog',
-  settingsClosesSidebar && sidebarClosesSettings,
-  `settings=${settingsClosesSidebar}, sidebar=${sidebarClosesSettings}`,
+  'every toolbar menu and the assistant close competing overlays and the channel dialog',
+  menuHandlerFailures.length === 0 && assistantClosesMenus && assistantOpensSharedPath,
+  `failures=${JSON.stringify(menuHandlerFailures)}, assistant=${assistantClosesMenus && assistantOpensSharedPath}`,
+);
+
+const retranslateBody = methodBody('private retranslate(): void {');
+const themeChangeBody = themeHandlerAt >= 0 && themeHandlerEnd > themeHandlerAt
+  ? app.slice(themeHandlerAt, themeHandlerEnd) : '';
+const lifecycleCloseFailures = ['settingsMenu', 'sidebarMenu', 'languageMenu', 'themeMenu'].flatMap((menu) => [
+  ...(!retranslateBody.includes(`this.${menu}.close('retranslate')`) ? [`retranslate:${menu}`] : []),
+  ...(!themeChangeBody.includes(`this.${menu}.close('theme')`) ? [`theme:${menu}`] : []),
+]);
+check(
+  'all four toolbar menus close for retranslation and theme changes',
+  lifecycleCloseFailures.length === 0,
+  `missing=${JSON.stringify(lifecycleCloseFailures)}`,
 );
 
 const settingsItemsBody = methodBody('private settingsItems(');
@@ -656,6 +753,9 @@ const detailedLabelsToggle = settingsItemsBody.includes("label: t('settings.deta
   settingsItemsBody.includes('this.detailedLabels = !this.detailedLabels;') &&
   settingsItemsBody.includes('this.reflectDetailedLabels();');
 const detailedLabelsDefault = app.includes('private detailedLabels = true;');
+const settingsDisplayOnly = !settingsItemsBody.includes("t('settings.language')") &&
+  !settingsItemsBody.includes('LOCALES.map') && !settingsItemsBody.includes('children:') &&
+  (settingsItemsBody.match(/onPick:/g)?.length ?? 0) === 1;
 const constructorBody = methodBody('constructor() {');
 const detailedLabelsReflection = app.includes("document.documentElement.removeAttribute('data-toolbar-labels')") &&
   app.includes("document.documentElement.setAttribute('data-toolbar-labels', 'off')") &&
@@ -663,9 +763,9 @@ const detailedLabelsReflection = app.includes("document.documentElement.removeAt
   constructorBody.includes('this.reflectDetailedLabels();') &&
   settingsItemsBody.includes('this.reflectDetailedLabels();');
 check(
-  'settings owns a checked default-on detailed-label toggle that only reflects chrome state',
-  detailedLabelsToggle && detailedLabelsDefault && detailedLabelsReflection,
-  `toggle=${detailedLabelsToggle}, default=${detailedLabelsDefault}, reflection=${detailedLabelsReflection}`,
+  'settings owns only the checked default-on detailed-label display toggle',
+  detailedLabelsToggle && detailedLabelsDefault && detailedLabelsReflection && settingsDisplayOnly,
+  `toggle=${detailedLabelsToggle}, default=${detailedLabelsDefault}, reflection=${detailedLabelsReflection}, displayOnly=${settingsDisplayOnly}`,
 );
 
 const viewportRestoreOrder = [
@@ -722,6 +822,7 @@ const dynamicNames = [
   "this.el.save.setAttribute('aria-label', t('toolbar.save'))",
   "this.el.fit.setAttribute('aria-label', t('toolbar.fit'))",
   "this.el.settings.setAttribute('aria-label', t('settings.title'))",
+  "this.el.language.setAttribute('aria-label', t('toolbar.languageTitle'))",
   "this.el.sidebar.setAttribute('aria-label', t('toolbar.sidebarTitle'))",
 ];
 const missingDynamicNames = dynamicNames.filter((needle) => !app.includes(needle));
@@ -737,7 +838,7 @@ const retiredTransportDescription = ['transportDescription', 'transport-descript
 const preservedClasses = app.includes("btn.classList.toggle('primary', !this.running)") &&
   app.includes("btn.classList.toggle('danger', this.running)") && !app.includes('btn.className =');
 check(
-  'renderToolbarState refreshes all seven accessible names from state and t()',
+  'renderToolbarState refreshes toolbar accessible names from state and t()',
   directButtonTranslations.length === 0 && missingDynamicNames.length === 0 &&
     dynamicTransportName && retiredVisibleLabelTargets.length === 0 &&
     retiredTransportDescription.length === 0 && preservedClasses,

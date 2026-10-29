@@ -35,6 +35,7 @@ export const zhCN: Messages = {
   'toolbar.shortFit': '适配',
   'toolbar.shortSettings': '设置',
   'toolbar.shortAssistant': '助手',
+  'toolbar.shortLanguage': '语言',
   'toolbar.shortTheme': '主题',
   'toolbar.shortSidebar': '边栏',
   'toolbar.startTitle': '在已连接的设备上开始采集',
@@ -47,6 +48,8 @@ export const zhCN: Messages = {
   'toolbar.fitTitle': '缩放以显示整个采集',
   'toolbar.sidebarTitle': '选择右侧边栏',
   'toolbar.themeTitle': '切换主题',
+  'toolbar.languageTitle': '选择语言',
+  'toolbar.switchGroup': '语言与主题',
   'toolbar.assistantTitle': 'AI 助手',
   'toolbar.sidebarDevice': '设备与采集设置',
   'toolbar.sidebarAnalyzers': '协议分析器',
@@ -314,7 +317,7 @@ export const zhCN: Messages = {
 
   // -------------------------------------------------------- settings menu
   'settings.title': '设置',
-  'settings.titleHint': '语言与显示偏好',
+  'settings.titleHint': '显示偏好',
   'settings.detailedLabels': '详细标签',
   'settings.language': '语言',
   'settings.theme': '主题',
