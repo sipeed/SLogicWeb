@@ -6,6 +6,8 @@ import {
 import {
   defaultCaptureSettings, defaultChannelName, defaultChannels, modesToConditions, THRESHOLD_VOLT_OPTIONS,
 } from '../state.js';
+import { busChannelBank } from '../channelBanks.js';
+import type { BusViewConfig } from '../busView.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
@@ -334,6 +336,115 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     serialized);
 }
 
+{
+  const generic: BusViewConfig = {
+    name: ' ADC custom ',
+    spec: { bits: [3, 1], clock: null, encoding: 'twos' },
+    color: '#010203',
+    fullScaleV: 5,
+    offsetV: -1,
+    style: 'step',
+    heightCss: 240,
+    hideSources: true,
+  };
+  const active: BusViewConfig = {
+    name: 'Forme d’onde analogique',
+    usesDefaultName: true,
+    spec: { bits: [15, 14, 13, 12, 11, 10, 9, 8], clock: { channel: 4, edge: 'falling' }, encoding: 'offset' },
+    color: '#112233',
+    fullScaleV: null,
+    offsetV: 0.5,
+    style: 'line',
+    heightCss: 160,
+    hideSources: false,
+  };
+  const disabled: BusViewConfig = {
+    name: 'Disabled scope',
+    spec: { bits: [0, 1, 2, 3, 4, 5, 6, 7], clock: null, encoding: 'unsigned' },
+    color: '#445566',
+    fullScaleV: 3.3,
+    offsetV: 0.25,
+    style: 'step',
+    heightCss: 120,
+    hideSources: true,
+  };
+  const parsed = parseWorkspaceSnapshot(serializeWorkspaceSnapshot({
+    version: 1,
+    detailedLabels: true,
+    channels: defaultChannels(16),
+    busViews: [generic, active],
+    bankBusDrafts: { 0: disabled, 8: { ...active, name: 'Conflicting draft' } },
+  }));
+  check('generic/bank configs and disabled drafts round-trip with active-view conflict resolution',
+    parsed?.busViews?.length === 2 && parsed.busViews[0]?.name === 'ADC custom' &&
+    !('usesDefaultName' in (parsed.busViews[0] ?? {})) && parsed.busViews[0]?.style === 'step' &&
+    parsed.busViews[0]?.heightCss === 240 && parsed.busViews[0]?.hideSources === true &&
+    parsed.busViews[1]?.name === 'Analog waveform' && parsed.busViews[1]?.usesDefaultName === true &&
+    parsed.busViews[1]?.spec.bits.join(',') === '15,14,13,12,11,10,9,8' &&
+    parsed.busViews[1]?.spec.clock?.channel === 4 && parsed.busViews[1]?.spec.clock.edge === 'falling' &&
+    parsed.bankBusDrafts?.[0]?.name === 'Disabled scope' &&
+    parsed.bankBusDrafts[0]?.fullScaleV === 3.3 && parsed.bankBusDrafts[0]?.offsetV === 0.25 &&
+    parsed.bankBusDrafts[0]?.hideSources === true && parsed.bankBusDrafts[8]?.name === 'Analog waveform',
+    JSON.stringify({ views: parsed?.busViews, drafts: parsed?.bankBusDrafts }));
+}
+
+{
+  const base: BusViewConfig = {
+    name: 'Bank',
+    spec: { bits: [0, 1, 2, 3, 4, 5, 6, 7], clock: null, encoding: 'unsigned' },
+    color: '#4C9AFF',
+    fullScaleV: null,
+    offsetV: 0,
+    style: 'line',
+    heightCss: 120,
+    hideSources: false,
+  };
+  const duplicate = { ...base, spec: { ...base.spec, bits: [0, 0, 1, 2, 3, 4, 5, 6] } };
+  const badClock = { ...base, spec: { ...base.spec, clock: { channel: 3, edge: 'rising' as const } } };
+  const badEncoding = { ...base, spec: { ...base.spec, encoding: 'invalid' } };
+  const parsed = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    channels: Array.from({ length: 16 }, () => ({})),
+    busViews: [duplicate, badClock, badEncoding, base],
+    bankBusDrafts: {
+      0: { ...base, spec: { ...base.spec, bits: [1, 2, 3, 4, 5, 6, 7, 8] } },
+      8: badClock,
+      9: base,
+    },
+  }));
+  check('duplicate/foreign bits, invalid clocks/encodings and unaligned draft keys cannot create active banks or drafts',
+    parsed?.busViews?.length === 1 && busChannelBank(parsed.busViews[0]!.spec) === 0 &&
+    Object.keys(parsed.bankBusDrafts ?? {}).join(',') === '0',
+    JSON.stringify({ views: parsed?.busViews, drafts: parsed?.bankBusDrafts }));
+}
+
+{
+  const runtimeConfig = {
+    name: 'Runtime',
+    spec: { bits: [0], clock: null, encoding: 'unsigned' as const },
+    color: '#4C9AFF',
+    fullScaleV: null,
+    offsetV: 0,
+    style: 'line' as const,
+    heightCss: 120,
+    hideSources: false,
+    id: 'bus-crafted',
+    builder: { done: true },
+    builtFor: {},
+    cache: { key: 'crafted' },
+  };
+  const serialized = serializeWorkspaceSnapshot({
+    version: 1,
+    detailedLabels: true,
+    busViews: [runtimeConfig],
+    bankBusDrafts: {},
+  });
+  check('bus runtime IDs/builders/stores/caches and analyzer/capture fields never serialize',
+    !serialized.includes('bus-crafted') && !serialized.includes('builder') && !serialized.includes('builtFor') &&
+    !serialized.includes('cache') && !serialized.includes('analyzers') && !serialized.includes('samples'),
+    serialized);
+}
+
 const app = fs.readFileSync('src/ui/app.ts', 'utf8');
 const constructorStart = app.indexOf('constructor() {');
 const constructorEnd = constructorStart >= 0
@@ -343,6 +454,8 @@ const constructorBody = constructorStart >= 0 && constructorEnd > constructorSta
 const restoreOrder = [
   'applyStaticI18n(document);',
   'readWorkspaceSnapshot()',
+  'this.syncBankChannels();',
+  'channels: this.neededWidth()',
   'this.reflectDetailedLabels();',
   'createSampleStore(',
 ].map((needle) => constructorBody.indexOf(needle));
@@ -391,7 +504,7 @@ check('the App snapshot boundary serializes canonical labels/channels/order and 
 
 const writeMethods = [
   'applySettings', 'afterChannelChange', 'configureChannel', 'reorder', 'adoptCapture', 'adoptDeviceChannels',
-  'startCapture', 'loadDemo',
+  'startCapture', 'loadDemo', 'configureBankBus',
 ];
 const missingWriteMethods = writeMethods.filter((name) => {
   const syncStart = app.indexOf(`private ${name}(`);
@@ -423,8 +536,24 @@ check('capture restore rebuilds canonical trigger derivatives and panel/debug/as
   snapshotBody.includes('samplerate: this.settings.samplerate') &&
   snapshotBody.includes('triggerModes: { ...this.settings.triggerModes }') &&
   !snapshotBody.includes('softwareTrigger') && !snapshotBody.includes('triggerConditions') &&
-  !snapshotBody.includes('triggerChannel'),
+  !snapshotBody.includes('triggerChannel') && snapshotBody.includes('busViews: this.busViews.map') &&
+  snapshotBody.includes('bankBusDrafts: Object.fromEntries') &&
+  !snapshotBody.includes('builder') && !snapshotBody.includes('builtFor') && !snapshotBody.includes('cache'),
   `derivation=${captureDerivation}, shared=${sharedSettingsPath}`);
+
+const busRestoreWiring = constructorBody.includes('id: `bus-${id}`, builder: null, builtFor: null, cache: null') &&
+  constructorBody.includes('this.nextBus = this.busViews.length;') &&
+  constructorBody.includes('this.bankBusDrafts.set(bank, cloneBusConfig(bus));') &&
+  constructorBody.includes('this.syncBankChannels();');
+const busMutationWiring = ['addBus', 'updateBus', 'removeBus'].every((name) => {
+  const start = app.indexOf(`private ${name}(`);
+  const end = start >= 0 ? app.indexOf('\n  }', start) : -1;
+  return start >= 0 && end > start && app.slice(start, end).includes('this.afterChannelChange();');
+});
+check('restored views get fresh IDs/null runtime and all generic/bank mutations share normalized writes',
+  busRestoreWiring && busMutationWiring &&
+  app.includes('this.settings = clampSettings({ ...this.settings, loopSamples }, this.rateCeilings);'),
+  `restore=${busRestoreWiring}, mutations=${busMutationWiring}`);
 
 const html = fs.readFileSync('index.html', 'utf8');
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);

@@ -1,5 +1,9 @@
 import { isChannelCount, type ChannelCount } from '../types.js';
 import { SAMPLERATES_HZ } from '../device/index.js';
+import { validateBusSpec } from '../data/index.js';
+import { busChannelBank } from './channelBanks.js';
+import { cloneBusConfig, defaultBusConfig, normalizeBankBusConfig } from './busPanel.js';
+import { BUS_HEIGHTS, type BusViewConfig } from './busView.js';
 import {
   defaultCaptureSettings, defaultChannelName, defaultChannels, THRESHOLD_VOLT_OPTIONS,
   type CaptureSettings, type TriggerMode,
@@ -32,6 +36,8 @@ export interface WorkspaceSnapshotV1 {
   channels?: PersistedChannel[];
   order?: number[];
   capture?: PersistedCaptureSettings;
+  busViews?: BusViewConfig[];
+  bankBusDrafts?: Record<string, BusViewConfig>;
 }
 
 function storage(): Storage | null {
@@ -129,6 +135,78 @@ function restoreCapture(value: unknown, capacity: number): PersistedCaptureSetti
   return capture;
 }
 
+function restoreBusConfig(value: unknown, capacity: number): BusViewConfig | null {
+  if (!isRecord(value) || !isRecord(value.spec) || !Array.isArray(value.spec.bits)) return null;
+  const defaults = defaultBusConfig(capacity);
+  const bits = value.spec.bits;
+  if (bits.some((channel) => !Number.isInteger(channel)) ||
+      (value.spec.encoding !== undefined &&
+        value.spec.encoding !== 'unsigned' && value.spec.encoding !== 'twos' && value.spec.encoding !== 'offset')) {
+    return null;
+  }
+  let clock: BusViewConfig['spec']['clock'] = null;
+  if (value.spec.clock !== undefined && value.spec.clock !== null) {
+    if (!isRecord(value.spec.clock) || !Number.isInteger(value.spec.clock.channel) ||
+        (value.spec.clock.edge !== 'rising' && value.spec.clock.edge !== 'falling')) return null;
+    clock = { channel: value.spec.clock.channel as number, edge: value.spec.clock.edge };
+  }
+  if (value.fullScaleV !== undefined && value.fullScaleV !== null &&
+      (typeof value.fullScaleV !== 'number' || !Number.isFinite(value.fullScaleV))) return null;
+  if (value.offsetV !== undefined &&
+      (typeof value.offsetV !== 'number' || !Number.isFinite(value.offsetV))) return null;
+  if (value.style !== undefined && value.style !== 'line' && value.style !== 'step') return null;
+  if (value.heightCss !== undefined &&
+      (typeof value.heightCss !== 'number' || !(BUS_HEIGHTS as readonly number[]).includes(value.heightCss))) {
+    return null;
+  }
+  const spec: BusViewConfig['spec'] = {
+    bits: [...bits] as number[],
+    clock,
+    encoding: value.spec.encoding ?? 'unsigned',
+  };
+  if (validateBusSpec(spec, capacity).length > 0) return null;
+  const color = typeof value.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.color)
+    ? value.color : defaults.color;
+  const fullScaleV = value.fullScaleV === undefined ? defaults.fullScaleV
+    : value.fullScaleV === null || value.fullScaleV === 0 ? null : value.fullScaleV;
+  const config: BusViewConfig = {
+    name: typeof value.name === 'string' ? value.name.trim() : defaults.name,
+    color,
+    fullScaleV,
+    offsetV: value.offsetV ?? defaults.offsetV,
+    style: value.style ?? defaults.style,
+    heightCss: value.heightCss ?? defaults.heightCss,
+    hideSources: typeof value.hideSources === 'boolean' ? value.hideSources : defaults.hideSources,
+    spec,
+  };
+  const bank = busChannelBank(spec);
+  if (bank === null) return config;
+  if (value.usesDefaultName === true) config.usesDefaultName = true;
+  return normalizeBankBusConfig(config, capacity, bank);
+}
+
+function restoreBusViews(value: unknown, capacity: number): BusViewConfig[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    const config = restoreBusConfig(candidate, capacity);
+    return config ? [config] : [];
+  });
+}
+
+function restoreBankBusDrafts(value: unknown, capacity: number): Record<string, BusViewConfig> {
+  const drafts: Record<string, BusViewConfig> = {};
+  if (!isRecord(value)) return drafts;
+  for (const [key, candidate] of Object.entries(value)) {
+    if (!/^(0|[1-9]\d*)$/.test(key)) continue;
+    const start = Number(key);
+    if (!Number.isSafeInteger(start) || start < 0 || start % 8 !== 0) continue;
+    const config = restoreBusConfig(candidate, capacity);
+    if (!config || busChannelBank(config.spec) !== start) continue;
+    drafts[String(start)] = normalizeBankBusConfig(config, capacity, start);
+  }
+  return drafts;
+}
+
 export function parseWorkspaceSnapshot(
   raw: string | null, fallbackChannelCount: ChannelCount = 16,
 ): WorkspaceSnapshotV1 | null {
@@ -141,12 +219,20 @@ export function parseWorkspaceSnapshot(
   }
   if (!isRecord(parsed) || parsed.version !== WORKSPACE_SCHEMA_VERSION) return null;
   const channels = restoreChannels(parsed.channels, fallbackChannelCount);
+  const busViews = restoreBusViews(parsed.busViews, channels.length);
+  const bankBusDrafts = restoreBankBusDrafts(parsed.bankBusDrafts, channels.length);
+  for (const bus of busViews) {
+    const bank = busChannelBank(bus.spec);
+    if (bank !== null) bankBusDrafts[String(bank)] = cloneBusConfig(bus);
+  }
   return {
     version: WORKSPACE_SCHEMA_VERSION,
     detailedLabels: typeof parsed.detailedLabels === 'boolean' ? parsed.detailedLabels : true,
     channels,
     order: restoreOrder(parsed.order, channels.length),
     capture: restoreCapture(parsed.capture, channels.length),
+    busViews,
+    bankBusDrafts,
   };
 }
 
@@ -156,6 +242,10 @@ export function readWorkspaceSnapshot(fallbackChannelCount: ChannelCount = 16): 
   } catch {
     return null;
   }
+}
+
+function serializeBusConfig(config: BusViewConfig): BusViewConfig {
+  return cloneBusConfig(config);
 }
 
 export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): string {
@@ -181,6 +271,12 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
         .sort(([a], [b]) => Number(a) - Number(b))),
       preTriggerPercent: capture.preTriggerPercent,
     };
+  }
+  if (snapshot.busViews) serialized.busViews = snapshot.busViews.map(serializeBusConfig);
+  if (snapshot.bankBusDrafts) {
+    serialized.bankBusDrafts = Object.fromEntries(Object.entries(snapshot.bankBusDrafts)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([start, config]) => [start, serializeBusConfig(config)]));
   }
   return JSON.stringify(serialized);
 }

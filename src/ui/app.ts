@@ -228,6 +228,17 @@ export class App {
       this.detailedLabels = workspace.detailedLabels;
       this.channels = (workspace.channels ?? defaultChannels(16)).map((channel, index) => ({ ...channel, index }));
       this.order = workspace.order ?? this.channels.map((channel) => channel.index);
+      this.busViews = (workspace.busViews ?? []).map((config, id) => ({
+        ...cloneBusConfig(config), id: `bus-${id}`, builder: null, builtFor: null, cache: null,
+      }));
+      this.nextBus = this.busViews.length;
+      this.bankBusDrafts = new Map(Object.entries(workspace.bankBusDrafts ?? {})
+        .map(([start, config]) => [Number(start), cloneBusConfig(config)]));
+      for (const bus of this.busViews) {
+        const bank = busChannelBank(bus.spec);
+        if (bank !== null) this.bankBusDrafts.set(bank, cloneBusConfig(bus));
+      }
+      this.syncBankChannels();
     }
     const triggerModes = workspace?.capture?.triggerModes ?? {};
     const triggerConditions = modesToConditions(triggerModes);
@@ -469,11 +480,13 @@ export class App {
       else this.addBus(next);
       return;
     }
+    this.settings = clampSettings({ ...this.settings, loopSamples }, this.rateCeilings);
     const remaining = this.busViews.filter((b) => busChannelBank(b.spec) !== start);
     if (remaining.length !== this.busViews.length) {
       this.busViews = remaining;
       this.afterChannelChange();
     }
+    this.persistWorkspace();
   }
 
   /** A new capture (or a growing one) invalidates every bus's overview and cache. */
@@ -1407,6 +1420,9 @@ export class App {
         triggerModes: { ...this.settings.triggerModes },
         preTriggerPercent: this.settings.preTriggerPercent,
       },
+      busViews: this.busViews.map((bus) => cloneBusConfig(bus)),
+      bankBusDrafts: Object.fromEntries([...this.bankBusDrafts]
+        .map(([start, config]) => [start, cloneBusConfig(config)])),
     };
   }
 
