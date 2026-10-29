@@ -15,8 +15,8 @@ import {
 import type { SampleStore } from '../data/types.js';
 import { bytesPerSampleForChannels, channelWidthForProbes, isChannelCount, type ChannelCount } from '../types.js';
 import {
-  MAX_SAMPLERATE_HZ, MAX_SAMPLERATE_HZ_SLOGIC32_U3, TransportDeadError, getGrantedDevicesOnBestThread,
-  requestDeviceOnBestThread, vrefCode, type CaptureConfig, type Device,
+  MAX_SAMPLERATE_HZ, TransportDeadError, getGrantedDevicesOnBestThread, requestDeviceOnBestThread,
+  vrefCode, type CaptureConfig, type Device,
 } from '../device/index.js';
 import { WorkerSlogicDevice, workerTransport } from '../device/workerTransport.js';
 import { WheelIntent, wheelSpanFactor } from '../render/index.js';
@@ -46,9 +46,6 @@ import {
   lockedChannelBanks, toggleChannelBank,
 } from './channelBanks.js';
 import { ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration } from './channelList.js';
-import {
-  SCOPE_MIN_SAMPLERATE_HZ, scopeEnableVerdict, scopeRateBlockAt, type ScopeEnableVerdict, type ScopeRateBlock,
-} from './scopeRateLimits.js';
 import { computeChannelRowHeight } from './channelLayout.js';
 import {
   MAX_SAMPLES, createProtocolDemoCapture, levelAt, loadFiles, loadLwcap, saveLwcap,
@@ -88,21 +85,6 @@ declare const __LOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
 type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number): number };
 
 const BUS_CAPTURE_LOCK_ERROR = 'bank oscilloscope settings are locked while capture is running or stopping';
-
-function scopeRateLimitMessage(block: ScopeEnableVerdict, upgradable: boolean): string {
-  return `enabling this oscilloscope bank needs ${block.requiredWidth} channels at ` +
-    `${formatRate(block.effectiveRate)}, which caps at ${formatRate(block.maxRate)}; ` +
-    `lower the sample rate to ${formatRate(block.maxRate)} or below first` +
-    (upgradable ? '; a 10 Gbps port and cable would allow it' : '');
-}
-
-function scopeRateBlockMessage(block: ScopeRateBlock): string {
-  return block.kind === 'floor'
-    ? `oscilloscope mode requires at least ${formatRate(SCOPE_MIN_SAMPLERATE_HZ)}; ` +
-      'disable every oscilloscope bank before choosing a lower rate'
-    : `the active oscilloscope banks need ${block.width} channels, which cap at ` +
-      `${formatRate(block.maxRate)}; remove an oscilloscope bank before choosing a higher rate`;
-}
 const LOOP_SUSPEND_MIN_BYTES_PER_SEC = 160e6;
 
 interface Lane {
@@ -163,7 +145,6 @@ export class App {
   private deviceEpoch = 0;
   private stopPending: Promise<void> | null = null;
   private rateCeilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ;
-  private rateCeilingsFull: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ;
   private running = false;
   /** True while WebUSB transfers from the previous run are being cancelled and drained. */
   private stopping = false;
@@ -271,7 +252,7 @@ export class App {
       triggerChannel: first?.channel ?? 0,
       triggerKind: first?.kind ?? 'rising',
       triggerLevel: first?.level ?? 1,
-    }, this.rateCeilings, this.scopeMinSamplerate());
+    }, this.rateCeilings);
     this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(this.workspaceSnapshot());
     this.reflectDetailedLabels();
 
@@ -426,38 +407,8 @@ export class App {
     return lockedChannelBanks(this.busViews, this.channels.length).size > 0;
   }
 
-  private scopeMinSamplerate(): number {
-    return this.oscilloscopeActive() ? SCOPE_MIN_SAMPLERATE_HZ : 0;
-  }
-
-  private scopeEnableBlock(start: number, clockChannel: number | null): ScopeEnableVerdict | null {
-    const verdict = scopeEnableVerdict({
-      start,
-      clockChannel,
-      currentWidth: this.neededWidth(),
-      rate: this.settings.samplerate,
-      ceilings: this.rateCeilings,
-      deviceChannels: this.channels.length,
-    });
-    return verdict.ok ? null : verdict;
-  }
-
-  private scopeEnableUpgradable(start: number, clockChannel: number | null): boolean {
-    return scopeEnableVerdict({
-      start,
-      clockChannel,
-      currentWidth: this.neededWidth(),
-      rate: this.settings.samplerate,
-      ceilings: this.rateCeilingsFull,
-      deviceChannels: this.channels.length,
-    }).ok;
-  }
-
   private addBus(cfg: BusViewConfig): string | null {
     if ((this.running || this.stopping) && busChannelBank(cfg.spec) !== null) return null;
-    const bank = busChannelBank(cfg.spec);
-    if (bank !== null && validateBusSpec(cfg.spec, this.channels.length).length === 0 &&
-      this.scopeEnableBlock(bank, cfg.spec.clock?.channel ?? null) !== null) return null;
     const color = busColor(this.nextBus);
     const id = `bus-${this.nextBus++}`;
     this.busViews.push({ ...cfg, color, id, builder: null, builtFor: null, cache: null });
@@ -474,11 +425,6 @@ export class App {
       (busChannelBank(current.spec) !== null || busChannelBank(cfg.spec) !== null)) return false;
     const next = cloneBusConfig(cfg);
     if (!preserveDefaultName && next.name !== current.name) delete next.usesDefaultName;
-    const targetBank = busChannelBank(next.spec);
-    if (targetBank !== null &&
-      !lockedChannelBanks(this.busViews, this.channels.length).has(targetBank) &&
-      validateBusSpec(next.spec, this.channels.length).length === 0 &&
-      this.scopeEnableBlock(targetBank, next.spec.clock?.channel ?? null) !== null) return false;
     this.busViews[i] = { ...next, color: current.color, id, builder: null, builtFor: null, cache: null };
     this.syncBankChannels();
     this.afterChannelChange();
@@ -501,9 +447,7 @@ export class App {
     let channels = bankWidth;
     if (clockWidth > channels) channels = clockWidth;
     if (currentWidth > channels) channels = currentWidth;
-    return clampSettings(
-      { ...this.settings, channels, loopSamples }, this.rateCeilings, SCOPE_MIN_SAMPLERATE_HZ,
-    );
+    return clampSettings({ ...this.settings, channels, loopSamples }, this.rateCeilings);
   }
 
   private openBankBus(start: number): boolean {
@@ -520,10 +464,6 @@ export class App {
       captureChannels: preview.channels,
       samplerate: preview.samplerate,
       locked: this.running || this.stopping,
-      enableBlock: lockedChannelBanks(this.busViews, this.channels.length).has(start)
-        ? null
-        : this.scopeEnableBlock(start, config.spec.clock?.channel ?? null),
-      enableUpgradable: this.scopeEnableUpgradable(start, config.spec.clock?.channel ?? null),
     });
     return true;
   }
@@ -534,17 +474,13 @@ export class App {
     const next = normalizeBankBusConfig(config, this.channels.length, start);
     this.bankBusDrafts.set(start, cloneBusConfig(next));
     if (enabled) {
-      const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
-      if (!lockedChannelBanks(this.busViews, this.channels.length).has(start) &&
-        this.scopeEnableBlock(start, next.spec.clock?.channel ?? null) !== null) return;
       this.settings = this.bankCaptureSettings(start, loopSamples, next);
+      const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
       if (active) this.updateBus(active.id, next, true);
       else this.addBus(next);
       return;
     }
-    this.settings = clampSettings(
-      { ...this.settings, loopSamples }, this.rateCeilings, this.scopeMinSamplerate(),
-    );
+    this.settings = clampSettings({ ...this.settings, loopSamples }, this.rateCeilings);
     const remaining = this.busViews.filter((b) => busChannelBank(b.spec) !== start);
     if (remaining.length !== this.busViews.length) {
       this.busViews = remaining;
@@ -615,7 +551,7 @@ export class App {
   }
 
   private applySettings(s: CaptureSettings): void {
-    const next = clampSettings(s, this.rateCeilings, this.scopeMinSamplerate());
+    const next = clampSettings(s, this.rateCeilings);
     if (triggerSettingsChanged(this.settings, next)) {
       this.triggerState = 'off';
       this.triggerSampleIndex = null;
@@ -647,7 +583,7 @@ export class App {
         triggerChannel: first.channel, triggerKind: first.kind, triggerLevel: first.level,
         ...(edgeTriggerAutoArms(previous, config.mode, this.settings.triggerEnableMask)
           ? { triggerEnableMask: true } : {}),
-      }, this.rateCeilings, this.scopeMinSamplerate());
+      }, this.rateCeilings);
       if (triggerSettingsChanged(this.settings, next)) {
         this.triggerState = 'off';
         this.triggerSampleIndex = null;
@@ -811,7 +747,7 @@ export class App {
    */
   private afterChannelChange(): void {
     this.settings = clampSettings(
-      { ...this.settings, channels: this.neededWidth() }, this.rateCeilings, this.scopeMinSamplerate(),
+      { ...this.settings, channels: this.neededWidth() }, this.rateCeilings,
     );
     this.persistWorkspace();
     this.relayout();
@@ -1608,7 +1544,6 @@ export class App {
         stopping: this.stopping,
         progress: this.running ? this.progressView() : null,
         maxSamplerateHz: this.rateCeilings,
-        maxSamplerateHzFull: this.rateCeilingsFull,
         triggerState: this.triggerState,
       });
     } else {
@@ -1622,8 +1557,6 @@ export class App {
       });
       this.busPanel.render({
         buses: this.busViews, channelCount: this.channels.length, captureLocked: this.running || this.stopping,
-        samplerate: this.settings.samplerate, captureChannels: this.settings.channels,
-        rateCeilings: this.rateCeilings, rateCeilingsFull: this.rateCeilingsFull,
       });
     }
   }
@@ -1769,7 +1702,7 @@ export class App {
       this.adoptCapture(demo.store, demo.channelNames, { kind: 'demo' });
       this.settings = clampSettings(
         { ...this.settings, channels: this.neededWidth(), samplerate: demo.store.samplerate },
-        this.rateCeilings, this.scopeMinSamplerate(),
+        this.rateCeilings,
       );
       this.persistWorkspace();
       this.relayout();
@@ -1812,7 +1745,7 @@ export class App {
     this.captureIsLoop = false;
     this.captureLabel = label;
     this.settings = clampSettings(
-      { ...this.settings, channels: this.neededWidth() }, this.rateCeilings, this.scopeMinSamplerate(),
+      { ...this.settings, channels: this.neededWidth() }, this.rateCeilings,
     );
     this.persistWorkspace();
     this.relayout();
@@ -1946,7 +1879,6 @@ export class App {
   /** Grow the channel model when a wider SLogic board is connected. */
   private adoptDeviceChannels(device: Device): void {
     this.rateCeilings = device.maxSamplerateHz ?? MAX_SAMPLERATE_HZ;
-    this.rateCeilingsFull = device.maxChannels === 32 ? MAX_SAMPLERATE_HZ_SLOGIC32_U3 : MAX_SAMPLERATE_HZ;
     const max = device.maxChannels ?? this.channels.length;
     if (!isChannelCount(max)) {
       throw new Error(`device reported unsupported channel count ${max}`);
@@ -1963,7 +1895,7 @@ export class App {
       this.order = this.channels.map((c) => c.index);
     }
     this.settings = clampSettings(
-      { ...this.settings, channels: max }, this.rateCeilings, this.scopeMinSamplerate(),
+      { ...this.settings, channels: max }, this.rateCeilings,
     );
     this.persistWorkspace();
     this.relayout();
@@ -2441,32 +2373,10 @@ export class App {
       // The same paths the bus panel uses.
       buses: () => this.busViews.map((b) => ({ config: b, built: b.builder?.done ?? false })),
       addBus: (cfg) => {
-        const bank = busChannelBank(cfg.spec);
-        if (!(this.running || this.stopping) && bank !== null &&
-          validateBusSpec(cfg.spec, this.channels.length).length === 0) {
-          const block = this.scopeEnableBlock(bank, cfg.spec.clock?.channel ?? null);
-          if (block !== null) {
-            throw new Error(scopeRateLimitMessage(
-              block, this.scopeEnableUpgradable(bank, cfg.spec.clock?.channel ?? null),
-            ));
-          }
-        }
         if (this.addBus(cfg) === null) throw new Error(BUS_CAPTURE_LOCK_ERROR);
       },
       updateBus: (index, cfg) => {
         const b = this.busViews[index];
-        if (b && !(this.running || this.stopping)) {
-          const bank = busChannelBank(cfg.spec);
-          if (bank !== null && !lockedChannelBanks(this.busViews, this.channels.length).has(bank) &&
-            validateBusSpec(cfg.spec, this.channels.length).length === 0) {
-            const block = this.scopeEnableBlock(bank, cfg.spec.clock?.channel ?? null);
-            if (block !== null) {
-              throw new Error(scopeRateLimitMessage(
-                block, this.scopeEnableUpgradable(bank, cfg.spec.clock?.channel ?? null),
-              ));
-            }
-          }
-        }
         if (b && !this.updateBus(b.id, cfg)) throw new Error(BUS_CAPTURE_LOCK_ERROR);
       },
       removeBus: (index) => {
@@ -2499,12 +2409,6 @@ export class App {
     attach: (id: string, ch: Record<number, number>, opts: Record<string, string | number> = {}) =>
       this.attachAnalyzer(id, ch, opts),
     setSettings: (s: Partial<CaptureSettings>) => {
-      if (s.samplerate !== undefined && this.oscilloscopeActive()) {
-        const block = scopeRateBlockAt(
-          s.samplerate, this.neededWidth(), this.rateCeilings, true,
-        );
-        if (block !== null) throw new Error(scopeRateBlockMessage(block));
-      }
       this.applySettings({ ...this.settings, ...s });
     },
     /** Add a parallel-bus view; missing fields take the panel's defaults. */
@@ -2662,9 +2566,8 @@ export class App {
  */
 function clampSettings(
   s: CaptureSettings, ceilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ,
-  minSamplerate = 0,
 ): CaptureSettings {
-  const samplerate = Math.max(minSamplerate, Math.min(s.samplerate, ceilings[s.channels] ?? 200e6));
+  const samplerate = Math.min(s.samplerate, ceilings[s.channels] ?? 200e6);
   const max = MAX_SAMPLES / samplerate;
   const savedModes = s.triggerModes ?? {};
   const configuredConditions = Object.keys(savedModes).length ? modesToConditions(savedModes)

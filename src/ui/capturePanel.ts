@@ -24,7 +24,6 @@ import {
 } from './channelBanks.js';
 import { t } from './i18n.js';
 import { chipForeground } from './metrics.js';
-import { SCOPE_MIN_SAMPLERATE_HZ, scopeRateBlockAt, scopeRateOptions } from './scopeRateLimits.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
 import type { CaptureSettings, ChannelState } from './state.js';
@@ -54,7 +53,6 @@ export interface CapturePanelView {
     /** Retained length (`store.length`) and the loop limit; the limit is 0 outside loop mode. */
     kept: number; limit: number } | null;
   maxSamplerateHz: Readonly<Record<number, number>>;
-  maxSamplerateHzFull: Readonly<Record<number, number>>;
   triggerState: 'off' | 'waiting' | 'triggered' | 'not-found';
 }
 
@@ -198,22 +196,9 @@ export class CapturePanel {
     // ---- rate + threshold
     const rowRT = div('field-row');
     const ceiling = v.maxSamplerateHz[s.channels] ?? 200e6;
-    const rateOptions: SelectOptionTuple[] = scopeRateOptions(
-      SAMPLERATES_HZ, s.channels, v.maxSamplerateHz, v.oscilloscopeActive,
-    ).map((option): SelectOptionTuple => {
-      if (option.block === null) return [String(option.rate), formatRate(option.rate)];
-      const note = option.block.kind === 'floor'
-        ? t('capturePanel.rateScopeFloor', { min: formatRate(SCOPE_MIN_SAMPLERATE_HZ) })
-        : scopeRateBlockAt(option.rate, s.channels, v.maxSamplerateHzFull, true) === null
-          ? t('capturePanel.rateScopeCeilingUpgradable', {
-            channels: option.block.width, rate: formatRate(option.block.maxRate),
-          })
-          : t('capturePanel.rateScopeCeiling', {
-            channels: option.block.width, rate: formatRate(option.block.maxRate),
-          });
-      const label = formatRate(option.rate);
-      return [String(option.rate), label, label, { disabled: true, note }];
-    });
+    const rateOptions: SelectOptionTuple[] = SAMPLERATES_HZ
+      .filter((r) => r <= ceiling)
+      .map((r) => [String(r), formatRate(r)]);
     const rate = selectControl(
       'capture.sampleRate',
       t('capturePanel.sampleRate'),

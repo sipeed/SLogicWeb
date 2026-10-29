@@ -3,16 +3,9 @@ import { fuzzyRank, highlightRuns } from './fuzzy.js';
 export interface SelectOption {
   readonly value: string;
   readonly label: string;
-  readonly disabled?: boolean;
-  readonly note?: string;
 }
 
-export interface SelectOptionMeta {
-  readonly disabled?: boolean;
-  readonly note?: string;
-}
-
-export type SelectOptionTuple = readonly [value: string, label: string, search?: string, meta?: SelectOptionMeta];
+export type SelectOptionTuple = readonly [value: string, label: string, search?: string];
 
 export interface SelectSearch {
   readonly label: string;
@@ -40,7 +33,7 @@ export function matchPrefix(options: readonly SelectOption[], prefix: string, fr
   for (let step = 1; step <= options.length; step++) {
     const index = (((from + step) % options.length) + options.length) % options.length;
     const option = options[index];
-    if (option !== undefined && option.disabled !== true && option.label.toLowerCase().startsWith(needle)) return index;
+    if (option !== undefined && option.label.toLowerCase().startsWith(needle)) return index;
   }
   return -1;
 }
@@ -68,11 +61,7 @@ export function clipHighlightPositions(
 }
 
 function normalizeOptions(options: readonly SelectOptionTuple[]): readonly SelectOption[] {
-  return options.map(([value, label, , meta]) => ({
-    value, label,
-    ...(meta?.disabled === true ? { disabled: true } : {}),
-    ...(meta?.note !== undefined && meta.note !== '' ? { note: meta.note } : {}),
-  }));
+  return options.map(([value, label]) => ({ value, label }));
 }
 
 function buildChevron(): SVGSVGElement {
@@ -217,21 +206,7 @@ export class SelectControl extends EventTarget {
       text.className = 'select-item-label';
       text.textContent = option.label;
 
-      if (option.disabled === true) {
-        item.classList.add('select-item--disabled');
-        item.setAttribute('aria-disabled', 'true');
-      }
-      if (option.note !== undefined) {
-        const itemBody = document.createElement('span');
-        itemBody.className = 'select-item-body';
-        const note = document.createElement('span');
-        note.className = 'select-item-note';
-        note.textContent = option.note;
-        itemBody.append(text, note);
-        item.append(check, itemBody);
-      } else {
-        item.append(check, text);
-      }
+      item.append(check, text);
       item.addEventListener('pointerdown', (event) => event.preventDefault());
       item.addEventListener('click', () => this.commit(index));
 
@@ -334,21 +309,15 @@ export class SelectControl extends EventTarget {
     this.searchInput?.removeAttribute('aria-activedescendant');
   }
 
-  private firstEnabledIndex(): number {
-    return this.options.findIndex((option) => option.disabled !== true);
-  }
-
-  private enabledVisibleIndices(): number[] {
-    return this.visibleIndices().filter((index) => this.options[index]?.disabled !== true);
-  }
-
   private moveActive(delta: number): void {
-    const pool = this.search === null
-      ? this.options.flatMap((option, index) => option.disabled === true ? [] : [index])
-      : this.enabledVisibleIndices();
-    const position = pool.indexOf(this.active);
-    const next = moveActiveIndex(position, delta, pool.length);
-    if (next >= 0) this.setActive(pool[next]!);
+    if (this.search === null) {
+      this.setActive(moveActiveIndex(this.active, delta, this.options.length));
+      return;
+    }
+    const visible = this.visibleIndices();
+    const position = visible.indexOf(this.active);
+    const next = moveActiveIndex(position, delta, visible.length);
+    if (next >= 0) this.setActive(visible[next]);
   }
 
   private paintLabel(index: number, positions: readonly number[] | null): void {
@@ -389,10 +358,7 @@ export class SelectControl extends EventTarget {
     if (query === '') {
       this.restoreFullList();
       const selected = this.selectedIndex();
-      const preferred = selected >= 0 ? selected : 0;
-      const active = this.options[preferred]?.disabled === true ? this.firstEnabledIndex() : preferred;
-      if (active >= 0) this.setActive(active);
-      else this.clearActive();
+      this.setActive(selected >= 0 ? selected : 0);
       return;
     }
     const ranks = fuzzyRank(query, this.searchTexts);
@@ -410,9 +376,8 @@ export class SelectControl extends EventTarget {
         this.emptyEl.textContent = search.empty.split('{query}').join(query);
       }
     }
-    const firstEnabled = ranks.find((rank) => this.options[rank.index]?.disabled !== true);
-    if (firstEnabled === undefined) this.clearActive();
-    else this.setActive(firstEnabled.index);
+    if (ranks.length === 0) this.clearActive();
+    else this.setActive(ranks[0].index);
   }
 
   private onToggle(state: string): void {
@@ -420,9 +385,8 @@ export class SelectControl extends EventTarget {
     this.trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) {
       const selected = this.selectedIndex();
-      const preferred = this.active >= 0 ? this.active : selected >= 0 ? selected : 0;
-      const active = this.options[preferred]?.disabled === true ? this.firstEnabledIndex() : preferred;
-      if (active >= 0) this.setActive(active);
+      const active = this.active >= 0 ? this.active : selected >= 0 ? selected : 0;
+      this.setActive(active);
       this.searchInput?.focus();
     } else {
       this.clearActive();
@@ -444,9 +408,9 @@ export class SelectControl extends EventTarget {
     if (key === 'Home' || key === 'End') {
       if (!this.isOpen()) return;
       event.preventDefault();
-      const visible = this.enabledVisibleIndices();
+      const visible = this.visibleIndices();
       if (visible.length === 0) return;
-      this.setActive(key === 'Home' ? visible[0]! : visible[visible.length - 1]!);
+      this.setActive(key === 'Home' ? visible[0] : visible[visible.length - 1]);
       return;
     }
     if (key === 'Enter' || key === ' ') {
@@ -491,10 +455,10 @@ export class SelectControl extends EventTarget {
       return;
     }
     if (key === 'Home' || key === 'End') {
-      const visible = this.enabledVisibleIndices();
+      const visible = this.visibleIndices();
       if (visible.length === 0) return;
       event.preventDefault();
-      this.setActive(key === 'Home' ? visible[0]! : visible[visible.length - 1]!);
+      this.setActive(key === 'Home' ? visible[0] : visible[visible.length - 1]);
       return;
     }
     if (key === 'Enter') {
@@ -523,7 +487,7 @@ export class SelectControl extends EventTarget {
   private commit(index: number): void {
     if (this.disabledState) return;
     const option = this.options[index];
-    if (option === undefined || option.disabled === true) return;
+    if (option === undefined) return;
     const changed = option.value !== this.current;
     if (changed) {
       this.current = option.value;

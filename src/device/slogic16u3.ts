@@ -32,7 +32,6 @@ import {
   EP_IN,
   MAX_SAMPLERATE_HZ,
   MAX_SAMPLERATE_HZ_SLOGIC32_U3,
-  MAX_SAMPLERATE_HZ_SLOGIC32_U3_5G,
   CONTROL_TIMEOUT_MS,
   PID_SLOGIC16_U3,
   PID_SLOGIC32_U3,
@@ -137,10 +136,6 @@ const DRAIN_FLOOR_MS = 250;
  * before `stop()` runs. The bench must never be the host that cuts a producing device off.
  */
 const BENCH_DRAIN_MS = 400;
-
-const LINK_PROBE_SECONDS = 0.2;
-const LINK_PROBE_DRAIN_MS = 250;
-const LINK_PROBE_10G_MIN_MBPS = 600;
 
 /**
  * A capture that has not received a single byte this long after RUN is looking at a
@@ -447,11 +442,7 @@ export class Slogic16U3 implements Device {
   readonly name: string;
   readonly serial: string;
   readonly maxChannels: number;
-  private rateCeilings: Readonly<Record<number, number>>;
-
-  get maxSamplerateHz(): Readonly<Record<number, number>> {
-    return this.rateCeilings;
-  }
+  readonly maxSamplerateHz: Readonly<Record<number, number>>;
 
   /**
    * Fatal errors from the background read loop land here. They are also
@@ -540,7 +531,7 @@ export class Slogic16U3 implements Device {
   constructor(private readonly usb: USBDevice) {
     const is32 = usb.productId === PID_SLOGIC32_U3;
     this.maxChannels = is32 ? 32 : 16;
-    this.rateCeilings = is32 ? MAX_SAMPLERATE_HZ_SLOGIC32_U3 : MAX_SAMPLERATE_HZ;
+    this.maxSamplerateHz = is32 ? MAX_SAMPLERATE_HZ_SLOGIC32_U3 : MAX_SAMPLERATE_HZ;
     this.name = usb.productName ?? (is32 ? 'SLogic32 U3' : 'SLogic16 U3');
     this.serial = usb.serialNumber ?? '';
   }
@@ -911,43 +902,6 @@ export class Slogic16U3 implements Device {
     // be free to wait as long as it likes.
     await this.clearSampleLimit(bus);
     this.trace({ dir: 'info', note: 'device stopped, interface 0 claimed' });
-  }
-
-  async probeLinkClass(): Promise<void> {
-    if (this.maxChannels !== 32) return;
-    const cfg: CaptureConfig = {
-      channels: 32,
-      samplerate: 100e6,
-      thresholdVolts: 1.6,
-      testMode: TEST_MODE_USB_MAX_SPEED,
-    };
-    try {
-      await this.start(cfg, () => {}, undefined, {
-        discard: true,
-        deviceSampleLimit: Math.floor(LINK_PROBE_SECONDS * cfg.samplerate),
-      });
-    } catch (e) {
-      if (e instanceof TransportDeadError) throw e;
-      this.rateCeilings = MAX_SAMPLERATE_HZ_SLOGIC32_U3_5G;
-      console.warn('[slogic] link probe start failed; assuming the 5 Gbps ceiling table', e);
-      return;
-    }
-    let mbps = 0;
-    try {
-      await new Promise((r) => setTimeout(r, LINK_PROBE_SECONDS * 1000 + LINK_PROBE_DRAIN_MS));
-      await this.stop();
-      mbps = this.getStats().rawMBps;
-    } catch (e) {
-      if (e instanceof TransportDeadError) throw e;
-      this.rateCeilings = MAX_SAMPLERATE_HZ_SLOGIC32_U3_5G;
-      console.warn('[slogic] link probe run failed; assuming the 5 Gbps ceiling table', e);
-      return;
-    }
-    if (mbps < LINK_PROBE_10G_MIN_MBPS) this.rateCeilings = MAX_SAMPLERATE_HZ_SLOGIC32_U3_5G;
-    this.trace({
-      dir: 'info',
-      note: `link probe: ${mbps.toFixed(0)} MB/s -> ${mbps >= LINK_PROBE_10G_MIN_MBPS ? '10' : '5'} Gbps ceiling table`,
-    });
   }
 
   async close(): Promise<void> {

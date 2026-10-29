@@ -128,30 +128,6 @@ check(
   `ap=${JSON.stringify(resolveLabel(prefixOptions, 'ap'))}, x=${JSON.stringify(resolveLabel(prefixOptions, 'x'))}`,
 );
 
-const mixedOptions: readonly SelectOption[] = [
-  { value: 'a', label: 'Apple' },
-  { value: 'ap', label: 'Apricot', disabled: true, note: 'blocked' },
-  { value: 'b', label: 'Banana' },
-];
-const disabledPrefixCases: readonly (readonly [string, number, number])[] = [
-  ['ap', 0, 0],
-  ['apr', 0, -1],
-  ['ap', 2, 0],
-  ['b', 0, 2],
-];
-const disabledPrefixFailures = disabledPrefixCases.filter(
-  ([prefix, from, expected]) => matchPrefix(mixedOptions, prefix, from) !== expected,
-);
-check(
-  'typeahead never lands on a disabled option',
-  disabledPrefixFailures.length === 0,
-  disabledPrefixFailures.length === 0
-    ? `all ${disabledPrefixCases.length} literal cases matched`
-    : disabledPrefixFailures
-      .map(([prefix, from]) => `'${prefix}'@${from}=${matchPrefix(mixedOptions, prefix, from)}`)
-      .join('; '),
-);
-
 const clipCases: readonly (readonly [readonly number[], number, readonly number[]])[] = [
   [[], 5, []],
   [[0, 1, 2], 3, [0, 1, 2]],
@@ -374,7 +350,7 @@ check(
 
   const searchNeedles = [
     "import { fuzzyRank, highlightRuns } from './fuzzy.js';",
-    'export type SelectOptionTuple = readonly [value: string, label: string, search?: string, meta?: SelectOptionMeta];',
+    'export type SelectOptionTuple = readonly [value: string, label: string, search?: string];',
     'this.searchTexts = options.map((option) => option[2] ?? option[1]);',
     'fuzzyRank(query, this.searchTexts)',
     'clipHighlightPositions(positions, label.length)',
@@ -394,7 +370,7 @@ check(
     "span.className = 'select-item-hit'",
     'labelEl.replaceChildren()',
     "split('{query}')",
-    'moveActiveIndex(position, delta, pool.length)',
+    'moveActiveIndex(position, delta, visible.length)',
     'this.searchInput?.focus()',
     'const owner = this.searchInput ?? this.trigger;',
     'this.indicesByItem.set(item, index)',
@@ -404,67 +380,6 @@ check(
     'the opt-in search mode wires a combobox input, filtered hidden items, and hit painting',
     missingSearch.length === 0,
     `missing=${JSON.stringify(missingSearch)}`,
-  );
-
-  const disabledNeedles = [
-    'readonly disabled?: boolean;',
-    'readonly note?: string;',
-    'export interface SelectOptionMeta',
-    "item.classList.add('select-item--disabled')",
-    "item.setAttribute('aria-disabled', 'true')",
-    "note.className = 'select-item-note'",
-    "itemBody.className = 'select-item-body'",
-    'option.disabled !== true && option.label.toLowerCase().startsWith(needle)',
-    'if (option === undefined || option.disabled === true) return;',
-    'private firstEnabledIndex()',
-    'private enabledVisibleIndices()',
-    "(meta?.disabled === true ? { disabled: true } : {})",
-    "(meta?.note !== undefined && meta.note !== '' ? { note: meta.note } : {})",
-  ];
-  const missingDisabled = disabledNeedles.filter((needle) => !src.includes(needle));
-  const disabledCss =
-    /\.select-item--disabled\s*\{[^}]*opacity:\s*0\.55/.test(css) &&
-    /\.select-item--disabled:hover\s*\{[^}]*background:\s*none/.test(css) &&
-    /\.select-item-note\s*\{[^}]*color:\s*var\(--muted-foreground\)/.test(css) &&
-    /\.select-item-body\s*\{[^}]*flex-direction:\s*column/.test(css);
-  check(
-    'per-option disabled state renders aria-disabled with a note line and is refused by commit and typeahead',
-    missingDisabled.length === 0 && disabledCss,
-    `missing=${JSON.stringify(missingDisabled)}, disabledCss=${disabledCss}`,
-  );
-
-  const sliceMethod = (start: string, end: string): string => {
-    const from = src.indexOf(start);
-    return from >= 0 ? src.slice(from, src.indexOf(end, from)) : '';
-  };
-  const skipSites: readonly (readonly [string, string, string])[] = [
-    ['private enabledVisibleIndices(', 'private moveActive(', 'this.visibleIndices()'],
-    ['private enabledVisibleIndices(', 'private moveActive(', 'this.options[index]?.disabled !== true'],
-    ['private firstEnabledIndex(', 'private enabledVisibleIndices(', 'option.disabled !== true'],
-    ['private moveActive(', 'private paintLabel(', 'option.disabled === true ? [] : [index]'],
-    ['private moveActive(', 'private paintLabel(', 'this.enabledVisibleIndices()'],
-    ['private onTriggerKeyDown(', 'private onSearchKeyDown(', 'const visible = this.enabledVisibleIndices();'],
-    ['private onSearchKeyDown(', 'private commit(', 'const visible = this.enabledVisibleIndices();'],
-    ['private applyQuery(', 'private onToggle(', 'ranks.find((rank) => this.options[rank.index]?.disabled !== true)'],
-    ['private applyQuery(', 'private onToggle(', '? this.firstEnabledIndex() : preferred'],
-    ['private onToggle(', 'private onTriggerKeyDown(', '? this.firstEnabledIndex() : preferred'],
-  ];
-  const missingSkipSites = skipSites.filter(([start, end, needle]) => !sliceMethod(start, end).includes(needle));
-  check(
-    'arrow keys, Home/End, rank landing, and open-time navigation all skip disabled options',
-    missingSkipSites.length === 0,
-    `missing=${JSON.stringify(missingSkipSites.map(([start, , needle]) => `${start}${needle}`))}`,
-  );
-
-  const optionBlock = sliceMethod('this.options.forEach((option, index) => {', 'popover.appendChild(group)');
-  check(
-    'option anatomy stays flat (check+label) without a note and nests label+note under one body',
-    optionBlock.includes('item.append(check, itemBody);') &&
-      optionBlock.includes('itemBody.append(text, note);') &&
-      optionBlock.includes('item.append(check, text);'),
-    `block@${optionBlock.length}, body=${optionBlock.includes('item.append(check, itemBody);')}, ` +
-    `label=${optionBlock.includes('itemBody.append(text, note);')}, ` +
-    `flat=${optionBlock.includes('item.append(check, text);')}`,
   );
 
   const seedBranchIndex = src.indexOf('if (this.search !== null && this.searchInput !== null) {');

@@ -81,7 +81,6 @@ async function handle(message: QueuedCommand): Promise<void> {
         message: error instanceof Error ? error.message : String(error),
       });
       await instance.open();
-      await instance.probeLinkClass();
       device = instance;
       post({
         kind: 'opened',

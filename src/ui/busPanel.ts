@@ -16,14 +16,13 @@ import {
 } from './busView.js';
 import { button, div, labelled, section } from './capturePanel.js';
 import { CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankRange } from './channelBanks.js';
-import { formatCount, formatDuration, formatRate } from './format.js';
+import { formatCount, formatDuration } from './format.js';
 import { t, type MessageKey } from './i18n.js';
 import {
   DEFAULT_LOOP_TIME_UNIT, isLoopTimeUnit, loopSamplesFromTime, loopTimeFromSamples, maxLoopTimeValue,
   type LoopTimeUnit,
 } from './loopTime.js';
 import { OscilloscopeChannelGrid } from './oscilloscopeChannels.js';
-import { scopeEnableVerdict, type ScopeEnableVerdict } from './scopeRateLimits.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { ChannelState } from './state.js';
 
@@ -32,10 +31,6 @@ export interface BusPanelView {
   /** Channels a bus may use: the current capture's, or the device's when there is none. */
   channelCount: number;
   captureLocked: boolean;
-  samplerate: number;
-  captureChannels: ChannelCount;
-  rateCeilings: Readonly<Record<number, number>>;
-  rateCeilingsFull: Readonly<Record<number, number>>;
 }
 
 export interface BusPanelCallbacks {
@@ -411,40 +406,11 @@ export class BusPanel {
       s.body.appendChild(err);
     }
 
-    const draftBank = busChannelBank(current.spec);
-    let scopeBlock: ScopeEnableVerdict | null = null;
-    let scopeUpgradable = false;
-    if (problems.length === 0 && draftBank !== null) {
-      const verdictArgs = {
-        start: draftBank,
-        clockChannel: current.spec.clock?.channel ?? null,
-        currentWidth: v.captureChannels,
-        rate: v.samplerate,
-        deviceChannels: v.channelCount,
-      };
-      const verdict = scopeEnableVerdict({ ...verdictArgs, ceilings: v.rateCeilings });
-      if (!verdict.ok) {
-        scopeBlock = verdict;
-        scopeUpgradable = scopeEnableVerdict({ ...verdictArgs, ceilings: v.rateCeilingsFull }).ok;
-      }
-    }
-    if (scopeBlock !== null) {
-      const err = div('panel-note error');
-      err.dataset.scopeRateNote = '';
-      err.textContent = t(scopeUpgradable ? 'bus.scopeRateLimitedUpgradable' : 'bus.scopeRateLimited', {
-        rate: formatRate(scopeBlock.effectiveRate),
-        channels: scopeBlock.maxWidth,
-        width: scopeBlock.requiredWidth,
-        maxRate: formatRate(scopeBlock.maxRate),
-      });
-      s.body.appendChild(err);
-    }
-
     const actions = div('bus-actions');
     const go = button(t(this.editing ? 'bus.save' : 'bus.addButton'), 'pill primary');
     const editingBank = this.editing !== null && v.buses
       .some((bus) => bus.id === this.editing && busChannelBank(bus.spec) !== null);
-    go.disabled = problems.length > 0 || scopeBlock !== null ||
+    go.disabled = problems.length > 0 ||
       (v.captureLocked && (editingBank || busChannelBank(current.spec) !== null));
     go.addEventListener('click', () => {
       if (go.disabled) return;
@@ -475,8 +441,6 @@ export interface BankBusDialogOpenContext {
   captureChannels: ChannelCount;
   samplerate: number;
   locked: boolean;
-  enableBlock: ScopeEnableVerdict | null;
-  enableUpgradable: boolean;
 }
 
 interface BankBusDetails {
@@ -669,26 +633,6 @@ export class BankBusDialog {
     enable.dataset.adcEnable = '';
     enableLabel.append(enable, document.createTextNode(t('bus.enableBank')));
 
-    const enableBlock = context.enableBlock;
-    let blockNote: HTMLDivElement | null = null;
-    const showBlockNote = (): void => {
-      if (enableBlock === null) return;
-      if (blockNote === null) {
-        blockNote = div('panel-note error');
-        blockNote.dataset.scopeRateNote = '';
-        blockNote.textContent = t(
-          context.enableUpgradable ? 'bus.scopeRateLimitedUpgradable' : 'bus.scopeRateLimited',
-          {
-            rate: formatRate(enableBlock.effectiveRate),
-            channels: enableBlock.maxWidth,
-            width: enableBlock.requiredWidth,
-            maxRate: formatRate(enableBlock.maxRate),
-          },
-        );
-        enableLabel.after(blockNote);
-      }
-    };
-
     const actions = div('channel-settings-actions');
     const cancel = button(t('bus.cancel'), 'pill');
     cancel.type = 'button';
@@ -709,23 +653,12 @@ export class BankBusDialog {
       details ??= this.createDetails(config, context);
       if (details.el.parentNode !== form) form.insertBefore(details.el, actions);
     };
-    enable.addEventListener('change', () => {
-      if (enable.checked && enableBlock !== null) {
-        enable.checked = false;
-        showBlockNote();
-        return;
-      }
-      syncDetails();
-    });
+    enable.addEventListener('change', syncDetails);
 
     form.addEventListener('submit', (event) => {
       event.preventDefault();
       if (context.locked || !form.reportValidity()) return;
       const enabled = enable.checked;
-      if (enabled && enableBlock !== null) {
-        showBlockNote();
-        return;
-      }
       const current = enabled
         ? (details ??= this.createDetails(config, context)).read()
         : { config, loopSamples: context.loopSamples };

@@ -288,49 +288,6 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     `iconOnly=${iconOnly}, sharedFields=${sharedFields}, sortable=${sortable}, ` +
     `disclosures=${disclosures}, nativeDialog=${nativeDialog}, realState=${realState}`);
 
-  const enableGate = dialog.includes('const enableBlock = context.enableBlock;') &&
-    dialog.includes('enable.disabled = context.locked;') &&
-    !dialog.includes('enable.disabled = context.locked ||') &&
-    dialog.includes('enable.checked = false;') &&
-    dialog.includes('showBlockNote();') &&
-    dialog.includes("blockNote.dataset.scopeRateNote = '';") &&
-    dialog.includes("div('panel-note error')") &&
-    dialog.includes('enableLabel.after(blockNote);') &&
-    dialog.includes('if (enabled && enableBlock !== null) {') &&
-    dialog.includes("'bus.scopeRateLimitedUpgradable'") &&
-    dialog.includes(": 'bus.scopeRateLimited',") &&
-    dialog.includes('context.enableUpgradable ?') &&
-    dialog.includes('formatRate(enableBlock.effectiveRate)') &&
-    dialog.includes('formatRate(enableBlock.maxRate)') &&
-    dialog.includes('if (blockNote === null) {') &&
-    (dialog.match(/showBlockNote\(\);/g) ?? []).length === 2;
-  const enCatalog2 = fs.readFileSync('src/ui/locales/en.ts', 'utf8');
-  const rateLimitedKey = /'bus\.scopeRateLimited': '[^']*\{rate\}[^']*\{channels\}[^']*\{width\}[^']*\{maxRate\}[^']*'/.test(enCatalog2);
-  check('the bank dialog blocks enable attempts with a lazy reason note and a submit guard',
-    enableGate && rateLimitedKey, `enableGate=${enableGate}, rateLimitedKey=${rateLimitedKey}`);
-
-  const editorGate = busPanel.includes('samplerate: number;') &&
-    busPanel.includes('captureChannels: ChannelCount;') &&
-    busPanel.includes('rateCeilings: Readonly<Record<number, number>>;') &&
-    busPanel.includes('if (problems.length === 0 && draftBank !== null) {') &&
-    busPanel.includes('scopeEnableVerdict({') &&
-    busPanel.includes('currentWidth: v.captureChannels') &&
-    busPanel.includes('rate: v.samplerate') &&
-    busPanel.includes('ceilings: v.rateCeilings') &&
-    busPanel.includes('deviceChannels: v.channelCount') &&
-    busPanel.includes("t(scopeUpgradable ? 'bus.scopeRateLimitedUpgradable' : 'bus.scopeRateLimited', {") &&
-    busPanel.includes('const verdict = scopeEnableVerdict({ ...verdictArgs, ceilings: v.rateCeilings });') &&
-    busPanel.includes('scopeUpgradable = scopeEnableVerdict({ ...verdictArgs, ceilings: v.rateCeilingsFull }).ok;') &&
-    busPanel.includes('formatRate(scopeBlock.effectiveRate)') &&
-    busPanel.includes('channels: scopeBlock.maxWidth') &&
-    busPanel.includes('width: scopeBlock.requiredWidth') &&
-    busPanel.includes('formatRate(scopeBlock.maxRate)') &&
-    busPanel.includes('go.disabled = problems.length > 0 || scopeBlock !== null ||') &&
-    (busPanel.match(/err\.dataset\.scopeRateNote = '';/g) ?? []).length === 1 &&
-    app.includes('samplerate: this.settings.samplerate, captureChannels: this.settings.channels');
-  check('the generic bus editor blocks rate-limited bank drafts with the shared reason note',
-    editorGate, `editorGate=${editorGate}`);
-
   const globalLoop = dialog.includes('loopSamplesFromTime') && dialog.includes('maxLoopTimeValue') &&
     dialog.includes('formatDuration(samples / context.samplerate)') &&
     app.includes('this.settings = this.bankCaptureSettings(start, loopSamples, next);') &&
