@@ -3,7 +3,9 @@ import {
   WORKSPACE_SCHEMA_VERSION, WORKSPACE_STORAGE_KEY, writeWorkspaceSnapshot,
   type WorkspaceSnapshotV1,
 } from '../workspacePreferences.js';
-import { defaultChannelName, defaultChannels } from '../state.js';
+import {
+  defaultCaptureSettings, defaultChannelName, defaultChannels, modesToConditions, THRESHOLD_VOLT_OPTIONS,
+} from '../state.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
@@ -132,6 +134,22 @@ check('literal false and true survive parsing without coercion',
     'undefined storage');
 }
 
+{
+  const first = defaultCaptureSettings();
+  const second = defaultCaptureSettings();
+  const defaultsMatch = first.channels === 16 && first.samplerate === 16e6 &&
+    first.thresholdVolts === 1.2 && first.mode === 'timer' && first.seconds === 1 &&
+    first.loopSamples === 16_000_000 && first.testMode === 0 && !first.triggerEnableMask &&
+    !first.softwareTrigger && first.triggerChannel === 0 && first.triggerKind === 'rising' &&
+    first.triggerLevel === 1 && first.preTriggerPercent === 10;
+  first.triggerModes[0] = 'high';
+  first.triggerConditions.push({ channel: 0, kind: 'level', level: 1 });
+  check('default capture settings preserve shipping values and allocate independent nested state',
+    defaultsMatch && Object.keys(second.triggerModes).length === 0 && second.triggerConditions.length === 0 &&
+    THRESHOLD_VOLT_OPTIONS.join(',') === '0.6,0.9,1.2,1.5,1.65,1.8,2.5,3.3',
+    JSON.stringify(second));
+}
+
 for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
   const parsed = parseWorkspaceSnapshot(JSON.stringify({
     version: 1,
@@ -224,6 +242,98 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     serialized);
 }
 
+{
+  const capture = {
+    samplerate: 25e6,
+    thresholdVolts: 1.65,
+    mode: 'free' as const,
+    seconds: 2.5,
+    loopSamples: 123_456,
+    testMode: 2 as const,
+    triggerEnableMask: true,
+    triggerModes: { 0: 'rising' as const, 3: 'dont-care' as const, 7: 'high' as const },
+    preTriggerPercent: 35,
+  };
+  const parsed = parseWorkspaceSnapshot(serializeWorkspaceSnapshot({
+    version: 1,
+    detailedLabels: true,
+    capture,
+  }));
+  check('every canonical capture/trigger field round-trips with deterministic trigger-key ordering',
+    JSON.stringify(parsed?.capture) === JSON.stringify(capture),
+    JSON.stringify(parsed?.capture));
+}
+
+{
+  const parsed = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    capture: {
+      samplerate: 123_456,
+      thresholdVolts: 1.3,
+      mode: 'invalid',
+      testMode: 9,
+      triggerEnableMask: 'true',
+      seconds: '2',
+      loopSamples: null,
+      preTriggerPercent: null,
+    },
+  }));
+  const defaults = defaultCaptureSettings();
+  check('unsupported capture scalars independently fall back to factory defaults',
+    parsed?.capture?.samplerate === defaults.samplerate &&
+    parsed.capture.thresholdVolts === defaults.thresholdVolts && parsed.capture.mode === defaults.mode &&
+    parsed.capture.testMode === defaults.testMode &&
+    parsed.capture.triggerEnableMask === defaults.triggerEnableMask &&
+    parsed.capture.seconds === defaults.seconds && parsed.capture.loopSamples === defaults.loopSamples &&
+    parsed.capture.preTriggerPercent === defaults.preTriggerPercent,
+    JSON.stringify(parsed?.capture));
+}
+
+{
+  const parsed = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    channels: Array.from({ length: 4 }, () => ({})),
+    capture: {
+      triggerModes: {
+        0: 'rising', 1: 'invalid', 2: 'high', 4: 'edge', '-1': 'low', '01': 'falling', x: 'edge',
+      },
+    },
+  }));
+  check('invalid trigger channel keys and modes are dropped without creating conditions',
+    JSON.stringify(parsed?.capture?.triggerModes) === '{"0":"rising","2":"high"}' &&
+    modesToConditions(parsed?.capture?.triggerModes ?? {}).length === 2,
+    JSON.stringify(parsed?.capture?.triggerModes));
+}
+
+{
+  const parsed = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    capture: {
+      samplerate: 25e6,
+      triggerEnableMask: false,
+      triggerModes: { 0: 'rising' },
+      channels: 128,
+      softwareTrigger: true,
+      triggerConditions: [{ channel: 99, kind: 'edge', level: 1 }],
+      triggerChannel: 99,
+      triggerKind: 'edge',
+      triggerLevel: 0,
+      samples: 1000,
+      analyzers: ['uart'],
+    },
+  }));
+  const capture = parsed?.capture;
+  if (!capture) throw new Error('capture did not parse');
+  const derivedAbsent = capture && !('channels' in capture) && !('softwareTrigger' in capture) &&
+    !('triggerConditions' in capture) && !('triggerChannel' in capture) && !('triggerKind' in capture) &&
+    !('triggerLevel' in capture) && !('samples' in capture) && !('analyzers' in capture);
+  const serialized = serializeWorkspaceSnapshot({ version: 1, detailedLabels: true, capture });
+  check('crafted derived capture/runtime fields are neither restored nor serialized',
+    derivedAbsent && !serialized.includes('softwareTrigger') && !serialized.includes('triggerConditions') &&
+    !serialized.includes('triggerChannel') && !serialized.includes('samples') && !serialized.includes('analyzers'),
+    serialized);
+}
+
 const app = fs.readFileSync('src/ui/app.ts', 'utf8');
 const constructorStart = app.indexOf('constructor() {');
 const constructorEnd = constructorStart >= 0
@@ -279,7 +389,10 @@ check('the App snapshot boundary serializes canonical labels/channels/order and 
   !app.includes('localStorage'),
   persistBody.replace(/\s+/g, ' ').trim());
 
-const writeMethods = ['afterChannelChange', 'configureChannel', 'reorder', 'adoptCapture', 'adoptDeviceChannels', 'startCapture'];
+const writeMethods = [
+  'applySettings', 'afterChannelChange', 'configureChannel', 'reorder', 'adoptCapture', 'adoptDeviceChannels',
+  'startCapture', 'loadDemo',
+];
 const missingWriteMethods = writeMethods.filter((name) => {
   const syncStart = app.indexOf(`private ${name}(`);
   const start = syncStart >= 0 ? syncStart : app.indexOf(`private async ${name}(`);
@@ -292,6 +405,26 @@ check('all committed channel paths share the writer and the initial empty store 
     'createSampleStore(channelWidthForProbes(this.channels.length), this.settings.samplerate)') &&
   !constructorBody.includes('createSampleStore(this.settings.channels, this.settings.samplerate)'),
   `missing=${JSON.stringify(missingWriteMethods)}`);
+
+const capturePanel = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
+const captureDerivation = constructorBody.includes('const triggerConditions = modesToConditions(triggerModes);') &&
+  constructorBody.includes('triggerChannel: first?.channel ?? 0') &&
+  constructorBody.includes('triggerKind: first?.kind ?? \'rising\'') &&
+  constructorBody.includes('triggerLevel: first?.level ?? 1') &&
+  constructorBody.includes('channels: this.neededWidth()') &&
+  constructorBody.includes('}, this.rateCeilings);');
+const sharedSettingsPath = app.includes('onSettings: (s) => this.applySettings(s)') &&
+  app.includes('this.applySettings({ ...this.settings, ...s });') &&
+  app.includes('private applySettings(s: CaptureSettings): void {');
+check('capture restore rebuilds canonical trigger derivatives and panel/debug/assistant use one commit path',
+  app.includes('private settings: CaptureSettings = defaultCaptureSettings();') &&
+  capturePanel.includes('THRESHOLD_VOLT_OPTIONS') && !capturePanel.includes('const THRESHOLDS') &&
+  captureDerivation && sharedSettingsPath && snapshotBody.includes('capture: {') &&
+  snapshotBody.includes('samplerate: this.settings.samplerate') &&
+  snapshotBody.includes('triggerModes: { ...this.settings.triggerModes }') &&
+  !snapshotBody.includes('softwareTrigger') && !snapshotBody.includes('triggerConditions') &&
+  !snapshotBody.includes('triggerChannel'),
+  `derivation=${captureDerivation}, shared=${sharedSettingsPath}`);
 
 const html = fs.readFileSync('index.html', 'utf8');
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);

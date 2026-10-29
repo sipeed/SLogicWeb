@@ -27,10 +27,8 @@ import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
 import type { CaptureSettings, ChannelState } from './state.js';
-import { clampLoopSamples } from './state.js';
+import { clampLoopSamples, THRESHOLD_VOLT_OPTIONS } from './state.js';
 import { MAX_SAMPLES } from './captureIO.js';
-
-const THRESHOLDS = [0.6, 0.9, 1.2, 1.5, 1.65, 1.8, 2.5, 3.3];
 
 export interface CapturePanelCallbacks {
   onSettings(next: CaptureSettings): void;
@@ -211,12 +209,12 @@ export class CapturePanel {
       this.cb.onSettings({ ...s, samplerate: Number(rate.value) }));
     rowRT.appendChild(rate.el);
 
-    const thresholdOptions: SelectOptionTuple[] = THRESHOLDS.map((t) => [String(t), `${t} V`]);
+    const thresholdOptions: SelectOptionTuple[] = THRESHOLD_VOLT_OPTIONS.map((t) => [String(t), `${t} V`]);
     const th = selectControl(
       'capture.threshold',
       t('capturePanel.threshold'),
       thresholdOptions,
-      String(nearest(THRESHOLDS, s.thresholdVolts)),
+      String(nearest(THRESHOLD_VOLT_OPTIONS, s.thresholdVolts)),
     );
     th.addEventListener('change', () =>
       this.cb.onSettings({ ...s, thresholdVolts: Number(th.value) }));
@@ -495,7 +493,7 @@ function oscilloscopeButton(
   return b;
 }
 
-function nearest(list: number[], v: number): number {
+function nearest(list: readonly number[], v: number): number {
   return list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), list[0]!);
 }
 

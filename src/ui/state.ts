@@ -81,6 +81,28 @@ export interface CaptureSettings {
   preTriggerPercent: number;
 }
 
+export const THRESHOLD_VOLT_OPTIONS = [0.6, 0.9, 1.2, 1.5, 1.65, 1.8, 2.5, 3.3] as const;
+
+export function defaultCaptureSettings(): CaptureSettings {
+  return {
+    channels: 16,
+    samplerate: 16e6,
+    thresholdVolts: 1.2,
+    mode: 'timer',
+    seconds: 1,
+    loopSamples: DEFAULT_LOOP_SAMPLES,
+    testMode: 0,
+    triggerEnableMask: false,
+    softwareTrigger: false,
+    triggerModes: {},
+    triggerConditions: [],
+    triggerChannel: 0,
+    triggerKind: 'rising',
+    triggerLevel: 1,
+    preTriggerPercent: 10,
+  };
+}
+
 export function effectiveCaptureMode(
   storedMode: CaptureSettings['mode'], oscilloscopeActive: boolean,
 ): CaptureSettings['mode'] {

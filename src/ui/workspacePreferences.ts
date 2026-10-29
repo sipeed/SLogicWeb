@@ -1,5 +1,9 @@
 import { isChannelCount, type ChannelCount } from '../types.js';
-import { defaultChannelName, defaultChannels } from './state.js';
+import { SAMPLERATES_HZ } from '../device/index.js';
+import {
+  defaultCaptureSettings, defaultChannelName, defaultChannels, THRESHOLD_VOLT_OPTIONS,
+  type CaptureSettings, type TriggerMode,
+} from './state.js';
 
 export const WORKSPACE_STORAGE_KEY = 'logicweb.workspace';
 export const WORKSPACE_SCHEMA_VERSION = 1 as const;
@@ -10,11 +14,24 @@ export interface PersistedChannel {
   enabled: boolean;
 }
 
+export interface PersistedCaptureSettings {
+  samplerate: number;
+  thresholdVolts: number;
+  mode: CaptureSettings['mode'];
+  seconds: number;
+  loopSamples: number;
+  testMode: 0 | 1 | 2;
+  triggerEnableMask: boolean;
+  triggerModes: Record<number, TriggerMode>;
+  preTriggerPercent: number;
+}
+
 export interface WorkspaceSnapshotV1 {
   version: typeof WORKSPACE_SCHEMA_VERSION;
   detailedLabels: boolean;
   channels?: PersistedChannel[];
   order?: number[];
+  capture?: PersistedCaptureSettings;
 }
 
 function storage(): Storage | null {
@@ -60,6 +77,58 @@ function restoreOrder(value: unknown, capacity: number): number[] {
   return order;
 }
 
+function isTriggerMode(value: unknown): value is TriggerMode {
+  return value === 'low' || value === 'high' || value === 'rising' ||
+    value === 'falling' || value === 'edge' || value === 'dont-care';
+}
+
+function restoreTriggerModes(value: unknown, capacity: number): Record<number, TriggerMode> {
+  const modes: Record<number, TriggerMode> = {};
+  if (!isRecord(value)) return modes;
+  for (const [key, mode] of Object.entries(value)) {
+    if (!/^(0|[1-9]\d*)$/.test(key)) continue;
+    const channel = Number(key);
+    if (!Number.isSafeInteger(channel) || channel < 0 || channel >= capacity || !isTriggerMode(mode)) continue;
+    modes[channel] = mode;
+  }
+  return modes;
+}
+
+function restoreCapture(value: unknown, capacity: number): PersistedCaptureSettings {
+  const defaults = defaultCaptureSettings();
+  const capture: PersistedCaptureSettings = {
+    samplerate: defaults.samplerate,
+    thresholdVolts: defaults.thresholdVolts,
+    mode: defaults.mode,
+    seconds: defaults.seconds,
+    loopSamples: defaults.loopSamples,
+    testMode: defaults.testMode,
+    triggerEnableMask: defaults.triggerEnableMask,
+    triggerModes: {},
+    preTriggerPercent: defaults.preTriggerPercent,
+  };
+  if (!isRecord(value)) return capture;
+  if (typeof value.samplerate === 'number' && SAMPLERATES_HZ.includes(value.samplerate)) {
+    capture.samplerate = value.samplerate;
+  }
+  if (typeof value.thresholdVolts === 'number' &&
+      (THRESHOLD_VOLT_OPTIONS as readonly number[]).includes(value.thresholdVolts)) {
+    capture.thresholdVolts = value.thresholdVolts;
+  }
+  if (value.mode === 'free' || value.mode === 'timer' || value.mode === 'loop') capture.mode = value.mode;
+  if (typeof value.seconds === 'number' && Number.isFinite(value.seconds)) capture.seconds = value.seconds;
+  if (typeof value.loopSamples === 'number' && Number.isFinite(value.loopSamples)) {
+    capture.loopSamples = value.loopSamples;
+  }
+  if (value.testMode === 0 || value.testMode === 1 || value.testMode === 2) capture.testMode = value.testMode;
+  if (typeof value.triggerEnableMask === 'boolean') capture.triggerEnableMask = value.triggerEnableMask;
+  capture.triggerModes = restoreTriggerModes(value.triggerModes, capacity);
+  if (typeof value.preTriggerPercent === 'number' && Number.isFinite(value.preTriggerPercent)) {
+    capture.preTriggerPercent = value.preTriggerPercent;
+  }
+  return capture;
+}
+
 export function parseWorkspaceSnapshot(
   raw: string | null, fallbackChannelCount: ChannelCount = 16,
 ): WorkspaceSnapshotV1 | null {
@@ -77,6 +146,7 @@ export function parseWorkspaceSnapshot(
     detailedLabels: typeof parsed.detailedLabels === 'boolean' ? parsed.detailedLabels : true,
     channels,
     order: restoreOrder(parsed.order, channels.length),
+    capture: restoreCapture(parsed.capture, channels.length),
   };
 }
 
@@ -97,6 +167,21 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
     serialized.channels = snapshot.channels.map(({ name, color, enabled }) => ({ name, color, enabled }));
   }
   if (snapshot.order) serialized.order = [...snapshot.order];
+  if (snapshot.capture) {
+    const capture = snapshot.capture;
+    serialized.capture = {
+      samplerate: capture.samplerate,
+      thresholdVolts: capture.thresholdVolts,
+      mode: capture.mode,
+      seconds: capture.seconds,
+      loopSamples: capture.loopSamples,
+      testMode: capture.testMode,
+      triggerEnableMask: capture.triggerEnableMask,
+      triggerModes: Object.fromEntries(Object.entries(capture.triggerModes)
+        .sort(([a], [b]) => Number(a) - Number(b))),
+      preTriggerPercent: capture.preTriggerPercent,
+    };
+  }
   return JSON.stringify(serialized);
 }
 

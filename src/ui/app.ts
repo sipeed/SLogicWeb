@@ -67,7 +67,7 @@ import { Overlay, paintMarkerChip, type HoverMeasurement } from './overlay.js';
 import { PanelResizer } from './panelResizer.js';
 import { StoreRef } from './storeRef.js';
 import {
-  analyzerColor, defaultChannels, defaultChannelName, channelColor, DEFAULT_TRIGGER_MODE,
+  analyzerColor, defaultCaptureSettings, defaultChannels, defaultChannelName, channelColor, DEFAULT_TRIGGER_MODE,
   edgeTriggerAutoArms, clampLoopSamples, DEFAULT_LOOP_SAMPLES, effectiveCaptureMode, loopDropSamples,
   modesToConditions, triggerModeFromCondition,
   type AnalyzerState, type CaptureSettings, type ChannelState, type TriggerMode,
@@ -139,13 +139,7 @@ export class App {
   private lanes: Lane[] = [];
   private nextAnalyzer = 0;
 
-  private settings: CaptureSettings = {
-    channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'timer', seconds: 1,
-    loopSamples: DEFAULT_LOOP_SAMPLES,
-    testMode: 0, triggerEnableMask: false, softwareTrigger: false, triggerModes: {},
-    triggerConditions: [], triggerChannel: 0,
-    triggerKind: 'rising', triggerLevel: 1, preTriggerPercent: 10,
-  };
+  private settings: CaptureSettings = defaultCaptureSettings();
 
   private device: Device | null = null;
   private deviceEpoch = 0;
@@ -235,7 +229,19 @@ export class App {
       this.channels = (workspace.channels ?? defaultChannels(16)).map((channel, index) => ({ ...channel, index }));
       this.order = workspace.order ?? this.channels.map((channel) => channel.index);
     }
-    this.settings = clampSettings({ ...this.settings, channels: this.neededWidth() }, this.rateCeilings);
+    const triggerModes = workspace?.capture?.triggerModes ?? {};
+    const triggerConditions = modesToConditions(triggerModes);
+    const first = triggerConditions[0];
+    this.settings = clampSettings({
+      ...defaultCaptureSettings(),
+      ...(workspace?.capture ?? {}),
+      channels: this.neededWidth(),
+      triggerModes,
+      triggerConditions,
+      triggerChannel: first?.channel ?? 0,
+      triggerKind: first?.kind ?? 'rising',
+      triggerLevel: first?.level ?? 1,
+    }, this.rateCeilings);
     this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(this.workspaceSnapshot());
     this.reflectDetailedLabels();
 
@@ -267,17 +273,7 @@ export class App {
     this.el.side.appendChild(panelHost);
     this.panelHost = panelHost;
     this.capturePanel = new CapturePanel(panelHost, {
-      onSettings: (s) => {
-        const next = clampSettings(s, this.rateCeilings);
-        if (triggerSettingsChanged(this.settings, next)) {
-          this.triggerState = 'off';
-          this.triggerSampleIndex = null;
-          this.dirty = true;
-        }
-        this.settings = next;
-        this.relayout();
-        this.renderPanels();
-      },
+      onSettings: (s) => this.applySettings(s),
       onToggleChannel: (i, on) => this.setChannelEnabled(i, on),
       onToggleBank: (start) => this.setBankEnabled(start),
       onOpenBank: (start) => this.openBankBus(start),
@@ -539,6 +535,19 @@ export class App {
         note,
       });
     }
+  }
+
+  private applySettings(s: CaptureSettings): void {
+    const next = clampSettings(s, this.rateCeilings);
+    if (triggerSettingsChanged(this.settings, next)) {
+      this.triggerState = 'off';
+      this.triggerSampleIndex = null;
+      this.dirty = true;
+    }
+    this.settings = next;
+    this.persistWorkspace();
+    this.relayout();
+    this.renderPanels();
   }
 
   /** Commit one channel-dialog draft. Name and color metadata stay editable during
@@ -1387,6 +1396,17 @@ export class App {
       detailedLabels: this.detailedLabels,
       channels: this.channels.map(({ name, color, enabled }) => ({ name, color, enabled })),
       order: [...this.order],
+      capture: {
+        samplerate: this.settings.samplerate,
+        thresholdVolts: this.settings.thresholdVolts,
+        mode: this.settings.mode,
+        seconds: this.settings.seconds,
+        loopSamples: this.settings.loopSamples,
+        testMode: this.settings.testMode,
+        triggerEnableMask: this.settings.triggerEnableMask,
+        triggerModes: { ...this.settings.triggerModes },
+        preTriggerPercent: this.settings.preTriggerPercent,
+      },
     };
   }
 
@@ -1668,6 +1688,7 @@ export class App {
         { ...this.settings, channels: this.neededWidth(), samplerate: demo.store.samplerate },
         this.rateCeilings,
       );
+      this.persistWorkspace();
       this.relayout();
       this.renderPanels();
       for (const spec of demo.analyzers) {
@@ -2372,15 +2393,7 @@ export class App {
     attach: (id: string, ch: Record<number, number>, opts: Record<string, string | number> = {}) =>
       this.attachAnalyzer(id, ch, opts),
     setSettings: (s: Partial<CaptureSettings>) => {
-      const next = clampSettings({ ...this.settings, ...s }, this.rateCeilings);
-      if (triggerSettingsChanged(this.settings, next)) {
-        this.triggerState = 'off';
-        this.triggerSampleIndex = null;
-        this.dirty = true;
-      }
-      this.settings = next;
-      this.relayout();
-      this.renderPanels();
+      this.applySettings({ ...this.settings, ...s });
     },
     /** Add a parallel-bus view; missing fields take the panel's defaults. */
     addBus: (cfg: Partial<BusViewConfig> & { spec: BusViewConfig['spec'] }) =>
