@@ -1022,6 +1022,61 @@ check('App restores sanitized labels before reflection and initial store creatio
   restoreOrder.every((index, i) => index >= 0 && (i === 0 || index > restoreOrder[i - 1])) && restoreHasNoWrite,
   `order=${JSON.stringify(restoreOrder)}, noWrite=${restoreHasNoWrite}`);
 
+const bootAnalyzerLine = 'this.analyzers = analyzerStatesFrom(workspace?.analyzers ?? []);';
+const bootSequenceLine = 'this.nextAnalyzer = nextAnalyzerSequence(this.analyzers);';
+const bootAnchor = 'this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(';
+const bootRestoreOrder = [
+  'const workspace = readWorkspaceSnapshot();',
+  bootAnalyzerLine,
+  bootSequenceLine,
+  bootAnchor,
+].map((needle) => constructorBody.indexOf(needle));
+const bootSliceStart = bootRestoreOrder[0] ?? -1;
+const bootSliceEnd = bootRestoreOrder[3] ?? -1;
+const bootRestoreSlice = bootSliceStart >= 0 && bootSliceEnd > bootSliceStart
+  ? constructorBody.slice(bootSliceStart, bootSliceEnd) : '';
+const bootForbidden = [
+  'hydrateDecoders', 'runDecode', 'persistWorkspace', 'writeWorkspaceSnapshot', 'demoAnalyzers',
+  'attachAnalyzer', 'warmup', 'adoptDeviceChannels',
+];
+const bootLeaks = bootForbidden.filter((needle) => bootRestoreSlice.includes(needle));
+check('App rebuilds analyzer mounts and the id sequence before the unchanged-value baseline',
+  bootRestoreOrder.every((index, i) => index >= 0 && (i === 0 || index > bootRestoreOrder[i - 1])) &&
+  app.includes('analyzerStatesFrom, nextAnalyzerSequence, readWorkspaceSnapshot'),
+  `order=${JSON.stringify(bootRestoreOrder)}`);
+
+check('the boot restoration slice never hydrates, decodes, connects, claims demo rows or writes',
+  bootRestoreSlice.includes(bootAnalyzerLine) && bootRestoreSlice.includes(bootSequenceLine) &&
+  bootRestoreSlice.includes('this.syncBankChannels();') && bootLeaks.length === 0,
+  `slice=${bootRestoreSlice.length}B, leaks=${JSON.stringify(bootLeaks)}`);
+
+{
+  const stored = JSON.stringify({
+    version: 1,
+    detailedLabels: true,
+    analyzers: [
+      { id: 'i2c-7', decoderId: 'i2c', label: 'I2C', color: '#9A7B2E',
+        channels: { 0: 1, 1: -1 }, options: { address: 72 }, laneChannel: 1 },
+      { id: 'spi-2', decoderId: 'spi', label: 'SPI', color: '#A8504E',
+        channels: { 0: 3 }, options: {}, laneChannel: 3 },
+    ],
+  });
+  const parsedAnalyzers = parseWorkspaceSnapshot(stored)?.analyzers ?? [];
+  const restored = analyzerStatesFrom(parsedAnalyzers);
+  const next = nextAnalyzerSequence(restored);
+  const runtimeFields = restored.filter((analyzer) => analyzer.result !== null || analyzer.index !== null ||
+    analyzer.status !== 'idle' || JSON.stringify(analyzer.note) !== '{"kind":"pending"}');
+  const collided = [...restored.map((analyzer) => analyzer.id), ...parsedAnalyzers.map((a) => a.id)]
+    .some((id) => id === `i2c-${next}` || id === `spi-${next}`);
+  const empty = nextAnalyzerSequence(analyzerStatesFrom(parseWorkspaceSnapshot(
+    JSON.stringify({ version: 1, detailedLabels: true }))?.analyzers ?? []));
+  check('a stored workspace restores idle analyzer states and a non-colliding next sequence',
+    parsedAnalyzers.length === 2 && restored.length === 2 &&
+    restored.map((analyzer) => analyzer.id).join(',') === 'i2c-7,spi-2' && next === 8 &&
+    !collided && empty === 0 && runtimeFields.length === 0,
+    `ids=${restored.map((a) => a.id).join(',')}, next=${next}, empty=${empty}, runtime=${runtimeFields.length}`);
+}
+
 const settingsStart = app.indexOf('private settingsItems(');
 const settingsEnd = settingsStart >= 0 ? app.indexOf('\n  }', settingsStart) : -1;
 const settingsBody = settingsStart >= 0 && settingsEnd > settingsStart

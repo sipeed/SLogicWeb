@@ -58,7 +58,8 @@ import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, set
 import { getMode, getTheme, onThemeChange, setMode, THEME_MODES, THEME_MODE_LABEL_KEYS,
   type ThemeId } from './theme.js';
 import {
-  readWorkspaceSnapshot, serializeWorkspaceSnapshot, WORKSPACE_SCHEMA_VERSION, writeWorkspaceSnapshot,
+  analyzerStatesFrom, nextAnalyzerSequence, readWorkspaceSnapshot, serializeWorkspaceSnapshot,
+  WORKSPACE_SCHEMA_VERSION, writeWorkspaceSnapshot,
   type PersistedAnalyzer, type WorkspaceSnapshotV1,
 } from './workspacePreferences.js';
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
@@ -243,6 +244,8 @@ export class App {
         if (bank !== null) this.bankBusDrafts.set(bank, cloneBusConfig(bus));
       }
     }
+    this.analyzers = analyzerStatesFrom(workspace?.analyzers ?? []);
+    this.nextAnalyzer = nextAnalyzerSequence(this.analyzers);
     this.samplerateExplicit = workspace?.capture?.samplerateExplicit === true;
     this.widthExplicit = workspace?.capture?.widthExplicit === true;
     const initialWidth = workspace?.capture?.channels ?? channelWidthForProbes(this.channels.length);
