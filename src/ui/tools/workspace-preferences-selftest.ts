@@ -1045,7 +1045,7 @@ check('App rebuilds analyzer mounts and the id sequence before the unchanged-val
   app.includes('analyzerStatesFrom, nextAnalyzerSequence, readWorkspaceSnapshot'),
   `order=${JSON.stringify(bootRestoreOrder)}`);
 
-check('the boot restoration slice never hydrates, decodes, connects, claims demo rows or writes',
+check('the boot restoration slice never hydrates, decodes, connects, claims loader rows or writes',
   bootRestoreSlice.includes(bootAnalyzerLine) && bootRestoreSlice.includes(bootSequenceLine) &&
   bootRestoreSlice.includes('this.syncBankChannels();') && bootLeaks.length === 0,
   `slice=${bootRestoreSlice.length}B, leaks=${JSON.stringify(bootLeaks)}`);
@@ -1132,7 +1132,7 @@ const directProjection = analyzerProjection.includes(
   'analyzers: this.analyzers.map((a): PersistedAnalyzer => ({') &&
   !analyzerProjection.includes('.filter(') &&
   !snapshotBody.includes('demoAnalyzers');
-check('the analyzer projection writes every mounted analyzer without demo filtering',
+check('the analyzer projection writes every mounted analyzer without ownership filtering',
   directProjection,
   `projection=${analyzerProjection.replace(/\s+/g, ' ').trim()}`);
 

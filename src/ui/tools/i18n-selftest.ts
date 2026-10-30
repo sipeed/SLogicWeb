@@ -471,7 +471,7 @@ const baseSettings: CaptureSettings = {
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const present = Object.entries(dicts).filter(([, dict]) =>
     retired.some((key) => Object.keys(dict).includes(key)));
-  check('the retired channel, bank, capture-panel and toolbar keys stay absent from every catalog',
+  check('the retired channel, bank, capture, capture-panel and toolbar keys stay absent from every catalog',
     present.length === 0,
     present.length === 0 ? `4 catalogs omit ${retired.length} keys` : present.map(([locale]) => locale).join(', '));
 }

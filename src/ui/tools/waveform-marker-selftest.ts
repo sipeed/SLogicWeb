@@ -968,7 +968,7 @@ function between(source: string, start: string, end: string): string {
   const startSource = between(appSource, 'private async startCapture()', 'private async stopCapture(');
   const escapeAt = appSource.indexOf("if (e.key === 'Escape') {");
   const escapeSource = escapeAt >= 0 ? appSource.slice(escapeAt, escapeAt + 200) : '';
-  check('file/demo adoption clears the marker while hardware start retains its sample',
+  check('capture adoption clears the marker while hardware start retains its sample',
     adoptSource.includes('this.markerA.clear();') &&
     startSource.length > 0 && !startSource.includes('this.markerA.clear();'),
     `adoptClear=${adoptSource.includes('this.markerA.clear();')}, ` +

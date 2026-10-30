@@ -250,7 +250,7 @@ check('bank start uses the absolute channel index',
     app.includes('private setChannelWidth(channels: number): void') &&
     app.includes('widthOptions: this.widthTiers()') &&
     app.includes('return captureWidthTiers(') &&
-    app.includes("this.captureLabel.kind === 'loaded'") &&
+    app.includes("return this.captureLabel.kind === 'loaded';") &&
     app.includes('if (!this.widthTiers().includes(channels)) return;') &&
     app.includes('!busOutOfWidth(bus.spec, channels)') &&
     app.includes('if (channels !== this.settings.channels) this.widthExplicit = true;') &&

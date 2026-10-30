@@ -416,8 +416,8 @@ Two deliberate properties:
   exactly as on the GPU path.
 - Its per-pixel painting is the same transcription of `FRAGMENT_SRC` that `cpuRaster`
   carries (separator first, NO_DATA wash + top border, idle lines, neighbour-extended
-  edge bars), so a screenshot of the protocol fixture capture is pixel-identical to the WebGL2 one
-  (verified by side-by-side capture, 2026-10-22).
+  edge bars), so a screenshot of the protocol fixture capture is pixel-identical to
+  the WebGL2 one (verified by side-by-side capture, 2026-10-22).
 
 The two files share no base class on purpose: the WebGL renderer is the hot path and
 stays untouched, and the fallback duplicates only the viewport/config bookkeeping.
