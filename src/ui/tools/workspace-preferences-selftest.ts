@@ -649,6 +649,16 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
 }
 
 {
+  const kept = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    analyzers: [{ decoderId: '_xy2', channels: { 0: 1 } }, { decoderId: 'i2c', channels: {} }],
+  }))?.analyzers ?? [];
+  check('a decoder id starting with an underscore is dropped whole instead of surviving beside valid mounts',
+    kept.length === 1 && kept[0]?.decoderId === 'i2c',
+    JSON.stringify(kept.map((analyzer) => analyzer.decoderId)));
+}
+
+{
   const snapshot: WorkspaceSnapshotV1 = {
     version: 1,
     detailedLabels: true,
@@ -702,6 +712,17 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     options['stop-bits'] === 8 && options['data-bits'] === '7' && options['trailing-'] === 1 &&
     options.plain_key === 4 && Object.keys(options).length === 4 &&
     !('-leading' in options) && !('UP-per' in options) && !('' in options),
+    JSON.stringify(options));
+}
+
+{
+  const options = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    analyzers: [{ decoderId: 'i2c', channels: {}, options: { _addr: 72, addr: 7, a_b: 1 } }],
+  }))?.analyzers?.[0]?.options ?? {};
+  check('an option key starting with an underscore is dropped key by key while its siblings survive',
+    !('_addr' in options) && options.addr === 7 && options.a_b === 1 &&
+    Object.keys(options).length === 2,
     JSON.stringify(options));
 }
 
@@ -774,6 +795,20 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     derived.every((value) => value === 5) && lane(undefined, { 0: -1 }) === 0 &&
     lane(undefined, {}) === 0 && lane(0, { 0: 5 }) === 0,
     `${derived.join(',')} | ${lane(undefined, { 0: -1 })}, ${lane(undefined, {})}`);
+}
+
+{
+  const lane = (laneChannel: unknown, channels: Record<number, number>) =>
+    parseWorkspaceSnapshot(JSON.stringify({
+      version: 1, analyzers: [{ decoderId: 'i2c', channels, laneChannel }],
+    }))?.analyzers?.[0]?.laneChannel;
+  const channels = { 0: 5, 1: 2 };
+  const largestValue = Math.max(...Object.values(channels));
+  const restored = [null, undefined, 16, -1, 1.5].map((value) => lane(value, channels));
+  check('an unusable persisted lane channel restores the highest mapped decoder channel, not the largest value',
+    restored.every((value) => value === 2) && largestValue === 5 &&
+    lane(undefined, { 0: -1, 3: 4 }) === 4 && lane(null, { 0: 6, 1: 1 }) === 1,
+    `${restored.join(',')} | largest=${largestValue}`);
 }
 
 {
@@ -957,6 +992,12 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
 const app = fs.readFileSync('src/ui/app.ts', 'utf8');
 const preferences = fs.readFileSync('src/ui/workspacePreferences.ts', 'utf8');
 const stateSource = fs.readFileSync('src/ui/state.ts', 'utf8');
+function appMethodBody(name: string): string {
+  const syncStart = app.indexOf(`private ${name}(`);
+  const start = syncStart >= 0 ? syncStart : app.indexOf(`private async ${name}(`);
+  const end = start >= 0 ? app.indexOf('\n  }', start) : -1;
+  return start >= 0 && end > start ? app.slice(start, end) : '';
+}
 const restoreStart = preferences.indexOf('function restoredLaneChannel(');
 const restoreEnd = restoreStart >= 0 ? preferences.indexOf('\n}', restoreStart) : -1;
 const restoreLaneBody = restoreStart >= 0 && restoreEnd > restoreStart
@@ -1027,12 +1068,13 @@ const projectionFields = [
 const projectionMissing = projectionFields.filter((needle) => !analyzerProjection.includes(needle));
 const runtimeLeak = ['a.result', 'a.index', 'a.status', 'a.note', 'result:', 'status:', 'note:']
   .filter((needle) => analyzerProjection.includes(needle));
-check('the snapshot projects analyzer mounts as a fresh DTO and never copies decode runtime fields',
-  analyzerProjectionAt >= 0 && projectionMissing.length === 0 && runtimeLeak.length === 0,
+check('the snapshot projects analyzer mounts as a typed fresh DTO and never copies decode runtime fields',
+  analyzerProjectionAt >= 0 && projectionMissing.length === 0 && runtimeLeak.length === 0 &&
+  analyzerProjection.includes('.map((a): PersistedAnalyzer => ({') && app.includes('type PersistedAnalyzer,'),
   `missing=${JSON.stringify(projectionMissing)}, leak=${JSON.stringify(runtimeLeak)}`);
 
 const demoExclusion = analyzerProjection.includes('.filter((a) => !this.demoAnalyzers.has(a.id))') &&
-  analyzerProjection.includes('.map((a) => ({') &&
+  analyzerProjection.includes('.map((a): PersistedAnalyzer => ({') &&
   !snapshotBody.includes('this.analyzers.map(') &&
   !snapshotBody.includes('analyzers: this.analyzers,');
 check('the analyzer projection drops demo-owned mounts before mapping so loader rows stay out',
@@ -1098,23 +1140,32 @@ check('decoding never writes the workspace snapshot',
   !runDecodeBody.includes('writeWorkspaceSnapshot'),
   `bytes=${runDecodeBody.length}`);
 
-const persistCalls = (app.match(/this\.persistWorkspace\(\);/g) ?? []).length;
-check('the analyzer attach/remove pair is the only writer surface this projection adds',
-  persistCalls === 12 && attachBody.includes('this.persistWorkspace();') &&
+const appMethodNames = [...app.matchAll(/^  private (?:async )?([A-Za-z0-9_]+)\(/gm)]
+  .map((match) => match[1] ?? '');
+const persistWriters = [...new Set(appMethodNames
+  .filter((name) => appMethodBody(name).includes('this.persistWorkspace();')))].sort();
+const expectedWriters = [
+  'adoptCapture', 'adoptDeviceChannels', 'afterChannelChange', 'applySettings', 'attachAnalyzer',
+  'configureBankBus', 'configureChannel', 'loadDemo', 'removeAnalyzer', 'reorder', 'settingsItems',
+  'startCapture',
+].sort();
+const quietMethods = ['runDecode', 'discardDecodeState', 'renderPanels', 'relayout', 'retranslate'];
+const quiet = quietMethods.map((name) => ({ name, body: appMethodBody(name) }));
+const quietLeaks = quiet.filter((entry) => entry.body.includes('persistWorkspace'))
+  .map((entry) => entry.name);
+check('the committed mutation methods are the only workspace writers and no render or scan pass writes',
+  JSON.stringify(persistWriters) === JSON.stringify(expectedWriters) &&
+  quiet.every((entry) => entry.body.length > 0) && quietLeaks.length === 0 &&
+  !constructorBody.includes('persistWorkspace') && attachBody.includes('this.persistWorkspace();') &&
   removeBody.includes('this.persistWorkspace();'),
-  `persist calls=${persistCalls}`);
+  `writers=${JSON.stringify(persistWriters)}, quiet=${JSON.stringify(quietLeaks)}`);
 
 const writeMethods = [
   'applySettings', 'afterChannelChange', 'configureChannel', 'reorder', 'adoptCapture', 'adoptDeviceChannels',
   'startCapture', 'loadDemo', 'configureBankBus',
 ];
-const missingWriteMethods = writeMethods.filter((name) => {
-  const syncStart = app.indexOf(`private ${name}(`);
-  const start = syncStart >= 0 ? syncStart : app.indexOf(`private async ${name}(`);
-  const end = start >= 0 ? app.indexOf('\n  }', start) : -1;
-  const body = start >= 0 && end > start ? app.slice(start, end) : '';
-  return !body.includes('this.persistWorkspace();');
-});
+const missingWriteMethods = writeMethods.filter((name) =>
+  !appMethodBody(name).includes('this.persistWorkspace();'));
 check('all committed channel paths share the writer and the initial empty store covers the whole channel model',
   missingWriteMethods.length === 0 && constructorBody.includes(
     'createSampleStore(channelWidthForProbes(this.channels.length), this.settings.samplerate)') &&

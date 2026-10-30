@@ -59,7 +59,7 @@ import { getMode, getTheme, onThemeChange, setMode, THEME_MODES, THEME_MODE_LABE
   type ThemeId } from './theme.js';
 import {
   readWorkspaceSnapshot, serializeWorkspaceSnapshot, WORKSPACE_SCHEMA_VERSION, writeWorkspaceSnapshot,
-  type WorkspaceSnapshotV1,
+  type PersistedAnalyzer, type WorkspaceSnapshotV1,
 } from './workspacePreferences.js';
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
@@ -1411,7 +1411,7 @@ export class App {
         .map(([start, config]) => [start, cloneBusConfig(config)])),
       analyzers: this.analyzers
         .filter((a) => !this.demoAnalyzers.has(a.id))
-        .map((a) => ({
+        .map((a): PersistedAnalyzer => ({
           id: a.id,
           decoderId: a.decoderId,
           label: a.label,
