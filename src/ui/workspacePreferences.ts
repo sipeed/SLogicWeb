@@ -5,12 +5,19 @@ import { busChannelBank } from './channelBanks.js';
 import { cloneBusConfig, defaultBusConfig, normalizeBankBusConfig } from './busPanel.js';
 import { BUS_HEIGHTS, type BusViewConfig } from './busView.js';
 import {
-  defaultCaptureSettings, defaultChannelName, defaultChannels, THRESHOLD_VOLT_OPTIONS,
-  type CaptureSettings, type TriggerMode,
+  analyzerColor, defaultCaptureSettings, defaultChannelName, defaultChannels, THRESHOLD_VOLT_OPTIONS,
+  type AnalyzerState, type CaptureSettings, type TriggerMode,
 } from './state.js';
 
 export const WORKSPACE_STORAGE_KEY = 'logicweb.workspace';
 export const WORKSPACE_SCHEMA_VERSION = 1 as const;
+export const MAX_PERSISTED_ANALYZERS = 64;
+
+const MAX_DECODER_CHANNELS = 64;
+const MAX_ANALYZER_LABEL_LENGTH = 64;
+const ANALYZER_TOKEN = /^[a-z0-9_]{1,64}$/;
+const ANALYZER_ID = /^[a-z0-9_]+-\d+$/;
+const CANONICAL_INDEX_KEY = /^(0|[1-9]\d*)$/;
 
 export interface PersistedChannel {
   name: string;
@@ -33,6 +40,16 @@ export interface PersistedCaptureSettings {
   preTriggerPercent: number;
 }
 
+export interface PersistedAnalyzer {
+  id: string;
+  decoderId: string;
+  label: string;
+  color: string;
+  channels: Record<number, number>;
+  options: Record<string, string | number>;
+  laneChannel: number;
+}
+
 export interface WorkspaceSnapshotV1 {
   version: typeof WORKSPACE_SCHEMA_VERSION;
   detailedLabels: boolean;
@@ -41,6 +58,7 @@ export interface WorkspaceSnapshotV1 {
   capture?: PersistedCaptureSettings;
   busViews?: BusViewConfig[];
   bankBusDrafts?: Record<string, BusViewConfig>;
+  analyzers?: PersistedAnalyzer[];
 }
 
 function storage(): Storage | null {
@@ -215,6 +233,82 @@ function restoreBankBusDrafts(value: unknown, capacity: number): Record<string, 
   return drafts;
 }
 
+function isIntegerInRange(value: unknown, min: number, max: number): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= min && value < max;
+}
+
+function restoreAnalyzerChannels(value: unknown, capacity: number): Record<number, number> | null {
+  if (!isRecord(value)) return null;
+  const channels: Record<number, number> = {};
+  for (const [key, target] of Object.entries(value)) {
+    if (!CANONICAL_INDEX_KEY.test(key)) return null;
+    const channel = Number(key);
+    if (!Number.isSafeInteger(channel) || channel >= MAX_DECODER_CHANNELS) return null;
+    if (!isIntegerInRange(target, -1, capacity)) return null;
+    channels[channel] = target;
+  }
+  return channels;
+}
+
+function restoreAnalyzerOptions(value: unknown): Record<string, string | number> {
+  const options: Record<string, string | number> = {};
+  if (!isRecord(value)) return options;
+  for (const [key, option] of Object.entries(value)) {
+    if (!ANALYZER_TOKEN.test(key)) continue;
+    if (typeof option === 'string' || (typeof option === 'number' && Number.isFinite(option))) {
+      options[key] = option;
+    }
+  }
+  return options;
+}
+
+function restoreAnalyzerLabel(value: unknown, decoderId: string): string {
+  if (typeof value !== 'string') return decoderId;
+  return value.trim().slice(0, MAX_ANALYZER_LABEL_LENGTH) || decoderId;
+}
+
+function restoredLaneChannel(
+  value: unknown, channels: Record<number, number>, capacity: number,
+): number {
+  if (isIntegerInRange(value, 0, capacity)) return value;
+  const mapped = Object.values(channels).filter((channel) => channel >= 0);
+  return mapped.length ? Math.max(...mapped) : 0;
+}
+
+function restoredAnalyzerId(value: unknown, decoderId: string, ids: ReadonlySet<string>): string {
+  if (typeof value === 'string' && ANALYZER_ID.test(value) && !ids.has(value)) return value;
+  let sequence = 0;
+  while (ids.has(`${decoderId}-${sequence}`)) sequence++;
+  return `${decoderId}-${sequence}`;
+}
+
+function restoreAnalyzers(value: unknown, capacity: number): PersistedAnalyzer[] {
+  if (!Array.isArray(value)) return [];
+  const analyzers: PersistedAnalyzer[] = [];
+  const ids = new Set<string>();
+  for (const candidate of value) {
+    if (analyzers.length >= MAX_PERSISTED_ANALYZERS) break;
+    if (!isRecord(candidate)) continue;
+    const decoderId = candidate.decoderId;
+    if (typeof decoderId !== 'string' || !ANALYZER_TOKEN.test(decoderId)) continue;
+    const channels = restoreAnalyzerChannels(candidate.channels, capacity);
+    if (channels === null) continue;
+    const id = restoredAnalyzerId(candidate.id, decoderId, ids);
+    ids.add(id);
+    analyzers.push({
+      id,
+      decoderId,
+      label: restoreAnalyzerLabel(candidate.label, decoderId),
+      color: typeof candidate.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(candidate.color)
+        ? candidate.color : analyzerColor(analyzers.length),
+      channels,
+      options: restoreAnalyzerOptions(candidate.options),
+      laneChannel: restoredLaneChannel(candidate.laneChannel, channels, capacity),
+    });
+  }
+  return analyzers;
+}
+
 export function parseWorkspaceSnapshot(
   raw: string | null, fallbackChannelCount: ChannelCount = 16,
 ): WorkspaceSnapshotV1 | null {
@@ -241,6 +335,7 @@ export function parseWorkspaceSnapshot(
     capture: restoreCapture(parsed.capture, channels.length),
     busViews,
     bankBusDrafts,
+    analyzers: restoreAnalyzers(parsed.analyzers, channels.length),
   };
 }
 
@@ -289,6 +384,17 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
       .sort(([a], [b]) => Number(a) - Number(b))
       .map(([start, config]) => [start, serializeBusConfig(config)]));
   }
+  serialized.analyzers = (snapshot.analyzers ?? []).map((analyzer) => ({
+    id: analyzer.id,
+    decoderId: analyzer.decoderId,
+    label: analyzer.label,
+    color: analyzer.color,
+    channels: Object.fromEntries(Object.entries(analyzer.channels)
+      .sort(([a], [b]) => Number(a) - Number(b))),
+    options: Object.fromEntries(Object.entries(analyzer.options)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+    laneChannel: analyzer.laneChannel,
+  }));
   return JSON.stringify(serialized);
 }
 
@@ -301,4 +407,32 @@ export function writeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): boolean {
   } catch {
     return false;
   }
+}
+
+export function analyzerStatesFrom(persisted: readonly PersistedAnalyzer[]): AnalyzerState[] {
+  return persisted.map((analyzer) => ({
+    id: analyzer.id,
+    decoderId: analyzer.decoderId,
+    label: analyzer.label,
+    color: analyzer.color,
+    channels: { ...analyzer.channels },
+    options: { ...analyzer.options },
+    laneChannel: analyzer.laneChannel,
+    result: null,
+    index: null,
+    status: 'idle',
+    note: { kind: 'pending' },
+  }));
+}
+
+export function nextAnalyzerSequence(analyzers: readonly { id: string }[]): number {
+  let next = 0;
+  for (const { id } of analyzers) {
+    const suffix = id.slice(id.lastIndexOf('-') + 1);
+    if (!CANONICAL_INDEX_KEY.test(suffix)) continue;
+    const sequence = Number(suffix);
+    if (!Number.isSafeInteger(sequence)) continue;
+    next = Math.max(next, sequence + 1);
+  }
+  return next;
 }

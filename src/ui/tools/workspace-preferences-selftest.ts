@@ -1,10 +1,12 @@
 import {
-  parseWorkspaceSnapshot, readWorkspaceSnapshot, serializeWorkspaceSnapshot,
+  analyzerStatesFrom, MAX_PERSISTED_ANALYZERS, nextAnalyzerSequence, parseWorkspaceSnapshot,
+  readWorkspaceSnapshot, serializeWorkspaceSnapshot,
   WORKSPACE_SCHEMA_VERSION, WORKSPACE_STORAGE_KEY, writeWorkspaceSnapshot,
-  type WorkspaceSnapshotV1,
+  type PersistedAnalyzer, type WorkspaceSnapshotV1,
 } from '../workspacePreferences.js';
 import {
-  defaultCaptureSettings, defaultChannelName, defaultChannels, modesToConditions, THRESHOLD_VOLT_OPTIONS,
+  analyzerColor, defaultCaptureSettings, defaultChannelName, defaultChannels, modesToConditions,
+  THRESHOLD_VOLT_OPTIONS,
 } from '../state.js';
 import { busChannelBank } from '../channelBanks.js';
 import type { BusViewConfig } from '../busView.js';
@@ -82,7 +84,8 @@ check('literal false and true survive parsing without coercion',
   const onRead = readWorkspaceSnapshot();
   check('guarded storage round-trips both label preferences under the exact key',
     absent === null && offWrite && onWrite && offRead?.detailedLabels === false &&
-    onRead?.detailedLabels === true && data.get(WORKSPACE_STORAGE_KEY) === '{"version":1,"detailedLabels":true}' &&
+    onRead?.detailedLabels === true &&
+    data.get(WORKSPACE_STORAGE_KEY) === '{"version":1,"detailedLabels":true,"analyzers":[]}' &&
     calls.every((call) => call.includes(WORKSPACE_STORAGE_KEY)),
     calls.join(' | '));
 }
@@ -95,7 +98,7 @@ check('literal false and true survive parsing without coercion',
   };
   const serialized = serializeWorkspaceSnapshot(crafted);
   check('serialization emits only the versioned preference whitelist',
-    serialized === '{"version":1,"detailedLabels":false}' &&
+    serialized === '{"version":1,"detailedLabels":false,"analyzers":[]}' &&
     !serialized.includes('runtime') && !serialized.includes('samples'),
     serialized);
 }
@@ -240,7 +243,7 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     order: [0],
   });
   check('channel serialization keeps array identity but excludes derived index/runtime fields',
-    serialized === '{"version":1,"detailedLabels":true,"channels":[{"name":"D0","color":"#010203","enabled":true}],"order":[0]}',
+    serialized === '{"version":1,"detailedLabels":true,"channels":[{"name":"D0","color":"#010203","enabled":true}],"order":[0],"analyzers":[]}',
     serialized);
 }
 
@@ -451,7 +454,8 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
   const serialized = serializeWorkspaceSnapshot({ version: 1, detailedLabels: true, capture });
   check('crafted derived capture/runtime fields are neither restored nor serialized',
     derivedAbsent && !serialized.includes('softwareTrigger') && !serialized.includes('triggerConditions') &&
-    !serialized.includes('triggerChannel') && !serialized.includes('samples') && !serialized.includes('analyzers'),
+    !serialized.includes('triggerChannel') && !serialized.includes('samples') &&
+    !serialized.includes('uart') && serialized.includes('"analyzers":[]'),
     serialized);
 }
 
@@ -558,10 +562,270 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     busViews: [runtimeConfig],
     bankBusDrafts: {},
   });
-  check('bus runtime IDs/builders/stores/caches and analyzer/capture fields never serialize',
+  check('bus runtime IDs/builders/stores/caches and analyzer runtime fields never serialize',
     !serialized.includes('bus-crafted') && !serialized.includes('builder') && !serialized.includes('builtFor') &&
-    !serialized.includes('cache') && !serialized.includes('analyzers') && !serialized.includes('samples'),
+    !serialized.includes('cache') && !serialized.includes('samples') &&
+    serialized.endsWith('"analyzers":[]}') && !serialized.includes('"result"') &&
+    !serialized.includes('"status"') && !serialized.includes('"note"'),
     serialized);
+}
+
+{
+  const analyzers: PersistedAnalyzer[] = [
+    {
+      id: 'i2c-0',
+      decoderId: 'i2c',
+      label: 'I2C',
+      color: '#9A7B2E',
+      channels: { 0: 3, 1: 4, 2: -1 },
+      options: { address_format: 'unshifted', address: 72, bitrate: 100000 },
+      laneChannel: 4,
+    },
+    {
+      id: 'spi-1',
+      decoderId: 'spi',
+      label: 'SPI',
+      color: '#A8504E',
+      channels: { 0: 6, 1: 7 },
+      options: {},
+      laneChannel: 7,
+    },
+  ];
+  const parsed = parseWorkspaceSnapshot(serializeWorkspaceSnapshot({
+    version: 1, detailedLabels: true, analyzers,
+  }))?.analyzers ?? [];
+  const [i2c, spi] = parsed;
+  check('legal analyzer mounts round-trip with unassigned channels and per-instance identities',
+    parsed.length === 2 && i2c?.id === 'i2c-0' && i2c.decoderId === 'i2c' && i2c.label === 'I2C' &&
+    i2c.color === '#9A7B2E' && JSON.stringify(i2c.channels) === '{"0":3,"1":4,"2":-1}' &&
+    i2c.options.address === 72 && i2c.options.address_format === 'unshifted' && i2c.options.bitrate === 100000 &&
+    i2c.laneChannel === 4 && spi?.id === 'spi-1' && spi.decoderId === 'spi' && spi.laneChannel === 7,
+    JSON.stringify(parsed));
+}
+
+{
+  const legacy = parseWorkspaceSnapshot('{"version":1,"detailedLabels":true}');
+  const nonArray = [null, 'i2c', 1, {}, true].map((analyzers) =>
+    parseWorkspaceSnapshot(JSON.stringify({ version: 1, analyzers }))?.analyzers);
+  const empty = serializeWorkspaceSnapshot({ version: 1, detailedLabels: true });
+  check('a missing or non-array analyzers section restores empty and still serializes as []',
+    JSON.stringify(legacy?.analyzers) === '[]' &&
+    nonArray.every((list) => JSON.stringify(list) === '[]') &&
+    empty === '{"version":1,"detailedLabels":true,"analyzers":[]}',
+    `${empty} | ${nonArray.map((list) => JSON.stringify(list)).join(', ')}`);
+}
+
+{
+  const invalidDecoders = ['', 'I2C', 'i2c ', 'i2c-', 'a'.repeat(65), 42, null, ['i2c']];
+  const dropped = invalidDecoders.map((decoderId) => parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, analyzers: [{ decoderId, channels: {} }],
+  }))?.analyzers?.length);
+  const boundary = [65, 64].map((length) => parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, analyzers: [{ decoderId: 'a'.repeat(length), channels: {} }],
+  }))?.analyzers?.[0]?.decoderId.length);
+  const mixed = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    analyzers: [
+      { decoderId: 'I2C', channels: {} },
+      { decoderId: 'i2c', channels: {} },
+      { decoderId: '', channels: {} },
+    ],
+  }))?.analyzers ?? [];
+  check('mounts without a stock decoderId shape are dropped while the 64-character bound is exact',
+    dropped.every((length) => length === 0) && boundary[0] === undefined && boundary[1] === 64 &&
+    mixed.length === 1 && mixed[0]?.decoderId === 'i2c',
+    `${dropped.join(',')} | ${boundary.join(',')} | mixed=${mixed.length}`);
+}
+
+{
+  const invalidChannels: unknown[] = [
+    { 0: 16 }, { 0: -2 }, { 0: 1.5 }, { 0: '3' }, { 0: null }, { '01': 0 }, { '-1': 0 }, { 64: 0 },
+    null, [], 'i2c', 3,
+  ];
+  const dropped = invalidChannels.map((channels) => parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    channels: Array.from({ length: 16 }, () => ({})),
+    analyzers: [{ decoderId: 'i2c', channels }],
+  }))?.analyzers?.length);
+  const unassigned = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    channels: Array.from({ length: 16 }, () => ({})),
+    analyzers: [{ decoderId: 'i2c', channels: { 0: 15, 1: -1 } }],
+  }))?.analyzers?.[0]?.channels;
+  check('channel maps keep -1 and reject out-of-capacity, fractional or non-canonical keys whole',
+    dropped.every((length) => length === 0) && JSON.stringify(unassigned) === '{"0":15,"1":-1}',
+    `${dropped.join(',')} | ${JSON.stringify(unassigned)}`);
+}
+
+{
+  const raw = '{"version":1,"analyzers":[{"decoderId":"i2c","channels":{},"options":' +
+    '{"address":72,"address_format":"unshifted","UPPER":1,"has space":2,"":3,' +
+    '"bool":true,"nothing":null,"nested":{},"list":[],"infinite":1e999,' +
+    `"${'x'.repeat(65)}":4,"negative":-5,"fractional":0.5}}]}`;
+  const options = parseWorkspaceSnapshot(raw)?.analyzers?.[0]?.options ?? {};
+  check('analyzer options drop illegal keys and non-string finite-number values one by one',
+    JSON.stringify(options) === JSON.stringify({
+      address: 72, address_format: 'unshifted', negative: -5, fractional: 0.5,
+    }),
+    JSON.stringify(options));
+}
+
+{
+  const label = (value: unknown) => parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, analyzers: [{ decoderId: 'i2c', channels: {}, label: value }],
+  }))?.analyzers?.[0]?.label;
+  const padded = label('  Inter-Integrated Circuit  ');
+  const truncated = label('L'.repeat(80));
+  check('analyzer labels trim, cap at 64 characters, and fall back to the decoder id',
+    padded === 'Inter-Integrated Circuit' && truncated === 'L'.repeat(64) &&
+    ['', '   ', 42, null, {}, ['x']].every((value) => label(value) === 'i2c'),
+    `${padded} | ${truncated?.length}`);
+}
+
+{
+  const color = (value: unknown) => parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    analyzers: [{ decoderId: 'i2c', channels: {} }, { decoderId: 'spi', channels: {}, color: value }],
+  }))?.analyzers?.[1]?.color;
+  const invalid = ['red', '#12345', '#1234567', '#GGGGGG', 12, null];
+  const fallbacks = invalid.map((value) => color(value));
+  check('invalid analyzer colors fall back to the analyzer palette position while valid hex survives',
+    fallbacks.every((value) => value === analyzerColor(1)) && fallbacks.every((value) => value !== analyzerColor(0)) &&
+    color('#aAbBcC') === '#aAbBcC',
+    `${fallbacks.join(',')} | ${color('#aAbBcC')}`);
+}
+
+{
+  const lane = (laneChannel: unknown, channels: Record<number, number>) =>
+    parseWorkspaceSnapshot(JSON.stringify({
+      version: 1, analyzers: [{ decoderId: 'i2c', channels, laneChannel }],
+    }))?.analyzers?.[0]?.laneChannel;
+  const invalid = [16, -1, 1.5, '3', null];
+  const derived = invalid.map((value) => lane(value, { 0: 3, 1: 5, 2: -1 }));
+  check('invalid lane channels derive from the highest assigned capture channel, or 0 when unassigned',
+    derived.every((value) => value === 5) && lane(undefined, { 0: -1 }) === 0 &&
+    lane(undefined, {}) === 0 && lane(0, { 0: 5 }) === 0,
+    `${derived.join(',')} | ${lane(undefined, { 0: -1 })}, ${lane(undefined, {})}`);
+}
+
+{
+  const parsed = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    analyzers: [
+      { id: 'i2c-0', decoderId: 'i2c', channels: {} },
+      { id: 'i2c-0', decoderId: 'i2c', channels: {} },
+      { id: 'I2C-1', decoderId: 'i2c', channels: {} },
+      { id: 'i2c', decoderId: 'i2c', channels: {} },
+      { id: 'i2c_2', decoderId: 'i2c', channels: {} },
+      { id: 'uart-3', decoderId: 'uart', channels: {} },
+    ],
+  }))?.analyzers ?? [];
+  const ids = parsed.map((analyzer) => analyzer.id);
+  check('analyzer ids keep unique stock-shaped values and synthesize a non-colliding id otherwise',
+    JSON.stringify(ids) === JSON.stringify(['i2c-0', 'i2c-1', 'i2c-2', 'i2c-3', 'i2c-4', 'uart-3']) &&
+    new Set(ids).size === ids.length,
+    JSON.stringify(ids));
+}
+
+{
+  const entries = Array.from({ length: MAX_PERSISTED_ANALYZERS + 4 }, (_, index) => ({
+    id: `i2c-${index}`, decoderId: 'i2c', channels: {}, label: `#${index}`,
+  }));
+  const capped = parseWorkspaceSnapshot(JSON.stringify({ version: 1, analyzers: entries }))?.analyzers ?? [];
+  const under = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, analyzers: entries.slice(0, MAX_PERSISTED_ANALYZERS),
+  }))?.analyzers?.length;
+  check('analyzer restoration truncates past the 64-entry cap instead of dropping the section',
+    capped.length === MAX_PERSISTED_ANALYZERS && capped[0]?.label === '#0' &&
+    capped[capped.length - 1]?.label === `#${MAX_PERSISTED_ANALYZERS - 1}` &&
+    under === MAX_PERSISTED_ANALYZERS,
+    `${capped.length} / ${under}`);
+}
+
+{
+  const snapshot: WorkspaceSnapshotV1 = {
+    version: 1,
+    detailedLabels: true,
+    analyzers: [{
+      id: 'i2c-0',
+      decoderId: 'i2c',
+      label: 'I2C',
+      color: '#9A7B2E',
+      channels: { 5: 9, 0: 3, 2: -1 },
+      options: { sample_rate: 400000, address: 72, address_format: 'shifted' },
+      laneChannel: 9,
+    }],
+  };
+  const first = serializeWorkspaceSnapshot(snapshot);
+  const second = serializeWorkspaceSnapshot(snapshot);
+  const reparsed = parseWorkspaceSnapshot(first);
+  const reserialized = serializeWorkspaceSnapshot({
+    version: 1, detailedLabels: true, analyzers: reparsed?.analyzers ?? [],
+  });
+  check('analyzer serialization is stable and orders channel keys numerically and options lexically',
+    first === second && reserialized === first &&
+    first.includes('"channels":{"0":3,"2":-1,"5":9}') &&
+    first.includes('"options":{"address":72,"address_format":"shifted","sample_rate":400000}') &&
+    first.indexOf('"label"') < first.indexOf('"channels"') &&
+    first.indexOf('"channels"') < first.indexOf('"options"') &&
+    first.indexOf('"options"') < first.indexOf('"laneChannel"'),
+    first);
+}
+
+{
+  const raw = '{"version":1,"analyzers":[{"id":"i2c-0","decoderId":"i2c","label":"I2C",' +
+    '"channels":{"0":1},"options":{},"laneChannel":1,"result":{"instances":[]},' +
+    '"index":{"keys":[1]},"status":"done","note":{"kind":"pending"}}]}';
+  const parsed = parseWorkspaceSnapshot(raw);
+  const analyzer = parsed?.analyzers?.[0];
+  const keys = analyzer ? Object.keys(analyzer).sort().join(',') : '';
+  const serialized = serializeWorkspaceSnapshot({
+    version: 1, detailedLabels: true, analyzers: parsed?.analyzers ?? [],
+  });
+  check('restored analyzer DTOs carry no decode result, status, note or annotation index',
+    keys === 'channels,color,decoderId,id,label,laneChannel,options' &&
+    !serialized.includes('"result"') && !serialized.includes('"status"') &&
+    !serialized.includes('"note"') && !serialized.includes('"index"'),
+    `${keys} | ${serialized}`);
+}
+
+{
+  const persisted: PersistedAnalyzer[] = [{
+    id: 'i2c-0', decoderId: 'i2c', label: 'I2C', color: '#9A7B2E',
+    channels: { 0: 3 }, options: { address: 72 }, laneChannel: 3,
+  }];
+  const states = analyzerStatesFrom(persisted);
+  const state = states[0];
+  const shape = states.length === 1 && state?.id === 'i2c-0' && state.decoderId === 'i2c' &&
+    state.label === 'I2C' && state.color === '#9A7B2E' && state.laneChannel === 3 &&
+    state.result === null && state.index === null && state.status === 'idle' &&
+    JSON.stringify(state.note) === '{"kind":"pending"}' &&
+    JSON.stringify(state.channels) === '{"0":3}' && JSON.stringify(state.options) === '{"address":72}';
+  persisted[0]!.channels[0] = 9;
+  persisted[0]!.options.address = 0;
+  check('analyzerStatesFrom projects mounts to idle, result-free state with isolated nested maps',
+    shape && state?.channels[0] === 3 && state.options.address === 72,
+    JSON.stringify(state));
+}
+
+{
+  const rows: Array<[string[], number]> = [
+    [[], 0],
+    [['i2c-0'], 1],
+    [['i2c-3', 'uart-1'], 4],
+    [['i2c-7', 'uart-2'], 8],
+    [['i2c', 'uart-x', 'spi-'], 0],
+    [['i2c-0', 'i2c-1', 'i2c-2'], 3],
+  ];
+  const failed = rows.filter(([ids, expected]) =>
+    nextAnalyzerSequence(ids.map((id) => ({ id }))) !== expected);
+  const restoredIds = ['i2c-7', 'i2c-2', 'spi-0'].map((id) => ({ id }));
+  const next = nextAnalyzerSequence(restoredIds);
+  const collision = restoredIds.some((analyzer) => analyzer.id === `i2c-${next}`);
+  check('nextAnalyzerSequence follows the highest numeric suffix and never collides with restored ids',
+    failed.length === 0 && !collision,
+    failed.map(([ids]) => `${ids.join('+')}=>${nextAnalyzerSequence(ids.map((id) => ({ id })))}`)
+      .join(', ') || `all rows matched, next=${next}`);
 }
 
 const app = fs.readFileSync('src/ui/app.ts', 'utf8');
