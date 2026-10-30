@@ -607,6 +607,25 @@ check('capture restore rebuilds canonical trigger derivatives and panel/debug/as
   !snapshotBody.includes('builder') && !snapshotBody.includes('builtFor') && !snapshotBody.includes('cache'),
   `derivation=${captureDerivation}, shared=${sharedSettingsPath}`);
 
+const applySettingsStart = app.indexOf('private applySettings(s: CaptureSettings): void {');
+const applySettingsEnd = applySettingsStart >= 0 ? app.indexOf('\n  }', applySettingsStart) : -1;
+const applySettingsBody = applySettingsStart >= 0 && applySettingsEnd > applySettingsStart
+  ? app.slice(applySettingsStart, applySettingsEnd) : '';
+const explicitMark = 'if (s.samplerate !== this.settings.samplerate) this.samplerateExplicit = true;';
+const explicitRestore = 'this.samplerateExplicit = workspace?.capture?.samplerateExplicit === true;';
+const markAt = applySettingsBody.indexOf(explicitMark);
+const clampAt = applySettingsBody.indexOf('clampSettings(');
+const restoreAt = constructorBody.indexOf(explicitRestore);
+const composeAt = constructorBody.indexOf('this.settings = clampSettings(');
+const explicitWiring = app.includes('private samplerateExplicit = false;') &&
+  applySettingsBody.includes(`private applySettings(s: CaptureSettings): void {\n    ${explicitMark}`) &&
+  applySettingsBody.split(explicitMark).length === 2 && markAt >= 0 && clampAt > markAt &&
+  restoreAt >= 0 && composeAt > restoreAt && !app.includes('this.settings.samplerateExplicit') &&
+  snapshotBody.includes('samplerateExplicit: this.samplerateExplicit,');
+check('App keeps the explicit-rate marker outside CaptureSettings and marks only real rate changes',
+  explicitWiring,
+  `mark=${markAt}, clamp=${clampAt}, restore=${restoreAt}, compose=${composeAt}, wiring=${explicitWiring}`);
+
 const busRestoreWiring = constructorBody.includes('id: `bus-${id}`, builder: null, builtFor: null, cache: null') &&
   constructorBody.includes('this.nextBus = this.busViews.length;') &&
   constructorBody.includes('this.bankBusDrafts.set(bank, cloneBusConfig(bus));') &&

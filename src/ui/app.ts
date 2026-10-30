@@ -140,6 +140,7 @@ export class App {
   private nextAnalyzer = 0;
 
   private settings: CaptureSettings = defaultCaptureSettings();
+  private samplerateExplicit = false;
 
   private device: Device | null = null;
   private deviceEpoch = 0;
@@ -240,6 +241,7 @@ export class App {
       }
       this.syncBankChannels();
     }
+    this.samplerateExplicit = workspace?.capture?.samplerateExplicit === true;
     const triggerModes = workspace?.capture?.triggerModes ?? {};
     const triggerConditions = modesToConditions(triggerModes);
     const first = triggerConditions[0];
@@ -550,6 +552,7 @@ export class App {
   }
 
   private applySettings(s: CaptureSettings): void {
+    if (s.samplerate !== this.settings.samplerate) this.samplerateExplicit = true;
     const next = clampSettings(s, this.rateCeilings);
     if (triggerSettingsChanged(this.settings, next)) {
       this.triggerState = 'off';
@@ -1410,6 +1413,7 @@ export class App {
       order: [...this.order],
       capture: {
         samplerate: this.settings.samplerate,
+        samplerateExplicit: this.samplerateExplicit,
         thresholdVolts: this.settings.thresholdVolts,
         mode: this.settings.mode,
         seconds: this.settings.seconds,
