@@ -244,3 +244,15 @@ export function channelColor(index: number): string {
 export function analyzerColor(n: number): string {
   return ANALYZER_COLORS[n % ANALYZER_COLORS.length]!;
 }
+
+export function analyzerLaneChannel(channels: Record<number, number>): number {
+  let decoderChannel = -1;
+  let laneChannel = 0;
+  for (const [key, value] of Object.entries(channels)) {
+    const index = Number(key);
+    if (value < 0 || index <= decoderChannel) continue;
+    decoderChannel = index;
+    laneChannel = value;
+  }
+  return laneChannel;
+}

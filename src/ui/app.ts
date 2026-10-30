@@ -68,7 +68,8 @@ import { Overlay, paintMarkerChip, type HoverMeasurement } from './overlay.js';
 import { PanelResizer } from './panelResizer.js';
 import { StoreRef } from './storeRef.js';
 import {
-  analyzerColor, defaultCaptureSettings, defaultChannels, defaultChannelName, channelColor, DEFAULT_TRIGGER_MODE,
+  analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannels, defaultChannelName, channelColor,
+  DEFAULT_TRIGGER_MODE,
   edgeTriggerAutoArms, clampLoopSamples, DEFAULT_LOOP_SAMPLES, effectiveCaptureMode, loopDropSamples,
   modesToConditions, triggerModeFromCondition,
   type AnalyzerState, type CaptureSettings, type ChannelState, type TriggerMode,
@@ -2176,8 +2177,7 @@ export class App {
   ): Promise<void> {
     await hydrateDecoders();
     const info = getDecoder(decoderId);
-    const mapped = Object.keys(channels).map(Number).sort((a, b) => a - b);
-    const laneChannel = mapped.length ? channels[mapped[mapped.length - 1]!]! : 0;
+    const laneChannel = analyzerLaneChannel(channels);
     const a: AnalyzerState = {
       id: `${decoderId}-${this.nextAnalyzer++}`,
       decoderId,

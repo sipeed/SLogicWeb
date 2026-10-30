@@ -5,7 +5,8 @@ import { busChannelBank } from './channelBanks.js';
 import { cloneBusConfig, defaultBusConfig, normalizeBankBusConfig } from './busPanel.js';
 import { BUS_HEIGHTS, type BusViewConfig } from './busView.js';
 import {
-  analyzerColor, defaultCaptureSettings, defaultChannelName, defaultChannels, THRESHOLD_VOLT_OPTIONS,
+  analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannelName, defaultChannels,
+  THRESHOLD_VOLT_OPTIONS,
   type AnalyzerState, type CaptureSettings, type TriggerMode,
 } from './state.js';
 
@@ -271,8 +272,7 @@ function restoredLaneChannel(
   value: unknown, channels: Record<number, number>, capacity: number,
 ): number {
   if (isIntegerInRange(value, 0, capacity)) return value;
-  const mapped = Object.values(channels).filter((channel) => channel >= 0);
-  return mapped.length ? Math.max(...mapped) : 0;
+  return analyzerLaneChannel(channels);
 }
 
 function restoredAnalyzerId(value: unknown, decoderId: string, ids: ReadonlySet<string>): string {

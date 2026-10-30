@@ -5,8 +5,8 @@ import {
   type PersistedAnalyzer, type WorkspaceSnapshotV1,
 } from '../workspacePreferences.js';
 import {
-  analyzerColor, defaultCaptureSettings, defaultChannelName, defaultChannels, modesToConditions,
-  THRESHOLD_VOLT_OPTIONS,
+  analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannelName, defaultChannels,
+  modesToConditions, THRESHOLD_VOLT_OPTIONS,
 } from '../state.js';
 import { busChannelBank } from '../channelBanks.js';
 import type { BusViewConfig } from '../busView.js';
@@ -770,10 +770,68 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     }))?.analyzers?.[0]?.laneChannel;
   const invalid = [16, -1, 1.5, '3', null];
   const derived = invalid.map((value) => lane(value, { 0: 3, 1: 5, 2: -1 }));
-  check('invalid lane channels derive from the highest assigned capture channel, or 0 when unassigned',
+  check('invalid lane channels derive from the highest assigned decoder channel, or 0 when unassigned',
     derived.every((value) => value === 5) && lane(undefined, { 0: -1 }) === 0 &&
     lane(undefined, {}) === 0 && lane(0, { 0: 5 }) === 0,
     `${derived.join(',')} | ${lane(undefined, { 0: -1 })}, ${lane(undefined, {})}`);
+}
+
+{
+  const legacyLaneChannel = (channels: Record<number, number>): number => {
+    const [last] = Object.keys(channels).map(Number).sort((a, b) => a - b).slice(-1);
+    return last === undefined ? 0 : channels[last]!;
+  };
+  const maxAssignedLaneChannel = (channels: Record<number, number>): number => {
+    const mapped = Object.values(channels).filter((channel) => channel >= 0);
+    return mapped.length ? Math.max(...mapped) : 0;
+  };
+  const fullyAssigned: Array<Record<number, number>> = [
+    { 0: 5, 1: 2 },
+    { 0: 2, 1: 3, 2: 0 },
+    { 1: 4, 0: 6 },
+    { 3: 1 },
+    { 2: 7, 0: 1, 4: 3, 1: 9 },
+    { 0: 0, 1: 1 },
+    { 5: 2, 4: 8, 3: 6 },
+    { 7: 3, 6: 5, 5: 4, 4: 1 },
+  ];
+  const legacyRows = fullyAssigned.map((channels) =>
+    `${JSON.stringify(channels)}=>${analyzerLaneChannel(channels)}/${legacyLaneChannel(channels)}`);
+  const legacyMismatch = fullyAssigned.filter((channels) =>
+    analyzerLaneChannel(channels) !== legacyLaneChannel(channels));
+  const discriminates = maxAssignedLaneChannel({ 0: 5, 1: 2 }) === 5 &&
+    analyzerLaneChannel({ 0: 5, 1: 2 }) === 2;
+  check('the lane rule matches the attach expression on every fully assigned map and rejects the max-value rule',
+    legacyMismatch.length === 0 && legacyRows.length >= 8 && discriminates,
+    legacyRows.join(', '));
+}
+
+{
+  const lanes: Array<[Record<number, number>, number]> = [
+    [{ 0: 5, 1: 2 }, 2],
+    [{ 0: 3, 1: -1 }, 3],
+    [{ 0: -1 }, 0],
+    [{}, 0],
+    [{ 2: 7 }, 7],
+    [{ 1: 4, 0: 6, 2: -1 }, 4],
+  ];
+  const failed = lanes.filter(([channels, expected]) => analyzerLaneChannel(channels) !== expected);
+  const channels = { 0: 3, 1: -1 };
+  const mounted: PersistedAnalyzer = {
+    id: 'jtag-0', decoderId: 'jtag', label: 'JTAG', color: analyzerColor(0),
+    channels: { ...channels }, options: {}, laneChannel: analyzerLaneChannel(channels),
+  };
+  const roundTripped = parseWorkspaceSnapshot(serializeWorkspaceSnapshot({
+    version: 1, detailedLabels: true, analyzers: [mounted],
+  }))?.analyzers?.[0]?.laneChannel;
+  const serializedLane = JSON.parse(serializeWorkspaceSnapshot({
+    version: 1, detailedLabels: true, analyzers: [mounted],
+  }))?.analyzers?.[0]?.laneChannel;
+  check('the lane derivation keeps the legacy mount position and skips unassigned top channels on both paths',
+    failed.length === 0 && mounted.laneChannel === 3 && roundTripped === 3 && serializedLane === 3,
+    `${failed.map(([row, expected]) => `${JSON.stringify(row)}=>${analyzerLaneChannel(row)}/${expected}`)
+      .join(', ') || 'all rows matched'} | mount=${mounted.laneChannel}, ` +
+    `roundTrip=${roundTripped}, serialized=${serializedLane}`);
 }
 
 {
@@ -897,6 +955,12 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
 }
 
 const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+const preferences = fs.readFileSync('src/ui/workspacePreferences.ts', 'utf8');
+const stateSource = fs.readFileSync('src/ui/state.ts', 'utf8');
+const restoreStart = preferences.indexOf('function restoredLaneChannel(');
+const restoreEnd = restoreStart >= 0 ? preferences.indexOf('\n}', restoreStart) : -1;
+const restoreLaneBody = restoreStart >= 0 && restoreEnd > restoreStart
+  ? preferences.slice(restoreStart, restoreEnd) : '';
 const constructorStart = app.indexOf('constructor() {');
 const constructorEnd = constructorStart >= 0
   ? app.indexOf('\n  // ------------------------------------------------------------------ layout', constructorStart) : -1;
@@ -990,6 +1054,25 @@ check('attaching a mount records demo ownership before persisting and writes bef
   attachBody.length > 0 && attachBody.split('this.persistWorkspace();').length === 2 &&
   attachOrder.every((index, i) => index >= 0 && (i === 0 || index > attachOrder[i - 1])),
   `order=${JSON.stringify(attachOrder)}`);
+
+const laneBodyStart = stateSource.indexOf('export function analyzerLaneChannel(');
+const laneBodyEnd = laneBodyStart >= 0
+  ? stateSource.indexOf('\n}', laneBodyStart) : -1;
+const laneBody = laneBodyStart >= 0 && laneBodyEnd > laneBodyStart
+  ? stateSource.slice(laneBodyStart, laneBodyEnd) : '';
+const laneRule = {
+  declared: stateSource.split('export function analyzerLaneChannel(').length - 1,
+  rule: laneBody.includes('value < 0') && laneBody.includes('index <= decoderChannel') &&
+    !laneBody.includes('Math.max'),
+  attach: attachBody.includes('analyzerLaneChannel(channels)') &&
+    !attachBody.includes('mapped[mapped.length - 1]') && !attachBody.includes('Object.keys(channels)'),
+  restore: restoreLaneBody.includes('analyzerLaneChannel(channels)') &&
+    !restoreLaneBody.includes('Math.max(...mapped)'),
+  singleSite: !app.includes('Math.max(...mapped)') && !preferences.includes('Math.max(...mapped)'),
+};
+check('the lane rule lives once in state and both the write and restore paths call it',
+  laneRule.declared === 1 && laneRule.rule && laneRule.attach && laneRule.restore && laneRule.singleSite,
+  JSON.stringify(laneRule));
 
 const removeStart = app.indexOf('private removeAnalyzer(id: string): void {');
 const removeEnd = removeStart >= 0 ? app.indexOf('\n  }', removeStart) : -1;
