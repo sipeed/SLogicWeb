@@ -255,20 +255,26 @@ check(
 
 const disconnectListenerCount =
   (app.match(/navigator\.usb\?\.addEventListener\('disconnect'/g) ?? []).length;
+const c6ConstructorBody = methodBody('constructor() {');
+const disconnectWiring =
+  "navigator.usb?.addEventListener('disconnect', (e) => this.usbDisconnected(e.device));";
 const usbDisconnectedBody = methodBody('private usbDisconnected(usb: USBDevice): void {');
 const deviceLostBody = methodBody('private deviceLost(error: unknown, report = true): void {');
 const disconnectGuard = usbDisconnectedBody.includes(
   'if (!device || !sameUsbDevice(device.serial, usb)) return;') &&
   usbDisconnectedBody.includes('this.deviceLost(new Error(');
+const lostFailAt = deviceLostBody.indexOf("this.fail('error.device', error)");
+const lostDetachAt = deviceLostBody.indexOf('this.detachDevice();');
+const lostRenderAt = deviceLostBody.indexOf('this.renderPanels();');
 const lostCleans = deviceLostBody.includes('if (this.device === null) return;') &&
-  deviceLostBody.includes("this.fail('error.device', error)") &&
-  deviceLostBody.includes('this.detachDevice();') &&
-  deviceLostBody.includes('this.renderPanels();') &&
+  lostFailAt >= 0 && lostFailAt < lostDetachAt && lostDetachAt < lostRenderAt &&
   !deviceLostBody.includes('recoverDevice');
 check(
   'a matching USB disconnect drops the transport once and finishes the capture',
-  disconnectListenerCount === 1 && disconnectGuard && lostCleans,
-  `listeners=${disconnectListenerCount}, guard=${disconnectGuard}, cleans=${lostCleans}`,
+  disconnectListenerCount === 1 && c6ConstructorBody.includes(disconnectWiring) &&
+    disconnectGuard && lostCleans,
+  `listeners=${disconnectListenerCount}, inCtor=${c6ConstructorBody.includes(disconnectWiring)}, ` +
+    `guard=${disconnectGuard}, cleans=${lostCleans}, order=${lostFailAt},${lostDetachAt},${lostRenderAt}`,
 );
 
 const ownershipAbsent = !app.includes('demoAnalyzers') && !app.includes('demoOwned');
