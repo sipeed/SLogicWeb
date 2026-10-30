@@ -53,6 +53,9 @@ import {
   emulationAnchor,
   emulationProbeWidths,
   emulationWidths,
+  finiteEndBudgetMs,
+  finiteExpectedBytes,
+  finiteSampleCount,
   liveWidths,
   modelForMaxChannels,
   modelForProductId,
@@ -2647,6 +2650,37 @@ async function main(): Promise<void> {
   check('scenario parsing reads explicit ms and mhz',
     stopFull.kind === 'stop' && stopFull.channels === 32 && stopFull.ms === 250 && stopFull.mhz === 100,
     JSON.stringify(stopFull));
+  const finiteDefault = parseScenario('?scenario=finite-4');
+  check('scenario parsing reads finite-4 with the documented defaults',
+    finiteDefault.kind === 'finite' && finiteDefault.channels === 4 &&
+      finiteDefault.ms === 1000 && finiteDefault.mhz === 16 &&
+      finiteDefault.layer === 'page' && finiteDefault.mode === 'normal',
+    JSON.stringify(finiteDefault));
+  const finiteEmulation = parseScenario('?scenario=finite-16ch&mode=emulation&layer=worker');
+  check('scenario parsing reads finite emulation and worker controls',
+    finiteEmulation.kind === 'finite' && finiteEmulation.channels === 16 &&
+      finiteEmulation.mode === 'emulation' && finiteEmulation.layer === 'worker',
+    JSON.stringify(finiteEmulation));
+  check('finite scenarios derive exactly 16 million samples for the default capture',
+    finiteSampleCount(1000, 16) === 16000000);
+  const finiteBytes = ([4, 8, 16, 32] as const).map((channels) =>
+    [channels, finiteExpectedBytes(16000000, channels)]);
+  check('finite scenarios map requested samples to exact delivered bytes at every width',
+    JSON.stringify(finiteBytes) ===
+      JSON.stringify([[4, 16000000], [8, 16000000], [16, 32000000], [32, 64000000]]),
+    JSON.stringify(finiteBytes));
+  check('finite scenarios use an explicit transfer-aware end budget',
+    finiteEndBudgetMs(4, 1000, 16) === 6000 &&
+      finiteEndBudgetMs(4, 50, 1) > 25000,
+    `${finiteEndBudgetMs(4, 1000, 16)}, ${finiteEndBudgetMs(4, 50, 1)}`);
+  await expectThrow('unknown finite modes are rejected',
+    async () => { parseScenario('?scenario=finite-4&mode=usbmax'); }, 'mode must be');
+  await expectThrow('continuous stops reject the finite-only mode parameter',
+    async () => { parseScenario('?scenario=stop-4&mode=emulation'); }, 'unknown scenario parameter "mode"');
+  await expectThrow('finite scenarios reject a zero-sample request',
+    async () => { parseScenario('?scenario=finite-4&ms=50&mhz=0.0000001'); }, 'at least one sample');
+  await expectThrow('finite scenarios reject an odd packed 4ch sample count',
+    async () => { parseScenario('?scenario=finite-4&ms=50&mhz=16.00002'); }, 'even integer');
   await expectThrow('unknown scenario names are rejected',
     async () => { parseScenario('?scenario=nope'); }, 'unknown scenario');
   await expectThrow('near-miss scenario forms are rejected',

@@ -1,4 +1,4 @@
-import type { ChannelCount } from '../types.js';
+import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
 import {
   MAX_SAMPLERATE_HZ,
   MAX_SAMPLERATE_HZ_SLOGIC32_U3,
@@ -116,7 +116,17 @@ export interface StopScenario {
   layer: 'page' | 'worker';
 }
 
-export type ScenarioRequest = { kind: 'full' } | StopScenario;
+export interface FiniteScenario {
+  kind: 'finite';
+  channels: ChannelCount;
+  ms: number;
+  mhz: number;
+  layer: 'page' | 'worker';
+  mode: 'normal' | 'emulation';
+}
+
+export type CaptureScenario = StopScenario | FiniteScenario;
+export type ScenarioRequest = { kind: 'full' } | CaptureScenario;
 
 export interface ScenarioTiming {
   wireBytesPerSec: number;
@@ -137,6 +147,19 @@ export function scenarioTiming(channels: ChannelCount, mhz: number): ScenarioTim
   };
 }
 
+export function finiteSampleCount(ms: number, mhz: number): number {
+  return Math.round((mhz * 1e6 * ms) / 1000);
+}
+
+export function finiteExpectedBytes(samples: number, channels: ChannelCount): number {
+  return samples * bytesPerSampleForChannels(channels);
+}
+
+export function finiteEndBudgetMs(channels: ChannelCount, ms: number, mhz: number): number {
+  const fillMs = scenarioTiming(channels, mhz).transferFillMs;
+  return Math.ceil(ms + Math.max(5000, 4 * fillMs));
+}
+
 export function traceWindow(
   length: number, shifted: number, stopAbs: number, radius: number,
 ): [number, number] {
@@ -148,17 +171,18 @@ export function parseScenario(search: string): ScenarioRequest {
   const params = new URLSearchParams(search);
   const keys = [...params.keys()];
   if (keys.length === 0) return { kind: 'full' };
-  const allowed = new Set(['scenario', 'ms', 'mhz', 'layer']);
+  const allowed = new Set(['scenario', 'ms', 'mhz', 'layer', 'mode']);
   for (const key of keys) {
     if (!allowed.has(key)) throw new Error(`unknown scenario parameter "${key}"`);
   }
   const scenario = params.get('scenario');
   if (scenario === null) throw new Error('scenario parameters require a "scenario" key');
-  const match = /^stop-(\d+)(?:ch)?$/.exec(scenario);
+  const match = /^(stop|finite)-(\d+)(?:ch)?$/.exec(scenario);
   if (!match) throw new Error(`unknown scenario "${scenario}"`);
-  const parsed = Number(match[1]);
+  const kind = match[1] as 'stop' | 'finite';
+  const parsed = Number(match[2]);
   if (!(SUPPORTED_CHANNELS as readonly number[]).includes(parsed)) {
-    throw new Error(`unsupported channel count ${match[1]}`);
+    throw new Error(`unsupported channel count ${match[2]}`);
   }
   const channels = parsed as ChannelCount;
   const msRaw = params.get('ms');
@@ -169,13 +193,32 @@ export function parseScenario(search: string): ScenarioRequest {
   const mhzRaw = params.get('mhz');
   const mhz = mhzRaw === null ? 16 : Number(mhzRaw);
   if (!Number.isFinite(mhz) || mhz <= 0) throw new Error(`mhz must be positive, got "${mhzRaw}"`);
-  const minRunMs = scenarioTiming(channels, mhz).minRunMs;
-  if (ms < minRunMs) {
-    throw new Error(`ms ${ms} is shorter than two transfer fills (${minRunMs} ms) at this geometry`);
+  if (kind === 'stop') {
+    if (params.has('mode')) throw new Error('unknown scenario parameter "mode"');
+    const minRunMs = scenarioTiming(channels, mhz).minRunMs;
+    if (ms < minRunMs) {
+      throw new Error(`ms ${ms} is shorter than two transfer fills (${minRunMs} ms) at this geometry`);
+    }
+  } else {
+    const samples = finiteSampleCount(ms, mhz);
+    if (!Number.isSafeInteger(samples) || samples < 1) {
+      throw new Error('finite scenarios must request at least one sample');
+    }
+    if (!Number.isInteger((samples * channels) / 8)) {
+      throw new Error(
+        `finite scenario requests ${samples} samples at ${channels}ch, which is not wire-aligned; ` +
+        'choose timing with an even integer sample count at 4ch',
+      );
+    }
   }
   const layer = params.get('layer') ?? 'page';
   if (layer !== 'page' && layer !== 'worker') {
     throw new Error(`layer must be "page" or "worker", got "${layer}"`);
   }
-  return { kind: 'stop', channels, ms, mhz, layer };
+  if (kind === 'stop') return { kind, channels, ms, mhz, layer };
+  const mode = params.get('mode') ?? 'normal';
+  if (mode !== 'normal' && mode !== 'emulation') {
+    throw new Error(`mode must be "normal" or "emulation", got "${mode}"`);
+  }
+  return { kind, channels, ms, mhz, layer, mode };
 }

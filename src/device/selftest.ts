@@ -30,11 +30,16 @@ import {
   modelForProductId,
   parseScenario,
   emulationProbeWidths,
+  finiteEndBudgetMs,
+  finiteExpectedBytes,
+  finiteSampleCount,
   refusalCases,
   scenarioTiming,
   sawtoothOk,
   throughputPlan,
   traceWindow,
+  type CaptureScenario,
+  type FiniteScenario,
   type ScenarioRequest,
   type SelftestModel,
   type StopScenario,
@@ -485,6 +490,223 @@ async function runStopScenario(
   await finish(hooks.close);
 }
 
+interface FiniteAttempt {
+  startError: string;
+  endError: string;
+  stopError: string;
+  endCountAtEnd: number;
+  endCountAfterStop: number;
+  endCountAfterSilence: number;
+  endMs: number;
+  stopMs: number;
+  chunkCount: number;
+  unalignedChunks: number;
+  bytesAtEnd: number;
+  bytesAfterStop: number;
+  bytesAfterSilence: number;
+  silent: boolean;
+}
+
+async function runFiniteAttempt(dev: Device, scenario: FiniteScenario): Promise<FiniteAttempt> {
+  const cfg: CaptureConfig = {
+    channels: scenario.channels,
+    samplerate: scenario.mhz * 1e6,
+    thresholdVolts: 1.6,
+    testMode: scenario.mode === 'emulation' ? TEST_MODE_EMULATION : TEST_MODE_NORMAL,
+  };
+  const expectedSamples = finiteSampleCount(scenario.ms, scenario.mhz);
+  const endBudgetMs = finiteEndBudgetMs(scenario.channels, scenario.ms, scenario.mhz);
+  const bytesPerSample = bytesPerSampleForChannels(scenario.channels);
+  let bytes = 0;
+  let chunkCount = 0;
+  let unalignedChunks = 0;
+  let endCount = 0;
+  let endMs = NaN;
+  let signalEnd!: () => void;
+  const ended = new Promise<void>((resolve) => { signalEnd = resolve; });
+  const captureStarted = performance.now();
+  let startError = '';
+  try {
+    await dev.start(cfg, (chunk) => {
+      bytes += chunk.length;
+      chunkCount++;
+      if (chunk.length % bytesPerSample !== 0) unalignedChunks++;
+    }, undefined, {
+      deviceSampleLimit: expectedSamples,
+      onEnd: () => {
+        endCount++;
+        endMs = performance.now() - captureStarted;
+        signalEnd();
+      },
+    });
+  } catch (e) {
+    startError = String(e);
+  }
+
+  let endError = startError;
+  if (startError === '') {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        ended,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`onEnd did not fire within ${endBudgetMs} ms`)), endBudgetMs,
+          );
+        }),
+      ]);
+    } catch (e) {
+      endError = String(e);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+  const bytesAtEnd = bytes;
+  const endCountAtEnd = endCount;
+
+  const STOP_BUDGET_MS = 5000;
+  const stopStarted = performance.now();
+  let stopMs = NaN;
+  let stopError = '';
+  try {
+    await stopWithBudget(dev, STOP_BUDGET_MS);
+    stopMs = performance.now() - stopStarted;
+  } catch (e) {
+    stopError = String(e);
+  }
+  const bytesAfterStop = bytes;
+  const endCountAfterStop = endCount;
+  await sleep(250);
+  return {
+    startError,
+    endError,
+    stopError,
+    endCountAtEnd,
+    endCountAfterStop,
+    endCountAfterSilence: endCount,
+    endMs,
+    stopMs,
+    chunkCount,
+    unalignedChunks,
+    bytesAtEnd,
+    bytesAfterStop,
+    bytesAfterSilence: bytes,
+    silent: stopError === '' && bytes === bytesAfterStop,
+  };
+}
+
+async function runFiniteScenario(
+  dev: Device, scenario: FiniteScenario, model: SelftestModel, hooks: ScenarioHooks,
+): Promise<void> {
+  connectEl.hidden = true;
+  report.device = { name: dev.name, serial: dev.serial };
+  report.model = model;
+  report.scenario = `finite-${scenario.channels}`;
+  report.layer = scenario.layer;
+  report.mode = scenario.mode;
+  line(`device: ${dev.name}  serial ${dev.serial}`, 'ok');
+  const deviceErrors: string[] = [];
+  dev.onError = (e) => {
+    deviceErrors.push(String(e));
+    line(`  device error: ${e}`, 'bad');
+  };
+  report.deviceErrors = deviceErrors;
+
+  const trace: string[] = [];
+  hooks.subscribeTrace((text) => {
+    trace.push(text);
+    if (trace.length > 400) trace.shift();
+  });
+
+  const expectedSamples = finiteSampleCount(scenario.ms, scenario.mhz);
+  const bytesPerSample = bytesPerSampleForChannels(scenario.channels);
+  const expectedBytes = finiteExpectedBytes(expectedSamples, scenario.channels);
+  const endBudgetMs = finiteEndBudgetMs(scenario.channels, scenario.ms, scenario.mhz);
+  head(
+    `finite scenario: ${scenario.channels} ch @ ${scenario.mhz} MHz, ` +
+      `${expectedSamples.toLocaleString()} samples, ${scenario.mode} mode`,
+  );
+
+  const first = await runFiniteAttempt(dev, scenario);
+  record('the finite capture starts', first.startError === '', { startError: first.startError });
+  record('the finite capture emits one automatic end within the budget',
+    first.startError === '' && first.endError === '' && first.endCountAtEnd === 1, {
+      endCount: first.endCountAtEnd,
+      endMs: Number.isNaN(first.endMs) ? 'timeout' : Math.round(first.endMs),
+      endBudgetMs,
+      endError: first.endError,
+    });
+  record('the finite capture delivers the exact requested sample and byte count',
+    first.bytesAtEnd === expectedBytes, {
+      expectedSamples,
+      actualSamples: first.bytesAtEnd / bytesPerSample,
+      expectedBytes,
+      actualBytes: first.bytesAtEnd,
+      bytesPerSample,
+    });
+  record('the finite capture delivers sample-aligned sink chunks',
+    first.chunkCount > 0 && first.unalignedChunks === 0, {
+      chunkCount: first.chunkCount,
+      unalignedChunks: first.unalignedChunks,
+      bytesPerSample,
+    });
+  record('stop after the finite capture completes within the budget', first.stopError === '', {
+    stopMs: Number.isNaN(first.stopMs) ? 'timeout' : Math.round(first.stopMs),
+    stopError: first.stopError,
+  });
+  record('the finite capture stays exact through stop',
+    first.bytesAfterStop === expectedBytes && first.endCountAfterStop === 1, {
+      expectedBytes,
+      actualBytes: first.bytesAfterStop,
+      endCount: first.endCountAfterStop,
+    });
+  record('the stream is silent and exact after the finite capture stop',
+    first.silent && first.bytesAfterSilence === expectedBytes && first.endCountAfterSilence === 1, {
+      bytesAtEnd: first.bytesAtEnd,
+      bytesAfterStop: first.bytesAfterStop,
+      bytesAfterSilence: first.bytesAfterSilence,
+      expectedBytes,
+      endCount: first.endCountAfterSilence,
+    });
+
+  const reuse = await runFiniteAttempt(dev, scenario);
+  record('the same transport completes an exact finite capture after stop',
+    reuse.startError === '' && reuse.endError === '' && reuse.endCountAtEnd === 1 &&
+      reuse.bytesAtEnd === expectedBytes && reuse.chunkCount > 0 && reuse.unalignedChunks === 0 &&
+      reuse.bytesAfterStop === expectedBytes && reuse.endCountAfterStop === 1 &&
+      reuse.stopError === '' && reuse.silent && reuse.bytesAfterSilence === expectedBytes &&
+      reuse.endCountAfterSilence === 1, {
+      startError: reuse.startError,
+      endError: reuse.endError,
+      stopError: reuse.stopError,
+      endCountAtEnd: reuse.endCountAtEnd,
+      endCountAfterStop: reuse.endCountAfterStop,
+      endCountAfterSilence: reuse.endCountAfterSilence,
+      endMs: Number.isNaN(reuse.endMs) ? 'timeout' : Math.round(reuse.endMs),
+      chunkCount: reuse.chunkCount,
+      unalignedChunks: reuse.unalignedChunks,
+      expectedSamples,
+      actualSamples: reuse.bytesAtEnd / bytesPerSample,
+      expectedBytes,
+      actualBytes: reuse.bytesAtEnd,
+      bytesAfterStop: reuse.bytesAfterStop,
+      bytesAfterSilence: reuse.bytesAfterSilence,
+    });
+
+  report.trace = trace;
+  await finish(hooks.close);
+}
+
+async function runCaptureScenario(
+  dev: Device, scenario: CaptureScenario, model: SelftestModel, hooks: ScenarioHooks,
+): Promise<void> {
+  if (scenario.kind === 'stop') {
+    await runStopScenario(dev, scenario, model, hooks);
+    return;
+  }
+  await runFiniteScenario(dev, scenario, model, hooks);
+}
+
 async function finish(close: () => void | Promise<void>): Promise<void> {
   head('done');
   const failed = checks.filter((c) => !c.pass);
@@ -522,9 +744,15 @@ async function main(): Promise<void> {
     line(`bad scenario parameters: ${e}`, 'bad');
     throw e;
   }
-  if (scenario.kind !== 'full') {
+  if (scenario.kind === 'stop') {
     line(
       `scenario: stop-${scenario.channels}, ${scenario.ms} ms @ ${scenario.mhz} MHz, ${scenario.layer} layer`,
+      'warn',
+    );
+  } else if (scenario.kind === 'finite') {
+    line(
+      `scenario: finite-${scenario.channels}, ${scenario.ms} ms @ ${scenario.mhz} MHz, ` +
+        `${scenario.mode} mode, ${scenario.layer} layer`,
       'warn',
     );
   }
@@ -564,7 +792,7 @@ async function dispatch(usb: USBDevice, scenario: ScenarioRequest): Promise<void
   if (scenario.layer === 'page') {
     const dev = new Slogic16U3(usb);
     await dev.open();
-    await runStopScenario(dev, scenario, model, {
+    await runCaptureScenario(dev, scenario, model, {
       subscribeTrace: (push) => {
         dev.onTrace = (e) => push(formatTrace(e));
       },
@@ -579,13 +807,14 @@ async function dispatch(usb: USBDevice, scenario: ScenarioRequest): Promise<void
     connectEl.hidden = true;
     report.device = { name: usb.productName, serial: usb.serialNumber };
     report.model = model;
-    report.scenario = `stop-${scenario.channels}`;
+    report.scenario = `${scenario.kind}-${scenario.channels}`;
     report.layer = scenario.layer;
+    if (scenario.kind === 'finite') report.mode = scenario.mode;
     record('worker transport opens the granted device', false, { error: String(e) });
     await finish(() => {});
     return;
   }
-  await runStopScenario(worker, scenario, model, {
+  await runCaptureScenario(worker, scenario, model, {
     subscribeTrace: (push) => {
       worker.onTrace = (message) => push(formatTrace(message.entry));
     },
