@@ -165,8 +165,8 @@ check('time units are us, ms and s with ms as the draft default',
     'DEFAULT_LOOP_SAMPLES', 'bytesPerSampleForChannels', '2 ** 31', '2 ** 30', '2**31', '2**30',
     '2147483648', '1073741824', '536870912', '268435456', '1024'];
   const leaked = forbidden.filter((needle) => source.includes(needle));
-  const routed = source.includes('clampLoopSamples(value * UNIT_SECONDS[unit] * samplerate, channels)') &&
-    source.includes('Math.floor(maxLoopSamples(channels) / samplerate / UNIT_SECONDS[unit])');
+  const routed = source.includes('clampLoopSamples(value * timeUnitSeconds(unit) * samplerate, channels)') &&
+    source.includes('Math.floor(maxLoopSamples(channels) / samplerate / timeUnitSeconds(unit))');
   check('time conversion has no second memory budget or quantum and routes through the shared helpers',
     leaked.length === 0 && routed, `leaked=${leaked.join(',') || 'none'}, routed=${routed}`);
 }

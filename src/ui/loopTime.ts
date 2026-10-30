@@ -2,15 +2,16 @@
 
 import type { ChannelCount } from '../types.js';
 import { clampLoopSamples, maxLoopSamples } from './state.js';
+import {
+  DEFAULT_TIME_UNIT, TIME_UNITS, isTimeUnit, timeUnitSeconds, type TimeUnit,
+} from './timeUnits.js';
 
-export const LOOP_TIME_UNITS = ['us', 'ms', 's'] as const;
-export type LoopTimeUnit = (typeof LOOP_TIME_UNITS)[number];
-export const DEFAULT_LOOP_TIME_UNIT: LoopTimeUnit = 'ms';
-
-const UNIT_SECONDS: Record<LoopTimeUnit, number> = { us: 1e-6, ms: 1e-3, s: 1 };
+export const LOOP_TIME_UNITS = TIME_UNITS;
+export type LoopTimeUnit = TimeUnit;
+export const DEFAULT_LOOP_TIME_UNIT: LoopTimeUnit = DEFAULT_TIME_UNIT;
 
 export function isLoopTimeUnit(value: string): value is LoopTimeUnit {
-  return (LOOP_TIME_UNITS as readonly string[]).includes(value);
+  return isTimeUnit(value);
 }
 
 function validSamplerate(samplerate: number): boolean {
@@ -19,7 +20,7 @@ function validSamplerate(samplerate: number): boolean {
 
 export function maxLoopTimeValue(channels: ChannelCount, samplerate: number, unit: LoopTimeUnit): number {
   if (!isLoopTimeUnit(unit) || !validSamplerate(samplerate)) return 0;
-  return Math.floor(maxLoopSamples(channels) / samplerate / UNIT_SECONDS[unit]);
+  return Math.floor(maxLoopSamples(channels) / samplerate / timeUnitSeconds(unit));
 }
 
 export function loopSamplesFromTime(
@@ -27,7 +28,7 @@ export function loopSamplesFromTime(
 ): number | null {
   if (!isLoopTimeUnit(unit) || !Number.isFinite(value) || !Number.isInteger(value) || value <= 0 ||
     !validSamplerate(samplerate)) return null;
-  return clampLoopSamples(value * UNIT_SECONDS[unit] * samplerate, channels);
+  return clampLoopSamples(value * timeUnitSeconds(unit) * samplerate, channels);
 }
 
 export function loopTimeFromSamples(
@@ -36,5 +37,5 @@ export function loopTimeFromSamples(
   if (!Number.isFinite(samples) || samples <= 0) return null;
   const max = maxLoopTimeValue(channels, samplerate, unit);
   if (max < 1) return null;
-  return Math.min(max, Math.max(1, Math.round(samples / samplerate / UNIT_SECONDS[unit])));
+  return Math.min(max, Math.max(1, Math.round(samples / samplerate / timeUnitSeconds(unit))));
 }
