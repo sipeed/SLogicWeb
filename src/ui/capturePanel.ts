@@ -20,7 +20,7 @@ import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import { formatDuration, formatRate } from './format.js';
 import {
-  channelBankIndices, channelBankRange, channelBankStarts, channelBankStatus, channelWidthOptions,
+  CHANNEL_BANK_SIZE, channelBankIndices, channelBankRange, channelBankStarts, channelWidthOptions,
   lockedChannelBanks,
 } from './channelBanks.js';
 import { t } from './i18n.js';
@@ -34,7 +34,6 @@ import { MAX_SAMPLES } from './captureIO.js';
 export interface CapturePanelCallbacks {
   onSettings(next: CaptureSettings): void;
   onToggleChannel(index: number, enabled: boolean): void;
-  onToggleBank(start: number): void;
   onOpenBank(start: number): void;
   onChannelWidth(channels: number): void;
   onUsbControl(command: string): Promise<string>;
@@ -126,49 +125,23 @@ export class CapturePanel {
     const banks = div('channel-banks');
     const activeBanks = lockedChannelBanks(v.buses, v.channels.length);
     for (const start of channelBankStarts(v.channels.length)) {
-      const status = channelBankStatus(v.channels, start);
+      const indices = channelBankIndices(start, v.channels.length);
       const range = channelBankRange(start, v.channels.length);
       const locked = activeBanks.has(start);
       const bank = div('channel-bank');
       bank.dataset.bankStart = String(start);
       const head = div('channel-bank-head');
-      if (status.total === 8) {
+      if (indices.length === CHANNEL_BANK_SIZE) {
         head.appendChild(oscilloscopeButton(start, activeBanks.has(start), range,
           () => this.cb.onOpenBank(start)));
       }
-      const toggle = document.createElement('input');
-      toggle.type = 'checkbox';
-      toggle.className = 'channel-bank-toggle';
-      toggle.checked = status.state === 'all';
-      toggle.indeterminate = status.state === 'mixed';
-      toggle.dataset.bankToggle = String(start);
-      toggle.dataset.adcLocked = String(locked);
-      toggle.disabled = locked;
-      toggle.setAttribute('aria-label', t(locked ? 'capturePanel.bankLocked' : 'capturePanel.bankToggle', { range }));
-      toggle.title = toggle.getAttribute('aria-label')!;
-      toggle.addEventListener('change', () => {
-        this.cb.onToggleBank(start);
-        if (toggle.isConnected) {
-          toggle.checked = status.state === 'all';
-          toggle.indeterminate = status.state === 'mixed';
-        } else {
-          this.root.querySelector<HTMLInputElement>(`[data-bank-toggle="${start}"]`)?.focus({ preventScroll: true });
-        }
-      });
-      const title = document.createElement('span');
-      title.className = 'channel-bank-title';
-      title.textContent = range;
-      const count = document.createElement('span');
-      count.className = 'channel-bank-count';
-      count.textContent = `${status.enabled}/${status.total}`;
-      head.append(toggle, title, count);
 
       const grid = div('chip-grid channel-bank-grid');
       grid.dataset.bankGrid = String(start);
       grid.dataset.adcLocked = String(locked);
       grid.setAttribute('role', 'group');
       grid.setAttribute('aria-label', range);
-      for (const index of channelBankIndices(start, v.channels.length)) {
+      for (const index of indices) {
         const c = v.channels[index]!;
         const chip = document.createElement('button');
         chip.className = 'chip' + (c.enabled ? ' on' : '') + (locked ? ' adc-locked' : '');

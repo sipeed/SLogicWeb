@@ -43,7 +43,7 @@ import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLay
 import { CapturePanel, type CapturePanelView } from './capturePanel.js';
 import {
   CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankStart,
-  lockedChannelBanks, scopeOutOfWidth, toggleChannelBank,
+  lockedChannelBanks, scopeOutOfWidth,
 } from './channelBanks.js';
 import { ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration } from './channelList.js';
 import { computeChannelRowHeight } from './channelLayout.js';
@@ -289,7 +289,6 @@ export class App {
     this.capturePanel = new CapturePanel(panelHost, {
       onSettings: (s) => this.applySettings(s),
       onToggleChannel: (i, on) => this.setChannelEnabled(i, on),
-      onToggleBank: (start) => this.setBankEnabled(start),
       onOpenBank: (start) => this.openBankBus(start),
       onChannelWidth: (n) => this.setChannelWidth(n),
       onUsbControl: (command) => this.usbControl(command),
@@ -713,13 +712,6 @@ export class App {
     if (!enabled && lockedChannelBanks(this.busViews, this.channels.length).has(channelBankStart(index))) return;
     if (!enabled && this.enabledChannels().length <= 1) return;   // never zero rows
     c.enabled = enabled;
-    this.afterChannelChange();
-  }
-
-  private setBankEnabled(start: number): void {
-    const next = toggleChannelBank(this.channels, start, lockedChannelBanks(this.busViews, this.channels.length));
-    if (!next) return;
-    for (let i = 0; i < this.channels.length; i++) this.channels[i]!.enabled = next[i]!;
     this.afterChannelChange();
   }
 

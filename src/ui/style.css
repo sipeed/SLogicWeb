@@ -987,9 +987,6 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 .adc-button svg { display: block; width: 14px; height: 14px; }
 .adc-button.on { background: #4C9AFF; color: #141415; }
-.channel-bank-toggle { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
-.channel-bank-title { color: var(--text80); font-size: 10px; line-height: 1; white-space: nowrap; }
-.channel-bank-count { margin-left: auto; color: var(--text50); font-size: 10px; line-height: 1; white-space: nowrap; }
 .chip-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
 .channel-bank-grid { position: relative; }
 .channel-bank-grid .chip { min-width: 0; padding: 0; font-size: 10px; }
@@ -1201,8 +1198,6 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
 }
 :is(html[data-theme="dark"], html[data-theme="light"]) .adc-button.on { background: #4C9AFF; color: #141415; }
 html[data-theme="light"] .adc-button:not(.on) { border-color: #2F6FAF; color: #2F6FAF; }
-:is(html[data-theme="dark"], html[data-theme="light"]) .channel-bank-title { color: var(--foreground); }
-:is(html[data-theme="dark"], html[data-theme="light"]) .channel-bank-count { color: var(--muted-foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .field input,
 :is(html[data-theme="dark"], html[data-theme="light"]) .usb-console-command input {
   background: var(--background); border-color: var(--input);
