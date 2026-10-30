@@ -122,7 +122,7 @@ Object.assign(globalThis, { localStorage: local, sessionStorage: session });
   check('additionalProperties schemas validate map values',
     validate({ trigger_modes: { 0: 'rising' } }, set).length === 0 &&
     validate({ trigger_modes: { 0: 'sideways' } }, set).length > 0);
-  check('enum is enforced', validate({ mode: 'single' }, set).length > 0);
+  check('enum is enforced', validate({ mode: 'sideways' }, set).length > 0);
   check('loop mode is accepted by the settings schema',
     validate({ mode: 'loop', loop_samples: 2048 }, set).length === 0);
   const attach = toolByName('attach_decoder')!.inputSchema;
@@ -141,7 +141,8 @@ const UART = fixture.channelNames.findIndex((n) => /uart/i.test(n) && /rx/i.test
 
 function settings(): CaptureSettings {
   return {
-    channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'timer', seconds: 1, loopSamples: 16_000_000,
+    channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'single', seconds: 1,
+    singleUnlimited: false, repeatIntervalSeconds: 1, loopSamples: 16_000_000,
     testMode: 0,
     triggerEnableMask: false, softwareTrigger: false, triggerModes: { 2: 'high' }, triggerConditions: [],
     triggerChannel: 0, triggerKind: 'rising', triggerLevel: 1, preTriggerPercent: 10,
@@ -204,9 +205,13 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
 
   const st = await run('get_state', {}, host);
   const state = st.out as Record<string, unknown>;
+  const stateCaptureSettings = state.settings as Record<string, unknown>;
   check('get_state reports the capture and limits',
     st.ok && (state.capture as { samplerate_hz: number }).samplerate_hz === 16e6 &&
-    JSON.stringify(state.max_samplerate_hz_by_width) === '{"16":400000000,"32":200000000}', JSON.stringify(state).slice(0, 300));
+    stateCaptureSettings.mode === 'single' && stateCaptureSettings.single_unlimited === false &&
+    stateCaptureSettings.repeat_interval_seconds === 1 &&
+    JSON.stringify(state.max_samplerate_hz_by_width) === '{"16":400000000,"32":200000000}',
+    JSON.stringify(state).slice(0, 300));
 
   const stats = await run('get_channel_stats', { channels: [UART] }, host);
   const ch = ((stats.out as { channels: Record<string, unknown>[] }).channels)[0]!;
@@ -265,11 +270,20 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
   const last = host.applied[host.applied.length - 1]!;
   const setLoop = await run('set_capture_settings', { mode: 'loop', loop_samples: 2_000_000 }, host);
   const lastLoop = host.applied[host.applied.length - 1]!;
+  const setRepeat = await run('set_capture_settings', {
+    mode: 'repeat', repeat_interval_seconds: 0.1,
+  }, host);
+  const lastRepeat = host.applied[host.applied.length - 1]!;
+  check('set_capture_settings maps repeat fields',
+    setRepeat.ok && lastRepeat.patch.mode === 'repeat' && lastRepeat.patch.repeatIntervalSeconds === 0.1 &&
+    lastRepeat.patch.singleUnlimited !== true,
+    JSON.stringify(lastRepeat.patch));
   check('set_capture_settings maps loop fields',
     setLoop.ok && lastLoop.patch.mode === 'loop' && lastLoop.patch.loopSamples === 2_000_000,
     JSON.stringify(lastLoop.patch));
   check('set_capture_settings maps fields and clears dont-care channels',
-    set.ok && last.patch.mode === 'free' && last.patch.triggerEnableMask === true &&
+    set.ok && last.patch.mode === 'single' && last.patch.singleUnlimited === true &&
+    last.patch.triggerEnableMask === true &&
     JSON.stringify(last.patch.triggerModes) === '{"0":"rising"}' && last.enabled?.length === 4,
     JSON.stringify(last));
   check('set_capture_settings reports a clamped samplerate',
@@ -444,7 +458,8 @@ async function converse(provider: Provider, approve: boolean | 'abort', host = n
     { stop: 'end', text: 'ok', toolCalls: [] },
   ]);
   const { host } = await converse(p, true);
-  check('an approved act tool runs', host.applied.length === 1 && host.applied[0]!.patch.mode === 'free');
+  check('an approved act tool runs', host.applied.length === 1 && host.applied[0]!.patch.mode === 'single' &&
+    host.applied[0]!.patch.singleUnlimited === true);
 }
 {
   const p = new ScriptedProvider([

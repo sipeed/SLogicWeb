@@ -216,6 +216,8 @@ function settingsView(s: CaptureSettings): Record<string, unknown> {
     threshold_v: s.thresholdVolts,
     mode: s.mode,
     seconds: s.seconds,
+    single_unlimited: s.singleUnlimited,
+    repeat_interval_seconds: s.repeatIntervalSeconds,
     loop_samples: s.loopSamples,
     test_mode: s.testMode,
     trigger: {
@@ -562,10 +564,13 @@ export const TOOLS: AssistantTool[] = [
         description: 'Exactly these channels are enabled.' },
       samplerate_hz: { type: 'number', exclusiveMinimum: 0 },
       threshold_v: { type: 'number', minimum: 0.1, maximum: 5 },
-      mode: { type: 'string', enum: ['timer', 'free', 'loop'],
-        description: 'timer: stop after `seconds`. free: run until stopped. loop: run until stopped, keeping only the newest `loop_samples`.' },
+      mode: { type: 'string', enum: ['single', 'repeat', 'loop', 'timer', 'free'],
+        description: 'single: capture once. repeat: capture again after each finite capture. loop: retain the newest window. Legacy timer/free map to finite/unlimited single.' },
       seconds: { type: 'number', minimum: 0.001,
-        description: 'Post-trigger capture length in timer mode, from 0.001 s (1 ms) up to the sample-count limit.' },
+        description: 'Post-trigger capture length in single/repeat mode, from 0.001 s (1 ms) up to the sample-count limit.' },
+      single_unlimited: { type: 'boolean', description: 'In single mode, run until stopped or the sample ceiling; seconds remains the finite draft.' },
+      repeat_interval_seconds: { type: 'number', minimum: 0.1, maximum: 10,
+        description: 'Delay between a naturally completed repeat capture and the next one, from 0.1 to 10 seconds.' },
       loop_samples: { type: 'number', minimum: 1024,
         description: 'Retention window in loop mode, in samples; rounded up to a multiple of 1024 and clamped to the loop memory budget.' },
       test_mode: { type: 'integer', enum: [0, 1, 2], description: '0 real pins, 1 USB max-speed pattern, 2 built-in signal simulator.' },
@@ -581,8 +586,18 @@ export const TOOLS: AssistantTool[] = [
       const patch: Partial<CaptureSettings> = {};
       if (typeof i.samplerate_hz === 'number') patch.samplerate = i.samplerate_hz;
       if (typeof i.threshold_v === 'number') patch.thresholdVolts = i.threshold_v;
-      if (i.mode === 'timer' || i.mode === 'free' || i.mode === 'loop') patch.mode = i.mode;
+      if (i.mode === 'free') {
+        patch.mode = 'single';
+        patch.singleUnlimited = true;
+      } else if (i.mode === 'timer') {
+        patch.mode = 'single';
+        patch.singleUnlimited = false;
+      } else if (i.mode === 'single' || i.mode === 'repeat' || i.mode === 'loop') {
+        patch.mode = i.mode;
+      }
       if (typeof i.seconds === 'number') patch.seconds = i.seconds;
+      if (typeof i.single_unlimited === 'boolean') patch.singleUnlimited = i.single_unlimited;
+      if (typeof i.repeat_interval_seconds === 'number') patch.repeatIntervalSeconds = i.repeat_interval_seconds;
       if (typeof i.loop_samples === 'number') patch.loopSamples = i.loop_samples;
       if (i.test_mode === 0 || i.test_mode === 1 || i.test_mode === 2) patch.testMode = i.test_mode;
       if (typeof i.trigger_enabled === 'boolean') patch.triggerEnableMask = i.trigger_enabled;

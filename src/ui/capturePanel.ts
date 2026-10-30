@@ -28,8 +28,14 @@ import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
 import type { CaptureSettings, ChannelState } from './state.js';
-import { clampLoopSamples, THRESHOLD_VOLT_OPTIONS } from './state.js';
+import {
+  clampLoopSamples, LOOP_WINDOW_QUANTUM, maxLoopSamples, THRESHOLD_VOLT_OPTIONS,
+} from './state.js';
 import { MAX_SAMPLES } from './captureIO.js';
+import {
+  clampCaptureSeconds, clampRepeatIntervalSeconds, maxCaptureSeconds,
+} from './captureTime.js';
+import { capturePostTriggerSamples } from './capturePolicy.js';
 
 export interface CapturePanelCallbacks {
   onSettings(next: CaptureSettings): void;
@@ -218,7 +224,8 @@ export class CapturePanel {
     const modeSec = section(t('capturePanel.capture'));
     const seg = div('segmented');
     for (const [id, text] of [
-      ['free', t('capturePanel.freeRun')], ['timer', t('capturePanel.timer')],
+      ['single', t('capturePanel.modeSingle')], ['repeat', t('capturePanel.modeRepeat')],
+      ['loop', t('capturePanel.modeLoop')],
     ] as const) {
       const b = document.createElement('button');
       b.className = 'seg' + (s.mode === id ? ' on' : '');
@@ -230,8 +237,8 @@ export class CapturePanel {
     }
     modeSec.body.appendChild(seg);
 
-    const maxSeconds = MAX_SAMPLES / s.samplerate;
-    if (s.mode === 'timer') {
+    const maxSeconds = maxCaptureSeconds(s.samplerate);
+    if (s.mode === 'single' || s.mode === 'repeat') {
       const secs = document.createElement('input');
       secs.type = 'number';
       secs.min = '0.001';
@@ -241,16 +248,61 @@ export class CapturePanel {
       secs.step = '0.001';
       secs.max = String(maxSeconds);
       secs.value = String(s.seconds);
+      secs.dataset.captureSeconds = '';
+      secs.disabled = v.running || v.stopping || (s.mode === 'single' && s.singleUnlimited);
       secs.addEventListener('change', () =>
-        this.cb.onSettings({ ...s, seconds: Math.min(Number(secs.value), maxSeconds) }));
+        this.cb.onSettings({ ...s, seconds: clampCaptureSeconds(Number(secs.value), s.samplerate) }));
       modeSec.body.appendChild(labelled(t('capturePanel.durationS'), secs));
+      if (s.mode === 'single') {
+        const unlimitedLabel = document.createElement('label');
+        unlimitedLabel.className = 'panel-note';
+        const unlimited = document.createElement('input');
+        unlimited.type = 'checkbox';
+        unlimited.checked = s.singleUnlimited;
+        unlimited.dataset.singleUnlimited = '';
+        unlimited.disabled = v.running || v.stopping;
+        unlimited.addEventListener('change', () =>
+          this.cb.onSettings({ ...s, singleUnlimited: unlimited.checked }));
+        unlimitedLabel.append(unlimited, document.createTextNode(t('capturePanel.unlimited')));
+        modeSec.body.appendChild(unlimitedLabel);
+      } else {
+        const interval = document.createElement('input');
+        interval.type = 'number';
+        interval.min = '1';
+        interval.max = '10';
+        interval.step = '1';
+        interval.value = String(s.repeatIntervalSeconds);
+        interval.dataset.repeatInterval = '';
+        interval.disabled = v.running || v.stopping;
+        interval.addEventListener('change', () =>
+          this.cb.onSettings({ ...s, repeatIntervalSeconds: clampRepeatIntervalSeconds(Number(interval.value)) }));
+        modeSec.body.appendChild(labelled(t('capturePanel.repeatIntervalS'), interval));
+      }
+    } else {
+      const win = document.createElement('input');
+      win.type = 'number';
+      win.min = String(LOOP_WINDOW_QUANTUM);
+      win.max = String(maxLoopSamples(s.channels));
+      win.step = String(LOOP_WINDOW_QUANTUM);
+      win.value = String(clampLoopSamples(s.loopSamples, s.channels));
+      win.dataset.loopSamples = '';
+      win.disabled = v.running || v.stopping;
+      win.addEventListener('change', () =>
+        this.cb.onSettings({ ...s, loopSamples: clampLoopSamples(Number(win.value), s.channels) }));
+      modeSec.body.appendChild(labelled(t('capturePanel.loopSamples'), win));
     }
     const limit = div('panel-note');
-    limit.textContent = t('capturePanel.ceilingNote', {
-      samples: MAX_SAMPLES.toLocaleString(),
-      duration: formatDuration(maxSeconds),
-      rate: formatRate(s.samplerate),
-    });
+    limit.textContent = s.mode === 'loop'
+      ? t('capturePanel.loopWindowLimit', {
+        samples: clampLoopSamples(s.loopSamples, s.channels).toLocaleString(),
+        duration: formatDuration(clampLoopSamples(s.loopSamples, s.channels) / s.samplerate),
+        rate: formatRate(s.samplerate),
+      })
+      : t('capturePanel.ceilingNote', {
+        samples: (MAX_SAMPLES - 1).toLocaleString(),
+        duration: formatDuration(maxSeconds),
+        rate: formatRate(s.samplerate),
+      });
     modeSec.body.appendChild(limit);
 
     const triggerSec = section(t('capturePanel.softwareTrigger'));
@@ -294,11 +346,7 @@ export class CapturePanel {
         // mode), capped by the 64 MiB retained prefix. Promising the raw percentage
         // would overstate it exactly when the cap bites (e.g. 50% of 1 s at
         // 16ch/200M is capped at ~167 ms).
-        const post = s.mode === 'timer'
-          ? Math.min(MAX_SAMPLES - 1, Math.round(s.seconds * s.samplerate))
-          : s.mode === 'loop'
-            ? clampLoopSamples(s.loopSamples, s.channels)
-            : MAX_SAMPLES - 1;
+        const post = capturePostTriggerSamples(s);
         const pre = Math.min(
           Math.max(0, post - 1),
           Math.max(0, Math.floor(post * s.preTriggerPercent / 100)),

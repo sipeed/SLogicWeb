@@ -143,7 +143,8 @@ check('literal false and true survive parsing without coercion',
   const first = defaultCaptureSettings();
   const second = defaultCaptureSettings();
   const defaultsMatch = first.channels === 16 && first.samplerate === 16e6 &&
-    first.thresholdVolts === 1.2 && first.mode === 'timer' && first.seconds === 1 &&
+    first.thresholdVolts === 1.2 && first.mode === 'single' && first.seconds === 1 &&
+    !first.singleUnlimited && first.repeatIntervalSeconds === 1 &&
     first.loopSamples === 16_000_000 && first.testMode === 0 && !first.triggerEnableMask &&
     !first.softwareTrigger && first.triggerChannel === 0 && first.triggerKind === 'rising' &&
     first.triggerLevel === 1 && first.preTriggerPercent === 10;
@@ -251,8 +252,10 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
   const capture = {
     samplerate: 25e6,
     thresholdVolts: 1.65,
-    mode: 'free' as const,
+    mode: 'single' as const,
     seconds: 2.5,
+    singleUnlimited: true,
+    repeatIntervalSeconds: 0.25,
     loopSamples: 123_456,
     testMode: 2 as const,
     triggerEnableMask: true,
@@ -273,8 +276,10 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
   const base = {
     samplerate: 25e6,
     thresholdVolts: 1.65,
-    mode: 'free' as const,
+    mode: 'single' as const,
     seconds: 2.5,
+    singleUnlimited: true,
+    repeatIntervalSeconds: 0.25,
     loopSamples: 123_456,
     testMode: 2 as const,
     triggerEnableMask: true,
@@ -329,18 +334,43 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
   const serialized = capture === undefined
     ? ''
     : serializeWorkspaceSnapshot({ version: 1, detailedLabels: true, capture });
-  check('legacy capture payload without the marker parses as not explicit and stays key-free',
-    !threw && capture?.samplerate === 16e6 && capture?.samplerateExplicit !== true &&
-    serialized.includes('"samplerate":16000000') && !serialized.includes('samplerateExplicit'),
+  check('legacy timer capture migrates to finite single and keeps the rate marker absent',
+    !threw && capture?.samplerate === 16e6 && capture.mode === 'single' &&
+    capture.singleUnlimited === false && capture.repeatIntervalSeconds === 1 &&
+    capture.samplerateExplicit !== true && serialized.includes('"samplerate":16000000') &&
+    serialized.includes('"repeatIntervalSeconds":1') && !serialized.includes('samplerateExplicit'),
     `threw=${threw}, capture=${JSON.stringify(capture)}`);
+}
+
+{
+  const legacyFree = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, capture: { mode: 'free', seconds: 2.5 },
+  }))?.capture;
+  const repeat = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, capture: { mode: 'repeat', singleUnlimited: true, repeatIntervalSeconds: 'fast' },
+  }))?.capture;
+  const single = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, capture: { mode: 'single', singleUnlimited: true },
+  }))?.capture;
+  const loop = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, capture: { mode: 'loop', singleUnlimited: true },
+  }))?.capture;
+  check('legacy free maps to unlimited single while repeat and invalid fields stay finite',
+    legacyFree?.mode === 'single' && legacyFree.singleUnlimited === true && legacyFree.seconds === 2.5 &&
+    repeat?.mode === 'repeat' && repeat.singleUnlimited === false && repeat.repeatIntervalSeconds === 1 &&
+    single?.mode === 'single' && single.singleUnlimited === true &&
+    loop?.mode === 'loop' && loop.singleUnlimited === false,
+    JSON.stringify({ legacyFree, repeat, single, loop }));
 }
 
 {
   const base = {
     samplerate: 25e6,
     thresholdVolts: 1.65,
-    mode: 'free' as const,
+    mode: 'single' as const,
     seconds: 2.5,
+    singleUnlimited: true,
+    repeatIntervalSeconds: 0.25,
     loopSamples: 123_456,
     testMode: 2 as const,
     triggerEnableMask: true,
@@ -398,6 +428,8 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
       testMode: 9,
       triggerEnableMask: 'true',
       seconds: '2',
+      singleUnlimited: 'yes',
+      repeatIntervalSeconds: 'fast',
       loopSamples: null,
       preTriggerPercent: null,
     },
@@ -408,8 +440,9 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     parsed.capture.thresholdVolts === defaults.thresholdVolts && parsed.capture.mode === defaults.mode &&
     parsed.capture.testMode === defaults.testMode &&
     parsed.capture.triggerEnableMask === defaults.triggerEnableMask &&
-    parsed.capture.seconds === defaults.seconds && parsed.capture.loopSamples === defaults.loopSamples &&
-    parsed.capture.preTriggerPercent === defaults.preTriggerPercent,
+    parsed.capture.seconds === defaults.seconds && parsed.capture.singleUnlimited === false &&
+    parsed.capture.repeatIntervalSeconds === defaults.repeatIntervalSeconds &&
+    parsed.capture.loopSamples === defaults.loopSamples && parsed.capture.preTriggerPercent === defaults.preTriggerPercent,
     JSON.stringify(parsed?.capture));
 }
 

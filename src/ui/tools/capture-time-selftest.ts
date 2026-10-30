@@ -10,6 +10,8 @@ import {
   DEFAULT_TIME_UNIT, TIME_UNITS, isPositiveInteger, isTimeUnit, maxTimeValue, minTimeValue,
   secondsFromTimeValue, timeUnitForRange, timeUnitSeconds, timeValueFromSeconds,
 } from '../timeUnits.js';
+import { capturePostTriggerSamples } from '../capturePolicy.js';
+import { defaultCaptureSettings } from '../state.js';
 
 const nodeProcess = (() => {
   const p = (globalThis as {
@@ -132,6 +134,19 @@ check('time units are us, ms and s with ms as the shared default',
     captureTimeFromSeconds(1, 's', 0) === null;
   check('every shipping rate has a usable microsecond range and invalid rates have none',
     valid && invalid, `rates=${rates.length}, valid=${valid}, invalid=${invalid}`);
+}
+
+{
+  const base = defaultCaptureSettings();
+  const finite = capturePostTriggerSamples({ ...base, seconds: 0.0015 }) === 24_000;
+  const unlimited = capturePostTriggerSamples({ ...base, singleUnlimited: true }) === 2 ** 31 - 1;
+  const repeat = capturePostTriggerSamples({
+    ...base, mode: 'repeat', singleUnlimited: true, seconds: 0.0015,
+  }) === 24_000;
+  const loop = capturePostTriggerSamples({ ...base, mode: 'loop', loopSamples: 12_345 }) === 13_312;
+  check('post-trigger policy shares finite, repeat, unlimited and loop budgets',
+    finite && unlimited && repeat && loop,
+    `finite=${finite}, unlimited=${unlimited}, repeat=${repeat}, loop=${loop}`);
 }
 
 {

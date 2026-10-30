@@ -415,7 +415,8 @@ function check(name: string, pass: boolean, detail: string): void {
 // -------------------------------------------------------- trigger summary
 
 const baseSettings: CaptureSettings = {
-  channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'timer', seconds: 1, loopSamples: 16_000_000,
+  channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'single', seconds: 1,
+  singleUnlimited: false, repeatIntervalSeconds: 1, loopSamples: 16_000_000,
   testMode: 0, triggerEnableMask: true, softwareTrigger: true, triggerModes: {},
   triggerConditions: [], triggerChannel: 0,
   triggerKind: 'rising', triggerLevel: 1, preTriggerPercent: 10,
@@ -461,6 +462,7 @@ const baseSettings: CaptureSettings = {
     'bus.bankEnabledNote', 'bus.bankDisableNote', 'bus.bankDisabledNote',
     'capturePanel.loop', 'capturePanel.retentionSamples', 'capturePanel.retentionNote',
     'capturePanel.loopCeilingNote', 'capturePanel.oscilloscopeTakeover',
+    'capturePanel.freeRun', 'capturePanel.timer',
     'capturePanel.all', 'capturePanel.clear', 'capturePanel.enabledCount',
     'capturePanel.bankToggle', 'capturePanel.bankLocked',
     'bus.loopWindow', 'bus.globalCapture', 'bus.loopUnit', 'bus.loopMax', 'bus.loopEffective',

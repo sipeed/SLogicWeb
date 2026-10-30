@@ -78,6 +78,8 @@ import {
   type CaptureLabel, type StatusError,
 } from './state.js';
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
+import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.js';
+import { capturePostTriggerSamples } from './capturePolicy.js';
 import { markerPointerCursor, markerSnapRadii, type MarkerCursor } from './markerGeometry.js';
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
@@ -1400,6 +1402,8 @@ export class App {
         thresholdVolts: this.settings.thresholdVolts,
         mode: this.settings.mode,
         seconds: this.settings.seconds,
+        singleUnlimited: this.settings.singleUnlimited,
+        repeatIntervalSeconds: this.settings.repeatIntervalSeconds,
         loopSamples: this.settings.loopSamples,
         testMode: this.settings.testMode,
         triggerEnableMask: this.settings.triggerEnableMask,
@@ -1955,10 +1959,8 @@ export class App {
       this.triggerSampleIndex = null;
       const softwareTrigger = this.settings.softwareTrigger;
       this.captureStart = softwareTrigger ? 0 : performance.now();
-      const postTriggerSamples = mode === 'timer'
-        ? Math.min(MAX_SAMPLES - 1, Math.round(this.settings.seconds * cfg.samplerate))
-        : MAX_SAMPLES - 1;
-      this.captureLimitSamples = postTriggerSamples;
+      const postTriggerSamples = capturePostTriggerSamples(this.settings);
+      this.captureLimitSamples = isLoop ? MAX_SAMPLES - 1 : postTriggerSamples;
       this.startMutatedCapture = true;
       this.triggerState = softwareTrigger ? 'waiting' : 'off';
       this.captureLabel = { kind: 'capturing', channels: cfg.channels, rate: cfg.samplerate };
@@ -2572,7 +2574,6 @@ function clampSettings(
   s: CaptureSettings, ceilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ,
 ): CaptureSettings {
   const samplerate = Math.min(s.samplerate, ceilings[s.channels] ?? 200e6);
-  const max = MAX_SAMPLES / samplerate;
   const savedModes = s.triggerModes ?? {};
   const configuredConditions = Object.keys(savedModes).length ? modesToConditions(savedModes)
     : s.triggerConditions.length ? s.triggerConditions : s.softwareTrigger
@@ -2586,7 +2587,10 @@ function clampSettings(
     triggerModes[c.channel] = triggerModeFromCondition(c);
   }
   return {
-    ...s, samplerate, seconds: Math.max(0.001, Math.min(s.seconds, max)),
+    ...s, samplerate,
+    seconds: clampCaptureSeconds(s.seconds, samplerate),
+    singleUnlimited: s.mode === 'single' && s.singleUnlimited === true,
+    repeatIntervalSeconds: clampRepeatIntervalSeconds(s.repeatIntervalSeconds),
     loopSamples: clampLoopSamples(s.loopSamples ?? DEFAULT_LOOP_SAMPLES, s.channels),
     triggerEnableMask: s.triggerEnableMask ?? true,
     // Enable Mask is the sole global gate. Turning it off must not erase the

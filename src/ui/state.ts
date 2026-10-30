@@ -12,6 +12,7 @@ import { ANALYZER_COLORS, CHANNEL_COLORS } from './metrics.js';
 import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
 import { DROP_FRONT_QUANTUM } from '../data/index.js';
 import type { MessageKey, MessageVars } from './i18n.js';
+import { REPEAT_INTERVAL_SECONDS } from './captureTime.js';
 
 export interface ChannelState {
   /** Capture channel index, i.e. D<index>. Never changes; display order does. */
@@ -60,9 +61,10 @@ export interface CaptureSettings {
   channels: ChannelCount;
   samplerate: number;
   thresholdVolts: number;
-  /** 'free' runs until stopped or until the sample ceiling; 'timer' stops after seconds. */
-  mode: 'free' | 'timer' | 'loop';
+  mode: 'single' | 'repeat' | 'loop';
   seconds: number;
+  singleUnlimited: boolean;
+  repeatIntervalSeconds: number;
   /** Loop window as a sample count (HSync's SampleLimit), not a duration. */
   loopSamples: number;
   /** Hardware data source: normal pins, USB maximum-speed pattern, or simulator. */
@@ -88,8 +90,10 @@ export function defaultCaptureSettings(): CaptureSettings {
     channels: 16,
     samplerate: 16e6,
     thresholdVolts: 1.2,
-    mode: 'timer',
+    mode: 'single',
     seconds: 1,
+    singleUnlimited: false,
+    repeatIntervalSeconds: REPEAT_INTERVAL_SECONDS.default,
     loopSamples: DEFAULT_LOOP_SAMPLES,
     testMode: 0,
     triggerEnableMask: false,

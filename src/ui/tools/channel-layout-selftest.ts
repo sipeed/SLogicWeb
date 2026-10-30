@@ -537,21 +537,26 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   if (!loopFs || typeof loopFs.readFileSync !== 'function') throw new Error('node fs module unavailable');
   const stateSrc = loopFs.readFileSync('src/ui/state.ts', 'utf8');
   check('capture mode stays a closed stored union with no oscilloscope transform',
-    !stateSrc.includes('effectiveCaptureMode') && stateSrc.includes("mode: 'free' | 'timer' | 'loop';"),
+    !stateSrc.includes('effectiveCaptureMode') && stateSrc.includes("mode: 'single' | 'repeat' | 'loop';") &&
+    stateSrc.includes('singleUnlimited: boolean;') && stateSrc.includes('repeatIntervalSeconds: number;'),
     `transform=${stateSrc.includes('effectiveCaptureMode')}, ` +
-    `union=${stateSrc.includes("mode: 'free' | 'timer' | 'loop';")}`);
+    `union=${stateSrc.includes("mode: 'single' | 'repeat' | 'loop';")}`);
   const panel = loopFs.readFileSync('src/ui/capturePanel.ts', 'utf8');
   const modeBlock = panel.split('const modeSec = section(')[1]?.split('modeSec.body.appendChild(seg)')[0] ?? '';
-  const panelModes = !panel.includes("['loop', t('capturePanel.loop')]") &&
+  const panelModes = !panel.includes('capturePanel.freeRun') && !panel.includes('capturePanel.timer') &&
     !panel.includes('capturePanel.retentionSamples') && !panel.includes('capturePanel.retentionNote') &&
-    !panel.includes('capturePanel.loopCeilingNote') && !panel.includes('maxLoopSamples(') &&
-    panel.includes("['free', t('capturePanel.freeRun')]") && panel.includes("['timer', t('capturePanel.timer')]") &&
+    !panel.includes('capturePanel.loopCeilingNote') &&
+    panel.includes("['single', t('capturePanel.modeSingle')]") &&
+    panel.includes("['repeat', t('capturePanel.modeRepeat')]") &&
+    panel.includes("['loop', t('capturePanel.modeLoop')]") &&
+    panel.includes('secs.dataset.captureSeconds') && panel.includes('interval.dataset.repeatInterval') &&
+    panel.includes('unlimited.dataset.singleUnlimited') && panel.includes('win.dataset.loopSamples') &&
     modeBlock.includes('b.disabled = v.running || v.stopping') && modeBlock.includes('s.mode === id') &&
     !modeBlock.includes('oscilloscope') && !panel.includes('v.effectiveMode') &&
     !panel.includes('v.oscilloscopeActive') && !panel.includes('oscilloscopeTakeover');
-  check('the capture panel offers Free/Timer without an oscilloscope takeover',
+  check('the capture panel offers Single, Repeat and Loop with basic mode settings',
     panelModes,
-    `noLoop=${!panel.includes("['loop', t('capturePanel.loop')]")}, ` +
+    `free=${panel.includes('capturePanel.freeRun')}, timer=${panel.includes('capturePanel.timer')}, ` +
     `takeover=${panel.includes('oscilloscopeTakeover')}, stored=${modeBlock.includes('s.mode === id')}, ` +
     `lock=${modeBlock.includes('b.disabled = v.running || v.stopping')}`);
 
@@ -566,11 +571,13 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     startSrc.length > 0 && flagReset >= 0 && firstRefusal > flagReset && flagSet > firstRefusal,
     `slice=${startSrc.length}, reset=${flagReset}, refusal=${firstRefusal}, set=${flagSet}`);
 
-  const directMode = panel.includes("s.mode === 'timer'") && panel.includes("s.mode === 'loop'") &&
-    !panel.includes('s.channels === 32') &&
+  const directMode = panel.includes('capturePostTriggerSamples(s)') && !panel.includes('s.channels === 32') &&
     startSrc.includes('const mode = this.settings.mode;') &&
     startSrc.includes("const isLoop = mode === 'loop'") &&
-    startSrc.includes("const postTriggerSamples = mode === 'timer'") &&
+    startSrc.includes('const postTriggerSamples = capturePostTriggerSamples(this.settings)') &&
+    startSrc.includes('this.captureLimitSamples = isLoop ? MAX_SAMPLES - 1 : postTriggerSamples;') &&
+    appSrc.includes("singleUnlimited: s.mode === 'single' && s.singleUnlimited === true") &&
+    appSrc.includes('repeatIntervalSeconds: clampRepeatIntervalSeconds(') &&
     !appSrc.includes('effectiveCaptureMode') && !appSrc.includes('effectiveMode:') &&
     !appSrc.includes('private oscilloscopeActive()');
   // W6: the loop decode ban is gone - a running loop decodes as a labelled snapshot,
@@ -598,7 +605,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `retained=${appSrc.includes('bytesPerSampleForChannels(this.store.channelCount)')}`);
   check('the panel, trigger budget and real start path share stored mode without scope ownership',
     directMode,
-    `panel=${panel.includes("s.mode === 'timer'")}, ` +
+    `panel=${panel.includes('capturePostTriggerSamples(s)')}, ` +
     `start=${startSrc.includes('const mode = this.settings.mode;')}, ` +
     `scopeTransform=${appSrc.includes('effectiveCaptureMode')}`);
 

@@ -34,6 +34,8 @@ export interface PersistedCaptureSettings {
   thresholdVolts: number;
   mode: CaptureSettings['mode'];
   seconds: number;
+  singleUnlimited?: boolean;
+  repeatIntervalSeconds?: number;
   loopSamples: number;
   testMode: 0 | 1 | 2;
   triggerEnableMask: boolean;
@@ -129,6 +131,8 @@ function restoreCapture(value: unknown, capacity: number): PersistedCaptureSetti
     thresholdVolts: defaults.thresholdVolts,
     mode: defaults.mode,
     seconds: defaults.seconds,
+    singleUnlimited: defaults.singleUnlimited,
+    repeatIntervalSeconds: defaults.repeatIntervalSeconds,
     loopSamples: defaults.loopSamples,
     testMode: defaults.testMode,
     triggerEnableMask: defaults.triggerEnableMask,
@@ -148,8 +152,20 @@ function restoreCapture(value: unknown, capacity: number): PersistedCaptureSetti
       (THRESHOLD_VOLT_OPTIONS as readonly number[]).includes(value.thresholdVolts)) {
     capture.thresholdVolts = value.thresholdVolts;
   }
-  if (value.mode === 'free' || value.mode === 'timer' || value.mode === 'loop') capture.mode = value.mode;
+  if (value.mode === 'free') {
+    capture.mode = 'single';
+    capture.singleUnlimited = true;
+  } else if (value.mode === 'timer') {
+    capture.mode = 'single';
+    capture.singleUnlimited = false;
+  } else if (value.mode === 'single' || value.mode === 'repeat' || value.mode === 'loop') {
+    capture.mode = value.mode;
+    capture.singleUnlimited = value.mode === 'single' && value.singleUnlimited === true;
+  }
   if (typeof value.seconds === 'number' && Number.isFinite(value.seconds)) capture.seconds = value.seconds;
+  if (typeof value.repeatIntervalSeconds === 'number' && Number.isFinite(value.repeatIntervalSeconds)) {
+    capture.repeatIntervalSeconds = value.repeatIntervalSeconds;
+  }
   if (typeof value.loopSamples === 'number' && Number.isFinite(value.loopSamples)) {
     capture.loopSamples = value.loopSamples;
   }
@@ -369,7 +385,9 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
       ...(capture.widthExplicit === true ? { widthExplicit: true } : {}),
       thresholdVolts: capture.thresholdVolts,
       mode: capture.mode,
+      ...(capture.singleUnlimited === true ? { singleUnlimited: true } : {}),
       seconds: capture.seconds,
+      repeatIntervalSeconds: capture.repeatIntervalSeconds ?? defaultCaptureSettings().repeatIntervalSeconds,
       loopSamples: capture.loopSamples,
       testMode: capture.testMode,
       triggerEnableMask: capture.triggerEnableMask,
