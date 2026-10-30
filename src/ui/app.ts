@@ -43,7 +43,7 @@ import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLay
 import { CapturePanel, type CapturePanelView } from './capturePanel.js';
 import {
   CHANNEL_BANK_SIZE, busChannelBank, captureWidthTiers, channelBankIndices, channelBankStart,
-  lockedChannelBanks, scopeOutOfWidth,
+  busOutOfWidth, lockedChannelBanks,
 } from './channelBanks.js';
 import { ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration } from './channelList.js';
 import { computeChannelRowHeight } from './channelLayout.js';
@@ -259,6 +259,7 @@ export class App {
       triggerKind: first?.kind ?? 'rising',
       triggerLevel: first?.level ?? 1,
     }, this.rateCeilings);
+    this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));
     this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(this.workspaceSnapshot());
     this.reflectDetailedLabels();
 
@@ -431,6 +432,7 @@ export class App {
   }
 
   private addBus(cfg: BusViewConfig): string | null {
+    if (busOutOfWidth(cfg.spec, this.displayChannelCount())) return null;
     if ((this.running || this.stopping) && busChannelBank(cfg.spec) !== null) return null;
     const color = busColor(this.nextBus);
     const id = `bus-${this.nextBus++}`;
@@ -443,6 +445,7 @@ export class App {
   private updateBus(id: string, cfg: BusViewConfig, preserveDefaultName = false): boolean {
     const i = this.busViews.findIndex((b) => b.id === id);
     if (i < 0) return false;
+    if (busOutOfWidth(cfg.spec, this.displayChannelCount())) return false;
     const current = this.busViews[i]!;
     if ((this.running || this.stopping) &&
       (busChannelBank(current.spec) !== null || busChannelBank(cfg.spec) !== null)) return false;
@@ -626,12 +629,14 @@ export class App {
     // axis). When even minimum-height rows do not fit, the stack overflows and the
     // scroll area scrolls - phones get every channel instead of the first six.
     // Analog (parallel-bus) rows sit above the channels and take their height first.
-    const analogRows: RowSpec[] = this.busViews.map((b, i) => ({
-      kind: 'analog' as const,
-      channel: Math.min(b.spec.bits[0] ?? 0, Math.max(0, this.store.channelCount - 1)),
-      heightCss: b.heightCss,
-      bus: i,
-    }));
+    const analogRows: RowSpec[] = [];
+    this.busViews.forEach((b, i) => {
+      if (busOutOfWidth(b.spec, this.displayChannelCount())) return;
+      analogRows.push({
+        kind: 'analog', channel: Math.min(b.spec.bits[0] ?? 0, Math.max(0, this.store.channelCount - 1)),
+        heightCss: b.heightCss, bus: i,
+      });
+    });
     const analogH = analogRows.reduce((sum, r) => sum + r.heightCss, 0);
     const axisH = this.el.axis.offsetHeight || 30;
     const plotH = Math.max(120, (this.el.scroll.clientHeight || 630) - axisH - analogH);
@@ -740,7 +745,7 @@ export class App {
     if (this.running || this.stopping) return;
     if (!this.widthTiers().includes(channels)) return;
     if (!isChannelCount(channels) || channels > this.channels.length) return;
-    this.busViews = this.busViews.filter((bus) => !scopeOutOfWidth(bus.spec, channels));
+    this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, channels));
     if (channels !== this.settings.channels) this.widthExplicit = true;
     this.applySettings({ ...this.settings, channels });
   }
@@ -1739,6 +1744,7 @@ export class App {
     this.settings = clampSettings(
       { ...this.settings, channels: channelWidthForProbes(store.channelCount) }, this.rateCeilings,
     );
+    this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));
     this.persistWorkspace();
     this.relayout();
     this.stack.zoomToFit();
@@ -1896,6 +1902,7 @@ export class App {
     this.settings = clampSettings(
       { ...this.settings, channels: width, samplerate }, this.rateCeilings,
     );
+    this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));
     this.persistWorkspace();
     this.relayout();
   }

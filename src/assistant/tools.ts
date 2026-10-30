@@ -283,6 +283,12 @@ function busView(b: HostBus, index: number): Record<string, unknown> {
   };
 }
 
+function visibleChannelCount(host: AssistantHost): number {
+  const st = host.snapshot();
+  const store = host.store();
+  return store.length > 0 ? Math.min(st.settings.channels, store.channelCount) : st.settings.channels;
+}
+
 function busAt(host: AssistantHost, index: unknown): HostBus {
   const list = host.buses();
   const i = typeof index === 'number' ? index : -1;
@@ -730,7 +736,7 @@ export const TOOLS: AssistantTool[] = [
       if (!Array.isArray(i.bits) && typeof i.start_channel !== 'number') {
         throw new Error('Give start_channel and width, or a bits list (LSB first).');
       }
-      const channelCount = host.store().length ? host.store().channelCount : host.snapshot().channelNames.length;
+      const channelCount = visibleChannelCount(host);
       const base: BusViewConfig = {
         name: 'ADC', color: '', fullScaleV: null, offsetV: 0, style: 'line', heightCss: DEFAULT_BUS_HEIGHT,
         hideSources: false, spec: { bits: [0], clock: null, encoding: 'unsigned' },
@@ -748,7 +754,7 @@ export const TOOLS: AssistantTool[] = [
     risk: 'act',
     run: async (i, host) => {
       const b = busAt(host, i.index);
-      const channelCount = host.store().length ? host.store().channelCount : host.snapshot().channelNames.length;
+      const channelCount = visibleChannelCount(host);
       host.updateBus(i.index as number, busConfigFrom(i, b.config, channelCount));
       return busView(host.buses()[i.index as number]!, i.index as number);
     },

@@ -46,8 +46,7 @@ export function captureWidthTiers(deviceChannels: number | null, loadedCapture: 
   return channelWidthOptions(deviceChannels);
 }
 
-export function scopeOutOfWidth(spec: BusSpec, channels: number): boolean {
-  if (busChannelBank(spec) === null) return false;
+export function busOutOfWidth(spec: BusSpec, channels: number): boolean {
   const used = [...spec.bits, ...(spec.clock ? [spec.clock.channel] : [])];
   return used.some((channel) => channel >= channels);
 }

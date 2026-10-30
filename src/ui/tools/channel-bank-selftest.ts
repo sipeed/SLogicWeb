@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  CHANNEL_BANK_SIZE, CHANNEL_WIDTH_OPTIONS, busChannelBank, captureWidthTiers, channelBankIndices,
-  channelBankRange, channelBankStart, channelBankStarts, channelWidthOptions, lockedChannelBanks,
-  scopeOutOfWidth,
+  CHANNEL_BANK_SIZE, CHANNEL_WIDTH_OPTIONS, busChannelBank, busOutOfWidth, captureWidthTiers,
+  channelBankIndices, channelBankRange, channelBankStart, channelBankStarts, channelWidthOptions,
+  lockedChannelBanks,
 } from '../channelBanks.js';
 import { defaultBankBusConfig, normalizeBankBusConfig } from '../busPanel.js';
 
@@ -252,7 +252,7 @@ check('bank start uses the absolute channel index',
     app.includes('return captureWidthTiers(') &&
     app.includes("this.captureLabel.kind === 'loaded' || this.captureLabel.kind === 'demo'") &&
     app.includes('if (!this.widthTiers().includes(channels)) return;') &&
-    app.includes('!scopeOutOfWidth(bus.spec, channels)') &&
+    app.includes('!busOutOfWidth(bus.spec, channels)') &&
     app.includes('if (channels !== this.settings.channels) this.widthExplicit = true;') &&
     widthSetter.includes('if (this.running || this.stopping) return;') &&
     widthSetter.includes('this.applySettings({ ...this.settings, channels });') &&
@@ -277,6 +277,31 @@ check('bank start uses the absolute channel index',
     app.includes('const want = new Set(list.filter((i) => i >= 0 && i < this.displayChannelCount()));') &&
     app.includes('const model = Math.max(cfg.channels, this.device?.maxChannels ?? this.channels.length);') &&
     app.includes('if (c.index >= this.displayChannelCount()) continue;');
+  const adoptBus = app.split('private adoptCapture(')[1]?.split('private save(')[0] ?? '';
+  const deviceBus = app.split('private adoptDeviceChannels(')[1]?.split('private async startCapture(')[0] ?? '';
+  const bootBus = app.split('const workspace = readWorkspaceSnapshot();')[1]
+    ?.split('this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(')[0] ?? '';
+  const bootGuard = bootBus.includes('this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));');
+  const busGuards = app.includes('this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, channels));') &&
+    adoptBus.includes('this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));') &&
+    deviceBus.includes('this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));') &&
+    bootGuard &&
+    app.includes('if (busOutOfWidth(cfg.spec, this.displayChannelCount())) return null;') &&
+    app.includes('if (busOutOfWidth(cfg.spec, this.displayChannelCount())) return false;') &&
+    app.includes('if (busOutOfWidth(b.spec, this.displayChannelCount())) return;') &&
+    !widthSetter.includes('bankBusDrafts') &&
+    !app.includes('scopeOutOfWidth');
+  check('width switching, restored state and bus edits all share the out-of-width test',
+    busGuards,
+    `switch=${app.includes('!busOutOfWidth(bus.spec, channels)')}, ` +
+    `add=${app.includes('if (busOutOfWidth(cfg.spec, this.displayChannelCount())) return null;')}, ` +
+    `update=${app.includes('if (busOutOfWidth(cfg.spec, this.displayChannelCount())) return false;')}, ` +
+    `boot=${bootGuard}, ` +
+    `adopt=${adoptBus.includes('!busOutOfWidth(bus.spec, this.displayChannelCount())')}, ` +
+    `device=${deviceBus.includes('!busOutOfWidth(bus.spec, this.displayChannelCount())')}, ` +
+    `rows=${app.includes('if (busOutOfWidth(b.spec, this.displayChannelCount())) return;')}, ` +
+    `drafts=${!widthSetter.includes('bankBusDrafts')}`);
+
   check('channels past the selected width never reach the panel, rows or the assistant mask',
     clipApp,
     `display=${app.includes('private displayChannelCount(): number')}, ` +
@@ -312,16 +337,17 @@ check('bank start uses the absolute channel index',
     tierValues.join('|') === '|8,16|8,16,32|8||',
     tiers.map((t, i) => `${t}=[${tierValues[i]}]`).join(', '));
 
-  const clock20 = scopeOutOfWidth(spec([0, 1, 2, 3, 4, 5, 6, 7], 20), 16);
-  const clock20Wide = scopeOutOfWidth(spec([0, 1, 2, 3, 4, 5, 6, 7], 20), 32);
-  const bank8 = scopeOutOfWidth(spec([8, 9, 10, 11, 12, 13, 14, 15]), 8);
-  const bank8Wide = scopeOutOfWidth(spec([8, 9, 10, 11, 12, 13, 14, 15]), 16);
-  const descending = scopeOutOfWidth(spec([15, 14, 13, 12, 11, 10, 9, 8]), 8);
-  const plain = scopeOutOfWidth(spec([0, 2, 4]), 4);
-  check('scope removal follows bank data bits and external clock against the new width',
-    clock20 && !clock20Wide && bank8 && !bank8Wide && descending && !plain,
+  const clock20 = busOutOfWidth(spec([0, 1, 2, 3, 4, 5, 6, 7], 20), 16);
+  const clock20Wide = busOutOfWidth(spec([0, 1, 2, 3, 4, 5, 6, 7], 20), 32);
+  const bank8 = busOutOfWidth(spec([8, 9, 10, 11, 12, 13, 14, 15]), 8);
+  const bank8Wide = busOutOfWidth(spec([8, 9, 10, 11, 12, 13, 14, 15]), 16);
+  const descending = busOutOfWidth(spec([15, 14, 13, 12, 11, 10, 9, 8]), 8);
+  const plain = busOutOfWidth(spec([0, 2, 3]), 4);
+  const genericOut = busOutOfWidth(spec([0, 2, 4, 9]), 8);
+  check('bus removal follows data bits and external clock against the new width',
+    clock20 && !clock20Wide && bank8 && !bank8Wide && descending && !plain && genericOut,
     `clock20@16=${clock20}, clock20@32=${clock20Wide}, bank8@8=${bank8}, bank8@16=${bank8Wide}, ` +
-    `desc@8=${descending}, plain@4=${plain}`);
+    `desc@8=${descending}, plain@4=${plain}, genericOut@8=${genericOut}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

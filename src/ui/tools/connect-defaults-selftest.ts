@@ -129,10 +129,10 @@ const wiredImport = appSource.includes("import { connectSamplerate } from './con
 const decisionFields = [
   'current: this.settings.samplerate,',
   'explicit: this.samplerateExplicit,',
-  'channels: max,',
+  'channels: width,',
   'ceilings: this.rateCeilings,',
 ].filter((needle) => decisionBlock.includes(needle));
-const clampTakesDecision = clampBlock.includes('channels: max, samplerate');
+const clampTakesDecision = clampBlock.includes('channels: width, samplerate');
 const storeTakesDecision = adoptBody.includes('createSampleStore(max, samplerate)');
 const persists = adoptBody.includes('this.persistWorkspace();');
 const decisionBeforeClamp = decisionAt !== -1 && clampAt !== -1 && decisionAt < clampAt;

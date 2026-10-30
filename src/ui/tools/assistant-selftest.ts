@@ -336,6 +336,16 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
     b0?.spec.clock?.edge === 'rising' && b0?.spec.encoding === 'twos', `${added.err} ${JSON.stringify(b0?.spec)}`);
   const past = await run('add_bus_view', { start_channel: 6, width: 4 }, host);
   check('add_bus_view refuses a run past the last channel', !past.ok && /runs past D7/.test(past.err), past.err);
+  const narrow = new FakeHost();   // an 8-channel capture, a 4-channel selected width
+  narrow.s = { ...narrow.s, channels: 4 };
+  const narrowBus = await run('add_bus_view', { start_channel: 5, width: 3 }, narrow);
+  check('add_bus_view follows the selected width, not just the capture data',
+    !narrowBus.ok && /runs past D3/.test(narrowBus.err), narrowBus.err);
+  const narrowBase = await run('add_bus_view', { start_channel: 0, width: 4 }, narrow);
+  const narrowClock = await run('update_bus_view', { index: 0, clock_channel: 5 }, narrow);
+  check('update_bus_view cannot reach past the selected width either',
+    narrowBase.ok && !narrowClock.ok && /channel 5 is not in D0-D3/.test(narrowClock.err),
+    `${narrowBase.err} ${narrowClock.err}`);
   const none = await run('add_bus_view', { name: 'x' }, host);
   check('add_bus_view needs channels', !none.ok && /start_channel/.test(none.err), none.err);
   const clash = await run('add_bus_view', { bits: [0, 1], clock_channel: 1 }, host);
