@@ -50,6 +50,7 @@ import { computeChannelRowHeight } from './channelLayout.js';
 import {
   MAX_SAMPLES, createProtocolDemoCapture, levelAt, loadFiles, loadLwcap, saveLwcap,
 } from './captureIO.js';
+import { connectSamplerate } from './connectDefaults.js';
 import { formatCount, formatDuration, formatFreq, formatRate,
   formatAnalyzerNote, formatCaptureLabel, formatStatusError } from './format.js';
 import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, setLocale, t,
@@ -1886,19 +1887,25 @@ export class App {
     if (!isChannelCount(max)) {
       throw new Error(`device reported unsupported channel count ${max}`);
     }
+    const samplerate = connectSamplerate({
+      current: this.settings.samplerate,
+      explicit: this.samplerateExplicit,
+      channels: max,
+      ceilings: this.rateCeilings,
+    });
     if (this.store.length === 0 && max !== this.store.channelCount) {
       // The empty store is still rendered before Start is pressed. Grow it together with
       // the channel rows; otherwise row 16 of a newly-connected 32U3 is queried against
       // the initial 16-channel placeholder and WaveformRenderer rejects it as out of range.
       this.releaseMarkerPointer();
-      this.storeRef.set(createSampleStore(max, this.settings.samplerate));
+      this.storeRef.set(createSampleStore(max, samplerate));
     }
     if (this.store.length === 0 && max !== this.channels.length) {
       this.channels = defaultChannels(max);
       this.order = this.channels.map((c) => c.index);
     }
     this.settings = clampSettings(
-      { ...this.settings, channels: max }, this.rateCeilings,
+      { ...this.settings, channels: max, samplerate }, this.rateCeilings,
     );
     this.persistWorkspace();
     this.relayout();

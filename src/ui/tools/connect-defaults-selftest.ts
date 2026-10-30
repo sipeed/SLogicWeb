@@ -115,6 +115,34 @@ check('the decision module is import-free, declares the designed contract shape 
   importFree && exported && commentFree,
   `importFree=${importFree}, exported=${exported}, commentFree=${commentFree}`);
 
+const appSource = fs.readFileSync('src/ui/app.ts', 'utf8');
+const adoptStart = appSource.indexOf('private adoptDeviceChannels(device: Device): void {');
+const adoptEnd = adoptStart === -1 ? -1 : appSource.indexOf('\n  private async startCapture', adoptStart);
+const adoptBody = adoptStart === -1 || adoptEnd === -1 ? '' : appSource.slice(adoptStart, adoptEnd);
+const decisionAt = adoptBody.indexOf('connectSamplerate({');
+const decisionEnd = decisionAt === -1 ? -1 : adoptBody.indexOf('});', decisionAt);
+const decisionBlock = decisionAt === -1 || decisionEnd === -1 ? '' : adoptBody.slice(decisionAt, decisionEnd);
+const clampAt = adoptBody.indexOf('clampSettings(');
+const clampEnd = clampAt === -1 ? -1 : adoptBody.indexOf(');', clampAt);
+const clampBlock = clampAt === -1 || clampEnd === -1 ? '' : adoptBody.slice(clampAt, clampEnd);
+const wiredImport = appSource.includes("import { connectSamplerate } from './connectDefaults.js';");
+const decisionFields = [
+  'current: this.settings.samplerate,',
+  'explicit: this.samplerateExplicit,',
+  'channels: max,',
+  'ceilings: this.rateCeilings,',
+].filter((needle) => decisionBlock.includes(needle));
+const clampTakesDecision = clampBlock.includes('channels: max, samplerate');
+const storeTakesDecision = adoptBody.includes('createSampleStore(max, samplerate)');
+const persists = adoptBody.includes('this.persistWorkspace();');
+const decisionBeforeClamp = decisionAt !== -1 && clampAt !== -1 && decisionAt < clampAt;
+check('C4: adoptDeviceChannels feeds the connect decision into the store and the clamp before writing',
+  wiredImport && decisionFields.length === 4 && clampTakesDecision && storeTakesDecision && persists &&
+    decisionBeforeClamp,
+  `import=${wiredImport}, fields=${decisionFields.length}/4, clamp=${clampTakesDecision}, ` +
+    `store=${storeTakesDecision}, persist=${persists}, order=${decisionBeforeClamp}\n` +
+    `decision=[${decisionBlock}]\nclamp=[${clampBlock}]\nbody=[${adoptBody}]`);
+
 let failures = 0;
 for (const result of results) {
   if (!result.pass) failures++;
