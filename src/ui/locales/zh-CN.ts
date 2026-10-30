@@ -214,7 +214,6 @@ export const zhCN: Messages = {
   'bus.defaultName': '模拟波形',
   'bus.enableBank': '启用示波器模式',
   'bus.channelOrder': '通道与解码顺序',
-  'bus.advanced': '高级设置',
   'bus.confirm': '确认',
   'bus.bits': '位数',
   'bus.start': '起始通道',

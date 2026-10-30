@@ -220,7 +220,6 @@ export const en = {
   'bus.defaultName': 'Analog waveform',
   'bus.enableBank': 'Enable oscilloscope mode',
   'bus.channelOrder': 'Channels and decoding order',
-  'bus.advanced': 'Advanced settings',
   'bus.confirm': 'Confirm',
   'bus.bits': 'Bits',
   'bus.start': 'Start channel',

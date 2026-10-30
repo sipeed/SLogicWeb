@@ -113,7 +113,6 @@ interface BusFields {
 
 interface BusAdvancedFieldsOptions {
   channelCount: number;
-  bankStart: number | null;
   disabled?: boolean;
   update: BusDraftUpdate;
 }
@@ -123,9 +122,7 @@ function busAdvancedFields(d: BusViewConfig, options: BusAdvancedFieldsOptions):
   const cc = options.channelCount;
   const disabled = options.disabled === true;
   const chOptions: SelectOptionTuple[] = Array.from({ length: cc }, (_, i) => [String(i), `D${i}`]);
-  const bankBits = new Set(options.bankStart === null ? [] : channelBankIndices(options.bankStart, cc));
-  const clockOptions = options.bankStart === null ? chOptions :
-    chOptions.filter(([ch]) => !bankBits.has(Number(ch)));
+  const clockOptions = chOptions;
 
   const clockRow = div('field-row');
   const clock = selectControl('bus.clock', t('bus.clock'),
@@ -292,7 +289,7 @@ function busConfigFields(d: BusViewConfig, options: BusConfigFieldsOptions): Bus
   per.appendChild(grid);
   body.appendChild(per);
 
-  const advanced = busAdvancedFields(d, { channelCount: cc, bankStart: null, update });
+  const advanced = busAdvancedFields(d, { channelCount: cc, update });
   body.appendChild(advanced.el);
   return {
     el: body,
@@ -497,26 +494,10 @@ export class BankBusDialog {
     order.addEventListener('change', writeOrder);
     body.appendChild(order.el);
 
-    const update: BusDraftUpdate = (patch, spec) => {
-      const next = { ...config, ...patch, spec: { ...config.spec, ...spec } };
-      Object.assign(config, patch);
-      config.spec = next.spec;
-    };
-    const advancedFields = busAdvancedFields(config, {
-      channelCount: this.channelCount, bankStart: this.start, disabled: context.locked, update,
-    });
-    const advanced = document.createElement('details');
-    advanced.className = 'bank-bus-advanced';
-    advanced.dataset.oscilloscopeAdvanced = '';
-    const summary = document.createElement('summary');
-    summary.textContent = t('bus.advanced');
-    advanced.append(summary, advancedFields.el);
-    body.appendChild(advanced);
-
     return {
       el: body,
       read: () => {
-        const next = advancedFields.read();
+        const next = cloneBusConfig(config);
         const nameText = name.value.trim();
         const usesDefaultName = nameText === '' || (config.usesDefaultName === true && nameText === config.name);
         next.name = usesDefaultName ? t('bus.defaultName') : nameText;

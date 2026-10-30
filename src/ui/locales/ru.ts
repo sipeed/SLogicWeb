@@ -216,7 +216,6 @@ export const ru: Messages = {
   'bus.defaultName': 'Аналоговая форма волны',
   'bus.enableBank': 'Включить режим осциллографа',
   'bus.channelOrder': 'Каналы и порядок декодирования',
-  'bus.advanced': 'Дополнительные настройки',
   'bus.confirm': 'Подтвердить',
   'bus.bits': 'Разрядов',
   'bus.start': 'Начальный канал',

@@ -269,8 +269,8 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     icon.includes("b.setAttribute('aria-haspopup', 'dialog')") && !icon.includes('textContent');
   const dialog = busPanel.split('export class BankBusDialog')[1] ?? '';
   const sharedFields = busPanel.includes('function busAdvancedFields') &&
-    (busPanel.match(/busAdvancedFields\(/g) ?? []).length >= 3 && busPanel.includes('bankStart: null') &&
-    dialog.includes('bankStart: this.start') && busPanel.includes('clockOptions');
+    (busPanel.match(/busAdvancedFields\(/g) ?? []).length === 2 && busPanel.includes('clockOptions') &&
+    !dialog.includes('busAdvancedFields') && !busPanel.includes('bankStart');
   const draftOrderWrite = dialog.includes('    };\n    writeOrder();\n    order.disabled = context.locked;');
   const orderChange = dialog.includes("    order.addEventListener('change', writeOrder);\n    body.appendChild(order.el);");
   const orderMode = dialog.includes("const order = selectControl('bus.channelOrder', t('bus.channelOrder')") &&
@@ -282,7 +282,8 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     !dialog.includes("t('bus.msbFirst')") && !dialog.includes("t('bus.perBit')") &&
     !dialog.includes('bankEnabledNote');
   const disclosures = dialog.includes('details?.el.remove()') &&
-    dialog.includes("document.createElement('details')") && dialog.includes("t('bus.advanced')");
+    !dialog.includes("document.createElement('details')") && !dialog.includes("t('bus.advanced')") &&
+    !dialog.includes('oscilloscopeAdvanced');
   const nativeDialog = busPanel.includes('this.dialog.showModal()') &&
     busPanel.indexOf("this.dialog.close('applied')") >= 0 &&
     busPanel.indexOf("this.dialog.close('applied')") < busPanel.indexOf('this.cb.onConfirm(this.start');
@@ -308,7 +309,7 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     updateBus.includes('if (!preserveDefaultName && next.name !== current.name) delete next.usesDefaultName;') &&
     app.includes('this.updateBus(active.id, next, true)');
   const locks = dialog.includes('enable.disabled = context.locked') &&
-    dialog.includes('confirm.disabled = context.locked') && dialog.includes('disabled: context.locked') &&
+    dialog.includes('confirm.disabled = context.locked') && dialog.includes('order.disabled = context.locked') &&
     app.includes('if (this.running || this.stopping ||') && app.includes('locked: this.running || this.stopping');
   const noBankSwap = busPanel.includes('if (busChannelBank(b.spec) === null) {');
   const editBus = app.split('private editBus(')[1]?.split('private addBus(')[0] ?? '';

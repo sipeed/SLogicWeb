@@ -216,7 +216,6 @@ export const fr: Messages = {
   'bus.defaultName': 'Forme d’onde analogique',
   'bus.enableBank': 'Activer le mode oscilloscope',
   'bus.channelOrder': 'Canaux et ordre de décodage',
-  'bus.advanced': 'Paramètres avancés',
   'bus.confirm': 'Confirmer',
   'bus.bits': 'Bits',
   'bus.start': 'Canal de départ',

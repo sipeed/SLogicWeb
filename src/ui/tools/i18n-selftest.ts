@@ -465,7 +465,7 @@ const baseSettings: CaptureSettings = {
     'capturePanel.loop', 'capturePanel.retentionSamples', 'capturePanel.retentionNote',
     'capturePanel.loopCeilingNote',
     'bus.loopWindow', 'bus.globalCapture', 'bus.loopUnit', 'bus.loopMax', 'bus.loopEffective',
-    'bus.loopInvalid', 'bus.loopUnavailable',
+    'bus.loopInvalid', 'bus.loopUnavailable', 'bus.advanced',
   ];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const present = Object.entries(dicts).filter(([, dict]) =>
@@ -500,7 +500,7 @@ const baseSettings: CaptureSettings = {
     'channels.triggerMode', 'channels.cancel',
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',
     'analyzerPanel.decoderSearchLabel',
-    'bus.defaultName', 'bus.enableBank', 'bus.advanced',
+    'bus.defaultName', 'bus.enableBank',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];

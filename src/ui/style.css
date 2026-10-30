@@ -1533,7 +1533,3 @@ html[data-theme="light"] .uictrl-card-actions .mini:hover { background: var(--mu
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-btn:hover,
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-cell-edit:hover { border-color: var(--primary); color: var(--foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-btn--remove:hover { border-color: var(--destructive); color: var(--destructive); }
-
-.bank-bus-advanced { padding-top: 10px; border-top: 1px solid var(--border); }
-.bank-bus-advanced > summary { color: var(--muted-foreground); font-size: 11px; font-weight: 600; cursor: pointer; }
-.bank-bus-advanced .bus-config-fields { margin-top: 10px; }
