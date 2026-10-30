@@ -5,9 +5,10 @@
  * a conventional capture-settings panel.
  *
  * Layout: a device header with the product name, a "Digital"
- * section with All/Clear and two rows of eight channel chips filled with the channel
- * colour when enabled, a sample-rate dropdown and a voltage dropdown side by side, then a
- * segmented capture-mode control.
+ * section with a channel-width selector and rows of eight channel chips filled with the
+ * channel colour when enabled, each full row preceded by its oscilloscope button, a
+ * sample-rate dropdown and a voltage dropdown side by side, then a segmented capture-mode
+ * control.
  *
  * Two things it has to show that a native tool would not: the WebUSB permission state, and the
  * **sample ceiling**. `src/data`'s `append` throws past 2^31 samples, which at this
@@ -130,10 +131,10 @@ export class CapturePanel {
       const locked = activeBanks.has(start);
       const bank = div('channel-bank');
       bank.dataset.bankStart = String(start);
-      const head = div('channel-bank-head');
       if (indices.length === CHANNEL_BANK_SIZE) {
-        head.appendChild(oscilloscopeButton(start, activeBanks.has(start), range,
+        bank.appendChild(oscilloscopeButton(start, activeBanks.has(start), range,
           () => this.cb.onOpenBank(start)));
+        bank.appendChild(div('channel-bank-sep'));
       }
 
       const grid = div('chip-grid channel-bank-grid');
@@ -171,7 +172,7 @@ export class CapturePanel {
         overlay.appendChild(label);
         grid.appendChild(overlay);
       }
-      bank.append(head, grid);
+      bank.append(grid);
       banks.appendChild(bank);
     }
     chSec.body.appendChild(banks);

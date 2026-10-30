@@ -127,9 +127,15 @@ check('bank start uses the absolute channel index',
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
   const busPanel = fs.readFileSync('src/ui/busPanel.ts', 'utf8');
   const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
+  const scopeBlockStart = panel.indexOf('if (indices.length === CHANNEL_BANK_SIZE) {');
+  const scopeBlock = scopeBlockStart >= 0
+    ? panel.slice(scopeBlockStart, panel.indexOf('const grid = div(', scopeBlockStart))
+    : '';
   const grouped = panel.includes('for (const start of channelBankStarts(v.channels.length))') &&
     panel.includes('const indices = channelBankIndices(start, v.channels.length);') &&
-    panel.includes('if (indices.length === CHANNEL_BANK_SIZE) {') &&
+    scopeBlockStart >= 0 &&
+    scopeBlock.includes('oscilloscopeButton') && scopeBlock.includes("div('channel-bank-sep')") &&
+    !panel.includes('channel-bank-head') &&
     panel.includes("div('chip-grid channel-bank-grid')") &&
     panel.includes('chSec.body.appendChild(banks)');
   const accessible = panel.includes("grid.setAttribute('role', 'group')") &&
@@ -138,7 +144,9 @@ check('bank start uses the absolute channel index',
   const wired = app.includes('onChannelWidth: (n) => this.setChannelWidth(n)') &&
     !panel.includes('capturePanel.all') && !panel.includes('channel-enabled-count');
   const grid = sheet.includes('grid-template-columns: repeat(8, minmax(0, 1fr))') &&
-    sheet.includes('.channel-bank-head');
+    sheet.includes('.channel-bank-sep') && !sheet.includes('.channel-bank-head') &&
+    sheet.includes('.channel-bank { display: flex; align-items: center; gap: 6px; min-width: 0; }') &&
+    sheet.includes('.channel-bank-grid { flex: 1 1 auto; position: relative; min-width: 0; }');
   check('the real Device panel renders accessible eight-channel banks through App state',
     grouped && accessible && wired && grid,
     `grouped=${grouped}, accessible=${accessible}, wired=${wired}, grid=${grid}`);
