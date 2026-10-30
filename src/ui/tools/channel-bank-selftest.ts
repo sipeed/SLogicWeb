@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  CHANNEL_BANK_SIZE, CHANNEL_WIDTH_OPTIONS, busChannelBank, channelBankIndices, channelBankRange,
-  channelBankStart, channelBankStarts, channelWidthOptions, lockedChannelBanks, scopeOutOfWidth,
+  CHANNEL_BANK_SIZE, CHANNEL_WIDTH_OPTIONS, busChannelBank, captureWidthTiers, channelBankIndices,
+  channelBankRange, channelBankStart, channelBankStarts, channelWidthOptions, lockedChannelBanks,
+  scopeOutOfWidth,
 } from '../channelBanks.js';
 import { defaultBankBusConfig, normalizeBankBusConfig } from '../busPanel.js';
 
@@ -233,7 +234,9 @@ check('bank start uses the absolute channel index',
   check('active bus banks enforce model locks and render the non-interactive localized overlay',
     modelLock && visualLock, `modelLock=${modelLock}, visualLock=${visualLock}`);
 
-  const widthPanel = panel.includes('channelWidthOptions(v.channels.length)') &&
+  const widthPanel = panel.includes('const widthOptions = v.widthOptions;') &&
+    panel.includes('widthOptions: readonly number[];') &&
+    !panel.includes('channelWidthOptions(') &&
     panel.includes("b.className = 'seg' + (s.channels === n ? ' on' : '')") &&
     panel.includes('b.textContent = `${n}CH`') &&
     panel.includes("b.dataset.channelWidth = String(n)") &&
@@ -245,6 +248,10 @@ check('bank start uses the absolute channel index',
   const widthSetter = app.split('private setChannelWidth(channels: number): void')[1]?.split('private afterChannelChange(')[0] ?? '';
   const widthApp = app.includes('onChannelWidth: (n) => this.setChannelWidth(n)') &&
     app.includes('private setChannelWidth(channels: number): void') &&
+    app.includes('widthOptions: this.widthTiers()') &&
+    app.includes('return captureWidthTiers(') &&
+    app.includes("this.captureLabel.kind === 'loaded' || this.captureLabel.kind === 'demo'") &&
+    app.includes('if (!this.widthTiers().includes(channels)) return;') &&
     app.includes('!scopeOutOfWidth(bus.spec, channels)') &&
     app.includes('this.channels[i]!.enabled = i < channels') &&
     widthSetter.includes('if (this.running || this.stopping) return;') &&
@@ -270,6 +277,15 @@ check('bank start uses the absolute channel index',
     `declared=${CHANNEL_WIDTH_OPTIONS}, 4=${channelWidthOptions(4)}, 8=${channelWidthOptions(8)}, ` +
     `16=${channelWidthOptions(16)}, 32=${channelWidthOptions(32)}, 128=${channelWidthOptions(128)}, ` +
     `7=${channelWidthOptions(7)}, 17=${channelWidthOptions(17)}`);
+
+  const tiers = ['null,false', '16,false', '32,false', '8,false', '32,true', '16,true'];
+  const tierValues = [
+    captureWidthTiers(null, false), captureWidthTiers(16, false), captureWidthTiers(32, false),
+    captureWidthTiers(8, false), captureWidthTiers(32, true), captureWidthTiers(16, true),
+  ].map((list) => list.join(','));
+  check('width tiers need a connected device and a capture that does not fix the width',
+    tierValues.join('|') === '|8,16|8,16,32|8||',
+    tiers.map((t, i) => `${t}=[${tierValues[i]}]`).join(', '));
 
   const clock20 = scopeOutOfWidth(spec([0, 1, 2, 3, 4, 5, 6, 7], 20), 16);
   const clock20Wide = scopeOutOfWidth(spec([0, 1, 2, 3, 4, 5, 6, 7], 20), 32);

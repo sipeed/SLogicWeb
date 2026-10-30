@@ -21,8 +21,7 @@ import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import { formatDuration, formatRate } from './format.js';
 import {
-  CHANNEL_BANK_SIZE, channelBankIndices, channelBankRange, channelBankStarts, channelWidthOptions,
-  lockedChannelBanks,
+  CHANNEL_BANK_SIZE, channelBankIndices, channelBankRange, channelBankStarts, lockedChannelBanks,
 } from './channelBanks.js';
 import { t } from './i18n.js';
 import { chipForeground } from './metrics.js';
@@ -45,6 +44,7 @@ export interface CapturePanelView {
   effectiveMode: CaptureSettings['mode'];
   oscilloscopeActive: boolean;
   channels: readonly ChannelState[];
+  widthOptions: readonly number[];
   buses: readonly BusViewState[];
   deviceName: string | null;
   running: boolean;
@@ -101,7 +101,7 @@ export class CapturePanel {
     // ---- channels
     const chSec = section(t('capturePanel.digital'));
     chSec.el.classList.add('digital-section');
-    const widthOptions = channelWidthOptions(v.channels.length);
+    const widthOptions = v.widthOptions;
     if (widthOptions.length > 0) {
       const widths = div('segmented channel-widths');
       widths.setAttribute('role', 'group');

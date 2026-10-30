@@ -42,7 +42,7 @@ import {
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
 import { CapturePanel, type CapturePanelView } from './capturePanel.js';
 import {
-  CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankStart,
+  CHANNEL_BANK_SIZE, busChannelBank, captureWidthTiers, channelBankIndices, channelBankStart,
   lockedChannelBanks, scopeOutOfWidth,
 } from './channelBanks.js';
 import { ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration } from './channelList.js';
@@ -376,6 +376,16 @@ export class App {
   private visibleChannels(): ChannelState[] {
     const hidden = new Set(this.busViews.filter((b) => b.hideSources).flatMap((b) => b.spec.bits));
     return this.enabledChannels().filter((c) => !hidden.has(c.index));
+  }
+
+  private loadedCapture(): boolean {
+    return this.captureLabel.kind === 'loaded' || this.captureLabel.kind === 'demo';
+  }
+
+  private widthTiers(): number[] {
+    const capacity = this.channels.length;
+    const deviceMax = this.device?.maxChannels ?? null;
+    return captureWidthTiers(deviceMax === null ? null : Math.min(deviceMax, capacity), this.loadedCapture());
   }
 
   // ------------------------------------------------------------------ bus views
@@ -717,6 +727,7 @@ export class App {
 
   private setChannelWidth(channels: number): void {
     if (this.running || this.stopping) return;
+    if (!this.widthTiers().includes(channels)) return;
     if (!isChannelCount(channels) || channels > this.channels.length) return;
     this.busViews = this.busViews.filter((bus) => !scopeOutOfWidth(bus.spec, channels));
     for (let i = 0; i < this.channels.length; i++) this.channels[i]!.enabled = i < channels;
@@ -1524,6 +1535,7 @@ export class App {
         effectiveMode: effectiveCaptureMode(this.settings.mode, oscilloscopeActive),
         oscilloscopeActive,
         channels: this.channels,
+        widthOptions: this.widthTiers(),
         buses: this.busViews,
         deviceName: this.device?.name ?? null,
         running: this.running,

@@ -41,6 +41,11 @@ export function channelWidthOptions(channelCount: number): number[] {
   return CHANNEL_WIDTH_OPTIONS.filter((n) => n <= max);
 }
 
+export function captureWidthTiers(deviceChannels: number | null, loadedCapture: boolean): number[] {
+  if (deviceChannels === null || loadedCapture) return [];
+  return channelWidthOptions(deviceChannels);
+}
+
 export function scopeOutOfWidth(spec: BusSpec, channels: number): boolean {
   if (busChannelBank(spec) === null) return false;
   const used = [...spec.bits, ...(spec.clock ? [spec.clock.channel] : [])];
