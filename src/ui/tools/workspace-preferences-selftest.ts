@@ -886,6 +886,73 @@ check('the App snapshot boundary serializes canonical labels/channels/order and 
   !app.includes('localStorage'),
   persistBody.replace(/\s+/g, ' ').trim());
 
+const analyzerProjectionAt = snapshotBody.indexOf('analyzers: this.analyzers');
+const analyzerProjection = analyzerProjectionAt >= 0 ? snapshotBody.slice(analyzerProjectionAt) : '';
+const projectionFields = [
+  'id: a.id', 'decoderId: a.decoderId', 'label: a.label', 'color: a.color',
+  'channels: { ...a.channels }', 'options: { ...a.options }', 'laneChannel: a.laneChannel',
+];
+const projectionMissing = projectionFields.filter((needle) => !analyzerProjection.includes(needle));
+const runtimeLeak = ['a.result', 'a.index', 'a.status', 'a.note', 'result:', 'status:', 'note:']
+  .filter((needle) => analyzerProjection.includes(needle));
+check('the snapshot projects analyzer mounts as a fresh DTO and never copies decode runtime fields',
+  analyzerProjectionAt >= 0 && projectionMissing.length === 0 && runtimeLeak.length === 0,
+  `missing=${JSON.stringify(projectionMissing)}, leak=${JSON.stringify(runtimeLeak)}`);
+
+const demoExclusion = analyzerProjection.includes('.filter((a) => !this.demoAnalyzers.has(a.id))') &&
+  analyzerProjection.includes('.map((a) => ({') &&
+  !snapshotBody.includes('this.analyzers.map(') &&
+  !snapshotBody.includes('analyzers: this.analyzers,');
+check('the analyzer projection drops demo-owned mounts before mapping so loader rows stay out',
+  demoExclusion,
+  `projection=${analyzerProjection.replace(/\s+/g, ' ').trim()}`);
+
+const attachStart = app.indexOf('private async attachAnalyzer(');
+const attachEnd = attachStart >= 0 ? app.indexOf('\n  }', attachStart) : -1;
+const attachBody = attachStart >= 0 && attachEnd > attachStart
+  ? app.slice(attachStart, attachEnd) : '';
+const attachOrder = [
+  'this.analyzers.push(a);',
+  'if (demoOwned) this.demoAnalyzers.add(a.id);',
+  'this.persistWorkspace();',
+  'this.renderPanels();',
+  'await this.runDecode(a.id);',
+].map((needle) => attachBody.indexOf(needle));
+check('attaching a mount records demo ownership before persisting and writes before decoding',
+  attachBody.length > 0 && attachBody.split('this.persistWorkspace();').length === 2 &&
+  attachOrder.every((index, i) => index >= 0 && (i === 0 || index > attachOrder[i - 1])),
+  `order=${JSON.stringify(attachOrder)}`);
+
+const removeStart = app.indexOf('private removeAnalyzer(id: string): void {');
+const removeEnd = removeStart >= 0 ? app.indexOf('\n  }', removeStart) : -1;
+const removeBody = removeStart >= 0 && removeEnd > removeStart
+  ? app.slice(removeStart, removeEnd) : '';
+const removeOrder = [
+  'this.demoAnalyzers.delete(id);',
+  'this.analyzers = this.analyzers.filter((a) => a.id !== id);',
+  'this.persistWorkspace();',
+  'this.relayout();',
+].map((needle) => removeBody.indexOf(needle));
+check('removing a mount persists exactly once after the array and demo ownership drop',
+  removeBody.length > 0 && removeBody.split('this.persistWorkspace();').length === 2 &&
+  removeOrder.every((index, i) => index >= 0 && (i === 0 || index > removeOrder[i - 1])),
+  `order=${JSON.stringify(removeOrder)}`);
+
+const runDecodeStart = app.indexOf('private async runDecode(');
+const runDecodeEnd = runDecodeStart >= 0 ? app.indexOf('private setEnabledChannels(', runDecodeStart) : -1;
+const runDecodeBody = runDecodeStart >= 0 && runDecodeEnd > runDecodeStart
+  ? app.slice(runDecodeStart, runDecodeEnd) : '';
+check('decoding never writes the workspace snapshot',
+  runDecodeBody.length > 0 && !runDecodeBody.includes('persistWorkspace') &&
+  !runDecodeBody.includes('writeWorkspaceSnapshot'),
+  `bytes=${runDecodeBody.length}`);
+
+const persistCalls = (app.match(/this\.persistWorkspace\(\);/g) ?? []).length;
+check('the analyzer attach/remove pair is the only writer surface this projection adds',
+  persistCalls === 12 && attachBody.includes('this.persistWorkspace();') &&
+  removeBody.includes('this.persistWorkspace();'),
+  `persist calls=${persistCalls}`);
+
 const writeMethods = [
   'applySettings', 'afterChannelChange', 'configureChannel', 'reorder', 'adoptCapture', 'adoptDeviceChannels',
   'startCapture', 'loadDemo', 'configureBankBus',

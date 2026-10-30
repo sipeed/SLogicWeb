@@ -1408,6 +1408,17 @@ export class App {
       busViews: this.busViews.map((bus) => cloneBusConfig(bus)),
       bankBusDrafts: Object.fromEntries([...this.bankBusDrafts]
         .map(([start, config]) => [start, cloneBusConfig(config)])),
+      analyzers: this.analyzers
+        .filter((a) => !this.demoAnalyzers.has(a.id))
+        .map((a) => ({
+          id: a.id,
+          decoderId: a.decoderId,
+          label: a.label,
+          color: a.color,
+          channels: { ...a.channels },
+          options: { ...a.options },
+          laneChannel: a.laneChannel,
+        })),
     };
   }
 
@@ -2182,6 +2193,7 @@ export class App {
     };
     this.analyzers.push(a);
     if (demoOwned) this.demoAnalyzers.add(a.id);
+    this.persistWorkspace();
     this.renderPanels();
     await this.runDecode(a.id);
   }
@@ -2189,6 +2201,7 @@ export class App {
   private removeAnalyzer(id: string): void {
     this.demoAnalyzers.delete(id);
     this.analyzers = this.analyzers.filter((a) => a.id !== id);
+    this.persistWorkspace();
     this.relayout();
     this.renderPanels();
   }
