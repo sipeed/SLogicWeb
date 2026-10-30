@@ -48,7 +48,7 @@ import {
 import { ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration } from './channelList.js';
 import { computeChannelRowHeight } from './channelLayout.js';
 import {
-  MAX_SAMPLES, createProtocolDemoCapture, levelAt, loadFiles, loadLwcap, saveLwcap,
+  MAX_SAMPLES, levelAt, loadFiles, loadLwcap, saveLwcap,
 } from './captureIO.js';
 import { connectSamplerate } from './connectDefaults.js';
 import { formatCount, formatDuration, formatFreq, formatRate,
@@ -170,7 +170,6 @@ export class App {
   private statusError: StatusError | null = null;
   private decodeBusy = false;
   private decodeWarm = false;
-  private demoBusy = false;
   private readonly demoAnalyzers = new Set<string>();
   private abort: AbortController | null = null;
 
@@ -1563,10 +1562,9 @@ export class App {
   }
 
   private primaryAction(): void {
-    if (this.stopping || this.demoBusy) return;
+    if (this.stopping) return;
     if (this.running) void this.stopCapture();
     else if (this.device) void this.startCapture();
-    else void this.loadDemo();
   }
 
   /**
@@ -1598,21 +1596,18 @@ export class App {
 
     const btn = this.el.transport;
     btn.setAttribute('aria-label', this.stopping ? t('toolbar.stopping')
-      : this.running ? t('toolbar.stop')
-        : this.device ? t('toolbar.start') : t('toolbar.demo'));
+      : this.running ? t('toolbar.stop') : t('toolbar.start'));
     const label = btn.querySelector<HTMLElement>('.toolbar-item-label');
     if (label) {
       label.textContent = this.stopping ? t('toolbar.shortStopping')
-        : this.running ? t('toolbar.shortStop')
-          : this.device ? t('toolbar.shortStart') : t('toolbar.shortDemo');
+        : this.running ? t('toolbar.shortStop') : t('toolbar.shortStart');
     }
     btn.classList.toggle('primary', !this.running);
     btn.classList.toggle('danger', this.running);
-    btn.disabled = this.stopping || this.demoBusy;
+    btn.disabled = this.stopping || (this.device === null && !this.running);
     btn.title = this.stopping ? t('toolbar.stoppingTitle')
-      : this.demoBusy ? t('toolbar.demoLoading')
-        : this.running ? t('toolbar.stopTitle')
-          : this.device ? t('toolbar.startTitle') : t('toolbar.demoTitle');
+      : this.running ? t('toolbar.stopTitle')
+        : this.device ? t('toolbar.startTitle') : t('toolbar.connectHint');
   }
 
   private renderStatus(): void {
@@ -1690,33 +1685,6 @@ export class App {
         { kind: 'loaded', source: cap.sourceDescription, ms: Math.round(performance.now() - t0) });
     } catch (e) {
       this.fail('error.openCapture', e);
-    }
-  }
-
-  private async loadDemo(): Promise<void> {
-    if (this.running || this.stopping || this.demoBusy || this.device) return;
-    this.demoBusy = true;
-    this.renderPanels();
-    try {
-      this.statusError = null;
-      const demo = createProtocolDemoCapture();
-      this.adoptCapture(demo.store, demo.channelNames, { kind: 'demo' });
-      this.settings = clampSettings(
-        { ...this.settings, samplerate: demo.store.samplerate },
-        this.rateCeilings,
-      );
-      this.persistWorkspace();
-      this.relayout();
-      this.renderPanels();
-      for (const spec of demo.analyzers) {
-        if (this.store !== demo.store) break;
-        await this.attachAnalyzer(spec.id, spec.channels, spec.options ?? {}, true);
-      }
-    } catch (e) {
-      this.fail('error.demo', e);
-    } finally {
-      this.demoBusy = false;
-      this.renderPanels();
     }
   }
 
@@ -2418,7 +2386,6 @@ export class App {
     getMode: () => getMode(),
     start: () => this.startCapture(),
     stop: () => this.stopCapture(),
-    demo: () => this.loadDemo(),
     attach: (id: string, ch: Record<number, number>, opts: Record<string, string | number> = {}) =>
       this.attachAnalyzer(id, ch, opts),
     setSettings: (s: Partial<CaptureSettings>) => {

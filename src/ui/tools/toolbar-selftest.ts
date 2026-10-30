@@ -106,10 +106,10 @@ const primaryEnd = primaryStart >= 0 ? app.indexOf('\n  }', primaryStart) : -1;
 const primaryBody = primaryStart >= 0 && primaryEnd > primaryStart
   ? app.slice(primaryStart, primaryEnd)
   : '';
-const primaryRoutes = primaryBody.includes('if (this.stopping || this.demoBusy) return;') &&
+const primaryRoutes = primaryBody.includes('if (this.stopping) return;') &&
   primaryBody.includes('if (this.running) void this.stopCapture();') &&
   primaryBody.includes('else if (this.device) void this.startCapture();') &&
-  primaryBody.includes('else void this.loadDemo();');
+  !primaryBody.includes('loadDemo');
 const clickDispatch = app.includes(
   "this.el.transport.addEventListener('click', () => this.primaryAction())");
 const spaceStart = app.indexOf("if (e.key === ' ') {");
@@ -118,54 +118,36 @@ const spaceBody = spaceStart >= 0 && spaceEnd > spaceStart ? app.slice(spaceStar
 const spaceDispatch = spaceBody.includes('this.primaryAction();') &&
   !spaceBody.includes('startCapture') && !spaceBody.includes('stopCapture');
 check(
-  'toolbar click and Space share one primary action preferring Stop, then Start, then Demo',
+  'toolbar click and Space share one primary action preferring Stop, then Start',
   primaryRoutes && clickDispatch && spaceDispatch,
   `routes=${primaryRoutes}, click=${clickDispatch}, space=${spaceDispatch}, ` +
     `spaceBody=${JSON.stringify(spaceBody.replace(/\s+/g, ' '))}`,
 );
 
-const demoStateNeedles = [
-  ": this.device ? t('toolbar.start') : t('toolbar.demo')",
-  ": this.device ? t('toolbar.startTitle') : t('toolbar.demoTitle')",
-  'btn.disabled = this.stopping || this.demoBusy;',
-  "t('toolbar.demoLoading')",
+const transportStateNeedles = [
+  ": this.running ? t('toolbar.stop') : t('toolbar.start')",
+  ": this.running ? t('toolbar.shortStop') : t('toolbar.shortStart')",
+  'btn.disabled = this.stopping || (this.device === null && !this.running);',
+  ": this.device ? t('toolbar.startTitle') : t('toolbar.connectHint')",
 ];
-const missingDemoState = demoStateNeedles.filter((needle) => !app.includes(needle));
+const missingTransportState = transportStateNeedles.filter((needle) => !app.includes(needle));
 const transportWebusbGated = /btn\.disabled[^;]*webusbAvailable/.test(app);
+const demoActionAbsent = ['loadDemo', 'demoBusy', 'createProtocolDemoCapture',
+  "t('toolbar.demo'", "t('toolbar.shortDemo'"]
+  .filter((needle) => app.includes(needle));
 check(
-  'the transport selects Demo only when disconnected and never gates on WebUSB',
-  missingDemoState.length === 0 && !transportWebusbGated,
-  `missing=${JSON.stringify(missingDemoState)}, webusbGated=${transportWebusbGated}`,
-);
-
-const loadDemoStart = app.indexOf('private async loadDemo(): Promise<void> {');
-const loadDemoEnd = loadDemoStart >= 0 ? app.indexOf('\n  }', loadDemoStart) : -1;
-const loadDemoBody = loadDemoStart >= 0 && loadDemoEnd > loadDemoStart
-  ? app.slice(loadDemoStart, loadDemoEnd)
-  : '';
-const demoGuarded = loadDemoBody.includes(
-  'if (this.running || this.stopping || this.demoBusy || this.device) return;');
-const demoAdopts = loadDemoBody.includes('createProtocolDemoCapture()') &&
-  loadDemoBody.includes("this.adoptCapture(demo.store, demo.channelNames, { kind: 'demo' })") &&
-  loadDemoBody.includes('samplerate: demo.store.samplerate');
-const demoClears = loadDemoBody.includes('this.demoBusy = true;') &&
-  loadDemoBody.includes('} finally {') && loadDemoBody.includes('this.demoBusy = false;');
-const demoFails = loadDemoBody.includes("this.fail('error.demo', e)");
-const demoNeverCaptures = !loadDemoBody.includes('startCapture') &&
-  !loadDemoBody.includes('this.running = true');
-check(
-  'Demo loading is re-entry guarded, adopts the fixture at its rate, and always clears its flag',
-  demoGuarded && demoAdopts && demoClears && demoFails && demoNeverCaptures,
-  `guarded=${demoGuarded}, adopts=${demoAdopts}, clears=${demoClears}, ` +
-    `fails=${demoFails}, neverCaptures=${demoNeverCaptures}`,
+  'the transport disables while disconnected and the demo action is retired',
+  missingTransportState.length === 0 && !transportWebusbGated && demoActionAbsent.length === 0,
+  `missing=${JSON.stringify(missingTransportState)}, webusbGated=${transportWebusbGated}, ` +
+    `demo=${JSON.stringify(demoActionAbsent)}`,
 );
 
 const debugDemoDelegates = app.includes('demo: () => this.loadDemo(),');
 const retiredConnectFirst = ['connectFirstTitle', 'toolbar.connectFirstTitle']
   .filter((needle) => app.includes(needle));
 check(
-  'the debug surface drives Demo and the unreachable connect-first string is retired',
-  debugDemoDelegates && retiredConnectFirst.length === 0,
+  'the debug surface no longer drives a demo loader and the unreachable connect-first string is retired',
+  !debugDemoDelegates && retiredConnectFirst.length === 0,
   `debug=${debugDemoDelegates}, retired=${JSON.stringify(retiredConnectFirst)}`,
 );
 
@@ -270,15 +252,6 @@ check(
   'Demo-owned analyzers are marked on insertion and released on manual removal',
   ownershipDeclared && ownsOnInsert && releasesOnManualRemove && manualAttachUnmarked,
   `declared=${ownershipDeclared}, insert=${ownsOnInsert}, remove=${releasesOnManualRemove}, manual=${manualAttachUnmarked}`,
-);
-
-const sequentialAttach = /for \(const spec of demo\.analyzers\) \{\s*if \(this\.store !== demo\.store\) break;\s*await this\.attachAnalyzer\(spec\.id, spec\.channels, spec\.options \?\? \{\}, true\);/.test(loadDemoBody);
-const awaitedAttach = attachBody.includes('await this.runDecode(a.id);');
-const noDemoFanOut = !/Promise\.all|demo\.analyzers\.(forEach|map)/.test(loadDemoBody);
-check(
-  'the demo attaches its three decoders sequentially and stops once the store is replaced',
-  sequentialAttach && awaitedAttach && noDemoFanOut,
-  `loop=${sequentialAttach}, awaited=${awaitedAttach}, noFanOut=${noDemoFanOut}`,
 );
 
 const discardsInFlight = discardBody.includes('this.abort?.abort();') &&
@@ -827,8 +800,7 @@ const dynamicNames = [
 ];
 const missingDynamicNames = dynamicNames.filter((needle) => !app.includes(needle));
 const dynamicTransportName = app.includes("btn.setAttribute('aria-label', this.stopping ? t('toolbar.stopping')") &&
-  app.includes(": this.running ? t('toolbar.stop')") &&
-  app.includes(": this.device ? t('toolbar.start') : t('toolbar.demo'));");
+  app.includes(": this.running ? t('toolbar.stop') : t('toolbar.start'));");
 const retiredVisibleLabelTargets = [
   'connectTitle', 'connectDescription', 'transportTitle',
   "'device-title'", "'device-description'", "'transport-title'",
@@ -848,10 +820,9 @@ check(
 );
 
 const dynamicTransportLabel = app.includes("label.textContent = this.stopping ? t('toolbar.shortStopping')") &&
-  app.includes(": this.running ? t('toolbar.shortStop')") &&
-  app.includes(": this.device ? t('toolbar.shortStart') : t('toolbar.shortDemo');");
+  app.includes(": this.running ? t('toolbar.shortStop') : t('toolbar.shortStart');");
 check(
-  'the visual transport shorthand follows stopping, running, connected and demo states',
+  'the visual transport shorthand follows stopping, running and connected states',
   dynamicTransportLabel,
   `dynamic=${dynamicTransportLabel}`,
 );

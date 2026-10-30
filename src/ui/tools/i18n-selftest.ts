@@ -361,11 +361,9 @@ function check(name: string, pass: boolean, detail: string): void {
 {
   const plain = formatStatusError({ what: 'error.openCapture', detail: 'zip: bad' });
   const withVars = formatStatusError({ what: 'error.decode', vars: { id: 'uart' }, detail: 'boom' });
-  const demo = formatStatusError({ what: 'error.demo', detail: 'boom' });
   check('formatStatusError joins translated prefix with raw diagnostic detail',
-    plain === 'open capture: zip: bad' && withVars === 'decode uart: boom' &&
-    demo === 'demo: boom',
-    `${JSON.stringify(plain)}, ${JSON.stringify(withVars)}, ${JSON.stringify(demo)}`);
+    plain === 'open capture: zip: bad' && withVars === 'decode uart: boom',
+    `${JSON.stringify(plain)}, ${JSON.stringify(withVars)}`);
 }
 
 {
@@ -490,9 +488,9 @@ const baseSettings: CaptureSettings = {
   // legitimate rewording does not break the check. A locale missing from `dicts` is a
   // clean FAIL, not a crash.
   const probes: (keyof Messages)[] = [
-    'toolbar.start', 'toolbar.demo', 'capture.demo', 'settings.language', 'settings.theme',
+    'toolbar.start', 'capture.demo', 'settings.language', 'settings.theme',
     'settings.detailedLabels', 'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortStop',
-    'toolbar.shortStopping', 'toolbar.shortDemo', 'toolbar.shortOpen', 'toolbar.shortSave',
+    'toolbar.shortStopping', 'toolbar.shortOpen', 'toolbar.shortSave',
     'toolbar.shortFit', 'toolbar.shortSettings', 'toolbar.shortLanguage', 'toolbar.shortTheme',
     'toolbar.shortSidebar',
     'trigger.anyEdge',
@@ -536,7 +534,7 @@ const baseSettings: CaptureSettings = {
   const namePairs: [keyof Messages, keyof Messages][] = [
     ['toolbar.shortDevice', 'toolbar.device'], ['toolbar.shortStart', 'toolbar.start'],
     ['toolbar.shortStop', 'toolbar.stop'], ['toolbar.shortStopping', 'toolbar.stopping'],
-    ['toolbar.shortDemo', 'toolbar.demo'], ['toolbar.shortOpen', 'toolbar.open'],
+    ['toolbar.shortOpen', 'toolbar.open'],
     ['toolbar.shortSave', 'toolbar.save'], ['toolbar.shortFit', 'toolbar.fit'],
     ['toolbar.shortSettings', 'settings.title'], ['toolbar.shortAssistant', 'toolbar.assistantTitle'],
     ['toolbar.shortLanguage', 'toolbar.languageTitle'], ['toolbar.shortTheme', 'toolbar.themeTitle'],

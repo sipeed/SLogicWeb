@@ -1201,7 +1201,7 @@ const persistWriters = [...new Set(appMethodNames
   .filter((name) => appMethodBody(name).includes('this.persistWorkspace();')))].sort();
 const expectedWriters = [
   'adoptCapture', 'adoptDeviceChannels', 'afterChannelChange', 'applySettings', 'attachAnalyzer',
-  'configureBankBus', 'configureChannel', 'loadDemo', 'removeAnalyzer', 'reorder', 'settingsItems',
+  'configureBankBus', 'configureChannel', 'removeAnalyzer', 'reorder', 'settingsItems',
   'startCapture',
 ].sort();
 const quietMethods = ['runDecode', 'discardDecodeState', 'renderPanels', 'relayout', 'retranslate'];
@@ -1217,7 +1217,7 @@ check('the committed mutation methods are the only workspace writers and no rend
 
 const writeMethods = [
   'applySettings', 'afterChannelChange', 'configureChannel', 'reorder', 'adoptCapture', 'adoptDeviceChannels',
-  'startCapture', 'loadDemo', 'configureBankBus',
+  'startCapture', 'configureBankBus',
 ];
 const missingWriteMethods = writeMethods.filter((name) =>
   !appMethodBody(name).includes('this.persistWorkspace();'));
