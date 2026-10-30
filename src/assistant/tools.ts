@@ -68,7 +68,6 @@ export interface AssistantHost {
   /** Start a capture and resolve when it has stopped (or the timeout passed). */
   startAndWait(timeoutMs: number, signal: AbortSignal): Promise<CaptureOutcome>;
   stop(): Promise<void>;
-  loadDemo(): Promise<void>;
   /** Attach a decoder and resolve after its first decode. */
   attach(decoderId: string, channels: Record<number, number>, options: Record<string, string | number>): Promise<void>;
   removeAnalyzer(index: number): boolean;
@@ -134,7 +133,7 @@ function edgeCount(store: SampleStore, ch: number, s: number, e: number): number
 function window(host: AssistantHost, startS: unknown, endS: unknown): { s: number; e: number; sr: number } {
   const store = host.store();
   const sr = store.samplerate;
-  if (store.length === 0) throw new Error('There is no capture yet. Start one or load the demo first.');
+  if (store.length === 0) throw new Error('There is no capture yet. Start one first.');
   const s = Math.max(0, Math.min(store.length, Math.floor(typeof startS === 'number' ? startS * sr : 0)));
   const e = Math.max(s, Math.min(store.length, Math.ceil(typeof endS === 'number' ? endS * sr : store.length)));
   if (e <= s) throw new Error('The time range is empty or outside the capture.');
@@ -641,20 +640,6 @@ export const TOOLS: AssistantTool[] = [
     run: async (_i, host) => {
       if (!host.snapshot().running) throw new Error('No capture is running.');
       await host.stop();
-      return stateView(host);
-    },
-  },
-  {
-    name: 'load_demo',
-    description:
-      'Load the built-in protocol demo capture (I2C, SPI and UART with decoders attached). ' +
-      'Only available while no device is connected.',
-    inputSchema: obj({}),
-    risk: 'act',
-    run: async (_i, host) => {
-      const st = host.snapshot();
-      if (st.connected) throw new Error('The demo is only available without a connected device.');
-      await host.loadDemo();
       return stateView(host);
     },
   },

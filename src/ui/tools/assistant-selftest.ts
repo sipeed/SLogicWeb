@@ -132,7 +132,7 @@ Object.assign(globalThis, { localStorage: local, sessionStorage: session });
     TOOLS.every((t) => t.inputSchema.type === 'object' && t.inputSchema.additionalProperties === false));
   check('act tools are exactly the ones that change the capture',
     TOOLS.filter((t) => t.risk === 'act').map((t) => t.name).sort().join(',') ===
-    'add_bus_view,attach_decoder,load_demo,remove_bus_view,remove_decoder,set_capture_settings,start_capture,stop_capture,update_bus_view');
+    'add_bus_view,attach_decoder,remove_bus_view,remove_decoder,set_capture_settings,start_capture,stop_capture,update_bus_view');
 }
 
 // ------------------------------------------------------------------ 3. tools
@@ -175,7 +175,6 @@ class FakeHost implements AssistantHost {
   }
   async startAndWait(): Promise<'finished'> { return 'finished'; }
   async stop(): Promise<void> { this.running = false; }
-  async loadDemo(): Promise<void> { /* already loaded */ }
   async attach(id: string, channels: Record<number, number>, options: Record<string, string | number>): Promise<void> {
     this.attached.push({ id, channels, options });
     this.analyzers_.push({ decoderId: id, channels, options, status: 'done', note: '', result: null });
@@ -295,8 +294,6 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
   host.connected = true;
   const started = await run('start_capture', { timeout_s: 1 }, host);
   check('start_capture with a device waits and reports', started.ok && (started.out as { finished: boolean }).finished === true);
-  const demoWithDevice = await run('load_demo', {}, host);
-  check('load_demo is refused while a device is connected', !demoWithDevice.ok);
 
   // A two-annotation result, laid out like DecodeClient's.
   const result: DecodeResult = {

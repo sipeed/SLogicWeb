@@ -2373,7 +2373,6 @@ export class App {
         return outcome;
       },
       stop: () => this.stopCapture(),
-      loadDemo: () => this.loadDemo(),
       attach: (id, channels, options) => this.attachAnalyzer(id, channels, options),
       removeAnalyzer: (index) => {
         const a = this.analyzers[index];

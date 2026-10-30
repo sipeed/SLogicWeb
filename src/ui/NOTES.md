@@ -883,7 +883,7 @@ change, which here would drop a streaming answer, a pending approval and the dra
 `describe_decoder`, `get_annotations`) and view tools (`set_viewport`,
 `zoom_to_annotation`) run at once, as does `get_bus_values` (a bus view's values over a
 range, capped, with min/max and volts). Tools that change the capture
-(`set_capture_settings`, `start_capture`, `stop_capture`, `load_demo`, `attach_decoder`,
+(`set_capture_settings`, `start_capture`, `stop_capture`, `attach_decoder`,
 `remove_decoder`, `add_bus_view`, `update_bus_view`, `remove_bus_view`) wait
 for the user's Allow on an approval card ("Allow all in this chat" skips the rest of the
 chat). Each tool goes through the path a button uses (`debug.setSettings`,
@@ -945,7 +945,7 @@ OpenAI-compatible providers allow browser (CORS) requests at all - a relay cover
   edge in live follow mode) and shows more or less time instead.
 
 `src/ui/tools/assistant-selftest.ts` (81 checks) replays recorded SSE streams through
-both real providers, runs every tool against the protocol demo capture, and drives the
+both real providers, runs every tool against the protocol fixture, and drives the
 loop's approval, abort, refusal and truncation paths with a scripted provider.
 
 ## 21. Parallel bus (ADC) as an analog row
