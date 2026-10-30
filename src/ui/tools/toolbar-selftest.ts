@@ -1,4 +1,5 @@
 import { settingsMenuRight } from '../settingsMenu.js';
+import { sameUsbDevice } from '../deviceIdentity.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
@@ -236,6 +237,38 @@ check(
     startBody.indexOf('await this.stopPending') >
       startBody.indexOf('await device.start(cfg, (chunk) => {'),
   `issuedTo=${startIssuedTo}, missing=${JSON.stringify(armingStop)}`,
+);
+
+const identityCases: [string, { serialNumber?: string | null }, boolean][] = [
+  ['same', { serialNumber: 'same' }, true],
+  ['one', { serialNumber: 'other' }, false],
+  ['', { serialNumber: 'other' }, true],
+  ['one', {}, true],
+  ['one', { serialNumber: null }, true],
+];
+const identityBad = identityCases.filter(([serial, usb, want]) => sameUsbDevice(serial, usb) !== want);
+check(
+  'USB disconnect matching accepts an absent serial and rejects a different reported one',
+  identityBad.length === 0,
+  identityBad.map(([serial, usb, want]) => `${serial}/${usb.serialNumber ?? 'null'}->${want}`).join('; '),
+);
+
+const disconnectListenerCount =
+  (app.match(/navigator\.usb\?\.addEventListener\('disconnect'/g) ?? []).length;
+const usbDisconnectedBody = methodBody('private usbDisconnected(usb: USBDevice): void {');
+const deviceLostBody = methodBody('private deviceLost(error: unknown, report = true): void {');
+const disconnectGuard = usbDisconnectedBody.includes(
+  'if (!device || !sameUsbDevice(device.serial, usb)) return;') &&
+  usbDisconnectedBody.includes('this.deviceLost(new Error(');
+const lostCleans = deviceLostBody.includes('if (this.device === null) return;') &&
+  deviceLostBody.includes("this.fail('error.device', error)") &&
+  deviceLostBody.includes('this.detachDevice();') &&
+  deviceLostBody.includes('this.renderPanels();') &&
+  !deviceLostBody.includes('recoverDevice');
+check(
+  'a matching USB disconnect drops the transport once and finishes the capture',
+  disconnectListenerCount === 1 && disconnectGuard && lostCleans,
+  `listeners=${disconnectListenerCount}, guard=${disconnectGuard}, cleans=${lostCleans}`,
 );
 
 const ownershipAbsent = !app.includes('demoAnalyzers') && !app.includes('demoOwned');

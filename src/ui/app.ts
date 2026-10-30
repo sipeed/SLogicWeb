@@ -51,6 +51,7 @@ import {
   MAX_SAMPLES, levelAt, loadFiles, loadLwcap, saveLwcap,
 } from './captureIO.js';
 import { connectSamplerate } from './connectDefaults.js';
+import { sameUsbDevice } from './deviceIdentity.js';
 import { formatCount, formatDuration, formatFreq, formatRate,
   formatAnalyzerNote, formatCaptureLabel, formatStatusError } from './format.js';
 import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, setLocale, t,
@@ -364,6 +365,7 @@ export class App {
       () => { this.decodeWarm = true; this.renderPanels(); },
       (e: unknown) => this.fail('error.decodeWorkerWarmup', e),
     );
+    navigator.usb?.addEventListener('disconnect', (e) => this.usbDisconnected(e.device));
     void this.reconnectGranted();
   }
 
@@ -1778,6 +1780,19 @@ export class App {
     this.adoptDeviceChannels(d);
     this.renderPanels();
     return true;
+  }
+
+  private usbDisconnected(usb: USBDevice): void {
+    const device = this.device;
+    if (!device || !sameUsbDevice(device.serial, usb)) return;
+    this.deviceLost(new Error(`${device.name} was disconnected`));
+  }
+
+  private deviceLost(error: unknown, report = true): void {
+    if (this.device === null) return;
+    if (report) this.fail('error.device', error);
+    this.detachDevice();
+    this.renderPanels();
   }
 
   private async reconnectGranted(): Promise<void> {
