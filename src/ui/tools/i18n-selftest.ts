@@ -466,11 +466,12 @@ const baseSettings: CaptureSettings = {
     'capturePanel.bankToggle', 'capturePanel.bankLocked',
     'bus.loopWindow', 'bus.globalCapture', 'bus.loopUnit', 'bus.loopMax', 'bus.loopEffective',
     'bus.loopInvalid', 'bus.loopUnavailable', 'bus.advanced',
+    'toolbar.demo', 'toolbar.shortDemo', 'toolbar.demoTitle', 'toolbar.demoLoading', 'error.demo',
   ];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const present = Object.entries(dicts).filter(([, dict]) =>
     retired.some((key) => Object.keys(dict).includes(key)));
-  check('the retired channel, bank and capture-panel keys stay absent from every catalog',
+  check('the retired channel, bank, capture-panel and toolbar keys stay absent from every catalog',
     present.length === 0,
     present.length === 0 ? `4 catalogs omit ${retired.length} keys` : present.map(([locale]) => locale).join(', '));
 }
