@@ -170,7 +170,6 @@ export class App {
   private statusError: StatusError | null = null;
   private decodeBusy = false;
   private decodeWarm = false;
-  private readonly demoAnalyzers = new Set<string>();
   private abort: AbortController | null = null;
 
   private readonly markerA = new WaveformMarker('A', MEASURE_COLORS[0]!);
@@ -1407,17 +1406,15 @@ export class App {
       busViews: this.busViews.map((bus) => cloneBusConfig(bus)),
       bankBusDrafts: Object.fromEntries([...this.bankBusDrafts]
         .map(([start, config]) => [start, cloneBusConfig(config)])),
-      analyzers: this.analyzers
-        .filter((a) => !this.demoAnalyzers.has(a.id))
-        .map((a): PersistedAnalyzer => ({
-          id: a.id,
-          decoderId: a.decoderId,
-          label: a.label,
-          color: a.color,
-          channels: { ...a.channels },
-          options: { ...a.options },
-          laneChannel: a.laneChannel,
-        })),
+      analyzers: this.analyzers.map((a): PersistedAnalyzer => ({
+        id: a.id,
+        decoderId: a.decoderId,
+        label: a.label,
+        color: a.color,
+        channels: { ...a.channels },
+        options: { ...a.options },
+        laneChannel: a.laneChannel,
+      })),
     };
   }
 
@@ -2132,15 +2129,10 @@ export class App {
     this.abort?.abort();
     this.abort = null;
     this.decodeBusy = false;
-    if (this.demoAnalyzers.size === 0) return;
-    const owned = new Set(this.demoAnalyzers);
-    this.analyzers = this.analyzers.filter((a) => !owned.has(a.id));
-    this.demoAnalyzers.clear();
   }
 
   private async attachAnalyzer(
     decoderId: string, channels: Record<number, number>, options: Record<string, string | number>,
-    demoOwned = false,
   ): Promise<void> {
     await hydrateDecoders();
     const info = getDecoder(decoderId);
@@ -2159,14 +2151,12 @@ export class App {
       note: { kind: 'pending' },
     };
     this.analyzers.push(a);
-    if (demoOwned) this.demoAnalyzers.add(a.id);
     this.persistWorkspace();
     this.renderPanels();
     await this.runDecode(a.id);
   }
 
   private removeAnalyzer(id: string): void {
-    this.demoAnalyzers.delete(id);
     this.analyzers = this.analyzers.filter((a) => a.id !== id);
     this.persistWorkspace();
     this.relayout();

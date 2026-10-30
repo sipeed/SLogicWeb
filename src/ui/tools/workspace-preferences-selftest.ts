@@ -1128,12 +1128,12 @@ check('the snapshot projects analyzer mounts as a typed fresh DTO and never copi
   analyzerProjection.includes('.map((a): PersistedAnalyzer => ({') && app.includes('type PersistedAnalyzer,'),
   `missing=${JSON.stringify(projectionMissing)}, leak=${JSON.stringify(runtimeLeak)}`);
 
-const demoExclusion = analyzerProjection.includes('.filter((a) => !this.demoAnalyzers.has(a.id))') &&
-  analyzerProjection.includes('.map((a): PersistedAnalyzer => ({') &&
-  !snapshotBody.includes('this.analyzers.map(') &&
-  !snapshotBody.includes('analyzers: this.analyzers,');
-check('the analyzer projection drops demo-owned mounts before mapping so loader rows stay out',
-  demoExclusion,
+const directProjection = analyzerProjection.includes(
+  'analyzers: this.analyzers.map((a): PersistedAnalyzer => ({') &&
+  !analyzerProjection.includes('.filter(') &&
+  !snapshotBody.includes('demoAnalyzers');
+check('the analyzer projection writes every mounted analyzer without demo filtering',
+  directProjection,
   `projection=${analyzerProjection.replace(/\s+/g, ' ').trim()}`);
 
 const attachStart = app.indexOf('private async attachAnalyzer(');
@@ -1142,12 +1142,11 @@ const attachBody = attachStart >= 0 && attachEnd > attachStart
   ? app.slice(attachStart, attachEnd) : '';
 const attachOrder = [
   'this.analyzers.push(a);',
-  'if (demoOwned) this.demoAnalyzers.add(a.id);',
   'this.persistWorkspace();',
   'this.renderPanels();',
   'await this.runDecode(a.id);',
 ].map((needle) => attachBody.indexOf(needle));
-check('attaching a mount records demo ownership before persisting and writes before decoding',
+check('attaching a mount persists before decoding',
   attachBody.length > 0 && attachBody.split('this.persistWorkspace();').length === 2 &&
   attachOrder.every((index, i) => index >= 0 && (i === 0 || index > attachOrder[i - 1])),
   `order=${JSON.stringify(attachOrder)}`);
@@ -1176,12 +1175,11 @@ const removeEnd = removeStart >= 0 ? app.indexOf('\n  }', removeStart) : -1;
 const removeBody = removeStart >= 0 && removeEnd > removeStart
   ? app.slice(removeStart, removeEnd) : '';
 const removeOrder = [
-  'this.demoAnalyzers.delete(id);',
   'this.analyzers = this.analyzers.filter((a) => a.id !== id);',
   'this.persistWorkspace();',
   'this.relayout();',
 ].map((needle) => removeBody.indexOf(needle));
-check('removing a mount persists exactly once after the array and demo ownership drop',
+check('removing a mount persists exactly once after the array drop',
   removeBody.length > 0 && removeBody.split('this.persistWorkspace();').length === 2 &&
   removeOrder.every((index, i) => index >= 0 && (i === 0 || index > removeOrder[i - 1])),
   `order=${JSON.stringify(removeOrder)}`);

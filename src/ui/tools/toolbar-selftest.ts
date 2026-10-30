@@ -157,8 +157,6 @@ function methodBody(marker: string): string {
   return start >= 0 && end > start ? app.slice(start, end) : '';
 }
 
-const attachBody = methodBody('private async attachAnalyzer(');
-const removeBody = methodBody('private removeAnalyzer(id: string): void {');
 const discardBody = methodBody('private discardDecodeState(): void {');
 const adoptBody = methodBody('private adoptCapture(');
 const startBody = methodBody('private async startCapture(): Promise<void> {');
@@ -240,35 +238,29 @@ check(
   `issuedTo=${startIssuedTo}, missing=${JSON.stringify(armingStop)}`,
 );
 
-const ownershipDeclared = app.includes('private readonly demoAnalyzers = new Set<string>();');
-const ownsOnInsert = attachBody.includes('this.analyzers.push(a);') &&
-  attachBody.includes('if (demoOwned) this.demoAnalyzers.add(a.id);') &&
-  attachBody.indexOf('this.analyzers.push(a);') < attachBody.indexOf('if (demoOwned)');
-const releasesOnManualRemove = removeBody.includes('this.demoAnalyzers.delete(id);');
+const ownershipAbsent = !app.includes('demoAnalyzers') && !app.includes('demoOwned');
 const manualAttachUnmarked = app.includes(
   "onAttach: (id, ch, opts) => void this.attachAnalyzer(id, ch, opts)") &&
   app.includes('this.attachAnalyzer(id, ch, opts),');
 check(
-  'Demo-owned analyzers are marked on insertion and released on manual removal',
-  ownershipDeclared && ownsOnInsert && releasesOnManualRemove && manualAttachUnmarked,
-  `declared=${ownershipDeclared}, insert=${ownsOnInsert}, remove=${releasesOnManualRemove}, manual=${manualAttachUnmarked}`,
+  'analyzer mounts carry no demo ownership',
+  ownershipAbsent && manualAttachUnmarked,
+  `ownership=${ownershipAbsent}, manual=${manualAttachUnmarked}`,
 );
 
 const discardsInFlight = discardBody.includes('this.abort?.abort();') &&
   discardBody.includes('this.abort = null;') && discardBody.includes('this.decodeBusy = false;');
-const dropsOnlyOwned = discardBody.includes('const owned = new Set(this.demoAnalyzers);') &&
-  discardBody.includes('this.analyzers = this.analyzers.filter((a) => !owned.has(a.id));') &&
-  discardBody.includes('this.demoAnalyzers.clear();') &&
-  !/this\.analyzers = \[\]/.test(discardBody);
+const discardKeepsMounts = !discardBody.includes('this.analyzers') &&
+  !discardBody.includes('demoAnalyzers');
 const adoptDiscardsFirst = adoptBody.indexOf('this.discardDecodeState();') >= 0 &&
   adoptBody.indexOf('this.discardDecodeState();') < adoptBody.indexOf('this.storeRef.set(store);');
 const startDiscardsAtReplacement = startBody.indexOf('this.discardDecodeState();') >
   startBody.indexOf('vrefCode(cfg.thresholdVolts)') &&
   startBody.indexOf('this.discardDecodeState();') < startBody.indexOf('this.storeRef.set(store);');
 check(
-  'capture replacement discards in-flight decode state and only demo-owned analyzers',
-  discardsInFlight && dropsOnlyOwned && adoptDiscardsFirst && startDiscardsAtReplacement,
-  `abort=${discardsInFlight}, ownedOnly=${dropsOnlyOwned}, adopt=${adoptDiscardsFirst}, start=${startDiscardsAtReplacement}`,
+  'capture replacement discards in-flight decode state without dropping mounts',
+  discardsInFlight && discardKeepsMounts && adoptDiscardsFirst && startDiscardsAtReplacement,
+  `abort=${discardsInFlight}, keepsMounts=${discardKeepsMounts}, adopt=${adoptDiscardsFirst}, start=${startDiscardsAtReplacement}`,
 );
 
 const stalePredicate = runDecodeBody.includes(
