@@ -267,6 +267,72 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
 }
 
 {
+  const base = {
+    samplerate: 25e6,
+    thresholdVolts: 1.65,
+    mode: 'free' as const,
+    seconds: 2.5,
+    loopSamples: 123_456,
+    testMode: 2 as const,
+    triggerEnableMask: true,
+    triggerModes: { 0: 'rising' as const },
+    preTriggerPercent: 35,
+  };
+  const explicit = serializeWorkspaceSnapshot({
+    version: 1,
+    detailedLabels: true,
+    capture: { ...base, samplerateExplicit: true },
+  });
+  const parsedExplicit = parseWorkspaceSnapshot(explicit);
+  check('an explicit capture rate marker round-trips as true directly after samplerate',
+    parsedExplicit?.capture?.samplerateExplicit === true &&
+    explicit.includes('"samplerate":25000000,"samplerateExplicit":true'),
+    explicit);
+  const absent = serializeWorkspaceSnapshot({ version: 1, detailedLabels: true, capture: base });
+  const explicitFalse = serializeWorkspaceSnapshot({
+    version: 1,
+    detailedLabels: true,
+    capture: { ...base, samplerateExplicit: false },
+  });
+  check('absent and explicit false capture rate markers serialize without the key',
+    !absent.includes('samplerateExplicit') && !explicitFalse.includes('samplerateExplicit'),
+    `${absent} | ${explicitFalse}`);
+}
+
+{
+  const dirty = ['yes', 1, null, [], {}];
+  const rows = dirty.map((samplerateExplicit) => {
+    const parsed = parseWorkspaceSnapshot(JSON.stringify({ version: 1, capture: { samplerateExplicit } }));
+    const capture = parsed?.capture;
+    const serialized = capture === undefined
+      ? 'missing capture'
+      : serializeWorkspaceSnapshot({ version: 1, detailedLabels: true, capture });
+    return { value: samplerateExplicit, flag: capture?.samplerateExplicit, serialized };
+  });
+  check('dirty capture rate markers never restore or serialize as explicit',
+    rows.every((row) => row.serialized !== 'missing capture' && row.flag !== true &&
+      !row.serialized.includes('samplerateExplicit')),
+    rows.map((row) => `${JSON.stringify(row.value)}=>${String(row.flag)}`).join(', '));
+}
+
+{
+  const legacy = '{"version":1,"channels":[{},{}],"capture":{"samplerate":16000000,' +
+    '"thresholdVolts":1.2,"mode":"timer","seconds":1,"loopSamples":16000000,"testMode":0,' +
+    '"triggerEnableMask":false,"triggerModes":{},"preTriggerPercent":10}}';
+  let threw = false;
+  let parsed: WorkspaceSnapshotV1 | null = null;
+  try { parsed = parseWorkspaceSnapshot(legacy); } catch { threw = true; }
+  const capture = parsed?.capture;
+  const serialized = capture === undefined
+    ? ''
+    : serializeWorkspaceSnapshot({ version: 1, detailedLabels: true, capture });
+  check('legacy capture payload without the marker parses as not explicit and stays key-free',
+    !threw && capture?.samplerate === 16e6 && capture?.samplerateExplicit !== true &&
+    serialized.includes('"samplerate":16000000') && !serialized.includes('samplerateExplicit'),
+    `threw=${threw}, capture=${JSON.stringify(capture)}`);
+}
+
+{
   const parsed = parseWorkspaceSnapshot(JSON.stringify({
     version: 1,
     capture: {

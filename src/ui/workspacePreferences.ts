@@ -20,6 +20,7 @@ export interface PersistedChannel {
 
 export interface PersistedCaptureSettings {
   samplerate: number;
+  samplerateExplicit?: boolean;
   thresholdVolts: number;
   mode: CaptureSettings['mode'];
   seconds: number;
@@ -117,6 +118,7 @@ function restoreCapture(value: unknown, capacity: number): PersistedCaptureSetti
   if (typeof value.samplerate === 'number' && SAMPLERATES_HZ.includes(value.samplerate)) {
     capture.samplerate = value.samplerate;
   }
+  if (value.samplerateExplicit === true) capture.samplerateExplicit = true;
   if (typeof value.thresholdVolts === 'number' &&
       (THRESHOLD_VOLT_OPTIONS as readonly number[]).includes(value.thresholdVolts)) {
     capture.thresholdVolts = value.thresholdVolts;
@@ -261,6 +263,7 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
     const capture = snapshot.capture;
     serialized.capture = {
       samplerate: capture.samplerate,
+      ...(capture.samplerateExplicit === true ? { samplerateExplicit: true } : {}),
       thresholdVolts: capture.thresholdVolts,
       mode: capture.mode,
       seconds: capture.seconds,
