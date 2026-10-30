@@ -4,6 +4,8 @@ import { validateBusSpec, type BusSpec } from '../data/busValue.js';
 
 export const CHANNEL_BANK_SIZE = 8;
 
+export const CHANNEL_WIDTH_OPTIONS = [8, 16, 32] as const;
+
 export interface ChannelEnableState {
   readonly index: number;
   readonly enabled: boolean;
@@ -74,6 +76,17 @@ export function busChannelBank(spec: BusSpec): number | null {
   const start = sorted[0]!;
   if (start % CHANNEL_BANK_SIZE !== 0) return null;
   return sorted.every((channel, i) => channel === start + i) ? start : null;
+}
+
+export function channelWidthOptions(channelCount: number): number[] {
+  const max = Math.max(0, Math.floor(channelCount));
+  return CHANNEL_WIDTH_OPTIONS.filter((n) => n <= max);
+}
+
+export function scopeOutOfWidth(spec: BusSpec, channels: number): boolean {
+  if (busChannelBank(spec) === null) return false;
+  const used = [...spec.bits, ...(spec.clock ? [spec.clock.channel] : [])];
+  return used.some((channel) => channel >= channels);
 }
 
 export function lockedChannelBanks(

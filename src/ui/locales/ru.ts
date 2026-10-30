@@ -128,6 +128,8 @@ export const ru: Messages = {
 
   // ------------------------------------------------------- capture panel
   'capturePanel.digital': 'Цифровые каналы',
+  'capturePanel.channelWidth': 'Включённые каналы',
+  'capturePanel.channelWidthBusy': 'Ширину каналов нельзя изменить во время захвата',
   'capturePanel.all': 'Все',
   'capturePanel.clear': 'Ничего',
   'capturePanel.enabledCount': 'Включено каналов: {enabled}/{total}',

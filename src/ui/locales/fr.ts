@@ -128,6 +128,8 @@ export const fr: Messages = {
 
   // ------------------------------------------------------- capture panel
   'capturePanel.digital': 'Canaux numériques',
+  'capturePanel.channelWidth': 'Canaux activés',
+  'capturePanel.channelWidthBusy': 'La largeur des canaux est verrouillée pendant une capture',
   'capturePanel.all': 'Tous',
   'capturePanel.clear': 'Aucun',
   'capturePanel.enabledCount': 'Canaux activés : {enabled}/{total}',

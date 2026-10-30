@@ -132,6 +132,8 @@ export const en = {
 
   // ------------------------------------------------------- capture panel
   'capturePanel.digital': 'Digital',
+  'capturePanel.channelWidth': 'Enabled channels',
+  'capturePanel.channelWidthBusy': 'Channel width is locked while capture is running',
   'capturePanel.all': 'All',
   'capturePanel.clear': 'Clear',
   'capturePanel.enabledCount': '{enabled}/{total} channels enabled',

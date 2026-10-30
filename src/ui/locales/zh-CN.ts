@@ -126,6 +126,8 @@ export const zhCN: Messages = {
 
   // ------------------------------------------------------- capture panel
   'capturePanel.digital': '数字通道',
+  'capturePanel.channelWidth': '启用的通道数',
+  'capturePanel.channelWidthBusy': '采集运行期间无法更改通道宽度',
   'capturePanel.all': '全选',
   'capturePanel.clear': '清空',
   'capturePanel.enabledCount': '已启用 {enabled}/{total} 个通道',

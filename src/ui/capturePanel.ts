@@ -20,7 +20,8 @@ import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import { formatDuration, formatRate } from './format.js';
 import {
-  channelBankIndices, channelBankRange, channelBankStarts, channelBankStatus, lockedChannelBanks,
+  channelBankIndices, channelBankRange, channelBankStarts, channelBankStatus, channelWidthOptions,
+  lockedChannelBanks,
 } from './channelBanks.js';
 import { t } from './i18n.js';
 import { chipForeground } from './metrics.js';
@@ -35,6 +36,7 @@ export interface CapturePanelCallbacks {
   onToggleChannel(index: number, enabled: boolean): void;
   onToggleBank(start: number): void;
   onOpenBank(start: number): void;
+  onChannelWidth(channels: number): void;
   onSetAllChannels(enabled: boolean): void;
   onUsbControl(command: string): Promise<string>;
 }
@@ -100,6 +102,27 @@ export class CapturePanel {
     // ---- channels
     const chSec = section(t('capturePanel.digital'));
     chSec.el.classList.add('digital-section');
+    const widthOptions = channelWidthOptions(v.channels.length);
+    if (widthOptions.length > 0) {
+      const widths = div('segmented channel-widths');
+      widths.setAttribute('role', 'group');
+      widths.setAttribute('aria-label', t('capturePanel.channelWidth'));
+      for (const n of widthOptions) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'seg' + (s.channels === n ? ' on' : '');
+        b.textContent = `${n}ch`;
+        b.dataset.channelWidth = String(n);
+        b.disabled = v.running || v.stopping;
+        if (b.disabled) {
+          b.title = t('capturePanel.channelWidthBusy');
+          b.setAttribute('aria-label', b.title);
+        }
+        b.addEventListener('click', () => this.cb.onChannelWidth(n));
+        widths.appendChild(b);
+      }
+      chSec.header.appendChild(widths);
+    }
     const all = button(t('capturePanel.all'), 'mini');
     all.addEventListener('click', () => this.cb.onSetAllChannels(true));
     const clear = button(t('capturePanel.clear'), 'mini');

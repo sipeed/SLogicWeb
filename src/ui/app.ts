@@ -43,7 +43,7 @@ import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLay
 import { CapturePanel, type CapturePanelView } from './capturePanel.js';
 import {
   CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankStart, clearChannelBanks,
-  lockedChannelBanks, toggleChannelBank,
+  lockedChannelBanks, scopeOutOfWidth, toggleChannelBank,
 } from './channelBanks.js';
 import { ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration } from './channelList.js';
 import { computeChannelRowHeight } from './channelLayout.js';
@@ -291,6 +291,7 @@ export class App {
       onToggleChannel: (i, on) => this.setChannelEnabled(i, on),
       onToggleBank: (start) => this.setBankEnabled(start),
       onOpenBank: (start) => this.openBankBus(start),
+      onChannelWidth: (n) => this.setChannelWidth(n),
       onSetAllChannels: (on) => this.setAllChannels(on),
       onUsbControl: (command) => this.usbControl(command),
     });
@@ -734,6 +735,14 @@ export class App {
       const next = clearChannelBanks(this.channels, lockedChannelBanks(this.busViews, this.channels.length));
       for (let i = 0; i < this.channels.length; i++) this.channels[i]!.enabled = next[i]!;
     }
+    this.afterChannelChange();
+  }
+
+  private setChannelWidth(channels: number): void {
+    if (this.running || this.stopping) return;
+    if (!isChannelCount(channels) || channels > this.channels.length) return;
+    this.busViews = this.busViews.filter((bus) => !scopeOutOfWidth(bus.spec, channels));
+    for (let i = 0; i < this.channels.length; i++) this.channels[i]!.enabled = i < channels;
     this.afterChannelChange();
   }
 

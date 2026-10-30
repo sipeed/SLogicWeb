@@ -975,6 +975,8 @@ html.resizing { cursor: col-resize; user-select: none; }
 .decoder-detail { font-size: 11px; color: var(--text80); line-height: 1.4; }
 
 .digital-section .panel-section-head > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.digital-section .panel-section-head > .channel-widths { flex: none; }
+.channel-widths .seg { padding: 1px 6px; font-size: 10px; }
 .channel-enabled-count { flex: none; color: var(--text50); font-size: 10px; font-weight: 400; white-space: nowrap; }
 .channel-banks { display: flex; flex-direction: column; gap: 8px; }
 .channel-bank { min-width: 0; }

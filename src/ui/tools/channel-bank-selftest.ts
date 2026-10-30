@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankRange, channelBankStart, channelBankStarts,
-  channelBankStatus, clearChannelBanks, lockedChannelBanks, toggleChannelBank, type ChannelEnableState,
+  CHANNEL_BANK_SIZE, CHANNEL_WIDTH_OPTIONS, busChannelBank, channelBankIndices, channelBankRange,
+  channelBankStart, channelBankStarts, channelBankStatus, channelWidthOptions, clearChannelBanks,
+  lockedChannelBanks, scopeOutOfWidth, toggleChannelBank, type ChannelEnableState,
 } from '../channelBanks.js';
 import { defaultBankBusConfig, normalizeBankBusConfig } from '../busPanel.js';
 
@@ -331,6 +332,54 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     sheet.includes('pointer-events: none') && sheet.includes('brightness(0.88)');
   check('active bus banks enforce model locks and render the non-interactive localized overlay',
     modelLock && visualLock, `modelLock=${modelLock}, visualLock=${visualLock}`);
+
+  const widthPanel = panel.includes('channelWidthOptions(v.channels.length)') &&
+    panel.includes("b.className = 'seg' + (s.channels === n ? ' on' : '')") &&
+    panel.includes("b.dataset.channelWidth = String(n)") &&
+    panel.includes('b.disabled = v.running || v.stopping') &&
+    panel.includes("b.title = t('capturePanel.channelWidthBusy')") &&
+    panel.includes("widths.setAttribute('aria-label', t('capturePanel.channelWidth'))") &&
+    panel.includes('onChannelWidth(channels: number): void') &&
+    panel.includes('chSec.header.appendChild(widths)');
+  const widthSetter = app.split('private setChannelWidth(channels: number): void')[1]?.split('private afterChannelChange(')[0] ?? '';
+  const widthApp = app.includes('onChannelWidth: (n) => this.setChannelWidth(n)') &&
+    app.includes('private setChannelWidth(channels: number): void') &&
+    app.includes('!scopeOutOfWidth(bus.spec, channels)') &&
+    app.includes('this.channels[i]!.enabled = i < channels') &&
+    widthSetter.includes('if (this.running || this.stopping) return;') &&
+    widthSetter.includes('this.afterChannelChange();');
+  const widthSheet = sheet.includes('.digital-section .panel-section-head > .channel-widths { flex: none; }') &&
+    sheet.includes('.channel-widths .seg { padding: 1px 6px; font-size: 10px; }');
+  check('the Device panel renders the channel-width selector through the App width setter',
+    widthPanel && widthApp && widthSheet,
+    `panel=${widthPanel}, app=${widthApp}, sheet=${widthSheet}`);
+}
+
+{
+  const spec = (bits: number[], clock: number | null = null) => ({
+    bits, clock: clock === null ? null : { channel: clock, edge: 'rising' as const }, encoding: 'unsigned' as const,
+  });
+  const options = channelWidthOptions(4).join(',') + '|' + channelWidthOptions(8).join(',') + '|' +
+    channelWidthOptions(16).join(',') + '|' + channelWidthOptions(32).join(',') + '|' +
+    channelWidthOptions(128).join(',');
+  const edge = channelWidthOptions(7).join(',') === '' && channelWidthOptions(0).join(',') === '' &&
+    channelWidthOptions(17).join(',') === '8,16';
+  check('channel width options follow the model width without inventing tiers',
+    CHANNEL_WIDTH_OPTIONS.join(',') === '8,16,32' && options === '|8|8,16|8,16,32|8,16,32' && edge,
+    `declared=${CHANNEL_WIDTH_OPTIONS}, 4=${channelWidthOptions(4)}, 8=${channelWidthOptions(8)}, ` +
+    `16=${channelWidthOptions(16)}, 32=${channelWidthOptions(32)}, 128=${channelWidthOptions(128)}, ` +
+    `7=${channelWidthOptions(7)}, 17=${channelWidthOptions(17)}`);
+
+  const clock20 = scopeOutOfWidth(spec([0, 1, 2, 3, 4, 5, 6, 7], 20), 16);
+  const clock20Wide = scopeOutOfWidth(spec([0, 1, 2, 3, 4, 5, 6, 7], 20), 32);
+  const bank8 = scopeOutOfWidth(spec([8, 9, 10, 11, 12, 13, 14, 15]), 8);
+  const bank8Wide = scopeOutOfWidth(spec([8, 9, 10, 11, 12, 13, 14, 15]), 16);
+  const descending = scopeOutOfWidth(spec([15, 14, 13, 12, 11, 10, 9, 8]), 8);
+  const plain = scopeOutOfWidth(spec([0, 2, 4]), 4);
+  check('scope removal follows bank data bits and external clock against the new width',
+    clock20 && !clock20Wide && bank8 && !bank8Wide && descending && !plain,
+    `clock20@16=${clock20}, clock20@32=${clock20Wide}, bank8@8=${bank8}, bank8@16=${bank8Wide}, ` +
+    `desc@8=${descending}, plain@4=${plain}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
