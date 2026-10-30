@@ -1006,6 +1006,21 @@ html.resizing { cursor: col-resize; user-select: none; }
   transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 
+.acquisition-time { display: flex; flex-direction: column; gap: 6px; }
+.acquisition-time-head { display: flex; align-items: end; gap: 8px; }
+.acquisition-time-label { flex: 1; min-width: 0; padding-bottom: 4px; font-size: 10px; color: var(--text50); }
+.acquisition-time-unit { flex: none; width: 72px; }
+.acquisition-time-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(64px, 88px); gap: 8px; align-items: center; }
+.acquisition-time-body.has-unlimited { grid-template-columns: minmax(0, 1fr) minmax(64px, 88px) 16px; }
+.acquisition-time-slider { width: 100%; min-width: 0; accent-color: var(--accent); }
+.acquisition-time-value {
+  width: 100%; min-width: 0; padding: 4px 6px;
+  background: var(--bg10); color: var(--text80); border: 1px solid var(--border-low);
+  border-radius: 3px; font: inherit; font-variant-numeric: tabular-nums;
+}
+.acquisition-time-value[hidden] { display: none; }
+.acquisition-time-unlimited { color: var(--text80); font-size: 16px; line-height: 1; text-align: center; }
+
 .field-row { display: flex; gap: 8px; }
 .field { flex: 1; display: flex; flex-direction: column; gap: 3px; }
 .field label { font-size: 10px; color: var(--text50); }
