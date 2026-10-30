@@ -19,7 +19,8 @@
  *     path, not just the format plumbing.
  */
 
-import { createProtocolDemoCapture, saveLwcap, loadLwcap } from '../captureIO.js';
+import { saveLwcap, loadLwcap } from '../captureIO.js';
+import { createProtocolFixture } from './protocolFixture.js';
 import { parseSr } from '../srLoad.js';
 import { getDecoder, hydrateDecoders, validateStack } from '../../decode/registry.js';
 import type { SampleStore } from '../../data/index.js';
@@ -441,8 +442,8 @@ async function main(): Promise<void> {
   }
 
   {
-    const demo = createProtocolDemoCapture();
-    const s = demo.store;
+    const fixture = createProtocolFixture();
+    const s = fixture.store;
     const wantNames = ['I2C SCL', 'I2C SDA', 'SPI CLK', 'SPI MISO', 'SPI MOSI', 'SPI CS#', 'UART RX', 'UART TX'];
     const wantInitial = [1, 1, 0, 0, 0, 1, 1, 1];
     const wantEdges = [56, 8, 32, 13, 11, 2, 26, 32];
@@ -450,17 +451,17 @@ async function main(): Promise<void> {
     if (s.channelCount !== 8) shape.push(`channels ${s.channelCount}`);
     if (s.samplerate !== 16e6) shape.push(`samplerate ${s.samplerate}`);
     if (s.length !== 18000) shape.push(`length ${s.length}`);
-    if (demo.channelNames.join('|') !== wantNames.join('|')) {
-      shape.push(`names ${demo.channelNames.join(',')}`);
+    if (fixture.channelNames.join('|') !== wantNames.join('|')) {
+      shape.push(`names ${fixture.channelNames.join(',')}`);
     }
-    for (let c = 0; c < demo.channelNames.length; c++) {
+    for (let c = 0; c < fixture.channelNames.length; c++) {
       const initial = s.query(c, 0, 1, 1).high[0]!;
       const count = s.edges(c, 0, s.length).length;
       if (initial !== wantInitial[c]) shape.push(`ch${c} initial ${initial}`);
       if (count !== wantEdges[c]) shape.push(`ch${c} ${count} edges`);
     }
     results.push({
-      name: 'protocol demo capture has the documented eight-channel shape',
+      name: 'protocol fixture has the documented eight-channel shape',
       pass: shape.length === 0,
       detail: shape.length === 0
         ? `8 ch, ${s.samplerate / 1e6} MSa/s, ${s.length} samples, edges ${wantEdges.join(',')}`
@@ -490,9 +491,9 @@ async function main(): Promise<void> {
       },
     ];
     const mapping: string[] = [];
-    if (demo.analyzers.length !== manifest.length) mapping.push(`${demo.analyzers.length} analyzers`);
+    if (fixture.analyzers.length !== manifest.length) mapping.push(`${fixture.analyzers.length} analyzers`);
     for (const want of manifest) {
-      const got = demo.analyzers.find((a) => a.id === want.id);
+      const got = fixture.analyzers.find((a) => a.id === want.id);
       if (!got) {
         mapping.push(`missing ${want.id}`);
         continue;
@@ -515,9 +516,9 @@ async function main(): Promise<void> {
         mapping.push(`${want.id} carries unexpected options`);
       }
     }
-    mapping.push(...validateStack(demo.analyzers, s.channelCount));
+    mapping.push(...validateStack(fixture.analyzers, s.channelCount));
     results.push({
-      name: 'protocol demo analyzers match the decoder manifest and validate',
+      name: 'protocol fixture analyzers match the decoder manifest and validate',
       pass: mapping.length === 0,
       detail: mapping.length === 0
         ? 'i2c scl/sda, spi clk/miso/mosi/cs, uart rx/tx on the documented options'
@@ -533,7 +534,7 @@ async function main(): Promise<void> {
     if (i2c.data.join(',') !== '0,255') i2cProblems.push(`data ${hexBytes(i2c.data)}`);
     if (i2c.acks.join(',') !== '0,0,0') i2cProblems.push(`acks ${i2c.acks.join(',')}`);
     results.push({
-      name: 'protocol demo I2C lines carry START, 50 write, 00 FF and STOP',
+      name: 'protocol fixture I2C lines carry START, 50 write, 00 FF and STOP',
       pass: i2cProblems.length === 0,
       detail: i2cProblems.length === 0
         ? `start ${i2c.start}, address byte a0 (0x50 write), data ${hexBytes(i2c.data)}, ${i2c.acks.length} ACKs, stop ${i2c.stop}`
@@ -561,7 +562,7 @@ async function main(): Promise<void> {
     const clkLast = spiClk.edges[spiClk.edges.length - 1]!;
     if (clkFirst !== 7400 || clkLast !== 9880) spiProblems.push(`clocks span ${clkFirst}..${clkLast}`);
     results.push({
-      name: 'protocol demo SPI carries DE AD on MOSI and 5A A5 on MISO',
+      name: 'protocol fixture SPI carries DE AD on MOSI and 5A A5 on MISO',
       pass: spiProblems.length === 0,
       detail: spiProblems.length === 0
         ? `MOSI ${hexBytes(mosi)}, MISO ${hexBytes(miso)}, ${clocks} clocks under CS#`
@@ -587,7 +588,7 @@ async function main(): Promise<void> {
     if (rxSpan !== '8000..13417') uartProblems.push(`RX frames span ${rxSpan}`);
     if (txSpan !== '8000..14806') uartProblems.push(`TX frames span ${txSpan}`);
     results.push({
-      name: 'protocol demo UART frames carry Hello and OK at 115200',
+      name: 'protocol fixture UART frames carry Hello and OK at 115200',
       pass: uartProblems.length === 0,
       detail: uartProblems.length === 0
         ? `RX ${asciiBytes(rx)} ${rxSpan}, TX ${asciiBytes(tx)} ${txSpan}, ${rx.length + tx.length} frames`
@@ -595,19 +596,19 @@ async function main(): Promise<void> {
     });
     const slow = frameUart(uartTx.edges, uartTx.initial, s.samplerate / 57600, s.length);
     results.push({
-      name: 'framing the demo UART at half the baud rate breaks the payload',
+      name: 'framing the fixture UART at half the baud rate breaks the payload',
       pass: String.fromCharCode(...slow) !== 'Hello',
       detail: `57600 baud reads ${asciiBytes(slow)}`,
     });
 
-    const blob = saveLwcap(s, demo.channelNames);
-    const back = loadLwcap(await blob.arrayBuffer(), 'protocol-demo.lwcap');
-    const roundTrip = compareStores(s, back.store, 'protocol demo round trip')
+    const blob = saveLwcap(s, fixture.channelNames);
+    const back = loadLwcap(await blob.arrayBuffer(), 'protocol-fixture.lwcap');
+    const roundTrip = compareStores(s, back.store, 'protocol fixture round trip')
       ?? (back.store.samplerate === s.samplerate ? null : `samplerate ${back.store.samplerate}`)
-      ?? (back.channelNames.join('|') === demo.channelNames.join('|')
+      ?? (back.channelNames.join('|') === fixture.channelNames.join('|')
         ? null : `names ${back.channelNames.join(',')}`);
     results.push({
-      name: 'protocol demo round-trips through .lwcap byte-identical',
+      name: 'protocol fixture round-trips through .lwcap byte-identical',
       pass: roundTrip === null,
       detail: roundTrip ?? `${blob.size} bytes, all ${s.channelCount} channels and names`,
     });

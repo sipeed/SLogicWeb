@@ -6,7 +6,7 @@
  *     --platform=node --outfile=/tmp/assistant-selftest.mjs && node /tmp/assistant-selftest.mjs
  *
  * Covers: settings persistence (where the API key is and is not stored); the input
- * validator; every tool against the protocol demo capture through a fake host; the loop's
+ * validator; every tool against the protocol fixture through a fake host; the loop's
  * approval, abort, refusal and truncation rules with a scripted provider; and both real
  * providers replaying recorded server-sent-event streams through an injected fetch.
  * When a hosted build is present in dist/, it also checks that no lazily loaded chunk
@@ -29,7 +29,8 @@ import {
 import { busSteps } from '../../data/busValue.js';
 import type { BusViewConfig } from '../busView.js';
 import type { Provider, ProviderConfig, ToolResult, TurnResult } from '../../assistant/types.js';
-import { createProtocolDemoCapture, levelAt } from '../captureIO.js';
+import { levelAt } from '../captureIO.js';
+import { createProtocolFixture } from './protocolFixture.js';
 import type { CaptureSettings } from '../state.js';
 
 interface FsLike {
@@ -135,8 +136,8 @@ Object.assign(globalThis, { localStorage: local, sessionStorage: session });
 }
 
 // ------------------------------------------------------------------ 3. tools
-const demo = createProtocolDemoCapture();
-const UART = demo.channelNames.findIndex((n) => /uart/i.test(n) && /rx/i.test(n));
+const fixture = createProtocolFixture();
+const UART = fixture.channelNames.findIndex((n) => /uart/i.test(n) && /rx/i.test(n));
 
 function settings(): CaptureSettings {
   return {
@@ -148,7 +149,7 @@ function settings(): CaptureSettings {
 }
 
 class FakeHost implements AssistantHost {
-  store_: SampleStore = demo.store;
+  store_: SampleStore = fixture.store;
   connected = false;
   running = false;
   analyzers_: HostAnalyzer[] = [];
@@ -159,10 +160,10 @@ class FakeHost implements AssistantHost {
   snapshot(): HostSnapshot {
     return {
       connected: this.connected, device: this.connected ? 'SLogic32 U3' : null, running: this.running,
-      stopping: false, error: '', label: 'demo', samples: this.store_.length, dropped: 0,
+      stopping: false, error: '', label: 'fixture', samples: this.store_.length, dropped: 0,
       samplerate: this.store_.samplerate, channelCount: this.store_.channelCount, triggerState: 'off',
       triggerSampleIndex: null, settings: this.s, rateCeilings: { 16: 400e6, 32: 200e6 },
-      enabledChannels: [0, 1, 2], channelNames: Array.from({ length: 32 }, (_, i) => demo.channelNames[i] ?? `D${i}`),
+      enabledChannels: [0, 1, 2], channelNames: Array.from({ length: 32 }, (_, i) => fixture.channelNames[i] ?? `D${i}`),
       view: this.view, decoderReady: true,
     };
   }
@@ -200,7 +201,7 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
 
 {
   const host = new FakeHost();
-  check('the demo has a UART RX channel', UART >= 0, demo.channelNames.join(', '));
+  check('the fixture has a UART RX channel', UART >= 0, fixture.channelNames.join(', '));
 
   const st = await run('get_state', {}, host);
   const state = st.out as Record<string, unknown>;
@@ -235,7 +236,7 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
   check('an out-of-range channel is an error', !noCh.ok && noCh.err.includes('D0-D'), noCh.err);
 
   const empty = new FakeHost();
-  empty.store_ = { ...demo.store, length: 0 } as SampleStore;
+  empty.store_ = { ...fixture.store, length: 0 } as SampleStore;
   const none = await run('get_channel_stats', { channels: [0] }, empty);
   check('no capture yet is explained', !none.ok && /no capture/i.test(none.err), none.err);
 
@@ -328,7 +329,7 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
   check('the duration description tells the model the 1 ms minimum',
     String((set.properties as Record<string, { description?: string }>).seconds?.description).includes('0.001 s'));
 
-  const host = new FakeHost();   // the 8-channel protocol demo
+  const host = new FakeHost();   // the 8-channel protocol fixture
   const added = await run('add_bus_view', { name: 'ADC', start_channel: 2, width: 4, msb_first: true, clock_channel: 7, encoding: 'twos' }, host);
   const b0 = host.buses_[0]?.config;
   check('add_bus_view: start + width + msb_first become bits LSB first',
@@ -367,12 +368,12 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
   await run('add_bus_view', { name: 'UART pair', bits: [6, 7] }, host);
   const vals = await run('get_bus_values', { bus: 1, limit: 5 }, host);
   const v = vals.out as { values: { t_s: number; value: number | null }[]; min: number; max: number; truncated?: boolean; changes_in_range: number };
-  const ref = busSteps(demo.store, { bits: [6, 7], clock: null, encoding: 'unsigned' }, 0, demo.store.length);
+  const ref = busSteps(fixture.store, { bits: [6, 7], clock: null, encoding: 'unsigned' }, 0, fixture.store.length);
   let mn = Infinity; let mx = -Infinity;
   for (let k = 0; k < ref.count; k++) { mn = Math.min(mn, ref.val[k]!); mx = Math.max(mx, ref.val[k]!); }
   check('get_bus_values matches busSteps, capped, with min and max',
     vals.ok && v.values.length === 5 && v.truncated === true && v.changes_in_range === ref.count &&
-    v.values.every((x, k) => x.value === ref.val[k] && x.t_s === Number((ref.pos[k]! / demo.store.samplerate).toPrecision(6))) &&
+    v.values.every((x, k) => x.value === ref.val[k] && x.t_s === Number((ref.pos[k]! / fixture.store.samplerate).toPrecision(6))) &&
     v.min === mn && v.max === mx, `${vals.err} ${JSON.stringify(v).slice(0, 300)}`);
   const volt = await run('get_bus_values', { bus: 0, limit: 3 }, host);
   const vv = volt.out as { values: { volts?: string }[]; max: string };
