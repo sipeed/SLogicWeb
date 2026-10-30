@@ -197,14 +197,14 @@ check('bank start uses the absolute channel index',
     `iconOnly=${iconOnly}, sharedFields=${sharedFields}, orderMode=${orderMode}, ` +
     `disclosures=${disclosures}, nativeDialog=${nativeDialog}, realState=${realState}`);
 
+  const bankSettings = app.split('private configureBankBus(')[1]?.split('private resetBusBuilds(')[0] ?? '';
   const loopDecoupled = !dialog.includes('loopSamples') && !dialog.includes('maxLoopTimeValue') &&
     !dialog.includes('data-loop-input') && !dialog.includes('bank-bus-loop') &&
-    app.includes('private bankCaptureSettings(start: number, config: BusViewConfig): CaptureSettings') &&
-    app.includes('{ ...this.settings, channels }, this.rateCeilings') &&
-    app.includes('this.settings = this.bankCaptureSettings(start, next);') &&
-    !app.includes('loopSamples: preview.loopSamples') && !app.includes('captureChannels: preview.channels') &&
-    app.includes('channelWidthForProbes(config.spec.clock.channel + 1)') &&
-    app.includes('const clockWidth = config.spec.clock ? channelWidthForProbes(config.spec.clock.channel + 1) : bankWidth;');
+    !app.includes('bankCaptureSettings') &&
+    !app.includes('channelWidthForProbes(config.spec.clock.channel + 1)') &&
+    !bankSettings.includes('channels:') &&
+    (bankSettings.match(/this\.settings = clampSettings\(\{ \.\.\.this\.settings \}, this\.rateCeilings\);/g) ?? []).length === 1 &&
+    !app.includes('loopSamples: preview.loopSamples') && !app.includes('captureChannels: preview.channels');
   const updateBus = app.split('private updateBus(')[1]?.split('private removeBus(')[0] ?? '';
   const names = busPanel.includes("t('bus.defaultName')") &&
     app.includes('retranslateBankBusConfig(bus)') && app.includes('retranslateBankBusConfig(draft)') &&

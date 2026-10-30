@@ -13,7 +13,7 @@ import {
   appendLostSamples, createSampleStore, MAX_SOFTWARE_TRIGGER_PREFIX_BYTES,
 } from '../data/index.js';
 import type { SampleStore } from '../data/types.js';
-import { bytesPerSampleForChannels, channelWidthForProbes, isChannelCount, type ChannelCount } from '../types.js';
+import { bytesPerSampleForChannels, channelWidthForProbes, isChannelCount } from '../types.js';
 import {
   MAX_SAMPLERATE_HZ, TransportDeadError, getGrantedDevicesOnBestThread, requestDeviceOnBestThread,
   vrefCode, type CaptureConfig, type Device,
@@ -466,15 +466,6 @@ export class App {
     return true;
   }
 
-  private bankCaptureSettings(start: number, config: BusViewConfig): CaptureSettings {
-    const bankWidth = channelWidthForProbes(start + CHANNEL_BANK_SIZE);
-    const clockWidth = config.spec.clock ? channelWidthForProbes(config.spec.clock.channel + 1) : bankWidth;
-    let channels: ChannelCount = bankWidth;
-    if (clockWidth > channels) channels = clockWidth;
-    if (this.settings.channels > channels) channels = this.settings.channels;
-    return clampSettings({ ...this.settings, channels }, this.rateCeilings);
-  }
-
   private openBankBus(start: number): boolean {
     if (channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return false;
     const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
@@ -493,14 +484,13 @@ export class App {
       channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return;
     const next = normalizeBankBusConfig(config, this.channels.length, start);
     this.bankBusDrafts.set(start, cloneBusConfig(next));
+    this.settings = clampSettings({ ...this.settings }, this.rateCeilings);
     if (enabled) {
-      this.settings = this.bankCaptureSettings(start, next);
       const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
       if (active) this.updateBus(active.id, next, true);
       else this.addBus(next);
       return;
     }
-    this.settings = clampSettings({ ...this.settings }, this.rateCeilings);
     const remaining = this.busViews.filter((b) => busChannelBank(b.spec) !== start);
     if (remaining.length !== this.busViews.length) {
       this.busViews = remaining;
@@ -2563,13 +2553,8 @@ export class App {
  * store enforces anyway, and a value the user cannot reach is better than an error at
  * Start.
  *
- * The samplerate clamp matters because the capture width is derived, not chosen. Narrow to
- * 4 channels, pick the 800 MS/s the panel then offers, re-enable a high channel, and the
- * width jumps to 16 whose ceiling is 200 MS/s. Without this the stale 800 MS/s survived,
- * the rate dropdown - which lists only rates at or under the ceiling - rendered with no
- * selection at all, and Start threw "800 MHz exceeds the 16-channel ceiling of 200 MHz"
- * from the device layer with no visible control to fix it. Every MAX_SAMPLERATE_HZ value
- * is itself in SAMPLERATES_HZ, so the clamp always lands on a rate the device supports.
+ * Every MAX_SAMPLERATE_HZ value is itself in SAMPLERATES_HZ, so the clamp always lands on
+ * a rate the device supports.
  */
 function clampSettings(
   s: CaptureSettings, ceilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ,

@@ -645,7 +645,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const busPanel = loopFs.readFileSync('src/ui/busPanel.ts', 'utf8');
   const addBus = appSrc.split('private addBus(')[1]?.split('private updateBus(')[0] ?? '';
   const updateBus = appSrc.split('private updateBus(')[1]?.split('private removeBus(')[0] ?? '';
-  const removeBus = appSrc.split('private removeBus(')[1]?.split('private bankCaptureSettings(')[0] ?? '';
+  const removeBus = appSrc.split('private removeBus(')[1]?.split('private openBankBus(')[0] ?? '';
   const scopeLocks = addBus.includes('(this.running || this.stopping) && busChannelBank(cfg.spec) !== null') &&
     updateBus.includes('busChannelBank(current.spec) !== null || busChannelBank(cfg.spec) !== null') &&
     removeBus.includes('(this.running || this.stopping) && busChannelBank(current.spec) !== null') &&
