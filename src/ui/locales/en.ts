@@ -66,7 +66,6 @@ export const en = {
   'capture.none': 'no capture',
   'capture.capturing': 'capturing {channels} ch @ {rate}',
   'capture.loaded': '{source} · loaded in {ms} ms',
-  'capture.demo': 'protocol demo',
   'capture.stoppedNoTrigger': 'no trigger · {samples} samples retained',
   'capture.live': 'live capture · {samples} samples @ {rate} · {duration}',
 

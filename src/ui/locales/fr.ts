@@ -62,7 +62,6 @@ export const fr: Messages = {
   'capture.none': 'aucune capture',
   'capture.capturing': 'capture en cours : {channels} canaux @ {rate}',
   'capture.loaded': '{source} · chargé en {ms} ms',
-  'capture.demo': 'démonstration de protocoles',
   'capture.stoppedNoTrigger': 'pas de trigger · échantillons conservés : {samples}',
   'capture.live': 'capture en direct · échantillons : {samples} @ {rate} · {duration}',
 

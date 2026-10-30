@@ -60,7 +60,6 @@ export const zhCN: Messages = {
   'capture.none': '无采集',
   'capture.capturing': '正在采集 {channels} 通道 @ {rate}',
   'capture.loaded': '{source} · 加载耗时 {ms} ms',
-  'capture.demo': '协议演示',
   'capture.stoppedNoTrigger': '未触发 · 保留样本数 {samples}',
   'capture.live': '实时采集 · 样本数 {samples} @ {rate} · {duration}',
 

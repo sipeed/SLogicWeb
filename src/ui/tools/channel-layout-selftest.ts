@@ -401,46 +401,14 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
   const overlay = fs.readFileSync('src/ui/overlay.ts', 'utf8');
 
-  const gate = app.includes("if (this.captureLabel.kind === 'demo') {");
-  const channelRowLookup = app.includes(
-    "const channelRow = boxes.find((b) => b.spec.kind === 'channel');");
-  const rowHeightPassed = app.includes(
-    'if (channelRow) this.overlay.drawDemoWatermark(channelRow.height);');
-  const noMetricSubstitute = !app.includes('drawDemoWatermark(ROWS.');
-  const singleCallSite = (app.match(/this\.overlay\.drawDemoWatermark\(/g) ?? []).length === 1;
-  check('the demo gate feeds a live channel row height to the watermark',
-    gate && channelRowLookup && rowHeightPassed && noMetricSubstitute && singleCallSite,
-    `gate=${gate}, channelRow=${channelRowLookup}, rowHeight=${rowHeightPassed}, ` +
-    `noMetricSubstitute=${noMetricSubstitute}, singleCallSite=${singleCallSite}`);
-
-  const signature = 'drawDemoWatermark(channelHeightCss: number): void {';
-  const methodStart = overlay.indexOf(signature);
-  const methodEnd = overlay.indexOf('\n  }\n', methodStart);
-  const body = methodStart >= 0 && methodEnd > methodStart
-    ? overlay.slice(methodStart, methodEnd) : '';
-  const fontScale = body.includes(
-    'c.font = `600 ${channelHeightCss * 2}px -apple-system, BlinkMacSystemFont, sans-serif`;');
-  const noLaneHeight = !body.includes('laneHeight') && !body.includes('ROWS.');
-  check('the watermark font is exactly twice the passed channel-row height',
-    methodStart >= 0 && fontScale && noLaneHeight,
-    `method=${methodStart >= 0}, fontScale=${fontScale}, noLaneHeight=${noLaneHeight}`);
-
-  const alpha = body.includes('c.globalAlpha = 0.12;');
-  const color = body.includes('c.fillStyle = this.palette.text80;');
-  const center = body.includes("c.textAlign = 'center';") &&
-    body.includes("c.textBaseline = 'middle';");
-  const anchor = body.includes("c.fillText('DEMO', this.wCss / 2, this.hCss / 2);");
-  check('the watermark is translucent, text80, centered text at the overlay center',
-    alpha && color && center && anchor,
-    `alpha=${alpha}, color=${color}, center=${center}, anchor=${anchor}`);
-
-  const saves = (body.match(/c\.save\(\);/g) ?? []).length;
-  const restores = (body.match(/c\.restore\(\);/g) ?? []).length;
-  const savesFirst = body.includes('const c = this.ctx;\n    c.save();');
-  const scoped = saves === 1 && restores === 1 && savesFirst &&
-    body.trimEnd().endsWith('c.restore();');
-  check('the watermark scopes every canvas state change in save/restore',
-    scoped, `saves=${saves}, restores=${restores}, savesFirst=${savesFirst}`);
+  const watermarkAbsent = !app.includes('drawDemoWatermark') &&
+    !overlay.includes('drawDemoWatermark') &&
+    !app.includes("captureLabel.kind === 'demo'") &&
+    !overlay.includes("fillText('DEMO'");
+  check('the demo provenance watermark is retired',
+    watermarkAbsent,
+    `app=${app.includes('drawDemoWatermark')}, overlay=${overlay.includes('drawDemoWatermark')}, ` +
+    `gate=${app.includes("captureLabel.kind === 'demo'")}`);
 
   const surfaceStart = app.indexOf('private drawLaneSurfaces(');
   const bubbleStart = app.indexOf('private drawLaneBubbles(');
@@ -454,7 +422,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     !surfaceSource.includes('drawBubbles');
   const bubblePass = bubbleSource.includes(
     'this.overlay.drawBubbles(bubbles, box.top, lane.analyzer.color);') &&
-    !bubbleSource.includes('fillLane') && !bubbleSource.includes('drawDemoWatermark');
+    !bubbleSource.includes('fillLane');
   check('lane surface filling is a separate pass from bubble painting',
     surfacePass && bubblePass && !app.includes('this.drawLanes('),
     `surface=${surfacePass}, bubbles=${bubblePass}, oldPass=${app.includes('this.drawLanes(')}`);
@@ -467,7 +435,6 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     'this.overlay.beginFrame();',
     'this.overlay.drawGrid(ticks);',
     'this.drawLaneSurfaces(boxes);',
-    'this.overlay.drawDemoWatermark(channelRow.height);',
     'this.overlay.drawLevels(',
     'this.drawLaneBubbles(boxes, wCss);',
     'this.overlay.drawTrigger(',
@@ -477,7 +444,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   ];
   const positions = paintOrder.map((needle) => drawSource.indexOf(needle));
   const ordered = positions.every((p, i) => p >= 0 && (i === 0 || p > positions[i - 1]!));
-  check('paint order is grid, lane surfaces, watermark, levels, overlays',
+  check('paint order is grid, lane surfaces, levels, overlays',
     drawSource.length > 0 && ordered,
     `positions=${positions.join(',')}`);
 }

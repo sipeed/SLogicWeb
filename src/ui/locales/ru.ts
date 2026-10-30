@@ -62,7 +62,6 @@ export const ru: Messages = {
   'capture.none': 'нет захвата',
   'capture.capturing': 'захват: каналов {channels} @ {rate}',
   'capture.loaded': '{source} · загружено за {ms} мс',
-  'capture.demo': 'демонстрация протоколов',
   'capture.stoppedNoTrigger': 'нет триггера · сохранено образцов: {samples}',
   'capture.live': 'онлайн-захват · образцов: {samples} @ {rate} · {duration}',
 

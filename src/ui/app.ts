@@ -386,7 +386,7 @@ export class App {
   }
 
   private loadedCapture(): boolean {
-    return this.captureLabel.kind === 'loaded' || this.captureLabel.kind === 'demo';
+    return this.captureLabel.kind === 'loaded';
   }
 
   private widthTiers(): number[] {
@@ -817,10 +817,6 @@ export class App {
     this.overlay.drawGrid(ticks);
     const boxes = this.stack.boxes();
     this.drawLaneSurfaces(boxes);
-    if (this.captureLabel.kind === 'demo') {
-      const channelRow = boxes.find((b) => b.spec.kind === 'channel');
-      if (channelRow) this.overlay.drawDemoWatermark(channelRow.height);
-    }
     this.overlay.drawLevels(boxes.map((b) => ({
       top: b.top, band: b.band, isChannel: b.spec.kind === 'channel',
     })));

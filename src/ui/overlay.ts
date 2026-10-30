@@ -238,18 +238,6 @@ export class Overlay {
     c.restore();
   }
 
-  drawDemoWatermark(channelHeightCss: number): void {
-    const c = this.ctx;
-    c.save();
-    c.globalAlpha = 0.12;
-    c.fillStyle = this.palette.text80;
-    c.font = `600 ${channelHeightCss * 2}px -apple-system, BlinkMacSystemFont, sans-serif`;
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillText('DEMO', this.wCss / 2, this.hCss / 2);
-    c.restore();
-  }
-
   /**
    * [CHOSEN] The two levels of every channel row are marked with a small "H" and "L"
    * at the left edge of the plot - visible in all five screenshots, including
