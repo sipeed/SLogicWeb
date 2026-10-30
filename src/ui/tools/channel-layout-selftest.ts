@@ -549,13 +549,17 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     panel.includes("['single', t('capturePanel.modeSingle')]") &&
     panel.includes("['repeat', t('capturePanel.modeRepeat')]") &&
     panel.includes("['loop', t('capturePanel.modeLoop')]") &&
-    panel.includes('secs.dataset.captureSeconds') && panel.includes('interval.dataset.repeatInterval') &&
-    panel.includes('unlimited.dataset.singleUnlimited') && panel.includes('win.dataset.loopSamples') &&
+    panel.includes("key: 'capture.duration'") && panel.includes("key: 'capture.repeatInterval'") &&
+    panel.includes("key: 'capture.loopWindow'") &&
+    (panel.match(/acquisitionTimeControl\(\{/g) ?? []).length === 3 &&
+    !panel.includes('secs.dataset.captureSeconds') && !panel.includes('interval.dataset.repeatInterval') &&
+    !panel.includes('unlimited.dataset.singleUnlimited') && !panel.includes('win.dataset.loopSamples') &&
+    panel.includes('singleUnlimited: true') && panel.includes('singleUnlimited: false') &&
     modeBlock.includes('b.disabled = modeLocked') && modeBlock.includes('s.mode === id') &&
     modeBlock.includes('const modeLocked = v.running || v.stopping || v.repeatPending') &&
     !modeBlock.includes('oscilloscope') && !panel.includes('v.effectiveMode') &&
     !panel.includes('v.oscilloscopeActive') && !panel.includes('oscilloscopeTakeover');
-  check('the capture panel offers Single, Repeat and Loop with basic mode settings',
+  check('the capture panel offers Single, Repeat and Loop with unified time controls',
     panelModes,
     `free=${panel.includes('capturePanel.freeRun')}, timer=${panel.includes('capturePanel.timer')}, ` +
     `takeover=${panel.includes('oscilloscopeTakeover')}, stored=${modeBlock.includes('s.mode === id')}, ` +

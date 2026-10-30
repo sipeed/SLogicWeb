@@ -1007,7 +1007,7 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 
 .acquisition-time { display: flex; flex-direction: column; gap: 6px; }
-.acquisition-time-head { display: flex; align-items: end; gap: 8px; }
+.acquisition-time-head { display: flex; align-items: flex-end; gap: 8px; }
 .acquisition-time-label { flex: 1; min-width: 0; padding-bottom: 4px; font-size: 10px; color: var(--text50); }
 .acquisition-time-unit { flex: none; width: 72px; }
 .acquisition-time-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(64px, 88px); gap: 8px; align-items: center; }

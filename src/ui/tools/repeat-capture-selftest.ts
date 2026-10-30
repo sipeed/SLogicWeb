@@ -120,7 +120,9 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
     toolbar.includes('this.device === null && !showStop') &&
     panel.includes('if (v.repeatPending)') && panel.includes('pending.dataset.repeatPending') &&
     panel.includes("t('capturePanel.repeatPending')") && panel.includes('b.disabled = modeLocked') &&
-    ['secs', 'unlimited', 'interval', 'win'].every((name) => panel.includes(`${name}.disabled = modeLocked`)) &&
+    (panel.match(/disabled: modeLocked/g) ?? []).length === 3 &&
+    !panel.includes('secs.disabled') && !panel.includes('unlimited.disabled') &&
+    !panel.includes('interval.disabled') && !panel.includes('win.disabled') &&
     assistant.includes('repeat_pending: st.repeatPending') &&
     (assistant.match(/st\.repeatPending/g) ?? []).length >= 3;
   check('pending Repeat remains stoppable and visible while settings and start reject re-entry',

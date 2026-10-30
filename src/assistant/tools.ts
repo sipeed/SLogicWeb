@@ -635,8 +635,9 @@ export const TOOLS: AssistantTool[] = [
     name: 'start_capture',
     description:
       'Start a capture on the connected device with the current settings and wait until ' +
-      'it stops (timer mode or trigger) or `timeout_s` passes. Free-running and loop ' +
-      'captures keep running after the timeout; call stop_capture to end them.',
+      'the single capture, one repeat iteration, or trigger stops, or `timeout_s` passes. ' +
+      'Unlimited single runs to the sample ceiling; loop keeps running after the timeout; ' +
+      'repeat may be pending. Call stop_capture to end them.',
     inputSchema: obj({
       timeout_s: { type: 'number', minimum: 1, maximum: 120, description: 'How long to wait. Default 15.' },
     }),

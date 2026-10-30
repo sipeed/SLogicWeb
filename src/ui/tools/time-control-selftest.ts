@@ -44,8 +44,10 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
 {
   const rangeInput = source.split("range.addEventListener('input'")[1]?.split("range.addEventListener('change'")[0] ?? '';
   const rangeChange = source.split("range.addEventListener('change'")[1]?.split('if (number) {')[0] ?? '';
+  const syncBody = source.split('const syncRange')[1]?.split('const commitValue')[0] ?? '';
   check('range edits synchronize locally and only the change event commits',
     rangeInput.includes('syncRange') && !rangeInput.includes('onValue') &&
+    syncBody.includes("number.removeAttribute('aria-invalid')") &&
     rangeChange.includes('commitValue(Number(range.value))') && rangeChange.includes('options.unlimited?.onSelect()') &&
     source.includes('options.onValue(clamped, unit)'),
     `input=${rangeInput.length}, change=${rangeChange.length}`);
@@ -75,7 +77,8 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
   const nativeSelectNeedle = ['createElement(', "'select'", ')'].join('');
   check('unit commits use the shared select, range fallback and normalized value',
     source.includes('selectControl(`${options.key}.unit`') && unitChange.includes('timeUnitForRange') &&
-    unitChange.includes('timeValueFromSeconds') && unitChange.includes('options.onUnit(nextUnit, nextValue)') &&
+    unitChange.includes('timeValueFromSeconds') && unitChange.includes('unitControl.value = nextUnit') &&
+    unitChange.includes('options.onUnit(nextUnit, nextValue)') &&
     unitChange.includes('options.unlimited?.active') && !source.includes(nativeSelectNeedle),
     `unitChange=${unitChange.length}`);
 }

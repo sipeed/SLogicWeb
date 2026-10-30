@@ -33,9 +33,15 @@ import {
 } from './state.js';
 import { MAX_SAMPLES } from './captureIO.js';
 import {
-  clampCaptureSeconds, clampRepeatIntervalSeconds, maxCaptureSeconds,
+  captureSecondsFromTime, maxCaptureSeconds, MIN_CAPTURE_SECONDS,
+  REPEAT_INTERVAL_SECONDS, repeatIntervalSecondsFromTime,
 } from './captureTime.js';
 import { capturePostTriggerSamples } from './capturePolicy.js';
+import { acquisitionTimeControl } from './timeControl.js';
+import { DEFAULT_TIME_UNIT, timeUnitForRange, type TimeUnit } from './timeUnits.js';
+import {
+  DEFAULT_LOOP_TIME_UNIT, loopSamplesFromTime, type LoopTimeUnit,
+} from './loopTime.js';
 
 export interface CapturePanelCallbacks {
   onSettings(next: CaptureSettings): void;
@@ -68,6 +74,9 @@ export class CapturePanel {
   private liveNote: HTMLElement | null = null;
   private lostNote: HTMLElement | null = null;
   private droppedNote: HTMLElement | null = null;
+  private captureTimeUnit: TimeUnit = DEFAULT_TIME_UNIT;
+  private repeatIntervalUnit: TimeUnit = DEFAULT_TIME_UNIT;
+  private loopTimeUnit: LoopTimeUnit = DEFAULT_LOOP_TIME_UNIT;
 
   constructor(
     private readonly root: HTMLElement,
@@ -241,57 +250,91 @@ export class CapturePanel {
 
     const maxSeconds = maxCaptureSeconds(s.samplerate);
     if (s.mode === 'single' || s.mode === 'repeat') {
-      const secs = document.createElement('input');
-      secs.type = 'number';
-      secs.min = '0.001';
-      // A 1 ms step, aligned with the 1 ms minimum: every whole-millisecond duration is
-      // valid. With 0.1 the valid values were 0.001, 0.101, 0.201... - 0.002 or even 0.5
-      // were flagged invalid and the spinner jumped from 0.005 straight to 0.001.
-      secs.step = '0.001';
-      secs.max = String(maxSeconds);
-      secs.value = String(s.seconds);
-      secs.dataset.captureSeconds = '';
-      secs.disabled = modeLocked || (s.mode === 'single' && s.singleUnlimited);
-      secs.addEventListener('change', () =>
-        this.cb.onSettings({ ...s, seconds: clampCaptureSeconds(Number(secs.value), s.samplerate) }));
-      modeSec.body.appendChild(labelled(t('capturePanel.durationS'), secs));
-      if (s.mode === 'single') {
-        const unlimitedLabel = document.createElement('label');
-        unlimitedLabel.className = 'panel-note';
-        const unlimited = document.createElement('input');
-        unlimited.type = 'checkbox';
-        unlimited.checked = s.singleUnlimited;
-        unlimited.dataset.singleUnlimited = '';
-        unlimited.disabled = modeLocked;
-        unlimited.addEventListener('change', () =>
-          this.cb.onSettings({ ...s, singleUnlimited: unlimited.checked }));
-        unlimitedLabel.append(unlimited, document.createTextNode(t('capturePanel.unlimited')));
-        modeSec.body.appendChild(unlimitedLabel);
-      } else {
-        const interval = document.createElement('input');
-        interval.type = 'number';
-        interval.min = '1';
-        interval.max = '10';
-        interval.step = '1';
-        interval.value = String(s.repeatIntervalSeconds);
-        interval.dataset.repeatInterval = '';
-        interval.disabled = modeLocked;
-        interval.addEventListener('change', () =>
-          this.cb.onSettings({ ...s, repeatIntervalSeconds: clampRepeatIntervalSeconds(Number(interval.value)) }));
-        modeSec.body.appendChild(labelled(t('capturePanel.repeatIntervalS'), interval));
+      this.captureTimeUnit = timeUnitForRange(this.captureTimeUnit, MIN_CAPTURE_SECONDS, maxSeconds) ?? 'us';
+      const duration = acquisitionTimeControl({
+        key: 'capture.duration',
+        label: t('capturePanel.duration'),
+        unitLabel: t('capturePanel.timeUnit'),
+        unit: this.captureTimeUnit,
+        seconds: s.seconds,
+        minSeconds: MIN_CAPTURE_SECONDS,
+        maxSeconds,
+        disabled: modeLocked,
+        ...(s.mode === 'single' ? {
+          unlimited: {
+            active: s.singleUnlimited,
+            label: t('capturePanel.unlimited'),
+            onSelect: () => this.cb.onSettings({ ...s, singleUnlimited: true }),
+          },
+        } : {}),
+        onValue: (value, unit) => {
+          const seconds = captureSecondsFromTime(value, unit, s.samplerate);
+          if (seconds !== null) this.cb.onSettings({ ...s, seconds, singleUnlimited: false });
+        },
+        onUnit: (unit, value) => {
+          this.captureTimeUnit = unit;
+          if (s.mode === 'single' && s.singleUnlimited) {
+            this.cb.onSettings({ ...s });
+            return;
+          }
+          if (value === null) return;
+          const seconds = captureSecondsFromTime(value, unit, s.samplerate);
+          if (seconds !== null) this.cb.onSettings({ ...s, seconds });
+        },
+      });
+      modeSec.body.appendChild(duration.el);
+      if (s.mode === 'repeat') {
+        this.repeatIntervalUnit = timeUnitForRange(
+          this.repeatIntervalUnit, REPEAT_INTERVAL_SECONDS.min, REPEAT_INTERVAL_SECONDS.max,
+        ) ?? 'us';
+        const interval = acquisitionTimeControl({
+          key: 'capture.repeatInterval',
+          label: t('capturePanel.repeatInterval'),
+          unitLabel: t('capturePanel.timeUnit'),
+          unit: this.repeatIntervalUnit,
+          seconds: s.repeatIntervalSeconds,
+          minSeconds: REPEAT_INTERVAL_SECONDS.min,
+          maxSeconds: REPEAT_INTERVAL_SECONDS.max,
+          disabled: modeLocked,
+          onValue: (value, unit) => {
+            const seconds = repeatIntervalSecondsFromTime(value, unit);
+            if (seconds !== null) this.cb.onSettings({ ...s, repeatIntervalSeconds: seconds });
+          },
+          onUnit: (unit, value) => {
+            this.repeatIntervalUnit = unit;
+            if (value === null) return;
+            const seconds = repeatIntervalSecondsFromTime(value, unit);
+            if (seconds !== null) this.cb.onSettings({ ...s, repeatIntervalSeconds: seconds });
+          },
+        });
+        modeSec.body.appendChild(interval.el);
       }
     } else {
-      const win = document.createElement('input');
-      win.type = 'number';
-      win.min = String(LOOP_WINDOW_QUANTUM);
-      win.max = String(maxLoopSamples(s.channels));
-      win.step = String(LOOP_WINDOW_QUANTUM);
-      win.value = String(clampLoopSamples(s.loopSamples, s.channels));
-      win.dataset.loopSamples = '';
-      win.disabled = modeLocked;
-      win.addEventListener('change', () =>
-        this.cb.onSettings({ ...s, loopSamples: clampLoopSamples(Number(win.value), s.channels) }));
-      modeSec.body.appendChild(labelled(t('capturePanel.loopSamples'), win));
+      const maxSamples = maxLoopSamples(s.channels);
+      const minSeconds = LOOP_WINDOW_QUANTUM / s.samplerate;
+      const maxWindowSeconds = maxSamples / s.samplerate;
+      this.loopTimeUnit = timeUnitForRange(this.loopTimeUnit, minSeconds, maxWindowSeconds) ?? 'us';
+      const windowControl = acquisitionTimeControl({
+        key: 'capture.loopWindow',
+        label: t('capturePanel.loopRetention'),
+        unitLabel: t('capturePanel.timeUnit'),
+        unit: this.loopTimeUnit,
+        seconds: clampLoopSamples(s.loopSamples, s.channels) / s.samplerate,
+        minSeconds,
+        maxSeconds: maxWindowSeconds,
+        disabled: modeLocked,
+        onValue: (value, unit) => {
+          const samples = loopSamplesFromTime(value, unit, s.samplerate, s.channels);
+          if (samples !== null) this.cb.onSettings({ ...s, loopSamples: samples });
+        },
+        onUnit: (unit, value) => {
+          this.loopTimeUnit = unit;
+          if (value === null) return;
+          const samples = loopSamplesFromTime(value, unit, s.samplerate, s.channels);
+          if (samples !== null) this.cb.onSettings({ ...s, loopSamples: samples });
+        },
+      });
+      modeSec.body.appendChild(windowControl.el);
     }
     const limit = div('panel-note');
     limit.textContent = s.mode === 'loop'

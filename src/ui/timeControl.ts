@@ -116,6 +116,7 @@ export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): 
     const unlimited = bounds.unlimitedValue !== null && Number(range.value) === bounds.unlimitedValue;
     range.setAttribute('aria-valuetext', unlimited ? options.unlimited!.label : `${range.value} ${unit}`);
     if (number) {
+      number.removeAttribute('aria-invalid');
       number.hidden = unlimited;
       if (!unlimited) number.value = range.value;
     }
@@ -164,6 +165,7 @@ export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): 
     const nextValue = options.unlimited?.active
       ? null
       : timeValueFromSeconds(options.seconds, nextUnit, options.minSeconds, options.maxSeconds);
+    unitControl.value = nextUnit;
     options.onUnit(nextUnit, nextValue);
   });
   syncRange();

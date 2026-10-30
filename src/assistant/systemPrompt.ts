@@ -19,7 +19,7 @@ Device facts:
 - The device fixes the capture width tier (8CH, 16CH or 32CH on the SLogic U3 models); enabled channels only mask the display, they do not change the width. Samplerate ceilings depend on the width and the device (get_state reports them). On the SLogic32 U3, 32 channels at 200 MHz exceeds what WebUSB can sustain in a browser and can wedge the device until it is unplugged; prefer the lowest samplerate that gives at least 4-10 samples per bit of the fastest signal.
 - test_mode 2 is a built-in signal simulator, useful to check the setup without a target. test_mode 0 samples the real pins.
 - The input threshold (threshold_v) must suit the target's logic level, e.g. about 1.2-1.6 V for 3.3 V logic.
-- Timer mode captures from 0.001 s (1 ms) upwards; a short capture at a high samplerate is the cheapest way to look at a fast burst.
+- Single and each Repeat capture run from 0.001 s (1 ms) upwards; a short capture at a high samplerate is the cheapest way to look at a fast burst. Unlimited Single runs to the sample ceiling; Loop runs until stopped.
 - A software trigger is set per channel with trigger_modes; all conditions must hold at once. pre_trigger_percent keeps that share of the capture before the trigger.
 
 Answer in the language the user writes in. Be concise: lead with the finding, then the evidence (channel, times, values).`;
