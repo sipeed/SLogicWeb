@@ -573,8 +573,9 @@ const constructorBody = constructorStart >= 0 && constructorEnd > constructorSta
 const restoreOrder = [
   'applyStaticI18n(document);',
   'readWorkspaceSnapshot()',
-  'this.syncBankChannels();',
   'channels: initialWidth',
+  'this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));',
+  'this.syncBankChannels();',
   'this.reflectDetailedLabels();',
   'createSampleStore(',
 ].map((needle) => constructorBody.indexOf(needle));
@@ -678,6 +679,12 @@ const explicitWiring = app.includes('private samplerateExplicit = false;') &&
 check('App keeps the explicit-rate marker outside CaptureSettings and marks only real rate changes',
   explicitWiring,
   `mark=${markAt}, clamp=${clampAt}, restore=${restoreAt}, compose=${composeAt}, wiring=${explicitWiring}`);
+
+const deviceBody = app.split('private adoptDeviceChannels(')[1]?.split('private async startCapture(')[0] ?? '';
+check('a narrower device keeps the restored channel mask',
+  deviceBody.includes('const masks = this.channels.map((c) => c.enabled);') &&
+  deviceBody.includes('defaultChannels(max).map((c) => ({ ...c, enabled: masks[c.index] ?? true }))'),
+  deviceBody.replace(/\s+/g, ' ').trim());
 
 const widthSetterBody = app.split('private setChannelWidth(channels: number): void')[1]
   ?.split('private afterChannelChange(')[0] ?? '';

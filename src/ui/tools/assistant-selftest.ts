@@ -336,7 +336,7 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
     b0?.spec.clock?.edge === 'rising' && b0?.spec.encoding === 'twos', `${added.err} ${JSON.stringify(b0?.spec)}`);
   const past = await run('add_bus_view', { start_channel: 6, width: 4 }, host);
   check('add_bus_view refuses a run past the last channel', !past.ok && /runs past D7/.test(past.err), past.err);
-  const narrow = new FakeHost();   // an 8-channel capture, a 4-channel selected width
+  const narrow = new FakeHost();
   narrow.s = { ...narrow.s, channels: 4 };
   const narrowBus = await run('add_bus_view', { start_channel: 5, width: 3 }, narrow);
   check('add_bus_view follows the selected width, not just the capture data',
