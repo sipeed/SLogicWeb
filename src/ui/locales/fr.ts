@@ -216,7 +216,6 @@ export const fr: Messages = {
   'bus.defaultName': 'Forme d’onde analogique',
   'bus.enableBank': 'Activer le mode oscilloscope',
   'bus.channelOrder': 'Canaux et ordre de décodage',
-  'bus.dragToOrder': 'Faites glisser pour modifier l’ordre de décodage',
   'bus.loopWindow': 'Fenêtre temporelle de boucle',
   'bus.globalCapture': 'Paramètres d’acquisition globaux',
   'bus.loopUnit': 'Unité de temps',

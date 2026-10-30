@@ -460,7 +460,7 @@ const baseSettings: CaptureSettings = {
 
 {
   const retired = [
-    'channels.dialogDescription', 'channels.moreColors', 'bus.fixedBits',
+    'channels.dialogDescription', 'channels.moreColors', 'bus.fixedBits', 'bus.dragToOrder',
     'bus.bankEnabledNote', 'bus.bankDisableNote', 'bus.bankDisabledNote',
     'capturePanel.loop', 'capturePanel.retentionSamples', 'capturePanel.retentionNote',
     'capturePanel.loopCeilingNote',
@@ -476,8 +476,7 @@ const baseSettings: CaptureSettings = {
 {
   const names = [en['bus.defaultName'], zhCN['bus.defaultName'], ru['bus.defaultName'], fr['bus.defaultName']];
   check('the bank default waveform name is localized in all four catalogs',
-    names.join('|') === 'Analog waveform|模拟波形|Аналоговая форма волны|Forme d’onde analogique' &&
-    zhCN['bus.dragToOrder'] === '拖动即可调整解码顺序',
+    names.join('|') === 'Analog waveform|模拟波形|Аналоговая форма волны|Forme d’onde analogique',
     names.join(' | '));
 }
 
@@ -499,7 +498,7 @@ const baseSettings: CaptureSettings = {
     'channels.triggerMode', 'channels.cancel',
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',
     'analyzerPanel.decoderSearchLabel',
-    'bus.defaultName', 'bus.enableBank', 'bus.dragToOrder', 'bus.globalCapture', 'bus.advanced',
+    'bus.defaultName', 'bus.enableBank', 'bus.globalCapture', 'bus.advanced',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];

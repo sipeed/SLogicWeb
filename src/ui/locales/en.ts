@@ -220,7 +220,6 @@ export const en = {
   'bus.defaultName': 'Analog waveform',
   'bus.enableBank': 'Enable oscilloscope mode',
   'bus.channelOrder': 'Channels and decoding order',
-  'bus.dragToOrder': 'Drag to adjust the decoding order',
   'bus.loopWindow': 'Loop time window',
   'bus.globalCapture': 'Global capture settings',
   'bus.loopUnit': 'Time unit',

@@ -216,7 +216,6 @@ export const ru: Messages = {
   'bus.defaultName': 'Аналоговая форма волны',
   'bus.enableBank': 'Включить режим осциллографа',
   'bus.channelOrder': 'Каналы и порядок декодирования',
-  'bus.dragToOrder': 'Перетащите, чтобы изменить порядок декодирования',
   'bus.loopWindow': 'Временное окно цикла',
   'bus.globalCapture': 'Глобальные настройки захвата',
   'bus.loopUnit': 'Единица времени',
