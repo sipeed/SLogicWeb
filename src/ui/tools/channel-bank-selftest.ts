@@ -225,7 +225,7 @@ check('bank start uses the absolute channel index',
     loopDecoupled && names && locks && noBankSwap && bankEditor,
     `loopDecoupled=${loopDecoupled}, names=${names}, locks=${locks}, noBankSwap=${noBankSwap}, bankEditor=${bankEditor}`);
 
-  const modelLock = (app.match(/lockedChannelBanks\(this.busViews, this.channels.length\)/g) ?? []).length >= 3 &&
+  const modelLock = (app.match(/lockedChannelBanks\(this.busViews, this.displayChannelCount\(\)\)/g) ?? []).length >= 3 &&
     app.includes('locked.has(channelBankStart(c.index))');
   const visualLock = panel.includes('lockedChannelBanks(v.buses, v.channels.length)') &&
     panel.includes('grid.dataset.adcLocked = String(locked)') && panel.includes('chip.disabled = locked') &&
@@ -263,6 +263,29 @@ check('bank start uses the absolute channel index',
   check('the Device panel renders the channel-width selector through the App width setter',
     widthPanel && widthApp && widthSheet,
     `panel=${widthPanel}, app=${widthApp}, sheet=${widthSheet}`);
+
+  const slicedPanels = (app.match(/channels: this\.channels\.slice\(0, this\.displayChannelCount\(\)\),/g) ?? []).length >= 2;
+  const clipApp = app.includes('private displayChannelCount(): number') &&
+    app.includes('return this.loadedCapture() ? this.channels.length : this.settings.channels;') &&
+    app.includes('private channelAvailable(index: number): boolean') &&
+    app.includes('index < Math.min(this.displayChannelCount(), this.store.channelCount)') &&
+    app.includes('filter((c) => this.channelAvailable(c.index) && c.enabled)') &&
+    slicedPanels &&
+    app.includes('buses: this.busViews, channelCount: this.displayChannelCount(), captureLocked:') &&
+    app.includes('if (index >= this.displayChannelCount()) return;') &&
+    app.includes('if (!enabled && lockedChannelBanks(this.busViews, this.displayChannelCount())') &&
+    app.includes('const want = new Set(list.filter((i) => i >= 0 && i < this.displayChannelCount()));') &&
+    app.includes('const model = Math.max(cfg.channels, this.device?.maxChannels ?? this.channels.length);') &&
+    app.includes('if (c.index >= this.displayChannelCount()) continue;');
+  check('channels past the selected width never reach the panel, rows or the assistant mask',
+    clipApp,
+    `display=${app.includes('private displayChannelCount(): number')}, ` +
+    `rows=${app.includes('filter((c) => this.channelAvailable(c.index) && c.enabled)')}, ` +
+    `panels=${slicedPanels}, ` +
+    `busPanel=${app.includes('channelCount: this.displayChannelCount(), captureLocked:')}, ` +
+    `toggle=${app.includes('if (index >= this.displayChannelCount()) return;')}, ` +
+    `assistant=${app.includes('const want = new Set(list.filter((i) => i >= 0 && i < this.displayChannelCount()));')}, ` +
+    `model=${app.includes('const model = Math.max(cfg.channels')}`);
 }
 
 {

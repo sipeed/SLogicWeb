@@ -604,7 +604,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `slice=${startSrc.length}, reset=${flagReset}, refusal=${firstRefusal}, set=${flagSet}`);
 
   const scopeActivity = appSrc.split('private oscilloscopeActive()')[1]?.split('private addBus(')[0] ?? '';
-  const segMatrix = scopeActivity.includes('lockedChannelBanks(this.busViews, this.channels.length).size > 0') &&
+  const segMatrix = scopeActivity.includes('lockedChannelBanks(this.busViews, this.displayChannelCount()).size > 0') &&
     panel.includes('b.disabled = v.oscilloscopeActive') &&
     panel.includes("v.effectiveMode === 'timer'") && panel.includes("v.effectiveMode === 'loop'") &&
     !panel.includes("s.mode === 'loop'") && !panel.includes('s.channels === 32') &&

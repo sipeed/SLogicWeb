@@ -369,7 +369,7 @@ export class App {
   private get store(): SampleStore { return this.storeRef.target; }
 
   private enabledChannels(): ChannelState[] {
-    return this.order.map((i) => this.channels[i]!).filter((c) => c.enabled);
+    return this.order.map((i) => this.channels[i]!).filter((c) => this.channelAvailable(c.index) && c.enabled);
   }
 
   /**
@@ -389,6 +389,14 @@ export class App {
     const capacity = this.channels.length;
     const deviceMax = this.device?.maxChannels ?? null;
     return captureWidthTiers(deviceMax === null ? null : Math.min(deviceMax, capacity), this.loadedCapture());
+  }
+
+  private displayChannelCount(): number {
+    return this.loadedCapture() ? this.channels.length : this.settings.channels;
+  }
+
+  private channelAvailable(index: number): boolean {
+    return index < Math.min(this.displayChannelCount(), this.store.channelCount);
   }
 
   // ------------------------------------------------------------------ bus views
@@ -419,7 +427,7 @@ export class App {
   }
 
   private oscilloscopeActive(): boolean {
-    return lockedChannelBanks(this.busViews, this.channels.length).size > 0;
+    return lockedChannelBanks(this.busViews, this.displayChannelCount()).size > 0;
   }
 
   private addBus(cfg: BusViewConfig): string | null {
@@ -719,9 +727,10 @@ export class App {
   }
 
   private setChannelEnabled(index: number, enabled: boolean): void {
+    if (index >= this.displayChannelCount()) return;
     const c = this.channels[index];
     if (!c) return;
-    if (!enabled && lockedChannelBanks(this.busViews, this.channels.length).has(channelBankStart(index))) return;
+    if (!enabled && lockedChannelBanks(this.busViews, this.displayChannelCount()).has(channelBankStart(index))) return;
     if (!enabled && this.enabledChannels().length <= 1) return;   // never zero rows
     c.enabled = enabled;
     this.afterChannelChange();
@@ -1518,7 +1527,7 @@ export class App {
         settings: this.settings,
         effectiveMode: effectiveCaptureMode(this.settings.mode, oscilloscopeActive),
         oscilloscopeActive,
-        channels: this.channels,
+        channels: this.channels.slice(0, this.displayChannelCount()),
         widthOptions: this.widthTiers(),
         buses: this.busViews,
         deviceName: this.device?.name ?? null,
@@ -1530,7 +1539,7 @@ export class App {
       });
     } else {
       this.analyzerPanel.render({
-        channels: this.channels,
+        channels: this.channels.slice(0, this.displayChannelCount()),
         analyzers: this.analyzers,
         captureChannels: this.store.channelCount,
         hasCapture: this.store.length > 0,
@@ -1538,7 +1547,7 @@ export class App {
         busy: this.decodeBusy,
       });
       this.busPanel.render({
-        buses: this.busViews, channelCount: this.channels.length, captureLocked: this.running || this.stopping,
+        buses: this.busViews, channelCount: this.displayChannelCount(), captureLocked: this.running || this.stopping,
       });
     }
   }
@@ -1918,7 +1927,8 @@ export class App {
       this.storeRef.set(store);
       this.resetBusBuilds();
       const masks = this.channels.map((c) => c.enabled);
-      this.channels = defaultChannels(cfg.channels).map((c) => ({ ...c, enabled: masks[c.index] ?? true }));
+      const model = Math.max(cfg.channels, this.device?.maxChannels ?? this.channels.length);
+      this.channels = defaultChannels(model).map((c) => ({ ...c, enabled: masks[c.index] ?? true }));
       this.order = this.channels.map((c) => c.index);
       this.persistWorkspace();
       for (const a of this.analyzers) {
@@ -2282,10 +2292,13 @@ export class App {
 
   /** Enable exactly `list`, ignoring channels the device lacks. */
   private setEnabledChannels(list: number[]): void {
-    const want = new Set(list.filter((i) => i >= 0 && i < this.channels.length));
+    const want = new Set(list.filter((i) => i >= 0 && i < this.displayChannelCount()));
     if (want.size === 0) return;   // never zero rows
-    const locked = lockedChannelBanks(this.busViews, this.channels.length);
-    for (const c of this.channels) c.enabled = want.has(c.index) || locked.has(channelBankStart(c.index));
+    const locked = lockedChannelBanks(this.busViews, this.displayChannelCount());
+    for (const c of this.channels) {
+      if (c.index >= this.displayChannelCount()) continue;
+      c.enabled = want.has(c.index) || locked.has(channelBankStart(c.index));
+    }
     this.afterChannelChange();
   }
 
@@ -2400,7 +2413,7 @@ export class App {
     },
     /** Add a parallel-bus view; missing fields take the panel's defaults. */
     addBus: (cfg: Partial<BusViewConfig> & { spec: BusViewConfig['spec'] }) =>
-      this.addBus({ ...defaultBusConfig(this.channels.length), ...cfg }),
+      this.addBus({ ...defaultBusConfig(this.displayChannelCount()), ...cfg }),
     removeBus: (id: string) => this.removeBus(id),
     buses: () => this.busViews.map((b) => ({
       id: b.id, name: b.name, color: b.color, summary: busSummary(b.spec), hideSources: b.hideSources,
