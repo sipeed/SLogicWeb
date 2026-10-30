@@ -87,6 +87,7 @@ declare const __LOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
 
 /** A store that can also count edges without materialising them (native live stores do). */
 type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number): number };
+type AcquireOutcome = 'connected' | 'cancelled' | 'failed';
 
 const BUS_CAPTURE_LOCK_ERROR = 'bank oscilloscope settings are locked while capture is running or stopping';
 const LOOP_SUSPEND_MIN_BYTES_PER_SEC = 160e6;
@@ -171,6 +172,9 @@ export class App {
   private statusError: StatusError | null = null;
   private decodeBusy = false;
   private decodeWarm = false;
+  private reacquiring = false;
+  private awaitingReconnect = false;
+  private lostSerial = '';
   private abort: AbortController | null = null;
 
   private readonly markerA = new WaveformMarker('A', MEASURE_COLORS[0]!);
@@ -366,6 +370,7 @@ export class App {
       (e: unknown) => this.fail('error.decodeWorkerWarmup', e),
     );
     navigator.usb?.addEventListener('disconnect', (e) => this.usbDisconnected(e.device));
+    navigator.usb?.addEventListener('connect', (e) => this.usbConnected(e.device));
     void this.reconnectGranted();
   }
 
@@ -1665,8 +1670,8 @@ export class App {
    * the user reads is the read loop's, not a teardown artefact.
    */
   private deviceFailed(e: unknown): void {
-    this.fail('error.device', e);
-    if (this.running && !this.stopping) void this.stopCapture();
+    if (this.stopping || this.device === null) { this.fail('error.device', e); return; }
+    this.deviceLost(e);
   }
 
   // ------------------------------------------------------------------ captures
@@ -1776,6 +1781,8 @@ export class App {
     }
     d.onError = (e) => this.deviceFailed(e);
     this.device = d;
+    this.awaitingReconnect = false;
+    this.lostSerial = '';
     this.noteTransport();
     this.adoptDeviceChannels(d);
     this.renderPanels();
@@ -1790,9 +1797,33 @@ export class App {
 
   private deviceLost(error: unknown, report = true): void {
     if (this.device === null) return;
+    this.lostSerial = this.device.serial;
+    this.awaitingReconnect = true;
     if (report) this.fail('error.device', error);
     this.detachDevice();
     this.renderPanels();
+    void this.recoverDevice();
+  }
+
+  private userCanPrompt(): boolean {
+    return navigator.userActivation?.isActive === true;
+  }
+
+  private async recoverDevice(): Promise<void> {
+    if (this.reacquiring || this.device !== null) return;
+    this.reacquiring = true;
+    try {
+      await this.reconnectGranted();
+      if (this.device === null && this.userCanPrompt()) await this.connect();
+    } finally {
+      this.reacquiring = false;
+    }
+  }
+
+  private usbConnected(usb: USBDevice): void {
+    if (this.device !== null || !this.awaitingReconnect || this.reacquiring) return;
+    if (!sameUsbDevice(this.lostSerial, usb)) return;
+    void this.reconnectGranted();
   }
 
   private async reconnectGranted(): Promise<void> {
@@ -1811,7 +1842,7 @@ export class App {
     }
   }
 
-  private async connect(): Promise<void> {
+  private async connect(): Promise<AcquireOutcome> {
     try {
       this.statusError = null;
       let epoch = this.deviceEpoch;
@@ -1819,19 +1850,20 @@ export class App {
       try {
         d = await requestDeviceOnBestThread();
       } catch (error) {
-        if (cancelledByUser(error)) return;
+        if (cancelledByUser(error)) return 'cancelled';
         if (this.device === null) throw error;
         epoch = this.detachDevice();
         try {
           d = await requestDeviceOnBestThread();
         } catch (retry) {
-          if (cancelledByUser(retry)) return;
+          if (cancelledByUser(retry)) return 'cancelled';
           throw retry;
         }
       }
-      this.installDevice(d, epoch);
+      return this.installDevice(d, epoch) ? 'connected' : 'failed';
     } catch (e) {
       this.fail('error.connect', e);
+      return 'failed';
     }
   }
 
@@ -2061,6 +2093,8 @@ export class App {
         else if (this.device === device) await this.teardownDevice(device);
       }
     } catch (e) {
+      const armed = this.startMutatedCapture;
+      if (armed && this.device === device) this.deviceLost(e, false);
       this.running = false;
       if (this.startMutatedCapture) {
         this.startMutatedCapture = false;
@@ -2069,9 +2103,8 @@ export class App {
       }
       this.relayout();
       this.fail('error.startCapture', e);
-      if (e instanceof TransportDeadError && this.device === device) {
-        this.discardDevice();
-        void this.reconnectGranted();
+      if (!armed && e instanceof TransportDeadError && this.device === device) {
+        this.deviceLost(e, false);
       }
       this.renderPanels();
     }
@@ -2117,8 +2150,10 @@ export class App {
     } catch (e) {
       this.fail('error.stopCapture', e);
       if (this.device === device) {
+        this.lostSerial = device?.serial ?? '';
+        this.awaitingReconnect = true;
         this.discardDevice();
-        void this.reconnectGranted();
+        void this.recoverDevice();
       }
     }
   }

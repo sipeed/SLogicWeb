@@ -168,7 +168,7 @@ const detachBody = methodBody('private detachDevice(): number {');
 const teardownBody =
   methodBody('private async teardownDevice(device: Device | null): Promise<void> {');
 const stopCaptureBody = methodBody('private async stopCapture(): Promise<void> {');
-const connectBody = methodBody('private async connect(): Promise<void> {');
+const connectBody = methodBody('private async connect(): Promise<AcquireOutcome> {');
 const reconnectBody = methodBody('private async reconnectGranted(): Promise<void> {');
 
 const escapeHatch = /^ {2}terminate\(\): void;$/m.test(deviceTypes) &&
@@ -178,7 +178,9 @@ const escapeHatch = /^ {2}terminate\(\): void;$/m.test(deviceTypes) &&
 const stopRecovers = teardownBody.includes("this.fail('error.stopCapture', e)") &&
   teardownBody.indexOf('this.discardDevice();') >
     teardownBody.indexOf("this.fail('error.stopCapture', e)") &&
-  teardownBody.includes('void this.reconnectGranted();') &&
+  teardownBody.includes('void this.recoverDevice();') &&
+  teardownBody.includes('this.awaitingReconnect = true;') &&
+  teardownBody.includes("this.lostSerial = device?.serial ?? '';") &&
   teardownBody.includes('if (this.device === device)') &&
   stopCaptureBody.includes('this.teardownDevice(this.device)');
 const discardTerminates = discardDeviceBody.includes('this.deviceEpoch += 1;') &&
@@ -199,7 +201,7 @@ const installReplaces = installBody.includes('if (epoch !== this.deviceEpoch && 
   installBody.includes('previous.onError = null;') &&
   installBody.includes('previous.terminate();') &&
   installBody.includes('this.finishCapture();');
-const cancelReturnAt = connectBody.indexOf('if (cancelledByUser(error)) return;');
+const cancelReturnAt = connectBody.indexOf("if (cancelledByUser(error)) return 'cancelled';");
 const detachAt = connectBody.indexOf('epoch = this.detachDevice();');
 const keepsOnCancel = cancelReturnAt >= 0 && detachAt > cancelReturnAt &&
   connectBody.includes('if (this.device === null) throw error;') &&
@@ -208,7 +210,7 @@ const acquireFirst = connectBody.indexOf('requestDeviceOnBestThread()') <
     connectBody.indexOf('this.detachDevice()') &&
   reconnectBody.indexOf('getGrantedDevicesOnBestThread()') <
     reconnectBody.indexOf('this.detachDevice()') &&
-  connectBody.includes('this.installDevice(d, epoch);') &&
+  connectBody.includes('this.installDevice(d, epoch)') &&
   reconnectBody.includes('this.installDevice(d, epoch);');
 check(
   'device acquisition replaces the transport it supersedes and keeps a working one on failure',
@@ -217,11 +219,12 @@ check(
     `keepsOnCancel=${keepsOnCancel}`,
 );
 
-const startRecovers = startBody.includes('e instanceof TransportDeadError') &&
-  startBody.includes('this.discardDevice();') &&
-  startBody.includes('void this.reconnectGranted();');
+const startRecovers = startBody.includes('const armed = this.startMutatedCapture;') &&
+  startBody.includes('if (armed && this.device === device) this.deviceLost(e, false);') &&
+  startBody.includes('!armed && e instanceof TransportDeadError') &&
+  startBody.includes('this.deviceLost(e, false);');
 check(
-  'a dead transport on start is dropped and re-acquired, not reported forever',
+  'an armed start failure drops the device and routes through the shared recovery',
   startRecovers,
   `recovers=${startRecovers}`,
 );
@@ -266,15 +269,48 @@ const disconnectGuard = usbDisconnectedBody.includes(
 const lostFailAt = deviceLostBody.indexOf("this.fail('error.device', error)");
 const lostDetachAt = deviceLostBody.indexOf('this.detachDevice();');
 const lostRenderAt = deviceLostBody.indexOf('this.renderPanels();');
+const lostRecoverAt = deviceLostBody.indexOf('void this.recoverDevice();');
 const lostCleans = deviceLostBody.includes('if (this.device === null) return;') &&
+  deviceLostBody.includes('this.lostSerial = this.device.serial;') &&
+  deviceLostBody.includes('this.awaitingReconnect = true;') &&
   lostFailAt >= 0 && lostFailAt < lostDetachAt && lostDetachAt < lostRenderAt &&
-  !deviceLostBody.includes('recoverDevice');
+  lostRenderAt < lostRecoverAt;
 check(
   'a matching USB disconnect drops the transport once and finishes the capture',
   disconnectListenerCount === 1 && c6ConstructorBody.includes(disconnectWiring) &&
     disconnectGuard && lostCleans,
   `listeners=${disconnectListenerCount}, inCtor=${c6ConstructorBody.includes(disconnectWiring)}, ` +
-    `guard=${disconnectGuard}, cleans=${lostCleans}, order=${lostFailAt},${lostDetachAt},${lostRenderAt}`,
+    `guard=${disconnectGuard}, cleans=${lostCleans}, order=${lostFailAt},${lostDetachAt},${lostRenderAt},${lostRecoverAt}`,
+);
+
+const connectListenerCount =
+  (app.match(/navigator\.usb\?\.addEventListener\('connect'/g) ?? []).length;
+const connectWiring =
+  "navigator.usb?.addEventListener('connect', (e) => this.usbConnected(e.device));";
+const recoverBody = methodBody('private async recoverDevice(): Promise<void> {');
+const promptBody = methodBody('private userCanPrompt(): boolean {');
+const usbConnectedBody = methodBody('private usbConnected(usb: USBDevice): void {');
+const deviceFailedBody = methodBody('private deviceFailed(e: unknown): void {');
+const reconnectAt = recoverBody.indexOf('await this.reconnectGranted();');
+const promptAt = recoverBody.indexOf('this.userCanPrompt()');
+const pickerAt = recoverBody.indexOf('await this.connect();');
+const silentFirst = recoverBody.includes('if (this.reacquiring || this.device !== null) return;') &&
+  reconnectAt >= 0 && reconnectAt < promptAt && promptAt < pickerAt;
+const promptGated = promptBody.includes('navigator.userActivation?.isActive === true');
+const plugRecovers = usbConnectedBody.includes('!this.awaitingReconnect') &&
+  usbConnectedBody.includes('sameUsbDevice(this.lostSerial, usb)') &&
+  usbConnectedBody.includes('void this.reconnectGranted();');
+const installClearsWait = installBody.includes('this.awaitingReconnect = false;') &&
+  installBody.includes("this.lostSerial = '';");
+const failedRoutes = deviceFailedBody.includes('this.stopping || this.device === null') &&
+  deviceFailedBody.includes('this.deviceLost(e);');
+check(
+  'a lost device reconnects silently before any picker and resumes on replug',
+  connectListenerCount === 1 && c6ConstructorBody.includes(connectWiring) &&
+    silentFirst && promptGated && plugRecovers && installClearsWait && failedRoutes,
+  `listeners=${connectListenerCount}, inCtor=${c6ConstructorBody.includes(connectWiring)}, ` +
+    `silentFirst=${silentFirst}, prompt=${promptGated}, plug=${plugRecovers}, ` +
+    `install=${installClearsWait}, failed=${failedRoutes}`,
 );
 
 const ownershipAbsent = !app.includes('demoAnalyzers') && !app.includes('demoOwned');
