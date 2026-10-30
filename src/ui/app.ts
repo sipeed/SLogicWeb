@@ -72,7 +72,7 @@ import { StoreRef } from './storeRef.js';
 import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannels, defaultChannelName, channelColor,
   DEFAULT_TRIGGER_MODE,
-  edgeTriggerAutoArms, clampLoopSamples, DEFAULT_LOOP_SAMPLES, effectiveCaptureMode, loopDropSamples,
+  edgeTriggerAutoArms, clampLoopSamples, DEFAULT_LOOP_SAMPLES, loopDropSamples,
   modesToConditions, triggerModeFromCondition,
   type AnalyzerState, type CaptureSettings, type ChannelState, type TriggerMode,
   type CaptureLabel, type StatusError,
@@ -434,10 +434,6 @@ export class App {
     if (bank !== null && this.openBankBus(bank)) return;
     this.busPanel.edit(bus);
     this.selectPanel('analyzers');
-  }
-
-  private oscilloscopeActive(): boolean {
-    return lockedChannelBanks(this.busViews, this.displayChannelCount()).size > 0;
   }
 
   private addBus(cfg: BusViewConfig): string | null {
@@ -1531,11 +1527,8 @@ export class App {
     const host = this.panelHost;
     host.replaceChildren();
     if (this.panel === 'device') {
-      const oscilloscopeActive = this.oscilloscopeActive();
       this.capturePanel.render({
         settings: this.settings,
-        effectiveMode: effectiveCaptureMode(this.settings.mode, oscilloscopeActive),
-        oscilloscopeActive,
         channels: this.channels.slice(0, this.displayChannelCount()),
         widthOptions: this.widthTiers(),
         buses: this.busViews,
@@ -1940,7 +1933,7 @@ export class App {
       if (code === 0 || code === 1023) {
         throw new Error(`threshold ${cfg.thresholdVolts} V clips the DAC (code ${code})`);
       }
-      const mode = effectiveCaptureMode(this.settings.mode, this.oscilloscopeActive());
+      const mode = this.settings.mode;
       const isLoop = mode === 'loop';
       const store = createSampleStore(cfg.channels, cfg.samplerate);
       this.discardDecodeState();

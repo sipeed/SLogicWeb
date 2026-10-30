@@ -135,7 +135,6 @@ export const ru: Messages = {
   'capturePanel.capture': 'Захват',
   'capturePanel.freeRun': 'Свободный режим',
   'capturePanel.timer': 'Таймер',
-  'capturePanel.oscilloscopeTakeover': 'Режим захвата управляется режимом осциллографа',
   'capturePanel.durationS': 'Длительность (с)',
   'capturePanel.loopWindow': 'Окно {kept} / {limit} отсчётов · отброшено {dropped}',
   'capturePanel.ceilingNote': 'Потолок: {samples} образцов = {duration} на {rate}. Свободный ход остановится сам на потолке.',

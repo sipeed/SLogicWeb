@@ -133,7 +133,6 @@ export const zhCN: Messages = {
   'capturePanel.capture': '采集',
   'capturePanel.freeRun': '自由运行',
   'capturePanel.timer': '定时',
-  'capturePanel.oscilloscopeTakeover': '采集模式已被示波器模式接管',
   'capturePanel.durationS': '时长 (s)',
   'capturePanel.loopWindow': '窗口 {kept} / {limit} 样本 · 已丢弃 {dropped}',
   'capturePanel.ceilingNote': '上限 {samples} 个样本 = 在 {rate} 下为 {duration}。自由运行会在到达上限时自行停止。',

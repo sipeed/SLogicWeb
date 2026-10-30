@@ -41,8 +41,6 @@ export interface CapturePanelCallbacks {
 
 export interface CapturePanelView {
   settings: CaptureSettings;
-  effectiveMode: CaptureSettings['mode'];
-  oscilloscopeActive: boolean;
   channels: readonly ChannelState[];
   widthOptions: readonly number[];
   buses: readonly BusViewState[];
@@ -223,17 +221,17 @@ export class CapturePanel {
       ['free', t('capturePanel.freeRun')], ['timer', t('capturePanel.timer')],
     ] as const) {
       const b = document.createElement('button');
-      b.className = 'seg' + (v.effectiveMode === id ? ' on' : '');
+      b.className = 'seg' + (s.mode === id ? ' on' : '');
       b.textContent = text;
       b.dataset.captureMode = id;
-      b.disabled = v.oscilloscopeActive;
+      b.disabled = v.running || v.stopping;
       b.addEventListener('click', () => this.cb.onSettings({ ...s, mode: id }));
       seg.appendChild(b);
     }
     modeSec.body.appendChild(seg);
 
     const maxSeconds = MAX_SAMPLES / s.samplerate;
-    if (!v.oscilloscopeActive && v.effectiveMode === 'timer') {
+    if (s.mode === 'timer') {
       const secs = document.createElement('input');
       secs.type = 'number';
       secs.min = '0.001';
@@ -247,20 +245,13 @@ export class CapturePanel {
         this.cb.onSettings({ ...s, seconds: Math.min(Number(secs.value), maxSeconds) }));
       modeSec.body.appendChild(labelled(t('capturePanel.durationS'), secs));
     }
-    if (v.oscilloscopeActive) {
-      const takeover = div('panel-note oscilloscope-takeover');
-      takeover.dataset.oscilloscopeTakeover = '';
-      takeover.textContent = t('capturePanel.oscilloscopeTakeover');
-      modeSec.body.appendChild(takeover);
-    } else {
-      const limit = div('panel-note');
-      limit.textContent = t('capturePanel.ceilingNote', {
-        samples: MAX_SAMPLES.toLocaleString(),
-        duration: formatDuration(maxSeconds),
-        rate: formatRate(s.samplerate),
-      });
-      modeSec.body.appendChild(limit);
-    }
+    const limit = div('panel-note');
+    limit.textContent = t('capturePanel.ceilingNote', {
+      samples: MAX_SAMPLES.toLocaleString(),
+      duration: formatDuration(maxSeconds),
+      rate: formatRate(s.samplerate),
+    });
+    modeSec.body.appendChild(limit);
 
     const triggerSec = section(t('capturePanel.softwareTrigger'));
     const mask = document.createElement('input');
@@ -303,9 +294,9 @@ export class CapturePanel {
         // mode), capped by the 64 MiB retained prefix. Promising the raw percentage
         // would overstate it exactly when the cap bites (e.g. 50% of 1 s at
         // 16ch/200M is capped at ~167 ms).
-        const post = v.effectiveMode === 'timer'
+        const post = s.mode === 'timer'
           ? Math.min(MAX_SAMPLES - 1, Math.round(s.seconds * s.samplerate))
-          : v.effectiveMode === 'loop'
+          : s.mode === 'loop'
             ? clampLoopSamples(s.loopSamples, s.channels)
             : MAX_SAMPLES - 1;
         const pre = Math.min(

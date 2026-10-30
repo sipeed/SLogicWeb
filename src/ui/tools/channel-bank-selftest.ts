@@ -225,7 +225,7 @@ check('bank start uses the absolute channel index',
     loopDecoupled && names && locks && noBankSwap && bankEditor,
     `loopDecoupled=${loopDecoupled}, names=${names}, locks=${locks}, noBankSwap=${noBankSwap}, bankEditor=${bankEditor}`);
 
-  const modelLock = (app.match(/lockedChannelBanks\(this.busViews, this.displayChannelCount\(\)\)/g) ?? []).length >= 3 &&
+  const modelLock = (app.match(/lockedChannelBanks\(this.busViews, this.displayChannelCount\(\)\)/g) ?? []).length >= 2 &&
     app.includes('locked.has(channelBankStart(c.index))');
   const visualLock = panel.includes('lockedChannelBanks(v.buses, v.channels.length)') &&
     panel.includes('grid.dataset.adcLocked = String(locked)') && panel.includes('chip.disabled = locked') &&

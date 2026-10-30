@@ -139,7 +139,6 @@ export const en = {
   'capturePanel.capture': 'Capture',
   'capturePanel.freeRun': 'Free run',
   'capturePanel.timer': 'Timer',
-  'capturePanel.oscilloscopeTakeover': 'Capture mode is controlled by oscilloscope mode',
   'capturePanel.durationS': 'Duration (s)',
   'capturePanel.loopWindow': 'Window {kept} / {limit} samples · {dropped} dropped',
   'capturePanel.ceilingNote': 'Ceiling {samples} samples = {duration} at {rate}. A free run stops itself there.',

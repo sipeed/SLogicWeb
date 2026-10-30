@@ -135,7 +135,6 @@ export const fr: Messages = {
   'capturePanel.capture': 'Capture',
   'capturePanel.freeRun': 'Marche libre',
   'capturePanel.timer': 'Minuteur',
-  'capturePanel.oscilloscopeTakeover': 'Le mode d’acquisition est contrôlé par le mode oscilloscope',
   'capturePanel.durationS': 'Durée (s)',
   'capturePanel.loopWindow': 'Fenêtre {kept} / {limit} échantillons · {dropped} abandonnés',
   'capturePanel.ceilingNote': 'Plafond : {samples} échantillons = {duration} à {rate}. Une marche libre s’y arrête d’elle-même.',

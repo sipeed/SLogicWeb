@@ -18,7 +18,7 @@ import { ROWS } from '../metrics.js';
 import { analogFrame, type BusViewState } from '../busView.js';
 import { BusBuilder, PlanarSampleStore, type BusSpec } from '../../data/index.js';
 import { DEFAULT_TRIGGER_MODE, edgeTriggerAutoArms, isEdgeTriggerMode, modesToConditions,
-  clampLoopSamples, DEFAULT_LOOP_SAMPLES, effectiveCaptureMode, LOOP_WINDOW_QUANTUM, loopDropSamples,
+  clampLoopSamples, DEFAULT_LOOP_SAMPLES, LOOP_WINDOW_QUANTUM, loopDropSamples,
   maxLoopSamples, triggerModeFromCondition,
   type TriggerCondition, type TriggerMode } from '../state.js';
 
@@ -533,31 +533,27 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
       ? `${dropTable.length} exact cases, every result a multiple of 64`
       : dropBad.join('; '));
 
-  const modeCases = [
-    ['free', false, 'free'], ['timer', false, 'timer'], ['loop', false, 'free'],
-    ['free', true, 'loop'], ['timer', true, 'loop'], ['loop', true, 'loop'],
-  ] as const;
-  const modeBad = modeCases.filter(([stored, active, expected]) =>
-    effectiveCaptureMode(stored, active) !== expected);
-  check('effective capture mode forces Loop only for oscilloscopes and falls legacy Loop back to Free',
-    modeBad.length === 0,
-    modeBad.length === 0 ? modeCases.map(([stored, active, expected]) =>
-      `${stored}/${active ? 'scope' : 'stored'}→${expected}`).join(', ') : JSON.stringify(modeBad));
-
   const loopFs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
   if (!loopFs || typeof loopFs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const stateSrc = loopFs.readFileSync('src/ui/state.ts', 'utf8');
+  check('capture mode stays a closed stored union with no oscilloscope transform',
+    !stateSrc.includes('effectiveCaptureMode') && stateSrc.includes("mode: 'free' | 'timer' | 'loop';"),
+    `transform=${stateSrc.includes('effectiveCaptureMode')}, ` +
+    `union=${stateSrc.includes("mode: 'free' | 'timer' | 'loop';")}`);
   const panel = loopFs.readFileSync('src/ui/capturePanel.ts', 'utf8');
+  const modeBlock = panel.split('const modeSec = section(')[1]?.split('modeSec.body.appendChild(seg)')[0] ?? '';
   const panelModes = !panel.includes("['loop', t('capturePanel.loop')]") &&
     !panel.includes('capturePanel.retentionSamples') && !panel.includes('capturePanel.retentionNote') &&
     !panel.includes('capturePanel.loopCeilingNote') && !panel.includes('maxLoopSamples(') &&
     panel.includes("['free', t('capturePanel.freeRun')]") && panel.includes("['timer', t('capturePanel.timer')]") &&
-    panel.includes('b.disabled = v.oscilloscopeActive') && panel.includes('v.effectiveMode === id') &&
-    panel.includes("t('capturePanel.oscilloscopeTakeover')");
-  check('the capture panel offers only Free/Timer plus the oscilloscope takeover notice',
+    modeBlock.includes('b.disabled = v.running || v.stopping') && modeBlock.includes('s.mode === id') &&
+    !modeBlock.includes('oscilloscope') && !panel.includes('v.effectiveMode') &&
+    !panel.includes('v.oscilloscopeActive') && !panel.includes('oscilloscopeTakeover');
+  check('the capture panel offers Free/Timer without an oscilloscope takeover',
     panelModes,
     `noLoop=${!panel.includes("['loop', t('capturePanel.loop')]")}, ` +
-    `takeover=${panel.includes("t('capturePanel.oscilloscopeTakeover')")}, ` +
-    `effective=${panel.includes('v.effectiveMode === id')}`);
+    `takeover=${panel.includes('oscilloscopeTakeover')}, stored=${modeBlock.includes('s.mode === id')}, ` +
+    `lock=${modeBlock.includes('b.disabled = v.running || v.stopping')}`);
 
   const appSrc = loopFs.readFileSync('src/ui/app.ts', 'utf8');
   const startStart = appSrc.indexOf('private async startCapture(');
@@ -570,16 +566,13 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     startSrc.length > 0 && flagReset >= 0 && firstRefusal > flagReset && flagSet > firstRefusal,
     `slice=${startSrc.length}, reset=${flagReset}, refusal=${firstRefusal}, set=${flagSet}`);
 
-  const scopeActivity = appSrc.split('private oscilloscopeActive()')[1]?.split('private addBus(')[0] ?? '';
-  const segMatrix = scopeActivity.includes('lockedChannelBanks(this.busViews, this.displayChannelCount()).size > 0') &&
-    panel.includes('b.disabled = v.oscilloscopeActive') &&
-    panel.includes("v.effectiveMode === 'timer'") && panel.includes("v.effectiveMode === 'loop'") &&
-    !panel.includes("s.mode === 'loop'") && !panel.includes('s.channels === 32') &&
-    startSrc.includes('const mode = effectiveCaptureMode(this.settings.mode, this.oscilloscopeActive())') &&
+  const directMode = panel.includes("s.mode === 'timer'") && panel.includes("s.mode === 'loop'") &&
+    !panel.includes('s.channels === 32') &&
+    startSrc.includes('const mode = this.settings.mode;') &&
     startSrc.includes("const isLoop = mode === 'loop'") &&
     startSrc.includes("const postTriggerSamples = mode === 'timer'") &&
-    !startSrc.includes('this.settings.mode ===') &&
-    appSrc.includes('effectiveMode: effectiveCaptureMode(this.settings.mode, oscilloscopeActive)');
+    !appSrc.includes('effectiveCaptureMode') && !appSrc.includes('effectiveMode:') &&
+    !appSrc.includes('private oscilloscopeActive()');
   // W6: the loop decode ban is gone - a running loop decodes as a labelled snapshot,
   // and the note carries the tag. The flag is read before the worker round trip, so a
   // decode that outlives the running capture keeps its label.
@@ -603,11 +596,11 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     progressSplit,
     `total=${appSrc.includes('samples: this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length')}, ` +
     `retained=${appSrc.includes('bytesPerSampleForChannels(this.store.channelCount)')}`);
-  check('the panel, trigger budget and real start path share effective mode without mutating stored mode',
-    segMatrix,
-    `panel=${panel.includes('b.disabled = v.oscilloscopeActive')}, ` +
-    `start=${startSrc.includes('const mode = effectiveCaptureMode(this.settings.mode, this.oscilloscopeActive())')}, ` +
-    `storedBypass=${!startSrc.includes('this.settings.mode ===')}`);
+  check('the panel, trigger budget and real start path share stored mode without scope ownership',
+    directMode,
+    `panel=${panel.includes("s.mode === 'timer'")}, ` +
+    `start=${startSrc.includes('const mode = this.settings.mode;')}, ` +
+    `scopeTransform=${appSrc.includes('effectiveCaptureMode')}`);
 
   const busPanel = loopFs.readFileSync('src/ui/busPanel.ts', 'utf8');
   const addBus = appSrc.split('private addBus(')[1]?.split('private updateBus(')[0] ?? '';

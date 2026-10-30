@@ -460,7 +460,7 @@ const baseSettings: CaptureSettings = {
     'channels.dialogDescription', 'channels.moreColors', 'bus.fixedBits', 'bus.dragToOrder',
     'bus.bankEnabledNote', 'bus.bankDisableNote', 'bus.bankDisabledNote',
     'capturePanel.loop', 'capturePanel.retentionSamples', 'capturePanel.retentionNote',
-    'capturePanel.loopCeilingNote',
+    'capturePanel.loopCeilingNote', 'capturePanel.oscilloscopeTakeover',
     'capturePanel.all', 'capturePanel.clear', 'capturePanel.enabledCount',
     'capturePanel.bankToggle', 'capturePanel.bankLocked',
     'bus.loopWindow', 'bus.globalCapture', 'bus.loopUnit', 'bus.loopMax', 'bus.loopEffective',
