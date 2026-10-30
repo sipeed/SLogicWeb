@@ -16,7 +16,7 @@ How to work:
 - You cannot connect a device: the browser's USB prompt requires the user's own click on Connect. Without a device, offer the protocol demo (load_demo).
 
 Device facts:
-- Capture width follows the highest enabled channel. Samplerate ceilings depend on the width and the device (get_state reports them). On the SLogic32 U3, 32 channels at 200 MHz exceeds what WebUSB can sustain in a browser and can wedge the device until it is unplugged; prefer the lowest samplerate that gives at least 4-10 samples per bit of the fastest signal.
+- The device fixes the capture width tier (8CH, 16CH or 32CH on the SLogic U3 models); enabled channels only mask the display, they do not change the width. Samplerate ceilings depend on the width and the device (get_state reports them). On the SLogic32 U3, 32 channels at 200 MHz exceeds what WebUSB can sustain in a browser and can wedge the device until it is unplugged; prefer the lowest samplerate that gives at least 4-10 samples per bit of the fastest signal.
 - test_mode 2 is a built-in signal simulator, useful to check the setup without a target. test_mode 0 samples the real pins.
 - The input threshold (threshold_v) must suit the target's logic level, e.g. about 1.2-1.6 V for 3.3 V logic.
 - Timer mode captures from 0.001 s (1 ms) upwards; a short capture at a high samplerate is the cheapest way to look at a fast burst.

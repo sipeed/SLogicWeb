@@ -142,6 +142,7 @@ export class App {
 
   private settings: CaptureSettings = defaultCaptureSettings();
   private samplerateExplicit = false;
+  private widthExplicit = false;
 
   private device: Device | null = null;
   private deviceEpoch = 0;
@@ -243,13 +244,15 @@ export class App {
       this.syncBankChannels();
     }
     this.samplerateExplicit = workspace?.capture?.samplerateExplicit === true;
+    this.widthExplicit = workspace?.capture?.widthExplicit === true;
+    const initialWidth = workspace?.capture?.channels ?? channelWidthForProbes(this.channels.length);
     const triggerModes = workspace?.capture?.triggerModes ?? {};
     const triggerConditions = modesToConditions(triggerModes);
     const first = triggerConditions[0];
     this.settings = clampSettings({
       ...defaultCaptureSettings(),
       ...(workspace?.capture ?? {}),
-      channels: this.neededWidth(),
+      channels: initialWidth,
       triggerModes,
       triggerConditions,
       triggerChannel: first?.channel ?? 0,
@@ -371,7 +374,7 @@ export class App {
 
   /**
    * The channels the plot shows: enabled ones, minus the source bits of a bus view that
-   * hides them. Display only - capture width and settings follow enabledChannels().
+   * hides them. Display only.
    */
   private visibleChannels(): ChannelState[] {
     const hidden = new Set(this.busViews.filter((b) => b.hideSources).flatMap((b) => b.spec.bits));
@@ -455,10 +458,9 @@ export class App {
   private bankCaptureSettings(start: number, config: BusViewConfig): CaptureSettings {
     const bankWidth = channelWidthForProbes(start + CHANNEL_BANK_SIZE);
     const clockWidth = config.spec.clock ? channelWidthForProbes(config.spec.clock.channel + 1) : bankWidth;
-    const currentWidth = this.neededWidth();
-    let channels = bankWidth;
+    let channels: ChannelCount = bankWidth;
     if (clockWidth > channels) channels = clockWidth;
-    if (currentWidth > channels) channels = currentWidth;
+    if (this.settings.channels > channels) channels = this.settings.channels;
     return clampSettings({ ...this.settings, channels }, this.rateCeilings);
   }
 
@@ -730,35 +732,15 @@ export class App {
     if (!this.widthTiers().includes(channels)) return;
     if (!isChannelCount(channels) || channels > this.channels.length) return;
     this.busViews = this.busViews.filter((bus) => !scopeOutOfWidth(bus.spec, channels));
-    for (let i = 0; i < this.channels.length; i++) this.channels[i]!.enabled = i < channels;
-    this.afterChannelChange();
+    if (channels !== this.settings.channels) this.widthExplicit = true;
+    this.applySettings({ ...this.settings, channels });
   }
 
-  /**
-   * Every path that flips a channel ends here. It used to be open-coded in two places and
-   * the All/Clear one was missing both halves: no `renderPanels`, so the chips kept their
-   * old fill even though the plot had already updated, and no width recompute, so Clear
-   * left `settings.channels` at 16 and the device would still have been configured for a
-   * 16-channel capture at the 16-channel rate ceiling.
-   */
   private afterChannelChange(): void {
-    this.settings = clampSettings(
-      { ...this.settings, channels: this.neededWidth() }, this.rateCeilings,
-    );
+    this.settings = clampSettings({ ...this.settings }, this.rateCeilings);
     this.persistWorkspace();
     this.relayout();
     this.renderPanels();
-  }
-
-  /** Narrowest capture width that covers every enabled channel. */
-  private neededWidth(): ChannelCount {
-    const activeBanks = lockedChannelBanks(this.busViews, this.channels.length);
-    const clockChannels = this.busViews.flatMap((bus) => {
-      const bank = busChannelBank(bus.spec);
-      return bank !== null && activeBanks.has(bank) && bus.spec.clock ? [bus.spec.clock.channel] : [];
-    });
-    const hi = Math.max(0, ...this.enabledChannels().map((c) => c.index), ...clockChannels);
-    return hi < 4 ? 4 : hi < 8 ? 8 : hi < 16 ? 16 : hi < 32 ? 32 : hi < 64 ? 64 : 128;
   }
 
   private reorder(from: number, to: number): void {
@@ -1406,6 +1388,8 @@ export class App {
       channels: this.channels.map(({ name, color, enabled }) => ({ name, color, enabled })),
       order: [...this.order],
       capture: {
+        channels: this.settings.channels,
+        widthExplicit: this.widthExplicit,
         samplerate: this.settings.samplerate,
         samplerateExplicit: this.samplerateExplicit,
         thresholdVolts: this.settings.thresholdVolts,
@@ -1699,7 +1683,7 @@ export class App {
       const demo = createProtocolDemoCapture();
       this.adoptCapture(demo.store, demo.channelNames, { kind: 'demo' });
       this.settings = clampSettings(
-        { ...this.settings, channels: this.neededWidth(), samplerate: demo.store.samplerate },
+        { ...this.settings, samplerate: demo.store.samplerate },
         this.rateCeilings,
       );
       this.persistWorkspace();
@@ -1742,8 +1726,9 @@ export class App {
     this.droppedTotal = 0;
     this.captureIsLoop = false;
     this.captureLabel = label;
+    this.widthExplicit = false;
     this.settings = clampSettings(
-      { ...this.settings, channels: this.neededWidth() }, this.rateCeilings,
+      { ...this.settings, channels: channelWidthForProbes(store.channelCount) }, this.rateCeilings,
     );
     this.persistWorkspace();
     this.relayout();
@@ -1881,10 +1866,11 @@ export class App {
     if (!isChannelCount(max)) {
       throw new Error(`device reported unsupported channel count ${max}`);
     }
+    const width = this.widthExplicit && this.settings.channels < max ? this.settings.channels : max;
     const samplerate = connectSamplerate({
       current: this.settings.samplerate,
       explicit: this.samplerateExplicit,
-      channels: max,
+      channels: width,
       ceilings: this.rateCeilings,
     });
     if (this.store.length === 0 && max !== this.store.channelCount) {
@@ -1899,7 +1885,7 @@ export class App {
       this.order = this.channels.map((c) => c.index);
     }
     this.settings = clampSettings(
-      { ...this.settings, channels: max, samplerate }, this.rateCeilings,
+      { ...this.settings, channels: width, samplerate }, this.rateCeilings,
     );
     this.persistWorkspace();
     this.relayout();
@@ -1931,7 +1917,8 @@ export class App {
       this.releaseMarkerPointer();
       this.storeRef.set(store);
       this.resetBusBuilds();
-      this.channels = defaultChannels(cfg.channels);
+      const masks = this.channels.map((c) => c.enabled);
+      this.channels = defaultChannels(cfg.channels).map((c) => ({ ...c, enabled: masks[c.index] ?? true }));
       this.order = this.channels.map((c) => c.index);
       this.persistWorkspace();
       for (const a of this.analyzers) {
@@ -2293,7 +2280,7 @@ export class App {
 
   // ------------------------------------------------------------------ assistant
 
-  /** Enable exactly `list` (ignoring channels the device lacks), then re-derive the width. */
+  /** Enable exactly `list`, ignoring channels the device lacks. */
   private setEnabledChannels(list: number[]): void {
     const want = new Set(list.filter((i) => i >= 0 && i < this.channels.length));
     if (want.size === 0) return;   // never zero rows

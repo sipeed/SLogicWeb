@@ -333,6 +333,59 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
 }
 
 {
+  const base = {
+    samplerate: 25e6,
+    thresholdVolts: 1.65,
+    mode: 'free' as const,
+    seconds: 2.5,
+    loopSamples: 123_456,
+    testMode: 2 as const,
+    triggerEnableMask: true,
+    triggerModes: { 0: 'rising' as const },
+    preTriggerPercent: 35,
+  };
+  const explicit = serializeWorkspaceSnapshot({
+    version: 1, detailedLabels: true, capture: { ...base, channels: 8 as const, widthExplicit: true },
+  });
+  const parsedWidth = parseWorkspaceSnapshot(explicit);
+  check('an explicit capture width pins its tier and survives a round trip',
+    parsedWidth?.capture?.channels === 8 && parsedWidth?.capture?.widthExplicit === true &&
+    explicit.includes('"channels":8,"widthExplicit":true'),
+    explicit);
+
+  const absent = serializeWorkspaceSnapshot({ version: 1, detailedLabels: true, capture: base });
+  const falseFlag = serializeWorkspaceSnapshot({
+    version: 1, detailedLabels: true, capture: { ...base, channels: 16, widthExplicit: false },
+  });
+  check('an absent width and a false width marker serialize without widthExplicit',
+    !absent.includes('"channels"') && !falseFlag.includes('widthExplicit') &&
+    falseFlag.includes('"channels":16'),
+    `${absent} | ${falseFlag}`);
+
+  const capacity = Array.from({ length: 16 }, () => ({}));
+  const dirtyWidths: unknown[] = [7, 64, 0, '16', null, 16.5];
+  const widthRows = dirtyWidths.map((channels) => {
+    const dirty = parseWorkspaceSnapshot(JSON.stringify({ version: 1, channels: capacity, capture: { channels } }));
+    return { channels, width: dirty?.capture?.channels };
+  });
+  const overCapacity = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, channels: capacity, capture: { channels: 32 },
+  }));
+  check('widths outside the storage tiers or past the channel capacity never restore',
+    widthRows.every((row) => row.width === undefined) && overCapacity?.capture?.channels === undefined,
+    widthRows.map((row) => `${JSON.stringify(row.channels)}=>${String(row.width)}`).join(', ') +
+    `, 32of16=>${String(overCapacity?.capture?.channels)}`);
+
+  const dirtyFlags: unknown[] = ['yes', 1, null, [], {}];
+  const flagRows = dirtyFlags.map((widthExplicit) => parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, capture: { channels: 16, widthExplicit },
+  })));
+  check('a dirty width marker never restores as explicit',
+    flagRows.every((snapshot) => snapshot?.capture?.widthExplicit !== true),
+    dirtyFlags.map((flag) => JSON.stringify(flag)).join(', '));
+}
+
+{
   const parsed = parseWorkspaceSnapshot(JSON.stringify({
     version: 1,
     capture: {
@@ -521,7 +574,7 @@ const restoreOrder = [
   'applyStaticI18n(document);',
   'readWorkspaceSnapshot()',
   'this.syncBankChannels();',
-  'channels: this.neededWidth()',
+  'channels: initialWidth',
   'this.reflectDetailedLabels();',
   'createSampleStore(',
 ].map((needle) => constructorBody.indexOf(needle));
@@ -590,7 +643,7 @@ const captureDerivation = constructorBody.includes('const triggerConditions = mo
   constructorBody.includes('triggerChannel: first?.channel ?? 0') &&
   constructorBody.includes('triggerKind: first?.kind ?? \'rising\'') &&
   constructorBody.includes('triggerLevel: first?.level ?? 1') &&
-  constructorBody.includes('channels: this.neededWidth()') &&
+  constructorBody.includes('channels: initialWidth') &&
   constructorBody.includes('}, this.rateCeilings);');
 const sharedSettingsPath = app.includes('onSettings: (s) => this.applySettings(s)') &&
   app.includes('this.applySettings({ ...this.settings, ...s });') &&
@@ -625,6 +678,26 @@ const explicitWiring = app.includes('private samplerateExplicit = false;') &&
 check('App keeps the explicit-rate marker outside CaptureSettings and marks only real rate changes',
   explicitWiring,
   `mark=${markAt}, clamp=${clampAt}, restore=${restoreAt}, compose=${composeAt}, wiring=${explicitWiring}`);
+
+const widthSetterBody = app.split('private setChannelWidth(channels: number): void')[1]
+  ?.split('private afterChannelChange(')[0] ?? '';
+const afterMaskBody = app.split('private afterChannelChange(): void {')[1]?.split('\n  }')[0] ?? '';
+const adoptBody = app.split('private adoptCapture(')[1]?.split('private save(')[0] ?? '';
+const widthWiring = app.includes('private widthExplicit = false;') &&
+  adoptBody.includes('this.widthExplicit = false;') &&
+  constructorBody.includes('this.widthExplicit = workspace?.capture?.widthExplicit === true;') &&
+  constructorBody.includes('const initialWidth = workspace?.capture?.channels ?? channelWidthForProbes(this.channels.length);') &&
+  widthSetterBody.includes('if (channels !== this.settings.channels) this.widthExplicit = true;') &&
+  widthSetterBody.includes('this.applySettings({ ...this.settings, channels });') &&
+  !widthSetterBody.includes('enabled = i < channels') &&
+  !app.includes('neededWidth(') &&
+  app.includes('const width = this.widthExplicit && this.settings.channels < max ? this.settings.channels : max;') &&
+  snapshotBody.includes('channels: this.settings.channels,') &&
+  snapshotBody.includes('widthExplicit: this.widthExplicit,') &&
+  afterMaskBody.length > 0 && !afterMaskBody.includes('channels:') && !afterMaskBody.includes('neededWidth');
+check('the capture width is explicit state and a mask flip never rewrites it',
+  widthWiring,
+  `setter=${widthSetterBody.replace(/\s+/g, ' ').trim()}, mask=${afterMaskBody.replace(/\s+/g, ' ').trim()}`);
 
 const busRestoreWiring = constructorBody.includes('id: `bus-${id}`, builder: null, builtFor: null, cache: null') &&
   constructorBody.includes('this.nextBus = this.busViews.length;') &&

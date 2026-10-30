@@ -548,7 +548,8 @@ export const TOOLS: AssistantTool[] = [
     description:
       'Change capture settings for the NEXT capture. Only the fields you pass change. ' +
       'Values are clamped to device limits; the result shows what was applied. The ' +
-      'capture width (and so the samplerate ceiling) follows the highest enabled channel. ' +
+      'capture width is an explicit tier (8CH/16CH/32CH); enabled_channels only masks ' +
+      'the display. ' +
       'trigger_modes maps a channel number to low/high/rising/falling/edge/dont-care; ' +
       'all conditions must hold at once (AND), and trigger_enabled gates them all.',
     inputSchema: obj({

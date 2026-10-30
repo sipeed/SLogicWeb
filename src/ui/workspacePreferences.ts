@@ -19,6 +19,8 @@ export interface PersistedChannel {
 }
 
 export interface PersistedCaptureSettings {
+  channels?: ChannelCount;
+  widthExplicit?: boolean;
   samplerate: number;
   samplerateExplicit?: boolean;
   thresholdVolts: number;
@@ -115,6 +117,10 @@ function restoreCapture(value: unknown, capacity: number): PersistedCaptureSetti
     preTriggerPercent: defaults.preTriggerPercent,
   };
   if (!isRecord(value)) return capture;
+  if (typeof value.channels === 'number' && isChannelCount(value.channels) && value.channels <= capacity) {
+    capture.channels = value.channels;
+  }
+  if (value.widthExplicit === true) capture.widthExplicit = true;
   if (typeof value.samplerate === 'number' && SAMPLERATES_HZ.includes(value.samplerate)) {
     capture.samplerate = value.samplerate;
   }
@@ -264,6 +270,8 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
     serialized.capture = {
       samplerate: capture.samplerate,
       ...(capture.samplerateExplicit === true ? { samplerateExplicit: true } : {}),
+      ...(capture.channels !== undefined ? { channels: capture.channels } : {}),
+      ...(capture.widthExplicit === true ? { widthExplicit: true } : {}),
       thresholdVolts: capture.thresholdVolts,
       mode: capture.mode,
       seconds: capture.seconds,

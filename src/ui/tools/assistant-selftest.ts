@@ -276,6 +276,13 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
     /clamped to 400000000/.test(String((set.out as { note?: string }).note)), JSON.stringify(set.out));
   const badChan = await run('set_capture_settings', { enabled_channels: [40] }, host);
   check('set_capture_settings rejects channels the device lacks', !badChan.ok, badChan.err);
+  const setDescription = toolByName('set_capture_settings')?.description ?? '';
+  check('the assistant describes an explicit width tier and a display-only mask',
+    SYSTEM_PROMPT.includes('8CH, 16CH or 32CH') && setDescription.includes('8CH/16CH/32CH') &&
+    setDescription.includes('only masks the display') &&
+    !SYSTEM_PROMPT.includes('highest enabled channel') && !setDescription.includes('highest enabled channel'),
+    `promptTier=${SYSTEM_PROMPT.includes('8CH, 16CH or 32CH')}, ` +
+    `toolTier=${setDescription.includes('8CH/16CH/32CH')}`);
   host.running = true;
   const busy = await run('set_capture_settings', { mode: 'timer' }, host);
   check('settings cannot change mid-capture', !busy.ok && /running/.test(busy.err), busy.err);

@@ -204,7 +204,7 @@ check('bank start uses the absolute channel index',
     app.includes('this.settings = this.bankCaptureSettings(start, next);') &&
     !app.includes('loopSamples: preview.loopSamples') && !app.includes('captureChannels: preview.channels') &&
     app.includes('channelWidthForProbes(config.spec.clock.channel + 1)') &&
-    app.includes('activeBanks.has(bank) && bus.spec.clock');
+    app.includes('const clockWidth = config.spec.clock ? channelWidthForProbes(config.spec.clock.channel + 1) : bankWidth;');
   const updateBus = app.split('private updateBus(')[1]?.split('private removeBus(')[0] ?? '';
   const names = busPanel.includes("t('bus.defaultName')") &&
     app.includes('retranslateBankBusConfig(bus)') && app.includes('retranslateBankBusConfig(draft)') &&
@@ -225,7 +225,7 @@ check('bank start uses the absolute channel index',
     loopDecoupled && names && locks && noBankSwap && bankEditor,
     `loopDecoupled=${loopDecoupled}, names=${names}, locks=${locks}, noBankSwap=${noBankSwap}, bankEditor=${bankEditor}`);
 
-  const modelLock = (app.match(/lockedChannelBanks\(this.busViews, this.channels.length\)/g) ?? []).length >= 4 &&
+  const modelLock = (app.match(/lockedChannelBanks\(this.busViews, this.channels.length\)/g) ?? []).length >= 3 &&
     app.includes('locked.has(channelBankStart(c.index))');
   const visualLock = panel.includes('lockedChannelBanks(v.buses, v.channels.length)') &&
     panel.includes('grid.dataset.adcLocked = String(locked)') && panel.includes('chip.disabled = locked') &&
@@ -253,9 +253,11 @@ check('bank start uses the absolute channel index',
     app.includes("this.captureLabel.kind === 'loaded' || this.captureLabel.kind === 'demo'") &&
     app.includes('if (!this.widthTiers().includes(channels)) return;') &&
     app.includes('!scopeOutOfWidth(bus.spec, channels)') &&
-    app.includes('this.channels[i]!.enabled = i < channels') &&
+    app.includes('if (channels !== this.settings.channels) this.widthExplicit = true;') &&
     widthSetter.includes('if (this.running || this.stopping) return;') &&
-    widthSetter.includes('this.afterChannelChange();');
+    widthSetter.includes('this.applySettings({ ...this.settings, channels });') &&
+    !widthSetter.includes('enabled = i < channels') &&
+    !app.includes('neededWidth(');
   const widthSheet = sheet.includes('.digital-section .panel-section-head > .channel-widths { flex: none; }') &&
     sheet.includes('.channel-widths .seg { padding: 1px 6px; font-size: 10px; }');
   check('the Device panel renders the channel-width selector through the App width setter',
