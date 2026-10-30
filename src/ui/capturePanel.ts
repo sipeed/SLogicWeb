@@ -37,7 +37,6 @@ export interface CapturePanelCallbacks {
   onToggleBank(start: number): void;
   onOpenBank(start: number): void;
   onChannelWidth(channels: number): void;
-  onSetAllChannels(enabled: boolean): void;
   onUsbControl(command: string): Promise<string>;
 }
 
@@ -123,18 +122,6 @@ export class CapturePanel {
       }
       chSec.header.appendChild(widths);
     }
-    const all = button(t('capturePanel.all'), 'mini');
-    all.addEventListener('click', () => this.cb.onSetAllChannels(true));
-    const clear = button(t('capturePanel.clear'), 'mini');
-    clear.addEventListener('click', () => this.cb.onSetAllChannels(false));
-    const enabledTotal = v.channels.filter((c) => c.enabled).length;
-    const total = document.createElement('span');
-    total.className = 'channel-enabled-count';
-    total.textContent = `${enabledTotal}/${v.channels.length}`;
-    total.setAttribute('aria-label', t('capturePanel.enabledCount', {
-      enabled: enabledTotal, total: v.channels.length,
-    }));
-    chSec.header.append(total, all, clear);
 
     const banks = div('channel-banks');
     const activeBanks = lockedChannelBanks(v.buses, v.channels.length);

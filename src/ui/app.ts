@@ -42,7 +42,7 @@ import {
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
 import { CapturePanel, type CapturePanelView } from './capturePanel.js';
 import {
-  CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankStart, clearChannelBanks,
+  CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankStart,
   lockedChannelBanks, scopeOutOfWidth, toggleChannelBank,
 } from './channelBanks.js';
 import { ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration } from './channelList.js';
@@ -292,7 +292,6 @@ export class App {
       onToggleBank: (start) => this.setBankEnabled(start),
       onOpenBank: (start) => this.openBankBus(start),
       onChannelWidth: (n) => this.setChannelWidth(n),
-      onSetAllChannels: (on) => this.setAllChannels(on),
       onUsbControl: (command) => this.usbControl(command),
     });
     this.analyzerPanel = new AnalyzerPanel(panelHost, {
@@ -721,20 +720,6 @@ export class App {
     const next = toggleChannelBank(this.channels, start, lockedChannelBanks(this.busViews, this.channels.length));
     if (!next) return;
     for (let i = 0; i < this.channels.length; i++) this.channels[i]!.enabled = next[i]!;
-    this.afterChannelChange();
-  }
-
-  /**
-   * All / Clear. Clear keeps channel 0 for the same reason `setChannelEnabled` refuses the
-   * last one: zero rows is not a state the stack can lay out.
-   */
-  private setAllChannels(on: boolean): void {
-    if (on) {
-      for (const c of this.channels) c.enabled = true;
-    } else {
-      const next = clearChannelBanks(this.channels, lockedChannelBanks(this.busViews, this.channels.length));
-      for (let i = 0; i < this.channels.length; i++) this.channels[i]!.enabled = next[i]!;
-    }
     this.afterChannelChange();
   }
 

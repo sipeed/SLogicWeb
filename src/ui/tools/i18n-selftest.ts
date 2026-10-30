@@ -464,6 +464,7 @@ const baseSettings: CaptureSettings = {
     'bus.bankEnabledNote', 'bus.bankDisableNote', 'bus.bankDisabledNote',
     'capturePanel.loop', 'capturePanel.retentionSamples', 'capturePanel.retentionNote',
     'capturePanel.loopCeilingNote',
+    'capturePanel.all', 'capturePanel.clear', 'capturePanel.enabledCount',
     'bus.loopWindow', 'bus.globalCapture', 'bus.loopUnit', 'bus.loopMax', 'bus.loopEffective',
     'bus.loopInvalid', 'bus.loopUnavailable', 'bus.advanced',
   ];

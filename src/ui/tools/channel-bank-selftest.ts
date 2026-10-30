@@ -250,7 +250,8 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     panel.includes("chip.setAttribute('aria-pressed', String(c.enabled))");
   const wired = app.includes('onToggleBank: (start) => this.setBankEnabled(start)') &&
     app.includes('const next = toggleChannelBank(this.channels, start, lockedChannelBanks(this.busViews, this.channels.length));') &&
-    app.includes('const next = clearChannelBanks(this.channels, lockedChannelBanks(this.busViews, this.channels.length));');
+    app.includes('onChannelWidth: (n) => this.setChannelWidth(n)') &&
+    !panel.includes('capturePanel.all') && !panel.includes('channel-enabled-count');
   const grid = sheet.includes('grid-template-columns: repeat(8, minmax(0, 1fr))') &&
     sheet.includes('.channel-bank-head') && sheet.includes('.channel-bank-count');
   check('the real Device panel renders accessible eight-channel banks through App state',
