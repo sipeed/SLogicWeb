@@ -287,20 +287,21 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     busPanel.indexOf("this.dialog.close('applied')") >= 0 &&
     busPanel.indexOf("this.dialog.close('applied')") < busPanel.indexOf('this.cb.onConfirm(this.start');
   const realState = panel.includes('buses: readonly BusViewState[]') &&
-    app.includes('buses: this.busViews') && app.includes('this.configureBankBus(start, cfg, enabled, loopSamples)') &&
+    app.includes('buses: this.busViews') && app.includes('this.configureBankBus(start, cfg, enabled)') &&
     app.includes('if (active) this.updateBus(active.id, next, true);') && app.includes('else this.addBus(next);');
   check('the bank dialog uses shared advanced fields and a two-mode canonical order draft',
     iconOnly && sharedFields && orderMode && disclosures && nativeDialog && realState,
     `iconOnly=${iconOnly}, sharedFields=${sharedFields}, orderMode=${orderMode}, ` +
     `disclosures=${disclosures}, nativeDialog=${nativeDialog}, realState=${realState}`);
 
-  const globalLoop = dialog.includes('loopSamplesFromTime') && dialog.includes('maxLoopTimeValue') &&
-    dialog.includes('formatDuration(samples / context.samplerate)') &&
-    app.includes('this.settings = this.bankCaptureSettings(start, loopSamples, next);') &&
-    app.includes('this.bankCaptureSettings(start, this.settings.loopSamples, config)') &&
+  const loopDecoupled = !dialog.includes('loopSamples') && !dialog.includes('maxLoopTimeValue') &&
+    !dialog.includes('data-loop-input') && !dialog.includes('bank-bus-loop') &&
+    app.includes('private bankCaptureSettings(start: number, config: BusViewConfig): CaptureSettings') &&
+    app.includes('{ ...this.settings, channels }, this.rateCeilings') &&
+    app.includes('this.settings = this.bankCaptureSettings(start, next);') &&
+    !app.includes('loopSamples: preview.loopSamples') && !app.includes('captureChannels: preview.channels') &&
     app.includes('channelWidthForProbes(config.spec.clock.channel + 1)') &&
-    app.includes('activeBanks.has(bank) && bus.spec.clock') &&
-    app.includes('captureChannels: preview.channels') && app.includes('samplerate: preview.samplerate');
+    app.includes('activeBanks.has(bank) && bus.spec.clock');
   const updateBus = app.split('private updateBus(')[1]?.split('private removeBus(')[0] ?? '';
   const names = busPanel.includes("t('bus.defaultName')") &&
     app.includes('retranslateBankBusConfig(bus)') && app.includes('retranslateBankBusConfig(draft)') &&
@@ -317,9 +318,9 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
     app.includes('length !== CHANNEL_BANK_SIZE) return false;') && app.includes('return true;') &&
     app.includes('onEditBus: (id) => this.editBus(id)') && app.includes('onEdit: (id) => this.editBus(id)') &&
     busPanel.includes("edit.addEventListener('click', () => this.cb.onEdit(b.id))");
-  check('App wires global loop, localized names, capture locks and bank-only editing without reversal shortcuts',
-    globalLoop && names && locks && noBankSwap && bankEditor,
-    `globalLoop=${globalLoop}, names=${names}, locks=${locks}, noBankSwap=${noBankSwap}, bankEditor=${bankEditor}`);
+  check('the bank dialog no longer owns the loop window and App keeps loopSamples in settings',
+    loopDecoupled && names && locks && noBankSwap && bankEditor,
+    `loopDecoupled=${loopDecoupled}, names=${names}, locks=${locks}, noBankSwap=${noBankSwap}, bankEditor=${bankEditor}`);
 
   const modelLock = (app.match(/lockedChannelBanks\(this.busViews, this.channels.length\)/g) ?? []).length >= 4 &&
     app.includes('locked.has(channelBankStart(c.index))');

@@ -9,19 +9,13 @@
  */
 
 import { MAX_BUS_BITS, validateBusSpec, type BusEncoding, type BusSpec } from '../data/busValue.js';
-import type { ChannelCount } from '../types.js';
 import {
   BUS_HEIGHTS, DEFAULT_BUS_HEIGHT, busSummary, runBits, runStart, swapBusOrder,
   type BusDrawStyle, type BusViewConfig, type BusViewState,
 } from './busView.js';
 import { button, div, labelled, section } from './capturePanel.js';
 import { CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankRange } from './channelBanks.js';
-import { formatCount, formatDuration } from './format.js';
 import { t, type MessageKey } from './i18n.js';
-import {
-  DEFAULT_LOOP_TIME_UNIT, isLoopTimeUnit, loopSamplesFromTime, loopTimeFromSamples, maxLoopTimeValue,
-  type LoopTimeUnit,
-} from './loopTime.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 
 export interface BusPanelView {
@@ -430,19 +424,16 @@ export class BusPanel {
 }
 
 export interface BankBusDialogCallbacks {
-  onConfirm(start: number, config: BusViewConfig, enabled: boolean, loopSamples: number): void;
+  onConfirm(start: number, config: BusViewConfig, enabled: boolean): void;
 }
 
 export interface BankBusDialogOpenContext {
-  loopSamples: number;
-  captureChannels: ChannelCount;
-  samplerate: number;
   locked: boolean;
 }
 
 interface BankBusDetails {
   el: HTMLElement;
-  read(): { config: BusViewConfig; loopSamples: number | null };
+  read(): BusViewConfig;
 }
 
 export class BankBusDialog {
@@ -506,77 +497,6 @@ export class BankBusDialog {
     order.addEventListener('change', writeOrder);
     body.appendChild(order.el);
 
-    const loopCard = div('bank-bus-loop');
-    const loopTitle = div('bank-bus-loop-title');
-    const loopName = document.createElement('span');
-    loopName.textContent = t('bus.loopWindow');
-    const globalTag = document.createElement('span');
-    globalTag.className = 'bank-bus-global';
-    globalTag.textContent = t('bus.globalCapture');
-    loopTitle.append(loopName, globalTag);
-    loopCard.appendChild(loopTitle);
-
-    const loopRow = div('bank-bus-loop-row');
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.className = 'bank-bus-loop-input';
-    input.min = '1';
-    input.step = '1';
-    input.inputMode = 'numeric';
-    input.dataset.loopInput = '';
-    input.setAttribute('aria-label', t('bus.loopWindow'));
-    let unit: LoopTimeUnit = DEFAULT_LOOP_TIME_UNIT;
-    const initialValue = loopTimeFromSamples(context.loopSamples, unit, context.samplerate, context.captureChannels);
-    input.value = String(initialValue ?? 1);
-    const unitControl = selectControl('bus.loopUnit', t('bus.loopUnit'),
-      [['us', 'us'], ['ms', 'ms'], ['s', 's']], unit);
-    unitControl.el.dataset.loopUnit = '';
-    const inputField = div('field bank-bus-loop-value');
-    inputField.appendChild(input);
-    loopRow.append(inputField, unitControl.el);
-    loopCard.appendChild(loopRow);
-    const limit = div('panel-note bank-bus-loop-limit');
-    const effective = div('panel-note bank-bus-loop-effective');
-    loopCard.append(limit, effective);
-    body.appendChild(loopCard);
-
-    let loopDirty = false;
-    const currentSamples = (): number | null => loopDirty
-      ? loopSamplesFromTime(Number(input.value), unit, context.samplerate, context.captureChannels)
-      : context.loopSamples;
-    const updateLoop = (): void => {
-      const max = maxLoopTimeValue(context.captureChannels, context.samplerate, unit);
-      input.max = String(max);
-      input.disabled = context.locked || max < 1;
-      unitControl.disabled = context.locked || max < 1;
-      limit.textContent = max > 0 ? t('bus.loopMax', { value: max, unit }) : '';
-      const samples = currentSamples();
-      effective.classList.toggle('error', max > 0 && samples === null);
-      if (max < 1) effective.textContent = t('bus.loopUnavailable');
-      else if (samples === null) effective.textContent = t('bus.loopInvalid');
-      else {
-        effective.textContent = t('bus.loopEffective', {
-          samples: formatCount(samples), duration: formatDuration(samples / context.samplerate),
-        });
-      }
-    };
-    input.addEventListener('input', () => {
-      loopDirty = true;
-      updateLoop();
-    });
-    unitControl.addEventListener('change', () => {
-      const nextUnit = isLoopTimeUnit(unitControl.value) ? unitControl.value : DEFAULT_LOOP_TIME_UNIT;
-      const samples = currentSamples();
-      if (samples !== null) {
-        const nextValue = loopTimeFromSamples(samples, nextUnit, context.samplerate, context.captureChannels);
-        if (nextValue !== null) input.value = String(nextValue);
-      }
-      unit = nextUnit;
-      loopDirty = true;
-      updateLoop();
-    });
-    updateLoop();
-
     const update: BusDraftUpdate = (patch, spec) => {
       const next = { ...config, ...patch, spec: { ...config.spec, ...spec } };
       Object.assign(config, patch);
@@ -602,7 +522,7 @@ export class BankBusDialog {
         next.name = usesDefaultName ? t('bus.defaultName') : nameText;
         if (usesDefaultName) next.usesDefaultName = true;
         else delete next.usesDefaultName;
-        return { config: next, loopSamples: currentSamples() };
+        return next;
       },
     };
   }
@@ -652,16 +572,11 @@ export class BankBusDialog {
       event.preventDefault();
       if (context.locked || !form.reportValidity()) return;
       const enabled = enable.checked;
-      const current = enabled
-        ? (details ??= this.createDetails(config, context)).read()
-        : { config, loopSamples: context.loopSamples };
-      const next = normalizeBankBusConfig(current.config, this.channelCount, this.start);
-      if (validateBusSpec(next.spec, this.channelCount).length > 0 || current.loopSamples === null) {
-        if (current.loopSamples === null) this.dialog.querySelector<HTMLInputElement>('[data-loop-input]')?.focus();
-        return;
-      }
+      const current = enabled ? (details ??= this.createDetails(config, context)).read() : config;
+      const next = normalizeBankBusConfig(current, this.channelCount, this.start);
+      if (validateBusSpec(next.spec, this.channelCount).length > 0) return;
       this.dialog.close('applied');
-      this.cb.onConfirm(this.start, next, enabled, current.loopSamples);
+      this.cb.onConfirm(this.start, next, enabled);
     });
     form.append(header, enableLabel, actions);
     this.dialog.replaceChildren(form);

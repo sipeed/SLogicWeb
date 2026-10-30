@@ -637,7 +637,7 @@ const busMutationWiring = ['addBus', 'updateBus', 'removeBus'].every((name) => {
 });
 check('restored views get fresh IDs/null runtime and all generic/bank mutations share normalized writes',
   busRestoreWiring && busMutationWiring &&
-  app.includes('this.settings = clampSettings({ ...this.settings, loopSamples }, this.rateCeilings);'),
+  app.includes('this.settings = clampSettings({ ...this.settings }, this.rateCeilings);'),
   `restore=${busRestoreWiring}, mutations=${busMutationWiring}`);
 
 const html = fs.readFileSync('index.html', 'utf8');

@@ -313,7 +313,7 @@ export class App {
       onRemove: (id) => this.removeBus(id),
     });
     this.bankBusDialog = new BankBusDialog({
-      onConfirm: (start, cfg, enabled, loopSamples) => this.configureBankBus(start, cfg, enabled, loopSamples),
+      onConfirm: (start, cfg, enabled) => this.configureBankBus(start, cfg, enabled),
     });
 
     this.wireToolbar();
@@ -443,14 +443,14 @@ export class App {
     return true;
   }
 
-  private bankCaptureSettings(start: number, loopSamples: number, config: BusViewConfig): CaptureSettings {
+  private bankCaptureSettings(start: number, config: BusViewConfig): CaptureSettings {
     const bankWidth = channelWidthForProbes(start + CHANNEL_BANK_SIZE);
     const clockWidth = config.spec.clock ? channelWidthForProbes(config.spec.clock.channel + 1) : bankWidth;
     const currentWidth = this.neededWidth();
     let channels = bankWidth;
     if (clockWidth > channels) channels = clockWidth;
     if (currentWidth > channels) channels = currentWidth;
-    return clampSettings({ ...this.settings, channels, loopSamples }, this.rateCeilings);
+    return clampSettings({ ...this.settings, channels }, this.rateCeilings);
   }
 
   private openBankBus(start: number): boolean {
@@ -460,29 +460,25 @@ export class App {
       active ?? this.bankBusDrafts.get(start) ?? defaultBankBusConfig(this.channels.length, start),
       this.channels.length, start,
     );
-    const preview = this.bankCaptureSettings(start, this.settings.loopSamples, config);
     this.bankBusDialog.open(start, config, active !== undefined, this.channels.length, {
-      loopSamples: preview.loopSamples,
-      captureChannels: preview.channels,
-      samplerate: preview.samplerate,
       locked: this.running || this.stopping,
     });
     return true;
   }
 
-  private configureBankBus(start: number, config: BusViewConfig, enabled: boolean, loopSamples: number): void {
+  private configureBankBus(start: number, config: BusViewConfig, enabled: boolean): void {
     if (this.running || this.stopping ||
       channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return;
     const next = normalizeBankBusConfig(config, this.channels.length, start);
     this.bankBusDrafts.set(start, cloneBusConfig(next));
     if (enabled) {
-      this.settings = this.bankCaptureSettings(start, loopSamples, next);
+      this.settings = this.bankCaptureSettings(start, next);
       const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
       if (active) this.updateBus(active.id, next, true);
       else this.addBus(next);
       return;
     }
-    this.settings = clampSettings({ ...this.settings, loopSamples }, this.rateCeilings);
+    this.settings = clampSettings({ ...this.settings }, this.rateCeilings);
     const remaining = this.busViews.filter((b) => busChannelBank(b.spec) !== start);
     if (remaining.length !== this.busViews.length) {
       this.busViews = remaining;
