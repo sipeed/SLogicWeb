@@ -22,9 +22,7 @@ import {
   DEFAULT_LOOP_TIME_UNIT, isLoopTimeUnit, loopSamplesFromTime, loopTimeFromSamples, maxLoopTimeValue,
   type LoopTimeUnit,
 } from './loopTime.js';
-import { OscilloscopeChannelGrid } from './oscilloscopeChannels.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
-import type { ChannelState } from './state.js';
 
 export interface BusPanelView {
   buses: readonly BusViewState[];
@@ -436,7 +434,6 @@ export interface BankBusDialogCallbacks {
 }
 
 export interface BankBusDialogOpenContext {
-  channels: readonly ChannelState[];
   loopSamples: number;
   captureChannels: ChannelCount;
   samplerate: number;
@@ -496,22 +493,18 @@ export class BankBusDialog {
     name.dataset.oscilloscopeName = '';
     body.appendChild(labelled(t('bus.name'), name));
 
-    const channelField = div('bank-bus-channel-field');
-    const channelLabel = div('bank-bus-field-label');
-    channelLabel.textContent = t('bus.channelOrder');
-    channelField.appendChild(channelLabel);
-    const bankChannels = channelBankIndices(this.start, this.channelCount).flatMap((index) => {
-      const channel = context.channels.find((candidate) => candidate.index === index);
-      return channel ? [channel] : [];
-    });
-    const grid = new OscilloscopeChannelGrid(bankChannels, config.spec.bits, {
-      disabled: context.locked,
-      onChange: (bits) => { config.spec = { ...config.spec, bits }; },
-    });
-    const dragNote = div('panel-note bank-bus-drag-note');
-    dragNote.textContent = t('bus.dragToOrder');
-    channelField.append(grid.el, dragNote);
-    body.appendChild(channelField);
+    const order = selectControl('bus.channelOrder', t('bus.channelOrder'),
+      [['lsb', 'LSB'], ['msb', 'MSB']], runStart(config.spec.bits).msbFirst ? 'msb' : 'lsb');
+    const writeOrder = (): void => {
+      config.spec = {
+        ...config.spec,
+        bits: runBits(this.start, CHANNEL_BANK_SIZE, this.channelCount, order.value === 'msb'),
+      };
+    };
+    writeOrder();
+    order.disabled = context.locked;
+    order.addEventListener('change', writeOrder);
+    body.appendChild(order.el);
 
     const loopCard = div('bank-bus-loop');
     const loopTitle = div('bank-bus-loop-title');

@@ -459,7 +459,6 @@ export class App {
     );
     const preview = this.bankCaptureSettings(start, this.settings.loopSamples, config);
     this.bankBusDialog.open(start, config, active !== undefined, this.channels.length, {
-      channels: this.channels,
       loopSamples: preview.loopSamples,
       captureChannels: preview.channels,
       samplerate: preview.samplerate,

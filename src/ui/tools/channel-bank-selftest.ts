@@ -271,10 +271,16 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
   const sharedFields = busPanel.includes('function busAdvancedFields') &&
     (busPanel.match(/busAdvancedFields\(/g) ?? []).length >= 3 && busPanel.includes('bankStart: null') &&
     dialog.includes('bankStart: this.start') && busPanel.includes('clockOptions');
-  const sortable = dialog.includes('new OscilloscopeChannelGrid') &&
-    dialog.includes('config.spec = { ...config.spec, bits }') &&
+  const draftOrderWrite = dialog.includes('    };\n    writeOrder();\n    order.disabled = context.locked;');
+  const orderChange = dialog.includes("    order.addEventListener('change', writeOrder);\n    body.appendChild(order.el);");
+  const orderMode = dialog.includes("const order = selectControl('bus.channelOrder', t('bus.channelOrder')") &&
+    dialog.includes("[['lsb', 'LSB'], ['msb', 'MSB']]") &&
+    dialog.includes("runStart(config.spec.bits).msbFirst ? 'msb' : 'lsb'") &&
+    dialog.includes("bits: runBits(this.start, CHANNEL_BANK_SIZE, this.channelCount, order.value === 'msb')") &&
+    draftOrderWrite && orderChange &&
+    !dialog.includes('new Oscilloscope' + 'ChannelGrid') && !dialog.includes("t('bus.drag" + "ToOrder')") &&
     !dialog.includes("t('bus.msbFirst')") && !dialog.includes("t('bus.perBit')") &&
-    !dialog.includes('runBits(') && !dialog.includes('bankEnabledNote');
+    !dialog.includes('bankEnabledNote');
   const disclosures = dialog.includes('details?.el.remove()') &&
     dialog.includes("document.createElement('details')") && dialog.includes("t('bus.advanced')");
   const nativeDialog = busPanel.includes('this.dialog.showModal()') &&
@@ -283,9 +289,9 @@ check('Clear with D0 locked preserves that whole bank without an extra channel',
   const realState = panel.includes('buses: readonly BusViewState[]') &&
     app.includes('buses: this.busViews') && app.includes('this.configureBankBus(start, cfg, enabled, loopSamples)') &&
     app.includes('if (active) this.updateBus(active.id, next, true);') && app.includes('else this.addBus(next);');
-  check('the bank dialog uses shared advanced fields and a sortable draft without legacy bit controls',
-    iconOnly && sharedFields && sortable && disclosures && nativeDialog && realState,
-    `iconOnly=${iconOnly}, sharedFields=${sharedFields}, sortable=${sortable}, ` +
+  check('the bank dialog uses shared advanced fields and a two-mode canonical order draft',
+    iconOnly && sharedFields && orderMode && disclosures && nativeDialog && realState,
+    `iconOnly=${iconOnly}, sharedFields=${sharedFields}, orderMode=${orderMode}, ` +
     `disclosures=${disclosures}, nativeDialog=${nativeDialog}, realState=${realState}`);
 
   const globalLoop = dialog.includes('loopSamplesFromTime') && dialog.includes('maxLoopTimeValue') &&
