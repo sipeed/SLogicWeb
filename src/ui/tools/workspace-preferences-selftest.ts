@@ -616,7 +616,7 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
 }
 
 {
-  const invalidDecoders = ['', 'I2C', 'i2c ', 'i2c-', 'a'.repeat(65), 42, null, ['i2c']];
+  const invalidDecoders = ['', 'I2C', 'i2c ', 'xy2-100!', '-xy2', 'a'.repeat(65), 42, null, ['i2c']];
   const dropped = invalidDecoders.map((decoderId) => parseWorkspaceSnapshot(JSON.stringify({
     version: 1, analyzers: [{ decoderId, channels: {} }],
   }))?.analyzers?.length);
@@ -635,6 +635,74 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     dropped.every((length) => length === 0) && boundary[0] === undefined && boundary[1] === 64 &&
     mixed.length === 1 && mixed[0]?.decoderId === 'i2c',
     `${dropped.join(',')} | ${boundary.join(',')} | mixed=${mixed.length}`);
+}
+
+{
+  const decoderMounts = (decoderId: unknown) => parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, analyzers: [{ decoderId, channels: {} }],
+  }))?.analyzers?.[0]?.decoderId;
+  check('the decoder-id charset admits interior and trailing dashes but still rejects leading ones',
+    decoderMounts('xy2-100') === 'xy2-100' && decoderMounts('i2c-') === 'i2c-' &&
+    decoderMounts('-xy2') === undefined && decoderMounts('xy2-100!') === undefined,
+    [decoderMounts('xy2-100'), decoderMounts('i2c-'), decoderMounts('-xy2'), decoderMounts('xy2-100!')]
+      .map((value) => String(value)).join(' | '));
+}
+
+{
+  const snapshot: WorkspaceSnapshotV1 = {
+    version: 1,
+    detailedLabels: true,
+    analyzers: [{
+      id: 'xy2-100-1',
+      decoderId: 'xy2-100',
+      label: 'XY2-100',
+      color: '#9A7B2E',
+      channels: { 0: 2, 1: 3, 2: -1 },
+      options: { address: 0 },
+      laneChannel: 3,
+    }],
+  };
+  const baseline = serializeWorkspaceSnapshot(snapshot);
+  const restored = parseWorkspaceSnapshot(baseline)?.analyzers ?? [];
+  const reserialized = serializeWorkspaceSnapshot({
+    version: 1, detailedLabels: true, analyzers: restored,
+  });
+  const [xy2] = restored;
+  check('dashed decoder mounts round-trip byte-identically and keep their stock per-instance id',
+    restored.length === 1 && xy2?.id === 'xy2-100-1' && xy2.decoderId === 'xy2-100' &&
+    JSON.stringify(xy2.channels) === '{"0":2,"1":3,"2":-1}' && xy2.laneChannel === 3 &&
+    reserialized === baseline && nextAnalyzerSequence(restored) === 2,
+    `${restored.length} | ${xy2?.id} | byte-equal=${reserialized === baseline} | next=${nextAnalyzerSequence(restored)}`);
+}
+
+{
+  const idOf = (id: unknown) => parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, analyzers: [{ id, decoderId: 'xy2-100', channels: {} }],
+  }))?.analyzers?.[0]?.id;
+  const synthesized = ['xy2-100-x', 'XY2-100-1', 'xy2-100-', 'xy2-100-1.5'].map(idOf);
+  check('analyzer ids keep dashed decoder prefixes and synthesize anything that is not <prefix>-<n>',
+    idOf('xy2-100-1') === 'xy2-100-1' && idOf('xy2-100-0') === 'xy2-100-0' &&
+    synthesized.every((id) => id === 'xy2-100-0'),
+    `${idOf('xy2-100-1')} | ${synthesized.join(',')}`);
+}
+
+{
+  const options = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    analyzers: [{
+      decoderId: 'xy2-100',
+      channels: {},
+      options: {
+        'stop-bits': 8, 'data-bits': '7', 'trailing-': 1, '-leading': 2, 'UP-per': 3,
+        plain_key: 4, '': 5,
+      },
+    }],
+  }))?.analyzers?.[0]?.options ?? {};
+  check('analyzer option keys share the dashed token charset and drop only the illegal shapes',
+    options['stop-bits'] === 8 && options['data-bits'] === '7' && options['trailing-'] === 1 &&
+    options.plain_key === 4 && Object.keys(options).length === 4 &&
+    !('-leading' in options) && !('UP-per' in options) && !('' in options),
+    JSON.stringify(options));
 }
 
 {

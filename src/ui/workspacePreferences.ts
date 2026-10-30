@@ -15,8 +15,8 @@ export const MAX_PERSISTED_ANALYZERS = 64;
 
 const MAX_DECODER_CHANNELS = 64;
 const MAX_ANALYZER_LABEL_LENGTH = 64;
-const ANALYZER_TOKEN = /^[a-z0-9_]{1,64}$/;
-const ANALYZER_ID = /^[a-z0-9_]+-\d+$/;
+const ANALYZER_TOKEN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const ANALYZER_ID = /^[a-z0-9_-]+-\d+$/;
 const CANONICAL_INDEX_KEY = /^(0|[1-9]\d*)$/;
 
 export interface PersistedChannel {
