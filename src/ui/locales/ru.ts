@@ -128,7 +128,7 @@ export const ru: Messages = {
 
   // ------------------------------------------------------- capture panel
   'capturePanel.digital': 'Цифровые каналы',
-  'capturePanel.channelWidth': 'Включённые каналы',
+  'capturePanel.channelWidth': 'Ширина каналов',
   'capturePanel.channelWidthBusy': 'Ширину каналов нельзя изменить во время захвата',
   'capturePanel.oscilloscopeConfig': '{range}: настройка аналогового осциллографа — {state}',
   'capturePanel.oscilloscopeEnabled': 'включён',
@@ -137,7 +137,7 @@ export const ru: Messages = {
   'capturePanel.oscilloscopeActive': 'Аналоговый осциллограф включён',
   'capturePanel.sampleRate': 'Частота выборки',
   'capturePanel.threshold': 'Порог',
-  'capturePanel.dacNote': 'Код DAC {code} = фактически {volts} В. Ширина захвата: {channels} кан. (потолок {rate}).',
+  'capturePanel.dacNote': 'Код DAC {code} = фактически {volts} В. Ширина захвата: {channels} CH (потолок {rate}).',
   'capturePanel.capture': 'Захват',
   'capturePanel.freeRun': 'Свободный режим',
   'capturePanel.timer': 'Таймер',

@@ -235,6 +235,7 @@ check('bank start uses the absolute channel index',
 
   const widthPanel = panel.includes('channelWidthOptions(v.channels.length)') &&
     panel.includes("b.className = 'seg' + (s.channels === n ? ' on' : '')") &&
+    panel.includes('b.textContent = `${n}CH`') &&
     panel.includes("b.dataset.channelWidth = String(n)") &&
     panel.includes('b.disabled = v.running || v.stopping') &&
     panel.includes("b.title = t('capturePanel.channelWidthBusy')") &&

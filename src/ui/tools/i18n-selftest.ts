@@ -503,6 +503,7 @@ const baseSettings: CaptureSettings = {
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',
     'analyzerPanel.decoderSearchLabel',
     'bus.defaultName', 'bus.enableBank',
+    'capturePanel.channelWidth',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];

@@ -126,7 +126,7 @@ export const zhCN: Messages = {
 
   // ------------------------------------------------------- capture panel
   'capturePanel.digital': '数字通道',
-  'capturePanel.channelWidth': '启用的通道数',
+  'capturePanel.channelWidth': '通道规格',
   'capturePanel.channelWidthBusy': '采集运行期间无法更改通道宽度',
   'capturePanel.oscilloscopeConfig': '{range} 模拟示波器配置：{state}',
   'capturePanel.oscilloscopeEnabled': '已启用',
@@ -135,7 +135,7 @@ export const zhCN: Messages = {
   'capturePanel.oscilloscopeActive': '模拟示波器功能启用中',
   'capturePanel.sampleRate': '采样率',
   'capturePanel.threshold': '阈值',
-  'capturePanel.dacNote': 'DAC 码 {code} = 实际 {volts} V。采集宽度 {channels} 通道（上限 {rate}）。',
+  'capturePanel.dacNote': 'DAC 码 {code} = 实际 {volts} V。采集宽度 {channels} CH（上限 {rate}）。',
   'capturePanel.capture': '采集',
   'capturePanel.freeRun': '自由运行',
   'capturePanel.timer': '定时',

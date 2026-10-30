@@ -110,7 +110,7 @@ export class CapturePanel {
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'seg' + (s.channels === n ? ' on' : '');
-        b.textContent = `${n}ch`;
+        b.textContent = `${n}CH`;
         b.dataset.channelWidth = String(n);
         b.disabled = v.running || v.stopping;
         if (b.disabled) {

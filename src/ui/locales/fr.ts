@@ -128,7 +128,7 @@ export const fr: Messages = {
 
   // ------------------------------------------------------- capture panel
   'capturePanel.digital': 'Canaux numériques',
-  'capturePanel.channelWidth': 'Canaux activés',
+  'capturePanel.channelWidth': 'Largeur des canaux',
   'capturePanel.channelWidthBusy': 'La largeur des canaux est verrouillée pendant une capture',
   'capturePanel.oscilloscopeConfig': '{range} : configuration de l’oscilloscope analogique — {state}',
   'capturePanel.oscilloscopeEnabled': 'activé',
@@ -137,7 +137,7 @@ export const fr: Messages = {
   'capturePanel.oscilloscopeActive': 'Oscilloscope analogique activé',
   'capturePanel.sampleRate': 'Fréquence d’échantillonnage',
   'capturePanel.threshold': 'Seuil',
-  'capturePanel.dacNote': 'Code DAC {code} = {volts} V réel. Largeur de capture : {channels} canaux (plafond {rate}).',
+  'capturePanel.dacNote': 'Code DAC {code} = {volts} V réel. Largeur de capture : {channels} CH (plafond {rate}).',
   'capturePanel.capture': 'Capture',
   'capturePanel.freeRun': 'Marche libre',
   'capturePanel.timer': 'Minuteur',

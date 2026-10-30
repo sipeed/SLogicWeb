@@ -132,7 +132,7 @@ export const en = {
 
   // ------------------------------------------------------- capture panel
   'capturePanel.digital': 'Digital',
-  'capturePanel.channelWidth': 'Enabled channels',
+  'capturePanel.channelWidth': 'Channel width',
   'capturePanel.channelWidthBusy': 'Channel width is locked while capture is running',
   'capturePanel.oscilloscopeConfig': '{range} analog oscilloscope configuration: {state}',
   'capturePanel.oscilloscopeEnabled': 'enabled',
@@ -141,7 +141,7 @@ export const en = {
   'capturePanel.oscilloscopeActive': 'Analog oscilloscope enabled',
   'capturePanel.sampleRate': 'Sample rate',
   'capturePanel.threshold': 'Threshold',
-  'capturePanel.dacNote': 'DAC code {code} = {volts} V actual. Capture width {channels} ch (ceiling {rate}).',
+  'capturePanel.dacNote': 'DAC code {code} = {volts} V actual. Capture width {channels} CH (ceiling {rate}).',
   'capturePanel.capture': 'Capture',
   'capturePanel.freeRun': 'Free run',
   'capturePanel.timer': 'Timer',
