@@ -143,6 +143,7 @@ export const en = {
   'capturePanel.unlimited': 'Unlimited',
   'capturePanel.durationS': 'Duration (s)',
   'capturePanel.repeatIntervalS': 'Repeat every (s)',
+  'capturePanel.repeatPending': 'Repeat is waiting. Stop to cancel the next capture.',
   'capturePanel.loopSamples': 'Window (samples)',
   'capturePanel.loopWindow': 'Window {kept} / {limit} samples · {dropped} dropped',
   'capturePanel.loopWindowLimit': 'Window ceiling {samples} samples = {duration} at {rate}.',

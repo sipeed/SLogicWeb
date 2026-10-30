@@ -137,6 +137,7 @@ export const zhCN: Messages = {
   'capturePanel.unlimited': '无限',
   'capturePanel.durationS': '时长 (s)',
   'capturePanel.repeatIntervalS': '重复间隔 (s)',
+  'capturePanel.repeatPending': '正在等待下一次重复采集，停止可取消。',
   'capturePanel.loopSamples': '窗口 (样本)',
   'capturePanel.loopWindow': '窗口 {kept} / {limit} 样本 · 已丢弃 {dropped}',
   'capturePanel.loopWindowLimit': '窗口上限 {samples} 个样本 = 在 {rate} 下为 {duration}。',

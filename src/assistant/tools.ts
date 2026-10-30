@@ -29,6 +29,7 @@ export interface HostSnapshot {
   device: string | null;
   running: boolean;
   stopping: boolean;
+  repeatPending: boolean;
   /** Formatted status-bar error, '' when none. */
   error: string;
   label: string;
@@ -237,6 +238,7 @@ function stateView(host: AssistantHost): Record<string, unknown> {
     device: st.device,
     running: st.running,
     stopping: st.stopping,
+    repeat_pending: st.repeatPending,
     status: st.label,
     ...(st.error ? { error: st.error } : {}),
     capture: {
@@ -582,7 +584,9 @@ export const TOOLS: AssistantTool[] = [
     risk: 'act',
     run: async (i, host) => {
       const st = host.snapshot();
-      if (st.running || st.stopping) throw new Error('A capture is running; stop it before changing settings.');
+      if (st.running || st.stopping || st.repeatPending) {
+        throw new Error('A capture is running or waiting to repeat; stop it before changing settings.');
+      }
       const patch: Partial<CaptureSettings> = {};
       if (typeof i.samplerate_hz === 'number') patch.samplerate = i.samplerate_hz;
       if (typeof i.threshold_v === 'number') patch.thresholdVolts = i.threshold_v;
@@ -640,7 +644,9 @@ export const TOOLS: AssistantTool[] = [
     run: async (i, host, signal) => {
       const st = host.snapshot();
       if (!st.connected) throw new Error(NO_DEVICE);
-      if (st.running || st.stopping) throw new Error('A capture is already running.');
+      if (st.running || st.stopping || st.repeatPending) {
+        throw new Error('A capture is already running or waiting to repeat.');
+      }
       const outcome = await host.startAndWait(((i.timeout_s as number | undefined) ?? 15) * 1000, signal);
       const after = stateView(host);
       if (outcome === 'not-started') return { started: false, state: after };
@@ -649,11 +655,12 @@ export const TOOLS: AssistantTool[] = [
   },
   {
     name: 'stop_capture',
-    description: 'Stop the running capture. The data captured so far is kept.',
+    description: 'Stop the running capture or a pending repeat. The data captured so far is kept.',
     inputSchema: obj({}),
     risk: 'act',
     run: async (_i, host) => {
-      if (!host.snapshot().running) throw new Error('No capture is running.');
+      const st = host.snapshot();
+      if (!st.running && !st.repeatPending) throw new Error('No capture is running.');
       await host.stop();
       return stateView(host);
     },

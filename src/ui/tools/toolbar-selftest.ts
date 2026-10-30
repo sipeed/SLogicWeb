@@ -108,7 +108,7 @@ const primaryBody = primaryStart >= 0 && primaryEnd > primaryStart
   ? app.slice(primaryStart, primaryEnd)
   : '';
 const primaryRoutes = primaryBody.includes('if (this.stopping) return;') &&
-  primaryBody.includes('if (this.running) void this.stopCapture();') &&
+  primaryBody.includes('if (this.running || this.repeatTimer.pending) void this.stopCapture();') &&
   primaryBody.includes('else if (this.device) void this.startCapture();') &&
   !primaryBody.includes('loadDemo');
 const clickDispatch = app.includes(
@@ -126,9 +126,9 @@ check(
 );
 
 const transportStateNeedles = [
-  ": this.running ? t('toolbar.stop') : t('toolbar.start')",
-  ": this.running ? t('toolbar.shortStop') : t('toolbar.shortStart')",
-  'btn.disabled = this.stopping || (this.device === null && !this.running);',
+  ": showStop ? t('toolbar.stop') : t('toolbar.start')",
+  ": showStop ? t('toolbar.shortStop') : t('toolbar.shortStart')",
+  'btn.disabled = this.stopping || (this.device === null && !showStop);',
   ": this.device ? t('toolbar.startTitle') : t('toolbar.connectHint')",
 ];
 const missingTransportState = transportStateNeedles.filter((needle) => !app.includes(needle));
@@ -167,7 +167,7 @@ const discardDeviceBody = methodBody('private discardDevice(): number {');
 const detachBody = methodBody('private detachDevice(): number {');
 const teardownBody =
   methodBody('private async teardownDevice(device: Device | null): Promise<void> {');
-const stopCaptureBody = methodBody('private async stopCapture(): Promise<void> {');
+const stopCaptureBody = methodBody('private async stopCapture(');
 const connectBody = methodBody('private async connect(): Promise<AcquireOutcome> {');
 const reconnectBody = methodBody('private async reconnectGranted(): Promise<void> {');
 
@@ -867,15 +867,15 @@ const dynamicNames = [
 ];
 const missingDynamicNames = dynamicNames.filter((needle) => !app.includes(needle));
 const dynamicTransportName = app.includes("btn.setAttribute('aria-label', this.stopping ? t('toolbar.stopping')") &&
-  app.includes(": this.running ? t('toolbar.stop') : t('toolbar.start'));");
+  app.includes(": showStop ? t('toolbar.stop') : t('toolbar.start'));");
 const retiredVisibleLabelTargets = [
   'connectTitle', 'connectDescription', 'transportTitle',
   "'device-title'", "'device-description'", "'transport-title'",
 ].filter((needle) => app.includes(needle));
 const retiredTransportDescription = ['transportDescription', 'transport-description']
   .filter((needle) => app.includes(needle) || toolbar.includes(needle));
-const preservedClasses = app.includes("btn.classList.toggle('primary', !this.running)") &&
-  app.includes("btn.classList.toggle('danger', this.running)") && !app.includes('btn.className =');
+const preservedClasses = app.includes("btn.classList.toggle('primary', !showStop)") &&
+  app.includes("btn.classList.toggle('danger', showStop)") && !app.includes('btn.className =');
 check(
   'renderToolbarState refreshes toolbar accessible names from state and t()',
   directButtonTranslations.length === 0 && missingDynamicNames.length === 0 &&
@@ -887,9 +887,9 @@ check(
 );
 
 const dynamicTransportLabel = app.includes("label.textContent = this.stopping ? t('toolbar.shortStopping')") &&
-  app.includes(": this.running ? t('toolbar.shortStop') : t('toolbar.shortStart');");
+  app.includes(": showStop ? t('toolbar.shortStop') : t('toolbar.shortStart');");
 check(
-  'the visual transport shorthand follows stopping, running and connected states',
+  'the visual transport shorthand follows stopping, running, repeat-pending and connected states',
   dynamicTransportLabel,
   `dynamic=${dynamicTransportLabel}`,
 );

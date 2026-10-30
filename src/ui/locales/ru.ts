@@ -139,6 +139,7 @@ export const ru: Messages = {
   'capturePanel.unlimited': 'Без ограничений',
   'capturePanel.durationS': 'Длительность (с)',
   'capturePanel.repeatIntervalS': 'Интервал повтора (с)',
+  'capturePanel.repeatPending': 'Ожидание повтора. Остановите, чтобы отменить следующий захват.',
   'capturePanel.loopSamples': 'Окно (отсчёты)',
   'capturePanel.loopWindow': 'Окно {kept} / {limit} отсчётов · отброшено {dropped}',
   'capturePanel.loopWindowLimit': 'Потолок окна: {samples} отсчётов = {duration} на {rate}.',

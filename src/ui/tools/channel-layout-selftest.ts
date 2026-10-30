@@ -551,14 +551,15 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     panel.includes("['loop', t('capturePanel.modeLoop')]") &&
     panel.includes('secs.dataset.captureSeconds') && panel.includes('interval.dataset.repeatInterval') &&
     panel.includes('unlimited.dataset.singleUnlimited') && panel.includes('win.dataset.loopSamples') &&
-    modeBlock.includes('b.disabled = v.running || v.stopping') && modeBlock.includes('s.mode === id') &&
+    modeBlock.includes('b.disabled = modeLocked') && modeBlock.includes('s.mode === id') &&
+    modeBlock.includes('const modeLocked = v.running || v.stopping || v.repeatPending') &&
     !modeBlock.includes('oscilloscope') && !panel.includes('v.effectiveMode') &&
     !panel.includes('v.oscilloscopeActive') && !panel.includes('oscilloscopeTakeover');
   check('the capture panel offers Single, Repeat and Loop with basic mode settings',
     panelModes,
     `free=${panel.includes('capturePanel.freeRun')}, timer=${panel.includes('capturePanel.timer')}, ` +
     `takeover=${panel.includes('oscilloscopeTakeover')}, stored=${modeBlock.includes('s.mode === id')}, ` +
-    `lock=${modeBlock.includes('b.disabled = v.running || v.stopping')}`);
+    `lock=${modeBlock.includes('b.disabled = modeLocked')}`);
 
   const appSrc = loopFs.readFileSync('src/ui/app.ts', 'utf8');
   const startStart = appSrc.indexOf('private async startCapture(');

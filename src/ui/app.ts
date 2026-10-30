@@ -80,6 +80,7 @@ import {
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
 import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.js';
 import { capturePostTriggerSamples } from './capturePolicy.js';
+import { RepeatCaptureTimer } from './repeatCapture.js';
 import { markerPointerCursor, markerSnapRadii, type MarkerCursor } from './markerGeometry.js';
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
@@ -100,6 +101,8 @@ interface Lane {
   displayRow: number;
   laneChannel: number;
 }
+
+type CaptureStopReason = 'manual' | 'completed';
 
 export class App {
   private readonly storeRef: StoreRef;
@@ -153,6 +156,7 @@ export class App {
   private device: Device | null = null;
   private deviceEpoch = 0;
   private stopPending: Promise<void> | null = null;
+  private readonly repeatTimer = new RepeatCaptureTimer();
   private rateCeilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ;
   private running = false;
   /** True while WebUSB transfers from the previous run are being cancelled and drained. */
@@ -1539,6 +1543,7 @@ export class App {
         deviceName: this.device?.name ?? null,
         running: this.running,
         stopping: this.stopping,
+        repeatPending: this.repeatTimer.pending,
         progress: this.running ? this.progressView() : null,
         maxSamplerateHz: this.rateCeilings,
         triggerState: this.triggerState,
@@ -1560,7 +1565,7 @@ export class App {
 
   private primaryAction(): void {
     if (this.stopping) return;
-    if (this.running) void this.stopCapture();
+    if (this.running || this.repeatTimer.pending) void this.stopCapture();
     else if (this.device) void this.startCapture();
   }
 
@@ -1573,6 +1578,8 @@ export class App {
    * vanished mid-run.
    */
   private renderToolbarState(): void {
+    const repeatPending = this.repeatTimer.pending;
+    const showStop = this.running || repeatPending;
     const webusbAvailable = typeof navigator !== 'undefined' && !!navigator.usb;
     const deviceName = this.device?.name ?? null;
     this.el.connect.setAttribute('aria-label',
@@ -1593,17 +1600,17 @@ export class App {
 
     const btn = this.el.transport;
     btn.setAttribute('aria-label', this.stopping ? t('toolbar.stopping')
-      : this.running ? t('toolbar.stop') : t('toolbar.start'));
+      : showStop ? t('toolbar.stop') : t('toolbar.start'));
     const label = btn.querySelector<HTMLElement>('.toolbar-item-label');
     if (label) {
       label.textContent = this.stopping ? t('toolbar.shortStopping')
-        : this.running ? t('toolbar.shortStop') : t('toolbar.shortStart');
+        : showStop ? t('toolbar.shortStop') : t('toolbar.shortStart');
     }
-    btn.classList.toggle('primary', !this.running);
-    btn.classList.toggle('danger', this.running);
-    btn.disabled = this.stopping || (this.device === null && !this.running);
+    btn.classList.toggle('primary', !showStop);
+    btn.classList.toggle('danger', showStop);
+    btn.disabled = this.stopping || (this.device === null && !showStop);
     btn.title = this.stopping ? t('toolbar.stoppingTitle')
-      : this.running ? t('toolbar.stopTitle')
+      : showStop ? t('toolbar.stopTitle')
         : this.device ? t('toolbar.startTitle') : t('toolbar.connectHint');
   }
 
@@ -1686,6 +1693,7 @@ export class App {
   }
 
   private adoptCapture(store: SampleStore, names: string[], label: CaptureLabel): void {
+    this.repeatTimer.cancel();
     this.discardDecodeState();
     this.releaseMarkerPointer();
     this.storeRef.set(store);
@@ -1739,6 +1747,7 @@ export class App {
   // ------------------------------------------------------------------ device
 
   private discardDevice(): number {
+    this.repeatTimer.cancel();
     const device = this.device;
     this.deviceEpoch += 1;
     if (device) {
@@ -1760,6 +1769,7 @@ export class App {
   }
 
   private installDevice(d: Device, epoch: number): boolean {
+    this.repeatTimer.cancel();
     if (epoch !== this.deviceEpoch && this.device !== null) {
       d.terminate();
       return false;
@@ -1919,7 +1929,7 @@ export class App {
   }
 
   private async startCapture(): Promise<void> {
-    if (this.running || this.stopping) return;
+    if (this.running || this.stopping || this.repeatTimer.pending) return;
     if (!this.device) { this.fail('error.start', new Error('no device connected')); return; }
     const device = this.device;
     try {
@@ -2012,13 +2022,13 @@ export class App {
           return;
         }
         const room = (this.captureLimitSamples - store.length) * bytesPerSample;
-        if (room <= 0) { void this.stopCapture(); return; }
+        if (room <= 0) { void this.stopCapture('completed'); return; }
         // Count what is actually kept: a truncated tail chunk must not inflate the
         // progress readout past the capture.
         this.captureBytes += Math.min(room, chunk.length);
         store.append(room < chunk.length ? chunk.subarray(0, room) : chunk);
         this.dirty = true;
-        if (store.length >= this.captureLimitSamples) void this.stopCapture();
+        if (store.length >= this.captureLimitSamples) void this.stopCapture('completed');
       }, (pos, missing) => {
         // A transfer the device could not fill. Append filler for the lost samples so
         // store time keeps tracking device time, then mark that span untrusted.
@@ -2040,7 +2050,7 @@ export class App {
         if (n === 0) return;
         this.lostSamples += n;
         if (isLoop) { this.enforceLoopRetention(this.storeRef); return; }
-        if (store.length >= this.captureLimitSamples) void this.stopCapture();
+        if (store.length >= this.captureLimitSamples) void this.stopCapture('completed');
       }, softwareTrigger ? {
         // A loop capture windows the triggered stream downstream of the trigger: the
         // trigger's budget is unbounded (maxSamples Infinity), the store drops the
@@ -2049,7 +2059,7 @@ export class App {
         // The transport says when bounded delivery is complete (trigger budget emitted,
         // or finite host budget delivered). This is the stop signal that does not depend
         // on this side's sample arithmetic agreeing with the transport's to the sample.
-        onEnd: () => { if (this.running) void this.stopCapture(); },
+        onEnd: () => { if (this.running) void this.stopCapture('completed'); },
         softwareTrigger: {
           channels: cfg.channels,
           conditions: triggerConditions.map((c) => ({
@@ -2081,13 +2091,14 @@ export class App {
         // of the first-byte and underrun watchdogs, ending only on a manual stop or a
         // device error (HSync semantics).
         ...(isLoop ? { loop: true } : { deviceSampleLimit: this.captureLimitSamples }),
-        onEnd: () => { if (this.running) void this.stopCapture(); },
+        onEnd: () => { if (this.running) void this.stopCapture('completed'); },
       });
       if (!this.running) {
         if (this.stopPending) await this.stopPending;
         else if (this.device === device) await this.teardownDevice(device);
       }
     } catch (e) {
+      this.repeatTimer.cancel();
       const armed = this.startMutatedCapture;
       if (armed && this.device === device) this.deviceLost(e, false);
       this.running = false;
@@ -2123,8 +2134,15 @@ export class App {
     this.hover = null;
   }
 
-  private async stopCapture(): Promise<void> {
+  private async stopCapture(reason: CaptureStopReason = 'manual'): Promise<void> {
+    if (!this.running && !this.stopping && this.repeatTimer.pending) {
+      this.repeatTimer.cancel();
+      this.relayout();
+      this.renderPanels();
+      return;
+    }
     if (!this.running || this.stopping) return;
+    if (reason === 'manual') this.repeatTimer.cancel();
     this.running = false;
     this.stopping = true;
     this.renderPanels();
@@ -2136,7 +2154,7 @@ export class App {
       this.stopping = false;
       this.stopPending = null;
     }
-    this.finishCapture();
+    this.finishCapture(reason);
   }
 
   private async teardownDevice(device: Device | null): Promise<void> {
@@ -2153,12 +2171,15 @@ export class App {
     }
   }
 
-  private finishCapture(): void {
+  private finishCapture(reason: CaptureStopReason = 'manual'): void {
     this.setFollow(false);
     const sr = this.store.samplerate;
     this.captureLabel = this.triggerState === 'not-found'
       ? { kind: 'stoppedNoTrigger', samples: this.store.length }
       : { kind: 'live', samples: this.store.length, rate: sr, seconds: this.store.length / sr };
+    if (reason === 'completed' && this.settings.mode === 'repeat' && this.device !== null) {
+      this.repeatTimer.schedule(this.settings.repeatIntervalSeconds, () => { void this.startCapture(); });
+    }
     this.stack.zoomToFit();
     this.relayout();
     this.renderPanels();
@@ -2327,6 +2348,7 @@ export class App {
         device: this.device?.name ?? null,
         running: this.running,
         stopping: this.stopping,
+        repeatPending: this.repeatTimer.pending,
         error: this.statusError ? formatStatusError(this.statusError) : '',
         label: formatCaptureLabel(this.captureLabel),
         samples: this.running && this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length,

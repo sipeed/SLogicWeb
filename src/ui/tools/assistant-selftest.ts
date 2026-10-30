@@ -153,6 +153,7 @@ class FakeHost implements AssistantHost {
   store_: SampleStore = fixture.store;
   connected = false;
   running = false;
+  repeatPending = false;
   analyzers_: HostAnalyzer[] = [];
   applied: { patch: Partial<CaptureSettings>; enabled?: number[] }[] = [];
   attached: { id: string; channels: Record<number, number>; options: Record<string, string | number> }[] = [];
@@ -161,7 +162,8 @@ class FakeHost implements AssistantHost {
   snapshot(): HostSnapshot {
     return {
       connected: this.connected, device: this.connected ? 'SLogic32 U3' : null, running: this.running,
-      stopping: false, error: '', label: 'fixture', samples: this.store_.length, dropped: 0,
+      stopping: false, repeatPending: this.repeatPending, error: '', label: 'fixture',
+      samples: this.store_.length, dropped: 0,
       samplerate: this.store_.samplerate, channelCount: this.store_.channelCount, triggerState: 'off',
       triggerSampleIndex: null, settings: this.s, rateCeilings: { 16: 400e6, 32: 200e6 },
       enabledChannels: [0, 1, 2], channelNames: Array.from({ length: 32 }, (_, i) => fixture.channelNames[i] ?? `D${i}`),
@@ -175,7 +177,7 @@ class FakeHost implements AssistantHost {
     this.s = { ...this.s, ...patch, samplerate: Math.min(patch.samplerate ?? this.s.samplerate, 400e6) };
   }
   async startAndWait(): Promise<'finished'> { return 'finished'; }
-  async stop(): Promise<void> { this.running = false; }
+  async stop(): Promise<void> { this.running = false; this.repeatPending = false; }
   async attach(id: string, channels: Record<number, number>, options: Record<string, string | number>): Promise<void> {
     this.attached.push({ id, channels, options });
     this.analyzers_.push({ decoderId: id, channels, options, status: 'done', note: '', result: null });
@@ -301,6 +303,21 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
   const busy = await run('set_capture_settings', { mode: 'timer' }, host);
   check('settings cannot change mid-capture', !busy.ok && /running/.test(busy.err), busy.err);
   host.running = false;
+  host.repeatPending = true;
+  const repeatBusy = await run('set_capture_settings', { mode: 'repeat' }, host);
+  host.connected = true;
+  const repeatStart = await run('start_capture', {}, host);
+  check('settings and start are rejected while a repeat is pending',
+    !repeatBusy.ok && !repeatStart.ok && /repeat/.test(repeatBusy.err) && /repeat/.test(repeatStart.err),
+    `${repeatBusy.err} | ${repeatStart.err}`);
+  const stopPending = await run('stop_capture', {}, host);
+  const stopIdle = await run('stop_capture', {}, host);
+  check('stop_capture accepts a pending-only repeat but still rejects an idle host',
+    stopPending.ok && (stopPending.out as { repeat_pending?: boolean }).repeat_pending === false &&
+    !stopIdle.ok && !host.repeatPending,
+    `${JSON.stringify(stopPending.out)} | ${stopIdle.err}`);
+  host.repeatPending = false;
+  host.connected = false;
 
   const start = await run('start_capture', {}, host);
   check('start_capture without a device tells the model the user must click Connect',

@@ -139,6 +139,7 @@ export const fr: Messages = {
   'capturePanel.unlimited': 'Illimité',
   'capturePanel.durationS': 'Durée (s)',
   'capturePanel.repeatIntervalS': 'Répéter toutes les (s)',
+  'capturePanel.repeatPending': 'La répétition attend. Arrêtez pour annuler la capture suivante.',
   'capturePanel.loopSamples': 'Fenêtre (échantillons)',
   'capturePanel.loopWindow': 'Fenêtre {kept} / {limit} échantillons · {dropped} abandonnés',
   'capturePanel.loopWindowLimit': 'Plafond de fenêtre : {samples} échantillons = {duration} à {rate}.',

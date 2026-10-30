@@ -53,6 +53,7 @@ export interface CapturePanelView {
   deviceName: string | null;
   running: boolean;
   stopping: boolean;
+  repeatPending: boolean;
   /** Non-null while a capture is streaming. */
   progress: { seconds: number; samples: number; bytes: number; lost: number; dropped: number;
     /** Retained length (`store.length`) and the loop limit; the limit is 0 outside loop mode. */
@@ -222,6 +223,7 @@ export class CapturePanel {
 
     // ---- mode
     const modeSec = section(t('capturePanel.capture'));
+    const modeLocked = v.running || v.stopping || v.repeatPending;
     const seg = div('segmented');
     for (const [id, text] of [
       ['single', t('capturePanel.modeSingle')], ['repeat', t('capturePanel.modeRepeat')],
@@ -231,7 +233,7 @@ export class CapturePanel {
       b.className = 'seg' + (s.mode === id ? ' on' : '');
       b.textContent = text;
       b.dataset.captureMode = id;
-      b.disabled = v.running || v.stopping;
+      b.disabled = modeLocked;
       b.addEventListener('click', () => this.cb.onSettings({ ...s, mode: id }));
       seg.appendChild(b);
     }
@@ -249,7 +251,7 @@ export class CapturePanel {
       secs.max = String(maxSeconds);
       secs.value = String(s.seconds);
       secs.dataset.captureSeconds = '';
-      secs.disabled = v.running || v.stopping || (s.mode === 'single' && s.singleUnlimited);
+      secs.disabled = modeLocked || (s.mode === 'single' && s.singleUnlimited);
       secs.addEventListener('change', () =>
         this.cb.onSettings({ ...s, seconds: clampCaptureSeconds(Number(secs.value), s.samplerate) }));
       modeSec.body.appendChild(labelled(t('capturePanel.durationS'), secs));
@@ -260,7 +262,7 @@ export class CapturePanel {
         unlimited.type = 'checkbox';
         unlimited.checked = s.singleUnlimited;
         unlimited.dataset.singleUnlimited = '';
-        unlimited.disabled = v.running || v.stopping;
+        unlimited.disabled = modeLocked;
         unlimited.addEventListener('change', () =>
           this.cb.onSettings({ ...s, singleUnlimited: unlimited.checked }));
         unlimitedLabel.append(unlimited, document.createTextNode(t('capturePanel.unlimited')));
@@ -273,7 +275,7 @@ export class CapturePanel {
         interval.step = '1';
         interval.value = String(s.repeatIntervalSeconds);
         interval.dataset.repeatInterval = '';
-        interval.disabled = v.running || v.stopping;
+        interval.disabled = modeLocked;
         interval.addEventListener('change', () =>
           this.cb.onSettings({ ...s, repeatIntervalSeconds: clampRepeatIntervalSeconds(Number(interval.value)) }));
         modeSec.body.appendChild(labelled(t('capturePanel.repeatIntervalS'), interval));
@@ -286,7 +288,7 @@ export class CapturePanel {
       win.step = String(LOOP_WINDOW_QUANTUM);
       win.value = String(clampLoopSamples(s.loopSamples, s.channels));
       win.dataset.loopSamples = '';
-      win.disabled = v.running || v.stopping;
+      win.disabled = modeLocked;
       win.addEventListener('change', () =>
         this.cb.onSettings({ ...s, loopSamples: clampLoopSamples(Number(win.value), s.channels) }));
       modeSec.body.appendChild(labelled(t('capturePanel.loopSamples'), win));
@@ -304,6 +306,12 @@ export class CapturePanel {
         rate: formatRate(s.samplerate),
       });
     modeSec.body.appendChild(limit);
+    if (v.repeatPending) {
+      const pending = div('panel-note live');
+      pending.dataset.repeatPending = '';
+      pending.textContent = t('capturePanel.repeatPending');
+      modeSec.body.appendChild(pending);
+    }
 
     const triggerSec = section(t('capturePanel.softwareTrigger'));
     const mask = document.createElement('input');
