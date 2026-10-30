@@ -2028,10 +2028,9 @@ export class App {
         // trigger's budget is unbounded (maxSamples Infinity), the store drops the
         // front, and the trigger marker shifts with each drop until it falls off.
         ...(isLoop ? { loop: true } : {}),
-        // The transport says when the capture has delivered everything it ever will
-        // (trigger budget emitted, or the device stopped at its own length). This is
-        // the stop signal that does not depend on this side's sample arithmetic
-        // agreeing with the device's to the sample.
+        // The transport says when bounded delivery is complete (trigger budget emitted,
+        // or finite host budget delivered). This is the stop signal that does not depend
+        // on this side's sample arithmetic agreeing with the transport's to the sample.
         onEnd: () => { if (this.running) void this.stopCapture(); },
         softwareTrigger: {
           channels: cfg.channels,
@@ -2057,12 +2056,9 @@ export class App {
           if (state === 'not-found') void this.stopCapture();
         },
       } : {
-        // A timer capture knows its length before RUN, so the device can be told to
-        // stop by itself at that length (R32_SAMPLE_LEN). That is the vendor's own
-        // answer to the overrun that wedges the board, and it is the only end-of-
-        // capture that never requires cutting off a device that is still producing.
-        // Software-trigger mode cannot use it: where the trigger will land is not
-        // known when the device is armed, and a limit there would stop the capture
+        // Timer and non-loop free captures use a host-side sample budget known before
+        // RUN. Software-trigger mode cannot use it: where the trigger will land is not
+        // known when the device is armed, and a finite budget could end the capture
         // before the trigger arrives. A loop capture is unbounded too - and opts out
         // of the first-byte and underrun watchdogs, ending only on a manual stop or a
         // device error (HSync semantics).

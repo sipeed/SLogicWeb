@@ -51,8 +51,6 @@ import {
   readDeviceFlags,
   readSampleLength,
   programCtrl,
-  sampleLengthForSamples,
-  samplesForSampleLength,
   writeSampleLength,
   type TraceEntry,
   withControlTimeout,
@@ -131,10 +129,7 @@ const SINK_CHUNK_BYTES = 8 * 1024 * 1024;
 const STOP_TIMEOUT_MS = 1500;
 const DRAIN_TRANSFER_FILLS = 2;
 const DRAIN_FLOOR_MS = 250;
-/**
- * Extra time a `bench` gives the device to finish the length it was programmed with
- * before `stop()` runs. The bench must never be the host that cuts a producing device off.
- */
+/** Extra time a `bench` gives the host to consume its finite read budget before stop(). */
 const BENCH_DRAIN_MS = 400;
 
 /**
@@ -200,9 +195,9 @@ export interface StreamTuning {
    * Completed transfers the consumer may fall behind by before the loop stops
    * replenishing the USB queue, **when the capture has no length of its own**.
    *
-   * A capture that knows its length (timer mode - `StartOptions.deviceSampleLimit`, which
-   * arms the device's own stop) bounds the queue with that length instead, exactly as the
-   * driver does (protocol.c:395), and this value is ignored: the device must never be left
+   * A capture that knows its length (timer mode - `StartOptions.deviceSampleLimit`)
+   * bounds the queue with that length instead, exactly as the driver does
+   * (protocol.c:395), and this value is ignored: the device must never be left
    * without queued reads because the consumer is late (NOTES 8.27). Software-trigger mode,
    * where the trigger position and so the capture's length are not known before RUN, has
    * nothing else to bound the memory with and keeps this cap.
@@ -307,15 +302,9 @@ export interface StartOptions extends CaptureStartOptions {
    */
   discard?: boolean;
   /**
-   * Samples the device should deliver before it stops itself (aux 0x04,
-   * R32_SAMPLE_LEN). This is the only way to end a capture without ever stopping
-   * the reader while the device is still producing, which is what overruns the
-   * FIFO and wedges the board until it is unplugged (NOTES 8.2 and 8.9).
-   *
-   * Counted in samples delivered to the sink, so the head bytes this transport
-   * discards are added here. Omit it - or pass 0 - for no limit, which is the
-   * only correct choice when the capture length is not known before RUN, as in
-   * software-trigger mode.
+   * Samples the host should deliver before ending a finite capture. Counted after
+   * the head drop, whose wire budget is added by the transport. Omit it - or pass 0 -
+   * for no limit when the capture length is not known before RUN.
    */
   deviceSampleLimit?: number;
 }
@@ -494,20 +483,8 @@ export class Slogic16U3 implements Device {
   /** Set when the host fell behind for `depth` consecutive transfers. */
   private underrun: Error | null = null;
   private readonly transferMs = new Ring(TIMING_SAMPLES);
-  /**
-   * True while R32_SAMPLE_LEN holds a limit *this* object programmed, so a later
-   * capture without one knows it has to clear the register instead of inheriting
-   * a truncated stream. Firmware that never takes the register stays untouched.
-   */
-  private sampleLimitArmed = false;
-  /**
-   * Device samples the armed limit allows, including the head this transport drops.
-   * Zero when no limit was programmed, which is also the case a stop() cannot use to
-   * tell a finished capture from a stalled one.
-   */
-  private armedDeviceSamples = 0;
-  /** Set after the first refusal, so an unsupported firmware is asked once. */
-  private sampleLimitUnavailable = false;
+  /** Device samples in the host's finite budget, including the dropped head. */
+  private targetDeviceSamples = 0;
   /** Fires if a capture never receives its first byte (a wedged board). */
   private noDataTimer: ReturnType<typeof setTimeout> | null = null;
   /** Reports how long this thread was blocked for, per acquisition. */
@@ -654,31 +631,15 @@ export class Slogic16U3 implements Device {
     return channels < 8 ? channels / 8 : bytesPerSampleForChannels(channels);
   }
 
-  /** Device samples this transport has received since RUN, the dropped head included. */
+  /** Device samples consumed within the host budget, the dropped head included. */
   private receivedDeviceSamples(): number {
-    // The head is dropped inside deliver(), which the discard path never reaches, so
-    // count it back either way and compare in the device's own units. The head bytes
-    // are *wire* bytes: at 4 channels the 4 dropped bytes are 8 device samples, and
-    // dividing by the stored bytes-per-sample here would leave this counter short of
-    // the armed limit forever - no flush, no onEnd, and stop() misses the
-    // self-stopped fast path.
     const wire = this.wireBytesPerSample(this.cfg?.channels ?? 32);
-    const headReceived = this.discard ? HEAD_DROP_BYTES : HEAD_DROP_BYTES - this.headRemaining;
+    const headReceived = this.discard ? 0 : HEAD_DROP_BYTES - this.headRemaining;
     return this.samplesDelivered + headReceived / wire;
   }
 
-  /**
-   * True when the device has delivered everything its own length limit allowed.
-   *
-   * The reads still queued at that point are tail reads the device answers with NAKs
-   * (NOTES 8.9) - they never complete and never carry a byte, so waiting STOP_TIMEOUT_MS
-   * for them only delays the next capture, and every bench would pay it. Measured on
-   * hardware: the count the device stops at lands here as a byte count that is only
-   * ever reached after the last data-carrying transfer has been consumed, which is what
-   * makes this safe to trust with a capture's tail.
-   */
-  private deviceReachedItsLimit(): boolean {
-    return this.armedDeviceSamples > 0 && this.receivedDeviceSamples() >= this.armedDeviceSamples;
+  private captureReachedItsLimit(): boolean {
+    return this.targetDeviceSamples > 0 && this.receivedDeviceSamples() >= this.targetDeviceSamples;
   }
 
   /**
@@ -804,71 +765,7 @@ export class Slogic16U3 implements Device {
       await writeSampleLength(bus, 0, (e) => this.trace(e));
       this.trace({ dir: 'info', note: `cleared a stale sample limit (R32_SAMPLE_LEN was ${current})` });
     } catch (e) {
-      this.sampleLimitUnavailable = true;
       this.trace({ dir: 'info', note: `R32_SAMPLE_LEN unavailable (${String(e)})` });
-    }
-  }
-
-  /**
-   * Program the device's own length limit (aux 0x04, R32_SAMPLE_LEN) so the device
-   * stops producing on its own instead of being cut off by the host.
-   *
-   * This is the vendor's answer to the failure that has been killing this board all
-   * along: "用于达到采集长度后停止上传, 防止停止采样命令设置前还在上传数据导致 Overflow".
-   * Measured on S/N 202608052052: six consecutive 32ch/100M captures, each ending on
-   * the device's own stop, 100.00% of the requested length, board healthy after all
-   * six (NOTES 8.9). Without it the only end-of-capture the host has is to stop
-   * reading while the device is still producing, which overruns the FIFO and wedges
-   * the sampler until the board is unplugged (NOTES 8.2).
-   *
-   * The limit counts from RB_CTRL_EN, so the samples this transport discards as a
-   * head are added before converting. A value of 0 is the device's reset value and
-   * means "no limit": a capture that must not have one (software-trigger mode, where
-   * the trigger position is not known before RUN) clears a limit an earlier capture
-   * armed rather than inheriting a stream that stops early.
-   *
-   * A firmware that does not implement the register is not fatal - the 16U3 may be
-   * one - but it is reported once, because a capture that silently loses its only
-   * underrun protection is worth knowing about.
-   */
-  private async armSampleLimit(
-    bus: RegisterBus,
-    channels: number,
-    samples: number | undefined,
-  ): Promise<void> {
-    const wanted = samples && samples > 0 ? samples + this.headDropSamples(channels) : 0;
-    // A healthy 16U3 has no reason to see this register at all.
-    if (wanted === 0 && !this.sampleLimitArmed) {
-      this.armedDeviceSamples = 0;
-      return;
-    }
-    const value = sampleLengthForSamples(wanted);
-    try {
-      await writeSampleLength(bus, value, (e) => this.trace(e));
-      this.sampleLimitArmed = value !== 0;
-      // Only a verified write counts: a limit the device did not take must not be
-      // allowed to explain a silent read queue later (writeSampleLength reads back).
-      this.armedDeviceSamples = this.sampleLimitArmed
-        ? samplesForSampleLength(value)
-        : 0;
-      this.trace({
-        dir: 'info',
-        note: value === 0
-          ? 'device sample limit cleared (R32_SAMPLE_LEN=0, no limit)'
-          : `device sample limit armed: R32_SAMPLE_LEN=${value} stops the device after ` +
-            `~${wanted} samples, so the host never has to cut off a producing device`,
-      });
-    } catch (e) {
-      if (!this.sampleLimitUnavailable) {
-        this.sampleLimitUnavailable = true;
-        console.warn(
-          '[slogic] this firmware refused R32_SAMPLE_LEN; captures run without a ' +
-            'device-side length limit and the FIFO can overrun if the host falls behind:',
-          e,
-        );
-      }
-      this.trace({ dir: 'info', note: `device sample limit unavailable (${String(e)})` });
-      this.armedDeviceSamples = 0;
     }
   }
 
@@ -969,16 +866,33 @@ export class Slogic16U3 implements Device {
     this.triggerState = opts.onTriggerState ?? null;
     this.onCaptureEnd = opts.onEnd ?? null;
     this.captureEnded = false;
+    const sampleLimit = opts.deviceSampleLimit;
     // The two end-of-capture mechanisms count different units: `deviceSampleLimit`
     // counts device samples, the trigger counts *emitted* samples. Combined, the
-    // comparison in deviceReachedItsLimit() is meaningless and can declare a still-
-    // producing device self-stopped, whose stop() path then cancels its reads - the
+    // comparison in captureReachedItsLimit() is meaningless and can declare a still-
+    // producing capture complete, whose stop() path then cancels its reads - the
     // FIFO-overrun wedge (NOTES 8.2). The capture length in trigger mode belongs in
     // `softwareTrigger.maxSamples`.
     if (opts.softwareTrigger && opts.deviceSampleLimit && opts.deviceSampleLimit > 0) {
       throw new Error('softwareTrigger and deviceSampleLimit are mutually exclusive; ' +
         'bound a triggered capture with softwareTrigger.maxSamples');
     }
+    let alignedSampleLimit: number | null = null;
+    if (sampleLimit !== undefined && Number.isFinite(sampleLimit) && sampleLimit > 0) {
+      const sampleAlignment = cfg.channels < 8 ? 1 / this.wireBytesPerSample(cfg.channels) : 1;
+      alignedSampleLimit = Math.floor(sampleLimit / sampleAlignment) * sampleAlignment;
+      if (alignedSampleLimit !== sampleLimit) {
+        this.trace({
+          dir: 'info',
+          note: `finite capture requested ${sampleLimit} samples at ${cfg.channels}ch; ` +
+            `aligned down to ${alignedSampleLimit} samples to match wire delivery; ` +
+            'choose a wire-aligned integer count to avoid the adjustment',
+        });
+      }
+    }
+    this.targetDeviceSamples = alignedSampleLimit !== null
+      ? alignedSampleLimit + this.headDropSamples(cfg.channels)
+      : 0;
     // Every byte the coalescing buffer flushes - the end-of-capture tail included -
     // must end on a sample boundary; the derived default (8 MiB) always does.
     if (this.tuning.coalesceBytes !== undefined &&
@@ -1041,10 +955,6 @@ export class Slogic16U3 implements Device {
     // to be per acquisition, right before the device is told to produce.
     await this.settleFifoOverflow(bus, 'start');
 
-    // Programme the device's own stop before RUN: from here on the capture can end
-    // without the host ever having to stop reading a device that is still producing.
-    await this.armSampleLimit(bus, cfg.channels, opts.deviceSampleLimit);
-
     const started = performance.now();
     // libusb can leave submitted URBs pending while the device is stopped, so
     // the native driver queues them before CMD_RUN. Chromium/WebUSB does not:
@@ -1058,22 +968,11 @@ export class Slogic16U3 implements Device {
     // and they have to happen before the read loop arms, which is the order below.
     await programCtrl(bus, CTRL_RUN, (e) => this.trace(e), 'start: CTRL');
     this.running = true;
-    // The exact number of wire bytes the device will send before it stops itself, when
-    // there is one: the *armed* length (rounded up by the register's granularity), in
-    // wire bytes, junk head included. It bounds the read loop's queue - the driver's
-    // rule (protocol.c:395) - and, more importantly, sizes the final transferIn.
-    // Measured on S/N 202608052052 (2026-09-14): the firmware ends its upload exactly at
-    // the armed length with NO short packet or ZLP, so a fixed-size final read that
-    // reaches past it never completes and the capture's tail sits in a URB forever -
-    // the "1 s capture stuck at 99%" report. libsigrok clamps its last transfer to the
-    // remaining bytes for exactly this reason (protocol.c:79-82). Zero means "not known
-    // before RUN", which is software-trigger mode; the loop then falls back to the
-    // consumer bound and fixed-size reads.
-    const deviceWireBytes = this.armedDeviceSamples > 0
-      ? Math.ceil(this.armedDeviceSamples * this.wireBytesPerSample(cfg.channels))
+    const targetWireBytes = this.targetDeviceSamples > 0
+      ? Math.ceil(this.targetDeviceSamples * this.wireBytesPerSample(cfg.channels))
       : 0;
     const generation = ++this.captureGeneration;
-    this.loopDone = this.readLoop(generation, started, deviceWireBytes).catch(() => {});
+    this.loopDone = this.readLoop(generation, started, targetWireBytes).catch(() => {});
     // A loop capture's only ends are a manual stop and a device error (HSync
     // semantics), so the first-byte watchdog stays disarmed for it.
     if (!this.loopMode) this.armNoDataWatchdog(cfg);
@@ -1099,7 +998,7 @@ export class Slogic16U3 implements Device {
    * if the browser happens to resolve promise callbacks out of order.
    */
   private async readLoop(
-    generation: number, started: number, deviceWireBytes = 0,
+    generation: number, started: number, targetWireBytes = 0,
   ): Promise<void> {
     const live = (): boolean => this.captureGeneration === generation && this.running;
     const { depth, transferBytes } = this.tuning!;
@@ -1247,8 +1146,8 @@ export class Slogic16U3 implements Device {
      * the board should never have been allowed to overrun - the failure the driver's own
      * resubmit rule exists to prevent.
      *
-     * So a capture whose length is known (timer mode arms `R32_SAMPLE_LEN`) arms while the
-     * host has not already read that whole length, the driver's rule. A capture without one
+     * So a capture whose length is known arms while the host has not already requested
+     * that whole length, the driver's rule. A capture without one
      * - software trigger, where the trigger position is not known before RUN - keeps the
      * consumer bound, because there is nothing else to bound the memory with, and says so
      * in the trace when the cap is what stopped the refill.
@@ -1262,28 +1161,12 @@ export class Slogic16U3 implements Device {
      * grew to 12 before the cap took effect.
      */
     const outstandingChunks = (): number => completed.size + inFlight.size;
-    /**
-     * Wire bytes already asked of the endpoint, across every submitted transferIn.
-     *
-     * A capture with a known length (`deviceWireBytes > 0`) uses it two ways, both the
-     * driver's own (protocol.c:79-82, :395): reads stop being armed once the whole
-     * length has been requested, and the *final* read is clamped to exactly the bytes
-     * that remain. The clamp is not an optimisation. The firmware stops its upload at
-     * the armed length without a short packet or a ZLP (measured on S/N 202608052052),
-     * so a fixed-size read that reaches past the end fills partially and then NAKs
-     * forever - the capture's tail sits in that URB until the interface is released,
-     * and the caller waits on samples that are never coming. Sized exactly, the last
-     * read completes the moment the device's last byte lands, the loop runs dry on its
-     * own, and stop() has nothing to cancel.
-     *
-     * Every quantity here is 1024-aligned (the armed length is a multiple of 1024
-     * samples, transferBytes a multiple of PACKET_BYTES), so a clamped read is still a
-     * whole number of max-size packets and cannot babble.
-     */
+    /** Wire bytes requested from the endpoint and consumed within the host budget. */
     let requestedBytes = 0;
+    let consumedWireBytes = 0;
     let lagStoppedRefill = false;
-    const withinBudget = (): boolean => deviceWireBytes > 0
-      ? requestedBytes < deviceWireBytes
+    const withinBudget = (): boolean => targetWireBytes > 0
+      ? requestedBytes < targetWireBytes
       : outstandingChunks() < lagChunks;
     const canArm = (): boolean => inFlight.size < depth && withinBudget();
     /**
@@ -1292,7 +1175,7 @@ export class Slogic16U3 implements Device {
      * the trace rather than looking like a slow device.
      */
     const noteLagStop = (): void => {
-      if (deviceWireBytes > 0 || lagStoppedRefill) return;
+      if (targetWireBytes > 0 || lagStoppedRefill) return;
       lagStoppedRefill = true;
       this.trace({
         dir: 'info',
@@ -1313,17 +1196,13 @@ export class Slogic16U3 implements Device {
           canArm()) {
         arm();
         this.rearmMs.push(performance.now() - item.completedAt);
-      } else if (live() && deviceWireBytes === 0) {
+      } else if (live() && targetWireBytes === 0) {
         noteLagStop();
       }
       notify();
     };
     const arm = (): void => {
-      // The driver's clamp: the last read asks for exactly what the device still owes.
-      const size = deviceWireBytes > 0
-        ? Math.min(transferBytes, deviceWireBytes - requestedBytes)
-        : transferBytes;
-      if (size <= 0) return;
+      const size = transferBytes;
       requestedBytes += size;
       const sequence = submitted++;
       let request: Promise<USBInTransferResult>;
@@ -1347,7 +1226,7 @@ export class Slogic16U3 implements Device {
           if (result.status === 'ok' && result.data) {
             // A short completion means the endpoint sent less than was asked: those
             // bytes are still owed, and without giving them back the loop would stop
-            // arming short of the device's length and hang on its tail.
+            // arming short of the host budget and hang on its tail.
             requestedBytes -= size - result.data.byteLength;
             observeCompletion(result.data.byteLength, completedAt);
           }
@@ -1398,17 +1277,25 @@ export class Slogic16U3 implements Device {
         }
         throw new Error(`bulk IN returned status "${r.status}"`);
       }
-      const data = r.data;
-      if (!data) throw new Error('bulk IN returned no data with status "ok"');
+      const actual = r.data;
+      if (!actual) throw new Error('bulk IN returned no data with status "ok"');
+      const remainingWireBytes = targetWireBytes > 0
+        ? Math.max(0, targetWireBytes - consumedWireBytes)
+        : actual.byteLength;
+      const acceptedBytes = Math.min(actual.byteLength, remainingWireBytes);
+      consumedWireBytes += acceptedBytes;
+      const data = acceptedBytes === actual.byteLength
+        ? actual
+        : new DataView(actual.buffer, actual.byteOffset, acceptedBytes);
 
       const now = item.completedAt;
-      if (this.stats.firstByteMs === null && data.byteLength > 0) {
+      if (this.stats.firstByteMs === null && actual.byteLength > 0) {
         this.stats.firstByteMs = now - started;
-        bytesAtFirstByte = this.stats.rawBytes + data.byteLength;
+        bytesAtFirstByte = this.stats.rawBytes + actual.byteLength;
       }
       this.stats.transfers += 1;
-      this.stats.rawBytes += data.byteLength;
-      if (data.byteLength < transferBytes) this.stats.shortTransfers += 1;
+      this.stats.rawBytes += actual.byteLength;
+      if (actual.byteLength < transferBytes) this.stats.shortTransfers += 1;
       this.stats.elapsedMs = now - started;
       this.stats.rawMBps =
         this.stats.elapsedMs > 0 ? this.stats.rawBytes / this.stats.elapsedMs / 1000 : 0;
@@ -1426,9 +1313,9 @@ export class Slogic16U3 implements Device {
         // Awaiting the sink is the backpressure: a worker pump hands each chunk to the
         // page and waits for the ack, so `completed` grows at most to lagChunks before
         // canArm() stops the refill above (see the refill rules).
-        await this.deliver(data);
-        await this.maybeEndCapture();
+        if (data.byteLength > 0) await this.deliver(data);
       }
+      await this.maybeEndCapture();
       this.sinkMs.push(performance.now() - sinkStarted);
       // A WebUSB short packet is successful data, not evidence that the unfilled part of
       // the requested buffer was lost. libsigrok likewise consumes actual_length and
@@ -1597,8 +1484,8 @@ export class Slogic16U3 implements Device {
   /**
    * End-of-capture, detected on the delivery path rather than left to the caller.
    *
-   * Two captures know when they are done: one whose device stops itself at
-   * R32_SAMPLE_LEN, and one whose software trigger has emitted its full budget. In
+   * Two captures know when they are done: one whose host budget is consumed, and one
+   * whose software trigger has emitted its full budget. In
    * both, the bytes already delivered are all the bytes there will ever be - but up
    * to one coalescing block of them (SINK_CHUNK_BYTES, ~10 ms of 32ch/200M) is still
    * sitting in `sinkBuffer`, and nothing else would flush it until stop(). A caller
@@ -1615,7 +1502,7 @@ export class Slogic16U3 implements Device {
     const trigger = this.trigger;
     const triggerDone = trigger !== null &&
       (trigger.stats.complete || trigger.stats.noTrigger);
-    if (!triggerDone && !this.deviceReachedItsLimit()) return;
+    if (!triggerDone && !this.captureReachedItsLimit()) return;
     this.captureEnded = true;
     await this.flushSink();
     this.trace({
@@ -1624,7 +1511,7 @@ export class Slogic16U3 implements Device {
         ? 'software trigger search ended without a match; nothing more will be delivered'
         : triggerDone
           ? 'software trigger delivered its full budget; capture complete'
-          : 'device delivered its programmed length; capture complete',
+          : 'the finite host budget was delivered; capture complete',
     });
     this.onCaptureEnd?.();
   }
@@ -1669,9 +1556,7 @@ export class Slogic16U3 implements Device {
     this.running = false;
     this.stopping = true;
     this.stoppingSince = performance.now();
-    // Ask before the producer is told to stop: this is the state the device reached on
-    // its own, and a capture whose length it delivered has nothing left to drain.
-    const deviceSelfStopped = this.deviceReachedItsLimit();
+    const captureComplete = this.captureReachedItsLimit();
 
     /*
      * Stop the producer first and drain second, which is the opposite of what this
@@ -1698,19 +1583,18 @@ export class Slogic16U3 implements Device {
         console.warn('[slogic] CTRL stop write failed during stop():', e);
         teardownError = e;
       }
-      if (deviceSelfStopped) {
+      if (captureComplete) {
         this.trace({
           dir: 'info',
-          note: 'device reached its programmed length and stopped itself; the queued ' +
-            'reads are tail NAKs, so they are cancelled now instead of at the timeout',
+          note: 'the finite host budget is consumed; queued reads beyond it are cancelled now',
         });
       }
       // Wait for the queue to drain, but only while it is still draining: the
       // producer is already stopped, so a transfer that has not completed in
       // STOP_TIMEOUT_MS never will, and waiting longer only delays the release.
-      // A device that stopped itself never will either, and the wait is skipped.
+      // A consumed finite budget has no more data to drain, so the wait is skipped.
       let settled = false;
-      for (; !deviceSelfStopped;) {
+      for (; !captureComplete;) {
         const remainingMs = this.queuedDrainDeadlineMs() - performance.now();
         if (remainingMs <= 0) break;
         let drainTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1725,10 +1609,9 @@ export class Slogic16U3 implements Device {
         if (settled) break;
       }
       if (!settled) {
-        // Disconnection or a firmware fault can leave transferIn pending forever, and a
-        // device that stopped itself leaves its tail reads pending on purpose. Either way
-        // only releasing the interface cancels them - WebUSB has no abort on a transfer.
-        if (!deviceSelfStopped) {
+        // Disconnection or a firmware fault can leave transferIn pending forever; only
+        // releasing the interface cancels them - WebUSB has no abort on a transfer.
+        if (!captureComplete) {
           console.warn(
             `[slogic] read loop still had transfers in flight ${Math.round(this.drainBudgetMs())} ms ` +
               'after capture stop; forcing endpoint cancellation',
@@ -1932,9 +1815,8 @@ export class Slogic16U3 implements Device {
                 `bench mode must be normal, usbmax or simulator, got ${modeToken}`);
             })();
       // The floor is what makes this safe to point at a rate the host cannot drain: at
-      // 32ch/200M, 5 ms is 4 MB, which the reads already in flight absorb, so the device
-      // stops itself at the length before its FIFO can be asked to hold anything. Longer
-      // than the queue can cover and the capture overruns the device, which wedges a 32U3
+      // 32ch/200M, 5 ms is 4 MB, which the reads already in flight absorb. Longer than
+      // the queue can cover and the capture overruns the device, which wedges a 32U3
       // until it is replugged (NOTES 8.6).
       if (!(seconds >= 0.005 && seconds <= 60)) {
         throw new Error(`bench seconds must be in [0.005, 60], got ${seconds}`);
@@ -1950,15 +1832,8 @@ export class Slogic16U3 implements Device {
       };
       assertValidConfig(cfg, this.maxSamplerateHz, this.maxChannels);
       const started = performance.now();
-      // End the run the way the vendor says to end one: the device stops *itself* at the
-      // length it was programmed with, so `stop()` below never has to cut off a device that
-      // is still producing. Doing that is what wedges a 32U3 until it is unplugged
-      // (NOTES 8.6), and it is not hypothetical: `bench 2 32 100` held the line rate at
-      // 398 MB/s, cut the device off at the end of the run, and left the board answering
-      // control transfers with nothing on the bulk endpoint until it was replugged
-      // (measured 2026-09-11). The drain wait is the device finishing the bytes the host
-      // already has queued, not padding in the measurement - `stats.elapsedMs` is the last
-      // completion, so the reported rate is still the rate.
+      // The drain wait lets the host consume the queued finite budget; `stats.elapsedMs`
+      // is the last completion, so it is not padding in the measured rate.
       const samples = Math.floor(seconds * cfg.samplerate);
       // Optional geometry, so a sweep is a list of one-line fixed configurations rather
       // than a new script per question: `bench 0.03 32 200 5 3129344`.
@@ -1970,15 +1845,28 @@ export class Slogic16U3 implements Device {
             ...(transferBytes === undefined ? {} : { transferBytes }),
           },
         };
+      let signalEnd!: () => void;
+      const ended = new Promise<void>((resolve) => { signalEnd = resolve; });
       await this.start(cfg, () => {}, undefined, {
         discard: true,
         deviceSampleLimit: samples,
+        onEnd: signalEnd,
         ...tuning,
       });
       // stop() clears the tuning, and the reply has to say which geometry it measured:
       // a sweep is only readable if each line names its own read size and depth.
       const geometry = this.tuning ?? undefined;
-      await new Promise((r) => setTimeout(r, seconds * 1000 + BENCH_DRAIN_MS));
+      let drainTimer: ReturnType<typeof setTimeout> | null = null;
+      try {
+        await Promise.race([
+          ended,
+          new Promise<void>((resolve) => {
+            drainTimer = setTimeout(resolve, seconds * 1000 + BENCH_DRAIN_MS);
+          }),
+        ]);
+      } finally {
+        if (drainTimer !== null) clearTimeout(drainTimer);
+      }
       await this.stop();
       return formatBench(this.getStats(), cfg, performance.now() - started, geometry);
     }

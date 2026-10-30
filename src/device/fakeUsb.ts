@@ -46,6 +46,7 @@ export class FakeSlogic {
   readonly flags = { rst: false, fifoOverflow: false, innerError: false };
   /** aux 0x04 R32_SAMPLE_LEN, as written by the host. 0 means "no limit". */
   sampleLenValue = 0;
+  sampleLenWrites = 0;
   /** R32_CTRL as the device holds it. The real register reads this back byte for byte. */
   ctrlValue = 0;
   /**
@@ -129,7 +130,10 @@ export class FakeSlogic {
         } else {
           m.payload[idx] = word;
           if (idx === 0) m.onWord0?.(m, word);
-          if (this.selector === 0x04 && idx === 0) this.sampleLenValue = word >>> 0;
+          if (this.selector === 0x04 && idx === 0) {
+            this.sampleLenValue = word >>> 0;
+            this.sampleLenWrites++;
+          }
         }
       }
       // Beyond the advertised length: silently dropped, exactly like the device.

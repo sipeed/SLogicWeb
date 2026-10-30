@@ -24,11 +24,9 @@ export interface CaptureStartOptions {
    */
   loop?: boolean;
   /**
-   * Samples the device should deliver before it stops itself, when the capture
-   * length is known before it is armed. The transport programmes the device's own
-   * length register (R32_SAMPLE_LEN) so the capture can end without the host
-   * cutting off a device that is still producing - the overrun that wedges a
-   * 32U3 until it is unplugged. Ignored by transports that have no such register.
+   * Samples the host should deliver before ending a finite capture when its length
+   * is known before RUN. The transport enforces this host-side budget independently
+   * of any device length register. Omit it - or pass 0 - for an unbounded capture.
    */
   deviceSampleLimit?: number;
   /** `triggerSampleIndex` is present for `triggered` and refers to the emitted stream. */
@@ -36,13 +34,12 @@ export interface CaptureStartOptions {
     state: 'waiting' | 'triggered' | 'not-found', triggerSampleIndex?: number,
   ) => void;
   /**
-   * The capture ended on its own and every byte it will ever produce has been handed
-   * to the sink: the device reached its programmed length (`deviceSampleLimit`), the
-   * software trigger emitted its full budget, or a bounded trigger search ended with
-   * no match (nothing was delivered; `onTriggerState` has already said `not-found`).
-   * Fired at most once per capture, after the last sink call for it, and never for a
-   * capture the caller stopped manually - so the caller can stop() on it without a
-   * sample count of its own having to agree with the device's to the sample.
+   * A bounded capture completed and all its data has been handed to the sink: the
+   * host delivered `deviceSampleLimit` samples, the software trigger emitted its full
+   * budget, or a bounded trigger search ended with no match (nothing was delivered;
+   * `onTriggerState` has already said `not-found`). Fired at most once per capture,
+   * after the last sink call for it, and never for a capture the caller stopped
+   * manually - so the caller can stop() on it without keeping a separate sample count.
    */
   onEnd?: () => void;
 }

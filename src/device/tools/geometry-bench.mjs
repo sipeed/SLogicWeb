@@ -9,11 +9,10 @@
  * depth or read size amortises) or per BYTE (Chromium's copy chain, in which case no
  * geometry helps and 32ch/200M is out of reach for WebUSB on this host)?
  *
- * Every run is length-limited by the device itself (R32_SAMPLE_LEN) to what the reads
- * already in flight can absorb, so a run that measures a rate the host cannot drain cannot
- * overrun the device's FIFO - which on a 32U3 means a wedged board and a physical replug
- * (NOTES 8.6). That is what makes a sweep of a *too slow* host affordable: 5 slices of
- * ~20 MB per geometry instead of one replug per attempt.
+ * Every run is bounded by a host-side finite byte budget that limits how long the host must
+ * keep up. Reaching the budget emits `onEnd`, which drives the normal stop path. High-rate
+ * finite-capture and bench FIFO behavior under this host-budget model is unverified; on a
+ * 32U3 an overrun can still mean a wedged board and a physical replug (NOTES 8.6).
  *
  * Run against an already-running Chromium with the app open on a dev server:
  *
@@ -66,11 +65,10 @@ const geometries = [
 
 const rateMBps = (mhz * 1e6 * channels) / 8 / 1e6;
 const plan = geometries.map(([label, depth, transferBytes]) => {
-  // The hard safety bound: the device cannot be asked to produce more than the reads
-  // already in flight can hold, or the bytes behind them have nowhere to go when the host
-  // is the slow side. Measured on hardware: a 1 s run at the default geometry aborted
-  // after 44 MB, which is 15.6 MiB of queued reads plus a couple of MB of FIFO, so 80% of
-  // the queued-read budget is the number to stay inside.
+  // The 80% cap is a sweep heuristic derived from the old measurement below, not a
+  // guarantee of device FIFO safety under the host-budget model. Measured on hardware:
+  // a 1 s run at the default geometry aborted after 44 MB, which is 15.6 MiB of queued
+  // reads plus a couple of MB of FIFO.
   const safeMB = Math.min(sliceMB, 0.8 * (depth * transferBytes) / 1e6);
   const seconds = +(safeMB / rateMBps).toFixed(4);
   return { label, depth, transferBytes, seconds, safeMB: +safeMB.toFixed(1) };
@@ -172,7 +170,7 @@ if (!result) {
 
 console.log(`${channels}ch @ ${mhz} MHz (expected ${rateMBps.toFixed(0)} MB/s), ` +
   `${repeats} slices per geometry, capped at 80% of the queued reads and at most ` +
-  `${sliceMB} MB, each ended by the device itself`);
+  `${sliceMB} MB, each run ended by the host finite budget and normal stop path`);
 if (result.error || !result.runs) {
   console.error(`${result.error ?? 'the page returned no runs'}` +
     ' - the device may not be granted to this page (open the app and connect first)');

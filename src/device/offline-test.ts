@@ -41,6 +41,7 @@ import {
 import { WorkerSlogicDevice } from './workerTransport.js';
 import { createCommandQueue, describeFailure } from './commandQueue.js';
 import { TransportDeadError } from './types.js';
+import { bytesPerSampleForChannels } from '../types.js';
 import type { FromWorker, ToWorker } from './usbWorkerProtocol.js';
 import {
   createSampleStore, InterleavedSampleStore, PlanarSampleStore, appendLostSamples,
@@ -208,6 +209,7 @@ class FakeStreamDevice extends FakeSlogic {
   serialNumber = 'fake';
   private calls = 0;
   private parked: Parked[] = [];
+  readonly transferInLengths: number[] = [];
   clearHaltCalls = 0;
   releaseInterfaceCalls = 0;
 
@@ -292,6 +294,7 @@ class FakeStreamDevice extends FakeSlogic {
   }
 
   transferIn(_ep: number, _len: number): Promise<USBInTransferResult> {
+    this.transferInLengths.push(_len);
     const index = this.calls++;
     if (this.endpointPoisoned || index >= this.failAfterCalls) {
       return Promise.reject(new Error('NetworkError: A transfer error has occurred.'));
@@ -316,7 +319,7 @@ class FakeStreamDevice extends FakeSlogic {
         });
       }
       this.streamLeftSamples -= _len / this.bytesPerSample;
-      return Promise.resolve({ status: 'ok', data: view(new Array<number>(_len).fill(0)) });
+      return Promise.resolve({ status: 'ok', data: new DataView(new Uint8Array(_len).buffer) });
     }
     const action: TransferAction = this.script[index] ?? { kind: 'hang' };
     if (action.kind === 'data') {
@@ -1140,9 +1143,7 @@ async function main(): Promise<void> {
       ended === 0, String(ended));
   }
   {
-    // Same tail, timer mode: the device stops itself at R32_SAMPLE_LEN, and the last
-    // sub-block of samples must reach the sink then - not when the user gives up and
-    // presses stop - followed by exactly one onEnd.
+    // A finite capture flushes its coalesced tail and reports exactly one onEnd.
     const fake = new FakeStreamDevice(recorded32(), [], 0x3032);
     fake.autoStream = true;
     fake.bytesPerSample = 4;
@@ -1163,19 +1164,18 @@ async function main(): Promise<void> {
     await new Promise((r) => setTimeout(r, 30));
     const samplesBeforeStop = bytes / 4;
     await dev.stop();
-    check('a coalesced device-length capture flushes its tail before stop()',
-      samplesBeforeStop >= wanted, `${samplesBeforeStop} of ${wanted} samples before stop`);
-    check('the device-length capture reports end-of-capture exactly once',
+    check('a coalesced finite capture flushes exactly its requested tail before stop()',
+      samplesBeforeStop === wanted, `${samplesBeforeStop} of ${wanted} samples before stop`);
+    check('the finite capture reports end-of-capture exactly once',
       ended === 1, String(ended));
+    check('the coalesced finite capture uses fixed-size requests without arming the device',
+      fake.transferInLengths.length > 0 &&
+        fake.transferInLengths.every((length) => length === 1024) && fake.sampleLenValue === 0,
+      `${fake.transferInLengths.join(',')} :: sample-len=${fake.sampleLenValue}`);
   }
   {
-    // Below 8 channels the 4 dropped head bytes are 8 device samples (two per wire
-    // byte at 4ch), not 4: counting them at the stored bytes-per-sample left
-    // receivedDeviceSamples() 4 short of the armed limit forever, so a 4-channel
-    // device-length capture never reported its end. The script delivers *exactly*
-    // the armed length in wire bytes, so an off-by-anything here fails the check.
-    const wanted = 1000; // arms ceil((1008+2048)/1024) = 3 units = 1024 device samples
-    const wireBytes = 1024 / 2; // 4ch: two samples per wire byte, head included
+    const wanted = 1000;
+    const wireBytes = 1024 / 2;
     const fake = new FakeStreamDevice(recorded(), [
       { kind: 'data', bytes: new Array<number>(wireBytes).fill(0) },
     ]);
@@ -1195,23 +1195,21 @@ async function main(): Promise<void> {
     await new Promise((r) => setTimeout(r, 20));
     const endedBeforeStop = ended;
     await dev.stop();
-    check('a 4-channel device-length capture counts its packed head correctly',
-      endedBeforeStop === 1 && samples === (wireBytes - 4) * 2,
-      `ended=${endedBeforeStop}, samples=${samples} of ${(wireBytes - 4) * 2}`);
+    check('a 4-channel finite capture clamps overshoot after its packed head',
+      endedBeforeStop === 1 && samples === wanted,
+      `ended=${endedBeforeStop}, samples=${samples} of ${wanted}`);
+    check('the packed finite capture keeps every USB request at the configured size',
+      fake.transferInLengths.length > 0 &&
+        fake.transferInLengths.every((length) => length === 1024),
+      fake.transferInLengths.join(','));
   }
   {
-    // The real board's end-of-upload (measured on S/N 202608052052, 2026-09-14): the
-    // firmware stops at the armed length with no short packet and no ZLP, so a read
-    // reaching past the end never completes and the capture's tail is stuck in it -
-    // a 1 s capture that sits at 99% until the user presses Stop. The driver must
-    // clamp its final read to the bytes that remain (libsigrok protocol.c:79-82).
-    // Here the transfer size (5120) does not divide the armed length (4096 wire
-    // bytes), so an unclamped final read hangs and the check times out.
+    // The fixed request overshoots the finite host budget; only completed data is clamped.
     const fake = new FakeStreamDevice(recorded32(), [], 0x3032);
     fake.autoStream = true;
     fake.bytesPerSample = 4;
     const dev = new Slogic16U3(fake as unknown as USBDevice);
-    const wanted = 1000; // arms 1024 device samples = 4096 wire bytes
+    const wanted = 1000;
     let bytes = 0;
     let ended = 0;
     await dev.open();
@@ -1228,9 +1226,13 @@ async function main(): Promise<void> {
     const endedBeforeStop = ended;
     const samplesBeforeStop = bytes / 4;
     await dev.stop();
-    check('the final read is clamped so a no-ZLP device end still completes',
-      endedBeforeStop === 1 && samplesBeforeStop >= wanted,
-      `ended=${endedBeforeStop}, samples=${samplesBeforeStop} of ${wanted}`);
+    check('a fixed-size final read completes and delivers no overshoot',
+      endedBeforeStop === 1 && samplesBeforeStop === wanted && bytes === wanted * 4,
+      `ended=${endedBeforeStop}, samples=${samplesBeforeStop} of ${wanted}, after stop=${bytes / 4}`);
+    check('the finite tail is never used to shorten a USB request',
+      fake.transferInLengths.length > 0 &&
+        fake.transferInLengths.every((length) => length === 5 * 1024),
+      fake.transferInLengths.join(','));
   }
   {
     const mediumCases = [
@@ -2287,7 +2289,7 @@ async function main(): Promise<void> {
       `dropouts=${JSON.stringify(dropouts)}, short=${dev.getStats().shortTransfers}`);
   }
 
-  console.log('\nR32_SAMPLE_LEN: the device stops itself at the capture length');
+  console.log('\nR32_SAMPLE_LEN compatibility and host-bounded finite captures');
   {
     // The transfer function measured on S/N 202608052052 (NOTES 8.9): four writes
     // from 500 to 100000 all delivered exactly value * 4096 - 8192 wire bytes at
@@ -2324,56 +2326,247 @@ async function main(): Promise<void> {
       fake.sampleLenValue === 0, `still ${fake.sampleLenValue}`);
   }
   {
-    // End to end: the length is known before RUN, so the device is told to stop by
-    // itself, and the capture ends because the device stopped - not because the host
-    // stopped reading a producer that was still running.
+    const requested = 1001;
+    const aligned = 1000;
     const fake = new FakeStreamDevice(recorded32(), [], 0x3032);
     fake.autoStream = true;
-    fake.bytesPerSample = 4;
+    fake.bytesPerSample = 0.5;
     const dev = new Slogic16U3(fake as unknown as USBDevice);
-    const wanted = 1000;
+    const notes: string[] = [];
     let bytes = 0;
+    let ended = 0;
     await dev.open();
+    dev.onTrace = (entry) => { if (entry.note) notes.push(entry.note); };
     await dev.start(
-      { channels: 32, samplerate: 100e6, thresholdVolts: 1.6 },
+      { channels: 4, samplerate: 16e6, thresholdVolts: 1.6 },
       (chunk) => { bytes += chunk.byteLength; },
       undefined,
-      { deviceSampleLimit: wanted },
+      {
+        deviceSampleLimit: requested,
+        tuning: { depth: 4, transferBytes: 1024 },
+        onEnd: () => { ended++; },
+      },
     );
     await new Promise((r) => setTimeout(r, 30));
-    const delivered = (bytes + 3) / 4; // sink bytes are whole 32-bit samples
+    const bytesAtEnd = bytes;
+    const endedAtEnd = ended;
     await dev.stop();
-    check('the device is told to stop itself at the capture length',
-      fake.sampleLenValue === sampleLengthForSamples(wanted + 1),
-      `wrote ${fake.sampleLenValue}, wanted ${sampleLengthForSamples(wanted + 1)}`);
-    check('the capture length is delivered before the device stops',
-      delivered >= wanted, `${bytes} B = ${delivered} samples, wanted ${wanted}`);
-    check('a self-stopped device is not reported as an overrun',
-      dev.getStats().slowTransfers === 0,
-      JSON.stringify(dev.getStats().slowTransfers));
+    check('a small wire-unaligned finite request starts and delivers the aligned count',
+      bytesAtEnd === aligned && endedAtEnd === 1 && bytes === aligned && ended === 1 &&
+        dev.getStats().sinkBytes === aligned && fake.transferInCalls > 0,
+      `at end=${bytesAtEnd}/${endedAtEnd}, after stop=${bytes}/${ended}, calls=${fake.transferInCalls}`);
+    check('a small wire-unaligned finite request traces the requested and aligned counts',
+      notes.some((note) => note.includes(`requested ${requested} samples`) &&
+        note.includes(`aligned down to ${aligned} samples`)),
+      notes.join(' | '));
   }
   {
-    // `bench` is the command the 32ch/200M measurements are taken with, and it used to end
-    // by calling stop() on a device that was still producing. Measured on hardware
-    // 2026-09-11: `bench 2 32 100` reported 398 MB/s and left the board silent on the bulk
-    // endpoint until it was replugged - the overrun NOTES 8.6 describes, caused by the tool
-    // that measures rather than by the capture path. It has to arm the device's own length.
+    const fake = new FakeStreamDevice(recorded32(), [], 0x3032);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    const notes: string[] = [];
+    await dev.open();
+    dev.onTrace = (entry) => { if (entry.note) notes.push(entry.note); };
+    await expectThrow('software-trigger exclusivity precedes finite alignment',
+      () => dev.start(
+        { channels: 4, samplerate: 16e6, thresholdVolts: 1.6 },
+        () => {},
+        undefined,
+        {
+          deviceSampleLimit: 1001,
+          softwareTrigger: {
+            channels: 4, channel: 0, kind: 'rising', preTriggerSamples: 0, maxSamples: 4,
+          },
+        },
+      ), 'mutually exclusive');
+    check('software-trigger exclusivity emits no alignment trace or bulk read',
+      !notes.some((note) => note.includes('aligned down')) && fake.transferInCalls === 0,
+      `calls=${fake.transferInCalls}, notes=${notes.join(' | ')}`);
+  }
+  {
+    const requested = 2_147_483_647;
+    const aligned = 2_147_483_646;
+    const transferBytes = 32 * 1024 * 1024;
+    const fake = new FakeStreamDevice(recorded32(), [], 0x3032);
+    fake.autoStream = true;
+    fake.bytesPerSample = 0.5;
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    const notes: string[] = [];
+    let bytes = 0;
+    let ended = 0;
+    let signalEnd!: () => void;
+    const end = new Promise<void>((resolve) => { signalEnd = resolve; });
+    await dev.open();
+    dev.onTrace = (entry) => { if (entry.note) notes.push(entry.note); };
+    let startError = '';
+    let endError = '';
+    let stopError = '';
+    try {
+      await dev.start(
+        { channels: 4, samplerate: 16e6, thresholdVolts: 1.6 },
+        (chunk) => { bytes += chunk.byteLength; },
+        undefined,
+        {
+          deviceSampleLimit: requested,
+          tuning: {
+            depth: 4, transferBytes, queueBudgetBytes: 4 * transferBytes,
+          },
+          onEnd: () => { ended++; signalEnd(); },
+        },
+      );
+    } catch (e) {
+      startError = String(e);
+    }
+    if (startError === '') {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          end,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Error('maximum finite capture did not end')), 60_000);
+          }),
+        ]);
+      } catch (e) {
+        endError = String(e);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+    }
+    const bytesAtEnd = bytes;
+    const endedAtEnd = ended;
+    if (startError === '') {
+      try { await dev.stop(); } catch (e) { stopError = String(e); }
+    }
+    check('the 4ch maximum free-run request starts without an alignment rejection',
+      startError === '' && fake.transferInCalls > 0,
+      `start=${startError || 'ok'}, calls=${fake.transferInCalls}`);
+    check('the 4ch maximum free-run request delivers its aligned count and stops once',
+      endError === '' && stopError === '' && bytesAtEnd === aligned && endedAtEnd === 1 &&
+        bytes === aligned && ended === 1 && dev.getStats().sinkBytes === aligned,
+      `at end=${bytesAtEnd}/${endedAtEnd}, after stop=${bytes}/${ended}, ` +
+        `end=${endError || 'ok'}, stop=${stopError || 'ok'}`);
+    check('the 4ch maximum free-run request retains fixed-size host-bounded reads',
+      fake.transferInLengths.length === 33 &&
+        fake.transferInLengths.every((length) => length === transferBytes),
+      `${fake.transferInLengths.length} requests: ${fake.transferInLengths.join(',')}`);
+    check('the 4ch maximum free-run request traces its alignment adjustment',
+      notes.some((note) => note.includes(`requested ${requested} samples`) &&
+        note.includes(`aligned down to ${aligned} samples`)),
+      notes.join(' | '));
+  }
+  {
+    for (const channels of [4, 16, 32] as const) {
+      const fake = new FakeStreamDevice(recorded32(), [], 0x3032);
+      fake.autoStream = true;
+      fake.bytesPerSample = channels / 8;
+      const dev = new Slogic16U3(fake as unknown as USBDevice);
+      const wanted = 1000;
+      const transferBytes = 1024;
+      const expectedBytes = wanted * bytesPerSampleForChannels(channels);
+      const targetWireBytes = wanted * channels / 8 + 4;
+      let bytes = 0;
+      let ended = 0;
+      let emptyChunks = 0;
+      await dev.open();
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const requestStart = fake.transferInLengths.length;
+        const sampleWritesBefore = fake.sampleLenWrites;
+        bytes = 0;
+        ended = 0;
+        await dev.start(
+          { channels, samplerate: 16e6, thresholdVolts: 1.6 },
+          (chunk) => {
+            bytes += chunk.byteLength;
+            if (chunk.byteLength === 0) emptyChunks++;
+          },
+          undefined,
+          {
+            deviceSampleLimit: wanted,
+            tuning: { depth: 4, transferBytes },
+            onEnd: () => { ended++; },
+          },
+        );
+        await new Promise((r) => setTimeout(r, 30));
+        const bytesAtEnd = bytes;
+        const endedAtEnd = ended;
+        await dev.stop();
+        const requests = fake.transferInLengths.slice(requestStart);
+        const sampleWrites = fake.sampleLenWrites;
+        const stats = dev.getStats();
+        check(`${channels}ch finite capture ${attempt} is exact through stop and emits one end`,
+          bytesAtEnd === expectedBytes && endedAtEnd === 1 && bytes === expectedBytes &&
+            ended === 1 && emptyChunks === 0 && stats.sinkBytes === expectedBytes &&
+            stats.rawBytes > targetWireBytes,
+          `at end=${bytesAtEnd}/${endedAtEnd}, after stop=${bytes}/${ended}, ` +
+            `expected=${expectedBytes}, raw=${stats.rawBytes}, sink=${stats.sinkBytes}`);
+        check(`${channels}ch finite capture ${attempt} uses fixed requests and no sample-limit write`,
+          requests.length > 0 && requests.every((length) => length === transferBytes) &&
+            sampleWrites === sampleWritesBefore && fake.sampleLenValue === 0,
+          `${requests.join(',')} :: sample writes ${sampleWritesBefore} -> ${sampleWrites}`);
+      }
+    }
+  }
+  {
+    const block = new Array<number>(1024).fill(0);
+    const fake = new FakeStreamDevice(recorded32(), Array.from(
+      { length: 24 }, () => ({ kind: 'data' as const, bytes: block }),
+    ), 0x3032);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    const finiteBytes = 1000 * 4;
+    let bytes = 0;
+    let ended = 0;
+    await dev.open();
+    await dev.start(
+      { channels: 32, samplerate: 16e6, thresholdVolts: 1.6 },
+      (chunk) => { bytes += chunk.byteLength; },
+      undefined,
+      {
+        deviceSampleLimit: 1000,
+        tuning: { depth: 4, transferBytes: 1024, coalesceBytes: 4096 },
+        onEnd: () => { ended++; },
+      },
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    const finiteBytesAtEnd = bytes;
+    const finiteEnds = ended;
+    await dev.stop();
+    bytes = 0;
+    await dev.start(
+      { channels: 32, samplerate: 16e6, thresholdVolts: 1.6 },
+      (chunk) => { bytes += chunk.byteLength; },
+      undefined,
+      {
+        tuning: { depth: 4, transferBytes: 1024, coalesceBytes: 4096 },
+        onEnd: () => { ended++; },
+      },
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    const unboundedBytesBeforeStop = bytes;
+    const endsBeforeStop = ended;
+    let stopError = '';
+    try { await dev.stop(); } catch (e) { stopError = String(e); }
+    const bytesAfterStop = bytes;
+    await new Promise((r) => setTimeout(r, 10));
+    check('a completed finite capture does not truncate or end a following unbounded capture',
+      finiteBytesAtEnd === finiteBytes && finiteEnds === 1 &&
+        unboundedBytesBeforeStop > finiteBytes && endsBeforeStop === 1 && stopError === '' &&
+        bytesAfterStop >= unboundedBytesBeforeStop && bytes === bytesAfterStop && ended === 1,
+      `finite=${finiteBytesAtEnd}/${finiteEnds}, unbounded=${unboundedBytesBeforeStop}, ` +
+        `after stop=${bytesAfterStop}, final=${bytes}, ends=${ended}, stop=${stopError || 'ok'}`);
+  }
+  {
     const clock = new ClockStreamDevice(400_000); // 32ch @ 100 MHz
     const dev = new Slogic16U3(clock as unknown as USBDevice);
     await dev.open();
     const benchFrom = performance.now();
     const text = await dev.usbControl('bench 0.2 32 100');
     const benchMs = performance.now() - benchFrom;
-    check('a bench arms the device length limit instead of cutting a producer off',
-      clock.sampleLenValue === sampleLengthForSamples(0.2 * 100e6),
-      `wrote ${clock.sampleLenValue}, wanted ${sampleLengthForSamples(0.2 * 100e6)}`);
-    check('a bench ends on the device own stop, not on the host cutting it off',
-      clock.selfStopped, `taken ${clock.taken / 4} samples of ${clock.sampleLenValue} units`);
+    check('a bench uses its host budget without arming the device length limit',
+      clock.sampleLenValue === 0, `wrote ${clock.sampleLenValue}`);
+    check('a bench consumes at least its finite sample budget',
+      clock.taken >= 0.2 * 100e6 * 4, `taken ${clock.taken / 4} samples`);
     check('a bench still reports the pipe it measured',
       /MB\/s/.test(text) && /expected/.test(text), text.split('\n')[1]);
-    // The tail reads after a self-stop are NAKs that only a release ends (NOTES 8.9).
-    // Waiting out STOP_TIMEOUT_MS for them would add 1.5 s to every bench and to every
-    // timed capture, so the stop has to recognise the device's own stop instead.
+    // A consumed finite budget has no further data to drain.
     check('a bench does not wait out the stop timeout for tail reads that cannot complete',
       benchMs < 0.2 * 1000 + 600 + 800, `${benchMs.toFixed(0)} ms for a 0.2 s + 0.4 s drain bench`);
     clock.release();
@@ -2400,29 +2593,6 @@ async function main(): Promise<void> {
       () => dev.usbControl('bench 0.02 32 100 2 3129344'), 'depth');
     clock.release();
   }
-  {
-    // A capture that must not have a limit has to clear the one an earlier capture
-    // armed: a software-trigger capture inheriting a stale length would stop before
-    // its trigger ever arrived, and no host-side check would notice.
-    const block = new Array<number>(8).fill(0x11);
-    const fake = new FakeStreamDevice(recorded32(), Array.from(
-      { length: 12 }, () => ({ kind: 'delayedData' as const, bytes: block, delayMs: 5 }),
-    ), 0x3032);
-    const dev = new Slogic16U3(fake as unknown as USBDevice);
-    await dev.open();
-    await dev.start({ channels: 32, samplerate: 16e6, thresholdVolts: 1.6 }, () => {},
-      undefined, { deviceSampleLimit: 4096 });
-    await new Promise((r) => setTimeout(r, 15));
-    await dev.stop();
-    const armed = fake.sampleLenValue;
-    await dev.start({ channels: 32, samplerate: 16e6, thresholdVolts: 1.6 }, () => {},
-      undefined, {});
-    await new Promise((r) => setTimeout(r, 15));
-    await dev.stop();
-    check('a capture with no known length clears the limit instead of inheriting it',
-      armed > 0 && fake.sampleLenValue === 0, `armed ${armed}, then ${fake.sampleLenValue}`);
-  }
-
   {
     // The wedged-board state of NOTES 8.8: every control transfer answers and the bulk
     // endpoint never delivers a byte. The capture has to say so rather than sitting
@@ -2516,6 +2686,33 @@ async function main(): Promise<void> {
     check('discard still reports the rate the pipe achieved',
       stats.rawMBps > 0 && stats.rateRatio > 0,
       `rawMBps ${stats.rawMBps.toFixed(1)}, ratio ${stats.rateRatio.toFixed(3)}`);
+  }
+
+  {
+    const fake = new FakeStreamDevice(recorded32(), [], 0x3032);
+    fake.autoStream = true;
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    const seen: number[] = [];
+    let ended = 0;
+    await dev.open();
+    await dev.start(
+      { channels: 32, samplerate: 16e6, thresholdVolts: 1.6 },
+      (chunk) => { seen.push(chunk.byteLength); },
+      undefined,
+      {
+        deviceSampleLimit: 1000,
+        tuning: { depth: 4, transferBytes: 1024 },
+        discard: true,
+        onEnd: () => { ended++; },
+      },
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    const endedBeforeStop = ended;
+    await dev.stop();
+    check('a finite discard capture ends on its host budget without calling the sink',
+      endedBeforeStop === 1 && ended === 1 && seen.length === 0 &&
+        dev.getStats().rawBytes > 1000 * 4 + 4,
+      `ended=${endedBeforeStop}/${ended}, sink calls=${seen.length}, raw=${dev.getStats().rawBytes}`);
   }
 
   {
