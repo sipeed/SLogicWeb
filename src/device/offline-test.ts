@@ -1943,8 +1943,10 @@ async function main(): Promise<void> {
       stopMs < 6500 && stuck.releases === 1,
       `${stopMs.toFixed(0)} ms, ${stuck.releases} release call(s)`);
     check('a stop that had to close the handle reports a dead transport',
-      stopError instanceof TransportDeadError && String(stopError).includes('handle was closed'),
-      `${String(stopError)} | ${Object.prototype.toString.call(stopError)}`);
+      stopError instanceof TransportDeadError && String(stopError).includes('handle was closed') &&
+        stopError.reason === 'loop-unsettled',
+      `${String(stopError)} | ${Object.prototype.toString.call(stopError)} | reason ` +
+        `${stopError instanceof TransportDeadError ? stopError.reason : '-'}`);
     check('a stop that had to close the handle closes it exactly once',
       stuck.closeCalls === 1, `close calls: ${stuck.closeCalls}`);
     let refusal: unknown = null;
@@ -1952,8 +1954,9 @@ async function main(): Promise<void> {
       await dev.start({ channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {});
     } catch (e) { refusal = e; }
     check('a start after an unsettled read loop refuses with a typed reason',
-      refusal instanceof TransportDeadError && String(refusal).includes('never settled'),
-      String(refusal));
+      refusal instanceof TransportDeadError && String(refusal).includes('never settled') &&
+        refusal.reason === 'loop-unsettled',
+      `${String(refusal)} | reason ${refusal instanceof TransportDeadError ? refusal.reason : '-'}`);
     const lateErrors: unknown[] = [];
     dev.onError = (e) => lateErrors.push(e);
     await FakeStreamDevice.prototype.releaseInterface.call(stuck);
@@ -2013,12 +2016,14 @@ async function main(): Promise<void> {
     await dev.stop().catch((e: unknown) => { claimError = e; });
     check('a device that cannot be re-claimed after a cancel is closed, not kept',
       claimError instanceof TransportDeadError &&
-        String(claimError).includes('could not be re-claimed') && stuckClaim.closeCalls === 1,
-      `${String(claimError)} | closes ${stuckClaim.closeCalls}`);
+        String(claimError).includes('could not be re-claimed') && stuckClaim.closeCalls === 1 &&
+        claimError.reason === 'reclaim-failed',
+      `${String(claimError)} | closes ${stuckClaim.closeCalls} | reason ` +
+        `${claimError instanceof TransportDeadError ? claimError.reason : '-'}`);
   }
   {
     const plain = describeFailure(new Error('config is wrong'));
-    const dead = describeFailure(new TransportDeadError('the worker was reset'));
+    const dead = describeFailure(new TransportDeadError('the worker was reset', 'unknown'));
     check('only a dead transport is reported as one',
       plain.dead === undefined && plain.message === 'config is wrong' &&
         dead.dead === true && dead.message === 'the worker was reset',

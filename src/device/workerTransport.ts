@@ -187,6 +187,7 @@ export class WorkerSlogicDevice implements Device {
       const detail = error instanceof Error ? error.message : String(error);
       throw new TransportDeadError(
         `${detail}; the USB transport was reset`,
+        'worker-timeout',
       );
     } finally {
       this.pageStalls.stop();
@@ -378,7 +379,7 @@ function firstMessage(
 }
 
 function failedReply(message: { message: string; dead?: boolean }): Error {
-  return message.dead === true ? new TransportDeadError(message.message) : new Error(message.message);
+  return message.dead === true ? new TransportDeadError(message.message, 'unknown') : new Error(message.message);
 }
 
 function post(worker: Worker, message: ToWorker): void {

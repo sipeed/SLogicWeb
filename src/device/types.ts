@@ -63,10 +63,18 @@ export type SampleSink = (chunk: Uint8Array) => void | Promise<void>;
  */
 export type DropoutSink = (samplePosition: number, missingSamples: number) => void;
 
+export type TransportDeadReason =
+  | 'loop-unsettled'
+  | 'reclaim-failed'
+  | 'worker-timeout'
+  | 'unknown';
+
 export class TransportDeadError extends Error {
-  constructor(message: string) {
+  readonly reason: TransportDeadReason;
+  constructor(message: string, reason: TransportDeadReason) {
     super(message);
     this.name = 'TransportDeadError';
+    this.reason = reason;
   }
 }
 

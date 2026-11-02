@@ -841,6 +841,7 @@ export class Slogic16U3 implements Device {
     if (this.loopUnsettled) {
       throw new TransportDeadError(
         'the previous capture\'s read loop never settled after the interface was released',
+        'loop-unsettled',
       );
     }
     assertValidConfig(cfg, this.maxSamplerateHz, this.maxChannels);
@@ -1645,6 +1646,7 @@ export class Slogic16U3 implements Device {
           teardownError = new TransportDeadError(
             'the read loop never settled after the interface was released, so the device ' +
             'handle was closed',
+            'loop-unsettled',
           );
         } else {
           const claimed = await this.settleWithin(
@@ -1660,6 +1662,7 @@ export class Slogic16U3 implements Device {
             teardownError = new TransportDeadError(
               'the interface could not be re-claimed after the capture was cancelled, so the ' +
               'device was closed',
+              'reclaim-failed',
             );
           }
         }
