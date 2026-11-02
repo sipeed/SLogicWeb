@@ -120,6 +120,7 @@ export const LIGHT_CHROME_TOKENS: Record<string, string> = {
   '--text50': '#59636e',
   '--accent': '#775AD2',
   '--negative': '#d1242f',
+  '--warning': '#9a6700',
   '--stop': 'var(--destructive)',
 };
 

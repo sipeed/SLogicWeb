@@ -567,6 +567,7 @@ function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia
     light.text === LIGHT_CHROME_TOKENS['--text'] &&
     light.text80 === LIGHT_CHROME_TOKENS['--text80'] &&
     light.text50 === LIGHT_CHROME_TOKENS['--text50'] &&
+    light.warning === LIGHT_CHROME_TOKENS['--warning'] &&
     light.negative === LIGHT_CHROME_TOKENS['--negative'] &&
     light.bubbleBg === LIGHT_CHROME_TOKENS['--bg30'] &&
     light.bubbleBorder === LIGHT_CHROME_TOKENS['--border-high'] &&
