@@ -16,7 +16,7 @@
  */
 
 import type { Stats, StartOptions } from './slogic16u3.js';
-import type { CaptureConfig, SampleSink } from './types.js';
+import type { CaptureConfig, SampleSink, TransportDeadReason } from './types.js';
 import type { TraceEntry } from './protocol.js';
 
 export interface DeviceFilter {
@@ -76,7 +76,7 @@ export type FromWorker =
   | { kind: 'console'; result: string }
   | { kind: 'started' }
   | { kind: 'stopped' }
-  | { kind: 'failed'; message: string; dead?: boolean };
+  | { kind: 'failed'; message: string; dead?: boolean; reason?: TransportDeadReason };
 
 /** What the worker's caller has to provide for `start`. */
 export interface WorkerStart {

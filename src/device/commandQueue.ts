@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
 
-import { TransportDeadError } from './types.js';
+import { TransportDeadError, type TransportDeadReason } from './types.js';
 
 export interface CommandQueue<T> {
   push(message: T): Promise<void>;
@@ -25,9 +25,11 @@ export function createCommandQueue<T>(
   };
 }
 
-export function describeFailure(error: unknown): { message: string; dead?: boolean } {
+export function describeFailure(
+  error: unknown,
+): { message: string; dead?: boolean; reason?: TransportDeadReason } {
   return {
     message: error instanceof Error ? error.message : String(error),
-    ...(error instanceof TransportDeadError ? { dead: true } : {}),
+    ...(error instanceof TransportDeadError ? { dead: true, reason: error.reason } : {}),
   };
 }

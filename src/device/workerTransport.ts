@@ -13,7 +13,7 @@
 import { LoopStallWatch, USB_FILTERS } from './usbCore.js';
 import { Slogic16U3 } from './slogic16u3.js';
 import type { Stats, StartOptions } from './slogic16u3.js';
-import { TransportDeadError } from './types.js';
+import { TransportDeadError, type TransportDeadReason } from './types.js';
 import type {
   CaptureConfig, CaptureStartOptions, Device, DropoutSink, SampleSink,
 } from './types.js';
@@ -378,8 +378,12 @@ function firstMessage(
   });
 }
 
-function failedReply(message: { message: string; dead?: boolean }): Error {
-  return message.dead === true ? new TransportDeadError(message.message, 'unknown') : new Error(message.message);
+function failedReply(
+  message: { message: string; dead?: boolean; reason?: TransportDeadReason },
+): Error {
+  return message.dead === true
+    ? new TransportDeadError(message.message, message.reason ?? 'unknown')
+    : new Error(message.message);
 }
 
 function post(worker: Worker, message: ToWorker): void {

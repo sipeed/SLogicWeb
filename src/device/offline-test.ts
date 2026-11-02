@@ -1624,15 +1624,19 @@ async function main(): Promise<void> {
     const stalled = new FakeWorker();
     const stalledDevice = await openWorkerDevice(stalled);
     const stalledFrom = Date.now();
-    let stalledError = '';
-    try { await stalledDevice.stop(); } catch (e) { stalledError = String(e); }
+    let stalledReply: unknown = null;
+    try { await stalledDevice.stop(); } catch (e) { stalledReply = e; }
+    const stalledError = String(stalledReply);
     check('a stop the worker never answers is abandoned, not waited for',
       stalledError.includes('did not answer "stopped"') && Date.now() - stalledFrom >= 150,
       `${stalledError} after ${Date.now() - stalledFrom} ms`);
     check('a stop that timed out terminates the worker it could not stop',
       stalled.terminated, `terminated=${stalled.terminated}`);
     check('a stop that timed out names the reset the caller has to recover from',
-      stalledError.includes('transport was reset'), stalledError);
+      stalledError.includes('transport was reset') && stalledReply instanceof TransportDeadError &&
+        stalledReply.reason === 'worker-timeout',
+      `${stalledError} | reason ` +
+        `${stalledReply instanceof TransportDeadError ? stalledReply.reason : '-'}`);
     check('a stop that timed out reports a dead transport, not a plain error',
       /transport was reset/.test(stalledError), String(stalledError));
 
@@ -1643,11 +1647,30 @@ async function main(): Promise<void> {
       const starting = deadDevice.start(
         { channels: 32, samplerate: 200e6, thresholdVolts: 1.6 }, () => {},
       );
-      deadWorker.emit({ kind: 'failed', message: 'the read loop never settled', dead: true });
+      deadWorker.emit({
+        kind: 'failed', message: 'the read loop never settled', dead: true, reason: 'loop-unsettled',
+      });
       await starting;
     } catch (e) { deadReply = e; }
     check('a dead-transport failure crosses the worker boundary as a typed error',
-      deadReply instanceof TransportDeadError, String(deadReply));
+      deadReply instanceof TransportDeadError && deadReply.reason === 'loop-unsettled',
+      `${String(deadReply)} | reason ` +
+        `${deadReply instanceof TransportDeadError ? deadReply.reason : '-'}`);
+
+    const anonymousWorker = new FakeWorker();
+    const anonymousDevice = await openWorkerDevice(anonymousWorker);
+    let anonymousReply: unknown = null;
+    try {
+      const starting = anonymousDevice.start(
+        { channels: 32, samplerate: 200e6, thresholdVolts: 1.6 }, () => {},
+      );
+      anonymousWorker.emit({ kind: 'failed', message: 'the worker gave no cause', dead: true });
+      await starting;
+    } catch (e) { anonymousReply = e; }
+    check('a dead transport that crossed without a cause is still reported as a dead transport',
+      anonymousReply instanceof TransportDeadError && anonymousReply.reason === 'unknown',
+      `${String(anonymousReply)} | reason ` +
+        `${anonymousReply instanceof TransportDeadError ? anonymousReply.reason : '-'}`);
 
     const streaming = new FakeWorker();
     const live = await openWorkerDevice(streaming);
@@ -2024,10 +2047,16 @@ async function main(): Promise<void> {
   {
     const plain = describeFailure(new Error('config is wrong'));
     const dead = describeFailure(new TransportDeadError('the worker was reset', 'unknown'));
+    const unsettled = describeFailure(new TransportDeadError('the handle was closed', 'loop-unsettled'));
     check('only a dead transport is reported as one',
       plain.dead === undefined && plain.message === 'config is wrong' &&
-        dead.dead === true && dead.message === 'the worker was reset',
+        plain.reason === undefined &&
+        dead.dead === true && dead.message === 'the worker was reset' &&
+        dead.reason === 'unknown',
       `${JSON.stringify(plain)} | ${JSON.stringify(dead)}`);
+    check('a failure described for the worker carries the cause it was given',
+      unsettled.dead === true && unsettled.reason === 'loop-unsettled',
+      `${JSON.stringify(unsettled)}`);
   }
 
   {
@@ -2765,6 +2794,14 @@ async function main(): Promise<void> {
     barrelSrc.length > 0 &&
     !/export\s*(\{[^}]*\}|\*)\s*from\s*['"]\.\/slogic16u3\.js['"]/.test(barrelSrc),
     'a value re-export from slogic16u3.js lets barrel consumers re-inline the driver');
+  const usbWorkerSrc = fs?.readFileSync(`${procFs?.cwd?.() ?? ''}/src/device/usbWorker.ts`, 'utf8') ?? '';
+  check('the worker reports a command failure through describeFailure so the cause crosses the boundary',
+    usbWorkerSrc.length > 0 &&
+      usbWorkerSrc.includes("post({ kind: 'failed', ...describeFailure(error) })"),
+    usbWorkerSrc.length === 0
+      ? 'src/device/usbWorker.ts was not readable, so the default worker producer is unverified'
+      : `reports through describeFailure: ${usbWorkerSrc.includes(
+        "post({ kind: 'failed', ...describeFailure(error) })")}`);
 
   check('selftest plan maps 16 channels to the 16 U3 model',
     modelForMaxChannels(16) === 'slogic16u3');
