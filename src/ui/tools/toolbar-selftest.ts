@@ -298,7 +298,7 @@ const usbDisconnectedBody = methodBody('private usbDisconnected(usb: USBDevice):
 const deviceLostBody = methodBody('private deviceLost(error: unknown, report = true): void {');
 const disconnectGuard = usbDisconnectedBody.includes(
   'if (!device || !sameUsbDevice(device.serial, usb)) return;') &&
-  usbDisconnectedBody.includes('this.deviceLost(new Error(');
+  usbDisconnectedBody.includes("this.deviceLost(new DiagnosticError('device.disconnected'");
 const lostFailAt = deviceLostBody.indexOf("this.fail('error.device', error)");
 const lostDetachAt = deviceLostBody.indexOf('this.detachDevice();');
 const lostRenderAt = deviceLostBody.indexOf('this.renderPanels();');

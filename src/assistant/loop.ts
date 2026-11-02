@@ -15,6 +15,8 @@
 
 import { TOOLS, toolByName, validate, type AssistantHost, type AssistantTool, type ToolRisk } from './tools.js';
 import type { Provider, ProviderError, ToolCall, ToolResult } from './types.js';
+import { diagnosticOf } from '../diagnostics.js';
+import { formatStatusDetail, statusDetailOf } from '../ui/format.js';
 
 /** Characters of tool output handed back to the model per call. */
 export const RESULT_MAX_CHARS = 24_000;
@@ -106,7 +108,8 @@ export class Conversation {
       const out = await tool.run(call.input as Record<string, unknown>, this.host, signal);
       return done(JSON.stringify(out), false);
     } catch (e) {
-      return done(e instanceof Error ? e.message : String(e), true);
+      return done(diagnosticOf(e) ? formatStatusDetail(statusDetailOf(e))
+        : e instanceof Error ? e.message : String(e), true);
     }
   }
 }

@@ -92,6 +92,9 @@ export const ru: Messages = {
 
   // ---------------------------------------- status error detail codes
   'diagnostic.ui.localeLoad': '«{locale}» не загружен',
+  'diagnostic.ui.axisContext': '2D-контекст оси недоступен',
+  'diagnostic.ui.captureLocked':
+    'настройки осциллографа группы заблокированы, пока идёт захват или остановка',
   'diagnostic.io.nothingToSave': 'нечего сохранять',
   'diagnostic.file.noFiles': 'файлы не выбраны',
   'diagnostic.file.unsupported':
@@ -165,6 +168,7 @@ export const ru: Messages = {
   'diagnostic.file.sr.noData':
     'в {source} нет элементов данных для capturefile {capturefile}',
   'diagnostic.device.transportDead': 'транспорт USB мёртв ({reason})',
+  'diagnostic.device.disconnected': '{device} отключён',
   'diagnostic.device.workerUnavailable': 'фоновый воркер USB недоступен в этом браузере',
   'diagnostic.device.workerCrashed': 'воркер USB завершился с ошибкой',
   'diagnostic.device.workerTimeout': 'воркер USB не ответил «{kind}» за {ms} мс',
@@ -183,11 +187,14 @@ export const ru: Messages = {
     'интерфейс не удалось занять заново после отмены записи, поэтому устройство было закрыто',
   'diagnostic.device.unsupportedChannels':
     'неподдерживаемое число каналов {channels}; это устройство предлагает {offered}',
+  'diagnostic.device.unknownWidth':
+    'устройство сообщило неподдерживаемое число каналов: {channels}',
   'diagnostic.device.unsupportedSamplerate':
     'неподдерживаемая частота дискретизации {samplerate} Гц; устройство предлагает {offered}',
   'diagnostic.device.rateCeiling':
     '{rate} МГц превышает потолок {ceiling} МГц для {channels} каналов',
   'diagnostic.device.threshold': 'порог должен быть числом, получено {threshold}',
+  'diagnostic.device.thresholdClips': 'порог {volts} В ограничивает ЦАП (код {code})',
   'diagnostic.device.testMode': 'режим теста должен быть 0, 1 или 2, получено {mode}',
   'diagnostic.device.tuningPacket':
     'transferBytes {bytes} не кратно размеру пакета {packet} байт',
@@ -212,6 +219,10 @@ export const ru: Messages = {
   'diagnostic.device.consoleBusy':
     'консоль USB недоступна, пока запись идёт или останавливается',
   'diagnostic.device.notOpen': 'устройство не открыто',
+  'diagnostic.device.notConnected': 'устройство не подключено',
+  'diagnostic.device.noConsole': 'это устройство не предоставляет консоль USB',
+  'diagnostic.device.sampleAccounting':
+    'устройство насчитало {counted} доставленных отсчётов, в хранилище {stored}',
   'diagnostic.device.noData':
     '{device} не отдал данных за {deadline} мс после RUN ({channels} каналов @ {rate} МГц). Плата в таком состоянии отвечает на каждую управляющую передачу и ничего не отправляет на bulk-эндпоинт: отключите и снова подключите её.',
   'diagnostic.device.underrunStalled':
@@ -275,6 +286,9 @@ export const ru: Messages = {
   'diagnostic.usb.notVisible':
     'устройство {vendor}:{product} не видно воркеру USB; сначала предоставьте к нему доступ со страницы',
   'diagnostic.decode.cancelled': 'декодирование отменено',
+  'diagnostic.decode.noCapture': 'нет захвата для декодирования',
+  'diagnostic.decode.channelOutOfRange':
+    'канала {channel} нет в этом захвате (всего каналов: {channels})',
   'diagnostic.decode.timeout': 'декодирование не уложилось в {ms} мс и было отменено',
   'diagnostic.decode.disposed': 'воркер декодирования закрыт',
   'diagnostic.decode.workerCrashed': 'воркер декодирования завершился с ошибкой',
@@ -289,6 +303,7 @@ export const ru: Messages = {
     '{edges} фронтов на сопоставленных каналах превышают бюджет декодирования {budget}. Отключите канал или уменьшите масштаб захвата.',
   'diagnostic.decode.edgeBudgetLoop':
     '{edges} фронтов на сопоставленных каналах превышают бюджет декодирования {budget}. Отключите канал или уменьшите окно цикла.',
+  'diagnostic.render.contextLost': 'контекст WebGL потерян, рендерер больше не работает',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Ширина: {duration}',

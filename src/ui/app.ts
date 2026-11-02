@@ -75,7 +75,7 @@ import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannels, defaultChannelName, channelColor,
   DEFAULT_TRIGGER_MODE,
   edgeTriggerAutoArms, clampLoopSamples, DEFAULT_LOOP_SAMPLES, loopDropSamples,
-  modesToConditions, triggerModeFromCondition,
+  modesToConditions, triggerModeFromCondition, mappedCaptureChannels,
   type AnalyzerState, type CaptureSettings, type ChannelState, type TriggerMode,
   type CaptureLabel, type StatusError,
 } from './state.js';
@@ -99,7 +99,6 @@ declare const __LOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
 type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number): number };
 type AcquireOutcome = 'connected' | 'cancelled' | 'failed';
 
-const BUS_CAPTURE_LOCK_ERROR = 'bank oscilloscope settings are locked while capture is running or stopping';
 const LOOP_SUSPEND_MIN_BYTES_PER_SEC = 160e6;
 
 interface Lane {
@@ -861,7 +860,7 @@ export class App {
     const h = Math.max(1, Math.round(hCss * dpr));
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     const ctx = c.getContext('2d');
-    if (!ctx) throw new Error('axis 2D context unavailable');
+    if (!ctx) throw new DiagnosticError('ui.axisContext');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawAxis(ctx, ticks, wCss, hCss, this.palette);
     this.markerA.drawChip({
@@ -1848,7 +1847,7 @@ export class App {
   private usbDisconnected(usb: USBDevice): void {
     const device = this.device;
     if (!device || !sameUsbDevice(device.serial, usb)) return;
-    this.deviceLost(new Error(`${device.name} was disconnected`));
+    this.deviceLost(new DiagnosticError('device.disconnected', { device: device.name }));
   }
 
   private deviceLost(error: unknown, report = true): void {
@@ -1938,8 +1937,8 @@ export class App {
   }
 
   private async usbControl(command: string): Promise<string> {
-    if (!this.device) throw new Error('no device connected');
-    if (!this.device.usbControl) throw new Error('this device does not expose a USB console');
+    if (!this.device) throw new DiagnosticError('device.notConnected');
+    if (!this.device.usbControl) throw new DiagnosticError('device.noConsole');
     return this.device.usbControl(command);
   }
 
@@ -1948,7 +1947,7 @@ export class App {
     this.rateCeilings = device.maxSamplerateHz ?? MAX_SAMPLERATE_HZ;
     const max = device.maxChannels ?? this.channels.length;
     if (!isChannelCount(max)) {
-      throw new Error(`device reported unsupported channel count ${max}`);
+      throw new DiagnosticError('device.unknownWidth', { channels: max });
     }
     const width = this.widthExplicit && this.settings.channels < max ? this.settings.channels : max;
     const samplerate = connectSamplerate({
@@ -1979,7 +1978,7 @@ export class App {
 
   private async startCapture(origin: CaptureStartOrigin = 'manual'): Promise<void> {
     if (this.running || this.stopping || this.repeatTimer.pending) return;
-    if (!this.device) { this.fail('error.start', new Error('no device connected')); return; }
+    if (!this.device) { this.fail('error.start', new DiagnosticError('device.notConnected')); return; }
     const device = this.device;
     try {
       this.statusError = null;
@@ -1994,7 +1993,7 @@ export class App {
       // the capture rather than discovering a clipped threshold in the data.
       const code = vrefCode(cfg.thresholdVolts);
       if (code === 0 || code === 1023) {
-        throw new Error(`threshold ${cfg.thresholdVolts} V clips the DAC (code ${code})`);
+        throw new DiagnosticError('device.thresholdClips', { volts: cfg.thresholdVolts, code });
       }
       const mode = this.settings.mode;
       const isLoop = mode === 'loop';
@@ -2106,7 +2105,9 @@ export class App {
         // silent divergence here would misplace every gap in the capture. Reported once.
         if (pos !== store.length + this.droppedTotal && this.lostSamples === 0) {
           this.fail('error.dropoutAccounting',
-            new Error(`device counted ${pos} samples delivered, store holds ${store.length + this.droppedTotal}`));
+            new DiagnosticError('device.sampleAccounting', {
+              counted: pos, stored: store.length + this.droppedTotal,
+            }));
         }
         const n = appendLostSamples(store, missing, this.captureLimitSamples);
         if (n === 0) return;
@@ -2313,7 +2314,13 @@ export class App {
     const stale = (): boolean => this.store !== store || !this.analyzers.includes(a);
     try {
       this.statusError = null;
-      if (store.length === 0) throw new Error('no capture to decode');
+      const { used, outside } = mappedCaptureChannels(a.channels, store.channelCount);
+      if (outside !== null) {
+        throw new DiagnosticError('decode.channelOutOfRange', {
+          channel: outside, channels: store.channelCount,
+        });
+      }
+      if (store.length === 0) throw new DiagnosticError('decode.noCapture');
       // A loop capture decodes as a snapshot: the edge extraction below is one
       // synchronous pass on this thread, so no append or drop can interleave, and
       // the result is labelled as not tracking the still-running capture. The flag is
@@ -2332,7 +2339,6 @@ export class App {
             window: formatDuration(MAX_SAMPLE / 200e6),
           });
       }
-      const used = [...new Set(Object.values(a.channels).filter((v) => v >= 0))];
       let edgeTotal = 0;
       for (const c of used) {
         edgeTotal += store.edgeCount
@@ -2490,15 +2496,15 @@ export class App {
       // The same paths the bus panel uses.
       buses: () => this.busViews.map((b) => ({ config: b, built: b.builder?.done ?? false })),
       addBus: (cfg) => {
-        if (this.addBus(cfg) === null) throw new Error(BUS_CAPTURE_LOCK_ERROR);
+        if (this.addBus(cfg) === null) throw new DiagnosticError('ui.captureLocked');
       },
       updateBus: (index, cfg) => {
         const b = this.busViews[index];
-        if (b && !this.updateBus(b.id, cfg)) throw new Error(BUS_CAPTURE_LOCK_ERROR);
+        if (b && !this.updateBus(b.id, cfg)) throw new DiagnosticError('ui.captureLocked');
       },
       removeBus: (index) => {
         const b = this.busViews[index];
-        if (b && !this.removeBus(b.id)) throw new Error(BUS_CAPTURE_LOCK_ERROR);
+        if (b && !this.removeBus(b.id)) throw new DiagnosticError('ui.captureLocked');
       },
     };
   }

@@ -10,9 +10,11 @@
  * Prints PASS/FAIL per check and exits non-zero on any failure.
  */
 
-import { formatMessage } from '../i18n.js';
+import { formatMessage, translate } from '../i18n.js';
 import { formatMountedAnalyzerNote, formatStatusDetail, statusDetailOf } from '../format.js';
-import { DiagnosticError, fromWireDiagnostic } from '../../diagnostics.js';
+import { DiagnosticError, diagnosticOf, fromWireDiagnostic } from '../../diagnostics.js';
+import { mappedCaptureChannels, type AnalyzerNote } from '../state.js';
+import { createSampleStore } from '../../data/index.js';
 import { en } from '../locales/en.js';
 import { fr } from '../locales/fr.js';
 import { ru } from '../locales/ru.js';
@@ -419,6 +421,94 @@ check(
     `window=${appSource.includes('window: formatDuration(MAX_SAMPLE / 200e6)')}, ` +
     `edgeBudget=${appSource.includes("this.captureIsLoop ? 'decode.edgeBudgetLoop' : 'decode.edgeBudget'")}, ` +
     `prose=${appSource.includes('decode is limited to')}`,
+);
+
+check(
+  'a stale analyzer mapping on a narrower capture reports the out-of-range code, not the store prose',
+  (() => {
+    const narrow = createSampleStore(4, 1e6);
+    narrow.append(new Uint8Array(16));
+    const mapping: Record<number, number> = { 0: 7 };
+    let raw = 'no throw';
+    try { narrow.edges(7, 0, narrow.length); } catch (e) { raw = e instanceof Error ? e.message : String(e); }
+    const mapped = mappedCaptureChannels(mapping, narrow.channelCount);
+    const error = mapped.outside === null
+      ? new Error('the guard let the stale mapping through')
+      : new DiagnosticError('decode.channelOutOfRange', {
+        channel: mapped.outside, channels: narrow.channelCount,
+      });
+    const diag = diagnosticOf(error);
+    const note: AnalyzerNote = {
+      kind: 'error',
+      detail: diag?.payload ?? (error instanceof Error ? error.message : String(error)),
+      ...(diag ? { diag } : {}),
+    };
+    const mounted = formatMountedAnalyzerNote(note, 'error');
+    return raw === 'channel 7 out of range 0..3' &&
+      mapped.outside === 7 && mapped.used.join(',') === '7' &&
+      error instanceof DiagnosticError && error.code === 'decode.channelOutOfRange' &&
+      error.message === 'decode.channelOutOfRange' &&
+      mounted === 'channel 7 is not in this capture (4 channels)' &&
+      !mounted.includes('out of range') && !mounted.includes('diagnostic.');
+  })(),
+  'D7 mapped, capture replaced by a 4-channel one: the data layer still throws the raw English ' +
+    'text, and the guard turns it into decode.channelOutOfRange before the edges are read. ' +
+    'Removing the guard from runDecode fails the source pin below.',
+);
+
+check(
+  'the mapped-channel width check flags exactly the channels the capture lacks',
+  (() => {
+    const cases: [string, Record<number, number>, number, number | null, string][] = [
+      ['stale D7 on a 4-channel capture', { 0: 7 }, 4, 7, '7'],
+      ['in-range mapping is left alone', { 0: 3, 1: 3 }, 4, null, '3'],
+      ['unmapped decoder channels (-1) are dropped', { 0: -1 }, 4, null, ''],
+      ['first stale channel in mapping order', { 0: 5, 1: 2, 2: 9 }, 4, 5, '5,2,9'],
+      ['the width boundary itself is outside', { 0: 4 }, 4, 4, '4'],
+      ['one below the boundary is inside', { 0: 3, 1: 0 }, 4, null, '3,0'],
+    ];
+    const bad = cases.filter(([, mapping, width, outside, used]) => {
+      const got = mappedCaptureChannels(mapping, width);
+      return got.outside !== outside || got.used.join(',') !== used;
+    }).map(([name]) => name);
+    return bad.length === 0;
+  })(),
+  'the discriminating rows are the `>=` boundary (channel 4 of 4 is outside) and the dropped -1 ' +
+    'sentinel; flipping the comparison or the filter fails this table',
+);
+
+check(
+  'the out-of-range sentence names the channel and the capture width in every locale',
+  (() => {
+    const vars = { channel: 7, channels: 4 };
+    const expected: [string, typeof en, string][] = [
+      ['en', en, 'channel 7 is not in this capture (4 channels)'],
+      ['zh-CN', zhCN, '通道 7 不在当前采集（共 4 个通道）'],
+      ['ru', ru, 'канала 7 нет в этом захвате (всего каналов: 4)'],
+      ['fr', fr, 'le canal 7 ne fait pas partie de cette capture (4 canaux)'],
+    ];
+    const bad = expected.filter(([, dict, want]) =>
+      translate(dict, 'diagnostic.decode.channelOutOfRange', vars) !== want).map(([locale]) => locale);
+    return bad.length === 0;
+  })(),
+  'each catalog renders the two measured values as vars, so the translated sentence can never ' +
+    'absorb the channel index or the width',
+);
+
+check(
+  'runDecode rejects a mapping the capture lacks before it reads any channel',
+  (() => {
+    const guard = appSource.indexOf('mappedCaptureChannels(a.channels, store.channelCount)');
+    const thrown = appSource.indexOf("new DiagnosticError('decode.channelOutOfRange'");
+    const edgeCount = appSource.indexOf('store.edgeCount');
+    const edges = appSource.indexOf('store.edges(c, 0, store.length)');
+    return guard >= 0 && thrown > guard && edgeCount > thrown && edges > thrown &&
+      count(appSource, /mappedCaptureChannels\(/g) === 1;
+  })(),
+  `guard=${appSource.indexOf('mappedCaptureChannels(a.channels, store.channelCount)')}, ` +
+    `throw=${appSource.indexOf("new DiagnosticError('decode.channelOutOfRange'")}, ` +
+    `edgeCount=${appSource.indexOf('store.edgeCount')}, ` +
+    `helperCalls=${count(appSource, /mappedCaptureChannels\(/g)}`,
 );
 
 console.log(results.map((result) => (

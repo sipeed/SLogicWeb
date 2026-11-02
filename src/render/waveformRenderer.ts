@@ -26,6 +26,7 @@
  */
 
 import type { SampleStore } from '../data/types.js';
+import { DiagnosticError } from '../diagnostics.js';
 import { fillAtlas, planColumns, type ColumnPlan } from './columns.js';
 import { computeLayout, type LayoutMetrics } from './layout.js';
 import { FRAGMENT_SRC, MAX_ROWS, VERTEX_SRC } from './shaders.js';
@@ -401,7 +402,7 @@ export class WaveformRenderer {
   }
 
   render(): FrameStats {
-    if (this.contextLost) throw new Error('WebGL context was lost; the renderer is dead');
+    if (this.contextLost) throw new DiagnosticError('render.contextLost');
     const gl = this.gl;
     const t0 = performance.now();
 

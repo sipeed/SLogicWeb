@@ -4,6 +4,8 @@ export type DiagnosticVars = Record<string, string | number>;
 
 export const DIAGNOSTIC_CODES = [
   'ui.localeLoad',
+  'ui.axisContext',
+  'ui.captureLocked',
   'io.nothingToSave',
   'file.noFiles',
   'file.unsupported',
@@ -51,6 +53,7 @@ export const DIAGNOSTIC_CODES = [
   'file.sr.tooLong',
   'file.sr.noData',
   'device.transportDead',
+  'device.disconnected',
   'device.workerUnavailable',
   'device.workerCrashed',
   'device.workerTimeout',
@@ -64,9 +67,11 @@ export const DIAGNOSTIC_CODES = [
   'device.loopUnsettledClosed',
   'device.reclaimFailed',
   'device.unsupportedChannels',
+  'device.unknownWidth',
   'device.unsupportedSamplerate',
   'device.rateCeiling',
   'device.threshold',
+  'device.thresholdClips',
   'device.testMode',
   'device.tuningPacket',
   'device.tuningDepth',
@@ -82,6 +87,9 @@ export const DIAGNOSTIC_CODES = [
   'device.bulkEmpty',
   'device.consoleBusy',
   'device.notOpen',
+  'device.notConnected',
+  'device.noConsole',
+  'device.sampleAccounting',
   'device.noData',
   'device.underrunStalled',
   'device.underrunClean',
@@ -118,6 +126,8 @@ export const DIAGNOSTIC_CODES = [
   'usb.blocked',
   'usb.notVisible',
   'decode.cancelled',
+  'decode.noCapture',
+  'decode.channelOutOfRange',
   'decode.timeout',
   'decode.disposed',
   'decode.workerCrashed',
@@ -128,6 +138,7 @@ export const DIAGNOSTIC_CODES = [
   'decode.tooLongLoop',
   'decode.edgeBudget',
   'decode.edgeBudgetLoop',
+  'render.contextLost',
 ] as const;
 
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[number];

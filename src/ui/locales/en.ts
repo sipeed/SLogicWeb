@@ -96,6 +96,9 @@ export const en = {
 
   // ---------------------------------------- status error detail codes
   'diagnostic.ui.localeLoad': '"{locale}" failed to load',
+  'diagnostic.ui.axisContext': 'axis 2D context unavailable',
+  'diagnostic.ui.captureLocked':
+    'bank oscilloscope settings are locked while capture is running or stopping',
   'diagnostic.io.nothingToSave': 'nothing to save',
   'diagnostic.file.noFiles': 'no files selected',
   'diagnostic.file.unsupported':
@@ -169,6 +172,7 @@ export const en = {
   'diagnostic.file.sr.noData':
     '{source} has no data members for capturefile {capturefile}',
   'diagnostic.device.transportDead': 'the USB transport is dead ({reason})',
+  'diagnostic.device.disconnected': '{device} was disconnected',
   'diagnostic.device.workerUnavailable':
     'the background USB worker is unavailable in this browser',
   'diagnostic.device.workerCrashed': 'the USB worker failed',
@@ -190,11 +194,15 @@ export const en = {
     'the interface could not be re-claimed after the capture was cancelled, so the device was closed',
   'diagnostic.device.unsupportedChannels':
     'unsupported channel count {channels}; this device offers {offered}',
+  'diagnostic.device.unknownWidth':
+    'device reported unsupported channel count {channels}',
   'diagnostic.device.unsupportedSamplerate':
     'unsupported samplerate {samplerate} Hz; the device offers {offered}',
   'diagnostic.device.rateCeiling':
     '{rate} MHz exceeds the {channels}-channel ceiling of {ceiling} MHz',
   'diagnostic.device.threshold': 'threshold must be a number, got {threshold}',
+  'diagnostic.device.thresholdClips':
+    'threshold {volts} V clips the DAC (code {code})',
   'diagnostic.device.testMode': 'test mode must be 0, 1 or 2, got {mode}',
   'diagnostic.device.tuningPacket':
     'transferBytes {bytes} is not a multiple of the {packet}-byte packet size',
@@ -219,6 +227,10 @@ export const en = {
   'diagnostic.device.consoleBusy':
     'USB console is unavailable while a capture is running or stopping',
   'diagnostic.device.notOpen': 'device is not open',
+  'diagnostic.device.notConnected': 'no device connected',
+  'diagnostic.device.noConsole': 'this device does not expose a USB console',
+  'diagnostic.device.sampleAccounting':
+    'device counted {counted} samples delivered, store holds {stored}',
   'diagnostic.device.noData':
     '{device} delivered no data within {deadline} ms of RUN ({channels}ch @ {rate} MHz). A board in this state answers every control transfer and sends nothing on the bulk endpoint: unplug it and plug it back in.',
   'diagnostic.device.underrunStalled':
@@ -284,6 +296,9 @@ export const en = {
   'diagnostic.usb.notVisible':
     'device {vendor}:{product} is not visible to the USB worker; grant it from the page first',
   'diagnostic.decode.cancelled': 'decode cancelled',
+  'diagnostic.decode.noCapture': 'no capture to decode',
+  'diagnostic.decode.channelOutOfRange':
+    'channel {channel} is not in this capture ({channels} channels)',
   'diagnostic.decode.timeout': 'decode exceeded {ms} ms and was cancelled',
   'diagnostic.decode.disposed': 'the decode worker has been retired',
   'diagnostic.decode.workerCrashed': 'the decode worker failed',
@@ -298,6 +313,7 @@ export const en = {
     '{edges} edges on the mapped channels exceed the {budget} decode budget. Disable a channel or zoom the capture down.',
   'diagnostic.decode.edgeBudgetLoop':
     '{edges} edges on the mapped channels exceed the {budget} decode budget. Disable a channel or shrink the loop window.',
+  'diagnostic.render.contextLost': 'WebGL context was lost; the renderer is dead',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Width: {duration}',

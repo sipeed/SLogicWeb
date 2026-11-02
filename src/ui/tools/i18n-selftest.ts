@@ -52,7 +52,7 @@ import {
 import {
   DIAGNOSTIC_CODES, DiagnosticError, fromWireDiagnostic, wireDiagnostic,
 } from '../../diagnostics.js';
-import type { AnalyzerNote, AnalyzerStatus, CaptureLabel, CaptureSettings } from '../state.js';
+import type { AnalyzerNote, AnalyzerStatus, CaptureLabel, CaptureSettings, StatusError } from '../state.js';
 
 /** Same structural-typing trick as sr-selftest.ts: node access without @types/node. */
 const nodeProcess = (() => {
@@ -471,6 +471,7 @@ function check(name: string, pass: boolean, detail: string): void {
 
 {
   const expected: Partial<Record<keyof Messages, string>> = {
+    'diagnostic.decode.channelOutOfRange': 'channel,channels',
     'diagnostic.decode.tooLong': 'max,samples,window',
     'diagnostic.decode.tooLongLoop': 'max,samples,window',
     'diagnostic.decode.edgeBudget': 'budget,edges',
@@ -480,9 +481,33 @@ function check(name: string, pass: boolean, detail: string): void {
     const template = en[key as keyof Messages] ?? '';
     return [...template.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!).sort().join(',') !== vars;
   }).map(([key]) => key);
-  check('the decode-limit templates keep every measured placeholder',
+  check('the decode templates keep every measured placeholder',
     bad.length === 0,
     bad.length === 0 ? `${Object.keys(expected).length} templates pinned` : bad.join(', '));
+}
+
+{
+  const dicts: [string, Messages][] = [['en', en], ['zh-CN', zhCN], ['ru', ru], ['fr', fr]];
+  const bad: string[] = [];
+  for (const code of DIAGNOSTIC_CODES) {
+    const key = `diagnostic.${code}` as keyof Messages;
+    const template = en[key];
+    const names = [...template.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!);
+    if (names.length === 0) continue;
+    const vars = Object.fromEntries(names.map((n) => [n, `<<${n}>>`]));
+    for (const [locale, dict] of dicts) {
+      const rendered = translate(dict, key, vars);
+      const missing = names.filter((n) => !rendered.includes(`<<${n}>>`));
+      if (missing.length > 0) bad.push(`${locale}:${key} drops ${missing.join('/')}`);
+      if (/[{}]/.test(rendered)) bad.push(`${locale}:${key} leaves a placeholder`);
+    }
+  }
+  const withVars = DIAGNOSTIC_CODES.filter((code) =>
+    /\{\w+\}/.test(en[`diagnostic.${code}` as keyof Messages]));
+  check('every diagnostic template substitutes each of its vars in every locale',
+    bad.length === 0 && withVars.length > 0,
+    bad.length === 0 ? `${withVars.length} var-bearing templates x ${dicts.length} locales render clean`
+      : bad.join('; '));
 }
 
 {
@@ -605,6 +630,18 @@ function check(name: string, pass: boolean, detail: string): void {
         ...duplicates.map((k) => `duplicate ${k}`),
         `codes=${DIAGNOSTIC_CODES.length} keys=${diagnosticKeys.length}`,
       ].join('; '));
+}
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const renderer = fs.readFileSync('src/render/waveformRenderer.ts', 'utf8');
+  const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const throwSite = renderer.includes("new DiagnosticError('render.contextLost')") &&
+    !renderer.includes('WebGL context was lost; the renderer is dead');
+  const route = /catch \(e\) \{\s*this\.fail\('error\.render', e\);\s*\}/.test(app);
+  check('render.contextLost is thrown by the renderer and reaches the status bar',
+    throwSite && route, `throw=${throwSite} route=${route}`);
 }
 
 {
@@ -790,10 +827,18 @@ const baseSettings: CaptureSettings = {
     'diagnostic.device.transportDead', 'diagnostic.device.workerTimeout',
     'diagnostic.device.loopUnsettledClosed', 'diagnostic.device.noData',
     'diagnostic.device.underrunStalled', 'diagnostic.usb.blocked',
+    'diagnostic.usb.unavailable', 'diagnostic.usb.notVisible',
     'diagnostic.device.controlReadTimeout', 'diagnostic.device.registerStuck',
     'diagnostic.device.samplerateNotExpressible',
     'diagnostic.decode.workerFailed', 'diagnostic.decode.timeout',
     'diagnostic.decode.edgeBudget',
+    'diagnostic.ui.axisContext', 'diagnostic.ui.captureLocked',
+    'diagnostic.device.disconnected', 'diagnostic.device.notConnected',
+    'diagnostic.device.noConsole', 'diagnostic.device.unknownWidth',
+    'diagnostic.device.thresholdClips', 'diagnostic.device.sampleAccounting',
+    'diagnostic.decode.noCapture',
+    'diagnostic.decode.channelOutOfRange',
+    'diagnostic.render.contextLost',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];
@@ -884,6 +929,27 @@ const baseSettings: CaptureSettings = {
     frText === fr['toolbar.start'] && frText !== en['toolbar.start'] &&
     enText === en['toolbar.start'],
     `fr→${JSON.stringify(frText)}, en→${JSON.stringify(enText)}`);
+}
+
+{
+  const stored: StatusError = {
+    what: 'error.device',
+    detail: {
+      kind: 'diagnostic',
+      diag: { code: 'device.disconnected', vars: { device: 'SLogic16 U3' } },
+    },
+  };
+  const before = formatStatusError(stored);
+  const switched = await setLocale('fr');
+  const after = formatStatusError(stored);
+  await setLocale('en');
+  const back = formatStatusError(stored);
+  check('an on-screen status error retranslates on a locale switch without being rebuilt',
+    switched === 'committed' &&
+      before === 'device: SLogic16 U3 was disconnected' &&
+      after === 'appareil: SLogic16 U3 a été déconnecté' &&
+      back === before,
+    `en=${JSON.stringify(before)} fr=${JSON.stringify(after)} back=${JSON.stringify(back)}`);
 }
 
 {

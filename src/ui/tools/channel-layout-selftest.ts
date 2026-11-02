@@ -570,7 +570,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const startEnd = startStart >= 0 ? appSrc.indexOf('private enforceLoopRetention', startStart) : -1;
   const startSrc = startEnd > startStart ? appSrc.slice(startStart, startEnd) : '';
   const flagReset = startSrc.indexOf('startMutatedCapture = false');
-  const firstRefusal = startSrc.indexOf('clips the DAC');
+  const firstRefusal = startSrc.indexOf('device.thresholdClips');
   const flagSet = startSrc.indexOf('startMutatedCapture = true');
   check('startCapture resets its mutation flag before the early refusals and sets it after them',
     startSrc.length > 0 && flagReset >= 0 && firstRefusal > flagReset && flagSet > firstRefusal,
@@ -624,9 +624,9 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     removeBus.includes('(this.running || this.stopping) && busChannelBank(current.spec) !== null') &&
     busPanel.includes('remove.disabled = v.captureLocked && busChannelBank(b.spec) !== null') &&
     busPanel.includes('v.captureLocked && (editingBank || busChannelBank(current.spec) !== null)') &&
-    appSrc.includes('if (this.addBus(cfg) === null) throw new Error(BUS_CAPTURE_LOCK_ERROR)') &&
-    appSrc.includes('if (b && !this.updateBus(b.id, cfg)) throw new Error(BUS_CAPTURE_LOCK_ERROR)') &&
-    appSrc.includes('if (b && !this.removeBus(b.id)) throw new Error(BUS_CAPTURE_LOCK_ERROR)');
+    appSrc.includes("if (this.addBus(cfg) === null) throw new DiagnosticError('ui.captureLocked')") &&
+    appSrc.includes("if (b && !this.updateBus(b.id, cfg)) throw new DiagnosticError('ui.captureLocked')") &&
+    appSrc.includes("if (b && !this.removeBus(b.id)) throw new DiagnosticError('ui.captureLocked')");
   check('running and stopping lock bank additions, edits and removal in both the view and App model',
     scopeLocks, `add=${addBus.includes('busChannelBank(cfg.spec)')}, ` +
     `update=${updateBus.includes('busChannelBank(cfg.spec)')}, remove=${removeBus.includes('busChannelBank(current.spec)')}, ` +

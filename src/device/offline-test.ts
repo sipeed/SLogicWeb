@@ -3369,6 +3369,23 @@ async function main(): Promise<void> {
       usbWorkerSrc.includes('product: message.filter.productId.toString(16)') &&
       !usbWorkerSrc.includes('is not visible to this worker'),
     'the open handler has to report the ids it looked for, not an English sentence');
+  const driverSrc = fs?.readFileSync(`${procFs?.cwd?.() ?? ''}/src/device/slogic16u3.ts`, 'utf8') ?? '';
+  const stalledAt = driverSrc.indexOf("new DiagnosticError('device.underrunStalled'");
+  const cleanAt = driverSrc.indexOf("new DiagnosticError('device.underrunClean'");
+  const stalledSrc = stalledAt >= 0 && cleanAt > stalledAt
+    ? driverSrc.slice(stalledAt, cleanAt) : '';
+  const cleanSrc = cleanAt >= 0 ? driverSrc.slice(cleanAt, cleanAt + 400) : '';
+  const stalledVars = ['stalls:', 'worstMs:', 'atMs:', 'coverMs:'];
+  check('the stalled-thread underrun passes all four stall vars and the clean one does not',
+    stalledSrc.length > 0 && cleanSrc.length > 0 &&
+      stalledVars.every((v) => stalledSrc.includes(v)) &&
+      stalledSrc.includes('...measured') &&
+      stalledVars.every((v) => !cleanSrc.includes(v)) &&
+      cleanSrc.includes('thresholdMs: THREAD_STALL_THRESHOLD_MS'),
+    stalledSrc.length === 0
+      ? 'the underrun branches were not readable in src/device/slogic16u3.ts'
+      : `stalled=${stalledVars.map((v) => stalledSrc.includes(v)).join(',')} ` +
+        `clean=${stalledVars.map((v) => !cleanSrc.includes(v)).join(',')}`);
 
   check('selftest plan maps 16 channels to the 16 U3 model',
     modelForMaxChannels(16) === 'slogic16u3');

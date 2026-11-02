@@ -90,6 +90,8 @@ export const zhCN: Messages = {
 
   // ---------------------------------------- status error detail codes
   'diagnostic.ui.localeLoad': '“{locale}”加载失败',
+  'diagnostic.ui.axisContext': '坐标轴 2D 上下文不可用',
+  'diagnostic.ui.captureLocked': '采集运行或停止期间，通道组示波器设置被锁定',
   'diagnostic.io.nothingToSave': '没有可保存的数据',
   'diagnostic.file.noFiles': '未选择文件',
   'diagnostic.file.unsupported': '{names} 中没有可加载的内容；需要 sigrok .sr 会话或 .lwcap 文件',
@@ -145,6 +147,7 @@ export const zhCN: Messages = {
   'diagnostic.file.sr.tooLong': '采集过长（{samples} 个样本）',
   'diagnostic.file.sr.noData': '{source} 中没有 capturefile {capturefile} 的数据成员',
   'diagnostic.device.transportDead': 'USB 传输已失效（{reason}）',
+  'diagnostic.device.disconnected': '{device} 已断开连接',
   'diagnostic.device.workerUnavailable': '此浏览器不支持后台 USB 工作线程',
   'diagnostic.device.workerCrashed': 'USB 工作线程失败',
   'diagnostic.device.workerTimeout': 'USB 工作线程未在 {ms} ms 内响应“{kind}”',
@@ -159,9 +162,11 @@ export const zhCN: Messages = {
     '释放接口后读取循环始终没有结束，因此设备句柄已被关闭',
   'diagnostic.device.reclaimFailed': '采集取消后无法重新占用接口，因此设备已被关闭',
   'diagnostic.device.unsupportedChannels': '不支持的通道数 {channels}；此设备提供 {offered}',
+  'diagnostic.device.unknownWidth': '设备报告的通道数不受支持：{channels}',
   'diagnostic.device.unsupportedSamplerate': '不支持的采样率 {samplerate} Hz；此设备提供 {offered}',
   'diagnostic.device.rateCeiling': '{rate} MHz 超过了 {channels} 通道的上限 {ceiling} MHz',
   'diagnostic.device.threshold': '阈值必须是数字，实际为 {threshold}',
+  'diagnostic.device.thresholdClips': '阈值 {volts} V 会使 DAC 削顶（代码 {code}）',
   'diagnostic.device.testMode': '测试模式必须为 0、1 或 2，实际为 {mode}',
   'diagnostic.device.tuningPacket': 'transferBytes {bytes} 不是 {packet} 字节包长的整数倍',
   'diagnostic.device.tuningDepth': '传输深度 {depth} 低于设备不溢出所需的 4',
@@ -180,6 +185,9 @@ export const zhCN: Messages = {
   'diagnostic.device.bulkEmpty': '批量 IN 传输在状态“ok”下没有返回数据',
   'diagnostic.device.consoleBusy': '采集运行或停止期间无法使用 USB 控制台',
   'diagnostic.device.notOpen': '设备未打开',
+  'diagnostic.device.notConnected': '未连接设备',
+  'diagnostic.device.noConsole': '此设备未提供 USB 控制台',
+  'diagnostic.device.sampleAccounting': '设备计数已送达 {counted} 个样本，存储中为 {stored} 个',
   'diagnostic.device.noData':
     '{device} 在 RUN 后 {deadline} ms 内没有送出任何数据（{channels}ch @ {rate} MHz）。处于该状态的板子会回应每一次控制传输，但在批量端点上不发送任何数据：请拔下并重新插入。',
   'diagnostic.device.underrunStalled':
@@ -236,6 +244,8 @@ export const zhCN: Messages = {
   'diagnostic.usb.blocked': '浏览器阻止了对 USB 设备的访问',
   'diagnostic.usb.notVisible': '设备 {vendor}:{product} 对 USB 工作线程不可见；请先在页面中授权',
   'diagnostic.decode.cancelled': '解码已取消',
+  'diagnostic.decode.noCapture': '没有可解码的采集',
+  'diagnostic.decode.channelOutOfRange': '通道 {channel} 不在当前采集（共 {channels} 个通道）',
   'diagnostic.decode.timeout': '解码超过 {ms} ms，已取消',
   'diagnostic.decode.disposed': '解码工作线程已停用',
   'diagnostic.decode.workerCrashed': '解码工作线程失败',
@@ -250,6 +260,7 @@ export const zhCN: Messages = {
     '映射通道上有 {edges} 个边沿，超出 {budget} 的解码预算。请禁用某个通道或缩小捕获范围。',
   'diagnostic.decode.edgeBudgetLoop':
     '映射通道上有 {edges} 个边沿，超出 {budget} 的解码预算。请禁用某个通道或缩小循环窗口。',
+  'diagnostic.render.contextLost': 'WebGL 上下文已丢失，渲染器已停止工作',
 
   // -------------------------------------------------------- hover readout
   'hover.width': '宽度：{duration}',

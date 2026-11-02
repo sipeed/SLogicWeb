@@ -27,7 +27,9 @@ import {
   TOOLS, toolByName, toolSpecs, validate, type AssistantHost, type HostAnalyzer, type HostBus, type HostSnapshot,
 } from '../../assistant/tools.js';
 import { busSteps } from '../../data/busValue.js';
+import { DiagnosticError } from '../../diagnostics.js';
 import type { BusViewConfig } from '../busView.js';
+import { setLocale } from '../i18n.js';
 import type { Provider, ProviderConfig, ToolResult, TurnResult } from '../../assistant/types.js';
 import { levelAt } from '../captureIO.js';
 import { createProtocolFixture } from './protocolFixture.js';
@@ -187,10 +189,20 @@ class FakeHost implements AssistantHost {
   zoomToAnnotation(): boolean { return true; }
   levelAt(ch: number, sample: number): 0 | 1 { return levelAt(this.store_, ch, sample); }
   buses_: HostBus[] = [];
+  busError: unknown = null;
   buses(): readonly HostBus[] { return this.buses_; }
-  addBus(cfg: BusViewConfig): void { this.buses_.push({ config: cfg, built: true }); }
-  updateBus(i: number, cfg: BusViewConfig): void { this.buses_[i] = { config: cfg, built: true }; }
-  removeBus(i: number): void { this.buses_.splice(i, 1); }
+  addBus(cfg: BusViewConfig): void {
+    if (this.busError) throw this.busError;
+    this.buses_.push({ config: cfg, built: true });
+  }
+  updateBus(i: number, cfg: BusViewConfig): void {
+    if (this.busError) throw this.busError;
+    this.buses_[i] = { config: cfg, built: true };
+  }
+  removeBus(i: number): void {
+    if (this.busError) throw this.busError;
+    this.buses_.splice(i, 1);
+  }
 }
 
 async function run(name: string, input: Record<string, unknown>, host: AssistantHost): Promise<{ ok: boolean; out: unknown; err: string }> {
@@ -516,6 +528,31 @@ async function converse(provider: Provider, approve: boolean | 'abort', host = n
   const p = new ScriptedProvider([]);
   const { events } = await converse(p, true);
   check('a provider error becomes an error event, not a throw', events.some((e) => e.type === 'error'));
+}
+{
+  const busFailure = async (failure: unknown): Promise<string> => {
+    const host = new FakeHost();
+    host.busError = failure;
+    const p = new ScriptedProvider([
+      { stop: 'tool_use', text: '', toolCalls: [{ id: 'b', name: 'add_bus_view', input: { bits: [0, 1] } }] },
+      { stop: 'end', text: 'ok', toolCalls: [] },
+    ]);
+    await converse(p, true, host);
+    return p.answered[0]?.[0]?.content ?? '';
+  };
+  const lockedEn = await busFailure(new DiagnosticError('ui.captureLocked'));
+  const varsEn = await busFailure(new DiagnosticError('device.thresholdClips', { volts: 4.5, code: 1023 }));
+  await setLocale('zh-CN');
+  const lockedZh = await busFailure(new DiagnosticError('ui.captureLocked'));
+  await setLocale('en');
+  const plain = await busFailure(new Error('the bus editor is offline'));
+  check('a coded tool failure reaches the model as a translated sentence, not a key',
+    lockedEn === 'bank oscilloscope settings are locked while capture is running or stopping' &&
+      varsEn === 'threshold 4.5 V clips the DAC (code 1023)' &&
+      lockedZh === '采集运行或停止期间，通道组示波器设置被锁定',
+    JSON.stringify({ lockedEn, varsEn, lockedZh }));
+  check('a plain tool error still reaches the model as its own text',
+    plain === 'the bus editor is offline', plain);
 }
 
 // ------------------------------------------------------------------ 5. providers over recorded streams

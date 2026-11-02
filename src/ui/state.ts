@@ -246,6 +246,19 @@ export function analyzerColor(n: number): string {
   return ANALYZER_COLORS[n % ANALYZER_COLORS.length]!;
 }
 
+export interface MappedCaptureChannels {
+  used: number[];
+  outside: number | null;
+}
+
+export function mappedCaptureChannels(
+  channels: Readonly<Record<number, number>>, channelCount: number,
+): MappedCaptureChannels {
+  const used = [...new Set(Object.values(channels).filter((v) => v >= 0))];
+  const outside = used.find((c) => c >= channelCount);
+  return { used, outside: outside ?? null };
+}
+
 export function analyzerLaneChannel(channels: Record<number, number>): number {
   let decoderChannel = -1;
   let laneChannel = 0;

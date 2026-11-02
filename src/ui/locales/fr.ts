@@ -92,6 +92,9 @@ export const fr: Messages = {
 
   // ---------------------------------------- status error detail codes
   'diagnostic.ui.localeLoad': '« {locale} » n’a pas pu être chargé',
+  'diagnostic.ui.axisContext': 'contexte 2D de l’axe indisponible',
+  'diagnostic.ui.captureLocked':
+    'les réglages oscilloscope du groupe sont verrouillés pendant une capture ou un arrêt',
   'diagnostic.io.nothingToSave': 'rien à enregistrer',
   'diagnostic.file.noFiles': 'aucun fichier sélectionné',
   'diagnostic.file.unsupported':
@@ -166,6 +169,7 @@ export const fr: Messages = {
   'diagnostic.file.sr.noData':
     '{source} n’a pas de membres de données pour capturefile {capturefile}',
   'diagnostic.device.transportDead': 'le transport USB est mort ({reason})',
+  'diagnostic.device.disconnected': '{device} a été déconnecté',
   'diagnostic.device.workerUnavailable':
     'le worker USB d’arrière-plan n’est pas disponible dans ce navigateur',
   'diagnostic.device.workerCrashed': 'le worker USB a échoué',
@@ -187,11 +191,14 @@ export const fr: Messages = {
     'l’interface n’a pas pu être reconquise après l’annulation de la capture, l’appareil a donc été fermé',
   'diagnostic.device.unsupportedChannels':
     'nombre de canaux {channels} non pris en charge ; cet appareil propose {offered}',
+  'diagnostic.device.unknownWidth':
+    'l’appareil a annoncé un nombre de canaux non pris en charge : {channels}',
   'diagnostic.device.unsupportedSamplerate':
     'fréquence d’échantillonnage {samplerate} Hz non prise en charge ; l’appareil propose {offered}',
   'diagnostic.device.rateCeiling':
     '{rate} MHz dépasse le plafond de {ceiling} MHz pour {channels} canaux',
   'diagnostic.device.threshold': 'le seuil doit être un nombre, reçu {threshold}',
+  'diagnostic.device.thresholdClips': 'le seuil {volts} V écrête le DAC (code {code})',
   'diagnostic.device.testMode': 'le mode de test doit être 0, 1 ou 2, reçu {mode}',
   'diagnostic.device.tuningPacket':
     'transferBytes {bytes} n’est pas un multiple de la taille de paquet de {packet} octets',
@@ -217,6 +224,10 @@ export const fr: Messages = {
   'diagnostic.device.consoleBusy':
     'la console USB est indisponible pendant une capture en cours ou en cours d’arrêt',
   'diagnostic.device.notOpen': 'l’appareil n’est pas ouvert',
+  'diagnostic.device.notConnected': 'aucun appareil connecté',
+  'diagnostic.device.noConsole': 'cet appareil n’expose pas de console USB',
+  'diagnostic.device.sampleAccounting':
+    'l’appareil compte {counted} échantillons livrés, le stockage en contient {stored}',
   'diagnostic.device.noData':
     '{device} n’a envoyé aucune donnée dans les {deadline} ms suivant RUN ({channels} canaux @ {rate} MHz). Une carte dans cet état répond à chaque transfert de contrôle et n’envoie rien sur le point de terminaison bulk : débranchez-la et rebranchez-la.',
   'diagnostic.device.underrunStalled':
@@ -281,8 +292,11 @@ export const fr: Messages = {
   'diagnostic.usb.unavailable': 'WebUSB n’est pas disponible dans ce navigateur',
   'diagnostic.usb.blocked': 'le navigateur a bloqué l’accès aux appareils USB',
   'diagnostic.usb.notVisible':
-    'l’appareil {vendor}:{product} n’est pas visible pour le worker USB ; accordez-le depuis la page d’abord',
+    'l’appareil {vendor}:{product} n’est pas visible pour le worker USB ; accordez-le d’abord depuis la page',
   'diagnostic.decode.cancelled': 'décodage annulé',
+  'diagnostic.decode.noCapture': 'aucune capture à décoder',
+  'diagnostic.decode.channelOutOfRange':
+    'le canal {channel} ne fait pas partie de cette capture ({channels} canaux)',
   'diagnostic.decode.timeout': 'le décodage a dépassé {ms} ms et a été annulé',
   'diagnostic.decode.disposed': 'le worker de décodage a été retiré',
   'diagnostic.decode.workerCrashed': 'le worker de décodage a échoué',
@@ -298,6 +312,7 @@ export const fr: Messages = {
     '{edges} fronts sur les canaux mappés dépassent le budget de décodage de {budget}. Désactivez un canal ou réduisez la capture.',
   'diagnostic.decode.edgeBudgetLoop':
     '{edges} fronts sur les canaux mappés dépassent le budget de décodage de {budget}. Désactivez un canal ou réduisez la fenêtre de boucle.',
+  'diagnostic.render.contextLost': 'le contexte WebGL a été perdu, le moteur de rendu est hors service',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Largeur : {duration}',
