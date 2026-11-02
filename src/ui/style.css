@@ -974,6 +974,34 @@ html.resizing { cursor: col-resize; user-select: none; }
 .panel-note { font-size: 10px; color: var(--text50); line-height: 1.5; white-space: pre-wrap; }
 .panel-note.error { color: var(--negative); }
 .panel-note.live { color: var(--text80); }
+.capture-badge {
+  display: inline-flex; min-height: 18px; align-items: center; gap: 5px; padding: 0 7px;
+  color: var(--text80); background: var(--muted); border: 1px solid transparent;
+  border-radius: 999px; font-size: 10px; font-weight: 600; white-space: nowrap;
+}
+.capture-badge::before { width: 5px; height: 5px; content: ""; background: var(--muted-foreground); border-radius: 50%; }
+.capture-badge.live { background: color-mix(in oklab, var(--primary) 18%, var(--card)); }
+.capture-badge.live::before { background: var(--primary); }
+.capture-badge.waiting { background: color-mix(in oklab, var(--warning) 18%, var(--card)); }
+.capture-badge.waiting::before { background: var(--warning); }
+.capture-badge.stopping { background: color-mix(in oklab, var(--destructive) 16%, var(--card)); }
+.capture-badge.stopping::before { background: var(--destructive); }
+.capture-status {
+  display: flex; flex-direction: column; gap: 5px; padding: 6px 8px;
+  background: var(--background); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.capture-status-line { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
+.capture-status-detail {
+  min-width: 0; color: var(--muted-foreground); font-size: 10px; line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.capture-status-value { flex: none; color: var(--foreground); font-size: 10px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.capture-progress { height: 4px; overflow: hidden; background: var(--muted); border-radius: 4px; }
+.capture-progress > span { display: block; width: 0; height: 100%; background: var(--primary); border-radius: 4px; }
+.capture-progress[data-indeterminate="true"] > span {
+  width: 100%; opacity: .55;
+  background: repeating-linear-gradient(90deg, var(--primary) 0 8px, transparent 8px 14px);
+}
 .decoder-detail { font-size: 11px; color: var(--text80); line-height: 1.4; }
 
 .digital-section .panel-section-head > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

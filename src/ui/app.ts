@@ -40,7 +40,7 @@ import {
   type BusViewState,
 } from './busView.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
-import { CapturePanel, type CapturePanelView } from './capturePanel.js';
+import { CapturePanel, type CapturePanelState, type CapturePanelView } from './capturePanel.js';
 import {
   CHANNEL_BANK_SIZE, busChannelBank, captureWidthTiers, channelBankIndices, channelBankStart,
   busOutOfWidth, lockedChannelBanks,
@@ -1523,17 +1523,27 @@ export class App {
   }
 
   private progressView(): NonNullable<CapturePanelView['progress']> {
+    const loop = this.captureIsLoop;
+    const unlimited = this.settings.mode === 'single' && this.settings.singleUnlimited;
     return {
       seconds: this.captureStart > 0 ? (performance.now() - this.captureStart) / 1000 : 0,
-      samples: this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length,
-      bytes: this.captureIsLoop
+      samples: loop ? this.store.length + this.droppedTotal : this.store.length,
+      bytes: loop
         ? this.store.length * bytesPerSampleForChannels(this.store.channelCount)
         : this.captureBytes,
       lost: this.lostSamples,
       dropped: this.droppedTotal,
       kept: this.store.length,
-      limit: this.captureIsLoop ? this.loopRetentionLen : 0,
+      limit: loop ? this.loopRetentionLen : 0,
+      targetSamples: loop || unlimited ? null : this.captureLimitSamples,
     };
+  }
+
+  private capturePanelState(): CapturePanelState {
+    if (this.stopping) return 'stopping';
+    if (this.repeatTimer.pending) return 'waiting';
+    if (this.running) return 'capturing';
+    return this.store.length > 0 ? 'completed' : 'ready';
   }
 
   private renderPanels(): void {
@@ -1572,6 +1582,10 @@ export class App {
         running: this.running,
         stopping: this.stopping,
         repeatPending: this.repeatTimer.pending,
+        captureState: this.capturePanelState(),
+        result: this.store.length > 0
+          ? { samples: this.store.length, seconds: this.store.length / this.store.samplerate }
+          : null,
         progress: this.running ? this.progressView() : null,
         maxSamplerateHz: this.rateCeilings,
         triggerState: this.triggerState,

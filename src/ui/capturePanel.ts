@@ -31,14 +31,12 @@ import type { CaptureSettings, ChannelState } from './state.js';
 import {
   clampLoopSamples, LOOP_WINDOW_QUANTUM, maxLoopSamples, THRESHOLD_VOLT_OPTIONS,
 } from './state.js';
-import { MAX_SAMPLES } from './captureIO.js';
-import {
-  captureSecondsFromTime, maxCaptureSeconds, MIN_CAPTURE_SECONDS,
+import { captureSecondsFromTime, maxCaptureSeconds, MIN_CAPTURE_SECONDS,
   REPEAT_INTERVAL_SECONDS, repeatIntervalSecondsFromTime,
 } from './captureTime.js';
 import { capturePostTriggerSamples } from './capturePolicy.js';
 import { acquisitionTimeControl } from './timeControl.js';
-import { DEFAULT_TIME_UNIT, timeUnitForRange, type TimeUnit } from './timeUnits.js';
+import { DEFAULT_TIME_UNIT, maxTimeValue, timeUnitForRange, type TimeUnit } from './timeUnits.js';
 import {
   DEFAULT_LOOP_TIME_UNIT, loopSamplesFromTime, type LoopTimeUnit,
 } from './loopTime.js';
@@ -51,6 +49,8 @@ export interface CapturePanelCallbacks {
   onUsbControl(command: string): Promise<string>;
 }
 
+export type CapturePanelState = 'ready' | 'capturing' | 'stopping' | 'waiting' | 'completed';
+
 export interface CapturePanelView {
   settings: CaptureSettings;
   channels: readonly ChannelState[];
@@ -60,10 +60,14 @@ export interface CapturePanelView {
   running: boolean;
   stopping: boolean;
   repeatPending: boolean;
+  captureState: CapturePanelState;
+  result: { samples: number; seconds: number } | null;
   /** Non-null while a capture is streaming. */
   progress: { seconds: number; samples: number; bytes: number; lost: number; dropped: number;
     /** Retained length (`store.length`) and the loop limit; the limit is 0 outside loop mode. */
-    kept: number; limit: number } | null;
+    kept: number; limit: number;
+    /** Finite sample target; null for Unlimited and Loop captures. */
+    targetSamples: number | null } | null;
   maxSamplerateHz: Readonly<Record<number, number>>;
   triggerState: 'off' | 'waiting' | 'triggered' | 'not-found';
 }
@@ -74,6 +78,10 @@ export class CapturePanel {
   private liveNote: HTMLElement | null = null;
   private lostNote: HTMLElement | null = null;
   private droppedNote: HTMLElement | null = null;
+  private statusDetail: HTMLElement | null = null;
+  private progressEl: HTMLElement | null = null;
+  private progressBar: HTMLElement | null = null;
+  private progressValue: HTMLElement | null = null;
   private captureTimeUnit: TimeUnit = DEFAULT_TIME_UNIT;
   private repeatIntervalUnit: TimeUnit = DEFAULT_TIME_UNIT;
   private loopTimeUnit: LoopTimeUnit = DEFAULT_LOOP_TIME_UNIT;
@@ -106,11 +114,40 @@ export class CapturePanel {
         dropped: progress.dropped.toLocaleString(),
       });
     }
+    const target = progress.targetSamples;
+    if (this.statusDetail) {
+      this.statusDetail.textContent = target !== null
+        ? t('capturePanel.statusFiniteDetail')
+        : progress.limit > 0
+          ? t('capturePanel.statusLoopDetail')
+          : t('capturePanel.statusUnlimitedDetail');
+    }
+    this.setStatusProgress(target !== null && target > 0 ? progress.samples / target * 100 : null);
+  }
+
+  private setStatusProgress(percent: number | null): void {
+    if (!this.progressEl || !this.progressBar || !this.progressValue) return;
+    const indeterminate = percent === null;
+    this.progressEl.dataset.indeterminate = String(indeterminate);
+    if (indeterminate) {
+      this.progressEl.removeAttribute('aria-valuenow');
+      this.progressValue.textContent = '';
+      this.progressBar.style.width = '100%';
+      return;
+    }
+    const rounded = Math.max(0, Math.min(100, Math.round(percent)));
+    this.progressEl.setAttribute('aria-valuenow', String(rounded));
+    this.progressValue.textContent = `${rounded}%`;
+    this.progressBar.style.width = `${rounded}%`;
   }
 
   render(v: CapturePanelView): void {
     const s = v.settings;
     this.root.replaceChildren();
+    this.statusDetail = null;
+    this.progressEl = null;
+    this.progressBar = null;
+    this.progressValue = null;
 
     // ---- channels
     const chSec = section(t('capturePanel.digital'));
@@ -248,6 +285,73 @@ export class CapturePanel {
     }
     modeSec.body.appendChild(seg);
 
+    const badgeKeys = {
+      ready: 'capturePanel.statusReady',
+      capturing: 'capturePanel.statusCapturing',
+      stopping: 'capturePanel.statusStopping',
+      waiting: 'capturePanel.statusWaiting',
+      completed: 'capturePanel.statusCompleted',
+    } as const;
+    const badge = document.createElement('span');
+    badge.className = 'capture-badge'
+      + (v.captureState === 'capturing' ? ' live' : '')
+      + (v.captureState === 'waiting' ? ' waiting' : '')
+      + (v.captureState === 'stopping' ? ' stopping' : '');
+    badge.textContent = t(badgeKeys[v.captureState]);
+    modeSec.header.appendChild(badge);
+
+    const status = div('capture-status');
+    status.dataset.captureState = v.captureState;
+    const statusLine = div('capture-status-line');
+    const statusDetail = document.createElement('span');
+    statusDetail.className = 'capture-status-detail';
+    statusDetail.dataset.captureStatusDetail = '';
+    const statusValue = document.createElement('strong');
+    statusValue.className = 'capture-status-value';
+    const progress = div('capture-progress');
+    progress.setAttribute('role', 'progressbar');
+    progress.setAttribute('aria-label', t('capturePanel.progress'));
+    progress.setAttribute('aria-valuemin', '0');
+    progress.setAttribute('aria-valuemax', '100');
+    const progressBar = document.createElement('span');
+    statusLine.append(statusDetail, statusValue);
+    progress.appendChild(progressBar);
+    status.append(statusLine, progress);
+    modeSec.body.appendChild(status);
+    this.statusDetail = statusDetail;
+    this.progressEl = progress;
+    this.progressBar = progressBar;
+    this.progressValue = statusValue;
+
+    const progressActive = v.captureState === 'capturing'
+      || v.captureState === 'stopping' || v.captureState === 'waiting';
+    progress.hidden = !progressActive;
+    statusDetail.textContent = v.captureState === 'ready'
+      ? t('capturePanel.statusReadyDetail')
+      : v.captureState === 'waiting'
+        ? t('capturePanel.statusWaitingDetail', {
+          interval: formatDuration(v.settings.repeatIntervalSeconds),
+        })
+        : v.captureState === 'stopping'
+          ? t('capturePanel.statusStoppingDetail')
+          : v.captureState === 'completed'
+            ? t('capturePanel.statusCompletedDetail', {
+              samples: (v.result?.samples ?? 0).toLocaleString(),
+              duration: formatDuration(v.result?.seconds ?? 0),
+            })
+            : v.progress && v.progress.targetSamples === null
+              ? v.progress.limit > 0
+                ? t('capturePanel.statusLoopDetail')
+                : t('capturePanel.statusUnlimitedDetail')
+              : t('capturePanel.statusFiniteDetail');
+    if (progressActive) this.setStatusProgress(null);
+    else {
+      this.progressBar.style.width = '0%';
+      this.progressValue.textContent = '';
+      progress.removeAttribute('aria-valuenow');
+      progress.dataset.indeterminate = 'false';
+    }
+
     const maxSeconds = maxCaptureSeconds(s.samplerate);
     if (s.mode === 'single' || s.mode === 'repeat') {
       this.captureTimeUnit = timeUnitForRange(this.captureTimeUnit, MIN_CAPTURE_SECONDS, maxSeconds) ?? 'us';
@@ -337,24 +441,27 @@ export class CapturePanel {
       modeSec.body.appendChild(windowControl.el);
     }
     const limit = div('panel-note');
-    limit.textContent = s.mode === 'loop'
-      ? t('capturePanel.loopWindowLimit', {
+    if (s.mode === 'loop') {
+      limit.textContent = t('capturePanel.loopWindowLimit', {
         samples: clampLoopSamples(s.loopSamples, s.channels).toLocaleString(),
         duration: formatDuration(clampLoopSamples(s.loopSamples, s.channels) / s.samplerate),
         rate: formatRate(s.samplerate),
-      })
-      : t('capturePanel.ceilingNote', {
-        samples: (MAX_SAMPLES - 1).toLocaleString(),
-        duration: formatDuration(maxSeconds),
-        rate: formatRate(s.samplerate),
       });
-    modeSec.body.appendChild(limit);
-    if (v.repeatPending) {
-      const pending = div('panel-note live');
-      pending.dataset.repeatPending = '';
-      pending.textContent = t('capturePanel.repeatPending');
-      modeSec.body.appendChild(pending);
+    } else {
+      const finiteMax = maxTimeValue(maxSeconds, this.captureTimeUnit);
+      if (s.mode === 'single' && s.singleUnlimited) {
+        limit.textContent = t('capturePanel.singleUnlimitedNote');
+      } else if (s.mode === 'single') {
+        limit.textContent = t('capturePanel.singleFiniteNote', {
+          max: finiteMax, unit: this.captureTimeUnit,
+        });
+      } else {
+        limit.textContent = t('capturePanel.repeatFiniteNote', {
+          max: finiteMax, unit: this.captureTimeUnit,
+        });
+      }
     }
+    modeSec.body.appendChild(limit);
 
     const triggerSec = section(t('capturePanel.softwareTrigger'));
     const mask = document.createElement('input');

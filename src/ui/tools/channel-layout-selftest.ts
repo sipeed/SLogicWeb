@@ -602,11 +602,12 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `snapshotTag=${appSrc.includes('...(snapshotDecode ? { snapshot: true as const } : {})')}, ` +
     `lateFlagGone=${!appSrc.includes('this.captureIsLoop && (this.running || this.stopping) ? { snapshot: true as const }')}`);
   const progressSplit =
-    appSrc.includes('samples: this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length') &&
+    appSrc.includes('const loop = this.captureIsLoop;') &&
+    appSrc.includes('samples: loop ? this.store.length + this.droppedTotal : this.store.length') &&
     appSrc.includes('bytesPerSampleForChannels(this.store.channelCount)');
   check('progressView splits loop totals from retained bytes',
     progressSplit,
-    `total=${appSrc.includes('samples: this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length')}, ` +
+    `total=${appSrc.includes('samples: loop ? this.store.length + this.droppedTotal : this.store.length')}, ` +
     `retained=${appSrc.includes('bytesPerSampleForChannels(this.store.channelCount)')}`);
   check('the panel, trigger budget and real start path share stored mode without scope ownership',
     directMode,

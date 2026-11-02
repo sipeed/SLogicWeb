@@ -464,6 +464,7 @@ const baseSettings: CaptureSettings = {
     'capturePanel.loopCeilingNote', 'capturePanel.oscilloscopeTakeover',
     'capturePanel.freeRun', 'capturePanel.timer', 'capturePanel.durationS',
     'capturePanel.repeatIntervalS', 'capturePanel.loopSamples',
+    'capturePanel.repeatPending', 'capturePanel.ceilingNote',
     'capturePanel.all', 'capturePanel.clear', 'capturePanel.enabledCount',
     'capturePanel.bankToggle', 'capturePanel.bankLocked',
     'bus.loopWindow', 'bus.globalCapture', 'bus.loopUnit', 'bus.loopMax', 'bus.loopEffective',
@@ -505,7 +506,11 @@ const baseSettings: CaptureSettings = {
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',
     'analyzerPanel.decoderSearchLabel',
     'bus.defaultName', 'bus.enableBank',
-    'capturePanel.channelWidth',
+    'capturePanel.channelWidth', 'capturePanel.statusReady', 'capturePanel.statusCapturing',
+    'capturePanel.statusStopping', 'capturePanel.statusWaiting', 'capturePanel.statusCompleted',
+    'capturePanel.statusWaitingDetail', 'capturePanel.statusCompletedDetail',
+    'capturePanel.singleFiniteNote', 'capturePanel.singleUnlimitedNote',
+    'capturePanel.repeatFiniteNote',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];

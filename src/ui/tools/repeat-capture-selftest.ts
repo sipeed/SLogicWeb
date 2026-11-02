@@ -118,8 +118,11 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
   const pendingUi = primary.includes('this.running || this.repeatTimer.pending') &&
     toolbar.includes('const showStop = this.running || repeatPending') &&
     toolbar.includes('this.device === null && !showStop') &&
-    panel.includes('if (v.repeatPending)') && panel.includes('pending.dataset.repeatPending') &&
-    panel.includes("t('capturePanel.repeatPending')") && panel.includes('b.disabled = modeLocked') &&
+    panel.includes("waiting: 'capturePanel.statusWaiting'") &&
+    panel.includes("t('capturePanel.statusWaitingDetail'") &&
+    panel.includes('status.dataset.captureState = v.captureState') &&
+    !panel.includes('capturePanel.repeatPending') &&
+    panel.includes('b.disabled = modeLocked') &&
     (panel.match(/disabled: modeLocked/g) ?? []).length === 3 &&
     !panel.includes('secs.disabled') && !panel.includes('unlimited.disabled') &&
     !panel.includes('interval.disabled') && !panel.includes('win.disabled') &&
@@ -127,6 +130,40 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
     (assistant.match(/st\.repeatPending/g) ?? []).length >= 3;
   check('pending Repeat remains stoppable and visible while settings and start reject re-entry',
     pendingUi, `primary=${primary.length}, toolbar=${toolbar.length}, pendingUi=${pendingUi}`);
+}
+
+{
+  const progress = app.split('private progressView()')[1]?.split('private capturePanelState()')[0] ?? '';
+  const state = app.split('private capturePanelState()')[1]?.split('private renderPanels()')[0] ?? '';
+  const view = app.split('this.capturePanel.render({')[1]?.split('});')[0] ?? '';
+  const fill = panel.split('private fillProgress(')[1]?.split('private setStatusProgress(')[0] ?? '';
+  const setter = panel.split('private setStatusProgress(')[1]?.split('render(v: CapturePanelView)')[0] ?? '';
+  const status = panel.split('const badgeKeys =')[1]?.split('const maxSeconds =')[0] ?? '';
+  const oneLifecycle = state.includes("if (this.stopping) return 'stopping';") &&
+    state.includes("if (this.repeatTimer.pending) return 'waiting';") &&
+    state.includes("if (this.running) return 'capturing';") &&
+    state.includes("return this.store.length > 0 ? 'completed' : 'ready';") &&
+    !state.includes('setTimeout') && !state.includes('setInterval') &&
+    view.includes('captureState: this.capturePanelState(),') &&
+    view.includes('progress: this.running ? this.progressView() : null,') &&
+    progress.includes('targetSamples: loop || unlimited ? null : this.captureLimitSamples') &&
+    !progress.includes('setTimeout') && !progress.includes('setInterval');
+  const oneProgress = fill.includes("t('capturePanel.statusFiniteDetail')") &&
+    fill.includes("t('capturePanel.statusLoopDetail')") &&
+    fill.includes("t('capturePanel.statusUnlimitedDetail')") &&
+    fill.includes('this.setStatusProgress(target !== null && target > 0 ? progress.samples / target * 100 : null)') &&
+    setter.includes("this.progressEl.dataset.indeterminate = String(indeterminate)") &&
+    setter.includes("this.progressEl.removeAttribute('aria-valuenow')") &&
+    setter.includes("this.progressEl.setAttribute('aria-valuenow', String(rounded))") &&
+    setter.includes('this.progressBar.style.width = `${rounded}%`') &&
+    status.includes("progress.setAttribute('role', 'progressbar')") &&
+    status.includes("progress.setAttribute('aria-label', t('capturePanel.progress'))") &&
+    status.includes("v.captureState === 'waiting'") &&
+    status.includes("v.captureState === 'completed'") &&
+    !panel.includes('setInterval') && !panel.includes('setTimeout');
+  check('one App-owned lifecycle drives badges, determinate progress, and indeterminate states',
+    oneLifecycle && oneProgress,
+    `state=${state.length}, progress=${progress.length}, fill=${fill.length}, setter=${setter.length}, status=${status.length}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
