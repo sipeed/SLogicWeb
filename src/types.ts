@@ -6,6 +6,8 @@ export type ChannelCount = 4 | 8 | 16 | 32 | 64 | 128;
 
 export const CHANNEL_COUNTS: readonly ChannelCount[] = [4, 8, 16, 32, 64, 128];
 
+export const MAX_SAMPLES = 2 ** 31;
+
 export function isChannelCount(value: number): value is ChannelCount {
   return CHANNEL_COUNTS.includes(value as ChannelCount);
 }

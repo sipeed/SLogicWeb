@@ -21,7 +21,8 @@
 
 import { createEdgeStore } from '../data/index.js';
 import type { SampleStore } from '../data/types.js';
-import { channelWidthForProbes } from '../types.js';
+import { DiagnosticError } from '../diagnostics.js';
+import { MAX_SAMPLES, channelWidthForProbes } from '../types.js';
 import type { LoadedCapture } from './captureIO.js';
 
 const EOCD_SIG = 0x06054b50;
@@ -53,29 +54,33 @@ function u32(dv: DataView, o: number): number {
  */
 function readCentralDirectory(buf: ArrayBuffer): Map<string, ZipMember> {
   const dv = new DataView(buf);
-  if (buf.byteLength < 22) throw new Error('not a zip (shorter than the EOCD record)');
+  if (buf.byteLength < 22) throw new DiagnosticError('file.sr.notZip');
   const maxComment = Math.min(0xffff, buf.byteLength - 22);
   let eocd = -1;
   for (let c = 0; c <= maxComment; c++) {
     const o = buf.byteLength - 22 - c;
     if (dv.getUint32(o, true) === EOCD_SIG) { eocd = o; break; }
   }
-  if (eocd < 0) throw new Error('not a zip (no EOCD record)');
+  if (eocd < 0) throw new DiagnosticError('file.sr.notZip');
   if (u16(dv, eocd + 4) !== 0 || u16(dv, eocd + 6) !== 0) {
-    throw new Error('multi-disk zips are not supported');
+    throw new DiagnosticError('file.sr.multiDisk');
   }
   const count = u16(dv, eocd + 10);
   const cdSize = u32(dv, eocd + 12);
   const cdOffset = u32(dv, eocd + 16);
-  if (cdOffset + cdSize > eocd) throw new Error('corrupt zip (central directory past the EOCD)');
+  if (cdOffset + cdSize > eocd) throw new DiagnosticError('file.sr.corruptDirectory');
   if (count === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) {
-    throw new Error('ZIP64 archives are not supported');
+    throw new DiagnosticError('file.sr.zip64');
   }
 
   const members = new Map<string, ZipMember>();
+  const cdEnd = cdOffset + cdSize;
   let o = cdOffset;
   for (let i = 0; i < count; i++) {
-    if (u32(dv, o) !== CENTRAL_SIG) throw new Error(`corrupt zip (central entry ${i} has no signature)`);
+    if (o + 46 > cdEnd) throw new DiagnosticError('file.sr.directoryBounds', { index: i });
+    if (u32(dv, o) !== CENTRAL_SIG) {
+      throw new DiagnosticError('file.sr.entrySignature', { index: i });
+    }
     const flags = u16(dv, o + 8);
     const method = u16(dv, o + 10);
     const compressedSize = u32(dv, o + 20);
@@ -84,15 +89,18 @@ function readCentralDirectory(buf: ArrayBuffer): Map<string, ZipMember> {
     const extraLen = u16(dv, o + 30);
     const commentLen = u16(dv, o + 32);
     const localOffset = u32(dv, o + 42);
+    if (o + 46 + nameLen > cdEnd) {
+      throw new DiagnosticError('file.sr.directoryBounds', { index: i });
+    }
     const name = new TextDecoder().decode(new Uint8Array(buf, o + 46, nameLen));
     if (flags & 0x0008) {
-      throw new Error(`member ${name} uses a data descriptor - not supported`);
+      throw new DiagnosticError('file.sr.dataDescriptor', { member: name });
     }
     if (compressedSize === 0xffffffff || uncompressedSize === 0xffffffff || localOffset === 0xffffffff) {
-      throw new Error(`member ${name} needs ZIP64 - not supported`);
+      throw new DiagnosticError('file.sr.memberZip64', { member: name });
     }
     if (method !== METHOD_STORED && method !== METHOD_DEFLATE) {
-      throw new Error(`member ${name} uses compression method ${method} - only stored and deflate are supported`);
+      throw new DiagnosticError('file.sr.compression', { member: name, method });
     }
     members.set(name, { name, method, compressedSize, uncompressedSize, localOffset });
     o += 46 + nameLen + extraLen + commentLen;
@@ -100,48 +108,74 @@ function readCentralDirectory(buf: ArrayBuffer): Map<string, ZipMember> {
   return members;
 }
 
+async function inflateDeflate(m: ZipMember, raw: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
+  let writeFailure: unknown = null;
+  try {
+    const stream = new DecompressionStream('deflate-raw');
+    const writer = stream.writable.getWriter();
+    const written = writer.write(raw)
+      .then(() => writer.close())
+      .catch((e: unknown) => { writeFailure = e; });
+    const reader = stream.readable.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.length;
+    }
+    await written;
+    if (writeFailure !== null) throw writeFailure;
+    if (total !== m.uncompressedSize) {
+      throw new DiagnosticError('file.sr.inflateSize', {
+        member: m.name, actual: total, expected: m.uncompressedSize,
+      });
+    }
+    const out = new Uint8Array(total);
+    let o = 0;
+    for (const c of chunks) { out.set(c, o); o += c.length; }
+    return out;
+  } catch (e) {
+    if (e instanceof DiagnosticError) throw e;
+    throw new DiagnosticError(
+      'file.sr.inflateFailed', { member: m.name },
+      e instanceof Error ? e.message : String(e));
+  }
+}
+
 /** The raw member payload, inflating deflated members through DecompressionStream. */
 async function inflate(
   buf: ArrayBuffer, m: ZipMember,
 ): Promise<Uint8Array> {
+  if (m.localOffset + 30 > buf.byteLength) {
+    throw new DiagnosticError('file.sr.localHeaderBounds', { member: m.name });
+  }
   const dv = new DataView(buf);
   if (u32(dv, m.localOffset) !== LOCAL_SIG) {
-    throw new Error(`member ${m.name} has no local header where the directory says it is`);
+    throw new DiagnosticError('file.sr.noLocalHeader', { member: m.name });
   }
   const nameLen = u16(dv, m.localOffset + 26);
   const extraLen = u16(dv, m.localOffset + 28);
   const start = m.localOffset + 30 + nameLen + extraLen;
+  if (start > buf.byteLength) {
+    throw new DiagnosticError('file.sr.localHeaderBounds', { member: m.name });
+  }
   if (start + m.compressedSize > buf.byteLength) {
-    throw new Error(`member ${m.name} runs past the end of the file`);
+    throw new DiagnosticError('file.sr.memberPastEnd', { member: m.name });
   }
   const raw = new Uint8Array(buf, start, m.compressedSize);
 
   if (m.method === METHOD_STORED) {
-    if (raw.length !== m.uncompressedSize) throw new Error(`member ${m.name} size mismatch`);
+    if (raw.length !== m.uncompressedSize) {
+      throw new DiagnosticError('file.sr.memberSize', { member: m.name });
+    }
     return raw.slice();
   }
 
   // DecompressionStream wants the raw deflate stream, which is exactly what the zip
   // local payload is (no zlib header, no adler trailer).
-  const stream = new DecompressionStream('deflate-raw');
-  const writer = stream.writable.getWriter();
-  void writer.write(raw).then(() => writer.close());
-  const reader = stream.readable.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    total += value.length;
-  }
-  if (total !== m.uncompressedSize) {
-    throw new Error(`member ${m.name} inflates to ${total} bytes, directory says ${m.uncompressedSize}`);
-  }
-  const out = new Uint8Array(total);
-  let o = 0;
-  for (const c of chunks) { out.set(c, o); o += c.length; }
-  return out;
+  return inflateDeflate(m, raw);
 }
 
 // ---------------------------------------------------------------- metadata
@@ -178,10 +212,10 @@ function parseMetadata(text: string): SrDevice {
     if (key === 'capturefile') {
       if (dev.capturefile !== undefined) {
         // A new device section without a header would be malformed; refuse rather than merge.
-        throw new Error('metadata has two capturefiles in one device section');
+        throw new DiagnosticError('file.sr.duplicateCapturefile');
       }
       if (!/^logic-[0-9]+$/.test(value)) {
-        throw new Error(`capturefile ${value} is not a logic unit - analog captures are not supported`);
+        throw new DiagnosticError('file.sr.analogCapture', { capturefile: value });
       }
       dev.capturefile = value;
     } else if (key === 'total probes') dev.probes = Number(value);
@@ -193,18 +227,24 @@ function parseMetadata(text: string): SrDevice {
       dev.probeNames[idx] = value;
     }
   }
-  if (!dev || dev.capturefile === undefined) throw new Error('no logic capturefile in the metadata');
+  if (!dev || dev.capturefile === undefined) throw new DiagnosticError('file.sr.noCapturefile');
   const samplerate = dev.samplerate;
-  if (!(samplerate !== undefined && samplerate > 0)) throw new Error('no samplerate in the metadata');
-  if (!(dev.probes >= 1 && dev.probes <= 128)) {
-    throw new Error(`total probes ${dev.probes} outside 1..128`);
+  if (!(samplerate !== undefined && samplerate > 0)) {
+    throw new DiagnosticError('file.sr.noSamplerate');
   }
-  if (dev.analog > 0) throw new Error('analog channels in this capture are not supported');
+  if (!(Number.isInteger(dev.probes) && dev.probes >= 1 && dev.probes <= 128)) {
+    throw new DiagnosticError('file.sr.probes', { probes: dev.probes });
+  }
+  if (dev.analog > 0) {
+    throw new DiagnosticError('file.sr.analogChannels', { count: dev.analog });
+  }
   if (!Number.isInteger(dev.unitsize) || dev.unitsize < 1 || dev.unitsize > 16) {
-    throw new Error(`unitsize ${dev.unitsize} is outside 1..16 bytes`);
+    throw new DiagnosticError('file.sr.unitsize', { unitsize: dev.unitsize });
   }
   if (dev.unitsize < Math.ceil(dev.probes / 8)) {
-    throw new Error(`unitsize ${dev.unitsize} cannot carry ${dev.probes} probes`);
+    throw new DiagnosticError('file.sr.unitsizeProbes', {
+      unitsize: dev.unitsize, probes: dev.probes,
+    });
   }
   return {
     capturefile: dev.capturefile,
@@ -219,23 +259,33 @@ function parseMetadata(text: string): SrDevice {
 /** "16 MHz", "1 kHz", "100 Hz" - the suffixes sigrok writes. */
 function parseSamplerate(v: string): number {
   const m = /^([0-9.]+)\s*(GHz|MHz|kHz|Hz)?$/.exec(v);
-  if (!m) throw new Error(`unparsable samplerate ${JSON.stringify(v)}`);
+  if (!m) throw new DiagnosticError('file.sr.samplerate', { value: JSON.stringify(v) });
   const mult = m[2] === 'GHz' ? 1e9 : m[2] === 'MHz' ? 1e6 : m[2] === 'kHz' ? 1e3 : 1;
   const r = Number(m[1]) * mult;
-  if (!(r > 0) || !Number.isFinite(r)) throw new Error(`unparsable samplerate ${JSON.stringify(v)}`);
+  if (!(r > 0) || !Number.isFinite(r)) {
+    throw new DiagnosticError('file.sr.samplerate', { value: JSON.stringify(v) });
+  }
   return r;
 }
 
 // ---------------------------------------------------------------- samples
+
+export function srSampleCount(bytes: number, unitsize: number): number {
+  if (bytes % unitsize !== 0) {
+    throw new DiagnosticError('file.sr.dataLength', { bytes, unitsize });
+  }
+  const length = bytes / unitsize;
+  if (length >= MAX_SAMPLES) {
+    throw new DiagnosticError('file.sr.tooLong', { samples: length });
+  }
+  return length;
+}
 
 /** Per-probe transition lists from unitsize-byte little-endian samples. */
 function samplesToChannels(
   data: Uint8Array, unitsize: number, probes: number,
 ): Array<{ initial: 0 | 1; edges: Int32Array }> {
   const length = data.length / unitsize;
-  if (length !== Math.floor(length)) {
-    throw new Error(`data length ${data.length} is not a whole number of ${unitsize}-byte samples`);
-  }
   const bitAt = (sample: number, c: number): number =>
     (data[sample * unitsize + (c >>> 3)]! >>> (c & 7)) & 1;
   const out: Array<{ initial: 0 | 1; edges: Int32Array }> = [];
@@ -265,7 +315,7 @@ function samplesToChannels(
 export async function parseSr(buf: ArrayBuffer, source: string): Promise<LoadedCapture> {
   const members = readCentralDirectory(buf);
   const metadata = members.get('metadata');
-  if (!metadata) throw new Error(`${source} has no metadata member - not a sigrok session`);
+  if (!metadata) throw new DiagnosticError('file.sr.noMetadata', { source });
   const dev = parseMetadata(new TextDecoder().decode(await inflate(buf, metadata)));
 
   // v1: the member is named exactly `capturefile`; v2: `capturefile-1`, `-2`, ... in
@@ -278,7 +328,7 @@ export async function parseSr(buf: ArrayBuffer, source: string): Promise<LoadedC
     if (m) packNames.push({ n: Number(m[1]), name });
   }
   if (packNames.length === 0) {
-    throw new Error(`${source} has no data members for capturefile ${dev.capturefile}`);
+    throw new DiagnosticError('file.sr.noData', { source, capturefile: dev.capturefile });
   }
   packNames.sort((a, b) => a.n - b.n);
 
@@ -293,8 +343,8 @@ export async function parseSr(buf: ArrayBuffer, source: string): Promise<LoadedC
   let o = 0;
   for (const p of packs) { data.set(p, o); o += p.length; }
 
+  const length = srSampleCount(data.length, dev.unitsize);
   const channels = samplesToChannels(data, dev.unitsize, dev.probes);
-  const length = data.length / dev.unitsize;
   // Pad to the next supported width; empty channels cost nothing in the edge store.
   const channelCount = channelWidthForProbes(dev.probes);
   const padded = Array.from({ length: channelCount }, (_, c) =>

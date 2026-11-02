@@ -111,6 +111,39 @@ export const zhCN: Messages = {
     '.lwcap 已损坏：通道 {channel} 的第 {index} 个边沿 {value} 超出 [1, {length})',
   'diagnostic.file.lwcap.edgeOrder':
     '.lwcap 已损坏：通道 {channel} 的边沿在索引 {index} 处不是严格递增的',
+  'diagnostic.file.sr.notZip': '不是 zip 压缩包',
+  'diagnostic.file.sr.multiDisk': '不支持多盘 zip 压缩包',
+  'diagnostic.file.sr.corruptDirectory': 'zip 已损坏：中央目录超出中央目录结束记录',
+  'diagnostic.file.sr.directoryBounds': 'zip 已损坏：第 {index} 个中央目录项超出中央目录范围',
+  'diagnostic.file.sr.zip64': '不支持 ZIP64 压缩包',
+  'diagnostic.file.sr.entrySignature': 'zip 已损坏：第 {index} 个中央目录项没有签名',
+  'diagnostic.file.sr.dataDescriptor': '成员 {member} 使用了数据描述符，不支持该方式',
+  'diagnostic.file.sr.memberZip64': '成员 {member} 需要 ZIP64，不支持该格式',
+  'diagnostic.file.sr.compression':
+    '成员 {member} 使用压缩方法 {method}；只支持存储和 deflate',
+  'diagnostic.file.sr.noLocalHeader':
+    '成员 {member} 在中央目录所指位置没有本地文件头',
+  'diagnostic.file.sr.localHeaderBounds': '成员 {member} 的本地文件头超出文件末尾',
+  'diagnostic.file.sr.memberPastEnd': '成员 {member} 超出文件末尾',
+  'diagnostic.file.sr.memberSize': '成员 {member} 大小不符',
+  'diagnostic.file.sr.inflateFailed': '无法解压成员 {member}',
+  'diagnostic.file.sr.inflateSize':
+    '成员 {member} 解压后为 {actual} 字节，中央目录记录为 {expected}',
+  'diagnostic.file.sr.noMetadata': '{source} 中没有 metadata 成员，因此不是 sigrok 会话',
+  'diagnostic.file.sr.duplicateCapturefile': '同一设备段内出现了两个 capturefile',
+  'diagnostic.file.sr.analogCapture':
+    'capturefile {capturefile} 不是逻辑单元；不支持模拟采集',
+  'diagnostic.file.sr.noCapturefile': 'metadata 中没有逻辑 capturefile',
+  'diagnostic.file.sr.noSamplerate': 'metadata 中没有采样率',
+  'diagnostic.file.sr.probes': 'total probes {probes} 超出 1..128',
+  'diagnostic.file.sr.analogChannels': '不支持本次采集中的模拟通道（存在 {count} 个）',
+  'diagnostic.file.sr.unitsize': 'unitsize {unitsize} 超出 1..16 字节',
+  'diagnostic.file.sr.unitsizeProbes': 'unitsize {unitsize} 无法容纳 {probes} 个探针',
+  'diagnostic.file.sr.samplerate': '无法解析采样率 {value}',
+  'diagnostic.file.sr.dataLength':
+    '数据长度 {bytes} 不是 {unitsize} 字节样本的整数倍',
+  'diagnostic.file.sr.tooLong': '采集过长（{samples} 个样本）',
+  'diagnostic.file.sr.noData': '{source} 中没有 capturefile {capturefile} 的数据成员',
 
   // -------------------------------------------------------- hover readout
   'hover.width': '宽度：{duration}',

@@ -124,6 +124,50 @@ export const en = {
     'corrupt .lwcap: channel {channel} edge {index} = {value} outside [1, {length})',
   'diagnostic.file.lwcap.edgeOrder':
     'corrupt .lwcap: channel {channel} edges are not strictly increasing at index {index}',
+  'diagnostic.file.sr.notZip': 'not a zip archive',
+  'diagnostic.file.sr.multiDisk': 'multi-disk zip archives are not supported',
+  'diagnostic.file.sr.corruptDirectory':
+    'corrupt zip: the central directory runs past the end-of-central-directory record',
+  'diagnostic.file.sr.directoryBounds':
+    'corrupt zip: central directory entry {index} runs past the directory',
+  'diagnostic.file.sr.zip64': 'ZIP64 archives are not supported',
+  'diagnostic.file.sr.entrySignature':
+    'corrupt zip: central entry {index} has no signature',
+  'diagnostic.file.sr.dataDescriptor':
+    'member {member} uses a data descriptor, which is not supported',
+  'diagnostic.file.sr.memberZip64':
+    'member {member} needs ZIP64, which is not supported',
+  'diagnostic.file.sr.compression':
+    'member {member} uses compression method {method}; only stored and deflate are supported',
+  'diagnostic.file.sr.noLocalHeader':
+    'member {member} has no local header where the directory says it is',
+  'diagnostic.file.sr.localHeaderBounds':
+    'member {member}’s local header runs past the end of the file',
+  'diagnostic.file.sr.memberPastEnd': 'member {member} runs past the end of the file',
+  'diagnostic.file.sr.memberSize': 'member {member} size mismatch',
+  'diagnostic.file.sr.inflateFailed': 'could not decompress member {member}',
+  'diagnostic.file.sr.inflateSize':
+    'member {member} inflates to {actual} bytes, the directory says {expected}',
+  'diagnostic.file.sr.noMetadata':
+    '{source} has no metadata member, so it is not a sigrok session',
+  'diagnostic.file.sr.duplicateCapturefile':
+    'metadata has two capturefiles in one device section',
+  'diagnostic.file.sr.analogCapture':
+    'capturefile {capturefile} is not a logic unit; analog captures are not supported',
+  'diagnostic.file.sr.noCapturefile': 'no logic capturefile in the metadata',
+  'diagnostic.file.sr.noSamplerate': 'no samplerate in the metadata',
+  'diagnostic.file.sr.probes': 'total probes {probes} is outside 1..128',
+  'diagnostic.file.sr.analogChannels':
+    'analog channels in this capture are not supported ({count} present)',
+  'diagnostic.file.sr.unitsize': 'unitsize {unitsize} is outside 1..16 bytes',
+  'diagnostic.file.sr.unitsizeProbes':
+    'unitsize {unitsize} cannot carry {probes} probes',
+  'diagnostic.file.sr.samplerate': 'unparsable samplerate {value}',
+  'diagnostic.file.sr.dataLength':
+    'data length {bytes} is not a whole number of {unitsize}-byte samples',
+  'diagnostic.file.sr.tooLong': 'capture is too long ({samples} samples)',
+  'diagnostic.file.sr.noData':
+    '{source} has no data members for capturefile {capturefile}',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Width: {duration}',

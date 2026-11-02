@@ -21,8 +21,11 @@
 
 import { saveLwcap, loadLwcap } from '../captureIO.js';
 import { createProtocolFixture } from './protocolFixture.js';
-import { parseSr } from '../srLoad.js';
+import { parseSr, srSampleCount } from '../srLoad.js';
 import { getDecoder, hydrateDecoders, validateStack } from '../../decode/registry.js';
+import { DIAGNOSTIC_CODES, diagnosticOf } from '../../diagnostics.js';
+import type { Diagnostic } from '../../diagnostics.js';
+import { formatDiagnostic } from '../format.js';
 import type { SampleStore } from '../../data/index.js';
 
 /**
@@ -271,6 +274,68 @@ async function buildZip(entries: Array<{ name: string; data: Uint8Array; deflate
   return out.buffer;
 }
 
+interface ZipLayout {
+  eocd: number;
+  cdOffset: number;
+  cdSize: number;
+  count: number;
+  central: number[];
+  total: number;
+}
+
+function zipLayout(buf: ArrayBuffer): ZipLayout {
+  const dv = new DataView(buf);
+  let eocd = -1;
+  for (let o = buf.byteLength - 22; o >= 0 && eocd < 0; o--) {
+    if (dv.getUint32(o, true) === 0x06054b50) eocd = o;
+  }
+  if (eocd < 0) throw new Error('fixture: built archive has no EOCD');
+  const count = dv.getUint16(eocd + 10, true);
+  const cdSize = dv.getUint32(eocd + 12, true);
+  const cdOffset = dv.getUint32(eocd + 16, true);
+  const central: number[] = [];
+  let o = cdOffset;
+  for (let i = 0; i < count; i++) {
+    central.push(o);
+    o += 46 + dv.getUint16(o + 28, true) + dv.getUint16(o + 30, true) + dv.getUint16(o + 32, true);
+  }
+  return { eocd, cdOffset, cdSize, count, central, total: buf.byteLength };
+}
+
+function mutateBytes(
+  source: ArrayBuffer, edit: (dv: DataView, u8: Uint8Array) => void,
+): ArrayBuffer {
+  const u8 = new Uint8Array(source.slice(0));
+  edit(new DataView(u8.buffer), u8);
+  return u8.buffer;
+}
+
+function localHeaderOffset(buf: ArrayBuffer, centralOffset: number): number {
+  return new DataView(buf).getUint32(centralOffset + 42, true);
+}
+
+function localPayloadOffset(buf: ArrayBuffer, centralOffset: number): number {
+  const dv = new DataView(buf);
+  const local = localHeaderOffset(buf, centralOffset);
+  return local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+}
+
+async function thrown(
+  fn: () => unknown,
+): Promise<{ code: string; diag: Diagnostic | null }> {
+  try {
+    await fn();
+  } catch (e) {
+    const d = diagnosticOf(e);
+    if (d) return { code: d.code, diag: d };
+    return {
+      code: `not a diagnostic: ${e instanceof Error ? e.message : String(e)}`,
+      diag: null,
+    };
+  }
+  return { code: 'did not throw', diag: null };
+}
+
 async function main(): Promise<void> {
   let preThrew = false;
   try { getDecoder('uart'); } catch { preThrew = true; }
@@ -399,45 +464,228 @@ async function main(): Promise<void> {
 
   // ---------------------------------------------------------------- corrupt
   {
-    const mk = (metadata: string, data?: Uint8Array) =>
+    const mk = (metadata: string, data?: Uint8Array, deflate = false) =>
       buildZip([
         { name: 'version', data: new TextEncoder().encode('2') },
-        { name: 'metadata', data: new TextEncoder().encode(metadata) },
-        ...(data ? [{ name: 'logic-1-1', data }] : []),
+        { name: 'metadata', data: new TextEncoder().encode(metadata), deflate },
+        ...(data ? [{ name: 'logic-1-1', data, deflate }] : []),
       ]);
     const base = '[device 1]\ncapturefile=logic-1\ntotal probes=4\nsamplerate=10 kHz\ntotal analog=0\nunitsize=1\n';
-    const cases: Array<[string, ArrayBuffer, RegExp]> = [
-      ['analog capturefile', await mk('[device 1]\ncapturefile=analog-1\ntotal probes=4\nsamplerate=10 kHz\nunitsize=1\n', new Uint8Array(16)), /not a logic unit/],
-      ['no capturefile', await mk('[device 1]\ntotal probes=4\nsamplerate=10 kHz\nunitsize=1\n', new Uint8Array(16)), /no logic capturefile/],
-      ['bad samplerate', await mk(base.replace('10 kHz', 'quack'), new Uint8Array(16)), /unparsable samplerate/],
-      ['unitsize 17', await mk(base.replace('unitsize=1', 'unitsize=17'), new Uint8Array(16)), /outside 1..16/],
-      ['zero probes', await mk(base.replace('total probes=4', 'total probes=0'), new Uint8Array(16)), /outside 1\.\.128/],
-      ['no data member', await mk(base), /no data members/],
+    const samples = new Uint8Array(16);
+    const valid = await mk(base, samples);
+    const layout = zipLayout(valid);
+    const versionAt = layout.central[0]!;
+    const metadataAt = layout.central[1]!;
+    const dataAt = layout.central[2]!;
+    const deflated = await mk(base, samples, true);
+    const deflatedLayout = zipLayout(deflated);
+    const deflatedMetadataAt = deflatedLayout.central[1]!;
+    const deflatedMetadataBytes = new DataView(deflated)
+      .getUint32(deflatedMetadataAt + 24, true);
+
+    const cases: Array<[string, string, () => unknown]> = [
+      ['a short buffer', 'file.sr.notZip',
+        () => parseSr(new ArrayBuffer(10), 'tiny.sr')],
+      ['an archive with no EOCD signature', 'file.sr.notZip',
+        () => parseSr(mutateBytes(valid, (dv) => dv.setUint32(layout.eocd, 0, true)), 'no-eocd.sr')],
+      ['an archive that spans two disks', 'file.sr.multiDisk',
+        () => parseSr(mutateBytes(valid, (dv) => dv.setUint16(layout.eocd + 4, 1, true)), 'two-disks.sr')],
+      ['a directory past the EOCD', 'file.sr.corruptDirectory',
+        () => parseSr(mutateBytes(valid, (dv) =>
+          dv.setUint32(layout.eocd + 12, layout.cdSize + layout.eocd, true)), 'directory-past.sr')],
+      ['an entry past the directory', 'file.sr.directoryBounds',
+        () => parseSr(mutateBytes(valid, (dv) =>
+          dv.setUint32(layout.eocd + 12, 10, true)), 'entry-past.sr')],
+      ['a central name past the directory', 'file.sr.directoryBounds',
+        () => parseSr(mutateBytes(valid, (dv) =>
+          dv.setUint16(dataAt + 28, 0xfff0, true)), 'name-past.sr')],
+      ['a ZIP64 entry count', 'file.sr.zip64',
+        () => parseSr(mutateBytes(valid, (dv) =>
+          dv.setUint16(layout.eocd + 10, 0xffff, true)), 'zip64-count.sr')],
+      ['a central entry without a signature', 'file.sr.entrySignature',
+        () => parseSr(mutateBytes(valid, (dv) => dv.setUint32(versionAt, 0, true)), 'no-signature.sr')],
+      ['a data descriptor flag', 'file.sr.dataDescriptor',
+        () => parseSr(mutateBytes(valid, (dv) =>
+          dv.setUint16(dataAt + 8, 0x0008, true)), 'data-descriptor.sr')],
+      ['a ZIP64 member size', 'file.sr.memberZip64',
+        () => parseSr(mutateBytes(valid, (dv) =>
+          dv.setUint32(dataAt + 20, 0xffffffff, true)), 'member-zip64.sr')],
+      ['an unsupported compression method', 'file.sr.compression',
+        () => parseSr(mutateBytes(valid, (dv) =>
+          dv.setUint16(metadataAt + 10, 12, true)), 'compression.sr')],
+      ['a local header elsewhere', 'file.sr.noLocalHeader',
+        () => parseSr(mutateBytes(valid, (dv) =>
+          dv.setUint32(dataAt + 42, layout.cdOffset, true)), 'no-local-header.sr')],
+      ['a local header past the end', 'file.sr.localHeaderBounds',
+        () => parseSr(mutateBytes(valid, (dv) =>
+          dv.setUint32(dataAt + 42, layout.total - 10, true)), 'local-past-end.sr')],
+      ['a local name length past the end', 'file.sr.localHeaderBounds',
+        () => parseSr(mutateBytes(valid, (dv) =>
+          dv.setUint16(localHeaderOffset(valid, dataAt) + 26, 0xffff, true)), 'local-name-past.sr')],
+      ['a member past the end', 'file.sr.memberPastEnd',
+        () => parseSr(mutateBytes(valid, (dv) =>
+          dv.setUint32(dataAt + 20, layout.total, true)), 'member-past-end.sr')],
+      ['a stored size mismatch', 'file.sr.memberSize',
+        () => parseSr(mutateBytes(valid, (dv) =>
+          dv.setUint32(dataAt + 24, samples.length - 1, true)), 'size-mismatch.sr')],
+      ['a corrupt deflate stream', 'file.sr.inflateFailed', () => parseSr(
+        mutateBytes(deflated, (_dv, u8) => {
+          u8[localPayloadOffset(deflated, deflatedMetadataAt)] = 0x07;
+        }), 'inflate-failed.sr')],
+      ['an inflated size mismatch', 'file.sr.inflateSize',
+        () => parseSr(mutateBytes(deflated, (dv) => dv.setUint32(
+          deflatedMetadataAt + 24, deflatedMetadataBytes + 1, true)), 'inflate-size.sr')],
+      ['an archive without metadata', 'file.sr.noMetadata', async () => parseSr(
+        await buildZip([
+          { name: 'version', data: new TextEncoder().encode('2') },
+          { name: 'logic-1-1', data: samples },
+        ]), 'no-metadata.sr')],
+      ['two capturefiles in one device section', 'file.sr.duplicateCapturefile',
+        async () => parseSr(await mk(`${base}capturefile=logic-2\n`, samples), 'duplicate.sr')],
+      ['an analog capturefile', 'file.sr.analogCapture',
+        async () => parseSr(await mk(base.replace('logic-1', 'analog-1'), samples), 'analog.sr')],
+      ['metadata without a capturefile', 'file.sr.noCapturefile',
+        async () => parseSr(await mk(base.replace('capturefile=logic-1\n', ''), samples), 'no-capturefile.sr')],
+      ['metadata without a samplerate', 'file.sr.noSamplerate',
+        async () => parseSr(await mk(base.replace('samplerate=10 kHz\n', ''), samples), 'no-samplerate.sr')],
+      ['zero probes', 'file.sr.probes',
+        async () => parseSr(await mk(base.replace('total probes=4', 'total probes=0'), samples), 'zero-probes.sr')],
+      ['a fractional probe count', 'file.sr.probes',
+        async () => parseSr(await mk(base.replace('total probes=4', 'total probes=3.5'), samples), 'fractional-probes.sr')],
+      ['analog channels', 'file.sr.analogChannels',
+        async () => parseSr(await mk(base.replace('total analog=0', 'total analog=2'), samples), 'analog-channels.sr')],
+      ['unitsize 17', 'file.sr.unitsize',
+        async () => parseSr(await mk(base.replace('unitsize=1', 'unitsize=17'), samples), 'unitsize-17.sr')],
+      ['unitsize too small for the probes', 'file.sr.unitsizeProbes',
+        async () => parseSr(await mk(base.replace('total probes=4', 'total probes=16'), samples), 'unitsize-probes.sr')],
+      ['an unparsable samplerate', 'file.sr.samplerate',
+        async () => parseSr(await mk(base.replace('10 kHz', 'quack'), samples), 'samplerate.sr')],
+      ['a zero samplerate', 'file.sr.samplerate',
+        async () => parseSr(await mk(base.replace('10 kHz', '0 Hz'), samples), 'zero-samplerate.sr')],
+      ['a partial sample', 'file.sr.dataLength',
+        async () => parseSr(await mk(base.replace('unitsize=1', 'unitsize=2'), samples.slice(0, 3)), 'partial.sr')],
+      ['a capture with no data member', 'file.sr.noData',
+        async () => parseSr(await mk(base), 'no-data.sr')],
     ];
-    let bad: string[] = [];
-    for (const [name, zip, want] of cases) {
-      try {
-        await parseSr(zip, `corrupt-${name}.sr`);
-        bad.push(name);
-      } catch (e) {
-        if (!want.test(String(e))) bad.push(`${name}: wrong error ${String(e)}`);
+    const mismatched: string[] = [];
+    const unrendered: string[] = [];
+    const covered = new Set<string>();
+    const rendered = new Set<string>();
+    let tooLongSentence = '';
+    const renderProblem = (label: string, code: string, diag: Diagnostic): string | null => {
+      const sentence = formatDiagnostic(diag);
+      const lost = Object.values(diag.vars ?? {}).map(String).filter((v) => !sentence.includes(v));
+      const payloadLost = diag.payload !== undefined && !sentence.includes(diag.payload);
+      if (!/[{}]/.test(sentence) && lost.length === 0 && !payloadLost) {
+        rendered.add(code);
+        return null;
       }
+      return `${label}: ${JSON.stringify(sentence)}` +
+        `${lost.length > 0 ? ` missing ${lost.join(',')}` : ''}${payloadLost ? ' payload' : ''}`;
+    };
+    for (const [label, want, run] of cases) {
+      const got = await thrown(run);
+      covered.add(want);
+      if (got.code !== want) mismatched.push(`${label}: want ${want} got ${got.code}`);
+      if (!got.diag) continue;
+      const problem = renderProblem(label, want, got.diag);
+      if (problem !== null) unrendered.push(problem);
     }
     results.push({
-      name: 'corrupt sessions throw the documented errors',
-      pass: bad.length === 0,
-      detail: bad.length === 0 ? `${cases.length} corrupt inputs all threw correctly` : bad.join('; '),
+      name: 'malformed sessions throw their documented diagnostic code',
+      pass: mismatched.length === 0,
+      detail: mismatched.length === 0
+        ? `${cases.length} corrupt inputs threw as documented`
+        : mismatched.join('; '),
     });
 
-    // A truncated archive (EOCD gone) must not be mistaken for anything.
-    const whole = await mk(base);
-    const cut = whole.slice(0, whole.byteLength - 10);
-    let truncatedThrew = false;
-    try { await parseSr(cut, 'truncated.sr'); } catch { truncatedThrew = true; }
+    const srCodes = DIAGNOSTIC_CODES.filter((c) => c.startsWith('file.sr.'));
+    const boundaries: Array<[string, string, () => unknown]> = [
+      ['a whole number of samples', '', () => srSampleCount(8, 1)],
+      ['the largest storable capture', '', () => srSampleCount(2 ** 31 - 1, 1)],
+      ['one sample past the ceiling', 'file.sr.tooLong', () => srSampleCount(2 ** 31, 1)],
+      ['a trailing partial sample', 'file.sr.dataLength', () => srSampleCount(3, 2)],
+    ];
+    const boundaryBad: string[] = [];
+    for (const [label, want, run] of boundaries) {
+      const got = await thrown(run);
+      const wantCode = want === '' ? 'did not throw' : want;
+      if (got.code !== wantCode) boundaryBad.push(`${label}: want ${wantCode} got ${got.code}`);
+      if (want !== '') covered.add(want);
+      if (!got.diag) continue;
+      const problem = renderProblem(label, got.code, got.diag);
+      if (problem !== null) unrendered.push(problem);
+      if (got.code === 'file.sr.tooLong') tooLongSentence = formatDiagnostic(got.diag);
+    }
     results.push({
-      name: 'a truncated archive throws',
-      pass: truncatedThrew,
-      detail: truncatedThrew ? 'rejected' : 'parsed without an EOCD record',
+      name: 'the sample-count guard stops at the edge store ceiling',
+      pass: boundaryBad.length === 0,
+      detail: boundaryBad.length === 0
+        ? '2^31-1 accepted, 2^31 rejected, partial samples rejected'
+        : boundaryBad.join('; '),
+    });
+
+    results.push({
+      name: 'the over-length sentence carries the measured sample count',
+      pass: tooLongSentence.includes('2147483648'),
+      detail: tooLongSentence === '' ? 'file.sr.tooLong did not render' : tooLongSentence,
+    });
+
+    const uncovered = srCodes.filter((c) => !covered.has(c));
+    const unrenderedCodes = srCodes.filter((c) => !rendered.has(c));
+    results.push({
+      name: 'every file.sr.* diagnostic code is exercised and rendered by a case above',
+      pass: unrendered.length === 0 && uncovered.length === 0 && unrenderedCodes.length === 0,
+      detail: unrendered.length === 0 && uncovered.length === 0 && unrenderedCodes.length === 0
+        ? `${srCodes.length - unrenderedCodes.length}/${srCodes.length} codes rendered, ` +
+          `${cases.length + boundaries.length} inputs`
+        : [...uncovered.map((c) => `uncovered ${c}`),
+          ...unrenderedCodes.map((c) => `unrendered ${c}`), ...unrendered].join('; '),
+    });
+
+    const whole = await mk(base, samples);
+    const cut = whole.slice(0, whole.byteLength - 10);
+    const truncated = await thrown(() => parseSr(cut, 'truncated.sr'));
+    results.push({
+      name: 'a truncated archive throws a diagnostic',
+      pass: truncated.code === 'file.sr.notZip',
+      detail: truncated.code === 'file.sr.notZip'
+        ? 'the EOCD is gone, so the archive is not a zip'
+        : 'parsed without an EOCD record',
+    });
+
+    const truncations: string[] = [];
+    for (let n = 0; n < whole.byteLength; n++) {
+      const got = await thrown(() => parseSr(whole.slice(0, n), `cut-${n}.sr`));
+      if (got.diag === null) truncations.push(`${n} bytes: ${got.code}`);
+    }
+
+    let seed = 0x2545f491;
+    const next = (): number => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed;
+    };
+    const mutations: string[] = [];
+    let parsed = 0;
+    for (let i = 0; i < 200; i++) {
+      const at = next() % deflated.byteLength;
+      const bit = 1 << (next() % 8);
+      const mutated = mutateBytes(deflated, (_dv, u8) => { u8[at] ^= bit; });
+      const got = await thrown(() => parseSr(mutated, `flip-${i}-at-${at}-bit-${bit}.sr`));
+      if (got.code === 'did not throw') parsed += 1;
+      else if (got.diag === null) mutations.push(`${i}: byte ${at} ^ ${bit}: ${got.code}`);
+    }
+
+    const control = await thrown(() => { throw new TypeError('raw reader text'); });
+    results.push({
+      name: 'every truncation and seeded byte flip throws a diagnostic, never a reader error',
+      pass: truncations.length === 0 && mutations.length === 0 &&
+        control.code === 'not a diagnostic: raw reader text',
+      detail: truncations.length === 0 && mutations.length === 0
+        ? `${whole.byteLength} truncations and 200 byte flips stayed structured ` +
+          `(${parsed} flipped archives still parsed)`
+        : [...truncations.map((t) => `truncation ${t}`), ...mutations.map((m) => `flip ${m}`),
+          `control ${control.code}`].join('; '),
     });
   }
 

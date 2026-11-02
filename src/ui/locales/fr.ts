@@ -121,6 +121,50 @@ export const fr: Messages = {
     '.lwcap corrompu : front {index} du canal {channel} = {value} hors de [1, {length})',
   'diagnostic.file.lwcap.edgeOrder':
     '.lwcap corrompu : les fronts du canal {channel} ne sont pas strictement croissants à l’index {index}',
+  'diagnostic.file.sr.notZip': 'ce n’est pas une archive zip',
+  'diagnostic.file.sr.multiDisk': 'les archives zip multi-disques ne sont pas prises en charge',
+  'diagnostic.file.sr.corruptDirectory':
+    'zip corrompu : le répertoire central dépasse l’enregistrement de fin de répertoire central',
+  'diagnostic.file.sr.directoryBounds':
+    'zip corrompu : l’entrée {index} du répertoire central dépasse le répertoire',
+  'diagnostic.file.sr.zip64': 'les archives ZIP64 ne sont pas prises en charge',
+  'diagnostic.file.sr.entrySignature':
+    'zip corrompu : l’entrée centrale {index} n’a pas de signature',
+  'diagnostic.file.sr.dataDescriptor':
+    'le membre {member} utilise un descripteur de données, ce qui n’est pas pris en charge',
+  'diagnostic.file.sr.memberZip64':
+    'le membre {member} exige ZIP64, ce qui n’est pas pris en charge',
+  'diagnostic.file.sr.compression':
+    'le membre {member} utilise la méthode de compression {method} ; seuls stored et deflate sont pris en charge',
+  'diagnostic.file.sr.noLocalHeader':
+    'le membre {member} n’a pas d’en-tête local là où le répertoire l’indique',
+  'diagnostic.file.sr.localHeaderBounds':
+    'l’en-tête local du membre {member} dépasse la fin du fichier',
+  'diagnostic.file.sr.memberPastEnd': 'le membre {member} dépasse la fin du fichier',
+  'diagnostic.file.sr.memberSize': 'taille incohérente pour le membre {member}',
+  'diagnostic.file.sr.inflateFailed': 'impossible de décompresser le membre {member}',
+  'diagnostic.file.sr.inflateSize':
+    'le membre {member} se décompresse en {actual} octets, le répertoire en annonce {expected}',
+  'diagnostic.file.sr.noMetadata':
+    '{source} n’a pas de membre metadata : ce n’est pas une session sigrok',
+  'diagnostic.file.sr.duplicateCapturefile':
+    'metadata contient deux capturefile dans une même section de périphérique',
+  'diagnostic.file.sr.analogCapture':
+    'capturefile {capturefile} n’est pas une unité logique ; les captures analogiques ne sont pas prises en charge',
+  'diagnostic.file.sr.noCapturefile': 'aucun capturefile logique dans metadata',
+  'diagnostic.file.sr.noSamplerate': 'aucune fréquence d’échantillonnage dans metadata',
+  'diagnostic.file.sr.probes': 'total probes {probes} est hors de 1..128',
+  'diagnostic.file.sr.analogChannels':
+    'les canaux analogiques de cette capture ne sont pas pris en charge ({count} présents)',
+  'diagnostic.file.sr.unitsize': 'unitsize {unitsize} est hors de 1..16 octets',
+  'diagnostic.file.sr.unitsizeProbes':
+    'unitsize {unitsize} ne peut pas contenir {probes} canaux',
+  'diagnostic.file.sr.samplerate': 'fréquence d’échantillonnage illisible {value}',
+  'diagnostic.file.sr.dataLength':
+    'la longueur {bytes} n’est pas un nombre entier d’échantillons de {unitsize} octets',
+  'diagnostic.file.sr.tooLong': 'capture trop longue ({samples} échantillons)',
+  'diagnostic.file.sr.noData':
+    '{source} n’a pas de membres de données pour capturefile {capturefile}',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Largeur : {duration}',

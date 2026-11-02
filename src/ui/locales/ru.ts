@@ -120,6 +120,50 @@ export const ru: Messages = {
     'файл .lwcap повреждён: переход {index} канала {channel} = {value} вне [1, {length})',
   'diagnostic.file.lwcap.edgeOrder':
     'файл .lwcap повреждён: переходы канала {channel} не строго возрастают на индексе {index}',
+  'diagnostic.file.sr.notZip': 'это не zip-архив',
+  'diagnostic.file.sr.multiDisk': 'многодисковые zip-архивы не поддерживаются',
+  'diagnostic.file.sr.corruptDirectory':
+    'zip повреждён: центральный каталог выходит за запись конца центрального каталога',
+  'diagnostic.file.sr.directoryBounds':
+    'zip повреждён: элемент центрального каталога {index} выходит за каталог',
+  'diagnostic.file.sr.zip64': 'архивы ZIP64 не поддерживаются',
+  'diagnostic.file.sr.entrySignature':
+    'zip повреждён: у элемента центрального каталога {index} нет сигнатуры',
+  'diagnostic.file.sr.dataDescriptor':
+    'элемент {member} использует дескриптор данных, что не поддерживается',
+  'diagnostic.file.sr.memberZip64':
+    'элементу {member} нужен ZIP64, что не поддерживается',
+  'diagnostic.file.sr.compression':
+    'элемент {member} использует метод сжатия {method}; поддерживаются только stored и deflate',
+  'diagnostic.file.sr.noLocalHeader':
+    'у элемента {member} нет локального заголовка там, где указывает каталог',
+  'diagnostic.file.sr.localHeaderBounds':
+    'локальный заголовок элемента {member} выходит за конец файла',
+  'diagnostic.file.sr.memberPastEnd': 'элемент {member} выходит за конец файла',
+  'diagnostic.file.sr.memberSize': 'несовпадение размера элемента {member}',
+  'diagnostic.file.sr.inflateFailed': 'не удалось распаковать элемент {member}',
+  'diagnostic.file.sr.inflateSize':
+    'элемент {member} распаковывается в {actual} байт, а каталог указывает {expected}',
+  'diagnostic.file.sr.noMetadata':
+    'в {source} нет элемента metadata, значит это не сеанс sigrok',
+  'diagnostic.file.sr.duplicateCapturefile':
+    'в одной секции устройства два capturefile',
+  'diagnostic.file.sr.analogCapture':
+    'capturefile {capturefile} не является логическим блоком; аналоговые записи не поддерживаются',
+  'diagnostic.file.sr.noCapturefile': 'в metadata нет логического capturefile',
+  'diagnostic.file.sr.noSamplerate': 'в metadata нет частоты дискретизации',
+  'diagnostic.file.sr.probes': 'total probes {probes} вне диапазона 1..128',
+  'diagnostic.file.sr.analogChannels':
+    'аналоговые каналы в этой записи не поддерживаются (их {count})',
+  'diagnostic.file.sr.unitsize': 'unitsize {unitsize} вне диапазона 1..16 байт',
+  'diagnostic.file.sr.unitsizeProbes':
+    'unitsize {unitsize} не вмещает {probes} каналов',
+  'diagnostic.file.sr.samplerate': 'не удалось разобрать частоту дискретизации {value}',
+  'diagnostic.file.sr.dataLength':
+    'длина данных {bytes} не кратна образцам по {unitsize} байт',
+  'diagnostic.file.sr.tooLong': 'запись слишком длинная ({samples} образцов)',
+  'diagnostic.file.sr.noData':
+    'в {source} нет элементов данных для capturefile {capturefile}',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Ширина: {duration}',

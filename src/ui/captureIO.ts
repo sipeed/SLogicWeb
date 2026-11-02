@@ -19,11 +19,11 @@
 import { channelAcrossGaps, createEdgeStore } from '../data/index.js';
 import type { GapSpan, SampleStore } from '../data/types.js';
 import { DiagnosticError } from '../diagnostics.js';
-import { CHANNEL_COUNTS, isChannelCount, type ChannelCount } from '../types.js';
+import { CHANNEL_COUNTS, MAX_SAMPLES, isChannelCount, type ChannelCount } from '../types.js';
 import { parseSr } from './srLoad.js';
 
 /** [src/data] `append` throws past 2^31 samples rather than wrapping. */
-export const MAX_SAMPLES = 2 ** 31;
+export { MAX_SAMPLES } from '../types.js';
 
 export interface LoadedCapture {
   store: SampleStore;
