@@ -965,7 +965,7 @@ function between(source: string, start: string, end: string): string {
     `swaps=${setIndices.length}, guarded=${JSON.stringify(guarded)}`);
 
   const adoptSource = between(appSource, 'private adoptCapture(', 'private save()');
-  const startSource = between(appSource, 'private async startCapture()', 'private async stopCapture(');
+  const startSource = between(appSource, 'private async startCapture(', 'private async stopCapture(');
   const escapeAt = appSource.indexOf("if (e.key === 'Escape') {");
   const escapeSource = escapeAt >= 0 ? appSource.slice(escapeAt, escapeAt + 200) : '';
   check('capture adoption clears the marker while hardware start retains its sample',

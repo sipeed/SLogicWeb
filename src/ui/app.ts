@@ -80,6 +80,10 @@ import {
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
 import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.js';
 import { capturePostTriggerSamples } from './capturePolicy.js';
+import {
+  captureFinishFits, captureStartUsesDefaultWindow, clampCaptureViewportAnchor,
+  type CaptureStartOrigin, type CaptureStopReason, type CaptureViewportAnchor,
+} from './captureViewport.js';
 import { RepeatCaptureTimer } from './repeatCapture.js';
 import { markerPointerCursor, markerSnapRadii, type MarkerCursor } from './markerGeometry.js';
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
@@ -101,8 +105,6 @@ interface Lane {
   displayRow: number;
   laneChannel: number;
 }
-
-type CaptureStopReason = 'manual' | 'completed';
 
 export class App {
   private readonly storeRef: StoreRef;
@@ -157,6 +159,7 @@ export class App {
   private deviceEpoch = 0;
   private stopPending: Promise<void> | null = null;
   private readonly repeatTimer = new RepeatCaptureTimer();
+  private repeatViewportAnchor: CaptureViewportAnchor | null = null;
   private rateCeilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ;
   private running = false;
   /** True while WebUSB transfers from the previous run are being cancelled and drained. */
@@ -574,6 +577,7 @@ export class App {
   private applySettings(s: CaptureSettings): void {
     if (s.samplerate !== this.settings.samplerate) this.samplerateExplicit = true;
     const next = clampSettings(s, this.rateCeilings);
+    if (next.mode !== this.settings.mode) this.repeatViewportAnchor = null;
     if (triggerSettingsChanged(this.settings, next)) {
       this.triggerState = 'off';
       this.triggerSampleIndex = null;
@@ -803,6 +807,8 @@ export class App {
     if (restorePending && pendingViewport) {
       this.stack.setViewport(pendingViewport.start, pendingViewport.end);
       this.stack.setFollowLatest(pendingViewport.follow);
+    } else {
+      this.restoreRepeatViewport();
     }
     const wCss = this.el.plot.clientWidth;
     const hCss = this.el.plot.clientHeight;
@@ -951,7 +957,7 @@ export class App {
         this.stack.panPixels(e.deltaX * dpr);
       }
       this.syncMarkerCursor(e.clientX - rect.left);
-      this.setFollow(false);
+      this.noteViewportIntent();
       this.dirty = true;
     }, { passive: false });
 
@@ -1023,7 +1029,7 @@ export class App {
           // Fingers spreading = zoom in = a smaller sample span, anchored between them.
           this.stack.zoomAt((midX - rect.left) * dpr, pinch.dist / dist);
           this.stack.panPixels(-(midX - pinch.midX) * dpr);
-          this.setFollow(false);
+          this.noteViewportIntent();
           this.dirty = true;
         }
         pinch = { dist, midX };
@@ -1035,7 +1041,7 @@ export class App {
         lastX = e.clientX;
         moved += Math.abs(dx);
         this.stack.panPixels(-dx * dpr);
-        this.setFollow(false);
+        this.noteViewportIntent();
         this.dirty = true;
         return;
       }
@@ -1087,7 +1093,11 @@ export class App {
       this.syncMarkerCursor(null);
       this.dirty = true;
     });
-    plot.addEventListener('dblclick', () => { this.stack.zoomToFit(); this.dirty = true; });
+    plot.addEventListener('dblclick', () => {
+      this.noteViewportIntent();
+      this.stack.zoomToFit();
+      this.dirty = true;
+    });
 
     // Dragging the axis pans, which is what a time ruler is for.
     let axisDrag = false;
@@ -1101,7 +1111,7 @@ export class App {
       const dpr = globalThis.devicePixelRatio || 1;
       this.stack.panPixels(-(e.clientX - axisLast) * dpr);
       axisLast = e.clientX;
-      this.setFollow(false);
+      this.noteViewportIntent();
       this.dirty = true;
     });
     const axisEnd = (e: PointerEvent) => {
@@ -1125,7 +1135,11 @@ export class App {
       if (target instanceof HTMLElement &&
           (target.isContentEditable || target.closest('.select-field, .assistant-panel') !== null)) return;
       if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;
-      if (e.key === 'f') { this.stack.zoomToFit(); this.dirty = true; }
+      if (e.key === 'f') {
+        this.noteViewportIntent();
+        this.stack.zoomToFit();
+        this.dirty = true;
+      }
       if (e.key === ' ') {
         e.preventDefault();
         this.primaryAction();
@@ -1279,6 +1293,19 @@ export class App {
     this.stack.setFollowLatest(on);
   }
 
+  private noteViewportIntent(): void {
+    this.repeatViewportAnchor = null;
+    this.setFollow(false);
+  }
+
+  private restoreRepeatViewport(): void {
+    const anchor = this.repeatViewportAnchor;
+    if (!anchor || anchor.followLatest) return;
+    const range = clampCaptureViewportAnchor(anchor, this.store.length);
+    this.stack.restoreViewport(range.start, range.end);
+    if (range.start === anchor.start) this.repeatViewportAnchor = null;
+  }
+
   private syncMarkerCursor(pointerCssX: number | null): void {
     const sample = this.markerA.sample;
     const next = markerPointerCursor(
@@ -1305,6 +1332,7 @@ export class App {
     });
     must<HTMLButtonElement>('btn-save').addEventListener('click', () => this.save());
     must<HTMLButtonElement>('btn-fit').addEventListener('click', () => {
+      this.noteViewportIntent();
       this.stack.zoomToFit();
       this.dirty = true;
     });
@@ -1694,6 +1722,7 @@ export class App {
 
   private adoptCapture(store: SampleStore, names: string[], label: CaptureLabel): void {
     this.repeatTimer.cancel();
+    this.repeatViewportAnchor = null;
     this.discardDecodeState();
     this.releaseMarkerPointer();
     this.storeRef.set(store);
@@ -1748,6 +1777,7 @@ export class App {
 
   private discardDevice(): number {
     this.repeatTimer.cancel();
+    this.repeatViewportAnchor = null;
     const device = this.device;
     this.deviceEpoch += 1;
     if (device) {
@@ -1770,6 +1800,7 @@ export class App {
 
   private installDevice(d: Device, epoch: number): boolean {
     this.repeatTimer.cancel();
+    this.repeatViewportAnchor = null;
     if (epoch !== this.deviceEpoch && this.device !== null) {
       d.terminate();
       return false;
@@ -1928,7 +1959,7 @@ export class App {
     this.relayout();
   }
 
-  private async startCapture(): Promise<void> {
+  private async startCapture(origin: CaptureStartOrigin = 'manual'): Promise<void> {
     if (this.running || this.stopping || this.repeatTimer.pending) return;
     if (!this.device) { this.fail('error.start', new Error('no device connected')); return; }
     const device = this.device;
@@ -1949,6 +1980,12 @@ export class App {
       }
       const mode = this.settings.mode;
       const isLoop = mode === 'loop';
+      const continuation = origin === 'repeat' ? {
+        start: this.stack.viewport.start,
+        span: this.stack.viewport.end - this.stack.viewport.start,
+        followLatest: this.stack.followLatest,
+      } : null;
+      this.repeatViewportAnchor = continuation;
       const store = createSampleStore(cfg.channels, cfg.samplerate);
       this.discardDecodeState();
       this.releaseMarkerPointer();
@@ -1977,10 +2014,17 @@ export class App {
       this.running = true;
       this.runningPanelAt = 0;
       this.relayout();
-      // Show a window rather than the whole (empty) capture, and follow the live edge.
-      const span = Math.max(1000, Math.round(cfg.samplerate * 0.05));
-      this.stack.setViewport(0, span);
-      this.setFollow(true);
+      if (captureStartUsesDefaultWindow(origin)) {
+        const span = Math.max(1000, Math.round(cfg.samplerate * 0.05));
+        this.stack.restoreViewport(0, span);
+        this.setFollow(true);
+      } else if (continuation?.followLatest) {
+        this.stack.restoreViewport(0, continuation.span);
+        this.setFollow(true);
+        this.repeatViewportAnchor = null;
+      } else {
+        this.restoreRepeatViewport();
+      }
       this.renderPanels();
 
       const bytesPerSample = bytesPerSampleForChannels(cfg.channels);
@@ -2099,6 +2143,7 @@ export class App {
       }
     } catch (e) {
       this.repeatTimer.cancel();
+      this.repeatViewportAnchor = null;
       const armed = this.startMutatedCapture;
       if (armed && this.device === device) this.deviceLost(e, false);
       this.running = false;
@@ -2137,12 +2182,18 @@ export class App {
   private async stopCapture(reason: CaptureStopReason = 'manual'): Promise<void> {
     if (!this.running && !this.stopping && this.repeatTimer.pending) {
       this.repeatTimer.cancel();
+      this.repeatViewportAnchor = null;
+      this.setFollow(false);
       this.relayout();
       this.renderPanels();
       return;
     }
     if (!this.running || this.stopping) return;
-    if (reason === 'manual') this.repeatTimer.cancel();
+    if (reason === 'manual') {
+      this.repeatTimer.cancel();
+      this.repeatViewportAnchor = null;
+      this.setFollow(false);
+    }
     this.running = false;
     this.stopping = true;
     this.renderPanels();
@@ -2172,15 +2223,18 @@ export class App {
   }
 
   private finishCapture(reason: CaptureStopReason = 'manual'): void {
-    this.setFollow(false);
+    const fit = captureFinishFits(this.settings.mode, reason);
+    if (reason === 'manual' || fit) this.setFollow(false);
+    this.restoreRepeatViewport();
+    this.repeatViewportAnchor = null;
     const sr = this.store.samplerate;
     this.captureLabel = this.triggerState === 'not-found'
       ? { kind: 'stoppedNoTrigger', samples: this.store.length }
       : { kind: 'live', samples: this.store.length, rate: sr, seconds: this.store.length / sr };
     if (reason === 'completed' && this.settings.mode === 'repeat' && this.device !== null) {
-      this.repeatTimer.schedule(this.settings.repeatIntervalSeconds, () => { void this.startCapture(); });
+      this.repeatTimer.schedule(this.settings.repeatIntervalSeconds, () => { void this.startCapture('repeat'); });
     }
-    this.stack.zoomToFit();
+    if (fit) this.stack.zoomToFit();
     this.relayout();
     this.renderPanels();
     this.dirty = true;
@@ -2457,6 +2511,7 @@ export class App {
     },
     setViewportSeconds: (a: number, b: number) => {
       const sr = this.store.samplerate;
+      this.noteViewportIntent();
       this.stack.setViewport(a * sr, b * sr);
       this.dirty = true;
     },
@@ -2541,6 +2596,7 @@ export class App {
       const s = start[n]!;
       const e = Math.max(end[n]!, s + 1);
       const w = (e - s) * (1 + 2 * pad);
+      this.noteViewportIntent();
       this.stack.setViewport(s - (e - s) * pad, s - (e - s) * pad + w);
       this.dirty = true;
       return true;

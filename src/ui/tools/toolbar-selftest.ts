@@ -160,7 +160,7 @@ function methodBody(marker: string): string {
 
 const discardBody = methodBody('private discardDecodeState(): void {');
 const adoptBody = methodBody('private adoptCapture(');
-const startBody = methodBody('private async startCapture(): Promise<void> {');
+const startBody = methodBody('private async startCapture(');
 const runDecodeBody = methodBody('private async runDecode(id: string): Promise<void> {');
 
 const discardDeviceBody = methodBody('private discardDevice(): number {');

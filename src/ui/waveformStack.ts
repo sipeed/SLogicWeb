@@ -36,7 +36,7 @@ import { ROWS } from './metrics.js';
 export type StackRenderer = Pick<
   WaveformRenderer,
   | 'widthDevicePx' | 'setTheme' | 'setChannels' | 'setRowHeights' | 'setDevicePixelRatio'
-  | 'syncCanvasSize' | 'setViewport' | 'viewport' | 'setFollowLatest' | 'followLatest'
+  | 'syncCanvasSize' | 'setViewport' | 'viewport' | 'transform' | 'setFollowLatest' | 'followLatest'
   | 'dispose'
 > & { render(): FrameStats };
 
@@ -223,10 +223,21 @@ export class WaveformStack {
     }
   }
 
+  get viewport(): { start: number; end: number } {
+    return { start: this.view.start, end: this.view.end };
+  }
+
   setViewport(start: number, end: number): void {
     if (!(end > start)) return;
     this.view.set(start, end);
     this.pushViewport();
+  }
+
+  restoreViewport(start: number, end: number): void {
+    if (!(end > start)) return;
+    this.view.set(start, end);
+    for (const r of this.activeRenderers()) r.transform.set(start, end);
+    this.setFollowLatest(false);
   }
 
   /** Apply the master view to every renderer, then adopt renderer 0's clamped answer so

@@ -104,7 +104,7 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
   const wired = completions === 5 && finish.includes("reason === 'completed' && this.settings.mode === 'repeat'") &&
     finish.includes('this.device !== null') && finish.includes('this.repeatTimer.schedule(') &&
     pendingStop.includes('this.repeatTimer.pending) {\n      this.repeatTimer.cancel();') &&
-    pendingStop.includes("if (reason === 'manual') this.repeatTimer.cancel()") &&
+    /if \(reason === 'manual'\) \{\s+this\.repeatTimer\.cancel\(\);/.test(pendingStop) &&
     discard.includes('this.repeatTimer.cancel()') && adopt.includes('this.repeatTimer.cancel()') &&
     start.includes('this.running || this.stopping || this.repeatTimer.pending') &&
     start.includes('this.repeatTimer.cancel()');
