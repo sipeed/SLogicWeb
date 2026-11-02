@@ -188,6 +188,13 @@ export const en = {
     'the read loop never settled after the interface was released, so the device handle was closed',
   'diagnostic.device.reclaimFailed':
     'the interface could not be re-claimed after the capture was cancelled, so the device was closed',
+  'diagnostic.device.openFailed': 'could not open the USB device',
+  'diagnostic.device.configureFailed': 'could not select the device configuration',
+  'diagnostic.device.claimFailed': 'could not claim interface 0',
+  'diagnostic.usb.unavailable': 'WebUSB is not available in this browser',
+  'diagnostic.usb.blocked': 'the browser blocked access to USB devices',
+  'diagnostic.usb.notVisible':
+    'device {vendor}:{product} is not visible to the USB worker; grant it from the page first',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Width: {duration}',

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
 import type { Device } from './types.js';
+import { DiagnosticError } from '../diagnostics.js';
 import { PID_SLOGIC16_U3, PID_SLOGIC32_U3, USB_VID_SIPEED } from './protocol.js';
 import { USB_FILTERS } from './usbCore.js';
 import { workerTransport } from './workerTransport.js';
@@ -13,8 +14,8 @@ export { WorkerSlogicDevice, workerTransport } from './workerTransport.js';
  * on the page when it cannot. See `workerTransport`.
  */
 export async function getGrantedDevicesOnBestThread(): Promise<Device[]> {
-  if (!navigator.usb) throw new Error('WebUSB is not available in this browser');
-  const all = await navigator.usb.getDevices();
+  if (!navigator.usb) throw new DiagnosticError('usb.unavailable');
+  const all = await navigator.usb.getDevices().catch(rethrowUsbFailure);
   const mine = all.filter((d) => d.vendorId === USB_VID_SIPEED &&
     (d.productId === PID_SLOGIC16_U3 || d.productId === PID_SLOGIC32_U3));
   const devices: Device[] = [];
@@ -27,9 +28,18 @@ export async function getGrantedDevicesOnBestThread(): Promise<Device[]> {
  * back the transport that should run it.
  */
 export async function requestDeviceOnBestThread(): Promise<Device> {
-  if (!navigator.usb) throw new Error('WebUSB is not available in this browser');
-  const usb = await navigator.usb.requestDevice({ filters: USB_FILTERS });
+  if (!navigator.usb) throw new DiagnosticError('usb.unavailable');
+  const usb = await navigator.usb.requestDevice({ filters: USB_FILTERS })
+    .catch(rethrowUsbFailure);
   return workerTransport.open(usb);
+}
+
+function rethrowUsbFailure(error: unknown): never {
+  if (!(error instanceof DOMException)) throw error;
+  if (error.name === 'SecurityError') {
+    throw new DiagnosticError('usb.blocked', undefined, error.message || undefined);
+  }
+  throw error;
 }
 export {
   SoftwareTrigger,

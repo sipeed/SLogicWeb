@@ -18,7 +18,7 @@
  */
 
 import { createCommandQueue, describeFailure } from './commandQueue.js';
-import { wireDiagnostic } from '../diagnostics.js';
+import { DiagnosticError, wireDiagnostic } from '../diagnostics.js';
 import { Slogic16U3 } from './slogic16u3.js';
 import type { SampleSink } from './types.js';
 import type {
@@ -70,10 +70,10 @@ async function handle(message: QueuedCommand): Promise<void> {
         candidate.productId === message.filter.productId &&
         (message.filter.serial === undefined || candidate.serialNumber === message.filter.serial));
       if (!usb) {
-        throw new Error(
-          `the ${message.filter.vendorId.toString(16)}:${message.filter.productId.toString(16)} ` +
-          'device is not visible to this worker; the page must grant it first',
-        );
+        throw new DiagnosticError('usb.notVisible', {
+          vendor: message.filter.vendorId.toString(16),
+          product: message.filter.productId.toString(16),
+        });
       }
       const instance = new Slogic16U3(usb);
       instance.onTrace = (entry) => post({ kind: 'trace', entry });

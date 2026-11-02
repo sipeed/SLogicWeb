@@ -36,9 +36,11 @@ import {
   vrefCode,
 } from './protocol.js';
 import {
-  LoopStallWatch, Slogic16U3, deriveStreamTuning, expandPacked, type Stats,
+  LoopStallWatch, Slogic16U3, deriveStreamTuning, expandPacked, getGrantedDevices,
+  requestDevice, type Stats,
 } from './slogic16u3.js';
 import { WorkerSlogicDevice } from './workerTransport.js';
+import { getGrantedDevicesOnBestThread, requestDeviceOnBestThread } from './index.js';
 import { createCommandQueue, describeFailure } from './commandQueue.js';
 import { TransportDeadError } from './types.js';
 import { DiagnosticError, diagnosticOf } from '../diagnostics.js';
@@ -1602,11 +1604,11 @@ async function main(): Promise<void> {
       { vendorId: 0x359f, productId: 0x3032 },
       { spawn: () => refused as unknown as Worker, openTimeoutMs: 200 },
     );
-    refused.emit({ kind: 'failed', message: 'the device is not visible to this worker' });
+    refused.emit({ kind: 'failed', message: 'the worker refused to open the device' });
     let refusedError = '';
     try { await refusing; } catch (e) { refusedError = String(e); }
-    check('a worker that cannot see the device says why', refusedError.includes('not visible'),
-      refusedError || '<no throw>');
+    check('a worker failure that carried no code still says why as raw text',
+      refusedError.includes('refused to open the device'), refusedError || '<no throw>');
 
     const silent = new FakeWorker();
     const silentStart = Date.now();
@@ -1920,6 +1922,155 @@ async function main(): Promise<void> {
     check('a worker that dies with a request outstanding keeps the browser text as a payload',
       crashDiag?.code === 'device.workerCrashed' && crashDiag.payload === 'worker blew up',
       `${String(crashReply)} | ${JSON.stringify(crashDiag)}`);
+  }
+
+  console.log('\nusb connect and open failures');
+  {
+    const nav = navigator as unknown as { usb?: unknown };
+    const savedUsb = Object.getOwnPropertyDescriptor(nav, 'usb');
+    const installUsb = (usb: unknown): void => {
+      Object.defineProperty(nav, 'usb', { value: usb, configurable: true, writable: true });
+    };
+    const restoreUsb = (): void => {
+      if (savedUsb) Object.defineProperty(nav, 'usb', savedUsb);
+      else delete nav.usb;
+    };
+    const settle = async (work: () => Promise<unknown>): Promise<unknown> => {
+      try { return await work(); } catch (e) { return e; }
+    };
+
+    restoreUsb();
+    const noUsbRequest = await settle(() => requestDeviceOnBestThread());
+    const noUsbGrant = await settle(() => getGrantedDevicesOnBestThread());
+    const noUsbLegacyRequest = await settle(() => requestDevice());
+    const noUsbLegacyGrant = await settle(() => getGrantedDevices());
+    check('a browser without WebUSB reports it on every entry point',
+      diagnosticOf(noUsbRequest)?.code === 'usb.unavailable' &&
+        diagnosticOf(noUsbGrant)?.code === 'usb.unavailable' &&
+        diagnosticOf(noUsbLegacyRequest)?.code === 'usb.unavailable' &&
+        diagnosticOf(noUsbLegacyGrant)?.code === 'usb.unavailable',
+      `${String(noUsbRequest)} | ${String(noUsbGrant)} | ` +
+        `${String(noUsbLegacyRequest)} | ${String(noUsbLegacyGrant)}`);
+
+    installUsb({
+      requestDevice: async () => { throw new DOMException('No device selected.', 'NotFoundError'); },
+      getDevices: async () => { throw new DOMException('No device selected.', 'NotFoundError'); },
+    });
+    const cancelled = await settle(() => requestDeviceOnBestThread());
+    const cancelledGrant = await settle(() => getGrantedDevicesOnBestThread());
+    check('a dismissed chooser stays a raw NotFoundError so the caller can cancel silently',
+      cancelled instanceof DOMException && cancelled.name === 'NotFoundError' &&
+        cancelled.message === 'No device selected.' && diagnosticOf(cancelled) === null &&
+        cancelledGrant instanceof DOMException && cancelledGrant.name === 'NotFoundError' &&
+        diagnosticOf(cancelledGrant) === null,
+      `${String(cancelled)} | ${String(cancelledGrant)}`);
+
+    const blockedText = 'The request is not allowed by the user agent or the platform.';
+    installUsb({
+      requestDevice: async () => { throw new DOMException(blockedText, 'SecurityError'); },
+      getDevices: async () => [],
+    });
+    const blocked = await settle(() => requestDeviceOnBestThread());
+    check('a blocked chooser keeps the browser text as its payload',
+      diagnosticOf(blocked)?.code === 'usb.blocked' && diagnosticOf(blocked)?.payload === blockedText,
+      `${String(blocked)} | ${JSON.stringify(diagnosticOf(blocked))}`);
+
+    installUsb({
+      requestDevice: async () => { throw new DOMException('', 'SecurityError'); },
+      getDevices: async () => { throw new DOMException('', 'SecurityError'); },
+    });
+    const silentBlocked = await settle(() => requestDeviceOnBestThread());
+    const silentGrant = await settle(() => getGrantedDevicesOnBestThread());
+    check('an empty browser message is omitted instead of stored as an empty payload',
+      diagnosticOf(silentBlocked)?.code === 'usb.blocked' &&
+        diagnosticOf(silentBlocked)?.payload === undefined &&
+        diagnosticOf(silentGrant)?.code === 'usb.blocked' &&
+        diagnosticOf(silentGrant)?.payload === undefined,
+      `${JSON.stringify(diagnosticOf(silentBlocked))} | ${JSON.stringify(diagnosticOf(silentGrant))}`);
+
+    installUsb({
+      requestDevice: async () => { throw new DOMException('the device was lost', 'NetworkError'); },
+      getDevices: async () => { throw new TypeError('getDevices is not a function'); },
+    });
+    const unknownName = await settle(() => requestDeviceOnBestThread());
+    const unmappedGrant = await settle(() => getGrantedDevicesOnBestThread());
+    check('a browser failure outside the mapping table keeps its own text',
+      unknownName instanceof DOMException && unknownName.message === 'the device was lost' &&
+        diagnosticOf(unknownName) === null &&
+        unmappedGrant instanceof TypeError &&
+        unmappedGrant.message === 'getDevices is not a function' &&
+        diagnosticOf(unmappedGrant) === null,
+      `${String(unknownName)} | ${String(unmappedGrant)}`);
+    restoreUsb();
+
+    const rejectAt = async (
+      stage: 'open' | 'selectConfiguration' | 'claimInterface', failure: unknown,
+    ): Promise<unknown> => {
+      const usb = {
+        opened: false,
+        configuration: null as number | null,
+        vendorId: 0x359f,
+        productId: PID_SLOGIC32_U3,
+        open: async (): Promise<void> => {
+          if (stage === 'open') throw failure;
+          usb.opened = true;
+        },
+        selectConfiguration: async (_value: number): Promise<void> => {
+          if (stage === 'selectConfiguration') throw failure;
+          usb.configuration = 1;
+        },
+        claimInterface: async (_index: number): Promise<void> => {
+          if (stage === 'claimInterface') throw failure;
+        },
+      };
+      const dev = new Slogic16U3(usb as unknown as USBDevice);
+      return settle(() => dev.open());
+    };
+
+    const openStages: ['open' | 'selectConfiguration' | 'claimInterface', string, string][] = [
+      ['open', 'device.openFailed', 'The device has already been opened or lost.'],
+      ['selectConfiguration', 'device.configureFailed', 'Unable to set device configuration.'],
+      ['claimInterface', 'device.claimFailed', 'Unable to claim interface.'],
+    ];
+    for (const [stage, code, text] of openStages) {
+      const reply = await rejectAt(stage, new DOMException(text, 'NetworkError'));
+      check(`a browser rejection while opening reports ${code} with the browser text`,
+        diagnosticOf(reply)?.code === code && diagnosticOf(reply)?.payload === text,
+        `${String(reply)} | ${JSON.stringify(diagnosticOf(reply))}`);
+    }
+
+    const silentOpen = await rejectAt('open', new DOMException('', 'InvalidStateError'));
+    check('an open rejection with no browser text carries no payload',
+      diagnosticOf(silentOpen)?.code === 'device.openFailed' &&
+        diagnosticOf(silentOpen)?.payload === undefined,
+      JSON.stringify(diagnosticOf(silentOpen)));
+    const unmappedOpen = await rejectAt('claimInterface',
+      new TypeError('claimInterface is not a function'));
+    check('a non-browser failure on the open path keeps its own text',
+      unmappedOpen instanceof TypeError &&
+        unmappedOpen.message === 'claimInterface is not a function' &&
+        diagnosticOf(unmappedOpen) === null,
+      `${String(unmappedOpen)} | ${JSON.stringify(diagnosticOf(unmappedOpen))}`);
+
+    const notVisible = new FakeWorker();
+    const notVisibleOpen = WorkerSlogicDevice.open(
+      { vendorId: 0x359f, productId: 0x3032 },
+      { spawn: () => notVisible as unknown as Worker, openTimeoutMs: 200 },
+    );
+    notVisible.emit({
+      kind: 'failed',
+      ...describeFailure(new DiagnosticError('usb.notVisible', {
+        vendor: '359f', product: '3032',
+      })),
+    });
+    let notVisibleReply: unknown = null;
+    try { await notVisibleOpen; } catch (e) { notVisibleReply = e; }
+    const notVisibleDiag = diagnosticOf(notVisibleReply);
+    check('a coded open failure thrown in the worker reaches the page as the same code',
+      notVisibleReply instanceof DiagnosticError &&
+        notVisibleDiag?.code === 'usb.notVisible' &&
+        notVisibleDiag.vars?.vendor === '359f' && notVisibleDiag.vars?.product === '3032',
+      `${String(notVisibleReply)} | ${JSON.stringify(notVisibleDiag)}`);
   }
 
   {
@@ -2911,6 +3062,12 @@ async function main(): Promise<void> {
       ? 'src/device/usbWorker.ts was not readable, so the default worker producer is unverified'
       : `reports through describeFailure: ${usbWorkerSrc.includes(
         "post({ kind: 'failed', ...describeFailure(error) })")}`);
+  check('the worker names the device it cannot see as hex vars, not prose',
+    usbWorkerSrc.includes("throw new DiagnosticError('usb.notVisible', {") &&
+      usbWorkerSrc.includes('vendor: message.filter.vendorId.toString(16)') &&
+      usbWorkerSrc.includes('product: message.filter.productId.toString(16)') &&
+      !usbWorkerSrc.includes('is not visible to this worker'),
+    'the open handler has to report the ids it looked for, not an English sentence');
 
   check('selftest plan maps 16 channels to the 16 U3 model',
     modelForMaxChannels(16) === 'slogic16u3');

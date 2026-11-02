@@ -22,6 +22,8 @@
 
 import { TransportDeadError } from './types.js';
 import type { CaptureConfig, CaptureStartOptions, Device, DropoutSink, SampleSink } from './types.js';
+import { DiagnosticError } from '../diagnostics.js';
+import type { DiagnosticCode } from '../diagnostics.js';
 import { SoftwareTrigger } from '../data/softwareTrigger.js';
 type SoftwareTriggerState = 'waiting' | 'triggered' | 'not-found';
 import { bytesPerSampleForChannels } from '../types.js';
@@ -771,9 +773,25 @@ export class Slogic16U3 implements Device {
 
   /** Open, claim interface 0 and put the device in a known state. */
   async open(): Promise<void> {
-    if (!this.usb.opened) await this.usb.open();
-    if (this.usb.configuration === null) await this.usb.selectConfiguration(1);
-    await this.usb.claimInterface(0);
+    if (!this.usb.opened) {
+      try {
+        await this.usb.open();
+      } catch (e) {
+        throw usbRejection('device.openFailed', e);
+      }
+    }
+    if (this.usb.configuration === null) {
+      try {
+        await this.usb.selectConfiguration(1);
+      } catch (e) {
+        throw usbRejection('device.configureFailed', e);
+      }
+    }
+    try {
+      await this.usb.claimInterface(0);
+    } catch (e) {
+      throw usbRejection('device.claimFailed', e);
+    }
     this.loopUnsettled = false;
     this.loopDone = null;
 
@@ -1905,6 +1923,11 @@ export class Slogic16U3 implements Device {
   }
 }
 
+function usbRejection(code: DiagnosticCode, cause: unknown): unknown {
+  if (!(cause instanceof DOMException)) return cause;
+  return new DiagnosticError(code, undefined, cause.message || undefined);
+}
+
 function parseConsoleNumber(token: string): number {
   if (/^0x[0-9a-f]+$/i.test(token)) return Number.parseInt(token.slice(2), 16);
   if (/^[0-9]+$/.test(token)) return Number.parseInt(token, 10);
@@ -1990,7 +2013,7 @@ function formatConsoleBytes(bytes: Uint8Array): string {
 
 /** Triggers the WebUSB picker. Must be called from a user gesture. */
 export async function requestDevice(): Promise<Device> {
-  if (!navigator.usb) throw new Error('WebUSB is not available in this browser');
+  if (!navigator.usb) throw new DiagnosticError('usb.unavailable');
   const usb = await navigator.usb.requestDevice({ filters: USB_FILTERS });
   const dev = new Slogic16U3(usb);
   await dev.open();
@@ -2002,7 +2025,7 @@ export async function requestDevice(): Promise<Device> {
  * gesture, so a page can reconnect after the one-time grant.
  */
 export async function getGrantedDevices(): Promise<Slogic16U3[]> {
-  if (!navigator.usb) throw new Error('WebUSB is not available in this browser');
+  if (!navigator.usb) throw new DiagnosticError('usb.unavailable');
   const all = await navigator.usb.getDevices();
   return all
     .filter((d) => d.vendorId === USB_VID_SIPEED &&

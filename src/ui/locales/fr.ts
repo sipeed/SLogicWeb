@@ -185,6 +185,14 @@ export const fr: Messages = {
     'la boucle de lecture ne s’est jamais terminée après la libération de l’interface, le descripteur de l’appareil a donc été fermé',
   'diagnostic.device.reclaimFailed':
     'l’interface n’a pas pu être reconquise après l’annulation de la capture, l’appareil a donc été fermé',
+  'diagnostic.device.openFailed': 'impossible d’ouvrir l’appareil USB',
+  'diagnostic.device.configureFailed':
+    'impossible de sélectionner la configuration de l’appareil',
+  'diagnostic.device.claimFailed': 'impossible de revendiquer l’interface 0',
+  'diagnostic.usb.unavailable': 'WebUSB n’est pas disponible dans ce navigateur',
+  'diagnostic.usb.blocked': 'le navigateur a bloqué l’accès aux appareils USB',
+  'diagnostic.usb.notVisible':
+    'l’appareil {vendor}:{product} n’est pas visible pour le worker USB ; accordez-le depuis la page d’abord',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Largeur : {duration}',

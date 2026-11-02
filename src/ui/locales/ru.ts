@@ -181,6 +181,13 @@ export const ru: Messages = {
     'цикл чтения так и не завершился после освобождения интерфейса, поэтому дескриптор устройства был закрыт',
   'diagnostic.device.reclaimFailed':
     'интерфейс не удалось занять заново после отмены записи, поэтому устройство было закрыто',
+  'diagnostic.device.openFailed': 'не удалось открыть USB-устройство',
+  'diagnostic.device.configureFailed': 'не удалось выбрать конфигурацию устройства',
+  'diagnostic.device.claimFailed': 'не удалось захватить интерфейс 0',
+  'diagnostic.usb.unavailable': 'WebUSB недоступен в этом браузере',
+  'diagnostic.usb.blocked': 'браузер заблокировал доступ к USB-устройствам',
+  'diagnostic.usb.notVisible':
+    'устройство {vendor}:{product} не видно воркеру USB; сначала предоставьте к нему доступ со страницы',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Ширина: {duration}',

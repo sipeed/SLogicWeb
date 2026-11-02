@@ -158,6 +158,12 @@ export const zhCN: Messages = {
   'diagnostic.device.loopUnsettledClosed':
     '释放接口后读取循环始终没有结束，因此设备句柄已被关闭',
   'diagnostic.device.reclaimFailed': '采集取消后无法重新占用接口，因此设备已被关闭',
+  'diagnostic.device.openFailed': '无法打开 USB 设备',
+  'diagnostic.device.configureFailed': '无法选择设备配置',
+  'diagnostic.device.claimFailed': '无法占用接口 0',
+  'diagnostic.usb.unavailable': 'WebUSB 在此浏览器中不可用',
+  'diagnostic.usb.blocked': '浏览器阻止了对 USB 设备的访问',
+  'diagnostic.usb.notVisible': '设备 {vendor}:{product} 对 USB 工作线程不可见；请先在页面中授权',
 
   // -------------------------------------------------------- hover readout
   'hover.width': '宽度：{duration}',

@@ -63,6 +63,12 @@ export const DIAGNOSTIC_CODES = [
   'device.loopUnsettled',
   'device.loopUnsettledClosed',
   'device.reclaimFailed',
+  'device.openFailed',
+  'device.configureFailed',
+  'device.claimFailed',
+  'usb.unavailable',
+  'usb.blocked',
+  'usb.notVisible',
 ] as const;
 
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[number];
