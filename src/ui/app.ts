@@ -14,6 +14,7 @@ import {
 } from '../data/index.js';
 import type { SampleStore } from '../data/types.js';
 import { bytesPerSampleForChannels, channelWidthForProbes, isChannelCount } from '../types.js';
+import { DiagnosticError } from '../diagnostics.js';
 import {
   MAX_SAMPLERATE_HZ, TransportDeadError, getGrantedDevicesOnBestThread, requestDeviceOnBestThread,
   vrefCode, type CaptureConfig, type Device,
@@ -53,7 +54,8 @@ import {
 import { connectSamplerate } from './connectDefaults.js';
 import { sameUsbDevice } from './deviceIdentity.js';
 import { formatCount, formatDuration, formatFreq, formatRate,
-  formatAnalyzerNote, formatCaptureLabel, formatStatusError } from './format.js';
+  formatAnalyzerNote, formatCaptureLabel, formatStatusError,
+  formatStatusErrorDebug, statusDetailOf } from './format.js';
 import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, setLocale, t,
   type Locale, type MessageKey, type MessageVars } from './i18n.js';
 import { getMode, getTheme, onThemeChange, setMode, THEME_MODES, THEME_MODE_LABEL_KEYS,
@@ -1412,7 +1414,9 @@ export class App {
     return LOCALES.map((l) => ({
       label: LOCALE_LABELS[l],
       checked: l === getLocale(),
-      onPick: () => { void setLocale(l).then((r) => { if (r === 'failed') this.fail('error.localeLoad', l); }); },
+      onPick: () => { void setLocale(l).then((r) => {
+        if (r === 'failed') this.fail('error.localeLoad', new DiagnosticError('ui.localeLoad', { locale: l }));
+      }); },
     }));
   }
 
@@ -1701,8 +1705,7 @@ export class App {
   }
 
   private fail(what: MessageKey, e: unknown, vars?: MessageVars): void {
-    const msg = e instanceof Error ? e.message : String(e);
-    this.statusError = { what, ...(vars ? { vars } : {}), detail: msg };
+    this.statusError = { what, ...(vars ? { vars } : {}), detail: statusDetailOf(e) };
     // The console prefix is the stable message KEY, not the translated text -
     // greppable in every locale.
     console.error(`[ui] ${what}`, e);
@@ -1776,7 +1779,7 @@ export class App {
 
   private save(): void {
     try {
-      if (this.store.length === 0) throw new Error('nothing to save');
+      if (this.store.length === 0) throw new DiagnosticError('io.nothingToSave');
       const blob = saveLwcap(this.store, this.channels.map((c) => c.name));
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -2623,7 +2626,7 @@ export class App {
     snapshot: () => ({
       label: formatCaptureLabel(this.captureLabel),
       theme: getTheme(),
-      error: this.statusError ? formatStatusError(this.statusError) : '',
+      error: this.statusError ? formatStatusErrorDebug(this.statusError) : '',
       running: this.running,
       stopping: this.stopping,
       device: this.device?.name ?? null,

@@ -4,6 +4,7 @@ import { WorkerSlogicDevice } from '../workerTransport.js';
 import type { Device } from '../types.js';
 import { bytesPerSampleForChannels } from '../../types.js';
 import type { App } from '../../ui/app.js';
+import type { StatusError } from '../../ui/state.js';
 import { fillCounter16 } from './loopWindowHarness.js';
 import FakeUsbWorker from './fakeUsbWorker.js?worker&inline';
 
@@ -25,7 +26,7 @@ interface AppProbe {
   deviceEpoch: number;
   running: boolean;
   stopping: boolean;
-  statusError: { what: string; detail: string } | null;
+  statusError: StatusError | null;
   droppedTotal: number;
   store: { channelCount: number; samplerate: number; length: number; droppedSamples: number; append(chunk: Uint8Array): void };
   channels: readonly { enabled: boolean }[];

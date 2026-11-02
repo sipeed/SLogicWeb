@@ -46,9 +46,12 @@ import {
   pickLocale, setLocale, t, translate, type Locale,
 } from '../i18n.js';
 import {
-  formatAnalyzerNote, formatCaptureLabel, formatMountedAnalyzerNote, formatStatusError,
-  formatTriggerSummary,
+  formatAnalyzerNote, formatCaptureLabel, formatDiagnostic, formatMountedAnalyzerNote,
+  formatStatusDetail, formatStatusError, formatStatusErrorDebug, formatTriggerSummary, statusDetailOf,
 } from '../format.js';
+import {
+  DIAGNOSTIC_CODES, DiagnosticError, fromWireDiagnostic, wireDiagnostic,
+} from '../../diagnostics.js';
 import type { AnalyzerNote, AnalyzerStatus, CaptureLabel, CaptureSettings } from '../state.js';
 
 /** Same structural-typing trick as sr-selftest.ts: node access without @types/node. */
@@ -358,11 +361,96 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 {
-  const plain = formatStatusError({ what: 'error.openCapture', detail: 'zip: bad' });
-  const withVars = formatStatusError({ what: 'error.decode', vars: { id: 'uart' }, detail: 'boom' });
-  check('formatStatusError joins translated prefix with raw diagnostic detail',
-    plain === 'open capture: zip: bad' && withVars === 'decode uart: boom',
-    `${JSON.stringify(plain)}, ${JSON.stringify(withVars)}`);
+  const thirdParty = formatStatusError({
+    what: 'error.openCapture', detail: { kind: 'text', text: 'zip: bad' },
+  });
+  const withVars = formatStatusError({
+    what: 'error.decode', vars: { id: 'uart' }, detail: { kind: 'text', text: 'boom' },
+  });
+  const translated = formatStatusError({
+    what: 'error.save', detail: { kind: 'diagnostic', diag: { code: 'io.nothingToSave' } },
+  });
+  const framed = formatStatusError({
+    what: 'error.localeLoad',
+    detail: { kind: 'diagnostic', diag: { code: 'ui.localeLoad', vars: { locale: 'fr' } } },
+  });
+  const payload = formatStatusDetail({
+    kind: 'diagnostic',
+    diag: { code: 'ui.localeLoad', vars: { locale: 'fr' }, payload: 'TypeError: boom' },
+  });
+  const direct = formatDiagnostic({ code: 'io.nothingToSave' });
+  const directPayload = formatDiagnostic({
+    code: 'ui.localeLoad', vars: { locale: 'ru' }, payload: 'TypeError: boom',
+  });
+  const debug = formatStatusErrorDebug({
+    what: 'error.decode', vars: { id: 'uart' },
+    detail: {
+      kind: 'diagnostic',
+      diag: { code: 'ui.localeLoad', vars: { locale: 'fr' }, payload: 'TypeError: boom' },
+    },
+  });
+  const debugText = formatStatusErrorDebug({
+    what: 'error.openCapture', detail: { kind: 'text', text: 'zip: bad' },
+  });
+  const cases: [string, string, string][] = [
+    ['third-party detail', thirdParty, 'open capture: zip: bad'],
+    ['detail vars', withVars, 'decode uart: boom'],
+    ['translated detail', translated, 'save: nothing to save'],
+    ['translated detail with vars', framed,
+      'Could not load the language catalog: "fr" failed to load'],
+    ['payload tail', payload,
+      '"fr" failed to load: TypeError: boom'],
+    ['formatDiagnostic', direct, 'nothing to save'],
+    ['formatDiagnostic with vars and payload', directPayload,
+      '"ru" failed to load: TypeError: boom'],
+    ['debug form', debug,
+      'error.decode {"id":"uart"}: diagnostic.ui.localeLoad {"locale":"fr"}: TypeError: boom'],
+    ['debug form of raw text', debugText, 'error.openCapture: zip: bad'],
+  ];
+  const bad = cases.filter(([, got, want]) => got !== want);
+  check('formatStatusError joins the translated prefix with a translated or raw detail',
+    bad.length === 0,
+    bad.length === 0 ? `${cases.length}/${cases.length} cases match`
+      : bad.map(([n, got, want]) => `${n}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}`).join('; '));
+}
+
+{
+  const diag = statusDetailOf(new DiagnosticError('io.nothingToSave'));
+  const rebuilt = statusDetailOf(fromWireDiagnostic({ message: 'io.nothingToSave', code: 'io.nothingToSave' }));
+  const unknownCode = fromWireDiagnostic({ message: 'skewed worker text', code: 'device.fromTheFuture' });
+  const skew = statusDetailOf(unknownCode);
+  const plain = statusDetailOf(new Error('zip: bad'));
+  const thrown = statusDetailOf('not an error');
+  const wire = wireDiagnostic(new DiagnosticError('ui.localeLoad', { locale: 'ru' }, 'TypeError: boom'));
+  const wirePlain = wireDiagnostic(new Error('zip: bad'));
+  check('statusDetailOf keeps authored errors structured and third-party text verbatim',
+    diag.kind === 'diagnostic' && diag.diag.code === 'io.nothingToSave' &&
+    rebuilt.kind === 'diagnostic' && rebuilt.diag.code === 'io.nothingToSave' &&
+    skew.kind === 'text' && skew.text === 'skewed worker text' &&
+    plain.kind === 'text' && plain.text === 'zip: bad' &&
+    thrown.kind === 'text' && thrown.text === 'not an error' &&
+    wire?.code === 'ui.localeLoad' && wire.vars?.locale === 'ru' && wire.payload === 'TypeError: boom' &&
+    wirePlain === null,
+    JSON.stringify({ diag, rebuilt, skew, plain, thrown, wire, wirePlain }));
+}
+
+{
+  const diagnosticKeys = Object.keys(en).filter((k) => k.startsWith('diagnostic.'));
+  const codes = new Set<string>(DIAGNOSTIC_CODES);
+  const stale = diagnosticKeys.filter((k) => !codes.has(k.slice('diagnostic.'.length)));
+  const uncovered = DIAGNOSTIC_CODES.filter((c) => !diagnosticKeys.includes(`diagnostic.${c}`));
+  const duplicates = diagnosticKeys.filter((k) => DIAGNOSTIC_CODES.filter((c) => `diagnostic.${c}` === k).length > 1);
+  const pass = stale.length === 0 && uncovered.length === 0 && duplicates.length === 0 &&
+    diagnosticKeys.length === DIAGNOSTIC_CODES.length;
+  check('every diagnostic.* catalog key matches one DIAGNOSTIC_CODES entry and vice versa',
+    pass,
+    pass ? `${diagnosticKeys.length} keys cover ${DIAGNOSTIC_CODES.length} codes`
+      : [
+        ...stale.map((k) => `stale ${k}`),
+        ...uncovered.map((c) => `uncovered ${c}`),
+        ...duplicates.map((k) => `duplicate ${k}`),
+        `codes=${DIAGNOSTIC_CODES.length} keys=${diagnosticKeys.length}`,
+      ].join('; '));
 }
 
 {
@@ -511,6 +599,7 @@ const baseSettings: CaptureSettings = {
     'capturePanel.statusWaitingDetail', 'capturePanel.statusCompletedDetail',
     'capturePanel.singleFiniteNote', 'capturePanel.singleUnlimitedNote',
     'capturePanel.repeatFiniteNote',
+    'diagnostic.ui.localeLoad', 'diagnostic.io.nothingToSave',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];

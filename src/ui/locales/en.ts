@@ -94,6 +94,10 @@ export const en = {
   'error.decode': 'decode {id}',
   'error.localeLoad': 'Could not load the language catalog',
 
+  // ---------------------------------------- status error detail codes
+  'diagnostic.ui.localeLoad': '"{locale}" failed to load',
+  'diagnostic.io.nothingToSave': 'nothing to save',
+
   // -------------------------------------------------------- hover readout
   'hover.width': 'Width: {duration}',
   'hover.widthInv': 'width⁻¹: {freq}',

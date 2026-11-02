@@ -90,6 +90,10 @@ export const fr: Messages = {
   'error.decode': 'décodage {id}',
   'error.localeLoad': 'Impossible de charger le catalogue de langue',
 
+  // ---------------------------------------- status error detail codes
+  'diagnostic.ui.localeLoad': '« {locale} » n’a pas pu être chargé',
+  'diagnostic.io.nothingToSave': 'rien à enregistrer',
+
   // -------------------------------------------------------- hover readout
   'hover.width': 'Largeur : {duration}',
   'hover.widthInv': 'largeur⁻¹ : {freq}',

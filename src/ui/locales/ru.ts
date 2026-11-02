@@ -90,6 +90,10 @@ export const ru: Messages = {
   'error.decode': 'декодирование {id}',
   'error.localeLoad': 'Не удалось загрузить языковой каталог',
 
+  // ---------------------------------------- status error detail codes
+  'diagnostic.ui.localeLoad': '«{locale}» не загружен',
+  'diagnostic.io.nothingToSave': 'нечего сохранять',
+
   // -------------------------------------------------------- hover readout
   'hover.width': 'Ширина: {duration}',
   'hover.widthInv': 'ширина⁻¹: {freq}',

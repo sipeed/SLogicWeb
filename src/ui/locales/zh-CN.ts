@@ -88,6 +88,10 @@ export const zhCN: Messages = {
   'error.decode': '解码 {id}',
   'error.localeLoad': '无法加载语言包',
 
+  // ---------------------------------------- status error detail codes
+  'diagnostic.ui.localeLoad': '“{locale}”加载失败',
+  'diagnostic.io.nothingToSave': '没有可保存的数据',
+
   // -------------------------------------------------------- hover readout
   'hover.width': '宽度：{duration}',
   'hover.widthInv': '宽度⁻¹：{freq}',

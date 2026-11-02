@@ -468,7 +468,7 @@ const languageItemsShape = languageItemsBody.includes('LOCALES.map') &&
   languageItemsBody.includes('label: LOCALE_LABELS[l]') &&
   languageItemsBody.includes('checked: l === getLocale()') &&
   languageItemsBody.includes('setLocale(l).then') &&
-  languageItemsBody.includes("this.fail('error.localeLoad', l)") &&
+  languageItemsBody.includes("this.fail('error.localeLoad', new DiagnosticError('ui.localeLoad', { locale: l }))") &&
   !languageItemsBody.includes('children') && !languageItemsBody.includes('hint');
 check(
   'the language disclosure reuses a distinct settings menu with four direct native-name choices',

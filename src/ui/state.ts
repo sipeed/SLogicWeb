@@ -8,6 +8,7 @@
  */
 
 import type { AnnotationIndex, DecodeResult } from '../decode/index.js';
+import type { Diagnostic } from '../diagnostics.js';
 import { ANALYZER_COLORS, CHANNEL_COLORS } from './metrics.js';
 import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
 import { DROP_FRONT_QUANTUM } from '../data/index.js';
@@ -209,15 +210,18 @@ export type CaptureLabel =
   | { kind: 'stoppedNoTrigger'; samples: number }
   | { kind: 'live'; samples: number; rate: number; seconds: number };
 
+export type StatusDetail =
+  | { kind: 'diagnostic'; diag: Diagnostic }
+  | { kind: 'text'; text: string };
+
 /**
  * The status-bar error as structured data: `what` is chrome (a catalog key, translated
- * at render time), `detail` is the diagnostic payload (kept verbatim - parser and
- * device errors are data, not prose). See format.ts's formatStatusError.
+ * at render time). See format.ts's formatStatusError.
  */
 export interface StatusError {
   what: MessageKey;
   vars?: MessageVars;
-  detail: string;
+  detail: StatusDetail;
 }
 
 export function defaultChannelName(index: number): string {

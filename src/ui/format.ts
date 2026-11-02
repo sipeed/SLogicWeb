@@ -27,9 +27,12 @@
  * without a fudge factor that would itself have to be justified.
  */
 
+import { diagnosticOf } from '../diagnostics.js';
+import type { Diagnostic, DiagnosticCode } from '../diagnostics.js';
 import { t } from './i18n.js';
+import type { MessageKey } from './i18n.js';
 import type {
-  AnalyzerNote, AnalyzerStatus, CaptureLabel, CaptureSettings, StatusError,
+  AnalyzerNote, AnalyzerStatus, CaptureLabel, CaptureSettings, StatusDetail, StatusError,
 } from './state.js';
 
 const PS_PER = { s: 1e12, ms: 1e9, us: 1e6, ns: 1e3, ps: 1 } as const;
@@ -170,9 +173,49 @@ export function formatCaptureLabel(label: CaptureLabel): string {
   }
 }
 
-/** "open capture: <diagnostic>" - the prefix is chrome (translated), detail is payload. */
+/** "open capture: <diagnostic>" - the prefix is chrome (translated). */
 export function formatStatusError(err: StatusError): string {
-  return `${t(err.what, err.vars)}: ${err.detail}`;
+  return `${t(err.what, err.vars)}: ${formatStatusDetail(err.detail)}`;
+}
+
+type DiagnosticKey = Extract<MessageKey, `diagnostic.${DiagnosticCode}`>;
+type UncoveredDiagnosticCode =
+  Exclude<DiagnosticCode, DiagnosticKey extends `diagnostic.${infer C}` ? C : never>;
+
+const DIAGNOSTIC_KEYS_COMPLETE: Record<UncoveredDiagnosticCode, never> = {};
+
+function diagnosticKey(code: DiagnosticCode): DiagnosticKey {
+  void DIAGNOSTIC_KEYS_COMPLETE;
+  return `diagnostic.${code}`;
+}
+
+export function formatDiagnostic(d: Diagnostic): string {
+  const sentence = t(diagnosticKey(d.code), d.vars);
+  return d.payload ? `${sentence}: ${d.payload}` : sentence;
+}
+
+export function formatStatusDetail(detail: StatusDetail): string {
+  return detail.kind === 'diagnostic' ? formatDiagnostic(detail.diag) : detail.text;
+}
+
+function formatStatusDetailDebug(detail: StatusDetail): string {
+  if (detail.kind === 'text') return detail.text;
+  const head = diagnosticKey(detail.diag.code);
+  const vars = detail.diag.vars ? ` ${JSON.stringify(detail.diag.vars)}` : '';
+  return detail.diag.payload === undefined
+    ? `${head}${vars}`
+    : `${head}${vars}: ${detail.diag.payload}`;
+}
+
+export function formatStatusErrorDebug(err: StatusError): string {
+  const head = err.vars ? `${err.what} ${JSON.stringify(err.vars)}` : err.what;
+  return `${head}: ${formatStatusDetailDebug(err.detail)}`;
+}
+
+export function statusDetailOf(error: unknown): StatusDetail {
+  const diag = diagnosticOf(error);
+  if (diag) return { kind: 'diagnostic', diag };
+  return { kind: 'text', text: error instanceof Error ? error.message : String(error) };
 }
 
 /**
@@ -198,7 +241,7 @@ export function formatTriggerSummary(s: CaptureSettings, channel: number): strin
 
 /**
  * An analyzer's status note, formatted at render time (state.ts explains why it is
- * data). Diagnostics (`error.detail`, `stats.firstError`) pass through untranslated.
+ * data). Diagnostics (`stats.firstError`) pass through untranslated.
  */
 export function formatAnalyzerNote(note: AnalyzerNote): string {
   switch (note.kind) {
