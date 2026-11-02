@@ -77,6 +77,7 @@ import {
   type AnalyzerState, type CaptureSettings, type ChannelState, type TriggerMode,
   type CaptureLabel, type StatusError,
 } from './state.js';
+import { stopFailureIsSilent } from './stopFailure.js';
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
 import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.js';
 import { capturePostTriggerSamples } from './capturePolicy.js';
@@ -2226,7 +2227,11 @@ export class App {
     try {
       await device?.stop();
     } catch (e) {
-      this.fail('error.stopCapture', e);
+      if (stopFailureIsSilent(e)) {
+        console.warn('[ui] the capture stop closed the transport; reconnecting:', e);
+      } else {
+        this.fail('error.stopCapture', e);
+      }
       if (this.device === device) {
         this.lostSerial = device?.serial ?? '';
         this.awaitingReconnect = true;

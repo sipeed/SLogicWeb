@@ -1,5 +1,7 @@
 import { settingsMenuRight } from '../settingsMenu.js';
 import { sameUsbDevice } from '../deviceIdentity.js';
+import { TransportDeadError } from '../../device/index.js';
+import { stopFailureIsSilent } from '../stopFailure.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
@@ -182,6 +184,7 @@ const stopRecovers = teardownBody.includes("this.fail('error.stopCapture', e)") 
   teardownBody.includes('this.awaitingReconnect = true;') &&
   teardownBody.includes("this.lostSerial = device?.serial ?? '';") &&
   teardownBody.includes('if (this.device === device)') &&
+  teardownBody.includes('stopFailureIsSilent(e)') &&
   stopCaptureBody.includes('this.teardownDevice(this.device)');
 const discardTerminates = discardDeviceBody.includes('this.deviceEpoch += 1;') &&
   discardDeviceBody.includes('device.onError = null;') &&
@@ -190,6 +193,36 @@ check(
   'a failed stop drops the transport and re-acquires it instead of leaving a dead button',
   stopRecovers && discardTerminates && escapeHatch,
   `recovers=${stopRecovers}, discard=${discardTerminates}, escape=${escapeHatch}`,
+);
+
+const silentStopReasons = ['reclaim-failed', 'worker-timeout', 'unknown'] as const;
+const silentOnClosedHandle =
+  stopFailureIsSilent(new TransportDeadError('the read loop never settled', 'loop-unsettled'));
+const reportedStopFailures = silentStopReasons.map((reason) => [
+  reason, stopFailureIsSilent(new TransportDeadError('the transport died', reason)),
+] as const);
+const reportedPlainError = !stopFailureIsSilent(new Error('CTRL stop write failed'));
+const silentTable =
+  reportedStopFailures.every(([, silent]) => !silent) && reportedPlainError;
+check(
+  'only a teardown that closed the handle is silent; every other stop failure is still reported',
+  silentOnClosedHandle && silentTable,
+  `closedHandle=${silentOnClosedHandle}, reported=${JSON.stringify(reportedStopFailures)}, ` +
+    `plainError=${reportedPlainError}`,
+);
+
+const silentBranchAt = teardownBody.indexOf('if (stopFailureIsSilent(e)) {');
+const silentWarnAt = teardownBody.indexOf(
+  "console.warn('[ui] the capture stop closed the transport; reconnecting:', e);");
+const elseAt = silentBranchAt >= 0 ? teardownBody.indexOf('} else {', silentBranchAt) : -1;
+const stopFailAt = teardownBody.indexOf("this.fail('error.stopCapture', e)");
+const silentBranchShape = silentBranchAt >= 0 && silentWarnAt > silentBranchAt &&
+  elseAt > silentWarnAt && stopFailAt > elseAt &&
+  teardownBody.indexOf('this.discardDevice();') > stopFailAt;
+check(
+  'the silent stop branch warns instead of reporting and keeps the reporting branch for the rest',
+  silentBranchShape,
+  `branch@${silentBranchAt}, warn@${silentWarnAt}, else@${elseAt}, fail@${stopFailAt}`,
 );
 
 const detachFinishes = detachBody.includes('const epoch = this.discardDevice();') &&
