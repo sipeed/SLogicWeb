@@ -168,6 +168,26 @@ export const en = {
   'diagnostic.file.sr.tooLong': 'capture is too long ({samples} samples)',
   'diagnostic.file.sr.noData':
     '{source} has no data members for capturefile {capturefile}',
+  'diagnostic.device.transportDead': 'the USB transport is dead ({reason})',
+  'diagnostic.device.workerUnavailable':
+    'the background USB worker is unavailable in this browser',
+  'diagnostic.device.workerCrashed': 'the USB worker failed',
+  'diagnostic.device.workerTimeout':
+    'the USB worker did not answer "{kind}" within {ms} ms',
+  'diagnostic.device.workerNoDevice': 'the USB worker did not report a device',
+  'diagnostic.device.workerTerminated': 'the USB worker transport was terminated',
+  'diagnostic.device.workerNoStats': 'the USB worker answered with no statistics',
+  'diagnostic.device.workerNoConsole': 'the USB worker answered with no console result',
+  'diagnostic.device.workerUnclaimed':
+    'the USB worker answered "{kind}" with nobody waiting',
+  'diagnostic.device.stopTimedOut':
+    'the capture did not stop within {ms} ms; the USB transport was reset',
+  'diagnostic.device.loopUnsettled':
+    'the previous capture\'s read loop never settled after the interface was released',
+  'diagnostic.device.loopUnsettledClosed':
+    'the read loop never settled after the interface was released, so the device handle was closed',
+  'diagnostic.device.reclaimFailed':
+    'the interface could not be re-claimed after the capture was cancelled, so the device was closed',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Width: {duration}',

@@ -164,6 +164,23 @@ export const ru: Messages = {
   'diagnostic.file.sr.tooLong': 'запись слишком длинная ({samples} образцов)',
   'diagnostic.file.sr.noData':
     'в {source} нет элементов данных для capturefile {capturefile}',
+  'diagnostic.device.transportDead': 'транспорт USB мёртв ({reason})',
+  'diagnostic.device.workerUnavailable': 'фоновый воркер USB недоступен в этом браузере',
+  'diagnostic.device.workerCrashed': 'воркер USB завершился с ошибкой',
+  'diagnostic.device.workerTimeout': 'воркер USB не ответил «{kind}» за {ms} мс',
+  'diagnostic.device.workerNoDevice': 'воркер USB не сообщил об устройстве',
+  'diagnostic.device.workerTerminated': 'транспорт фонового воркера USB был остановлен',
+  'diagnostic.device.workerNoStats': 'воркер USB ответил без статистики',
+  'diagnostic.device.workerNoConsole': 'воркер USB ответил без результата консоли',
+  'diagnostic.device.workerUnclaimed': 'воркер USB ответил «{kind}», когда ответ никто не ждал',
+  'diagnostic.device.stopTimedOut':
+    'запись не остановилась за {ms} мс; транспорт USB был сброшен',
+  'diagnostic.device.loopUnsettled':
+    'цикл чтения предыдущей записи так и не завершился после освобождения интерфейса',
+  'diagnostic.device.loopUnsettledClosed':
+    'цикл чтения так и не завершился после освобождения интерфейса, поэтому дескриптор устройства был закрыт',
+  'diagnostic.device.reclaimFailed':
+    'интерфейс не удалось занять заново после отмены записи, поэтому устройство было закрыто',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Ширина: {duration}',

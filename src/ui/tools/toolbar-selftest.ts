@@ -197,9 +197,9 @@ check(
 
 const silentStopReasons = ['reclaim-failed', 'worker-timeout', 'unknown'] as const;
 const silentOnClosedHandle =
-  stopFailureIsSilent(new TransportDeadError('the read loop never settled', 'loop-unsettled'));
+  stopFailureIsSilent(new TransportDeadError('device.loopUnsettledClosed', 'loop-unsettled'));
 const reportedStopFailures = silentStopReasons.map((reason) => [
-  reason, stopFailureIsSilent(new TransportDeadError('the transport died', reason)),
+  reason, stopFailureIsSilent(new TransportDeadError('device.transportDead', reason)),
 ] as const);
 const reportedPlainError = !stopFailureIsSilent(new Error('CTRL stop write failed'));
 const silentTable =

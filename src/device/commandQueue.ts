@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
 
+import { wireDiagnostic } from '../diagnostics.js';
+import type { DiagnosticVars } from '../diagnostics.js';
 import { TransportDeadError, type TransportDeadReason } from './types.js';
 
 export interface CommandQueue<T> {
@@ -27,9 +29,18 @@ export function createCommandQueue<T>(
 
 export function describeFailure(
   error: unknown,
-): { message: string; dead?: boolean; reason?: TransportDeadReason } {
+): {
+  message: string;
+  dead?: boolean;
+  reason?: TransportDeadReason;
+  code?: string;
+  vars?: DiagnosticVars;
+  payload?: string;
+} {
+  const wire = wireDiagnostic(error);
   return {
     message: error instanceof Error ? error.message : String(error),
     ...(error instanceof TransportDeadError ? { dead: true, reason: error.reason } : {}),
+    ...(wire ?? {}),
   };
 }

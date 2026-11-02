@@ -839,10 +839,7 @@ export class Slogic16U3 implements Device {
       throw new Error('start() called before the previous capture finished stopping');
     }
     if (this.loopUnsettled) {
-      throw new TransportDeadError(
-        'the previous capture\'s read loop never settled after the interface was released',
-        'loop-unsettled',
-      );
+      throw new TransportDeadError('device.loopUnsettled', 'loop-unsettled');
     }
     assertValidConfig(cfg, this.maxSamplerateHz, this.maxChannels);
     if (!this.bus) throw new Error('start() called before open()');
@@ -1643,11 +1640,7 @@ export class Slogic16U3 implements Device {
           };
           void loopDone.then(settled, settled);
           await this.abandonTransport(loopDone);
-          teardownError = new TransportDeadError(
-            'the read loop never settled after the interface was released, so the device ' +
-            'handle was closed',
-            'loop-unsettled',
-          );
+          teardownError = new TransportDeadError('device.loopUnsettledClosed', 'loop-unsettled');
         } else {
           const claimed = await this.settleWithin(
             this.usb.claimInterface(0).then(() => true, (e: unknown) => {
@@ -1659,11 +1652,7 @@ export class Slogic16U3 implements Device {
           );
           if (claimed !== true) {
             await this.abandonTransport(loopDone);
-            teardownError = new TransportDeadError(
-              'the interface could not be re-claimed after the capture was cancelled, so the ' +
-              'device was closed',
-              'reclaim-failed',
-            );
+            teardownError = new TransportDeadError('device.reclaimFailed', 'reclaim-failed');
           }
         }
       }

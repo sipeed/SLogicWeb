@@ -41,6 +41,7 @@ import {
 import { WorkerSlogicDevice } from './workerTransport.js';
 import { createCommandQueue, describeFailure } from './commandQueue.js';
 import { TransportDeadError } from './types.js';
+import { DiagnosticError, diagnosticOf } from '../diagnostics.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import type { FromWorker, ToWorker } from './usbWorkerProtocol.js';
 import {
@@ -1609,36 +1610,59 @@ async function main(): Promise<void> {
 
     const silent = new FakeWorker();
     const silentStart = Date.now();
-    let silentError = '';
+    let silentReply: unknown = null;
     try {
       await WorkerSlogicDevice.open(
         { vendorId: 0x359f, productId: 0x3032 },
         { spawn: () => silent as unknown as Worker, openTimeoutMs: 60 },
       );
-    } catch (e) { silentError = String(e); }
+    } catch (e) { silentReply = e; }
+    const silentDiag = diagnosticOf(silentReply);
     check('a worker that never answers is given up on, not waited for',
-      silentError.includes('did not answer "opened"') && Date.now() - silentStart >= 50,
-      `${silentError} after ${Date.now() - silentStart} ms`);
+      silentDiag?.code === 'device.workerTimeout' && silentDiag.vars?.kind === 'opened' &&
+        silentDiag.vars?.ms === 60 && Date.now() - silentStart >= 50,
+      `${String(silentReply)} | ${JSON.stringify(silentDiag)} after ${Date.now() - silentStart} ms`);
     check('a failed open terminates the worker it could not use', silent.terminated);
+
+    let unavailableReply: unknown = null;
+    try {
+      await WorkerSlogicDevice.open({ vendorId: 0x359f, productId: 0x3032 });
+    } catch (e) { unavailableReply = e; }
+    check('a browser with no worker spawn reports the missing worker',
+      diagnosticOf(unavailableReply)?.code === 'device.workerUnavailable',
+      String(unavailableReply));
 
     const stalled = new FakeWorker();
     const stalledDevice = await openWorkerDevice(stalled);
     const stalledFrom = Date.now();
     let stalledReply: unknown = null;
     try { await stalledDevice.stop(); } catch (e) { stalledReply = e; }
-    const stalledError = String(stalledReply);
+    const stalledDiag = diagnosticOf(stalledReply);
     check('a stop the worker never answers is abandoned, not waited for',
-      stalledError.includes('did not answer "stopped"') && Date.now() - stalledFrom >= 150,
-      `${stalledError} after ${Date.now() - stalledFrom} ms`);
+      stalledDiag?.code === 'device.stopTimedOut' && stalledDiag.vars?.ms === 200 &&
+        Date.now() - stalledFrom >= 150,
+      `${String(stalledReply)} | ${JSON.stringify(stalledDiag)} after ` +
+        `${Date.now() - stalledFrom} ms`);
     check('a stop that timed out terminates the worker it could not stop',
       stalled.terminated, `terminated=${stalled.terminated}`);
     check('a stop that timed out names the reset the caller has to recover from',
-      stalledError.includes('transport was reset') && stalledReply instanceof TransportDeadError &&
-        stalledReply.reason === 'worker-timeout',
-      `${stalledError} | reason ` +
+      stalledReply instanceof TransportDeadError && stalledReply.reason === 'worker-timeout',
+      `${String(stalledReply)} | reason ` +
         `${stalledReply instanceof TransportDeadError ? stalledReply.reason : '-'}`);
     check('a stop that timed out reports a dead transport, not a plain error',
-      /transport was reset/.test(stalledError), String(stalledError));
+      stalledReply instanceof TransportDeadError && stalledDiag?.code === 'device.stopTimedOut',
+      String(stalledReply));
+
+    const dyingStop = new FakeWorker();
+    const dyingStopDevice = await openWorkerDevice(dyingStop);
+    const dyingStopReply = dyingStopDevice.stop();
+    dyingStop.onerror?.({ message: 'the worker died mid-stop' });
+    let dyingStopError: unknown = null;
+    try { await dyingStopReply; } catch (e) { dyingStopError = e; }
+    check('a worker that dies during stop reports its own cause, not a timeout',
+      diagnosticOf(dyingStopError)?.code === 'device.workerCrashed' &&
+        diagnosticOf(dyingStopError)?.payload === 'the worker died mid-stop',
+      `${String(dyingStopError)} | ${JSON.stringify(diagnosticOf(dyingStopError))}`);
 
     const deadWorker = new FakeWorker();
     const deadDevice = await openWorkerDevice(deadWorker);
@@ -1656,6 +1680,11 @@ async function main(): Promise<void> {
       deadReply instanceof TransportDeadError && deadReply.reason === 'loop-unsettled',
       `${String(deadReply)} | reason ` +
         `${deadReply instanceof TransportDeadError ? deadReply.reason : '-'}`);
+    const deadDiag = diagnosticOf(deadReply);
+    check('a dead worker failure that carried no code falls back to the transport-dead diagnostic',
+      deadDiag?.code === 'device.transportDead' && deadDiag.vars?.reason === 'loop-unsettled' &&
+        deadDiag.payload === 'the read loop never settled',
+      JSON.stringify(deadDiag));
 
     const anonymousWorker = new FakeWorker();
     const anonymousDevice = await openWorkerDevice(anonymousWorker);
@@ -1668,7 +1697,8 @@ async function main(): Promise<void> {
       await starting;
     } catch (e) { anonymousReply = e; }
     check('a dead transport that crossed without a cause is still reported as a dead transport',
-      anonymousReply instanceof TransportDeadError && anonymousReply.reason === 'unknown',
+      anonymousReply instanceof TransportDeadError && anonymousReply.reason === 'unknown' &&
+        diagnosticOf(anonymousReply)?.code === 'device.transportDead',
       `${String(anonymousReply)} | reason ` +
         `${anonymousReply instanceof TransportDeadError ? anonymousReply.reason : '-'}`);
 
@@ -1816,11 +1846,80 @@ async function main(): Promise<void> {
     const dyingDevice = await openWorkerDevice(dying);
     const pending = dyingDevice.getStats();
     dyingDevice.terminate();
-    let deadError = '';
-    try { await pending; } catch (e) { deadError = String(e); }
+    let terminatedReply: unknown = null;
+    try { await pending; } catch (e) { terminatedReply = e; }
     check('a terminated worker fails what it was asked for',
-      deadError.includes('terminated'), deadError || '<resolved>');
+      diagnosticOf(terminatedReply)?.code === 'device.workerTerminated',
+      String(terminatedReply) || '<resolved>');
     check('a terminated worker is terminated', dying.terminated);
+
+    const coded = new FakeWorker();
+    const codedDevice = await openWorkerDevice(coded);
+    const codedRequest = codedDevice.getStats();
+    coded.emit({
+      kind: 'failed',
+      message: 'device.workerTimeout',
+      code: 'device.workerTimeout',
+      vars: { kind: 'stats', ms: 7 },
+    });
+    let codedReply: unknown = null;
+    try { await codedRequest; } catch (e) { codedReply = e; }
+    const codedDiag = diagnosticOf(codedReply);
+    check('a coded failure thrown in the worker reaches the page as the same diagnostic',
+      codedReply instanceof DiagnosticError && codedDiag?.code === 'device.workerTimeout' &&
+        codedDiag.vars?.kind === 'stats' && codedDiag.vars?.ms === 7,
+      `${String(codedReply)} | ${JSON.stringify(codedDiag)}`);
+
+    const channelErrors: unknown[] = [];
+    codedDevice.onError = (e) => channelErrors.push(e);
+    coded.emit({
+      kind: 'error', message: 'device.workerCrashed', code: 'device.workerCrashed',
+      payload: 'TypeError: boom',
+    });
+    const channelDiag = diagnosticOf(channelErrors[0]);
+    check('the error channel carries the worker diagnostic and its external payload',
+      channelDiag?.code === 'device.workerCrashed' && channelDiag.payload === 'TypeError: boom',
+      JSON.stringify(channelDiag));
+
+    const plainRequest = codedDevice.getStats();
+    coded.emit({ kind: 'failed', message: 'config is wrong' });
+    let plainReply: unknown = null;
+    try { await plainRequest; } catch (e) { plainReply = e; }
+    check('a plain worker failure still arrives as raw text, not a diagnostic',
+      plainReply instanceof Error && plainReply.message === 'config is wrong' &&
+        diagnosticOf(plainReply) === null,
+      `${String(plainReply)} | ${JSON.stringify(diagnosticOf(plainReply))}`);
+
+    const skewRequest = codedDevice.getStats();
+    coded.emit({
+      kind: 'failed', message: 'a newer worker failed', code: 'device.fromTheFuture',
+      vars: { n: 1 },
+    });
+    let skewReply: unknown = null;
+    try { await skewRequest; } catch (e) { skewReply = e; }
+    check('a worker code this page does not know still arrives as its raw text',
+      skewReply instanceof Error && skewReply.message === 'a newer worker failed' &&
+        diagnosticOf(skewReply) === null,
+      `${String(skewReply)} | ${JSON.stringify(diagnosticOf(skewReply))}`);
+
+    const orphanErrors: unknown[] = [];
+    codedDevice.onError = (e) => orphanErrors.push(e);
+    coded.emit({ kind: 'stopped' });
+    const orphanDiag = diagnosticOf(orphanErrors[0]);
+    check('a reply nobody is waiting for is reported as an unclaimed answer',
+      orphanDiag?.code === 'device.workerUnclaimed' && orphanDiag.vars?.kind === 'stopped',
+      JSON.stringify(orphanDiag));
+
+    const crashing = new FakeWorker();
+    const crashingDevice = await openWorkerDevice(crashing);
+    const pendingStats = crashingDevice.getStats();
+    crashing.onerror?.({ message: 'worker blew up' });
+    let crashReply: unknown = null;
+    try { await pendingStats; } catch (e) { crashReply = e; }
+    const crashDiag = diagnosticOf(crashReply);
+    check('a worker that dies with a request outstanding keeps the browser text as a payload',
+      crashDiag?.code === 'device.workerCrashed' && crashDiag.payload === 'worker blew up',
+      `${String(crashReply)} | ${JSON.stringify(crashDiag)}`);
   }
 
   {
@@ -1966,9 +2065,9 @@ async function main(): Promise<void> {
       stopMs < 6500 && stuck.releases === 1,
       `${stopMs.toFixed(0)} ms, ${stuck.releases} release call(s)`);
     check('a stop that had to close the handle reports a dead transport',
-      stopError instanceof TransportDeadError && String(stopError).includes('handle was closed') &&
-        stopError.reason === 'loop-unsettled',
-      `${String(stopError)} | ${Object.prototype.toString.call(stopError)} | reason ` +
+      stopError instanceof TransportDeadError && stopError.reason === 'loop-unsettled' &&
+        diagnosticOf(stopError)?.code === 'device.loopUnsettledClosed',
+      `${String(stopError)} | ${JSON.stringify(diagnosticOf(stopError))} | reason ` +
         `${stopError instanceof TransportDeadError ? stopError.reason : '-'}`);
     check('a stop that had to close the handle closes it exactly once',
       stuck.closeCalls === 1, `close calls: ${stuck.closeCalls}`);
@@ -1977,9 +2076,10 @@ async function main(): Promise<void> {
       await dev.start({ channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {});
     } catch (e) { refusal = e; }
     check('a start after an unsettled read loop refuses with a typed reason',
-      refusal instanceof TransportDeadError && String(refusal).includes('never settled') &&
-        refusal.reason === 'loop-unsettled',
-      `${String(refusal)} | reason ${refusal instanceof TransportDeadError ? refusal.reason : '-'}`);
+      refusal instanceof TransportDeadError && refusal.reason === 'loop-unsettled' &&
+        diagnosticOf(refusal)?.code === 'device.loopUnsettled',
+      `${String(refusal)} | ${JSON.stringify(diagnosticOf(refusal))} | reason ` +
+        `${refusal instanceof TransportDeadError ? refusal.reason : '-'}`);
     const lateErrors: unknown[] = [];
     dev.onError = (e) => lateErrors.push(e);
     await FakeStreamDevice.prototype.releaseInterface.call(stuck);
@@ -2039,23 +2139,32 @@ async function main(): Promise<void> {
     await dev.stop().catch((e: unknown) => { claimError = e; });
     check('a device that cannot be re-claimed after a cancel is closed, not kept',
       claimError instanceof TransportDeadError &&
-        String(claimError).includes('could not be re-claimed') && stuckClaim.closeCalls === 1 &&
+        diagnosticOf(claimError)?.code === 'device.reclaimFailed' && stuckClaim.closeCalls === 1 &&
         claimError.reason === 'reclaim-failed',
-      `${String(claimError)} | closes ${stuckClaim.closeCalls} | reason ` +
+      `${String(claimError)} | ${JSON.stringify(diagnosticOf(claimError))} | ` +
+        `closes ${stuckClaim.closeCalls} | reason ` +
         `${claimError instanceof TransportDeadError ? claimError.reason : '-'}`);
   }
   {
     const plain = describeFailure(new Error('config is wrong'));
-    const dead = describeFailure(new TransportDeadError('the worker was reset', 'unknown'));
-    const unsettled = describeFailure(new TransportDeadError('the handle was closed', 'loop-unsettled'));
+    const dead = describeFailure(new TransportDeadError(
+      'device.transportDead', 'unknown', undefined, 'the worker was reset',
+    ));
+    const unsettled = describeFailure(
+      new TransportDeadError('device.loopUnsettledClosed', 'loop-unsettled'),
+    );
     check('only a dead transport is reported as one',
       plain.dead === undefined && plain.message === 'config is wrong' &&
-        plain.reason === undefined &&
-        dead.dead === true && dead.message === 'the worker was reset' &&
-        dead.reason === 'unknown',
+        plain.reason === undefined && plain.code === undefined &&
+        plain.vars === undefined && plain.payload === undefined &&
+        dead.dead === true && dead.message === 'device.transportDead' &&
+        dead.reason === 'unknown' && dead.code === 'device.transportDead' &&
+        dead.payload === 'the worker was reset',
       `${JSON.stringify(plain)} | ${JSON.stringify(dead)}`);
     check('a failure described for the worker carries the cause it was given',
-      unsettled.dead === true && unsettled.reason === 'loop-unsettled',
+      unsettled.dead === true && unsettled.reason === 'loop-unsettled' &&
+        unsettled.code === 'device.loopUnsettledClosed' &&
+        unsettled.vars?.reason === 'loop-unsettled',
       `${JSON.stringify(unsettled)}`);
   }
 

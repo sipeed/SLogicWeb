@@ -605,6 +605,8 @@ const baseSettings: CaptureSettings = {
     'diagnostic.file.lwcap.samplerate', 'diagnostic.file.lwcap.edgeOrder',
     'diagnostic.file.sr.notZip', 'diagnostic.file.sr.compression',
     'diagnostic.file.sr.noSamplerate',
+    'diagnostic.device.transportDead', 'diagnostic.device.workerTimeout',
+    'diagnostic.device.loopUnsettledClosed',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];

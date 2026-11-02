@@ -144,6 +144,20 @@ export const zhCN: Messages = {
     '数据长度 {bytes} 不是 {unitsize} 字节样本的整数倍',
   'diagnostic.file.sr.tooLong': '采集过长（{samples} 个样本）',
   'diagnostic.file.sr.noData': '{source} 中没有 capturefile {capturefile} 的数据成员',
+  'diagnostic.device.transportDead': 'USB 传输已失效（{reason}）',
+  'diagnostic.device.workerUnavailable': '此浏览器不支持后台 USB 工作线程',
+  'diagnostic.device.workerCrashed': 'USB 工作线程失败',
+  'diagnostic.device.workerTimeout': 'USB 工作线程未在 {ms} ms 内响应“{kind}”',
+  'diagnostic.device.workerNoDevice': 'USB 工作线程未报告设备',
+  'diagnostic.device.workerTerminated': 'USB 工作线程传输已终止',
+  'diagnostic.device.workerNoStats': 'USB 工作线程未返回统计数据',
+  'diagnostic.device.workerNoConsole': 'USB 工作线程未返回控制台结果',
+  'diagnostic.device.workerUnclaimed': 'USB 工作线程返回“{kind}”时没有任何请求在等待',
+  'diagnostic.device.stopTimedOut': '采集未在 {ms} ms 内停止；USB 传输已重置',
+  'diagnostic.device.loopUnsettled': '释放接口后，上一次采集的读取循环始终没有结束',
+  'diagnostic.device.loopUnsettledClosed':
+    '释放接口后读取循环始终没有结束，因此设备句柄已被关闭',
+  'diagnostic.device.reclaimFailed': '采集取消后无法重新占用接口，因此设备已被关闭',
 
   // -------------------------------------------------------- hover readout
   'hover.width': '宽度：{duration}',

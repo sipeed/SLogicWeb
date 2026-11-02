@@ -5,6 +5,9 @@
  * Nothing outside this file is part of the cross-module interface.
  */
 
+import { DiagnosticError } from '../diagnostics.js';
+import type { DiagnosticCode, DiagnosticVars } from '../diagnostics.js';
+
 export interface CaptureConfig {
   channels: import('../types.js').ChannelCount;
   samplerate: number; // Hz, from the table in PROTOCOL-SLOGIC16U3.md
@@ -69,10 +72,16 @@ export type TransportDeadReason =
   | 'worker-timeout'
   | 'unknown';
 
-export class TransportDeadError extends Error {
+export class TransportDeadError extends DiagnosticError {
   readonly reason: TransportDeadReason;
-  constructor(message: string, reason: TransportDeadReason) {
-    super(message);
+
+  constructor(
+    code: DiagnosticCode,
+    reason: TransportDeadReason,
+    vars?: DiagnosticVars,
+    payload?: string,
+  ) {
+    super(code, { ...vars, reason }, payload);
     this.name = 'TransportDeadError';
     this.reason = reason;
   }

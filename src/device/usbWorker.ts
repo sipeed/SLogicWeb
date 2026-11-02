@@ -18,6 +18,7 @@
  */
 
 import { createCommandQueue, describeFailure } from './commandQueue.js';
+import { wireDiagnostic } from '../diagnostics.js';
 import { Slogic16U3 } from './slogic16u3.js';
 import type { SampleSink } from './types.js';
 import type {
@@ -79,6 +80,7 @@ async function handle(message: QueuedCommand): Promise<void> {
       instance.onError = (error) => post({
         kind: 'error',
         message: error instanceof Error ? error.message : String(error),
+        ...(wireDiagnostic(error) ?? {}),
       });
       await instance.open();
       device = instance;

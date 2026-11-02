@@ -50,6 +50,19 @@ export const DIAGNOSTIC_CODES = [
   'file.sr.dataLength',
   'file.sr.tooLong',
   'file.sr.noData',
+  'device.transportDead',
+  'device.workerUnavailable',
+  'device.workerCrashed',
+  'device.workerTimeout',
+  'device.workerNoDevice',
+  'device.workerTerminated',
+  'device.workerNoStats',
+  'device.workerNoConsole',
+  'device.workerUnclaimed',
+  'device.stopTimedOut',
+  'device.loopUnsettled',
+  'device.loopUnsettledClosed',
+  'device.reclaimFailed',
 ] as const;
 
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[number];

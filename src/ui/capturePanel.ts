@@ -19,7 +19,7 @@
 import { SAMPLERATES_HZ, vrefCode, vrefVolts } from '../device/index.js';
 import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
-import { formatDuration, formatRate } from './format.js';
+import { formatDuration, formatRate, formatStatusDetail, statusDetailOf } from './format.js';
 import {
   CHANNEL_BANK_SIZE, channelBankIndices, channelBankRange, channelBankStarts, lockedChannelBanks,
 } from './channelBanks.js';
@@ -616,7 +616,9 @@ export class CapturePanel {
       try {
         this.consoleLines.push(await this.cb.onUsbControl(command));
       } catch (e) {
-        this.consoleLines.push(t('capturePanel.consoleError', { detail: e instanceof Error ? e.message : String(e) }));
+        this.consoleLines.push(t('capturePanel.consoleError', {
+          detail: formatStatusDetail(statusDetailOf(e)),
+        }));
       } finally {
         this.consoleLines = this.consoleLines.slice(-80);
         input.disabled = !v.deviceName || v.running;

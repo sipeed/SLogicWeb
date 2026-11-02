@@ -165,6 +165,26 @@ export const fr: Messages = {
   'diagnostic.file.sr.tooLong': 'capture trop longue ({samples} échantillons)',
   'diagnostic.file.sr.noData':
     '{source} n’a pas de membres de données pour capturefile {capturefile}',
+  'diagnostic.device.transportDead': 'le transport USB est mort ({reason})',
+  'diagnostic.device.workerUnavailable':
+    'le worker USB d’arrière-plan n’est pas disponible dans ce navigateur',
+  'diagnostic.device.workerCrashed': 'le worker USB a échoué',
+  'diagnostic.device.workerTimeout':
+    'le worker USB n’a pas répondu à « {kind} » en {ms} ms',
+  'diagnostic.device.workerNoDevice': 'le worker USB n’a signalé aucun appareil',
+  'diagnostic.device.workerTerminated': 'le transport du worker USB a été arrêté',
+  'diagnostic.device.workerNoStats': 'le worker USB a répondu sans statistiques',
+  'diagnostic.device.workerNoConsole': 'le worker USB a répondu sans résultat de console',
+  'diagnostic.device.workerUnclaimed':
+    'le worker USB a répondu « {kind} » alors que personne n’attendait',
+  'diagnostic.device.stopTimedOut':
+    'la capture ne s’est pas arrêtée en {ms} ms ; le transport USB a été réinitialisé',
+  'diagnostic.device.loopUnsettled':
+    'la boucle de lecture de la capture précédente ne s’est jamais terminée après la libération de l’interface',
+  'diagnostic.device.loopUnsettledClosed':
+    'la boucle de lecture ne s’est jamais terminée après la libération de l’interface, le descripteur de l’appareil a donc été fermé',
+  'diagnostic.device.reclaimFailed':
+    'l’interface n’a pas pu être reconquise après l’annulation de la capture, l’appareil a donc été fermé',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Largeur : {duration}',

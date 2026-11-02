@@ -11,9 +11,10 @@
  */
 
 import { LoopStallWatch, USB_FILTERS } from './usbCore.js';
+import { DiagnosticError, diagnosticOf, fromWireDiagnostic } from '../diagnostics.js';
 import { Slogic16U3 } from './slogic16u3.js';
 import type { Stats, StartOptions } from './slogic16u3.js';
-import { TransportDeadError, type TransportDeadReason } from './types.js';
+import { TransportDeadError } from './types.js';
 import type {
   CaptureConfig, CaptureStartOptions, Device, DropoutSink, SampleSink,
 } from './types.js';
@@ -103,7 +104,9 @@ export class WorkerSlogicDevice implements Device {
   ) {
     worker.onmessage = (event: MessageEvent<FromWorker>) => this.onMessage(event.data);
     worker.onerror = (event) => {
-      this.failAll(new Error(`USB worker error: ${event.message || 'unknown'}`));
+      this.failAll(
+        new DiagnosticError('device.workerCrashed', undefined, event.message || undefined),
+      );
     };
   }
 
@@ -119,7 +122,7 @@ export class WorkerSlogicDevice implements Device {
     // No `typeof Worker` test here: without a spawn nothing can be started anyway, and
     // with one the caller has already decided the environment supports workers (the
     // offline suite passes a fake, in Node, where the global does not exist).
-    if (!spawn) throw new Error('workers are unavailable');
+    if (!spawn) throw new DiagnosticError('device.workerUnavailable');
     const timeouts = {
       openTimeoutMs: options.openTimeoutMs ?? OPEN_TIMEOUT_MS,
       stopTimeoutMs: options.stopTimeoutMs ?? STOP_TIMEOUT_MS,
@@ -132,7 +135,7 @@ export class WorkerSlogicDevice implements Device {
       post(worker, { kind: 'open', filter });
       const message = await opened;
       if (message.kind === 'failed') throw failedReply(message);
-      if (message.kind !== 'opened') throw new Error('the worker did not report a device');
+      if (message.kind !== 'opened') throw new DiagnosticError('device.workerNoDevice');
       return new WorkerSlogicDevice(
         worker, message.name, message.serial, message.maxChannels, message.maxSamplerateHz,
         timeouts,
@@ -184,10 +187,10 @@ export class WorkerSlogicDevice implements Device {
       message = await stopped;
     } catch (error) {
       this.terminate();
-      const detail = error instanceof Error ? error.message : String(error);
+      const cause = diagnosticOf(error);
+      if (cause && cause.code !== 'device.workerTimeout') throw error;
       throw new TransportDeadError(
-        `${detail}; the USB transport was reset`,
-        'worker-timeout',
+        'device.stopTimedOut', 'worker-timeout', { ms: this.timeouts.stopTimeoutMs },
       );
     } finally {
       this.pageStalls.stop();
@@ -199,7 +202,7 @@ export class WorkerSlogicDevice implements Device {
   terminate(): void {
     this.stopped = true;
     this.pageStalls.stop();
-    this.failAll(new Error('the worker transport was terminated'));
+    this.failAll(new DiagnosticError('device.workerTerminated'));
     this.worker.terminate();
   }
 
@@ -210,7 +213,7 @@ export class WorkerSlogicDevice implements Device {
     // A `failed` reply is the worker saying why the command threw; reporting it as "no
     // statistics" would hide the one sentence that matters.
     if (message.kind === 'failed') throw failedReply(message);
-    if (message.kind !== 'stats') throw new Error('the worker answered with no statistics');
+    if (message.kind !== 'stats') throw new DiagnosticError('device.workerNoStats');
     return {
       ...message.stats,
       pageStallMaxMs: this.pageStalls.maxMs,
@@ -233,7 +236,7 @@ export class WorkerSlogicDevice implements Device {
       // console result" hides the one sentence that matters - measured on hardware, where a
       // bench that aborted with a rate report looked like a protocol bug instead.
       if (message.kind === 'failed') throw failedReply(message);
-      if (message.kind !== 'console') throw new Error('the worker answered with no console result');
+      if (message.kind !== 'console') throw new DiagnosticError('device.workerNoConsole');
       return bench
         ? `${message.result}\n  page       thread blocked ${this.pageStalls.count} time(s), ` +
           `worst ${this.pageStalls.maxMs.toFixed(1)} ms (measured here, not in the worker)`
@@ -257,7 +260,7 @@ export class WorkerSlogicDevice implements Device {
           const index = list.findIndex((w) => w.timer === timer);
           if (index >= 0) list.splice(index, 1);
         }
-        reject(new Error(`the USB worker did not answer "${kind}" within ${timeoutMs} ms`));
+        reject(new DiagnosticError('device.workerTimeout', { kind, ms: timeoutMs }));
       }, timeoutMs);
       const list = this.waiters.get(kind) ?? [];
       list.push({ resolve, reject, timer });
@@ -316,7 +319,7 @@ export class WorkerSlogicDevice implements Device {
       case 'error':
         // Transport-level and fatal: the read loop is over, so is the page measurement.
         this.pageStalls.stop();
-        this.onError?.(new Error(message.message));
+        this.onError?.(fromWireDiagnostic(message));
         return;
       case 'failed': {
         // A failure answers whatever the page is waiting for; with nothing outstanding it
@@ -324,7 +327,7 @@ export class WorkerSlogicDevice implements Device {
         for (const kind of ['opened', 'started', 'stopped', 'stats', 'console']) {
           if (this.settle(kind, message)) return;
         }
-        this.onError?.(new Error(message.message));
+        this.onError?.(failedReply(message));
         return;
       }
       case 'opened':
@@ -333,9 +336,7 @@ export class WorkerSlogicDevice implements Device {
       case 'stats':
       case 'console':
         if (!this.settle(message.kind, message)) {
-          this.onError?.(
-            new Error(`the USB worker answered "${message.kind}" with nobody waiting`),
-          );
+          this.onError?.(new DiagnosticError('device.workerUnclaimed', { kind: message.kind }));
         }
         return;
     }
@@ -366,7 +367,7 @@ function firstMessage(
   return new Promise<FromWorker>((resolve, reject) => {
     const timer = setTimeout(() => {
       worker.onmessage = null;
-      reject(new Error(`the USB worker did not answer "${kind}" within ${timeoutMs} ms`));
+      reject(new DiagnosticError('device.workerTimeout', { kind, ms: timeoutMs }));
     }, timeoutMs);
     worker.onmessage = (event: MessageEvent<FromWorker>) => {
       const message = event.data;
@@ -378,12 +379,16 @@ function firstMessage(
   });
 }
 
-function failedReply(
-  message: { message: string; dead?: boolean; reason?: TransportDeadReason },
-): Error {
-  return message.dead === true
-    ? new TransportDeadError(message.message, message.reason ?? 'unknown')
-    : new Error(message.message);
+function failedReply(message: Extract<FromWorker, { kind: 'failed' }>): Error {
+  const rebuilt = fromWireDiagnostic(message);
+  if (message.dead !== true) return rebuilt;
+  const diag = diagnosticOf(rebuilt);
+  return new TransportDeadError(
+    diag?.code ?? 'device.transportDead',
+    message.reason ?? 'unknown',
+    diag?.vars,
+    diag ? diag.payload : message.message,
+  );
 }
 
 function post(worker: Worker, message: ToWorker): void {

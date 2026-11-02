@@ -16,6 +16,7 @@
  */
 
 import type { Stats, StartOptions } from './slogic16u3.js';
+import type { DiagnosticVars } from '../diagnostics.js';
 import type { CaptureConfig, SampleSink, TransportDeadReason } from './types.js';
 import type { TraceEntry } from './protocol.js';
 
@@ -71,12 +72,20 @@ export type FromWorker =
   /** The capture delivered everything it ever will; every chunk of it precedes this. */
   | { kind: 'ended' }
   | { kind: 'trace'; entry: TraceEntry }
-  | { kind: 'error'; message: string }
+  | { kind: 'error'; message: string; code?: string; vars?: DiagnosticVars; payload?: string }
   | { kind: 'stats'; stats: Stats }
   | { kind: 'console'; result: string }
   | { kind: 'started' }
   | { kind: 'stopped' }
-  | { kind: 'failed'; message: string; dead?: boolean; reason?: TransportDeadReason };
+  | {
+      kind: 'failed';
+      message: string;
+      dead?: boolean;
+      reason?: TransportDeadReason;
+      code?: string;
+      vars?: DiagnosticVars;
+      payload?: string;
+    };
 
 /** What the worker's caller has to provide for `start`. */
 export interface WorkerStart {
