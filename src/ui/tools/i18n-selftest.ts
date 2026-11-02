@@ -415,6 +415,58 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 {
+  const expected: Partial<Record<keyof Messages, string>> = {
+    'diagnostic.device.noData': 'channels,deadline,device,rate',
+    'diagnostic.device.underrunStalled':
+      'atMs,avg,bytes,channels,count,coverMs,device,limitMs,minimum,offered,rate,runMs,stalls,thread,transferMs,worstMs',
+    'diagnostic.device.underrunClean':
+      'avg,bytes,channels,count,device,limitMs,minimum,offered,rate,runMs,thread,thresholdMs,transferMs',
+  };
+  const bad = Object.entries(expected).filter(([key, vars]) => {
+    const template = en[key as keyof Messages] ?? '';
+    return [...template.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!).sort().join(',') !== vars;
+  }).map(([key]) => key);
+  check('the capture-failure templates keep every measured placeholder',
+    bad.length === 0, bad.length === 0 ? `${Object.keys(expected).length} templates pinned` : bad.join(', '));
+}
+
+{
+  const noDataVars = { device: 'Slogic32 U3', deadline: 720, channels: 32, rate: 100 };
+  const stalledVars = {
+    device: 'Slogic32 U3', channels: 32, rate: 200, offered: 800, count: 5,
+    transferMs: '18.00', bytes: 786432, limitMs: '9.75', avg: 731, runMs: 1180,
+    minimum: 760, thread: 'worker', stalls: 2, worstMs: '46.8', atMs: 415, coverMs: '19.6',
+  };
+  const cleanVars = {
+    device: 'Slogic32 U3', channels: 16, rate: 16, offered: 32, count: 4,
+    transferMs: '380.00', bytes: 1024, limitMs: '1.75', avg: 30, runMs: 360,
+    minimum: 30.4, thread: 'page', thresholdMs: 8,
+  };
+  const cases: [keyof Messages, string, Record<string, string | number>][] = [
+    ['diagnostic.device.noData', 'the wedged-board sentence', noDataVars],
+    ['diagnostic.device.underrunStalled', 'the stalled-thread sentence', stalledVars],
+    ['diagnostic.device.underrunClean', 'the clean-thread sentence', cleanVars],
+  ];
+  const dicts: [string, Messages][] = [['en', en], ['zh-CN', zhCN], ['ru', ru], ['fr', fr]];
+  const bad: string[] = [];
+  for (const [code, label, vars] of cases) {
+    for (const [locale, dict] of dicts) {
+      const rendered = translate(dict, code, vars);
+      const missing = Object.entries(vars)
+        .filter(([, value]) => !rendered.includes(String(value)))
+        .map(([name]) => name);
+      if (missing.length > 0) bad.push(`${locale}:${label} drops ${missing.join('/')}`);
+      if (/[{}]/.test(rendered)) bad.push(`${locale}:${label} leaves a placeholder`);
+      if (!/FIFO/i.test(rendered) && code.startsWith('diagnostic.device.underrun')) {
+        bad.push(`${locale}:${label} loses the FIFO-overflow meaning`);
+      }
+    }
+  }
+  check('a rendered capture failure shows every measured value in every locale',
+    bad.length === 0, bad.length === 0 ? `${cases.length * dicts.length} renderings complete` : bad.join('; '));
+}
+
+{
   const diag = statusDetailOf(new DiagnosticError('io.nothingToSave'));
   const rebuilt = statusDetailOf(fromWireDiagnostic({ message: 'io.nothingToSave', code: 'io.nothingToSave' }));
   const unknownCode = fromWireDiagnostic({ message: 'skewed worker text', code: 'device.fromTheFuture' });
@@ -606,7 +658,8 @@ const baseSettings: CaptureSettings = {
     'diagnostic.file.sr.notZip', 'diagnostic.file.sr.compression',
     'diagnostic.file.sr.noSamplerate',
     'diagnostic.device.transportDead', 'diagnostic.device.workerTimeout',
-    'diagnostic.device.loopUnsettledClosed',
+    'diagnostic.device.loopUnsettledClosed', 'diagnostic.device.noData',
+    'diagnostic.device.underrunStalled', 'diagnostic.usb.blocked',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];

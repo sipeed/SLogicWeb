@@ -315,29 +315,29 @@ function assertValidConfig(
   cfg: CaptureConfig, maxSamplerateHz: Readonly<Record<number, number>>, maxChannels: number,
 ): void {
   if (!(SUPPORTED_CHANNELS as readonly number[]).includes(cfg.channels) || cfg.channels > maxChannels) {
-    throw new Error(
-      `unsupported channel count ${cfg.channels}; this device offers ` +
-        SUPPORTED_CHANNELS.filter((n) => n <= maxChannels).join(', '),
-    );
+    throw new DiagnosticError('device.unsupportedChannels', {
+      channels: cfg.channels,
+      offered: SUPPORTED_CHANNELS.filter((n) => n <= maxChannels).join(', '),
+    });
   }
   if (!SAMPLERATES_HZ.includes(cfg.samplerate)) {
-    throw new Error(
-      `unsupported samplerate ${cfg.samplerate} Hz; the device offers ` +
-        SAMPLERATES_HZ.map((r) => `${r / 1e6}M`).join(', '),
-    );
+    throw new DiagnosticError('device.unsupportedSamplerate', {
+      samplerate: cfg.samplerate,
+      offered: SAMPLERATES_HZ.map((r) => `${r / 1e6}M`).join(', '),
+    });
   }
   const ceiling = maxSamplerateHz[cfg.channels];
   if (cfg.samplerate > ceiling) {
-    throw new Error(
-      `${cfg.samplerate / 1e6} MHz exceeds the ${cfg.channels}-channel ceiling of ${ceiling / 1e6} MHz`,
-    );
+    throw new DiagnosticError('device.rateCeiling', {
+      rate: cfg.samplerate / 1e6, channels: cfg.channels, ceiling: ceiling / 1e6,
+    });
   }
   if (!Number.isFinite(cfg.thresholdVolts)) {
-    throw new Error(`threshold must be a number, got ${cfg.thresholdVolts}`);
+    throw new DiagnosticError('device.threshold', { threshold: cfg.thresholdVolts });
   }
   if (cfg.testMode !== undefined && cfg.testMode !== TEST_MODE_NORMAL &&
       cfg.testMode !== TEST_MODE_USB_MAX_SPEED && cfg.testMode !== TEST_MODE_EMULATION) {
-    throw new Error(`test mode must be 0, 1 or 2, got ${cfg.testMode}`);
+    throw new DiagnosticError('device.testMode', { mode: cfg.testMode });
   }
 }
 
@@ -383,27 +383,26 @@ export function deriveStreamTuning(cfg: CaptureConfig, want: Partial<StreamTunin
         ? FAST_READ_DEPTH
         : LIBSIGROK_TRANSFER_DEPTH;
   if (transferBytes % PACKET_BYTES !== 0) {
-    throw new Error(
-      `transferBytes ${transferBytes} is not a multiple of the ${PACKET_BYTES}-byte packet size`,
-    );
+    throw new DiagnosticError('device.tuningPacket', {
+      bytes: transferBytes, packet: PACKET_BYTES,
+    });
   }
   if (depth < 4) {
-    throw new Error(`transfer depth ${depth} is below the 4 the device needs to not overrun`);
+    throw new DiagnosticError('device.tuningDepth', { depth });
   }
   if (transferBytes > MAX_WEBUSB_TRANSFER_BYTES) {
-    throw new Error(
-      `transferBytes ${transferBytes} exceeds Chromium WebUSB's ${MAX_WEBUSB_TRANSFER_BYTES}-byte limit`,
-    );
+    throw new DiagnosticError('device.tuningTransfer', {
+      bytes: transferBytes, limit: MAX_WEBUSB_TRANSFER_BYTES,
+    });
   }
   const queuedBytes = transferBytes * depth;
   const budget = want.queueBudgetBytes && want.queueBudgetBytes > 0
     ? want.queueBudgetBytes
     : MAX_SAFE_QUEUED_BYTES;
   if (!Number.isSafeInteger(queuedBytes) || queuedBytes > budget) {
-    throw new Error(
-      `transfer queue ${depth} x ${transferBytes} B exceeds the safe ` +
-        `${budget}-byte usbfs budget; raise usbfs_memory_mb and queueBudgetBytes together`,
-    );
+    throw new DiagnosticError('device.tuningQueue', {
+      depth, bytes: transferBytes, budget,
+    });
   }
   // Four `depth`s of unconsumed chunks: enough that a page doing real work between two
   // transfers never trips it, small enough that the pile stays well under the store it
@@ -736,12 +735,12 @@ export class Slogic16U3 implements Device {
     this.noDataTimer = setTimeout(() => {
       this.noDataTimer = null;
       if (!this.running || this.stats.transfers > 0) return;
-      const e = new Error(
-        `${this.name} delivered no data within ${Math.round(this.noDataDeadlineMs)} ms of RUN ` +
-          `(${cfg.channels}ch @ ${cfg.samplerate / 1e6} MHz). A board in this state answers ` +
-          'every control transfer and sends nothing on the bulk endpoint: unplug it and plug it ' +
-          'back in.',
-      );
+      const e = new DiagnosticError('device.noData', {
+        device: this.name,
+        deadline: Math.round(this.noDataDeadlineMs),
+        channels: cfg.channels,
+        rate: cfg.samplerate / 1e6,
+      });
       this.loopError = e;
       this.underrun = e;
       console.error('[slogic]', e.message);
@@ -852,15 +851,15 @@ export class Slogic16U3 implements Device {
   async start(
     cfg: CaptureConfig, sink: SampleSink, _onDropout?: DropoutSink, opts: StartOptions = {},
   ): Promise<void> {
-    if (this.running) throw new Error('start() called while already running');
+    if (this.running) throw new DiagnosticError('device.startRunning');
     if (this.stopping || this.loopDone) {
-      throw new Error('start() called before the previous capture finished stopping');
+      throw new DiagnosticError('device.startStopping');
     }
     if (this.loopUnsettled) {
       throw new TransportDeadError('device.loopUnsettled', 'loop-unsettled');
     }
     assertValidConfig(cfg, this.maxSamplerateHz, this.maxChannels);
-    if (!this.bus) throw new Error('start() called before open()');
+    if (!this.bus) throw new DiagnosticError('device.startBeforeOpen');
     const bus = this.bus;
 
     this.cfg = cfg;
@@ -890,8 +889,7 @@ export class Slogic16U3 implements Device {
     // FIFO-overrun wedge (NOTES 8.2). The capture length in trigger mode belongs in
     // `softwareTrigger.maxSamples`.
     if (opts.softwareTrigger && opts.deviceSampleLimit && opts.deviceSampleLimit > 0) {
-      throw new Error('softwareTrigger and deviceSampleLimit are mutually exclusive; ' +
-        'bound a triggered capture with softwareTrigger.maxSamples');
+      throw new DiagnosticError('device.triggerLimitConflict');
     }
     let alignedSampleLimit: number | null = null;
     if (sampleLimit !== undefined && Number.isFinite(sampleLimit) && sampleLimit > 0) {
@@ -913,12 +911,16 @@ export class Slogic16U3 implements Device {
     // must end on a sample boundary; the derived default (8 MiB) always does.
     if (this.tuning.coalesceBytes !== undefined &&
         this.tuning.coalesceBytes % bytesPerSampleForChannels(cfg.channels) !== 0) {
-      throw new Error(`coalesceBytes ${this.tuning.coalesceBytes} is not a multiple of ` +
-        `the ${bytesPerSampleForChannels(cfg.channels)}-byte sample size`);
+      throw new DiagnosticError('device.coalescePacket', {
+        bytes: this.tuning.coalesceBytes,
+        packet: bytesPerSampleForChannels(cfg.channels),
+      });
     }
     if (opts.softwareTrigger) {
       if (opts.softwareTrigger.channels !== cfg.channels) {
-        throw new Error(`software trigger width ${opts.softwareTrigger.channels} does not match capture width ${cfg.channels}`);
+        throw new DiagnosticError('device.triggerWidth', {
+          width: opts.softwareTrigger.channels, channels: cfg.channels,
+        });
       }
       this.trigger = new SoftwareTrigger({
         config: opts.softwareTrigger,
@@ -1110,24 +1112,33 @@ export class Slogic16U3 implements Device {
       // A loop capture never trips this: its windowing drains the store by
       // construction, and its only ends are a manual stop and a device error.
       if (slowCount >= depth && !this.underrun && !this.loopMode) {
-        this.underrun = new Error(
-          `${this.name} overran the host: ${this.cfg!.channels}ch @ ` +
-            `${this.cfg!.samplerate / 1e6} MHz offers ${(expectedBytesPerMs * 1000 / 1e6).toFixed(0)} MB/s ` +
-            `for ${slowCount} consecutive transfers: ${duration.toFixed(2)} ms for ` +
-            `${bytes} B (limit ${((1 + SLOW_TRANSFER_TOLERANCE) * expectedTransferMs).toFixed(2)} ms), ` +
-            `${(runRate * 1000 / 1e6).toFixed(0)} MB/s average over ${runMs.toFixed(0)} ms ` +
-            `(minimum ${(expectedBytesPerMs * SLOW_AVERAGE_HEADROOM * 1000 / 1e6).toFixed(0)} MB/s). ` +
-            'Capture aborted before the device FIFO overflow wedged the endpoint.' +
-            // A starved queue and a slow device look identical from here. The probe is
-            // what tells them apart, so its worst number belongs in this message.
-            (this.loopStalls.count > 0
-              ? ` The ${this.threadLabel} thread was blocked ${this.loopStalls.count} time(s) during the ` +
-                `capture, worst ${this.loopStalls.maxMs.toFixed(1)} ms at ` +
-                `${(this.loopStalls.maxAtMs - started).toFixed(0)} ms; the queue covers ` +
-                `${(depth * expectedTransferMs).toFixed(1)} ms.`
-              : ` The ${this.threadLabel} thread was never blocked for more than ` +
-                `${THREAD_STALL_THRESHOLD_MS} ms, so this is the device or the USB path.`),
-        );
+        const measured = {
+          device: this.name,
+          channels: this.cfg!.channels,
+          rate: this.cfg!.samplerate / 1e6,
+          offered: Math.round(expectedBytesPerMs * 1000 / 1e6),
+          count: slowCount,
+          transferMs: duration.toFixed(2),
+          bytes,
+          limitMs: ((1 + SLOW_TRANSFER_TOLERANCE) * expectedTransferMs).toFixed(2),
+          avg: Math.round(runRate * 1000 / 1e6),
+          runMs: Math.round(runMs),
+          minimum: Math.round(expectedBytesPerMs * SLOW_AVERAGE_HEADROOM * 1000 / 1e6),
+          thread: this.threadLabel,
+        };
+        // A starved queue and a slow device look identical from here. The probe is
+        // what tells them apart, so its worst number belongs in this message.
+        this.underrun = this.loopStalls.count > 0
+          ? new DiagnosticError('device.underrunStalled', {
+            ...measured,
+            stalls: this.loopStalls.count,
+            worstMs: this.loopStalls.maxMs.toFixed(1),
+            atMs: Math.round(this.loopStalls.maxAtMs - started),
+            coverMs: (depth * expectedTransferMs).toFixed(1),
+          })
+          : new DiagnosticError('device.underrunClean', {
+            ...measured, thresholdMs: THREAD_STALL_THRESHOLD_MS,
+          });
         // Tell the device to stop producing now, while this loop still has `depth`
         // reads queued, rather than waiting for the caller to get around to stop().
         // The loop stops replenishing on the next completion, and a producer with no
@@ -1291,10 +1302,10 @@ export class Slogic16U3 implements Device {
           this.trace({ dir: 'info', note: `pending transfer ended with status "${r.status}" on stop` });
           return;
         }
-        throw new Error(`bulk IN returned status "${r.status}"`);
+        throw new DiagnosticError('device.bulkStatus', { status: r.status });
       }
       const actual = r.data;
-      if (!actual) throw new Error('bulk IN returned no data with status "ok"');
+      if (!actual) throw new DiagnosticError('device.bulkEmpty');
       const remainingWireBytes = targetWireBytes > 0
         ? Math.max(0, targetWireBytes - consumedWireBytes)
         : actual.byteLength;
@@ -1725,9 +1736,9 @@ export class Slogic16U3 implements Device {
    */
   async usbControl(command: string): Promise<string> {
     if (this.running || this.stopping || this.loopDone) {
-      throw new Error('USB console is unavailable while a capture is running or stopping');
+      throw new DiagnosticError('device.consoleBusy');
     }
-    if (!this.bus || !this.usb.opened) throw new Error('device is not open');
+    if (!this.bus || !this.usb.opened) throw new DiagnosticError('device.notOpen');
     const tokens = command.trim().split(/\s+/).filter(Boolean);
     const op = tokens.shift()?.toLowerCase();
     if (!op || op === 'help') {

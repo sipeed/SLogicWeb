@@ -181,6 +181,43 @@ export const ru: Messages = {
     'цикл чтения так и не завершился после освобождения интерфейса, поэтому дескриптор устройства был закрыт',
   'diagnostic.device.reclaimFailed':
     'интерфейс не удалось занять заново после отмены записи, поэтому устройство было закрыто',
+  'diagnostic.device.unsupportedChannels':
+    'неподдерживаемое число каналов {channels}; это устройство предлагает {offered}',
+  'diagnostic.device.unsupportedSamplerate':
+    'неподдерживаемая частота дискретизации {samplerate} Гц; устройство предлагает {offered}',
+  'diagnostic.device.rateCeiling':
+    '{rate} МГц превышает потолок {ceiling} МГц для {channels} каналов',
+  'diagnostic.device.threshold': 'порог должен быть числом, получено {threshold}',
+  'diagnostic.device.testMode': 'режим теста должен быть 0, 1 или 2, получено {mode}',
+  'diagnostic.device.tuningPacket':
+    'transferBytes {bytes} не кратно размеру пакета {packet} байт',
+  'diagnostic.device.tuningDepth':
+    'глубина передачи {depth} меньше 4, необходимых устройству, чтобы не переполниться',
+  'diagnostic.device.tuningTransfer':
+    'transferBytes {bytes} превышает предел Chromium WebUSB в {limit} байт',
+  'diagnostic.device.tuningQueue':
+    'очередь передач {depth} x {bytes} B превышает безопасный бюджет usbfs в {budget} байт; увеличьте usbfs_memory_mb и queueBudgetBytes вместе',
+  'diagnostic.device.startRunning': 'start() вызван, когда запись уже идёт',
+  'diagnostic.device.startStopping':
+    'start() вызван до завершения остановки предыдущей записи',
+  'diagnostic.device.startBeforeOpen': 'start() вызван до open()',
+  'diagnostic.device.triggerLimitConflict':
+    'softwareTrigger и deviceSampleLimit взаимоисключающие; ограничьте запись с триггером через softwareTrigger.maxSamples',
+  'diagnostic.device.coalescePacket':
+    'coalesceBytes {bytes} не кратно размеру отсчёта {packet} байт',
+  'diagnostic.device.triggerWidth':
+    'ширина программного триггера {width} не совпадает с шириной записи {channels}',
+  'diagnostic.device.bulkStatus': 'bulk IN вернул статус «{status}»',
+  'diagnostic.device.bulkEmpty': 'bulk IN не вернул данных со статусом «ok»',
+  'diagnostic.device.consoleBusy':
+    'консоль USB недоступна, пока запись идёт или останавливается',
+  'diagnostic.device.notOpen': 'устройство не открыто',
+  'diagnostic.device.noData':
+    '{device} не отдал данных за {deadline} мс после RUN ({channels} каналов @ {rate} МГц). Плата в таком состоянии отвечает на каждую управляющую передачу и ничего не отправляет на bulk-эндпоинт: отключите и снова подключите её.',
+  'diagnostic.device.underrunStalled':
+    '{device} перегрузил хост: {channels} каналов @ {rate} МГц дают {offered} МБ/с, но {count} передач подряд заняли {transferMs} мс на {bytes} B (предел {limitMs} мс), средняя {avg} МБ/с за {runMs} мс (минимум {minimum} МБ/с). Запись прервана до того, как переполнение FIFO устройства заблокировало эндпоинт. Поток {thread} блокировался {stalls} раз за запись, дольше всего {worstMs} мс на отметке {atMs} мс; очередь покрывает {coverMs} мс.',
+  'diagnostic.device.underrunClean':
+    '{device} перегрузил хост: {channels} каналов @ {rate} МГц дают {offered} МБ/с, но {count} передач подряд заняли {transferMs} мс на {bytes} B (предел {limitMs} мс), средняя {avg} МБ/с за {runMs} мс (минимум {minimum} МБ/с). Запись прервана до того, как переполнение FIFO устройства заблокировало эндпоинт. Поток {thread} ни разу не блокировался дольше {thresholdMs} мс, значит дело в устройстве или в шине USB.',
   'diagnostic.device.openFailed': 'не удалось открыть USB-устройство',
   'diagnostic.device.configureFailed': 'не удалось выбрать конфигурацию устройства',
   'diagnostic.device.claimFailed': 'не удалось захватить интерфейс 0',

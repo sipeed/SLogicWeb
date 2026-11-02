@@ -43,6 +43,7 @@ import { WorkerSlogicDevice } from './workerTransport.js';
 import { getGrantedDevicesOnBestThread, requestDeviceOnBestThread } from './index.js';
 import { createCommandQueue, describeFailure } from './commandQueue.js';
 import { TransportDeadError } from './types.js';
+import type { CaptureConfig } from './types.js';
 import { DiagnosticError, diagnosticOf } from '../diagnostics.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import type { FromWorker, ToWorker } from './usbWorkerProtocol.js';
@@ -117,6 +118,18 @@ async function expectThrow(name: string, fn: () => Promise<unknown>, substr: str
     msg = String(e);
   }
   check(name, msg.includes(substr), `got ${msg || '<no throw>'}`);
+}
+
+async function expectDiagnostic(
+  name: string, fn: () => Promise<unknown>, code: string,
+): Promise<void> {
+  let diag: ReturnType<typeof diagnosticOf> = null;
+  try {
+    await fn();
+  } catch (e) {
+    diag = diagnosticOf(e);
+  }
+  check(name, diag?.code === code, `got ${diag ? diag.code : '<no diagnostic>'}`);
 }
 
 /**
@@ -1279,11 +1292,11 @@ async function main(): Promise<void> {
     check('16ch@200M is 400 MB/s and keeps libsigrok trained transfer geometry',
       at16.transferBytes === 3_129_344 && at16.depth === 5,
       JSON.stringify(at16));
-    await expectThrow('an oversized WebUSB queue is refused before it can poison the endpoint',
+    await expectDiagnostic('an oversized WebUSB queue is refused before it can poison the endpoint',
       async () => { deriveStreamTuning(
         { channels: 32, samplerate: 200e6, thresholdVolts: 1.6 },
         { transferBytes: 4 * 1024 * 1024, depth: 4 },
-      ); }, 'exceeds the safe');
+      ); }, 'device.tuningQueue');
     // libsigrok sizes its queue from what the host accepts (protocol.c:249-330) rather
     // than pinning it, so a host whose usbfs budget was raised can use fewer, larger
     // transfers. The refusal above is against the *declared* budget, not against a
@@ -1295,11 +1308,11 @@ async function main(): Promise<void> {
     check('a declared usbfs budget admits the geometry libsigrok would train on it',
       raised.transferBytes === 6_258_688 && raised.depth === 8,
       JSON.stringify(raised));
-    await expectThrow('the same geometry is still refused on the default budget',
+    await expectDiagnostic('the same geometry is still refused on the default budget',
       async () => { deriveStreamTuning(
         { channels: 32, samplerate: 200e6, thresholdVolts: 1.6 },
         { transferBytes: 6_258_688, depth: 8 },
-      ); }, 'exceeds the safe');
+      ); }, 'device.tuningQueue');
   }
 
   {
@@ -1542,23 +1555,145 @@ async function main(): Promise<void> {
     let failure: unknown = null;
     try { await dev.stop(); } catch (e) { failure = e; }
     const stats = dev.getStats();
+    const underrun = diagnosticOf(failure);
+    const measured = [
+      'avg', 'bytes', 'channels', 'count', 'device', 'limitMs', 'minimum', 'offered', 'rate',
+      'runMs', 'thread', 'transferMs',
+    ];
+    const stalledVars = [...measured, 'atMs', 'coverMs', 'stalls', 'worstMs'].sort().join(',');
+    const cleanVars = [...measured, 'thresholdMs'].sort().join(',');
+    const varKeys = Object.keys(underrun?.vars ?? {}).sort().join(',');
     check('a host that cannot drain the device aborts the capture',
-      failure instanceof Error && /overran the host/.test(failure.message),
-      failure instanceof Error ? failure.message : String(failure));
+      underrun !== null &&
+        (underrun.code === 'device.underrunStalled' || underrun.code === 'device.underrunClean'),
+      `${String(failure)} | ${JSON.stringify(underrun)}`);
     check('the underrun watchdog reports consecutive slow transfers',
       stats.slowTransfers >= 4 && stats.slowTransferLimit === 4,
       `slow=${stats.slowTransfers} limit=${stats.slowTransferLimit}`);
     check('the underrun watchdog records the timing distribution',
       stats.transferMsMax > 0 && stats.rearmMsP50 >= 0 && stats.sinkMsP95 >= 0,
       `transferMax=${stats.transferMsMax.toFixed(2)} rearmP50=${stats.rearmMsP50.toFixed(3)}`);
+    check('the underrun keeps every measured value the sentence renders',
+      varKeys === stalledVars || varKeys === cleanVars, varKeys);
+    check('the underrun measurements are the capture\'s own numbers',
+      underrun?.vars?.channels === 4 && underrun.vars.rate === 5 &&
+        underrun.vars.bytes === 1024 && underrun.vars.count === stats.slowTransfers &&
+        typeof underrun.vars.offered === 'number' && typeof underrun.vars.avg === 'number' &&
+        typeof underrun.vars.runMs === 'number' && typeof underrun.vars.minimum === 'number' &&
+        typeof underrun.vars.transferMs === 'string' &&
+        Number.isFinite(Number(underrun.vars.transferMs)) &&
+        Number.isFinite(Number(underrun.vars.limitMs)),
+      JSON.stringify(underrun?.vars));
     // A starved queue and a slow device look the same from the count alone; the message
     // has to say which one this was, and one of the two branches always applies.
     check('the abort names the thread running the read loop, not the page',
-      failure instanceof Error && /worker thread/.test(failure.message),
-      failure instanceof Error ? failure.message.slice(-160) : String(failure));
+      underrun?.vars?.thread === 'worker', JSON.stringify(underrun?.vars?.thread));
     check('the stall probe reports a clean thread when nothing blocked it',
       Number.isFinite(stats.threadStallMaxMs) && stats.threadStalls >= 0,
       `max=${stats.threadStallMaxMs.toFixed(1)}ms count=${stats.threadStalls}`);
+  }
+  {
+    const block = new Array<number>(1024).fill(0);
+    const fake = new FakeStreamDevice(recorded(), Array.from({ length: 32 }, () => (
+      { kind: 'delayedData' as const, bytes: block, delayMs: 2 }
+    )));
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    await dev.open();
+    await dev.start(
+      { channels: 4, samplerate: 5e6, thresholdVolts: 1.6 }, () => {}, undefined,
+      { threadLabel: 'page', tuning: { depth: 4, transferBytes: 1024 } },
+    );
+    await new Promise((r) => setTimeout(r, 80));
+    let failure: unknown = null;
+    try { await dev.stop(); } catch (e) { failure = e; }
+    const vars = diagnosticOf(failure)?.vars;
+    check('the underrun names the page thread when the page runs the read loop',
+      vars?.thread === 'page' && vars.channels === 4 && vars.rate === 5 &&
+        vars.bytes === 1024 && vars.count === dev.getStats().slowTransfers,
+      JSON.stringify(vars));
+  }
+  {
+    class BadBulkDevice extends FakeStreamDevice {
+      constructor(private readonly reply: USBInTransferResult) {
+        super(recorded(), []);
+      }
+      override transferIn(): Promise<USBInTransferResult> {
+        return Promise.resolve(this.reply);
+      }
+    }
+    const cfg: CaptureConfig = { channels: 4, samplerate: 16e6, thresholdVolts: 1.6 };
+    const badConfig = (patch: Record<string, unknown>): CaptureConfig =>
+      ({ ...cfg, ...patch } as unknown as CaptureConfig);
+    const fake = new FakeStreamDevice(recorded(), [], 0x3032);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    await expectDiagnostic('a capture cannot start before the device is open',
+      () => dev.start(cfg, () => {}), 'device.startBeforeOpen');
+    await expectDiagnostic('the advanced console is refused before the device is open',
+      () => dev.usbControl('help'), 'device.notOpen');
+    await expectDiagnostic('an unsupported capture width names the widths on offer',
+      () => dev.start(badConfig({ channels: 6 }), () => {}),
+      'device.unsupportedChannels');
+    await expectDiagnostic('an unsupported samplerate names the rates on offer',
+      () => dev.start(badConfig({ samplerate: 33e6 }), () => {}),
+      'device.unsupportedSamplerate');
+    await expectDiagnostic('a rate above the width\'s ceiling is refused',
+      () => dev.start(badConfig({ channels: 16, samplerate: 800e6 }), () => {}),
+      'device.rateCeiling');
+    await expectDiagnostic('a non-finite threshold is refused',
+      () => dev.start(badConfig({ thresholdVolts: Number.NaN }), () => {}), 'device.threshold');
+    await expectDiagnostic('an unknown test mode is refused',
+      () => dev.start(badConfig({ testMode: 7 }), () => {}),
+      'device.testMode');
+
+    const streaming = new FakeStreamDevice(recorded(), [], 0x3032);
+    streaming.autoStream = true;
+    const live = new Slogic16U3(streaming as unknown as USBDevice);
+    await live.open();
+    await live.start(cfg, () => {}, undefined, { tuning: { depth: 4, transferBytes: 1024 } });
+    await expectDiagnostic('a second start while a capture is running is refused',
+      () => live.start(cfg, () => {}), 'device.startRunning');
+    await expectDiagnostic('the advanced console is refused while a capture is running',
+      () => live.usbControl('help'), 'device.consoleBusy');
+    const stopping = live.stop();
+    await expectDiagnostic('a start while the previous capture is stopping is refused',
+      () => live.start(cfg, () => {}), 'device.startStopping');
+    await stopping;
+
+    const stalled = new Slogic16U3(
+      new FakeStreamDevice(recorded(), [], 0x3032) as unknown as USBDevice,
+    );
+    await stalled.open();
+    await expectDiagnostic('a coalescing block off the sample grid is refused',
+      () => stalled.start(
+        { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {}, undefined,
+        { tuning: { depth: 4, transferBytes: 1024, coalesceBytes: 3 } },
+      ), 'device.coalescePacket');
+    await expectDiagnostic('a software trigger of a different width is refused',
+      () => stalled.start(cfg, () => {}, undefined, {
+        softwareTrigger: {
+          channels: 8, channel: 0, kind: 'rising', preTriggerSamples: 0, maxSamples: 8,
+        },
+      }), 'device.triggerWidth');
+
+    for (const [name, reply, code] of [
+      ['a bulk IN reporting a failure status names the status',
+        { status: 'stall', data: new DataView(new ArrayBuffer(0)) }, 'device.bulkStatus'],
+      ['a bulk IN reporting ok with no data fails instead of consuming nothing',
+        { status: 'ok' }, 'device.bulkEmpty'],
+    ] as [string, USBInTransferResult, string][]) {
+      const bulk = new Slogic16U3(
+        new BadBulkDevice(reply) as unknown as USBDevice,
+      );
+      await bulk.open();
+      await bulk.start(cfg, () => {}, undefined, { tuning: { depth: 4, transferBytes: 1024 } });
+      await new Promise((r) => setTimeout(r, 20));
+      let bulkError: unknown = null;
+      try { await bulk.stop(); } catch (e) { bulkError = e; }
+      const diag = diagnosticOf(bulkError);
+      check(name, diag?.code === code &&
+        (code !== 'device.bulkStatus' || diag.vars?.status === 'stall'),
+        `${String(bulkError)} | ${JSON.stringify(diag)}`);
+    }
   }
 
   console.log('\npage-thread stall probe');
@@ -2660,7 +2795,7 @@ async function main(): Promise<void> {
     const notes: string[] = [];
     await dev.open();
     dev.onTrace = (entry) => { if (entry.note) notes.push(entry.note); };
-    await expectThrow('software-trigger exclusivity precedes finite alignment',
+    await expectDiagnostic('software-trigger exclusivity precedes finite alignment',
       () => dev.start(
         { channels: 4, samplerate: 16e6, thresholdVolts: 1.6 },
         () => {},
@@ -2671,7 +2806,7 @@ async function main(): Promise<void> {
             channels: 4, channel: 0, kind: 'rising', preTriggerSamples: 0, maxSamples: 4,
           },
         },
-      ), 'mutually exclusive');
+      ), 'device.triggerLimitConflict');
     check('software-trigger exclusivity emits no alignment trace or bulk read',
       !notes.some((note) => note.includes('aligned down')) && fake.transferInCalls === 0,
       `calls=${fake.transferInCalls}, notes=${notes.join(' | ')}`);
@@ -2883,8 +3018,8 @@ async function main(): Promise<void> {
       text.split('\n')[1]);
     await expectThrow('a bench refuses a slice too short to be a measurement',
       () => dev.usbControl('bench 0.001 32 100'), 'bench seconds must be in');
-    await expectThrow('a bench refuses a geometry the device would overrun with',
-      () => dev.usbControl('bench 0.02 32 100 2 3129344'), 'depth');
+    await expectDiagnostic('a bench refuses a geometry the device would overrun with',
+      () => dev.usbControl('bench 0.02 32 100 2 3129344'), 'device.tuningDepth');
     clock.release();
   }
   {
@@ -2893,20 +3028,28 @@ async function main(): Promise<void> {
     // there and reporting an empty capture with no error.
     const fake = new FakeStreamDevice(recorded32(), [], 0x3032);
     const dev = new Slogic16U3(fake as unknown as USBDevice);
-    const errors: string[] = [];
-    dev.onError = (e) => errors.push(String(e));
+    const errors: unknown[] = [];
+    dev.onError = (e) => errors.push(e);
     await dev.open();
     await dev.start({ channels: 32, samplerate: 100e6, thresholdVolts: 1.6 }, () => {},
       undefined, { tuning: { depth: 4, transferBytes: 1024 } });
     await new Promise((r) => setTimeout(r, 900));
-    let stopError = '';
-    try { await dev.stop(); } catch (e) { stopError = String(e); }
-  check('a capture that never receives a byte fails with the wedged-board state',
-      stopError.includes('delivered no data within') && stopError.includes('unplug it'),
-      stopError || '<no error>');
+    let stopError: unknown = null;
+    try { await dev.stop(); } catch (e) { stopError = e; }
+    const noData = diagnosticOf(stopError);
+    const noDataVars = noData?.vars;
+    check('a capture that never receives a byte fails with the wedged-board state',
+      noData?.code === 'device.noData',
+      `${String(stopError)} | ${JSON.stringify(noData)}`);
+    check('the wedged-board failure carries its device, deadline, width and rate',
+      Object.keys(noDataVars ?? {}).sort().join(',') === 'channels,deadline,device,rate' &&
+        noDataVars?.device === dev.name &&
+        typeof noDataVars.deadline === 'number' && noDataVars.deadline > 0 &&
+        noDataVars.channels === 32 && noDataVars.rate === 100,
+      JSON.stringify(noDataVars));
     check('the wedged board is reported once, through onError',
-      errors.length === 1 && errors[0]!.includes('delivered no data'),
-      `${errors.length}: ${errors[0] ?? ''}`);
+      errors.length === 1 && diagnosticOf(errors[0])?.code === 'device.noData',
+      `${errors.length}: ${String(errors[0] ?? '')}`);
   }
   {
     // The same wedged board under StartOptions.loop: a loop capture ends only on a

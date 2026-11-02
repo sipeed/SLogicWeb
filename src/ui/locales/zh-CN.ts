@@ -158,6 +158,34 @@ export const zhCN: Messages = {
   'diagnostic.device.loopUnsettledClosed':
     '释放接口后读取循环始终没有结束，因此设备句柄已被关闭',
   'diagnostic.device.reclaimFailed': '采集取消后无法重新占用接口，因此设备已被关闭',
+  'diagnostic.device.unsupportedChannels': '不支持的通道数 {channels}；此设备提供 {offered}',
+  'diagnostic.device.unsupportedSamplerate': '不支持的采样率 {samplerate} Hz；此设备提供 {offered}',
+  'diagnostic.device.rateCeiling': '{rate} MHz 超过了 {channels} 通道的上限 {ceiling} MHz',
+  'diagnostic.device.threshold': '阈值必须是数字，实际为 {threshold}',
+  'diagnostic.device.testMode': '测试模式必须为 0、1 或 2，实际为 {mode}',
+  'diagnostic.device.tuningPacket': 'transferBytes {bytes} 不是 {packet} 字节包长的整数倍',
+  'diagnostic.device.tuningDepth': '传输深度 {depth} 低于设备不溢出所需的 4',
+  'diagnostic.device.tuningTransfer':
+    'transferBytes {bytes} 超过 Chromium WebUSB 的 {limit} 字节上限',
+  'diagnostic.device.tuningQueue':
+    '传输队列 {depth} x {bytes} B 超出安全的 {budget} 字节 usbfs 预算；请同时提高 usbfs_memory_mb 和 queueBudgetBytes',
+  'diagnostic.device.startRunning': 'start() 在采集已运行时被调用',
+  'diagnostic.device.startStopping': 'start() 在上一次采集停止完成之前被调用',
+  'diagnostic.device.startBeforeOpen': 'start() 在 open() 之前被调用',
+  'diagnostic.device.triggerLimitConflict':
+    'softwareTrigger 与 deviceSampleLimit 互斥；请用 softwareTrigger.maxSamples 限定触发采集的长度',
+  'diagnostic.device.coalescePacket': 'coalesceBytes {bytes} 不是 {packet} 字节样本大小的整数倍',
+  'diagnostic.device.triggerWidth': '软件触发宽度 {width} 与采集宽度 {channels} 不匹配',
+  'diagnostic.device.bulkStatus': '批量 IN 传输返回状态“{status}”',
+  'diagnostic.device.bulkEmpty': '批量 IN 传输在状态“ok”下没有返回数据',
+  'diagnostic.device.consoleBusy': '采集运行或停止期间无法使用 USB 控制台',
+  'diagnostic.device.notOpen': '设备未打开',
+  'diagnostic.device.noData':
+    '{device} 在 RUN 后 {deadline} ms 内没有送出任何数据（{channels}ch @ {rate} MHz）。处于该状态的板子会回应每一次控制传输，但在批量端点上不发送任何数据：请拔下并重新插入。',
+  'diagnostic.device.underrunStalled':
+    '{device} 让主机过载：{channels}ch @ {rate} MHz 提供 {offered} MB/s，但连续 {count} 次传输只有 {transferMs} ms 传输 {bytes} B（上限 {limitMs} ms），{runMs} ms 内平均 {avg} MB/s（最低 {minimum} MB/s）。已在设备 FIFO 溢出卡死端点之前中止采集。{thread} 线程在采集期间被阻塞 {stalls} 次，最长 {worstMs} ms（采集开始后 {atMs} ms）；队列覆盖 {coverMs} ms。',
+  'diagnostic.device.underrunClean':
+    '{device} 让主机过载：{channels}ch @ {rate} MHz 提供 {offered} MB/s，但连续 {count} 次传输只有 {transferMs} ms 传输 {bytes} B（上限 {limitMs} ms），{runMs} ms 内平均 {avg} MB/s（最低 {minimum} MB/s）。已在设备 FIFO 溢出卡死端点之前中止采集。{thread} 线程从未被阻塞超过 {thresholdMs} ms，因此问题出在设备或 USB 通路上。',
   'diagnostic.device.openFailed': '无法打开 USB 设备',
   'diagnostic.device.configureFailed': '无法选择设备配置',
   'diagnostic.device.claimFailed': '无法占用接口 0',

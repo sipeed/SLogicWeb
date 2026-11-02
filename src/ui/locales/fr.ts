@@ -185,6 +185,44 @@ export const fr: Messages = {
     'la boucle de lecture ne s’est jamais terminée après la libération de l’interface, le descripteur de l’appareil a donc été fermé',
   'diagnostic.device.reclaimFailed':
     'l’interface n’a pas pu être reconquise après l’annulation de la capture, l’appareil a donc été fermé',
+  'diagnostic.device.unsupportedChannels':
+    'nombre de canaux {channels} non pris en charge ; cet appareil propose {offered}',
+  'diagnostic.device.unsupportedSamplerate':
+    'fréquence d’échantillonnage {samplerate} Hz non prise en charge ; l’appareil propose {offered}',
+  'diagnostic.device.rateCeiling':
+    '{rate} MHz dépasse le plafond de {ceiling} MHz pour {channels} canaux',
+  'diagnostic.device.threshold': 'le seuil doit être un nombre, reçu {threshold}',
+  'diagnostic.device.testMode': 'le mode de test doit être 0, 1 ou 2, reçu {mode}',
+  'diagnostic.device.tuningPacket':
+    'transferBytes {bytes} n’est pas un multiple de la taille de paquet de {packet} octets',
+  'diagnostic.device.tuningDepth':
+    'la profondeur de transfert {depth} est inférieure aux 4 nécessaires pour que l’appareil ne déborde pas',
+  'diagnostic.device.tuningTransfer':
+    'transferBytes {bytes} dépasse la limite de {limit} octets de Chromium WebUSB',
+  'diagnostic.device.tuningQueue':
+    'la file de transferts {depth} x {bytes} B dépasse le budget usbfs sûr de {budget} octets ; augmentez usbfs_memory_mb et queueBudgetBytes ensemble',
+  'diagnostic.device.startRunning':
+    'start() appelé alors qu’une capture est déjà en cours',
+  'diagnostic.device.startStopping':
+    'start() appelé avant la fin de l’arrêt de la capture précédente',
+  'diagnostic.device.startBeforeOpen': 'start() appelé avant open()',
+  'diagnostic.device.triggerLimitConflict':
+    'softwareTrigger et deviceSampleLimit s’excluent ; bornez une capture déclenchée avec softwareTrigger.maxSamples',
+  'diagnostic.device.coalescePacket':
+    'coalesceBytes {bytes} n’est pas un multiple de la taille d’échantillon de {packet} octets',
+  'diagnostic.device.triggerWidth':
+    'la largeur du déclencheur logiciel {width} ne correspond pas à la largeur de capture {channels}',
+  'diagnostic.device.bulkStatus': 'bulk IN a renvoyé le statut « {status} »',
+  'diagnostic.device.bulkEmpty': 'bulk IN n’a renvoyé aucune donnée avec le statut « ok »',
+  'diagnostic.device.consoleBusy':
+    'la console USB est indisponible pendant une capture en cours ou en cours d’arrêt',
+  'diagnostic.device.notOpen': 'l’appareil n’est pas ouvert',
+  'diagnostic.device.noData':
+    '{device} n’a envoyé aucune donnée dans les {deadline} ms suivant RUN ({channels} canaux @ {rate} MHz). Une carte dans cet état répond à chaque transfert de contrôle et n’envoie rien sur le point de terminaison bulk : débranchez-la et rebranchez-la.',
+  'diagnostic.device.underrunStalled':
+    '{device} a saturé l’hôte : {channels} canaux @ {rate} MHz offrent {offered} Mo/s mais {count} transferts consécutifs ont pris {transferMs} ms pour {bytes} B (limite {limitMs} ms), {avg} Mo/s en moyenne sur {runMs} ms (minimum {minimum} Mo/s). Capture interrompue avant que le débordement de la FIFO de l’appareil ne bloque le point de terminaison. Le thread {thread} a été bloqué {stalls} fois pendant la capture, au pire {worstMs} ms à {atMs} ms ; la file couvre {coverMs} ms.',
+  'diagnostic.device.underrunClean':
+    '{device} a saturé l’hôte : {channels} canaux @ {rate} MHz offrent {offered} Mo/s mais {count} transferts consécutifs ont pris {transferMs} ms pour {bytes} B (limite {limitMs} ms), {avg} Mo/s en moyenne sur {runMs} ms (minimum {minimum} Mo/s). Capture interrompue avant que le débordement de la FIFO de l’appareil ne bloque le point de terminaison. Le thread {thread} n’a jamais été bloqué plus de {thresholdMs} ms, c’est donc l’appareil ou le chemin USB.',
   'diagnostic.device.openFailed': 'impossible d’ouvrir l’appareil USB',
   'diagnostic.device.configureFailed':
     'impossible de sélectionner la configuration de l’appareil',

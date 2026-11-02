@@ -188,6 +188,43 @@ export const en = {
     'the read loop never settled after the interface was released, so the device handle was closed',
   'diagnostic.device.reclaimFailed':
     'the interface could not be re-claimed after the capture was cancelled, so the device was closed',
+  'diagnostic.device.unsupportedChannels':
+    'unsupported channel count {channels}; this device offers {offered}',
+  'diagnostic.device.unsupportedSamplerate':
+    'unsupported samplerate {samplerate} Hz; the device offers {offered}',
+  'diagnostic.device.rateCeiling':
+    '{rate} MHz exceeds the {channels}-channel ceiling of {ceiling} MHz',
+  'diagnostic.device.threshold': 'threshold must be a number, got {threshold}',
+  'diagnostic.device.testMode': 'test mode must be 0, 1 or 2, got {mode}',
+  'diagnostic.device.tuningPacket':
+    'transferBytes {bytes} is not a multiple of the {packet}-byte packet size',
+  'diagnostic.device.tuningDepth':
+    'transfer depth {depth} is below the 4 the device needs to not overrun',
+  'diagnostic.device.tuningTransfer':
+    'transferBytes {bytes} exceeds Chromium WebUSB’s {limit}-byte limit',
+  'diagnostic.device.tuningQueue':
+    'transfer queue {depth} x {bytes} B exceeds the safe {budget}-byte usbfs budget; raise usbfs_memory_mb and queueBudgetBytes together',
+  'diagnostic.device.startRunning': 'start() called while already running',
+  'diagnostic.device.startStopping':
+    'start() called before the previous capture finished stopping',
+  'diagnostic.device.startBeforeOpen': 'start() called before open()',
+  'diagnostic.device.triggerLimitConflict':
+    'softwareTrigger and deviceSampleLimit are mutually exclusive; bound a triggered capture with softwareTrigger.maxSamples',
+  'diagnostic.device.coalescePacket':
+    'coalesceBytes {bytes} is not a multiple of the {packet}-byte sample size',
+  'diagnostic.device.triggerWidth':
+    'software trigger width {width} does not match capture width {channels}',
+  'diagnostic.device.bulkStatus': 'bulk IN returned status "{status}"',
+  'diagnostic.device.bulkEmpty': 'bulk IN returned no data with status "ok"',
+  'diagnostic.device.consoleBusy':
+    'USB console is unavailable while a capture is running or stopping',
+  'diagnostic.device.notOpen': 'device is not open',
+  'diagnostic.device.noData':
+    '{device} delivered no data within {deadline} ms of RUN ({channels}ch @ {rate} MHz). A board in this state answers every control transfer and sends nothing on the bulk endpoint: unplug it and plug it back in.',
+  'diagnostic.device.underrunStalled':
+    '{device} overran the host: {channels}ch @ {rate} MHz offers {offered} MB/s for {count} consecutive transfers: {transferMs} ms for {bytes} B (limit {limitMs} ms), {avg} MB/s average over {runMs} ms (minimum {minimum} MB/s). Capture aborted before the device FIFO overflow wedged the endpoint. The {thread} thread was blocked {stalls} time(s) during the capture, worst {worstMs} ms at {atMs} ms; the queue covers {coverMs} ms.',
+  'diagnostic.device.underrunClean':
+    '{device} overran the host: {channels}ch @ {rate} MHz offers {offered} MB/s for {count} consecutive transfers: {transferMs} ms for {bytes} B (limit {limitMs} ms), {avg} MB/s average over {runMs} ms (minimum {minimum} MB/s). Capture aborted before the device FIFO overflow wedged the endpoint. The {thread} thread was never blocked for more than {thresholdMs} ms, so this is the device or the USB path.',
   'diagnostic.device.openFailed': 'could not open the USB device',
   'diagnostic.device.configureFailed': 'could not select the device configuration',
   'diagnostic.device.claimFailed': 'could not claim interface 0',
