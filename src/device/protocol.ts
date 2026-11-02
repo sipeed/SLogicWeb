@@ -14,6 +14,8 @@
  * compared.
  */
 
+import { DiagnosticError } from '../diagnostics.js';
+
 export const USB_VID_SIPEED = 0x359f;
 export const PID_SLOGIC16_U3 = 0x3031;
 /** SLogic32 U3 (the 800 MB/s-class board described by the slogic-dev driver). */
@@ -210,6 +212,14 @@ function hex(b: Bytes): string {
   return Array.from(b, (v) => v.toString(16).padStart(2, '0')).join(' ');
 }
 
+function hexByte(n: number): string {
+  return `0x${n.toString(16).padStart(2, '0')}`;
+}
+
+function hexSelector(selector: number): string {
+  return `0x${selector.toString(16)}`;
+}
+
 /**
  * Deadline for a single control transfer.
  *
@@ -228,6 +238,23 @@ function hex(b: Bytes): string {
  */
 export const CONTROL_TIMEOUT_MS = 2000;
 
+export type ControlTarget =
+  | { kind: 'reg'; dir: 'read' | 'write'; addr: number }
+  | { kind: 'console'; request: number };
+
+function controlTimeout(target: ControlTarget, timeoutMs: number): DiagnosticError {
+  if (target.kind === 'console') {
+    return new DiagnosticError('device.controlRequestTimeout', {
+      request: `0x${target.request.toString(16)}`,
+      ms: timeoutMs,
+    });
+  }
+  const addr = `0x${target.addr.toString(16)}`;
+  return target.dir === 'read'
+    ? new DiagnosticError('device.controlReadTimeout', { addr, ms: timeoutMs })
+    : new DiagnosticError('device.controlWriteTimeout', { addr, ms: timeoutMs });
+}
+
 /**
  * Resolve with `work`, or reject with a named timeout once `timeoutMs` passes.
  *
@@ -238,17 +265,12 @@ export const CONTROL_TIMEOUT_MS = 2000;
  */
 export function withControlTimeout<T>(
   work: Promise<T>,
-  what: string,
+  target: ControlTarget,
   timeoutMs: number = CONTROL_TIMEOUT_MS,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const expired = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(
-        `${what} did not complete within ${timeoutMs} ms; the board stopped ` +
-        'answering control transfers',
-      ));
-    }, timeoutMs);
+    timer = setTimeout(() => reject(controlTimeout(target, timeoutMs)), timeoutMs);
   });
   work.catch(() => {});
   return Promise.race([work, expired]).finally(() => {
@@ -294,20 +316,22 @@ export class RegisterBus {
           },
           chunk,
         ),
-        `control write to reg 0x${(addr + i).toString(16)}`,
+        { kind: 'reg', dir: 'write', addr: addr + i },
         this.timeoutMs,
       );
       // Silent rejection is the default failure mode: a stalled control
       // transfer still resolves, it just does not report 'ok'.
       if (r.status !== 'ok') {
-        throw new Error(
-          `control write to reg 0x${(addr + i).toString(16)} returned status "${r.status}"`,
-        );
+        throw new DiagnosticError('device.controlWriteStatus', {
+          addr: `0x${(addr + i).toString(16)}`,
+          status: r.status,
+        });
       }
       if (r.bytesWritten !== 4) {
-        throw new Error(
-          `control write to reg 0x${(addr + i).toString(16)} moved ${r.bytesWritten} bytes, expected 4`,
-        );
+        throw new DiagnosticError('device.controlWriteLength', {
+          addr: `0x${(addr + i).toString(16)}`,
+          bytes: r.bytesWritten,
+        });
       }
       this.trace({ dir: 'wr', addr: addr + i, bytes: hex(chunk), note: '' });
     }
@@ -329,18 +353,20 @@ export class RegisterBus {
           },
           4,
         ),
-        `control read of reg 0x${(addr + i).toString(16)}`,
+        { kind: 'reg', dir: 'read', addr: addr + i },
         this.timeoutMs,
       );
       if (r.status !== 'ok') {
-        throw new Error(
-          `control read of reg 0x${(addr + i).toString(16)} returned status "${r.status}"`,
-        );
+        throw new DiagnosticError('device.controlReadStatus', {
+          addr: `0x${(addr + i).toString(16)}`,
+          status: r.status,
+        });
       }
       if (!r.data || r.data.byteLength !== 4) {
-        throw new Error(
-          `control read of reg 0x${(addr + i).toString(16)} returned ${r.data?.byteLength ?? 0} bytes, expected 4`,
-        );
+        throw new DiagnosticError('device.controlReadLength', {
+          addr: `0x${(addr + i).toString(16)}`,
+          bytes: r.data?.byteLength ?? 0,
+        });
       }
       out.set(
         new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength),
@@ -465,9 +491,11 @@ export async function programCtrl(
   value: number,
   trace: Tracer = () => {},
   where = 'CTRL',
+  stage = '',
 ): Promise<number> {
   const wanted = value & 0xff;
-  let last = 'no cycle ran';
+  const label = stage ? `${stage}: ${where}` : where;
+  let readBack = wanted;
   for (let cycle = 1; cycle <= CTRL_WRITE_CYCLES; cycle++) {
     let was: number;
     try {
@@ -476,34 +504,35 @@ export async function programCtrl(
       await bus.writeCtrl(wanted);
       trace({
         dir: 'info',
-        note: `${where}=0x${wanted.toString(16).padStart(2, '0')} written unverified: ` +
+        note: `${label}=${hexByte(wanted)} written unverified: ` +
           `R32_CTRL is unreadable (${String(e)})`,
       });
       return 0;
     }
     await bus.writeCtrl(wanted);
-    const now = await readCtrlByte(bus);
-    if (now === wanted) {
+    readBack = await readCtrlByte(bus);
+    if (readBack === wanted) {
       trace({
         dir: 'info',
-        note: `${where}=0x${wanted.toString(16).padStart(2, '0')} verified` +
+        note: `${label}=${hexByte(wanted)} verified` +
           (cycle > 1 ? ` (cycle ${cycle})` : '') +
           (was === wanted ? ' (the register already held it)' : ''),
       });
       return cycle;
     }
-    last = `wrote 0x${wanted.toString(16).padStart(2, '0')}, read back ` +
-      `0x${now.toString(16).padStart(2, '0')}`;
     trace({
       dir: 'info',
-      note: `${where}: cycle ${cycle} did not stick (${last}, was 0x${was
-        .toString(16).padStart(2, '0')}), writing it again`,
+      note: `${label}: cycle ${cycle} did not stick (wrote ${hexByte(wanted)}, ` +
+        `read back ${hexByte(readBack)}, was ${hexByte(was)}), writing it again`,
     });
   }
-  throw new Error(
-    `${where}=0x${wanted.toString(16).padStart(2, '0')} never stuck across ` +
-      `${CTRL_WRITE_CYCLES} read/write/read cycles (${last})`,
-  );
+  throw new DiagnosticError('device.registerStuck', {
+    where,
+    wanted: hexByte(wanted),
+    cycles: CTRL_WRITE_CYCLES,
+    wrote: hexByte(wanted),
+    readBack: hexByte(readBack),
+  });
 }
 
 /**
@@ -541,10 +570,11 @@ export async function writeSampleLength(
   await tx.writePayload();
   await tx.readPayload();
   if (!tx.verifyU32(0, value)) {
-    throw new Error(
-      `sample length not accepted: wrote ${value}, read back ${tx.u32(0)} ` +
-        `(compared over the ${tx.advertisedBytesInWord(0)} advertised byte(s))`,
-    );
+    throw new DiagnosticError('device.sampleLengthRejected', {
+      value,
+      readBack: tx.u32(0),
+      advertised: tx.advertisedBytesInWord(0),
+    });
   }
   trace({ dir: 'info', note: `sample length ${value} verified` });
   return tx.u32(0);
@@ -626,17 +656,19 @@ export class AuxTransaction {
       status = null;
     }
     if (!status) {
-      throw new Error(
-        `aux selector 0x${selector.toString(16)}: ready bit never set after ${AUX_READY_READS} reads`,
-      );
+      throw new DiagnosticError('device.auxReadyTimeout', {
+        selector: hexSelector(selector),
+        reads: AUX_READY_READS,
+      });
     }
     // The device echoes the selector in byte 0. Observed for selectors
     // 0x01/0x02/0x03/0x05 on S/N 202512261505. A mismatch means the aux engine
     // is answering about something else and everything after would be garbage.
     if (status[0] !== selector) {
-      throw new Error(
-        `aux selector 0x${selector.toString(16)}: device echoed 0x${status[0].toString(16)}`,
-      );
+      throw new DiagnosticError('device.auxEcho', {
+        selector: hexSelector(selector),
+        echoed: `0x${status[0].toString(16)}`,
+      });
     }
 
     const tx = new AuxTransaction(bus, selector, status);
@@ -654,9 +686,9 @@ export class AuxTransaction {
 
   async readPayload(): Promise<void> {
     if (this.payloadLen === 0) {
-      throw new Error(
-        `aux selector 0x${this.selector.toString(16)}: device reported a zero-length payload`,
-      );
+      throw new DiagnosticError('device.auxZeroLength', {
+        selector: hexSelector(this.selector),
+      });
     }
     const p = await this.bus.read(R32_AUX_PAYLOAD, this.payloadLen);
     this.buf.set(p.subarray(0, Math.min(p.length, AUX_BUF_BYTES - 4)), 4);
@@ -683,11 +715,12 @@ export class AuxTransaction {
     this.assertInPayload(i * 4 + 4);
     const mask = this.wordMask(i);
     if (((v >>> 0) & ~mask) >>> 0) {
-      throw new Error(
-        `aux selector 0x${this.selector.toString(16)}: value 0x${(v >>> 0).toString(16)} ` +
-          `does not fit the ${this.advertisedBytesInWord(i)} byte(s) the device advertised ` +
-          `for payload word ${i}`,
-      );
+      throw new DiagnosticError('device.auxValueTooWide', {
+        selector: hexSelector(this.selector),
+        value: `0x${(v >>> 0).toString(16)}`,
+        advertised: this.advertisedBytesInWord(i),
+        word: i,
+      });
     }
     this.view.setUint32(4 + i * 4, v >>> 0, true);
   }
@@ -731,10 +764,11 @@ export class AuxTransaction {
   wordMask(i: number): number {
     const n = this.advertisedBytesInWord(i);
     if (n === 0) {
-      throw new Error(
-        `aux selector 0x${this.selector.toString(16)}: payload word ${i} is entirely outside ` +
-          `the ${this.payloadLen}-byte payload the device advertised`,
-      );
+      throw new DiagnosticError('device.auxWordOutside', {
+        selector: hexSelector(this.selector),
+        word: i,
+        bytes: this.payloadLen,
+      });
     }
     return n >= 4 ? 0xffffffff : (((1 << (n * 8)) >>> 0) - 1) >>> 0;
   }
@@ -761,10 +795,11 @@ export class AuxTransaction {
    */
   private assertInPayload(endByte: number): void {
     if (endByte > this.payloadTransferLen) {
-      throw new Error(
-        `aux selector 0x${this.selector.toString(16)}: field ends at payload byte ${endByte} ` +
-          `but the device only accepts ${this.payloadTransferLen} bytes`,
-      );
+      throw new DiagnosticError('device.auxFieldOutside', {
+        selector: hexSelector(this.selector),
+        endByte,
+        accepted: this.payloadTransferLen,
+      });
     }
   }
 }
@@ -786,12 +821,15 @@ export async function configureChannels(
   await tx.readPayload();
   const accepted = channels === 32 ? tx.verifyPaddedU32(0, mask) : tx.verifyU32(0, mask);
   if (!accepted) {
-    throw new Error(
-      `channel mask not accepted: wrote 0x${mask.toString(16)}, read back 0x${tx.u32(0).toString(16)} ` +
-        (channels === 32
-          ? '(compared over the complete four-byte padded word)'
-          : `(compared over the ${tx.advertisedBytesInWord(0)} advertised byte(s))`),
-    );
+    const maskText = `0x${mask.toString(16)}`;
+    const readBack = `0x${tx.u32(0).toString(16)}`;
+    throw channels === 32
+      ? new DiagnosticError('device.channelMaskRejectedPadded', { mask: maskText, readBack })
+      : new DiagnosticError('device.channelMaskRejected', {
+        mask: maskText,
+        readBack,
+        advertised: tx.advertisedBytesInWord(0),
+      });
   }
   trace({ dir: 'info', note: `channel mask 0x${mask.toString(16)} verified` });
 }
@@ -818,28 +856,25 @@ export async function configureSamplerate(
   samplerateHz: number,
   trace: Tracer = () => {},
 ): Promise<{ baseHz: number; divider: number }> {
-  let lastCycle = 'no cycle ran';
-  for (let cycle = 1; cycle <= SAMPLERATE_WRITE_CYCLES; cycle++) {
+  for (let cycle = 1; ; cycle++) {
     const tx = await AuxTransaction.begin(bus, AUX_SAMPLERATE, trace);
     // Payload word 0 is {base index, base MHz} and word 1 is the divider, so the
     // device has to accept at least 8 payload bytes. Anything shorter would let
     // the divider write fall off the end and be dropped without complaint.
     if (tx.payloadTransferLen < 8) {
-      throw new Error(
-        `samplerate aux payload is ${tx.payloadTransferLen} bytes, need at least 8 for the divider`,
-      );
+      throw new DiagnosticError('device.sampleratePayload', { bytes: tx.payloadTransferLen });
     }
     const outcome = await programSamplerate(tx, samplerateHz, trace);
     // A rate no base can express is deterministic: the walk answered from the
     // device's own table, so repeating it would only repeat the same refusal.
     if (outcome.kind === 'refused') throw outcome.error;
     if (outcome.kind === 'retry') {
-      lastCycle = outcome.detail;
       trace({
         dir: 'info',
         note: `samplerate ${samplerateHz / 1e6} MHz: cycle ${cycle} did not stick ` +
           `(${outcome.detail}), writing it again`,
       });
+      if (cycle === SAMPLERATE_WRITE_CYCLES) throw outcome.failure;
       continue;
     }
 
@@ -848,13 +883,43 @@ export async function configureSamplerate(
     const confirm = await AuxTransaction.begin(bus, AUX_SAMPLERATE, trace);
     await confirm.readPayload();
     const answered = `index ${confirm.u16(0)} base ${confirm.u16(1)} MHz divider ${confirm.u32(1)}`;
-    if (!confirm.verifyU32(1, outcome.divider - 1) || confirm.u16(1) * 1e6 !== outcome.baseHz) {
-      lastCycle = `wrote ${outcome.divider - 1} on base ${outcome.baseMHz} MHz, the device answered ${answered}`;
+    const dividerStuck = !confirm.verifyU32(1, outcome.divider - 1);
+    const baseChanged = confirm.u16(1) * 1e6 !== outcome.baseHz;
+    if (dividerStuck || baseChanged) {
       trace({
         dir: 'info',
         note: `samplerate ${samplerateHz / 1e6} MHz: cycle ${cycle} read back as ${answered}, ` +
           'writing it again',
       });
+      if (cycle === SAMPLERATE_WRITE_CYCLES) {
+        const common = {
+          rate: samplerateHz / 1e6,
+          before: outcome.baseMHz,
+          index: confirm.u16(0),
+          cycles: SAMPLERATE_WRITE_CYCLES,
+        };
+        if (dividerStuck && baseChanged) {
+          throw new DiagnosticError('device.samplerateAnswered', {
+            ...common,
+            wrote: outcome.divider - 1,
+            after: confirm.u16(1),
+            readBack: confirm.u32(1),
+          });
+        }
+        if (dividerStuck) {
+          throw new DiagnosticError('device.samplerateStuck', {
+            ...common,
+            base: confirm.u16(1),
+            wrote: outcome.divider - 1,
+            readBack: confirm.u32(1),
+          });
+        }
+        throw new DiagnosticError('device.samplerateBaseChanged', {
+          ...common,
+          after: confirm.u16(1),
+          divider: outcome.divider - 1,
+        });
+      }
       continue;
     }
     trace({
@@ -864,10 +929,6 @@ export async function configureSamplerate(
     });
     return { baseHz: outcome.baseHz, divider: outcome.divider };
   }
-  throw new Error(
-    `could not configure ${samplerateHz / 1e6} MHz: the divider never stuck ` +
-      `(${lastCycle}) across ${SAMPLERATE_WRITE_CYCLES} read/write/read cycles`,
-  );
 }
 
 /** Outcome of one read -> write -> read cycle of the samplerate aux command. */
@@ -875,13 +936,34 @@ type SamplerateCycle =
   /** The device kept the divider through the cycle's own read-back. */
   | { kind: 'programmed'; baseHz: number; baseMHz: number; divider: number }
   /** The read-back disagreed; a fresh command may land where this one did not. */
-  | { kind: 'retry'; detail: string }
+  | { kind: 'retry'; detail: string; failure: DiagnosticError }
   /**
    * The device's own base table cannot express the rate. This one stays out of the
    * retry loop: repeating it would walk the same two bases again and report a wire
    * problem where the honest answer is that the rate is not offered.
    */
-  | { kind: 'refused'; error: Error };
+  | { kind: 'refused'; error: DiagnosticError };
+
+function samplerateRefusal(
+  seen: Map<number, number>,
+  samplerateHz: number,
+): DiagnosticError {
+  const [index, baseMHz] = [...seen].sort(([a], [b]) => a - b)[0]!;
+  const common = {
+    rate: samplerateHz / 1e6,
+    count: seen.size,
+    index,
+    baseMHz,
+    maxIndex: MAX_BASE_INDEX,
+  };
+  return baseMHz !== 0 && (baseMHz * 1e6) % samplerateHz === 0
+    ? new DiagnosticError('device.samplerateNotExpressible', {
+      ...common,
+      divider: (baseMHz * 1e6) / samplerateHz,
+      maxDivider: MAX_SAMPLERATE_DIVIDER,
+    })
+    : new DiagnosticError('device.samplerateNotDivided', common);
+}
 
 async function programSamplerate(
   tx: AuxTransaction,
@@ -924,12 +1006,29 @@ async function programSamplerate(
         return {
           kind: 'retry',
           detail: `wrote divider ${divider - 1}, read back ${tx.u32(1)}`,
+          failure: new DiagnosticError('device.samplerateStuck', {
+            rate: samplerateHz / 1e6,
+            base: baseMHz,
+            before: baseMHz,
+            index: baseIndex,
+            wrote: divider - 1,
+            readBack: tx.u32(1),
+            cycles: SAMPLERATE_WRITE_CYCLES,
+          }),
         };
       }
       if (tx.u16(1) * 1e6 !== baseHz) {
         return {
           kind: 'retry',
           detail: `base changed under us: ${tx.u16(1)} MHz after write, ${baseMHz} MHz before`,
+          failure: new DiagnosticError('device.samplerateBaseChanged', {
+            rate: samplerateHz / 1e6,
+            before: baseMHz,
+            after: tx.u16(1),
+            index: tx.u16(0),
+            divider: divider - 1,
+            cycles: SAMPLERATE_WRITE_CYCLES,
+          }),
         };
       }
       return { kind: 'programmed', baseHz, baseMHz, divider };
@@ -941,20 +1040,7 @@ async function programSamplerate(
       // device (drop the preference and go to one that fits) or nothing fits.
       const usable = [...seen].find(([, mhz]) => fitsBase(mhz));
       if (!usable) {
-        const why = [...seen].sort(([a], [b]) => a - b).map(([i, mhz]) => {
-          const reason = mhz === 0 || (mhz * 1e6) % samplerateHz !== 0
-            ? 'does not divide it'
-            : `needs divider ${(mhz * 1e6) / samplerateHz}, past the ${MAX_SAMPLERATE_DIVIDER} ` +
-              'the sampler honours';
-          return `base[${i}] = ${mhz} MHz ${reason}`;
-        });
-        return {
-          kind: 'refused',
-          error: new Error(
-            `could not configure ${samplerateHz / 1e6} MHz: ${why.join(', ')}, ` +
-              `and index ${MAX_BASE_INDEX} is the last one that exists`,
-          ),
-        };
+        return { kind: 'refused', error: samplerateRefusal(seen, samplerateHz) };
       }
       wantMHz = 0;
       if (usable[0] === baseIndex) {
@@ -977,6 +1063,10 @@ async function programSamplerate(
   return {
     kind: 'retry',
     detail: `no usable base clock after ${SAMPLERATE_BASE_PASSES} passes`,
+    failure: new DiagnosticError('device.samplerateUnwalked', {
+      rate: samplerateHz / 1e6,
+      passes: SAMPLERATE_BASE_PASSES,
+    }),
   };
 }
 
@@ -993,10 +1083,11 @@ export async function configureThreshold(
   await tx.writePayload();
   await tx.readPayload();
   if (!tx.verifyU32(0, code)) {
-    throw new Error(
-      `threshold not accepted: wrote code ${code}, read back ${tx.u32(0)} ` +
-        `(compared over the ${tx.advertisedBytesInWord(0)} advertised byte(s))`,
-    );
+    throw new DiagnosticError('device.thresholdRejected', {
+      code,
+      readBack: tx.u32(0),
+      advertised: tx.advertisedBytesInWord(0),
+    });
   }
   const achievedVolts = vrefVolts(code);
   trace({
@@ -1018,10 +1109,11 @@ export async function configureTestMode(
   await tx.writePayload();
   await tx.readPayload();
   if (!tx.verifyU32(0, mode)) {
-    throw new Error(
-      `test mode not accepted: wrote ${mode}, read back ${tx.u32(0)} ` +
-        `(compared over the ${tx.advertisedBytesInWord(0)} advertised byte(s))`,
-    );
+    throw new DiagnosticError('device.testModeRejected', {
+      mode,
+      readBack: tx.u32(0),
+      advertised: tx.advertisedBytesInWord(0),
+    });
   }
   trace({ dir: 'info', note: `test mode ${mode} verified` });
 }

@@ -132,6 +132,17 @@ async function expectDiagnostic(
   check(name, diag?.code === code, `got ${diag ? diag.code : '<no diagnostic>'}`);
 }
 
+async function diagnosticFromThrow(
+  fn: () => Promise<unknown>,
+): Promise<ReturnType<typeof diagnosticOf>> {
+  try {
+    await fn();
+  } catch (e) {
+    return diagnosticOf(e);
+  }
+  return null;
+}
+
 /**
  * Devices that answer, but badly. RegisterBus has to reject each of these:
  * a control transfer that is refused still *resolves*, it just does not say
@@ -519,51 +530,71 @@ async function main(): Promise<void> {
   {
     // ...and a value that does not fit the advertised length is refused rather
     // than being written and silently truncated by the device.
-    let err = '';
-    try {
+    const refused = await diagnosticFromThrow(
       // An arbitrary wider mask is still refused; only the known 32U3 width uses the
       // firmware's padded-word compatibility path.
-      await configureChannels(bus(recorded()).bus, 24);
-    } catch (e) {
-      err = String(e);
-    }
-    check('a value wider than the advertised length is refused', err.includes('does not fit'), err);
+      () => configureChannels(bus(recorded()).bus, 24),
+    );
+    check('a value wider than the advertised length is refused',
+      refused?.code === 'device.auxValueTooWide', JSON.stringify(refused));
+    check('the refused write keeps the selector, the value and the advertised width',
+      refused?.vars?.selector === '0x1' && refused.vars.value === '0xffffff' &&
+        refused.vars.advertised === 2 && refused.vars.word === 0,
+      JSON.stringify(refused?.vars));
   }
 
   console.log('\nfailure modes');
-  await expectThrow(
-    'ready bit never set is fatal',
-    () => configureChannels(bus({ 0x01: { status: 0x00010401, payload: [0], ready: false } }).bus, 16),
-    'ready bit never set',
-  );
-  await expectThrow(
-    'wrong selector echo is fatal',
-    () => configureChannels(bus({ 0x01: { status: 0x00010401, payload: [0], echo: 0x07 } }).bus, 16),
-    'echoed',
-  );
-  await expectThrow(
-    'a payload the device will not accept is fatal, not silently truncated',
+  {
+    const ready = await diagnosticFromThrow(
+      () => configureChannels(bus({ 0x01: { status: 0x00010401, payload: [0], ready: false } }).bus, 16),
+    );
+    check('ready bit never set is fatal', ready?.code === 'device.auxReadyTimeout',
+      JSON.stringify(ready));
+    check('the ready timeout keeps the selector and its poll budget as vars',
+      ready?.vars?.selector === '0x1' && ready.vars.reads === 6, JSON.stringify(ready?.vars));
+  }
+  {
+    const echoed = await diagnosticFromThrow(
+      () => configureChannels(bus({ 0x01: { status: 0x00010401, payload: [0], echo: 0x07 } }).bus, 16),
+    );
+    check('wrong selector echo is fatal', echoed?.code === 'device.auxEcho', JSON.stringify(echoed));
+    check('the echo failure keeps both selectors as vars',
+      echoed?.vars?.selector === '0x1' && echoed.vars.echoed === '0x7',
+      JSON.stringify(echoed?.vars));
+  }
+  {
     // Length 2 rounds up to one 4-byte word, but the divider lives in word 1.
-    () => configureSamplerate(bus({ 0x02: { status: 0x00010402, payload: [0, 0] } }).bus, 16e6),
-    'need at least 8',
-  );
-  await expectThrow(
-    'a read-back mismatch is fatal',
-    () =>
-      configureChannels(
-        bus({
-          0x01: {
-            status: 0x00010401,
-            payload: [0],
-            onWord0: (self) => {
-              self.payload[0] = 0xdead; // device quietly ignores the write
+    const short = await diagnosticFromThrow(
+      () => configureSamplerate(bus({ 0x02: { status: 0x00010402, payload: [0, 0] } }).bus, 16e6),
+    );
+    check('a payload the device will not accept is fatal, not silently truncated',
+      short?.code === 'device.sampleratePayload', JSON.stringify(short));
+    check('the short samplerate payload reports the length the device advertised',
+      short?.vars?.bytes === 4, JSON.stringify(short?.vars));
+  }
+  {
+    const ignored = await diagnosticFromThrow(
+      () =>
+        configureChannels(
+          bus({
+            0x01: {
+              status: 0x00010401,
+              payload: [0],
+              onWord0: (self) => {
+                self.payload[0] = 0xdead; // device quietly ignores the write
+              },
             },
-          },
-        }).bus,
-        16,
-      ),
-    'not accepted',
-  );
+          }).bus,
+          16,
+        ),
+    );
+    check('a read-back mismatch is fatal',
+      ignored?.code === 'device.channelMaskRejected', JSON.stringify(ignored));
+    check('the mask rejection keeps the mask, the read-back and the compared width',
+      ignored?.vars?.mask === '0xffff' && ignored.vars.readBack === '0xdead' &&
+        ignored.vars.advertised === 2,
+      JSON.stringify(ignored?.vars));
+  }
   {
     // Base always 700 MHz, which never divides 16 MHz. The walk must give up,
     // and - this is the part that matters - it must never write a base index
@@ -577,14 +608,14 @@ async function main(): Promise<void> {
         },
       },
     });
-    let err = '';
-    try {
-      await configureSamplerate(b, 16e6);
-    } catch (e) {
-      err = String(e);
-    }
+    const refused = await diagnosticFromThrow(() => configureSamplerate(b, 16e6));
     check('an unreachable samplerate gives up instead of spinning',
-      err.includes('is the last one that exists'), err);
+      refused?.code === 'device.samplerateNotDivided', JSON.stringify(refused));
+    check('the refusal names the base it could not divide and the walk that found it',
+      refused?.vars?.baseMHz === 700 && refused.vars.rate === 16 &&
+        refused.vars.index === 0 && refused.vars.maxIndex === 1 &&
+        refused.vars.count === 2,
+      JSON.stringify(refused?.vars));
 
     const indicesWritten = dev.log
       .filter((l) => l.startsWith('W 10 '))
@@ -728,11 +759,14 @@ async function main(): Promise<void> {
           },
         },
       });
-      await expectThrow(
-        'a rate no base can express is refused, not truncated',
-        () => configureSamplerate(b, 5e6),
-        'past the 255 the sampler honours',
-      );
+      const refused = await diagnosticFromThrow(() => configureSamplerate(b, 5e6));
+      check('a rate no base can express is refused, not truncated',
+        refused?.code === 'device.samplerateNotExpressible', JSON.stringify(refused));
+      check('the refusal keeps the divider it would have needed past the sampler byte',
+        refused?.vars?.baseMHz === 1400 && refused.vars.divider === 280 &&
+          refused.vars.maxDivider === 255 && refused.vars.index === 0 &&
+          refused.vars.maxIndex === 1 && refused.vars.count === 2,
+        JSON.stringify(refused?.vars));
     }
     {
       // NOTES 8.11, the half a read-back cannot see: R32_AUX+4 is scratch RAM, and a
@@ -777,39 +811,162 @@ async function main(): Promise<void> {
         payload: [(800 << 16) | 1, 7],
         dropPayloadWrites: 99,
       };
-      let err = '';
-      try {
-        await configureSamplerate(bus({ 0x02: model }).bus, 5e6);
-      } catch (e) {
-        err = String(e);
-      }
+      const failure = await diagnosticFromThrow(
+        () => configureSamplerate(bus({ 0x02: model }).bus, 5e6),
+      );
       check('a divider the device never keeps is fatal, and names the rate',
-        err.includes('could not configure 5 MHz') && err.includes('read/write/read cycles'),
-        err || '<no throw>');
+        failure?.code === 'device.samplerateStuck' && failure.vars?.rate === 5,
+        JSON.stringify(failure));
+      check('the stuck divider reports the last cycle it tried and the cycle count',
+        failure?.vars?.wrote === 159 && failure.vars.readBack === 7 &&
+          failure.vars.cycles === 3,
+        JSON.stringify(failure?.vars));
+      check('the stuck divider keeps the base clock the walk was on and its index',
+        failure?.vars?.base === 800 && failure.vars.index === 1 &&
+          failure.vars.before === 800,
+        JSON.stringify(failure?.vars));
+    }
+    {
+      const model: AuxModel = {
+        status: 0x00011002,
+        payload: [(800 << 16) | 1, 7],
+      };
+      let dividerWord = 7;
+      Object.defineProperty(model.payload, 1, {
+        get: () => dividerWord,
+        set: (v: number) => {
+          dividerWord = v >>> 0;
+          model.payload[0] = (1000 << 16) | 0;
+        },
+      });
+      model.live = {
+        get divider(): number { return dividerWord; },
+        set divider(_v: number) { model.payload[0] = (800 << 16) | 1; },
+      };
+      const failure = await diagnosticFromThrow(
+        () => configureSamplerate(bus({ 0x02: model }).bus, 5e6),
+      );
+      check('a base the write cycle moves is reported with the clock it moved to',
+        failure?.code === 'device.samplerateBaseChanged' && failure.vars?.before === 800 &&
+          failure.vars.after === 1000 && failure.vars.divider === 159 &&
+          failure.vars.cycles === 3,
+        JSON.stringify(failure));
+      check('the moved base keeps the index the device answered, not the one written',
+        failure?.vars?.index === 0, JSON.stringify(failure?.vars));
+    }
+    {
+      const model: AuxModel = {
+        status: 0x00011002,
+        payload: [(800 << 16) | 1, 7],
+      };
+      model.live = {
+        get divider(): number { return model.payload[1] ?? 0; },
+        set divider(_v: number) { model.payload[1] = 7; },
+      };
+      const failure = await diagnosticFromThrow(
+        () => configureSamplerate(bus({ 0x02: model }).bus, 5e6),
+      );
+      check('a divider the confirm read never sees keeps the answered base and index',
+        failure?.code === 'device.samplerateStuck' && failure.vars?.base === 800 &&
+          failure.vars.index === 1 && failure.vars.wrote === 159 && failure.vars.readBack === 7 &&
+          failure.vars.before === 800,
+        JSON.stringify(failure));
+    }
+    {
+      const model: AuxModel = {
+        status: 0x00011002,
+        payload: [(800 << 16) | 1, 7],
+      };
+      let selectorWrites = 0;
+      model.live = {
+        get divider(): number { return model.payload[1] ?? 0; },
+        set divider(v: number) {
+          selectorWrites++;
+          model.payload[0] = selectorWrites % 2 === 1 ? ((800 << 16) | 1) : ((1000 << 16) | 0);
+          model.payload[1] = v;
+        },
+      };
+      const failure = await diagnosticFromThrow(
+        () => configureSamplerate(bus({ 0x02: model }).bus, 5e6),
+      );
+      check('a base that moves under the confirm read is reported as the base, not the divider',
+        failure?.code === 'device.samplerateBaseChanged' && failure.vars?.before === 800 &&
+          failure.vars.after === 1000 && failure.vars.index === 0 &&
+          failure.vars.divider === 159 && failure.vars.cycles === 3,
+        JSON.stringify(failure));
+    }
+    {
+      const model: AuxModel = {
+        status: 0x00011002,
+        payload: [(800 << 16) | 1, 7],
+      };
+      let selectorWrites = 0;
+      model.live = {
+        get divider(): number { return model.payload[1] ?? 0; },
+        set divider(v: number) {
+          selectorWrites++;
+          model.payload[0] = selectorWrites % 2 === 1 ? ((800 << 16) | 1) : ((1400 << 16) | 0);
+          model.payload[1] = selectorWrites % 2 === 1 ? v : 7;
+        },
+      };
+      const failure = await diagnosticFromThrow(
+        () => configureSamplerate(bus({ 0x02: model }).bus, 5e6),
+      );
+      check('a confirm read that disagrees about base and divider keeps both answers',
+        failure?.code === 'device.samplerateAnswered' && failure.vars?.before === 800 &&
+          failure.vars.after === 1400 && failure.vars.index === 0 &&
+          failure.vars.wrote === 159 && failure.vars.readBack === 7 &&
+          failure.vars.cycles === 3,
+        JSON.stringify(failure));
+    }
+    {
+      const model: AuxModel = {
+        status: 0x00011002,
+        payload: [(1400 << 16) | 0, 0],
+        dropPayloadWrites: 99,
+      };
+      const failure = await diagnosticFromThrow(
+        () => configureSamplerate(bus({ 0x02: model }).bus, 50e6),
+      );
+      check('a walk whose writes never land reports the unwalked base, not a divider verdict',
+        failure?.code === 'device.samplerateUnwalked', JSON.stringify(failure));
+      check('the unwalked failure keeps the rate and the pass budget',
+        failure?.vars?.rate === 50 && failure.vars.passes === 6,
+        JSON.stringify(failure?.vars));
     }
   }
 
   console.log('\nreply checking (a refused transfer still resolves)');
-  await expectThrow(
-    'a stalled control write is fatal',
-    () => configureChannels(badBus('status'), 16),
-    'returned status "stall"',
-  );
-  await expectThrow(
-    'a control write that moved the wrong number of bytes is fatal',
-    () => configureChannels(badBus('bytesWritten'), 16),
-    'moved 2 bytes, expected 4',
-  );
-  await expectThrow(
-    'a short control read is fatal',
-    () => configureChannels(badBus('short'), 16),
-    'returned 2 bytes, expected 4',
-  );
-  await expectThrow(
-    'a control read with a bad status is fatal',
-    () => configureChannels(badBus('inStatus'), 16),
-    'returned status "babble"',
-  );
+  {
+    const stalled = await diagnosticFromThrow(() => configureChannels(badBus('status'), 16));
+    check('a stalled control write is fatal',
+      stalled?.code === 'device.controlWriteStatus', JSON.stringify(stalled));
+    check('the stalled write keeps the register and the raw status token',
+      stalled?.vars?.addr === '0xc' && stalled.vars.status === 'stall',
+      JSON.stringify(stalled?.vars));
+  }
+  {
+    const short = await diagnosticFromThrow(() => configureChannels(badBus('bytesWritten'), 16));
+    check('a control write that moved the wrong number of bytes is fatal',
+      short?.code === 'device.controlWriteLength', JSON.stringify(short));
+    check('the short write keeps the register and the byte count',
+      short?.vars?.addr === '0xc' && short.vars.bytes === 2, JSON.stringify(short?.vars));
+  }
+  {
+    const short = await diagnosticFromThrow(() => configureChannels(badBus('short'), 16));
+    check('a short control read is fatal',
+      short?.code === 'device.controlReadLength', JSON.stringify(short));
+    check('the short read keeps the register and the byte count',
+      short?.vars?.addr === '0xc' && short.vars.bytes === 2, JSON.stringify(short?.vars));
+  }
+  {
+    const refused = await diagnosticFromThrow(() => configureChannels(badBus('inStatus'), 16));
+    check('a control read with a bad status is fatal',
+      refused?.code === 'device.controlReadStatus', JSON.stringify(refused));
+    check('the refused read keeps the register and the raw status token',
+      refused?.vars?.addr === '0xc' && refused.vars.status === 'babble',
+      JSON.stringify(refused?.vars));
+  }
 
   console.log('\ncontrol-transfer deadline (a board that stops answering)');
   {
@@ -818,42 +975,34 @@ async function main(): Promise<void> {
     const silent = new SilentDevice();
     const silentBus = new RegisterBus(silent as unknown as USBDevice, () => {}, 40);
     const readStarted = Date.now();
-    let readError = '';
-    try {
-      await silentBus.read(0x04, 4);
-    } catch (e) {
-      readError = String(e);
-    }
+    const readError = await diagnosticFromThrow(() => silentBus.read(0x04, 4));
     const readWaited = Date.now() - readStarted;
     check('a control read that never answers fails instead of hanging',
-      readError.includes('control read of reg 0x4 did not complete within 40 ms'),
-      readError || '<no throw>');
+      readError?.code === 'device.controlReadTimeout', JSON.stringify(readError));
+    check('the deadline keeps the register it abandoned and its budget',
+      readError?.vars?.addr === '0x4' && readError.vars.ms === 40,
+      JSON.stringify(readError?.vars));
     check('and it fails at the deadline, not later',
       readWaited >= 35 && readWaited < 500, `${readWaited} ms`);
 
-    let writeError = '';
-    try {
-      await silentBus.write(0x04, Uint8Array.of(0, 0, 0, 0));
-    } catch (e) {
-      writeError = String(e);
-    }
+    const writeError = await diagnosticFromThrow(
+      () => silentBus.write(0x04, Uint8Array.of(0, 0, 0, 0)),
+    );
     check('a control write that never answers fails instead of hanging',
-      writeError.includes('control write to reg 0x4 did not complete within 40 ms'),
-      writeError || '<no throw>');
+      writeError?.code === 'device.controlWriteTimeout' &&
+        writeError.vars?.addr === '0x4' && writeError.vars.ms === 40,
+      JSON.stringify(writeError));
 
     // The abandoned transfer is still inside Chromium and will settle (or fail)
     // whenever it likes. That late rejection must not escape: an unhandled
     // rejection behind an error the caller already has crashes the page.
     const late = new LateDevice();
     const lateBus = new RegisterBus(late as unknown as USBDevice, () => {}, 30);
-    let lateError = '';
-    try {
-      await lateBus.read(0x04, 4);
-    } catch (e) {
-      lateError = String(e);
-    }
+    const lateError = await diagnosticFromThrow(() => lateBus.read(0x04, 4));
     check('an answered-too-late read still reports the deadline',
-      lateError.includes('did not complete within 30 ms'), lateError || '<no throw>');
+      lateError?.code === 'device.controlReadTimeout' && lateError.vars?.ms === 30 &&
+        lateError.vars.addr === '0x4',
+      JSON.stringify(lateError));
     await new Promise((r) => setTimeout(r, 80));
     check('the abandoned transfer rejecting afterwards is swallowed',
       late.lateRejections === 1, `${late.lateRejections} late rejection(s)`);
@@ -2546,15 +2695,24 @@ async function main(): Promise<void> {
     const dev = new Slogic16U3(fake as unknown as USBDevice);
     await dev.open();
     fake.holdCtrl = true;
-    let error = '';
+    const notes: string[] = [];
+    dev.onTrace = (entry) => { if (entry.note) notes.push(entry.note); };
+    let failure: unknown = null;
     try {
       await dev.start(
         { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {}, undefined,
         { tuning: { depth: 4, transferBytes: 1024 } },
       );
-    } catch (e) { error = String(e); }
+    } catch (e) { failure = e; }
+    const stuck = diagnosticOf(failure);
     check('a CTRL write that never sticks fails the capture by name',
-      error.includes('CTRL=0x01 never stuck across 3 read/write/read cycles'), error);
+      stuck?.code === 'device.registerStuck', JSON.stringify(stuck));
+    check('the stuck CTRL keeps the register, the wanted value and the cycle budget',
+      stuck?.vars?.where === 'CTRL' && stuck.vars.wanted === '0x01' &&
+        stuck.vars.wrote === '0x01' && stuck.vars.readBack === '0x00' && stuck.vars.cycles === 3,
+      JSON.stringify(stuck?.vars));
+    check('the capture phase stays in the trace note, not in the register identifier',
+      notes.some((n) => n.startsWith('start: CTRL')), notes.join(' | '));
     check('the failed capture submits no bulk read',
       fake.transferInCalls === 0, String(fake.transferInCalls));
     await dev.stop();

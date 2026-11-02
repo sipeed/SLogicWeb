@@ -227,6 +227,57 @@ export const fr: Messages = {
   'diagnostic.device.configureFailed':
     'impossible de sélectionner la configuration de l’appareil',
   'diagnostic.device.claimFailed': 'impossible de revendiquer l’interface 0',
+  'diagnostic.device.controlReadTimeout':
+    'la lecture du registre {addr} ne s’est pas terminée en {ms} ms ; la carte a cessé de répondre aux transferts de contrôle',
+  'diagnostic.device.controlWriteTimeout':
+    'l’écriture dans le registre {addr} ne s’est pas terminée en {ms} ms ; la carte a cessé de répondre aux transferts de contrôle',
+  'diagnostic.device.controlWriteStatus':
+    'l’écriture dans le registre {addr} a renvoyé le statut « {status} »',
+  'diagnostic.device.controlWriteLength':
+    'l’écriture dans le registre {addr} a transmis {bytes} octets, 4 attendus',
+  'diagnostic.device.controlReadStatus':
+    'la lecture du registre {addr} a renvoyé le statut « {status} »',
+  'diagnostic.device.controlReadLength':
+    'la lecture du registre {addr} a renvoyé {bytes} octets, 4 attendus',
+  'diagnostic.device.controlRequestTimeout':
+    'la requête {request} de la console USB ne s’est pas terminée en {ms} ms ; la carte a cessé de répondre aux transferts de contrôle',
+  'diagnostic.device.registerStuck':
+    '{where}={wanted} ne s’est jamais maintenu sur {cycles} cycles lecture/écriture/lecture ({wrote} écrit, {readBack} relu)',
+  'diagnostic.device.sampleLengthRejected':
+    'longueur d’échantillonnage refusée : {value} écrit, {readBack} relu (comparaison sur les octets annoncés : {advertised})',
+  'diagnostic.device.auxReadyTimeout':
+    'sélecteur aux {selector} : bit de disponibilité jamais armé après {reads} lectures',
+  'diagnostic.device.auxEcho': 'sélecteur aux {selector} : l’appareil a renvoyé l’écho {echoed}',
+  'diagnostic.device.auxZeroLength':
+    'sélecteur aux {selector} : l’appareil a annoncé une charge utile de longueur nulle',
+  'diagnostic.device.auxValueTooWide':
+    'sélecteur aux {selector} : la valeur {value} ne tient pas dans les octets annoncés pour le mot de charge utile {word} ({advertised})',
+  'diagnostic.device.auxWordOutside':
+    'sélecteur aux {selector} : le mot de charge utile {word} est entièrement hors de la charge utile de {bytes} octets annoncée',
+  'diagnostic.device.auxFieldOutside':
+    'sélecteur aux {selector} : le champ se termine à l’octet de charge utile {endByte} mais l’appareil n’accepte que {accepted} octets',
+  'diagnostic.device.channelMaskRejected':
+    'masque de canaux refusé : {mask} écrit, {readBack} relu (comparaison sur les octets annoncés : {advertised})',
+  'diagnostic.device.channelMaskRejectedPadded':
+    'masque de canaux refusé : {mask} écrit, {readBack} relu (comparaison sur le mot complet de quatre octets, remplissage compris)',
+  'diagnostic.device.sampleratePayload':
+    'la charge utile aux de fréquence d’échantillonnage fait {bytes} octets, il en faut au moins 8 pour le diviseur',
+  'diagnostic.device.samplerateStuck':
+    'impossible de configurer {rate} MHz sur base[{index}] = {base} MHz : le diviseur ne s’est jamais maintenu sur {cycles} cycles lecture/écriture/lecture ({wrote} écrit, {readBack} relu, horloge de base avant l’écriture {before} MHz)',
+  'diagnostic.device.samplerateBaseChanged':
+    'impossible de configurer {rate} MHz : l’horloge de base est passée de {before} MHz à {after} MHz (diviseur {divider} écrit, l’appareil a répondu indice {index}) sur {cycles} cycles lecture/écriture/lecture',
+  'diagnostic.device.samplerateAnswered':
+    'impossible de configurer {rate} MHz : diviseur {wrote} écrit sur l’horloge de base {before} MHz, l’appareil a répondu indice {index}, base {after} MHz, diviseur {readBack} sur {cycles} cycles lecture/écriture/lecture',
+  'diagnostic.device.samplerateNotDivided':
+    'impossible de configurer {rate} MHz : base[{index}] = {baseMHz} MHz ne la divise pas ({count} bases vérifiées ; l’indice {maxIndex} est le dernier qui existe)',
+  'diagnostic.device.samplerateNotExpressible':
+    'impossible de configurer {rate} MHz : base[{index}] = {baseMHz} MHz exige un diviseur de {divider}, au-delà des {maxDivider} que l’échantillonneur honore ({count} bases vérifiées ; l’indice {maxIndex} est le dernier qui existe)',
+  'diagnostic.device.samplerateUnwalked':
+    'impossible de configurer {rate} MHz : le diviseur ne s’est jamais maintenu et aucune horloge de base n’est devenue utilisable en {passes} passes',
+  'diagnostic.device.thresholdRejected':
+    'seuil refusé : code {code} écrit, {readBack} relu (comparaison sur les octets annoncés : {advertised})',
+  'diagnostic.device.testModeRejected':
+    'mode de test refusé : {mode} écrit, {readBack} relu (comparaison sur les octets annoncés : {advertised})',
   'diagnostic.usb.unavailable': 'WebUSB n’est pas disponible dans ce navigateur',
   'diagnostic.usb.blocked': 'le navigateur a bloqué l’accès aux appareils USB',
   'diagnostic.usb.notVisible':

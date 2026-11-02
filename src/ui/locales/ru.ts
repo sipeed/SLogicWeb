@@ -221,6 +221,55 @@ export const ru: Messages = {
   'diagnostic.device.openFailed': 'не удалось открыть USB-устройство',
   'diagnostic.device.configureFailed': 'не удалось выбрать конфигурацию устройства',
   'diagnostic.device.claimFailed': 'не удалось захватить интерфейс 0',
+  'diagnostic.device.controlReadTimeout':
+    'чтение регистра {addr} не завершилось за {ms} мс; плата перестала отвечать на управляющие передачи',
+  'diagnostic.device.controlWriteTimeout':
+    'запись в регистр {addr} не завершилась за {ms} мс; плата перестала отвечать на управляющие передачи',
+  'diagnostic.device.controlWriteStatus': 'запись в регистр {addr} вернула статус «{status}»',
+  'diagnostic.device.controlWriteLength':
+    'запись в регистр {addr} передала {bytes} байт, ожидалось 4',
+  'diagnostic.device.controlReadStatus': 'чтение регистра {addr} вернуло статус «{status}»',
+  'diagnostic.device.controlReadLength':
+    'чтение регистра {addr} вернуло {bytes} байт, ожидалось 4',
+  'diagnostic.device.controlRequestTimeout':
+    'запрос консоли USB {request} не завершился за {ms} мс; плата перестала отвечать на управляющие передачи',
+  'diagnostic.device.registerStuck':
+    '{where}={wanted} не удержалось после {cycles} циклов чтение/запись/чтение (записано {wrote}, прочитано {readBack})',
+  'diagnostic.device.sampleLengthRejected':
+    'длина выборки не принята: записано {value}, прочитано {readBack} (сравнение по объявленным байтам: {advertised})',
+  'diagnostic.device.auxReadyTimeout':
+    'селектор aux {selector}: бит готовности не установился за {reads} чтений',
+  'diagnostic.device.auxEcho': 'селектор aux {selector}: устройство вернуло эхо {echoed}',
+  'diagnostic.device.auxZeroLength':
+    'селектор aux {selector}: устройство сообщило полезную нагрузку нулевой длины',
+  'diagnostic.device.auxValueTooWide':
+    'селектор aux {selector}: значение {value} не помещается в объявленные для слова нагрузки {word} байты (их {advertised})',
+  'diagnostic.device.auxWordOutside':
+    'селектор aux {selector}: слово нагрузки {word} целиком вне объявленной нагрузки из {bytes} байт',
+  'diagnostic.device.auxFieldOutside':
+    'селектор aux {selector}: поле заканчивается на байте нагрузки {endByte}, а устройство принимает только {accepted} байт',
+  'diagnostic.device.channelMaskRejected':
+    'маска каналов не принята: записано {mask}, прочитано {readBack} (сравнение по объявленным байтам: {advertised})',
+  'diagnostic.device.channelMaskRejectedPadded':
+    'маска каналов не принята: записано {mask}, прочитано {readBack} (сравнение по полному четырёхбайтовому дополненному слову)',
+  'diagnostic.device.sampleratePayload':
+    'полезная нагрузка aux частоты дискретизации — {bytes} байт, для делителя нужно минимум 8',
+  'diagnostic.device.samplerateStuck':
+    'не удалось настроить {rate} МГц на base[{index}] = {base} МГц: делитель не удержался после {cycles} циклов чтение/запись/чтение (записано {wrote}, прочитано {readBack}, опорная частота до записи {before} МГц)',
+  'diagnostic.device.samplerateBaseChanged':
+    'не удалось настроить {rate} МГц: опорная частота изменилась с {before} МГц на {after} МГц (записан делитель {divider}, устройство ответило индексом {index}) после {cycles} циклов чтение/запись/чтение',
+  'diagnostic.device.samplerateAnswered':
+    'не удалось настроить {rate} МГц: записан делитель {wrote} на опорной частоте {before} МГц, устройство ответило индексом {index}, опорной частотой {after} МГц и делителем {readBack} после {cycles} циклов чтение/запись/чтение',
+  'diagnostic.device.samplerateNotDivided':
+    'не удалось настроить {rate} МГц: base[{index}] = {baseMHz} МГц не делится на неё (проверено баз: {count}; индекс {maxIndex} — последний существующий)',
+  'diagnostic.device.samplerateNotExpressible':
+    'не удалось настроить {rate} МГц: base[{index}] = {baseMHz} МГц требует делитель {divider}, больше {maxDivider}, который поддерживает сэмплер (проверено баз: {count}; индекс {maxIndex} — последний существующий)',
+  'diagnostic.device.samplerateUnwalked':
+    'не удалось настроить {rate} МГц: делитель не удержался, и ни одна опорная частота не стала пригодной за {passes} проходов',
+  'diagnostic.device.thresholdRejected':
+    'порог не принят: записан код {code}, прочитано {readBack} (сравнение по объявленным байтам: {advertised})',
+  'diagnostic.device.testModeRejected':
+    'режим теста не принят: записано {mode}, прочитано {readBack} (сравнение по объявленным байтам: {advertised})',
   'diagnostic.usb.unavailable': 'WebUSB недоступен в этом браузере',
   'diagnostic.usb.blocked': 'браузер заблокировал доступ к USB-устройствам',
   'diagnostic.usb.notVisible':

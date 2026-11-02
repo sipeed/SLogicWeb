@@ -228,6 +228,57 @@ export const en = {
   'diagnostic.device.openFailed': 'could not open the USB device',
   'diagnostic.device.configureFailed': 'could not select the device configuration',
   'diagnostic.device.claimFailed': 'could not claim interface 0',
+  'diagnostic.device.controlReadTimeout':
+    'control read of reg {addr} did not complete within {ms} ms; the board stopped answering control transfers',
+  'diagnostic.device.controlWriteTimeout':
+    'control write to reg {addr} did not complete within {ms} ms; the board stopped answering control transfers',
+  'diagnostic.device.controlWriteStatus':
+    'control write to reg {addr} returned status "{status}"',
+  'diagnostic.device.controlWriteLength':
+    'control write to reg {addr} moved {bytes} bytes, expected 4',
+  'diagnostic.device.controlReadStatus':
+    'control read of reg {addr} returned status "{status}"',
+  'diagnostic.device.controlReadLength':
+    'control read of reg {addr} returned {bytes} bytes, expected 4',
+  'diagnostic.device.controlRequestTimeout':
+    'the USB console request {request} did not complete within {ms} ms; the board stopped answering control transfers',
+  'diagnostic.device.registerStuck':
+    '{where}={wanted} never stuck across {cycles} read/write/read cycles (wrote {wrote}, read back {readBack})',
+  'diagnostic.device.sampleLengthRejected':
+    'sample length not accepted: wrote {value}, read back {readBack} (compared over the {advertised} advertised byte(s))',
+  'diagnostic.device.auxReadyTimeout':
+    'aux selector {selector}: ready bit never set after {reads} reads',
+  'diagnostic.device.auxEcho': 'aux selector {selector}: device echoed {echoed}',
+  'diagnostic.device.auxZeroLength':
+    'aux selector {selector}: device reported a zero-length payload',
+  'diagnostic.device.auxValueTooWide':
+    'aux selector {selector}: value {value} does not fit the {advertised} byte(s) the device advertised for payload word {word}',
+  'diagnostic.device.auxWordOutside':
+    'aux selector {selector}: payload word {word} is entirely outside the {bytes}-byte payload the device advertised',
+  'diagnostic.device.auxFieldOutside':
+    'aux selector {selector}: field ends at payload byte {endByte} but the device only accepts {accepted} bytes',
+  'diagnostic.device.channelMaskRejected':
+    'channel mask not accepted: wrote {mask}, read back {readBack} (compared over the {advertised} advertised byte(s))',
+  'diagnostic.device.channelMaskRejectedPadded':
+    'channel mask not accepted: wrote {mask}, read back {readBack} (compared over the complete four-byte padded word)',
+  'diagnostic.device.sampleratePayload':
+    'samplerate aux payload is {bytes} bytes, need at least 8 for the divider',
+  'diagnostic.device.samplerateStuck':
+    'could not configure {rate} MHz on base[{index}] = {base} MHz: the divider never stuck (wrote {wrote}, read back {readBack}, base before the write {before} MHz) across {cycles} read/write/read cycles',
+  'diagnostic.device.samplerateBaseChanged':
+    'could not configure {rate} MHz: the base clock moved from {before} MHz to {after} MHz (wrote divider {divider}, the device answered index {index}) across {cycles} read/write/read cycles',
+  'diagnostic.device.samplerateAnswered':
+    'could not configure {rate} MHz: wrote divider {wrote} on base {before} MHz, the device answered index {index} base {after} MHz divider {readBack} across {cycles} read/write/read cycles',
+  'diagnostic.device.samplerateNotDivided':
+    'could not configure {rate} MHz: base[{index}] = {baseMHz} MHz does not divide it ({count} bases checked; index {maxIndex} is the last one that exists)',
+  'diagnostic.device.samplerateNotExpressible':
+    'could not configure {rate} MHz: base[{index}] = {baseMHz} MHz needs divider {divider}, past the {maxDivider} the sampler honours ({count} bases checked; index {maxIndex} is the last one that exists)',
+  'diagnostic.device.samplerateUnwalked':
+    'could not configure {rate} MHz: the divider never stuck and no base clock became usable within {passes} passes',
+  'diagnostic.device.thresholdRejected':
+    'threshold not accepted: wrote code {code}, read back {readBack} (compared over the {advertised} advertised byte(s))',
+  'diagnostic.device.testModeRejected':
+    'test mode not accepted: wrote {mode}, read back {readBack} (compared over the {advertised} advertised byte(s))',
   'diagnostic.usb.unavailable': 'WebUSB is not available in this browser',
   'diagnostic.usb.blocked': 'the browser blocked access to USB devices',
   'diagnostic.usb.notVisible':

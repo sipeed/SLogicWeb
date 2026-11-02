@@ -805,7 +805,7 @@ export class Slogic16U3 implements Device {
     // board that answers nothing on the bulk endpoint until CTRL is written again.
     // Read -> write -> read is what tells those apart, and what confirms RST is not left
     // set (NOTES 8.13).
-    await programCtrl(bus, CTRL_STOP, (e) => this.trace(e), 'open: CTRL');
+    await programCtrl(bus, CTRL_STOP, (e) => this.trace(e), 'CTRL', 'open');
     // Clearing the overflow latch used to be the reset's job (NOTES 8.4); with no reset
     // in this path the write-1-to-clear below is the only thing that clears it, so ask
     // the status register instead of assuming anything.
@@ -951,7 +951,7 @@ export class Slogic16U3 implements Device {
 
     // Order matters and matches the driver. Verified for the same reason open() is: a
     // stop the firmware missed shows up as a capture that starts mid-stream.
-    await programCtrl(bus, CTRL_STOP, (e) => this.trace(e), 'start: CTRL');
+    await programCtrl(bus, CTRL_STOP, (e) => this.trace(e), 'CTRL', 'start');
     // WebUSB has no per-transfer cancellation. stop() cancels pending reads by releasing
     // and re-claiming the interface; Chromium can leave the bulk pipe in an error state
     // afterwards. Clear the endpoint before every new run so capture #2 starts with a
@@ -984,7 +984,7 @@ export class Slogic16U3 implements Device {
     // transport spent the day chasing: a board that did not start answers every queued
     // transferIn with nothing at all. Two extra control reads are cheap next to that,
     // and they have to happen before the read loop arms, which is the order below.
-    await programCtrl(bus, CTRL_RUN, (e) => this.trace(e), 'start: CTRL');
+    await programCtrl(bus, CTRL_RUN, (e) => this.trace(e), 'CTRL', 'start');
     this.running = true;
     const targetWireBytes = this.targetDeviceSamples > 0
       ? Math.ceil(this.targetDeviceSamples * this.wireBytesPerSample(cfg.channels))
@@ -1904,7 +1904,7 @@ export class Slogic16U3 implements Device {
         this.usb.controlTransferIn(
           { requestType: 'vendor', recipient: 'device', request, value, index }, length,
         ),
-        `control in request 0x${request.toString(16)}`,
+        { kind: 'console', request },
       );
       const data = result.data
         ? new Uint8Array(result.data.buffer, result.data.byteOffset, result.data.byteLength)
@@ -1926,7 +1926,7 @@ export class Slogic16U3 implements Device {
         this.usb.controlTransferOut(
           { requestType: 'vendor', recipient: 'device', request, value, index }, data,
         ),
-        `control out request 0x${request.toString(16)}`,
+        { kind: 'console', request },
       );
       return `${result.status}, wrote ${result.bytesWritten ?? 0} byte(s)`;
     }

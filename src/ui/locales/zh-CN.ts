@@ -189,6 +189,49 @@ export const zhCN: Messages = {
   'diagnostic.device.openFailed': '无法打开 USB 设备',
   'diagnostic.device.configureFailed': '无法选择设备配置',
   'diagnostic.device.claimFailed': '无法占用接口 0',
+  'diagnostic.device.controlReadTimeout': '从寄存器 {addr} 的控制读取未在 {ms} ms 内完成；板子已停止响应控制传输',
+  'diagnostic.device.controlWriteTimeout': '向寄存器 {addr} 的控制写入未在 {ms} ms 内完成；板子已停止响应控制传输',
+  'diagnostic.device.controlWriteStatus': '向寄存器 {addr} 的控制写入返回状态“{status}”',
+  'diagnostic.device.controlWriteLength': '向寄存器 {addr} 的控制写入传输了 {bytes} 字节，应为 4',
+  'diagnostic.device.controlReadStatus': '从寄存器 {addr} 的控制读取返回状态“{status}”',
+  'diagnostic.device.controlReadLength': '从寄存器 {addr} 的控制读取返回了 {bytes} 字节，应为 4',
+  'diagnostic.device.controlRequestTimeout': 'USB 控制台请求 {request} 未在 {ms} ms 内完成；板子已停止响应控制传输',
+  'diagnostic.device.registerStuck':
+    '{where}={wanted} 在 {cycles} 次读/写/读循环后仍未生效（写入 {wrote}，读回 {readBack}）',
+  'diagnostic.device.sampleLengthRejected':
+    '采样长度未被接受：写入 {value}，读回 {readBack}（比较范围为设备声明的 {advertised} 字节）',
+  'diagnostic.device.auxReadyTimeout':
+    'aux 选择子 {selector}：读取 {reads} 次后就绪位始终未置位',
+  'diagnostic.device.auxEcho': 'aux 选择子 {selector}：设备回显 {echoed}',
+  'diagnostic.device.auxZeroLength': 'aux 选择子 {selector}：设备报告零长度负载',
+  'diagnostic.device.auxValueTooWide':
+    'aux 选择子 {selector}：值 {value} 无法放入设备为负载字 {word} 声明的 {advertised} 字节',
+  'diagnostic.device.auxWordOutside':
+    'aux 选择子 {selector}：负载字 {word} 完全超出设备声明的 {bytes} 字节负载',
+  'diagnostic.device.auxFieldOutside':
+    'aux 选择子 {selector}：字段结束于负载字节 {endByte}，但设备只接受 {accepted} 字节',
+  'diagnostic.device.channelMaskRejected':
+    '通道掩码未被接受：写入 {mask}，读回 {readBack}（比较范围为设备声明的 {advertised} 字节）',
+  'diagnostic.device.channelMaskRejectedPadded':
+    '通道掩码未被接受：写入 {mask}，读回 {readBack}（比较范围为完整的四字节填充字）',
+  'diagnostic.device.sampleratePayload':
+    '采样率 aux 负载为 {bytes} 字节，分频器至少需要 8 字节',
+  'diagnostic.device.samplerateStuck':
+    '无法配置 {rate} MHz（base[{index}] = {base} MHz）：{cycles} 次读/写/读循环后分频器仍未生效（写入 {wrote}，读回 {readBack}，写入前的基准 {before} MHz）',
+  'diagnostic.device.samplerateBaseChanged':
+    '无法配置 {rate} MHz：{cycles} 次读/写/读循环期间基准时钟从 {before} MHz 变为 {after} MHz（写入分频 {divider}，设备应答索引 {index}）',
+  'diagnostic.device.samplerateAnswered':
+    '无法配置 {rate} MHz：在 {before} MHz 基准上写入分频 {wrote}，设备应答索引 {index}、基准 {after} MHz、分频 {readBack}，共 {cycles} 次读/写/读循环',
+  'diagnostic.device.samplerateNotDivided':
+    '无法配置 {rate} MHz：base[{index}] = {baseMHz} MHz 无法整除它（共检查 {count} 个基准时钟；索引 {maxIndex} 是存在的最后一个）',
+  'diagnostic.device.samplerateNotExpressible':
+    '无法配置 {rate} MHz：base[{index}] = {baseMHz} MHz 需要分频 {divider}，超过了采样器支持的 {maxDivider}（共检查 {count} 个基准时钟；索引 {maxIndex} 是存在的最后一个）',
+  'diagnostic.device.samplerateUnwalked':
+    '无法配置 {rate} MHz：分频器始终未生效，且在 {passes} 轮遍历内没有出现可用的基准时钟',
+  'diagnostic.device.thresholdRejected':
+    '阈值未被接受：写入代码 {code}，读回 {readBack}（比较范围为设备声明的 {advertised} 字节）',
+  'diagnostic.device.testModeRejected':
+    '测试模式未被接受：写入 {mode}，读回 {readBack}（比较范围为设备声明的 {advertised} 字节）',
   'diagnostic.usb.unavailable': 'WebUSB 在此浏览器中不可用',
   'diagnostic.usb.blocked': '浏览器阻止了对 USB 设备的访问',
   'diagnostic.usb.notVisible': '设备 {vendor}:{product} 对 USB 工作线程不可见；请先在页面中授权',

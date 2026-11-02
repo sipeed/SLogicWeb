@@ -431,6 +431,45 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 {
+  const expected: Partial<Record<keyof Messages, string>> = {
+    'diagnostic.device.controlReadTimeout': 'addr,ms',
+    'diagnostic.device.controlWriteTimeout': 'addr,ms',
+    'diagnostic.device.controlRequestTimeout': 'ms,request',
+    'diagnostic.device.controlWriteStatus': 'addr,status',
+    'diagnostic.device.controlWriteLength': 'addr,bytes',
+    'diagnostic.device.controlReadStatus': 'addr,status',
+    'diagnostic.device.controlReadLength': 'addr,bytes',
+    'diagnostic.device.registerStuck': 'cycles,readBack,wanted,where,wrote',
+    'diagnostic.device.sampleLengthRejected': 'advertised,readBack,value',
+    'diagnostic.device.auxReadyTimeout': 'reads,selector',
+    'diagnostic.device.auxEcho': 'echoed,selector',
+    'diagnostic.device.auxZeroLength': 'selector',
+    'diagnostic.device.auxValueTooWide': 'advertised,selector,value,word',
+    'diagnostic.device.auxWordOutside': 'bytes,selector,word',
+    'diagnostic.device.auxFieldOutside': 'accepted,endByte,selector',
+    'diagnostic.device.channelMaskRejected': 'advertised,mask,readBack',
+    'diagnostic.device.channelMaskRejectedPadded': 'mask,readBack',
+    'diagnostic.device.sampleratePayload': 'bytes',
+    'diagnostic.device.samplerateStuck': 'base,before,cycles,index,rate,readBack,wrote',
+    'diagnostic.device.samplerateBaseChanged': 'after,before,cycles,divider,index,rate',
+    'diagnostic.device.samplerateAnswered': 'after,before,cycles,index,rate,readBack,wrote',
+    'diagnostic.device.samplerateNotDivided': 'baseMHz,count,index,maxIndex,rate',
+    'diagnostic.device.samplerateNotExpressible':
+      'baseMHz,count,divider,index,maxDivider,maxIndex,rate',
+    'diagnostic.device.samplerateUnwalked': 'passes,rate',
+    'diagnostic.device.thresholdRejected': 'advertised,code,readBack',
+    'diagnostic.device.testModeRejected': 'advertised,mode,readBack',
+  };
+  const bad = Object.entries(expected).filter(([key, vars]) => {
+    const template = en[key as keyof Messages] ?? '';
+    return [...template.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!).sort().join(',') !== vars;
+  }).map(([key]) => key);
+  check('the register-transfer templates keep every measured placeholder',
+    bad.length === 0,
+    bad.length === 0 ? `${Object.keys(expected).length} templates pinned` : bad.join(', '));
+}
+
+{
   const noDataVars = { device: 'Slogic32 U3', deadline: 720, channels: 32, rate: 100 };
   const stalledVars = {
     device: 'Slogic32 U3', channels: 32, rate: 200, offered: 800, count: 5,
@@ -660,6 +699,8 @@ const baseSettings: CaptureSettings = {
     'diagnostic.device.transportDead', 'diagnostic.device.workerTimeout',
     'diagnostic.device.loopUnsettledClosed', 'diagnostic.device.noData',
     'diagnostic.device.underrunStalled', 'diagnostic.usb.blocked',
+    'diagnostic.device.controlReadTimeout', 'diagnostic.device.registerStuck',
+    'diagnostic.device.samplerateNotExpressible',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];
