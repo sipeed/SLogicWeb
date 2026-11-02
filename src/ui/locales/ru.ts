@@ -274,6 +274,21 @@ export const ru: Messages = {
   'diagnostic.usb.blocked': 'браузер заблокировал доступ к USB-устройствам',
   'diagnostic.usb.notVisible':
     'устройство {vendor}:{product} не видно воркеру USB; сначала предоставьте к нему доступ со страницы',
+  'diagnostic.decode.cancelled': 'декодирование отменено',
+  'diagnostic.decode.timeout': 'декодирование не уложилось в {ms} мс и было отменено',
+  'diagnostic.decode.disposed': 'воркер декодирования закрыт',
+  'diagnostic.decode.workerCrashed': 'воркер декодирования завершился с ошибкой',
+  'diagnostic.decode.workerFailed': 'декодер завершился с ошибкой',
+  'diagnostic.decode.workerUnexpected': 'воркер декодирования ответил {got}, ожидался {want}',
+  'diagnostic.decode.terminated': 'воркер декодирования был остановлен',
+  'diagnostic.decode.tooLong':
+    'в захвате {samples} отсчётов; декодирование ограничено {max} ({window} при 200 MSa/s). Декодируйте поддиапазон.',
+  'diagnostic.decode.tooLongLoop':
+    'в захвате {samples} отсчётов; декодирование ограничено {max} ({window} при 200 MSa/s). Уменьшите окно цикла.',
+  'diagnostic.decode.edgeBudget':
+    '{edges} фронтов на сопоставленных каналах превышают бюджет декодирования {budget}. Отключите канал или уменьшите масштаб захвата.',
+  'diagnostic.decode.edgeBudgetLoop':
+    '{edges} фронтов на сопоставленных каналах превышают бюджет декодирования {budget}. Отключите канал или уменьшите окно цикла.',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Ширина: {duration}',

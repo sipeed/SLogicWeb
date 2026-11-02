@@ -16,6 +16,7 @@
  * wrong answer cannot pass.
  */
 
+import { diagnosticOf } from '../../diagnostics';
 import {
   DecodeClient, decoderCount, getDecoder, hydrateDecoders, validateStack, MAX_SAMPLE,
 } from '../index';
@@ -263,7 +264,7 @@ export async function runDecodeBench(repeats = 80): Promise<BenchResult> {
     for (const [what, run] of limitProbes) {
       try { await run(); res.limitErrors.push(`${what}: accepted, expected refusal`); }
       catch (e) {
-        const m = (e as Error).message;
+        const m = diagnosticOf(e)?.payload ?? (e as Error).message;
         if (/exceeds the/.test(m)) refusals++;
         else res.limitErrors.push(`${what}: wrong error ${m.slice(0, 120)}`);
       }

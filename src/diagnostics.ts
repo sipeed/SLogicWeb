@@ -117,6 +117,17 @@ export const DIAGNOSTIC_CODES = [
   'usb.unavailable',
   'usb.blocked',
   'usb.notVisible',
+  'decode.cancelled',
+  'decode.timeout',
+  'decode.disposed',
+  'decode.workerCrashed',
+  'decode.workerFailed',
+  'decode.workerUnexpected',
+  'decode.terminated',
+  'decode.tooLong',
+  'decode.tooLongLoop',
+  'decode.edgeBudget',
+  'decode.edgeBudgetLoop',
 ] as const;
 
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[number];

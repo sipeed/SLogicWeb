@@ -3,6 +3,7 @@
 /** Message protocol between the main thread and the decode worker. Internal:
  *  the UI talks to `DecodeClient`, not to these. */
 
+import type { DiagnosticVars } from '../diagnostics';
 import type { DecodeRequest, DecodeResult, DecoderInfo } from './types';
 
 export interface WorkerConfig {
@@ -31,4 +32,7 @@ export type WorkerResponse =
   | { type: 'ready'; id: number; loadMs: number }
   | { type: 'described'; id: number; info: DecoderInfo }
   | { type: 'decoded'; id: number; result: DecodeResult; loadMs: number }
-  | { type: 'failed'; id: number; message: string; stack: string };
+  | {
+      type: 'failed'; id: number; message: string; stack: string;
+      code?: string; vars?: DiagnosticVars; payload?: string;
+    };

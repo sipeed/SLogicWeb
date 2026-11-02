@@ -29,8 +29,9 @@ export type AnalyzerStatus = 'idle' | 'decoding' | 'done' | 'error';
 /**
  * An analyzer's status note as structured data, formatted by format.ts's
  * formatAnalyzerNote at render time so a locale switch retranslates it (same rule
- * as CaptureLabel). The `error` variant's detail - and `stats.firstError` - is
- * decoder/worker diagnostic payload and passes through untranslated.
+ * as CaptureLabel). The `error` variant's `diag` is translated; its `detail`
+ * fallback and `stats.firstError` are decoder/worker payload and pass through
+ * untranslated.
  */
 export type AnalyzerNote =
   | { kind: 'pending' }
@@ -39,7 +40,7 @@ export type AnalyzerNote =
   | { kind: 'stats'; anns: number; decodeMs: number; wallMs: number; firstError?: string; snapshot?: boolean }
   | { kind: 'timeout' }
   | { kind: 'cancelled' }
-  | { kind: 'error'; detail: string };
+  | { kind: 'error'; detail: string; diag?: Diagnostic };
 
 export interface AnalyzerState {
   id: string;

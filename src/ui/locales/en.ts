@@ -283,6 +283,21 @@ export const en = {
   'diagnostic.usb.blocked': 'the browser blocked access to USB devices',
   'diagnostic.usb.notVisible':
     'device {vendor}:{product} is not visible to the USB worker; grant it from the page first',
+  'diagnostic.decode.cancelled': 'decode cancelled',
+  'diagnostic.decode.timeout': 'decode exceeded {ms} ms and was cancelled',
+  'diagnostic.decode.disposed': 'the decode worker has been retired',
+  'diagnostic.decode.workerCrashed': 'the decode worker failed',
+  'diagnostic.decode.workerFailed': 'the decoder failed',
+  'diagnostic.decode.workerUnexpected': 'the decode worker answered {got}, expected {want}',
+  'diagnostic.decode.terminated': 'the decode worker was terminated',
+  'diagnostic.decode.tooLong':
+    'capture is {samples} samples; decoding is limited to {max} ({window} at 200 MSa/s). Decode a sub-range instead.',
+  'diagnostic.decode.tooLongLoop':
+    'capture is {samples} samples; decoding is limited to {max} ({window} at 200 MSa/s). Shrink the loop window instead.',
+  'diagnostic.decode.edgeBudget':
+    '{edges} edges on the mapped channels exceed the {budget} decode budget. Disable a channel or zoom the capture down.',
+  'diagnostic.decode.edgeBudgetLoop':
+    '{edges} edges on the mapped channels exceed the {budget} decode budget. Disable a channel or shrink the loop window.',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Width: {duration}',

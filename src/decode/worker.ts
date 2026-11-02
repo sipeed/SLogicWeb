@@ -17,6 +17,7 @@
 
 import sigrokdecodePy from './py/sigrokdecode.py?raw';
 import srdenginePy from './py/srdengine.py?raw';
+import { DiagnosticError, wireDiagnostic } from '../diagnostics';
 import { EDGE_BUDGET, MAX_SAMPLE } from './limits';
 import type { Annotations, DecodeRequest, DecodeResult } from './types';
 import type { WorkerRequest, WorkerResponse } from './protocol';
@@ -364,7 +365,7 @@ p
   } catch (e) {
     // A cancel arrives as KeyboardInterrupt out of the interpreter loop.
     if (String((e as Error)?.message ?? '').includes('KeyboardInterrupt')) {
-      throw new Error('decode cancelled');
+      throw new DiagnosticError('decode.cancelled');
     }
     throw e;
   }
@@ -432,6 +433,7 @@ self.onmessage = async (ev: MessageEvent<WorkerRequest>) => {
       id: (msg as { id: number }).id,
       message: err?.message ?? String(e),
       stack: err?.stack ?? '',
+      ...(wireDiagnostic(e) ?? {}),
     });
   }
 };

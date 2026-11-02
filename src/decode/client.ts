@@ -12,6 +12,7 @@
  * Every decode is bounded by a timeout and can be cancelled; see `decode()`.
  */
 
+import { DiagnosticError, fromWireDiagnostic } from '../diagnostics';
 import { DEFAULT_DECODE_TIMEOUT_MS } from './limits';
 import { getDecoder, hydrateDecoders } from './registry';
 import type { WorkerConfig, WorkerRequest, WorkerResponse } from './protocol';
@@ -36,18 +37,25 @@ export interface DecodeOptions {
   signal?: AbortSignal;
 }
 
-export class DecodeCancelledError extends Error {
-  constructor(msg = 'decode cancelled') {
-    super(msg);
+export class DecodeCancelledError extends DiagnosticError {
+  constructor() {
+    super('decode.cancelled');
     this.name = 'DecodeCancelledError';
   }
 }
 
-export class DecodeTimeoutError extends Error {
+export class DecodeTimeoutError extends DiagnosticError {
   constructor(ms: number) {
-    super(`decode exceeded ${ms} ms and was cancelled`);
+    super('decode.timeout', { ms });
     this.name = 'DecodeTimeoutError';
   }
+}
+
+function failureError(res: Extract<WorkerResponse, { type: 'failed' }>): Error {
+  if (res.code !== undefined) {
+    return res.code === 'decode.cancelled' ? new DecodeCancelledError() : fromWireDiagnostic(res);
+  }
+  return new DiagnosticError('decode.workerFailed', undefined, res.message);
 }
 
 export class DecodeClient {
@@ -74,7 +82,7 @@ export class DecodeClient {
   /** Spawn the worker if it is not up. Lazy, so `terminate()` is recoverable
    *  rather than one-way. */
   private ensureWorker(): Worker {
-    if (this.disposed) throw new Error('DecodeClient has been disposed');
+    if (this.disposed) throw new DiagnosticError('decode.disposed');
     if (this.worker) return this.worker;
 
     // Vite's inline worker wrapper turns the complete bundled worker into a blob.
@@ -85,8 +93,9 @@ export class DecodeClient {
     w.onerror = (ev) => {
       // A worker-level error kills every in-flight request; failing them all
       // loudly beats leaving callers hanging forever.
-      this.failAll(new Error(
-        `decode worker error: ${ev.message} (${ev.filename}:${ev.lineno})`));
+      const where = ev.filename ? ` (${ev.filename}:${ev.lineno})` : '';
+      this.failAll(new DiagnosticError(
+        'decode.workerCrashed', undefined, `${ev.message}${where}`));
     };
     this.worker = w;
     if (this.config) void this.send({ type: 'configure', config: this.config }, 'configured');
@@ -119,12 +128,11 @@ export class DecodeClient {
     if (!p) return;
     this.pending.delete(res.id);
     if (res.type === 'failed') {
-      const e = res.message === 'decode cancelled'
-        ? new DecodeCancelledError() : new Error(res.message);
+      const e = failureError(res);
       if (res.stack) e.stack = res.stack;
       p.reject(e);
     } else if (res.type !== p.want) {
-      p.reject(new Error(`decode worker: expected ${p.want}, got ${res.type}`));
+      p.reject(new DiagnosticError('decode.workerUnexpected', { got: res.type, want: p.want }));
     } else {
       if ('loadMs' in res) this.loadMs = res.loadMs;
       p.resolve(res as never);
@@ -229,7 +237,7 @@ export class DecodeClient {
   /** Kill the worker. The client stays usable: the next request spawns a new
    *  one and pays the cold start again. */
   terminate() {
-    this.hardReset(new Error('decode worker terminated'));
+    this.hardReset(new DiagnosticError('decode.terminated'));
   }
 
   /** Permanently retire this client. */

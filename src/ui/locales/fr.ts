@@ -282,6 +282,22 @@ export const fr: Messages = {
   'diagnostic.usb.blocked': 'le navigateur a bloqué l’accès aux appareils USB',
   'diagnostic.usb.notVisible':
     'l’appareil {vendor}:{product} n’est pas visible pour le worker USB ; accordez-le depuis la page d’abord',
+  'diagnostic.decode.cancelled': 'décodage annulé',
+  'diagnostic.decode.timeout': 'le décodage a dépassé {ms} ms et a été annulé',
+  'diagnostic.decode.disposed': 'le worker de décodage a été retiré',
+  'diagnostic.decode.workerCrashed': 'le worker de décodage a échoué',
+  'diagnostic.decode.workerFailed': 'le décodeur a échoué',
+  'diagnostic.decode.workerUnexpected':
+    'le worker de décodage a répondu {got}, alors que {want} était attendu',
+  'diagnostic.decode.terminated': 'le worker de décodage a été arrêté',
+  'diagnostic.decode.tooLong':
+    'la capture compte {samples} échantillons ; le décodage est limité à {max} ({window} à 200 MSa/s). Décodez plutôt une sous-plage.',
+  'diagnostic.decode.tooLongLoop':
+    'la capture compte {samples} échantillons ; le décodage est limité à {max} ({window} à 200 MSa/s). Réduisez plutôt la fenêtre de boucle.',
+  'diagnostic.decode.edgeBudget':
+    '{edges} fronts sur les canaux mappés dépassent le budget de décodage de {budget}. Désactivez un canal ou réduisez la capture.',
+  'diagnostic.decode.edgeBudgetLoop':
+    '{edges} fronts sur les canaux mappés dépassent le budget de décodage de {budget}. Désactivez un canal ou réduisez la fenêtre de boucle.',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Largeur : {duration}',

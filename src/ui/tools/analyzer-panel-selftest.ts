@@ -11,6 +11,8 @@
  */
 
 import { formatMessage } from '../i18n.js';
+import { formatMountedAnalyzerNote, formatStatusDetail, statusDetailOf } from '../format.js';
+import { DiagnosticError, fromWireDiagnostic } from '../../diagnostics.js';
 import { en } from '../locales/en.js';
 import { fr } from '../locales/fr.js';
 import { ru } from '../locales/ru.js';
@@ -50,6 +52,9 @@ const ANALYZER_ACT_NEEDLES = 3;
 
 const panel = fs.readFileSync('src/ui/analyzerPanel.ts', 'utf8');
 const css = fs.readFileSync('src/ui/style.css', 'utf8');
+const clientSource = fs.readFileSync('src/decode/client.ts', 'utf8');
+const workerSource = fs.readFileSync('src/decode/worker.ts', 'utf8');
+const appSource = fs.readFileSync('src/ui/app.ts', 'utf8');
 
 const results: TestResult[] = [];
 
@@ -307,6 +312,113 @@ check(
   'no raw hex inside the analyzer-act rules (tokens only)',
   actRules.length === 7 && actRules.every((rule) => !/#[0-9a-fA-F]{3,8}/.test(rule)),
   `rules=${actRules.length}, hex=${actRules.filter((rule) => /#[0-9a-fA-F]{3,8}/.test(rule)).length}`,
+);
+
+const TRACEBACK =
+  'Traceback (most recent call last):\n' +
+  '  File "/decoders/uart.py", line 118, in decode\n' +
+  'srdengine.SigrokDecodeError: bad parity';
+const failedFrame = formatStatusDetail(statusDetailOf(fromWireDiagnostic({
+  message: 'the decoder failed', code: 'decode.workerFailed', payload: TRACEBACK,
+})));
+check(
+  'a failed decode renders a translated frame followed by the raw decoder diagnostic',
+  failedFrame === `${en['diagnostic.decode.workerFailed']}: ${TRACEBACK}` &&
+    failedFrame.startsWith('the decoder failed: Traceback') &&
+    failedFrame.endsWith(TRACEBACK),
+  `frame=${JSON.stringify(failedFrame)}`,
+);
+
+const cancelledWire = fromWireDiagnostic({ message: 'decode cancelled', code: 'decode.cancelled' });
+const cancelledDetail = statusDetailOf(cancelledWire);
+check(
+  'a cancelled decode resolves as its own diagnostic code, not raw worker text',
+  cancelledWire instanceof DiagnosticError && cancelledWire.code === 'decode.cancelled' &&
+    cancelledDetail.kind === 'diagnostic' && cancelledDetail.diag.code === 'decode.cancelled',
+  `code=${cancelledWire instanceof DiagnosticError ? cancelledWire.code : 'none'}, ` +
+    `detail=${cancelledDetail.kind}`,
+);
+
+check(
+  'the decode control-flow errors keep their class identity on top of DiagnosticError',
+  clientSource.includes('export class DecodeCancelledError extends DiagnosticError') &&
+    clientSource.includes("super('decode.cancelled')") &&
+    clientSource.includes('export class DecodeTimeoutError extends DiagnosticError') &&
+    clientSource.includes("super('decode.timeout', { ms })"),
+  `cancelled=${clientSource.includes('export class DecodeCancelledError extends DiagnosticError')}, ` +
+    `timeout=${clientSource.includes('export class DecodeTimeoutError extends DiagnosticError')}`,
+);
+
+check(
+  'the client selects a cancelled decode by its diagnostic code',
+  clientSource.includes("res.code === 'decode.cancelled'") &&
+    clientSource.includes('new DecodeCancelledError()') &&
+    !clientSource.includes("res.message === 'decode cancelled'"),
+  `code=${clientSource.includes("res.code === 'decode.cancelled'")}, ` +
+    `legacyText=${clientSource.includes("res.message === 'decode cancelled'")}`,
+);
+
+check(
+  'the client rebuilds a coded failure and frames an uncoded one as a decoder failure',
+  clientSource.includes('fromWireDiagnostic(res)') &&
+    clientSource.includes("'decode.workerFailed', undefined, res.message)") &&
+    clientSource.includes('if (res.stack) e.stack = res.stack;') &&
+    !clientSource.includes('${res.message}\\n${res.stack}') &&
+    clientSource.includes("'decode.workerCrashed', undefined,"),
+  `rebuilt=${clientSource.includes('fromWireDiagnostic(res)')}, ` +
+    `failed=${clientSource.includes("'decode.workerFailed', undefined, res.message)")}, ` +
+    `stack=${clientSource.includes('if (res.stack) e.stack = res.stack;')}, ` +
+    `joined=${clientSource.includes('${res.message}\\n${res.stack}')}`,
+);
+
+check(
+  'the decode worker reports cancellation and third-party failures through the wire fields',
+  workerSource.includes("throw new DiagnosticError('decode.cancelled')") &&
+    workerSource.includes('...(wireDiagnostic(e) ?? {})'),
+  `cancel=${workerSource.includes("throw new DiagnosticError('decode.cancelled')")}, ` +
+    `wire=${workerSource.includes('...(wireDiagnostic(e) ?? {})')}`,
+);
+
+check(
+  'the analyzer row keeps the cancelled note variant and the raw diagnostic detail',
+  appSource.includes("e instanceof DecodeCancelledError ? { kind: 'cancelled' as const }") &&
+    appSource.includes('detail: diag?.payload ?? (e instanceof Error ? e.message : String(e))') &&
+    appSource.includes('...(diag ? { diag } : {})') &&
+    !appSource.includes("kind: 'error' as const, detail: e.message"),
+  `cancelled=${appSource.includes("e instanceof DecodeCancelledError ? { kind: 'cancelled' as const }")}, ` +
+    `diag=${appSource.includes('...(diag ? { diag } : {})')}, ` +
+    `rawCoercion=${appSource.includes("kind: 'error' as const, detail: e.message")}`,
+);
+
+check(
+  'a mounted row for a payload-free decode failure reads the translated sentence, not the code',
+  (() => {
+    const mounted = formatMountedAnalyzerNote({
+      kind: 'error', detail: 'decode.edgeBudget',
+      diag: { code: 'decode.edgeBudget', vars: { edges: '51.2 M', budget: '48 M' } },
+    }, 'error');
+    return mounted ===
+      '51.2 M edges on the mapped channels exceed the 48 M decode budget. ' +
+        'Disable a channel or zoom the capture down.' &&
+      !mounted.includes('decode.edgeBudget') && !mounted.includes('diagnostic.');
+  })(),
+  `mounted=${JSON.stringify(formatMountedAnalyzerNote({
+    kind: 'error', detail: 'decode.edgeBudget',
+    diag: { code: 'decode.edgeBudget', vars: { edges: '51.2 M', budget: '48 M' } },
+  }, 'error'))}`,
+);
+
+check(
+  'the decode limits pick the loop or sub-range wording from the capture state',
+  appSource.includes("this.captureIsLoop ? 'decode.tooLongLoop' : 'decode.tooLong'") &&
+    appSource.includes('window: formatDuration(MAX_SAMPLE / 200e6)') &&
+    appSource.includes("this.captureIsLoop ? 'decode.edgeBudgetLoop' : 'decode.edgeBudget'") &&
+    !appSource.includes('decode is limited to') &&
+    !appSource.includes('decode budget. Disable a channel or '),
+  `tooLong=${appSource.includes("this.captureIsLoop ? 'decode.tooLongLoop' : 'decode.tooLong'")}, ` +
+    `window=${appSource.includes('window: formatDuration(MAX_SAMPLE / 200e6)')}, ` +
+    `edgeBudget=${appSource.includes("this.captureIsLoop ? 'decode.edgeBudgetLoop' : 'decode.edgeBudget'")}, ` +
+    `prose=${appSource.includes('decode is limited to')}`,
 );
 
 console.log(results.map((result) => (

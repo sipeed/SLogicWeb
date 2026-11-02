@@ -470,6 +470,69 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 {
+  const expected: Partial<Record<keyof Messages, string>> = {
+    'diagnostic.decode.tooLong': 'max,samples,window',
+    'diagnostic.decode.tooLongLoop': 'max,samples,window',
+    'diagnostic.decode.edgeBudget': 'budget,edges',
+    'diagnostic.decode.edgeBudgetLoop': 'budget,edges',
+  };
+  const bad = Object.entries(expected).filter(([key, vars]) => {
+    const template = en[key as keyof Messages] ?? '';
+    return [...template.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!).sort().join(',') !== vars;
+  }).map(([key]) => key);
+  check('the decode-limit templates keep every measured placeholder',
+    bad.length === 0,
+    bad.length === 0 ? `${Object.keys(expected).length} templates pinned` : bad.join(', '));
+}
+
+{
+  const samples = '2.15 G';
+  const max = '2.14 G';
+  const window = '10.74 s';
+  const edges = '51.2 M';
+  const budget = '48 M';
+  const cases: [keyof Messages, string, Record<string, string | number>][] = [
+    ['diagnostic.decode.tooLong', 'the sub-range sentence', { samples, max, window }],
+    ['diagnostic.decode.tooLongLoop', 'the loop-window sentence', { samples, max, window }],
+    ['diagnostic.decode.edgeBudget', 'the zoom sentence', { edges, budget }],
+    ['diagnostic.decode.edgeBudgetLoop', 'the edge loop-window sentence', { edges, budget }],
+  ];
+  const dicts: [string, Messages][] = [['en', en], ['zh-CN', zhCN], ['ru', ru], ['fr', fr]];
+  const bad: string[] = [];
+  for (const [code, label, vars] of cases) {
+    for (const [locale, dict] of dicts) {
+      const rendered = translate(dict, code, vars);
+      const missing = Object.entries(vars)
+        .filter(([, value]) => !rendered.includes(String(value)))
+        .map(([name]) => name);
+      if (missing.length > 0) bad.push(`${locale}:${label} drops ${missing.join('/')}`);
+      if (/[{}]/.test(rendered)) bad.push(`${locale}:${label} leaves a placeholder`);
+    }
+  }
+  for (const [locale, dict] of dicts) {
+    if (dict['diagnostic.decode.tooLong'] === dict['diagnostic.decode.tooLongLoop']) {
+      bad.push(`${locale}: the two sample-limit sentences are identical`);
+    }
+    if (dict['diagnostic.decode.edgeBudget'] === dict['diagnostic.decode.edgeBudgetLoop']) {
+      bad.push(`${locale}: the two edge-budget sentences are identical`);
+    }
+  }
+  check('a rendered decode-limit failure shows every measured value in every locale',
+    bad.length === 0, bad.length === 0 ? `${cases.length * dicts.length} renderings complete` : bad.join('; '));
+}
+
+{
+  const dicts: [string, Messages][] = [['en', en], ['zh-CN', zhCN], ['ru', ru], ['fr', fr]];
+  const bad = dicts.filter(([, dict]) => (
+    !dict['diagnostic.decode.tooLong'].includes('200 MSa/s') ||
+    !dict['diagnostic.decode.tooLongLoop'].includes('200 MSa/s')
+  )).map(([locale]) => locale);
+  check('the decode-limit duration parenthetical keeps its rate notation in every locale',
+    bad.length === 0,
+    bad.length === 0 ? `${dicts.length} locales carry 200 MSa/s` : bad.join(', '));
+}
+
+{
   const noDataVars = { device: 'Slogic32 U3', deadline: 720, channels: 32, rate: 100 };
   const stalledVars = {
     device: 'Slogic32 U3', channels: 32, rate: 200, offered: 800, count: 5,
@@ -545,6 +608,11 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 {
+  const traceback = 'Traceback (most recent call last):\n  File "/decoders/uart.py", line 118\n' +
+    'srdengine.SigrokDecodeError: bad parity';
+  const limitSentence =
+    '51.2 M edges on the mapped channels exceed the 48 M decode budget. ' +
+    'Disable a channel or zoom the capture down.';
   const cases: [AnalyzerNote, string][] = [
     [{ kind: 'pending' }, 'not decoded'],
     [{ kind: 'edges', count: 2048 }, '2,048 edges'],
@@ -556,12 +624,29 @@ function check(name: string, pass: boolean, detail: string): void {
     [{ kind: 'timeout' }, 'timed out'],
     [{ kind: 'cancelled' }, 'cancelled'],
     [{ kind: 'error', detail: 'worker exploded' }, 'worker exploded'],
+    [{ kind: 'error', detail: traceback, diag: { code: 'decode.workerFailed', payload: traceback } },
+      `the decoder failed: ${traceback}`],
+    [{
+      kind: 'error', detail: 'decode.edgeBudget',
+      diag: { code: 'decode.edgeBudget', vars: { edges: '51.2 M', budget: '48 M' } },
+    }, limitSentence],
   ];
   const bad = cases.filter(([note, want]) => formatAnalyzerNote(note) !== want);
-  check('formatAnalyzerNote renders every variant, diagnostics passing through raw',
+  check('formatAnalyzerNote renders every variant, a diagnostic through its translated sentence',
     bad.length === 0,
-    bad.length === 0 ? `${cases.length}/8 variants match`
+    bad.length === 0 ? `${cases.length}/10 variants match`
       : bad.map(([n, want]) => `${n.kind}: got ${JSON.stringify(formatAnalyzerNote(n))} want ${JSON.stringify(want)}`).join('; '));
+}
+
+{
+  const rendered = formatAnalyzerNote({
+    kind: 'error', detail: 'decode.edgeBudget',
+    diag: { code: 'decode.edgeBudget', vars: { edges: '51.2 M', budget: '48 M' } },
+  });
+  check('a payload-free diagnostic note never leaks its message key',
+    !rendered.includes('decode.edgeBudget') && !rendered.includes('diagnostic.') &&
+      rendered.includes('51.2 M') && rendered.includes('48 M'),
+    JSON.stringify(rendered));
 }
 
 {
@@ -582,11 +667,17 @@ function check(name: string, pass: boolean, detail: string): void {
     [{ kind: 'timeout' }, 'error', 'timed out'],
     [{ kind: 'cancelled' }, 'idle', 'cancelled'],
     [{ kind: 'error', detail: 'worker exploded' }, 'error', 'worker exploded'],
+    [{
+      kind: 'error', detail: 'decode.edgeBudget',
+      diag: { code: 'decode.edgeBudget', vars: { edges: '51.2 M', budget: '48 M' } },
+    }, 'error',
+    '51.2 M edges on the mapped channels exceed the 48 M decode budget. ' +
+      'Disable a channel or zoom the capture down.'],
   ];
   const bad = cases.filter(([note, status, want]) => formatMountedAnalyzerNote(note, status) !== want);
   check('formatMountedAnalyzerNote hides statistics, keeps diagnostics, delegates the rest',
     bad.length === 0,
-    bad.length === 0 ? `${cases.length}/11 cases match`
+    bad.length === 0 ? `${cases.length}/12 cases match`
       : bad.map(([n, s, want]) => `${n.kind}/${s}: got ` +
         `${JSON.stringify(formatMountedAnalyzerNote(n, s))} want ${JSON.stringify(want)}`).join('; '));
 }
@@ -701,6 +792,8 @@ const baseSettings: CaptureSettings = {
     'diagnostic.device.underrunStalled', 'diagnostic.usb.blocked',
     'diagnostic.device.controlReadTimeout', 'diagnostic.device.registerStuck',
     'diagnostic.device.samplerateNotExpressible',
+    'diagnostic.decode.workerFailed', 'diagnostic.decode.timeout',
+    'diagnostic.decode.edgeBudget',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];

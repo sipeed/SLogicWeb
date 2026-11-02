@@ -14,7 +14,7 @@ import {
 } from '../data/index.js';
 import type { SampleStore } from '../data/types.js';
 import { bytesPerSampleForChannels, channelWidthForProbes, isChannelCount } from '../types.js';
-import { DiagnosticError } from '../diagnostics.js';
+import { DiagnosticError, diagnosticOf } from '../diagnostics.js';
 import {
   MAX_SAMPLERATE_HZ, TransportDeadError, getGrantedDevicesOnBestThread, requestDeviceOnBestThread,
   vrefCode, type CaptureConfig, type Device,
@@ -2324,10 +2324,13 @@ export class App {
       // [src/decode/limits.ts] annotation spans are Int32Array, so 2^31-1 is a hard
       // ceiling - 10.7 s at 200 MSa/s, which this bench can actually reach.
       if (store.length > MAX_SAMPLE) {
-        throw new Error(
-          `capture is ${formatCount(store.length)} samples; decode is limited to ` +
-          `${formatCount(MAX_SAMPLE)} (10.7 s at 200 MSa/s).` +
-          (this.captureIsLoop ? ' Shrink the loop window instead.' : ' Decode a sub-range instead.'));
+        throw new DiagnosticError(
+          this.captureIsLoop ? 'decode.tooLongLoop' : 'decode.tooLong',
+          {
+            samples: formatCount(store.length),
+            max: formatCount(MAX_SAMPLE),
+            window: formatDuration(MAX_SAMPLE / 200e6),
+          });
       }
       const used = [...new Set(Object.values(a.channels).filter((v) => v >= 0))];
       let edgeTotal = 0;
@@ -2339,10 +2342,9 @@ export class App {
       // [src/decode/limits.ts] past ~80 M edges Pyodide corrupts rather than failing, so
       // the budget stops at 48 M where refusing is still possible.
       if (edgeTotal > EDGE_BUDGET) {
-        throw new Error(
-          `${formatCount(edgeTotal)} edges on the mapped channels exceeds the ` +
-          `${formatCount(EDGE_BUDGET)} decode budget. Disable a channel or ` +
-          (this.captureIsLoop ? 'shrink the loop window.' : 'zoom the capture down.'));
+        throw new DiagnosticError(
+          this.captureIsLoop ? 'decode.edgeBudgetLoop' : 'decode.edgeBudget',
+          { edges: formatCount(edgeTotal), budget: formatCount(EDGE_BUDGET) });
       }
 
       a.status = 'decoding';
@@ -2383,9 +2385,14 @@ export class App {
     } catch (e) {
       if (stale()) return;
       a.status = 'error';
+      const diag = diagnosticOf(e);
       a.note = e instanceof DecodeTimeoutError ? { kind: 'timeout' as const }
         : e instanceof DecodeCancelledError ? { kind: 'cancelled' as const }
-          : { kind: 'error' as const, detail: e instanceof Error ? e.message : String(e) };
+          : {
+            kind: 'error' as const,
+            detail: diag?.payload ?? (e instanceof Error ? e.message : String(e)),
+            ...(diag ? { diag } : {}),
+          };
       this.fail('error.decode', e, { id: a.decoderId });
     } finally {
       if (this.abort === controller) {

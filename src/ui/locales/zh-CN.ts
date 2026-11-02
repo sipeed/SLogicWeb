@@ -235,6 +235,21 @@ export const zhCN: Messages = {
   'diagnostic.usb.unavailable': 'WebUSB 在此浏览器中不可用',
   'diagnostic.usb.blocked': '浏览器阻止了对 USB 设备的访问',
   'diagnostic.usb.notVisible': '设备 {vendor}:{product} 对 USB 工作线程不可见；请先在页面中授权',
+  'diagnostic.decode.cancelled': '解码已取消',
+  'diagnostic.decode.timeout': '解码超过 {ms} ms，已取消',
+  'diagnostic.decode.disposed': '解码工作线程已停用',
+  'diagnostic.decode.workerCrashed': '解码工作线程失败',
+  'diagnostic.decode.workerFailed': '解码器失败',
+  'diagnostic.decode.workerUnexpected': '解码工作线程返回了 {got}，预期 {want}',
+  'diagnostic.decode.terminated': '解码工作线程已被终止',
+  'diagnostic.decode.tooLong':
+    '捕获共 {samples} 个样本，解码上限为 {max}（{window}，按 200 MSa/s 计）。请改为解码一段子区间。',
+  'diagnostic.decode.tooLongLoop':
+    '捕获共 {samples} 个样本，解码上限为 {max}（{window}，按 200 MSa/s 计）。请缩小循环窗口。',
+  'diagnostic.decode.edgeBudget':
+    '映射通道上有 {edges} 个边沿，超出 {budget} 的解码预算。请禁用某个通道或缩小捕获范围。',
+  'diagnostic.decode.edgeBudgetLoop':
+    '映射通道上有 {edges} 个边沿，超出 {budget} 的解码预算。请禁用某个通道或缩小循环窗口。',
 
   // -------------------------------------------------------- hover readout
   'hover.width': '宽度：{duration}',

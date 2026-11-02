@@ -258,7 +258,7 @@ export function formatAnalyzerNote(note: AnalyzerNote): string {
     }
     case 'timeout': return t('analyzerNote.timeout');
     case 'cancelled': return t('analyzerNote.cancelled');
-    case 'error': return note.detail;
+    case 'error': return note.diag ? formatDiagnostic(note.diag) : note.detail;
   }
 }
 
