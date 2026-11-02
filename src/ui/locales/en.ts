@@ -97,6 +97,33 @@ export const en = {
   // ---------------------------------------- status error detail codes
   'diagnostic.ui.localeLoad': '"{locale}" failed to load',
   'diagnostic.io.nothingToSave': 'nothing to save',
+  'diagnostic.file.noFiles': 'no files selected',
+  'diagnostic.file.unsupported':
+    'nothing loadable in {names}; expected a sigrok .sr session or a .lwcap',
+  'diagnostic.file.lwcap.header':
+    'truncated .lwcap: {bytes} bytes is shorter than the {need}-byte header',
+  'diagnostic.file.lwcap.magic': 'not a .lwcap file (magic {magic})',
+  'diagnostic.file.lwcap.channels':
+    'channel count {channels} is not a supported width ({widths})',
+  'diagnostic.file.lwcap.length': 'implausible capture length {length}',
+  'diagnostic.file.lwcap.samplerate': 'implausible .lwcap samplerate {samplerate}',
+  'diagnostic.file.lwcap.namesTruncated':
+    'truncated .lwcap: name blob of {bytes} bytes runs past the end',
+  'diagnostic.file.lwcap.namesInvalid': 'invalid .lwcap channel names',
+  'diagnostic.file.lwcap.gapTruncated':
+    'truncated .lwcap: gap span {index} runs past the end',
+  'diagnostic.file.lwcap.gapSpan': 'corrupt gap span [{start}, {end}) in {source}',
+  'diagnostic.file.lwcap.gapOrder': 'gap spans overlap or are unsorted at index {index}',
+  'diagnostic.file.lwcap.channelHeaders':
+    'truncated .lwcap: channel headers run past the end',
+  'diagnostic.file.lwcap.initial':
+    'corrupt .lwcap: channel {channel} starts at level {level}',
+  'diagnostic.file.lwcap.edgeBytes':
+    'truncated or trailing bytes in .lwcap ({actual} vs {expected})',
+  'diagnostic.file.lwcap.edgeRange':
+    'corrupt .lwcap: channel {channel} edge {index} = {value} outside [1, {length})',
+  'diagnostic.file.lwcap.edgeOrder':
+    'corrupt .lwcap: channel {channel} edges are not strictly increasing at index {index}',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Width: {duration}',

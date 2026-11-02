@@ -600,6 +600,9 @@ const baseSettings: CaptureSettings = {
     'capturePanel.singleFiniteNote', 'capturePanel.singleUnlimitedNote',
     'capturePanel.repeatFiniteNote',
     'diagnostic.ui.localeLoad', 'diagnostic.io.nothingToSave',
+    'diagnostic.file.unsupported', 'diagnostic.file.lwcap.magic',
+    'diagnostic.file.lwcap.channels', 'diagnostic.file.lwcap.gapSpan',
+    'diagnostic.file.lwcap.samplerate', 'diagnostic.file.lwcap.edgeOrder',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];

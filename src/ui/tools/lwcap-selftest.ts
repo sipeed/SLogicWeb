@@ -19,7 +19,11 @@
 
 import { PlanarSampleStore, generateCapture } from '../../data/index.js';
 import type { SampleStore } from '../../data/index.js';
-import { saveLwcap, loadLwcap, levelAt } from '../captureIO.js';
+import { diagnosticOf } from '../../diagnostics.js';
+import type { Diagnostic } from '../../diagnostics.js';
+import { CHANNEL_COUNTS } from '../../types.js';
+import { formatDiagnostic } from '../format.js';
+import { saveLwcap, loadLwcap, loadFiles, levelAt } from '../captureIO.js';
 import { defaultChannels } from '../state.js';
 
 const nodeProcess = (() => {
@@ -45,6 +49,23 @@ function buildPlanar(chunkSamples: number): PlanarSampleStore {
     store.append(chunk);
   }
   return store;
+}
+
+async function thrown(
+  fn: () => unknown,
+): Promise<{ code: string; diag: Diagnostic | null; payload: string | null }> {
+  try {
+    await fn();
+  } catch (e) {
+    const d = diagnosticOf(e);
+    if (d) return { code: d.code, diag: d, payload: d.payload ?? null };
+    return {
+      code: `not a diagnostic: ${e instanceof Error ? e.message : String(e)}`,
+      diag: null,
+      payload: null,
+    };
+  }
+  return { code: 'did not throw', diag: null, payload: null };
 }
 
 function compareStores(a: SampleStore, b: SampleStore, tag: string): string | null {
@@ -185,15 +206,15 @@ async function main(): Promise<void> {
       const o = 36 + nameLen;
       dv.setUint32(o, s, true);
       dv.setUint32(o + 4, e, true);
-      try {
-        loadLwcap(u8.buffer, `corrupt-${name}.lwcap`);
-        bad.push(name);
-      } catch { /* expected */ }
+      const got = await thrown(() => loadLwcap(u8.buffer, `corrupt-${name}.lwcap`));
+      if (got.code !== 'file.lwcap.gapSpan') bad.push(`${name}: ${got.code}`);
     }
     results.push({
       name: 'corrupt v2 spans throw instead of loading',
       pass: bad.length === 0,
-      detail: bad.length === 0 ? 'reversed and past-length spans both threw' : `did not throw: ${bad.join(', ')}`,
+      detail: bad.length === 0
+        ? 'reversed and past-length spans both threw file.lwcap.gapSpan'
+        : `wrong code: ${bad.join(', ')}`,
     });
   }
 
@@ -226,6 +247,158 @@ async function main(): Promise<void> {
       detail: customSame && customFail === null
         ? loadedCustom.channelNames.join(', ')
         : customFail ?? `${JSON.stringify(loadedCustom.channelNames)} (want ${JSON.stringify(custom)})`,
+    });
+  }
+
+  {
+    const store = buildPlanar(4099);
+    store.noteGap(100, 200);
+    store.noteGap(300, 400);
+    const ab = await saveLwcap(store, names).arrayBuffer();
+    const dv0 = new DataView(ab);
+    const nameLen = dv0.getUint32(32, true);
+    const gapOff = 36 + nameLen;
+    const channelCount = dv0.getUint32(8, true);
+    const gapCount = dv0.getUint32(12, true);
+    const headerOff = gapOff + gapCount * 8;
+    const sampleLength = dv0.getFloat64(24, true);
+    const layout: { header: number; edges: number; count: number }[] = [];
+    let edgeCursor = headerOff + channelCount * 8;
+    for (let c = 0; c < channelCount; c++) {
+      const count = dv0.getUint32(headerOff + c * 8 + 4, true);
+      layout.push({ header: headerOff + c * 8, edges: edgeCursor, count });
+      edgeCursor += count * 4;
+    }
+    const busy = layout.find((c) => c.count >= 2);
+    if (!busy) throw new Error('fixture: expected a channel with two edges');
+    const mutate = (edit: (dv: DataView, u8: Uint8Array) => void): ArrayBuffer => {
+      const u8 = new Uint8Array(ab.slice(0));
+      edit(new DataView(u8.buffer), u8);
+      return u8.buffer;
+    };
+    const badMagic = (): ArrayBuffer => mutate((_dv, u8) => { u8[0] = 0x58; });
+    const reversedSpan = (): ArrayBuffer => mutate((dv) => {
+      dv.setUint32(gapOff, 90000, true);
+      dv.setUint32(gapOff + 4, 40000, true);
+    });
+    const badChannelCount = (): ArrayBuffer => mutate((dv) => dv.setUint32(8, 7, true));
+    const badNames = (): ArrayBuffer => mutate((dv, u8) => {
+      u8.set([0x7b, 0x7b, 0x7b, 0x7b], 36);
+      dv.setUint32(32, 4, true);
+    });
+    const badNamesShape = (): ArrayBuffer => mutate((_dv, u8) => {
+      const text = new TextEncoder().encode('[1,2,3,4]');
+      u8.fill(0x20, 36, 36 + nameLen);
+      u8.set(text, 36);
+    });
+    const cases: [string, string, () => unknown][] = [
+      ['short buffer', 'file.lwcap.header',
+        () => loadLwcap(ab.slice(0, 4), 'short-buffer.lwcap')],
+      ['truncated header after a valid magic', 'file.lwcap.header',
+        () => loadLwcap(ab.slice(0, 20), 'short-header.lwcap')],
+      ['bad magic', 'file.lwcap.magic',
+        () => loadLwcap(badMagic(), 'bad-magic.lwcap')],
+      ['unsupported channel count', 'file.lwcap.channels',
+        () => loadLwcap(badChannelCount(), 'bad-channels.lwcap')],
+      ['implausible length', 'file.lwcap.length',
+        () => loadLwcap(mutate((dv) => dv.setFloat64(24, -1, true)), 'bad-length.lwcap')],
+      ['fractional length', 'file.lwcap.length',
+        () => loadLwcap(
+          mutate((dv) => dv.setFloat64(24, sampleLength + 0.5, true)), 'fractional-length.lwcap')],
+      ['zero samplerate', 'file.lwcap.samplerate',
+        () => loadLwcap(mutate((dv) => dv.setFloat64(16, 0, true)), 'zero-samplerate.lwcap')],
+      ['NaN samplerate', 'file.lwcap.samplerate',
+        () => loadLwcap(mutate((dv) => dv.setFloat64(16, Number.NaN, true)), 'nan-samplerate.lwcap')],
+      ['name blob past the end', 'file.lwcap.namesTruncated',
+        () => loadLwcap(mutate((dv) => dv.setUint32(32, 0xfffffff0, true)), 'bad-names-len.lwcap')],
+      ['unreadable names JSON', 'file.lwcap.namesInvalid',
+        () => loadLwcap(badNames(), 'bad-names-json.lwcap')],
+      ['channel names that are not strings', 'file.lwcap.namesInvalid',
+        () => loadLwcap(badNamesShape(), 'bad-names-shape.lwcap')],
+      ['gap span past the end', 'file.lwcap.gapTruncated',
+        () => loadLwcap(ab.slice(0, gapOff), 'gap-past-end.lwcap')],
+      ['reversed gap span', 'file.lwcap.gapSpan',
+        () => loadLwcap(reversedSpan(), 'corrupt-gap.lwcap')],
+      ['overlapping gap spans', 'file.lwcap.gapOrder',
+        () => loadLwcap(mutate((dv) => dv.setUint32(gapOff + 8, 150, true)), 'gap-order.lwcap')],
+      ['channel headers past the end', 'file.lwcap.channelHeaders',
+        () => loadLwcap(ab.slice(0, gapOff + 16 + names.length * 8 - 1), 'headers-past-end.lwcap')],
+      ['initial level outside 0 or 1', 'file.lwcap.initial',
+        () => loadLwcap(mutate((dv) => dv.setUint8(busy.header, 2)), 'bad-initial.lwcap')],
+      ['trailing bytes', 'file.lwcap.edgeBytes', () => {
+        const u8 = new Uint8Array(ab.byteLength + 1);
+        u8.set(new Uint8Array(ab));
+        return loadLwcap(u8.buffer, 'trailing.lwcap');
+      }],
+      ['edge at sample 0', 'file.lwcap.edgeRange',
+        () => loadLwcap(mutate((dv) => dv.setInt32(busy.edges, 0, true)), 'edge-zero.lwcap')],
+      ['edge at the capture length', 'file.lwcap.edgeRange',
+        () => loadLwcap(
+          mutate((dv) => dv.setInt32(busy.edges, sampleLength, true)), 'edge-past-length.lwcap')],
+      ['edges that are not strictly increasing', 'file.lwcap.edgeOrder',
+        () => loadLwcap(mutate((dv) =>
+          dv.setInt32(busy.edges + 4, dv.getInt32(busy.edges, true), true)), 'edge-order.lwcap')],
+      ['no files', 'file.noFiles', () => loadFiles([])],
+      ['nothing loadable', 'file.unsupported',
+        () => loadFiles([new File(['x'], 'notes.txt'), new File(['y'], 'readme.md')])],
+    ];
+    const mismatched: string[] = [];
+    const unrendered: string[] = [];
+    for (const [label, want, run] of cases) {
+      const got = await thrown(run);
+      if (got.code !== want) mismatched.push(`${label}: want ${want} got ${got.code}`);
+      if (!got.diag) continue;
+      const vars = Object.values(got.diag.vars ?? {}).map(String);
+      const sentence = formatDiagnostic({
+        code: got.diag.code,
+        ...(got.diag.vars ? { vars: got.diag.vars } : {}),
+      });
+      const rendered = formatDiagnostic(got.diag);
+      const lost = vars.filter((v) => !sentence.includes(v));
+      const payloadLost = got.diag.payload !== undefined && !rendered.includes(got.diag.payload);
+      if (/[{}]/.test(sentence) || lost.length > 0 || payloadLost) {
+        unrendered.push(
+          `${label}: ${JSON.stringify(sentence)} missing ${lost.join(',')}${payloadLost ? ' payload' : ''}`);
+      }
+    }
+    results.push({
+      name: 'malformed and unsupported inputs throw their diagnostic code',
+      pass: mismatched.length === 0,
+      detail: mismatched.length === 0
+        ? `${cases.length} cases: ${cases.map(([, want]) => want).join(', ')}`
+        : mismatched.join('; '),
+    });
+    results.push({
+      name: 'every thrown diagnostic renders its vars with no leftover placeholder',
+      pass: unrendered.length === 0,
+      detail: unrendered.length === 0
+        ? `${cases.length} rendered sentences, all vars present`
+        : unrendered.join('; '),
+    });
+
+    const gapRendered = await thrown(() => loadLwcap(reversedSpan(), 'corrupt-gap.lwcap'));
+    const widthRendered = await thrown(() => loadLwcap(badChannelCount(), 'bad-channels.lwcap'));
+    const gapSentence = gapRendered.diag ? formatDiagnostic(gapRendered.diag) : '';
+    const widthSentence = widthRendered.diag ? formatDiagnostic(widthRendered.diag) : '';
+    const wantGap = 'corrupt gap span [90000, 40000) in corrupt-gap.lwcap';
+    const wantWidths = `channel count 7 is not a supported width (${CHANNEL_COUNTS.join('/')})`;
+    results.push({
+      name: 'rendered sentences carry the source name and the supported widths',
+      pass: gapSentence === wantGap && widthSentence === wantWidths,
+      detail: `gap ${JSON.stringify(gapSentence)}, widths ${JSON.stringify(widthSentence)}`,
+    });
+
+    const invalidNames = await thrown(() => loadLwcap(badNames(), 'bad-names-json.lwcap'));
+    const unsupported = await thrown(
+      () => loadFiles([new File(['x'], 'notes.txt'), new File(['y'], 'readme.md')]));
+    results.push({
+      name: 'unreadable names keep the JSON error and file names keep their own vars',
+      pass: invalidNames.code === 'file.lwcap.namesInvalid' &&
+        (invalidNames.payload ?? '').length > 0 &&
+        unsupported.code === 'file.unsupported' &&
+        unsupported.payload === null,
+      detail: `names payload ${JSON.stringify(invalidNames.payload)}, ` +
+        `unsupported payload ${JSON.stringify(unsupported.payload)}`,
     });
   }
 

@@ -93,6 +93,34 @@ export const fr: Messages = {
   // ---------------------------------------- status error detail codes
   'diagnostic.ui.localeLoad': '« {locale} » n’a pas pu être chargé',
   'diagnostic.io.nothingToSave': 'rien à enregistrer',
+  'diagnostic.file.noFiles': 'aucun fichier sélectionné',
+  'diagnostic.file.unsupported':
+    'rien d’exploitable dans {names} ; une session sigrok .sr ou un .lwcap est attendu',
+  'diagnostic.file.lwcap.header':
+    '.lwcap tronqué : {bytes} octets, moins que l’en-tête de {need} octets',
+  'diagnostic.file.lwcap.magic': 'ce n’est pas un fichier .lwcap (magic {magic})',
+  'diagnostic.file.lwcap.channels':
+    'le nombre de canaux {channels} n’est pas une largeur prise en charge ({widths})',
+  'diagnostic.file.lwcap.length': 'longueur de capture invraisemblable {length}',
+  'diagnostic.file.lwcap.samplerate':
+    'fréquence d’échantillonnage invraisemblable dans le .lwcap : {samplerate}',
+  'diagnostic.file.lwcap.namesTruncated':
+    '.lwcap tronqué : le bloc de noms de {bytes} octets dépasse la fin du fichier',
+  'diagnostic.file.lwcap.namesInvalid': 'noms de canaux invalides dans le .lwcap',
+  'diagnostic.file.lwcap.gapTruncated':
+    '.lwcap tronqué : le trou {index} dépasse la fin du fichier',
+  'diagnostic.file.lwcap.gapSpan': 'intervalle de trou corrompu [{start}, {end}) dans {source}',
+  'diagnostic.file.lwcap.gapOrder':
+    'intervalles de trou qui se chevauchent ou désordonnés à l’index {index}',
+  'diagnostic.file.lwcap.channelHeaders':
+    '.lwcap tronqué : les en-têtes de canaux dépassent la fin du fichier',
+  'diagnostic.file.lwcap.initial': '.lwcap corrompu : le canal {channel} démarre au niveau {level}',
+  'diagnostic.file.lwcap.edgeBytes':
+    'octets tronqués ou en trop dans le .lwcap ({actual} vs {expected})',
+  'diagnostic.file.lwcap.edgeRange':
+    '.lwcap corrompu : front {index} du canal {channel} = {value} hors de [1, {length})',
+  'diagnostic.file.lwcap.edgeOrder':
+    '.lwcap corrompu : les fronts du canal {channel} ne sont pas strictement croissants à l’index {index}',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Largeur : {duration}',

@@ -91,6 +91,26 @@ export const zhCN: Messages = {
   // ---------------------------------------- status error detail codes
   'diagnostic.ui.localeLoad': '“{locale}”加载失败',
   'diagnostic.io.nothingToSave': '没有可保存的数据',
+  'diagnostic.file.noFiles': '未选择文件',
+  'diagnostic.file.unsupported': '{names} 中没有可加载的内容；需要 sigrok .sr 会话或 .lwcap 文件',
+  'diagnostic.file.lwcap.header': '.lwcap 已截断：{bytes} 字节短于 {need} 字节的文件头',
+  'diagnostic.file.lwcap.magic': '不是 .lwcap 文件（magic {magic}）',
+  'diagnostic.file.lwcap.channels': '通道数 {channels} 不是受支持的位宽（{widths}）',
+  'diagnostic.file.lwcap.length': '采集长度不合理：{length}',
+  'diagnostic.file.lwcap.samplerate': '.lwcap 采样率不合理：{samplerate}',
+  'diagnostic.file.lwcap.namesTruncated':
+    '.lwcap 已截断：{bytes} 字节的通道名数据超出文件末尾',
+  'diagnostic.file.lwcap.namesInvalid': '.lwcap 中的通道名无效',
+  'diagnostic.file.lwcap.gapTruncated': '.lwcap 已截断：第 {index} 个间隙超出文件末尾',
+  'diagnostic.file.lwcap.gapSpan': '{source} 中的间隙区间 [{start}, {end}) 已损坏',
+  'diagnostic.file.lwcap.gapOrder': '第 {index} 个间隙区间与前一个重叠或顺序错误',
+  'diagnostic.file.lwcap.channelHeaders': '.lwcap 已截断：通道头超出文件末尾',
+  'diagnostic.file.lwcap.initial': '.lwcap 已损坏：通道 {channel} 的起始电平为 {level}',
+  'diagnostic.file.lwcap.edgeBytes': '.lwcap 中的字节被截断或有多余（实际 {actual}，应为 {expected}）',
+  'diagnostic.file.lwcap.edgeRange':
+    '.lwcap 已损坏：通道 {channel} 的第 {index} 个边沿 {value} 超出 [1, {length})',
+  'diagnostic.file.lwcap.edgeOrder':
+    '.lwcap 已损坏：通道 {channel} 的边沿在索引 {index} 处不是严格递增的',
 
   // -------------------------------------------------------- hover readout
   'hover.width': '宽度：{duration}',

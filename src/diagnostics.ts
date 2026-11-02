@@ -2,7 +2,27 @@
 
 export type DiagnosticVars = Record<string, string | number>;
 
-export const DIAGNOSTIC_CODES = ['ui.localeLoad', 'io.nothingToSave'] as const;
+export const DIAGNOSTIC_CODES = [
+  'ui.localeLoad',
+  'io.nothingToSave',
+  'file.noFiles',
+  'file.unsupported',
+  'file.lwcap.header',
+  'file.lwcap.magic',
+  'file.lwcap.channels',
+  'file.lwcap.length',
+  'file.lwcap.samplerate',
+  'file.lwcap.namesTruncated',
+  'file.lwcap.namesInvalid',
+  'file.lwcap.gapTruncated',
+  'file.lwcap.gapSpan',
+  'file.lwcap.gapOrder',
+  'file.lwcap.channelHeaders',
+  'file.lwcap.initial',
+  'file.lwcap.edgeBytes',
+  'file.lwcap.edgeRange',
+  'file.lwcap.edgeOrder',
+] as const;
 
 export type DiagnosticCode = (typeof DIAGNOSTIC_CODES)[number];
 

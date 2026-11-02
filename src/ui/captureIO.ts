@@ -18,7 +18,8 @@
 
 import { channelAcrossGaps, createEdgeStore } from '../data/index.js';
 import type { GapSpan, SampleStore } from '../data/types.js';
-import { isChannelCount, type ChannelCount } from '../types.js';
+import { DiagnosticError } from '../diagnostics.js';
+import { CHANNEL_COUNTS, isChannelCount, type ChannelCount } from '../types.js';
 import { parseSr } from './srLoad.js';
 
 /** [src/data] `append` throws past 2^31 samples rather than wrapping. */
@@ -34,7 +35,7 @@ export interface LoadedCapture {
 
 /** Load whatever the user picked: a sigrok session, or our own file. */
 export async function loadFiles(files: File[]): Promise<LoadedCapture> {
-  if (files.length === 0) throw new Error('no files selected');
+  if (files.length === 0) throw new DiagnosticError('file.noFiles');
 
   const lw = files.find((f) => f.name.toLowerCase().endsWith('.lwcap'));
   if (lw) return loadLwcap(await lw.arrayBuffer(), lw.name);
@@ -42,9 +43,9 @@ export async function loadFiles(files: File[]): Promise<LoadedCapture> {
   const sr = files.find((f) => f.name.toLowerCase().endsWith('.sr'));
   if (sr) return parseSr(await sr.arrayBuffer(), sr.name);
 
-  throw new Error(
-    `nothing loadable in ${files.map((f) => f.name).join(', ')}. ` +
-    `Expected a sigrok .sr session or a .lwcap.`);
+  throw new DiagnosticError('file.unsupported', {
+    names: files.map((f) => f.name).join(', '),
+  });
 }
 
 // ---------------------------------------------------------------- our own format
@@ -109,61 +110,122 @@ export function saveLwcap(store: SampleStore, names: readonly string[]): Blob {
   return new Blob([buf], { type: 'application/octet-stream' });
 }
 
+const LWCAP_HEADER_BYTES = 36;
+
+function isChannelNameList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
 export function loadLwcap(buf: ArrayBuffer, source: string): LoadedCapture {
+  if (buf.byteLength < 8) {
+    throw new DiagnosticError('file.lwcap.header', {
+      bytes: buf.byteLength, need: LWCAP_HEADER_BYTES,
+    });
+  }
   const dv = new DataView(buf);
   let magic = '';
   for (let i = 0; i < 8; i++) magic += String.fromCharCode(dv.getUint8(i));
   if (magic !== LWCAP_MAGIC_V1 && magic !== LWCAP_MAGIC_V2) {
-    throw new Error(`not a .lwcap file (magic ${JSON.stringify(magic)})`);
+    throw new DiagnosticError('file.lwcap.magic', { magic: JSON.stringify(magic) });
+  }
+  if (buf.byteLength < LWCAP_HEADER_BYTES) {
+    throw new DiagnosticError('file.lwcap.header', {
+      bytes: buf.byteLength, need: LWCAP_HEADER_BYTES,
+    });
   }
   const n = dv.getUint32(8, true);
-  if (!isChannelCount(n)) throw new Error(`channelCount ${n} is not a supported width (4/8/16/32/64/128)`);
+  if (!isChannelCount(n)) {
+    throw new DiagnosticError('file.lwcap.channels', {
+      channels: n, widths: CHANNEL_COUNTS.join('/'),
+    });
+  }
   const gapCount = dv.getUint32(12, true);
   const samplerate = dv.getFloat64(16, true);
   const length = dv.getFloat64(24, true);
-  if (!(length >= 0) || length >= MAX_SAMPLES) throw new Error(`implausible length ${length}`);
+  if (!Number.isInteger(length) || !(length >= 0) || length >= MAX_SAMPLES) {
+    throw new DiagnosticError('file.lwcap.length', { length });
+  }
+  if (!(samplerate > 0)) {
+    throw new DiagnosticError('file.lwcap.samplerate', { samplerate });
+  }
   const nameLen = dv.getUint32(32, true);
-  if (36 + nameLen > buf.byteLength) throw new Error(`truncated .lwcap (name blob of ${nameLen} past end)`);
-  const names = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 36, nameLen))) as string[];
+  if (36 + nameLen > buf.byteLength) {
+    throw new DiagnosticError('file.lwcap.namesTruncated', { bytes: nameLen });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 36, nameLen)));
+  } catch (e) {
+    throw new DiagnosticError(
+      'file.lwcap.namesInvalid', undefined, e instanceof Error ? e.message : String(e));
+  }
+  if (!isChannelNameList(parsed)) throw new DiagnosticError('file.lwcap.namesInvalid');
+  const names = parsed;
 
   let o = 36 + nameLen;
   const gaps: GapSpan[] = [];
   for (let g = 0; g < gapCount; g++) {
-    if (o + 8 > buf.byteLength) throw new Error(`truncated .lwcap (gap span ${g} past end)`);
+    if (o + 8 > buf.byteLength) throw new DiagnosticError('file.lwcap.gapTruncated', { index: g });
     const s = dv.getUint32(o, true);
     const e = dv.getUint32(o + 4, true);
     o += 8;
-    if (!(e > s) || e > length) throw new Error(`corrupt gap span [${s}, ${e}) in ${source}`);
+    if (!(e > s) || e > length) {
+      throw new DiagnosticError('file.lwcap.gapSpan', { start: s, end: e, source });
+    }
     if (g > 0) {
       const prev = gaps[g - 1]!;
-      if (!(s > prev.endSample)) throw new Error(`gap spans overlap or unsorted at index ${g}`);
+      if (!(s > prev.endSample)) {
+        throw new DiagnosticError('file.lwcap.gapOrder', { index: g });
+      }
     }
     gaps.push({ startSample: s, endSample: e });
   }
-  if (o + n * 8 > buf.byteLength) throw new Error('truncated .lwcap (channel headers past end)');
-  const initials: number[] = [];
+  if (o + n * 8 > buf.byteLength) {
+    throw new DiagnosticError('file.lwcap.channelHeaders');
+  }
+  const initials: (0 | 1)[] = [];
   const counts: number[] = [];
   for (let c = 0; c < n; c++) {
-    initials.push(dv.getUint8(o));
+    const initial = dv.getUint8(o);
+    if (initial !== 0 && initial !== 1) {
+      throw new DiagnosticError('file.lwcap.initial', { channel: c, level: initial });
+    }
+    initials.push(initial === 1 ? 1 : 0);
     counts.push(dv.getUint32(o + 4, true));
     o += 8;
   }
   let edgeBytes = 0;
   for (let c = 0; c < n; c++) edgeBytes += counts[c]! * 4;
   if (o + edgeBytes !== buf.byteLength) {
-    throw new Error(`truncated or trailing bytes in .lwcap (${buf.byteLength} vs ${o + edgeBytes})`);
+    throw new DiagnosticError('file.lwcap.edgeBytes', {
+      actual: buf.byteLength, expected: o + edgeBytes,
+    });
   }
   const edges: Int32Array[] = [];
   for (let c = 0; c < n; c++) {
     const e = new Int32Array(counts[c]!);
-    for (let i = 0; i < e.length; i++) { e[i] = dv.getInt32(o, true); o += 4; }
+    let previous = 0;
+    for (let i = 0; i < e.length; i++) {
+      const p = dv.getInt32(o, true);
+      o += 4;
+      if (p < 1 || p >= length) {
+        throw new DiagnosticError('file.lwcap.edgeRange', {
+          channel: c, index: i, value: p, length,
+        });
+      }
+      if (i > 0 && !(p > previous)) {
+        throw new DiagnosticError('file.lwcap.edgeOrder', { channel: c, index: i });
+      }
+      e[i] = p;
+      previous = p;
+    }
     edges.push(e);
   }
 
   // The file already IS the edge store's representation: load straight into it, no
   // sample-space expansion.
   const store = createEdgeStore(n as ChannelCount, samplerate, length,
-    Array.from({ length: n }, (_, c) => ({ initial: initials[c]! as 0 | 1, edges: edges[c]! })),
+    Array.from({ length: n }, (_, c) => ({ initial: initials[c]!, edges: edges[c]! })),
     gaps);
   return {
     store,

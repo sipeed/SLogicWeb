@@ -93,6 +93,33 @@ export const ru: Messages = {
   // ---------------------------------------- status error detail codes
   'diagnostic.ui.localeLoad': '«{locale}» не загружен',
   'diagnostic.io.nothingToSave': 'нечего сохранять',
+  'diagnostic.file.noFiles': 'файлы не выбраны',
+  'diagnostic.file.unsupported':
+    'среди {names} нет загружаемого: нужен сеанс sigrok .sr или файл .lwcap',
+  'diagnostic.file.lwcap.header':
+    'файл .lwcap обрезан: {bytes} байт короче заголовка в {need} байт',
+  'diagnostic.file.lwcap.magic': 'это не файл .lwcap (magic {magic})',
+  'diagnostic.file.lwcap.channels':
+    'число каналов {channels} не входит в поддерживаемую разрядность ({widths})',
+  'diagnostic.file.lwcap.length': 'неправдоподобная длина записи {length}',
+  'diagnostic.file.lwcap.samplerate': 'неправдоподобная частота дискретизации в .lwcap: {samplerate}',
+  'diagnostic.file.lwcap.namesTruncated':
+    'файл .lwcap обрезан: блок имён каналов размером {bytes} байт выходит за конец файла',
+  'diagnostic.file.lwcap.namesInvalid': 'недопустимые имена каналов в .lwcap',
+  'diagnostic.file.lwcap.gapTruncated':
+    'файл .lwcap обрезан: пропуск {index} выходит за конец файла',
+  'diagnostic.file.lwcap.gapSpan': 'повреждённый интервал пропуска [{start}, {end}) в {source}',
+  'diagnostic.file.lwcap.gapOrder':
+    'интервалы пропусков перекрываются или идут не по порядку на позиции {index}',
+  'diagnostic.file.lwcap.channelHeaders':
+    'файл .lwcap обрезан: заголовки каналов выходят за конец файла',
+  'diagnostic.file.lwcap.initial': 'файл .lwcap повреждён: канал {channel} начинается с уровня {level}',
+  'diagnostic.file.lwcap.edgeBytes':
+    'в .lwcap усечённые или лишние байты ({actual} вместо {expected})',
+  'diagnostic.file.lwcap.edgeRange':
+    'файл .lwcap повреждён: переход {index} канала {channel} = {value} вне [1, {length})',
+  'diagnostic.file.lwcap.edgeOrder':
+    'файл .lwcap повреждён: переходы канала {channel} не строго возрастают на индексе {index}',
 
   // -------------------------------------------------------- hover readout
   'hover.width': 'Ширина: {duration}',
