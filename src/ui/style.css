@@ -1271,12 +1271,10 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.cursor-dist-head { container-type: inline-size; }
-.cursor-dist-head > span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cursor-dist-head .cursor-legend { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-@container (max-width: 224px) {
-  .cursor-dist-head .cursor-legend { display: none; }
+.cursor-dist-head > span:first-child {
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.cursor-dist-head .cursor-legend { flex: none; }
 .cursor-dist-list { display: flex; flex-direction: column; gap: 6px; }
 .cursor-dist-row {
   display: flex; flex-wrap: wrap; align-items: center;

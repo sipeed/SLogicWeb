@@ -570,7 +570,7 @@ const distanceRowsSource = slice(app,
   const baseRules = declarations - scoped;
   check('the sheet styles the legend as a muted tabular 10 px caption',
     rule.length > 0 && absentProps.length === 0 && !rule.includes('!important') &&
-    !rule.includes('margin') && baseRules === 1 && scoped === 2,
+    !rule.includes('margin') && baseRules === 1 && scoped === 1,
     `absent=${JSON.stringify(absentProps)}, important=${rule.includes('!important')}, ` +
     `margin=${rule.includes('margin')}, baseRules=${baseRules}, scoped=${scoped}`);
 }
@@ -633,30 +633,32 @@ const distanceRowsSource = slice(app,
 }
 
 {
-  const headRule = slice(css, '.cursor-dist-head {', '}');
   const titleRule = slice(css, '.cursor-dist-head > span:first-child {', '}');
   const legendRule = slice(css, '.cursor-dist-head .cursor-legend {', '}');
-  const narrow = slice(css, '@container (max-width: 224px) {', '\n}\n');
-  const titleDecls = ['white-space: nowrap;', 'overflow: hidden;', 'text-overflow: ellipsis;'];
-  const missingTitle = titleDecls.filter((decl) => !titleRule.includes(decl));
-  const legendDecls = ['flex: 0 1 auto;', 'min-width: 0;', 'overflow: hidden;',
+  const titleDecls = ['min-width: 0;', 'white-space: nowrap;', 'overflow: hidden;',
     'text-overflow: ellipsis;'];
-  const missingLegend = legendDecls.filter((decl) => !legendRule.includes(decl));
+  const missingTitle = titleDecls.filter((decl) => !titleRule.includes(decl));
   const headClass = "distanceSec.header.classList.add('cursor-dist-head');";
-  check('the distance head is a size container whose title ellipsizes instead of wrapping',
-    distanceSection.includes(headClass) &&
-    headRule.includes('container-type: inline-size;') &&
-    missingTitle.length === 0 && !titleRule.includes('!important'),
-    `class=${distanceSection.includes(headClass)}, ` +
-    `container=${headRule.includes('container-type: inline-size;')}, ` +
-    `missing=${JSON.stringify(missingTitle)}`);
+  check('the distance title ellipsizes on one line inside the head',
+    distanceSection.includes(headClass) && missingTitle.length === 0 &&
+    !titleRule.includes('container-type') && !titleRule.includes('!important'),
+    `class=${distanceSection.includes(headClass)}, missing=${JSON.stringify(missingTitle)}, ` +
+    `important=${titleRule.includes('!important')}`);
 
-  const hidden = narrow.includes('.cursor-dist-head .cursor-legend { display: none; }');
-  check('the head legend yields before the title and hides in a narrow head',
-    missingLegend.length === 0 && hidden &&
-    !legendRule.includes('display: none'),
-    `missing=${JSON.stringify(missingLegend)}, hidden=${hidden}, ` +
-    `block=${narrow.length} chars`);
+  const forbiddenLegend = ['flex: 0 1 auto;', 'min-width: 0;', 'overflow: hidden;',
+    'text-overflow: ellipsis;', 'display: none;'].filter((decl) => legendRule.includes(decl));
+  check('the head legend never hides and never shrinks',
+    legendRule.includes('flex: none;') && forbiddenLegend.length === 0 &&
+    !legendRule.includes('!important'),
+    `rule=${legendRule.length} chars, forbidden=${JSON.stringify(forbiddenLegend)}`);
+
+  const containerBlocks = css.match(/@container[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g) ?? [];
+  const distanceContainers = containerBlocks.filter((block) => block.includes('.cursor-dist-head'));
+  const legendHideRules = [...css.matchAll(/([^{}]+)\{([^{}]*display:\s*none;[^{}]*)\}/g)]
+    .filter((match) => match[1]!.includes('.cursor-legend'));
+  check('no sheet rule or container query hides the distance legend at any width',
+    distanceContainers.length === 0 && legendHideRules.length === 0,
+    `containers=${distanceContainers.length}, hideRules=${legendHideRules.length}`);
 }
 
 {
