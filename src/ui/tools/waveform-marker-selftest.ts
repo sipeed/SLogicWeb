@@ -946,7 +946,7 @@ function between(source: string, start: string, end: string): string {
     deleteAt >= 0 && deleteAt < endDragAt && endDragAt < captureReleaseAt &&
     captureReleaseAt < endPinchAt &&
     endSource.includes('for (const cursor of this.cursors) {') &&
-    endSource.includes('if (markerEnded) { this.dirty = true; return; }') &&
+    endSource.includes('if (markerEnded) { this.renderPanels(); this.dirty = true; return; }') &&
     !endSource.includes('setSample(') && !endSource.includes('shiftKey'),
     `delete=${deleteAt}, endDrag=${endDragAt}, release=${captureReleaseAt}, ` +
     `pinch=${endPinchAt}, shift=${endSource.includes('shiftKey')}`);

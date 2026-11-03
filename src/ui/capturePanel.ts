@@ -47,9 +47,18 @@ export interface CapturePanelCallbacks {
   onOpenBank(start: number): void;
   onChannelWidth(channels: number): void;
   onUsbControl(command: string): Promise<string>;
+  onRemoveCursor(id: number): void;
 }
 
 export type CapturePanelState = 'ready' | 'capturing' | 'stopping' | 'waiting' | 'completed';
+
+export interface CursorRowView {
+  id: number;
+  label: string;
+  color: string;
+  seconds: number;
+  sample: number;
+}
 
 export interface CapturePanelView {
   settings: CaptureSettings;
@@ -70,6 +79,7 @@ export interface CapturePanelView {
     targetSamples: number | null } | null;
   maxSamplerateHz: Readonly<Record<number, number>>;
   triggerState: 'off' | 'waiting' | 'triggered' | 'not-found';
+  cursors: readonly CursorRowView[];
 }
 
 export class CapturePanel {
@@ -558,6 +568,33 @@ export class CapturePanel {
     this.root.appendChild(modeSec.el);
     this.root.appendChild(triggerSec.el);
 
+    const cursorSec = section(t('capturePanel.cursors'));
+    if (v.cursors.length === 0) {
+      const hint = div('panel-note');
+      hint.textContent = t('capturePanel.cursorEmpty');
+      cursorSec.body.appendChild(hint);
+    } else {
+      const list = div('cursor-list');
+      for (const row of v.cursors) {
+        const item = div('cursor-row');
+        item.dataset.cursorId = String(row.id);
+        const order = document.createElement('span');
+        order.className = 'cursor-idx';
+        order.textContent = row.label;
+        order.style.background = row.color;
+        order.style.color = chipForeground(row.color);
+        const pos = document.createElement('span');
+        pos.className = 'cursor-pos';
+        pos.textContent = `${formatDuration(row.seconds)}/${row.sample}`;
+        const remove = cursorRemoveButton(t('capturePanel.removeCursor', { label: row.label }),
+          () => this.cb.onRemoveCursor(row.id));
+        item.append(order, pos, remove);
+        list.appendChild(item);
+      }
+      cursorSec.body.appendChild(list);
+    }
+    this.root.appendChild(cursorSec.el);
+
     // ---- advanced test mode + raw USB console
     const advanced = document.createElement('details');
     advanced.className = 'advanced';
@@ -674,6 +711,35 @@ function oscilloscopeButton(
   b.appendChild(icon);
   b.addEventListener('click', onOpen);
   return b;
+}
+
+function cursorRemoveButton(label: string, onRemove: () => void): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'analyzer-act analyzer-act--remove';
+  b.title = label;
+  b.setAttribute('aria-label', label);
+  b.appendChild(cursorRemoveIcon());
+  b.addEventListener('click', onRemove);
+  return b;
+}
+
+function cursorRemoveIcon(): SVGSVGElement {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const icon = document.createElementNS(namespace, 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true');
+  for (const d of ['M18 6 6 18', 'm6 6 12 12']) {
+    const path = document.createElementNS(namespace, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    icon.appendChild(path);
+  }
+  return icon;
 }
 
 function nearest(list: readonly number[], v: number): number {

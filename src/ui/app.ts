@@ -41,7 +41,8 @@ import {
   type BusViewState,
 } from './busView.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
-import { CapturePanel, type CapturePanelState, type CapturePanelView } from './capturePanel.js';
+import { CapturePanel, type CapturePanelState, type CapturePanelView,
+  type CursorRowView } from './capturePanel.js';
 import {
   CHANNEL_BANK_SIZE, busChannelBank, captureWidthTiers, channelBankIndices, channelBankStart,
   busOutOfWidth, lockedChannelBanks,
@@ -327,6 +328,7 @@ export class App {
       onOpenBank: (start) => this.openBankBus(start),
       onChannelWidth: (n) => this.setChannelWidth(n),
       onUsbControl: (command) => this.usbControl(command),
+      onRemoveCursor: (id) => this.removeCursor(id),
     });
     this.analyzerPanel = new AnalyzerPanel(panelHost, {
       onAttach: (id, ch, opts) => void this.attachAnalyzer(id, ch, opts),
@@ -1080,7 +1082,7 @@ export class App {
       }
       if (plot.hasPointerCapture(e.pointerId)) plot.releasePointerCapture(e.pointerId);
       this.syncMarkerCursor(e.clientX - plot.getBoundingClientRect().left);
-      if (markerEnded) { this.dirty = true; return; }
+      if (markerEnded) { this.renderPanels(); this.dirty = true; return; }
       if (pinch && pointers.size >= 2) {
         // Three fingers down and one lifted: the pinch pair changed identity, so the
         // baseline must be re-measured or the next move zooms by the pair difference.
@@ -1276,6 +1278,23 @@ export class App {
     this.activeCursorId = id;
     this.renderPanels();
     this.dirty = true;
+  }
+
+  private cursorRows(): CursorRowView[] {
+    const origin = this.triggerSampleIndex ?? 0;
+    const rows: CursorRowView[] = [];
+    for (const cursor of this.cursors) {
+      const sample = cursor.marker.sample;
+      if (sample === null) continue;
+      rows.push({
+        id: cursor.id,
+        label: cursor.marker.label,
+        color: cursor.marker.color,
+        seconds: (sample - origin) / this.store.samplerate,
+        sample,
+      });
+    }
+    return rows;
   }
 
   private removeCursor(id: number): void {
@@ -1692,6 +1711,7 @@ export class App {
         progress: this.running ? this.progressView() : null,
         maxSamplerateHz: this.rateCeilings,
         triggerState: this.triggerState,
+        cursors: this.cursorRows(),
       });
     } else {
       this.analyzerPanel.render({
