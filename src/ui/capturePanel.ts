@@ -19,7 +19,9 @@
 import { SAMPLERATES_HZ, vrefCode, vrefVolts } from '../device/index.js';
 import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
-import { formatDuration, formatRate, formatStatusDetail, statusDetailOf } from './format.js';
+import {
+  formatCount, formatDuration, formatRate, formatStatusDetail, statusDetailOf,
+} from './format.js';
 import {
   CHANNEL_BANK_SIZE, channelBankIndices, channelBankRange, channelBankStarts, lockedChannelBanks,
 } from './channelBanks.js';
@@ -116,7 +118,7 @@ export class CapturePanel {
       if (row === undefined) continue;
       const pos = item.querySelector<HTMLElement>('.cursor-pos');
       if (pos === null) continue;
-      pos.textContent = `${row.time}/${row.sample}`;
+      pos.textContent = cursorCellText(row);
     }
   }
 
@@ -611,7 +613,7 @@ export class CapturePanel {
         });
         const pos = document.createElement('span');
         pos.className = 'cursor-pos';
-        pos.textContent = `${row.time}/${row.sample}`;
+        pos.textContent = cursorCellText(row);
         const remove = cursorRemoveButton(t('capturePanel.removeCursor', { label: row.label }),
           () => this.cb.onRemoveCursor(row.id));
         item.append(order, pos, remove);
@@ -737,6 +739,10 @@ function oscilloscopeButton(
   b.appendChild(icon);
   b.addEventListener('click', onOpen);
   return b;
+}
+
+function cursorCellText(row: CursorRowView): string {
+  return `${row.time}/${formatCount(row.sample)}`;
 }
 
 function cursorRemoveButton(label: string, onRemove: () => void): HTMLButtonElement {

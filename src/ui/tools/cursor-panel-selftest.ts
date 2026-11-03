@@ -2,6 +2,7 @@ import { en } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
 import { ru } from '../locales/ru.js';
 import { fr } from '../locales/fr.js';
+import { formatCount } from '../format.js';
 import type { MessageKey } from '../i18n.js';
 
 interface FsLike {
@@ -86,13 +87,55 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
 }
 
 {
-  check('the position cell is the row time joined to the absolute sample by /',
-    cursorSection.includes('pos.textContent = `${row.time}/${row.sample}`;') &&
+  check('the position cell delegates its time/sample composition to one shared helper',
+    cursorSection.includes('pos.textContent = cursorCellText(row);') &&
+    !cursorSection.includes('${row.time}/${row.sample}') &&
     !cursorSection.includes('formatDuration(row.seconds)') &&
     panel.includes("from './format.js'") &&
     panel.includes('formatDuration,'),
-    `composed=${cursorSection.includes('${row.time}/${row.sample}')}, ` +
+    `delegated=${cursorSection.includes('pos.textContent = cursorCellText(row);')}, ` +
+    `inline=${cursorSection.includes('${row.time}/${row.sample}')}, ` +
     `rederived=${cursorSection.includes('formatDuration(row.seconds)')}`);
+}
+
+{
+  const helper = slice(panel, 'function cursorCellText(', 'function cursorRemoveButton(');
+  const localHits = ['toLocaleString', 'toFixed', 'String(', 'innerHTML']
+    .filter((needle) => helper.includes(needle));
+  check('one module-local helper composes the row time and the formatted sample by /',
+    helper.length > 0 &&
+    helper.includes('function cursorCellText(row: CursorRowView): string {') &&
+    helper.includes('return `${row.time}/${formatCount(row.sample)}`;') &&
+    localHits.length === 0,
+    `helper=${helper.length} chars, time=${helper.includes('row.time')}, ` +
+    `sample=${helper.includes('formatCount(row.sample)')}, local=${JSON.stringify(localHits)}`);
+
+  const calls = (panel.match(/cursorCellText\(row\)/g) ?? []).length;
+  const compositions = (panel.match(/`\$\{row\.time\}/g) ?? []).length;
+  check('both the rebuild and the live refresh read the cell through that one helper',
+    calls === 2 && compositions === 1 &&
+    slice(panel, 'updateCursors(rows: readonly CursorRowView[]): void {', 'private fillProgress(progress:')
+      .includes('pos.textContent = cursorCellText(row);') &&
+    cursorSection.includes('pos.textContent = cursorCellText(row);'),
+    `calls=${calls}, compositions=${compositions}`);
+
+  const importAt = panel.indexOf('} from \'./format.js\';');
+  const importBlock = importAt < 0 ? '' : panel.slice(panel.lastIndexOf('import {', importAt), importAt);
+  const importStatements = (panel.match(/from '\.\/format\.js';/g) ?? []).length;
+  check('the helper reuses the shared count formatter through the existing format import',
+    importBlock.includes('formatCount,') && importStatements === 1 &&
+    helper.includes('formatCount(row.sample)') &&
+    formatCount(123400) !== '123400' &&
+    formatCount(123400).replace(/\D/g, '') === '123400',
+    `imported=${importBlock.includes('formatCount,')}, statements=${importStatements}, ` +
+    `grouped=${formatCount(123400) !== '123400'}`);
+
+  check('the helper sits with the other module-local cursor DOM helpers',
+    panel.indexOf('function cursorCellText(') > panel.indexOf('export class CapturePanel') &&
+    panel.indexOf('function cursorCellText(') < panel.indexOf('function cursorRemoveButton(') &&
+    panel.indexOf('function cursorCellText(') < panel.indexOf('function cursorRemoveIcon('),
+    `at=${panel.indexOf('function cursorCellText(')}, ` +
+    `remove=${panel.indexOf('function cursorRemoveButton(')}`);
 }
 
 {
@@ -355,7 +398,8 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
   const writeBans = structural.concat(['dataset', 'className']);
   const writeHits = writeBans.filter((needle) => write.includes(needle));
   check('the write site touches only the position text of an existing row',
-    write.includes('pos.textContent = `${row.time}/${row.sample}`;') &&
+    write.includes('pos.textContent = cursorCellText(row);') &&
+    !write.includes('${row.time}/${row.sample}') &&
     !write.includes('formatDuration') && writeHits.length === 0,
     `hits=${JSON.stringify(writeHits)}, text=${write.includes('pos.textContent')}`);
 
