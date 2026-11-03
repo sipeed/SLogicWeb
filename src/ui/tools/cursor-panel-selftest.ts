@@ -393,6 +393,20 @@ const distanceRowsSource = slice(app,
     consumed.slice(0, updateAt).includes("if (this.panel === 'device')") &&
     !consumed.includes('renderPanels('),
     `consumed=${consumed.length} chars, activate=${activateAt}, update=${updateAt}`);
+
+  const distanceAt = consumed.indexOf(
+    "if (this.panel === 'device') this.capturePanel.updateCursorDistances(this.cursorDistanceRows());");
+  check('a consumed drag move follows the same drag in the distance rows, after the cursor list',
+    consumed.length > 0 && updateAt >= 0 && distanceAt > updateAt &&
+    !consumed.slice(distanceAt).includes('renderPanels('),
+    `consumed=${consumed.length} chars, update=${updateAt}, distance=${distanceAt}`);
+
+  const callSites = (app.match(/updateCursorDistances\(/g) ?? []).length;
+  const rowSites = (app.match(/updateCursorDistances\(this\.cursorDistanceRows\(\)\)/g) ?? []).length;
+  const compositions = (app.match(/private cursorDistanceRows\(\): CursorDistanceRowView\[\] \{/g) ?? []).length;
+  check('both distance refreshes read the one view-row composition, never an ad-hoc map',
+    callSites === 2 && rowSites === 2 && compositions === 1,
+    `calls=${callSites}, rows=${rowSites}, compositions=${compositions}`);
 }
 
 {
@@ -455,6 +469,24 @@ const distanceRowsSource = slice(app,
     retention.indexOf('this.renderPanels();') > dropAt &&
     retention.indexOf('this.renderPanels();') < branchAt,
     `renders=${renders.length}, updates=${updates.length}, drop=${dropAt}, branch=${branchAt}`);
+
+  const shiftBranch = slice(retention, "} else if (shifted && this.panel === 'device') {",
+    'this.hover = null;');
+  const shiftListAt = shiftBranch.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
+  const shiftDistanceAt = shiftBranch.indexOf(
+    'this.capturePanel.updateCursorDistances(this.cursorDistanceRows());');
+  check('a retention shift refreshes the distance rows after the cursor list, in the same branch',
+    shiftBranch.length > 0 && shiftListAt >= 0 && shiftDistanceAt > shiftListAt &&
+    !shiftBranch.includes('renderPanels('),
+    `branch=${shiftBranch.length} chars, list=${shiftListAt}, distance=${shiftDistanceAt}`);
+
+  const pruneAt = retention.indexOf('this.distanceRows = pruneDistancePairs(');
+  const dropRenderAt = dropAt < 0 ? -1 : retention.indexOf('this.renderPanels();', dropAt);
+  check('a retention drop prunes the pairs that lost their cursor before the panel renders',
+    dropAt >= 0 && pruneAt > dropAt && dropRenderAt > pruneAt &&
+    retention.slice(pruneAt, dropRenderAt).includes(
+      'new Set(this.cursors.map((cursor) => cursor.id)),'),
+    `drop=${dropAt}, prune=${pruneAt}, render=${dropRenderAt}`);
 }
 
 {

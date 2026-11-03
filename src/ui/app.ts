@@ -1060,6 +1060,7 @@ export class App {
         if (consumed) {
           if (cursor.marker.started) this.activeCursorId = cursor.id;
           if (this.panel === 'device') this.capturePanel.updateCursors(this.cursorRows());
+          if (this.panel === 'device') this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
           this.dirty = true; return;
         }
       }
@@ -2413,9 +2414,13 @@ export class App {
         this.activeCursorId = last === undefined ? null : last.id;
       }
       this.renumberCursors();
+      this.distanceRows = pruneDistancePairs(
+        this.distanceRows, new Set(this.cursors.map((cursor) => cursor.id)),
+      );
       this.renderPanels();
     } else if (shifted && this.panel === 'device') {
       this.capturePanel.updateCursors(this.cursorRows());
+      this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
     }
     this.hover = null;
   }
