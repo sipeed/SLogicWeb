@@ -166,7 +166,8 @@ check('bank start uses the absolute channel index',
     retiredSheet, `retiredSheet=${retiredSheet}`);
 
   const iconStart = panel.indexOf('function oscilloscopeButton');
-  const icon = panel.slice(iconStart, panel.indexOf('function nearest', iconStart));
+  const iconRest = iconStart < 0 ? '' : panel.slice(iconStart);
+  const icon = iconRest.slice(0, iconRest.indexOf('\n}\n') + 3);
   const iconOnly = iconStart >= 0 && icon.includes('createElementNS') &&
     icon.includes("b.setAttribute('aria-haspopup', 'dialog')") && !icon.includes('textContent');
   const dialog = busPanel.split('export class BankBusDialog')[1] ?? '';

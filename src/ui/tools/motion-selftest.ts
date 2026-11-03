@@ -95,6 +95,7 @@ const MOTION_CONSUMERS: readonly string[] = [
   '.select-popover::-webkit-scrollbar-thumb',
   '.select-popover, .settings-menu, .settings-flyout',
   '.channel-color-palette',
+  '.cursor-dist-popover',
   '.channel-settings-dialog',
   '.channel-settings-dialog::backdrop',
 ];
@@ -102,6 +103,7 @@ const MOTION_CONSUMERS: readonly string[] = [
 const ENTRY_RULES: readonly string[] = [
   '.select-popover, .settings-menu, .settings-flyout',
   '.channel-color-palette',
+  '.cursor-dist-popover',
   '.channel-settings-dialog',
   '.channel-settings-dialog::backdrop',
 ];

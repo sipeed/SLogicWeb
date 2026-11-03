@@ -41,7 +41,8 @@ import {
   type BusViewState,
 } from './busView.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
-import { CapturePanel, type CapturePanelState, type CapturePanelView,
+import { CapturePanel, cursorDistanceSideId, type CapturePanelState, type CapturePanelView,
+  type CursorDistanceRowView, type CursorDistanceSideView,
   type CursorRowView } from './capturePanel.js';
 import {
   CHANNEL_BANK_SIZE, busChannelBank, captureWidthTiers, channelBankIndices, channelBankStart,
@@ -97,6 +98,11 @@ import {
   cursorColor, cursorLabels, layoutCursorChips, nearestCursorGrab,
   type CursorChip, type CursorGrabCandidate,
 } from './cursorSet.js';
+import {
+  addDistanceRow as appendDistanceRow, assignDistanceCursor, clearDistancePairs, distanceCell,
+  pruneDistancePairs, removeDistanceRow as dropDistanceRow, seedDistanceRow,
+  type CursorDistanceRow, type DistanceSide,
+} from './cursorDistance.js';
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
 
@@ -204,6 +210,8 @@ export class App {
   private cursors: CursorLine[] = [];
   private nextCursorId = 1;
   private activeCursorId: number | null = null;
+  private distanceRows: readonly CursorDistanceRow[] = [];
+  private nextDistanceRowId = 1;
   private releaseMarkerPointer: () => void = () => {};
   private hover: HoverMeasurement | null = null;
   private markerCursor: MarkerCursor = null;
@@ -331,6 +339,10 @@ export class App {
       onUsbControl: (command) => this.usbControl(command),
       onRemoveCursor: (id) => this.removeCursor(id),
       onFocusCursor: (id) => this.focusCursor(id),
+      onAddCursorDistance: () => this.addDistanceRow(),
+      onRemoveCursorDistance: (rowId) => this.removeDistanceRow(rowId),
+      onPickCursorDistance: (rowId, side, cursorId) =>
+        this.pickDistanceCursor(rowId, side, cursorId),
     });
     this.analyzerPanel = new AnalyzerPanel(panelHost, {
       onAttach: (id, ch, opts) => void this.attachAnalyzer(id, ch, opts),
@@ -1155,7 +1167,7 @@ export class App {
       if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement ||
           target instanceof HTMLTextAreaElement) return;
       if (target instanceof HTMLElement &&
-          (target.isContentEditable || target.closest('.select-field, .assistant-panel') !== null)) return;
+          (target.isContentEditable || target.closest('.select-field, .assistant-panel, .cursor-dist-popover') !== null)) return;
       if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;
       if (e.key === 'f') {
         this.noteViewportIntent();
@@ -1167,6 +1179,7 @@ export class App {
         this.primaryAction();
       }
       if (e.key === 'Escape') {
+        if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return;
         this.releaseMarkerPointer();
         this.clearCursors();
         this.renderPanels();
@@ -1279,8 +1292,59 @@ export class App {
     this.cursors.push({ id, marker });
     this.renumberCursors();
     this.activeCursorId = id;
+    if (this.cursors.length === 2) {
+      const seeded = seedDistanceRow(
+        this.distanceRows, this.nextDistanceRowId, this.cursors.map((cursor) => cursor.id),
+      );
+      if (seeded !== null) {
+        this.distanceRows = seeded;
+        this.nextDistanceRowId++;
+      }
+    }
     this.renderPanels();
     this.dirty = true;
+  }
+
+  private addDistanceRow(): void {
+    const rows = appendDistanceRow(this.distanceRows, this.nextDistanceRowId);
+    if (rows === this.distanceRows) return;
+    this.distanceRows = rows;
+    this.nextDistanceRowId++;
+    this.renderPanels();
+  }
+
+  private removeDistanceRow(rowId: number): void {
+    this.distanceRows = dropDistanceRow(this.distanceRows, rowId);
+    this.renderPanels();
+  }
+
+  private pickDistanceCursor(rowId: number, side: DistanceSide, cursorId: number): void {
+    this.distanceRows = assignDistanceCursor(this.distanceRows, rowId, side, cursorId);
+    this.renderPanels();
+    const invoker = document.getElementById(cursorDistanceSideId(rowId, side));
+    if (invoker !== null) invoker.focus();
+  }
+
+  private cursorDistanceRows(): CursorDistanceRowView[] {
+    const labels = cursorLabels(this.cursors.length);
+    const sides = new Map<number, CursorDistanceSideView>();
+    for (let index = 0; index < this.cursors.length; index++) {
+      const cursor = this.cursors[index]!;
+      sides.set(cursor.id, { id: cursor.id, label: labels[index]!, color: cursorColor(index) });
+    }
+    const samples = new Map<number, number>();
+    for (const cursor of this.cursors) {
+      const sample = cursor.marker.sample;
+      if (sample !== null && Number.isFinite(sample)) samples.set(cursor.id, sample);
+    }
+    const samplePeriod = 1 / this.store.samplerate;
+    return this.distanceRows.map((row, index) => ({
+      id: row.id,
+      row: index + 1,
+      a: row.a === null ? null : sides.get(row.a) ?? null,
+      b: row.b === null ? null : sides.get(row.b) ?? null,
+      delta: distanceCell(row, samples, samplePeriod),
+    }));
   }
 
   private cursorRows(): CursorRowView[] {
@@ -1322,6 +1386,9 @@ export class App {
       this.activeCursorId = last === undefined ? null : last.id;
     }
     this.renumberCursors();
+    this.distanceRows = pruneDistancePairs(
+      this.distanceRows, new Set(this.cursors.map((cursor) => cursor.id)),
+    );
     this.renderPanels();
     this.dirty = true;
   }
@@ -1329,6 +1396,7 @@ export class App {
   private clearCursors(): void {
     this.cursors = [];
     this.activeCursorId = null;
+    this.distanceRows = clearDistancePairs(this.distanceRows);
   }
 
   private cancelMarkerDrags(): void {
@@ -1728,6 +1796,7 @@ export class App {
         maxSamplerateHz: this.rateCeilings,
         triggerState: this.triggerState,
         cursors: this.cursorRows(),
+        cursorDistances: this.cursorDistanceRows(),
       });
     } else {
       this.analyzerPanel.render({

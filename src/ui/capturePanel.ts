@@ -37,6 +37,7 @@ import { captureSecondsFromTime, maxCaptureSeconds, MIN_CAPTURE_SECONDS,
   REPEAT_INTERVAL_SECONDS, repeatIntervalSecondsFromTime,
 } from './captureTime.js';
 import { capturePostTriggerSamples } from './capturePolicy.js';
+import { MAX_CURSOR_DISTANCE_ROWS, type DistanceSide } from './cursorDistance.js';
 import { acquisitionTimeControl } from './timeControl.js';
 import { DEFAULT_TIME_UNIT, maxTimeValue, timeUnitForRange, type TimeUnit } from './timeUnits.js';
 import {
@@ -51,6 +52,9 @@ export interface CapturePanelCallbacks {
   onUsbControl(command: string): Promise<string>;
   onRemoveCursor(id: number): void;
   onFocusCursor(id: number): void;
+  onAddCursorDistance(): void;
+  onRemoveCursorDistance(rowId: number): void;
+  onPickCursorDistance(rowId: number, side: DistanceSide, cursorId: number): void;
 }
 
 export type CapturePanelState = 'ready' | 'capturing' | 'stopping' | 'waiting' | 'completed';
@@ -62,6 +66,20 @@ export interface CursorRowView {
   seconds: number;
   sample: number;
   time: string;
+}
+
+export interface CursorDistanceSideView {
+  id: number;
+  label: string;
+  color: string;
+}
+
+export interface CursorDistanceRowView {
+  id: number;
+  row: number;
+  a: CursorDistanceSideView | null;
+  b: CursorDistanceSideView | null;
+  delta: string;
 }
 
 export interface CapturePanelView {
@@ -84,6 +102,7 @@ export interface CapturePanelView {
   maxSamplerateHz: Readonly<Record<number, number>>;
   triggerState: 'off' | 'waiting' | 'triggered' | 'not-found';
   cursors: readonly CursorRowView[];
+  cursorDistances: readonly CursorDistanceRowView[];
 }
 
 export class CapturePanel {
@@ -108,6 +127,18 @@ export class CapturePanel {
   updateProgress(progress: NonNullable<CapturePanelView['progress']>): void {
     if (!this.liveNote) return;
     this.fillProgress(progress);
+  }
+
+  updateCursorDistances(rows: readonly CursorDistanceRowView[]): void {
+    const byId = new Map<number, CursorDistanceRowView>();
+    for (const row of rows) byId.set(row.id, row);
+    for (const item of this.root.querySelectorAll<HTMLElement>('.cursor-dist-row')) {
+      const row = byId.get(Number(item.dataset.distanceId));
+      if (row === undefined) continue;
+      const delta = item.querySelector<HTMLElement>('.cursor-dist-delta');
+      if (delta === null) continue;
+      delta.textContent = row.delta;
+    }
   }
 
   updateCursors(rows: readonly CursorRowView[]): void {
@@ -623,6 +654,49 @@ export class CapturePanel {
     }
     this.root.appendChild(cursorSec.el);
 
+    const distanceSec = section(t('capturePanel.cursorDistance'));
+    distanceSec.header.classList.add('cursor-dist-head');
+    const distanceLegend = document.createElement('span');
+    distanceLegend.className = 'cursor-legend';
+    distanceLegend.textContent = t('capturePanel.cursorDistanceFormat');
+    distanceSec.header.appendChild(distanceLegend);
+    distanceSec.header.appendChild(distanceAddButton(
+      v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,
+      () => this.cb.onAddCursorDistance(),
+    ));
+    if (v.cursorDistances.length === 0) {
+      const hint = document.createElement('p');
+      hint.className = 'cursor-dist-hint';
+      hint.textContent = t(v.cursors.length < 2
+        ? 'capturePanel.cursorDistanceEmpty' : 'capturePanel.cursorDistanceNoRows');
+      distanceSec.body.appendChild(hint);
+    } else {
+      const list = div('cursor-dist-list');
+      for (const row of v.cursorDistances) {
+        const item = div('cursor-dist-row');
+        item.dataset.distanceId = String(row.id);
+        const a = distanceSideControl(row, 'a', v.cursors,
+          (cursorId) => this.cb.onPickCursorDistance(row.id, 'a', cursorId));
+        const mark = document.createElement('span');
+        mark.className = 'cursor-dist-mark';
+        mark.setAttribute('aria-hidden', 'true');
+        mark.textContent = '−';
+        const b = distanceSideControl(row, 'b', v.cursors,
+          (cursorId) => this.cb.onPickCursorDistance(row.id, 'b', cursorId));
+        const remove = cursorRemoveButton(
+          t('capturePanel.cursorDistanceRemove', { row: row.row }),
+          () => this.cb.onRemoveCursorDistance(row.id),
+        );
+        const delta = document.createElement('span');
+        delta.className = 'cursor-dist-delta';
+        delta.textContent = row.delta;
+        item.append(a.el, mark, b.el, remove, delta, a.popover, b.popover);
+        list.appendChild(item);
+      }
+      distanceSec.body.appendChild(list);
+    }
+    this.root.appendChild(distanceSec.el);
+
     // ---- advanced test mode + raw USB console
     const advanced = document.createElement('details');
     advanced.className = 'advanced';
@@ -761,17 +835,115 @@ function cursorRemoveIcon(): SVGSVGElement {
   const icon = document.createElementNS(namespace, 'svg');
   icon.setAttribute('viewBox', '0 0 24 24');
   icon.setAttribute('aria-hidden', 'true');
-  for (const d of ['M18 6 6 18', 'm6 6 12 12']) {
-    const path = document.createElementNS(namespace, 'path');
-    path.setAttribute('d', d);
-    path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', 'currentColor');
-    path.setAttribute('stroke-width', '2');
-    path.setAttribute('stroke-linecap', 'round');
-    path.setAttribute('stroke-linejoin', 'round');
-    icon.appendChild(path);
-  }
+  for (const d of ['M18 6 6 18', 'm6 6 12 12']) appendIconPath(icon, d);
   return icon;
+}
+
+export function cursorDistanceSideId(rowId: number, side: DistanceSide): string {
+  return `cursor-dist-${rowId}-${side}`;
+}
+
+function distanceSideControl(
+  row: CursorDistanceRowView, side: DistanceSide, cursors: readonly CursorRowView[],
+  onPick: (cursorId: number) => void,
+): { el: HTMLButtonElement; popover: HTMLDivElement } {
+  const pick = side === 'a' ? row.a : row.b;
+  const id = cursorDistanceSideId(row.id, side);
+  const menuId = `${id}-menu`;
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.id = id;
+  el.className = 'cursor-idx cursor-dist-side' + (pick === null ? ' is-unset' : '');
+  el.dataset.distanceId = String(row.id);
+  el.dataset.side = side;
+  el.textContent = pick === null ? '–' : pick.label;
+  if (pick !== null) {
+    el.style.background = pick.color;
+    el.style.color = chipForeground(pick.color);
+  }
+  el.style.setProperty('anchor-name', `--${id}`);
+  el.setAttribute('popovertarget', menuId);
+  const action = t(side === 'a' ? 'capturePanel.cursorDistanceStart' : 'capturePanel.cursorDistanceEnd',
+    { row: row.row });
+  const name = `${action}: ${pick === null ? t('capturePanel.cursorDistanceUnset') : pick.label}`;
+  el.title = name;
+  el.setAttribute('aria-label', name);
+  el.addEventListener('keydown', (e) => {
+    if (e.key === ' ') e.stopPropagation();
+  });
+
+  const popover = document.createElement('div');
+  popover.id = menuId;
+  popover.className = 'cursor-dist-popover';
+  popover.setAttribute('popover', 'auto');
+  popover.style.setProperty('position-anchor', `--${id}`);
+  if (cursors.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'cursor-dist-popover-empty';
+    empty.textContent = t('capturePanel.cursorEmpty');
+    popover.appendChild(empty);
+  } else {
+    for (const cursor of cursors) {
+      const current = pick !== null && pick.id === cursor.id;
+      const choice = document.createElement('button');
+      choice.type = 'button';
+      choice.className = 'cursor-dist-choice' + (current ? ' is-current' : '');
+      choice.dataset.cursorId = String(cursor.id);
+      const mark = document.createElement('span');
+      mark.className = 'cursor-dist-choice-mark';
+      mark.setAttribute('aria-hidden', 'true');
+      mark.textContent = current ? '✓' : '';
+      const chip = document.createElement('span');
+      chip.className = 'cursor-idx';
+      chip.textContent = cursor.label;
+      chip.style.background = cursor.color;
+      chip.style.color = chipForeground(cursor.color);
+      const pos = document.createElement('span');
+      pos.className = 'cursor-pos';
+      pos.textContent = cursorCellText(cursor);
+      choice.append(mark, chip, pos);
+      choice.addEventListener('click', () => onPick(cursor.id));
+      popover.appendChild(choice);
+    }
+  }
+  popover.addEventListener('toggle', () => {
+    if (popover.matches(':popover-open')) return;
+    if (el.isConnected) el.focus();
+  });
+  return { el, popover };
+}
+
+function distanceAddButton(disabled: boolean, onAdd: () => void): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'analyzer-act cursor-dist-add';
+  b.disabled = disabled;
+  const label = t('capturePanel.cursorDistanceAdd');
+  b.title = label;
+  b.setAttribute('aria-label', label);
+  b.appendChild(distanceAddIcon());
+  b.addEventListener('click', onAdd);
+  return b;
+}
+
+function distanceAddIcon(): SVGSVGElement {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const icon = document.createElementNS(namespace, 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true');
+  for (const d of ['M12 5v14', 'M5 12h14']) appendIconPath(icon, d);
+  return icon;
+}
+
+function appendIconPath(icon: SVGSVGElement, d: string): void {
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', d);
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '2');
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+  icon.appendChild(path);
 }
 
 function nearest(list: readonly number[], v: number): number {
