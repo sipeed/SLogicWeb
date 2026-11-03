@@ -6,7 +6,7 @@ import {
   markerEdgeWindow, markerPointerCursor, markerSnapRadii, nearestMarkerEdge,
 } from '../markerGeometry.js';
 import {
-  WaveformMarker, type MarkerChipTarget, type MarkerPaintTarget, type MarkerSnapContext,
+  WaveformMarker, type MarkerPaintTarget, type MarkerSnapContext,
 } from '../waveformMarker.js';
 
 interface FsLike {
@@ -44,18 +44,6 @@ interface DrawCall {
 function recordingTarget(calls: DrawCall[]): MarkerPaintTarget {
   return {
     drawCursor: (x: number, color: string) => { calls.push({ x, color }); },
-  };
-}
-
-interface ChipCall {
-  x: number;
-  color: string;
-  label: string;
-}
-
-function recordingChipTarget(calls: ChipCall[]): MarkerChipTarget {
-  return {
-    drawChip: (x: number, color: string, label: string) => { calls.push({ x, color, label }); },
   };
 }
 
@@ -140,6 +128,27 @@ function between(source: string, start: string, end: string): string {
 
 {
   const marker = new WaveformMarker('A', '#CD427E');
+  marker.setLabel('3');
+  marker.setColor('#00994D');
+  check('the label and colour are mutable without touching the sample or the drag session',
+    marker.label === '3' && marker.color === '#00994D' && marker.sample === null &&
+    !marker.isDragging,
+    `label=${marker.label}, color=${marker.color}, sample=${String(marker.sample)}, ` +
+    `dragging=${marker.isDragging}`);
+
+  marker.setSample(42, 1000);
+  grab(marker);
+  marker.setLabel('4');
+  marker.setColor('#2683D9');
+  check('control: relabelling a dragged cursor keeps its sample and its live session',
+    marker.label === '4' && marker.color === '#2683D9' && marker.sample === 42 &&
+    marker.isDragging,
+    `label=${marker.label}, color=${marker.color}, sample=${String(marker.sample)}, ` +
+    `dragging=${marker.isDragging}`);
+}
+
+{
+  const marker = new WaveformMarker('A', '#CD427E');
   marker.setSample(42, 1000);
   check('setSample writes the exact in-range sample',
     marker.sample === 42, `actual=${String(marker.sample)}`);
@@ -178,38 +187,25 @@ function between(source: string, start: string, end: string): string {
 
 {
   const calls: DrawCall[] = [];
-  const chipCalls: ChipCall[] = [];
   const target = recordingTarget(calls);
-  const chipTarget = recordingChipTarget(chipCalls);
   const marker = new WaveformMarker('A', '#CD427E');
   const toPx = (sample: number) => sample / 2 + 0.25;
 
   marker.draw(target, toPx);
-  marker.drawChip(chipTarget, toPx);
-  check('an absent sample paints neither a line nor a chip',
-    calls.length === 0 && chipCalls.length === 0,
-    `draws=${calls.length}, chips=${chipCalls.length}`);
+  check('an absent sample paints no line',
+    calls.length === 0, `draws=${calls.length}`);
 
   marker.setSample(10, 1000);
   marker.draw(target, toPx);
-  marker.drawChip(chipTarget, toPx);
   const exact = calls.length === 1 && calls[0]!.x === 5.25 && calls[0]!.color === '#CD427E';
   check('one present sample produces exactly one draw at the supplied pixel',
     exact, `draws=${calls.length}, calls=${JSON.stringify(calls)}`);
 
-  const chipExact = chipCalls.length === 1 && chipCalls[0]!.x === 5.25 &&
-    chipCalls[0]!.color === '#CD427E' && chipCalls[0]!.label === 'A';
-  check('one present sample produces exactly one chip call carrying the label',
-    chipExact, `chips=${chipCalls.length}, calls=${JSON.stringify(chipCalls)}`);
-
   marker.clear();
-  const clearedChips = chipCalls.length;
   const clearedDraws = calls.length;
   marker.draw(target, toPx);
-  marker.drawChip(chipTarget, toPx);
-  check('clearing the marker removes its chip as well as its line',
-    chipCalls.length === clearedChips && calls.length === clearedDraws,
-    `draws=${calls.length}, chips=${chipCalls.length}`);
+  check('clearing the marker removes its line',
+    calls.length === clearedDraws, `draws=${calls.length}`);
 
   marker.setSample(10, 1000);
   const controlCalls: DrawCall[] = [];
@@ -816,69 +812,93 @@ function between(source: string, start: string, end: string): string {
     `bands=${classGrab.includes('isMarkerGrab(request.pointerCssX, request.markerCssX)')}`);
 
   const constructions = appSource.match(/new WaveformMarker\(/g) ?? [];
-  check('the application constructs exactly one marker with the A identity',
-    constructions.length === 1 && appSource.includes("new WaveformMarker('A', MEASURE_COLORS[0]!)"),
+  check('the application constructs one marker per placement from the positional colour',
+    constructions.length === 1 &&
+    appSource.includes("new WaveformMarker('', cursorColor(this.cursors.length))") &&
+    !appSource.includes("new WaveformMarker('A'"),
     `constructions=${constructions.length}`);
 
+  const drawBlock = between(appSource, 'private draw(): void {', 'private drawAxisCanvas(');
   const draws = appSource.match(/\.draw\(this\.overlay, /g) ?? [];
-  check('the application paints the marker through the class exactly once',
-    draws.length === 1, `draws=${draws.length}`);
+  check('the application paints every cursor through the class in one list-order loop',
+    draws.length === 1 &&
+    drawBlock.includes('for (const cursor of this.cursors) cursor.marker.draw(this.overlay,') &&
+    !drawBlock.includes('markerA'),
+    `draws=${draws.length}`);
 
-  check('the marker is the only owner of the A sample',
-    !appSource.includes('cursorA'), `cursorA=${appSource.includes('cursorA')}`);
+  check('the retired single A marker field leaves no state, draw, or status path behind',
+    !appSource.includes('markerA') && !appSource.includes('cursorA'),
+    `markerA=${appSource.includes('markerA')}, cursorA=${appSource.includes('cursorA')}`);
 
-  check('no marker collection or manager API exists in the class or the app',
-    !/markers\s*[:=]|WaveformMarkers|MarkerManager/.test(markerSource + appSource),
-    `markerSource=${/markers\s*[:=]|WaveformMarkers|MarkerManager/.test(markerSource)}, ` +
-    `appSource=${/markers\s*[:=]|WaveformMarkers|MarkerManager/.test(appSource)}`);
+  check('the marker class stays single-instance while the application owns the list',
+    !/markers\s*[:=]|WaveformMarkers|MarkerManager/.test(markerSource) &&
+    appSource.includes('interface CursorLine {') &&
+    appSource.includes('private cursors: CursorLine[] = [];'),
+    `classCollection=${/markers\s*[:=]|WaveformMarkers|MarkerManager/.test(markerSource)}`);
 
-  const bTraces = ['cursorB', 'setCursors', "'B'", '|B-A|', '1/|B-A|']
-    .filter((token) => appSource.includes(token));
+  check('the application keeps a plain cursor list with no manager or marker registry',
+    !appSource.includes('MarkerManager') && !appSource.includes('WaveformMarkers') &&
+    !appSource.includes('markers:') &&
+    appSource.includes('private cursors: CursorLine[] = [];'),
+    `manager=${appSource.includes('MarkerManager')}, ` +
+    `registry=${appSource.includes('WaveformMarkers')}, ` +
+    `markers=${appSource.includes('markers:')}`);
+
+  const bTokens = ['setCursors', "'B'", '|B-A|', '1/|B-A|'];
+  const bTraces = [
+    ...bTokens.filter((token) => appSource.includes(token)),
+    ...(/\bcursorB\b/.test(appSource) ? ['cursorB'] : []),
+  ];
   check('marker B leaves no state, draw, status segment, or debug parameter behind',
     bTraces.length === 0, `traces=${JSON.stringify(bTraces)}`);
 
-  const aStatus = appSource.match(/parts\.push\(`A /g) ?? [];
-  check('the A status segment has exactly one producing path',
-    aStatus.length === 1, `segments=${aStatus.length}`);
+  const statusSource = between(appSource, 'private renderStatus(): void {', 'private fail(');
+  const activeStatus = statusSource.match(/parts\.push\(`\$\{active\.marker\.label\} /g) ?? [];
+  check('the status bar has exactly one active-cursor segment carrying its order label',
+    activeStatus.length === 1 &&
+    statusSource.includes('const active = this.activeCursor();') &&
+    statusSource.includes('parts.push(`${active.marker.label} ${formatDuration((markerSample - origin) / sr)}`);') &&
+    !statusSource.includes('`A '),
+    `segments=${activeStatus.length}, len=${statusSource.length}`);
 
   const downSource = between(appSource, "plot.addEventListener('pointerdown'", "plot.addEventListener('pointermove'");
   const pinchBranch = between(downSource, 'if (pointers.size === 2) {', '} else if (pointers.size === 1) {');
-  check('a second pointer cancels only the marker session and keeps both pointers mapped and captured',
-    pinchBranch.includes('this.markerA.cancelDrag();') &&
+  check('a second pointer cancels only the cursor sessions and keeps both pointers mapped and captured',
+    pinchBranch.includes('this.cancelMarkerDrags();') &&
     !pinchBranch.includes('pointers.delete') &&
     !pinchBranch.includes('releasePointerCapture') &&
     !pinchBranch.includes('endDrag') &&
     downSource.indexOf('plot.setPointerCapture(e.pointerId);') < downSource.indexOf('if (pointers.size === 2)'),
-    `len=${pinchBranch.length}, cancel=${pinchBranch.includes('this.markerA.cancelDrag();')}, ` +
+    `len=${pinchBranch.length}, cancel=${pinchBranch.includes('this.cancelMarkerDrags();')}, ` +
     `delete=${pinchBranch.includes('pointers.delete')}, ` +
     `release=${pinchBranch.includes('releasePointerCapture')}, ` +
     `endDrag=${pinchBranch.includes('endDrag')}`);
 
   const grabCall = downSource.indexOf('const grabbed = this.tryGrabMarker(');
-  check('the first pointer arbitrates the marker grab before ordinary pan',
+  check('the first pointer arbitrates the cursor grab before ordinary pan',
     grabCall >= 0 && grabCall > downSource.indexOf('if (pointers.size === 2)') &&
     downSource.indexOf('dragging = !grabbed;') > grabCall,
     `grabAt=${grabCall}, panAt=${downSource.indexOf('dragging = !grabbed;')}`);
 
   const moveSource = between(appSource, "plot.addEventListener('pointermove'", 'const end = (e: PointerEvent) => {');
-  const markerMove = moveSource.indexOf('this.markerA.move({');
+  const markerMove = moveSource.indexOf('cursor.marker.move({');
   const pinchAt = moveSource.indexOf('if (pinch && pointers.size >= 2)');
   const panAt = moveSource.indexOf('if (dragging) {');
   const hoverAt = moveSource.indexOf('this.updateHover(');
-  const markerBranch = between(moveSource, 'if (this.markerA.isDragging) {', 'if (pinch');
-  check('marker moves are handled before pinch, pan, and hover',
+  const markerBranch = between(moveSource, 'const cursor = this.draggingCursor();', 'if (pinch');
+  check('dragging cursor moves are handled before pinch, pan, and hover',
     markerMove >= 0 && markerMove < pinchAt && pinchAt >= 0 && pinchAt < panAt &&
     panAt >= 0 && panAt < hoverAt,
     `move=${markerMove}, pinch=${pinchAt}, pan=${panAt}, hover=${hoverAt}`);
-  const moveCalls = markerBranch.match(/this\.markerA\.move\(\{/g) ?? [];
-  const snapCalls = markerBranch.match(/snap: this\.markerSnap\(sample\),/g) ?? [];
-  check('the marker move branch supplies exactly one snap context to the single move',
+  const moveCalls = markerBranch.match(/cursor\.marker\.move\(\{/g) ?? [];
+  const snapCalls = markerBranch.match(/snap: this\.snapContext\(cursor\.marker\.channel, sample\),/g) ?? [];
+  check('the dragging cursor move branch supplies exactly one snap context to the single move',
     moveCalls.length === 1 && snapCalls.length === 1 &&
     markerBranch.indexOf('const sample = this.toSample(') >= 0 &&
-    markerBranch.indexOf('snap: this.markerSnap(sample),') >
+    markerBranch.indexOf('snap: this.snapContext(cursor.marker.channel, sample),') >
       markerBranch.indexOf('const sample = this.toSample('),
     `moves=${moveCalls.length}, snaps=${snapCalls.length}, len=${markerBranch.length}`);
-  check('the marker move branch never pans, zooms, changes follow state, or queries edges itself',
+  check('the cursor move branch never pans, zooms, changes follow state, or queries edges itself',
     markerBranch.length > 0 && !markerBranch.includes('panPixels') &&
     !markerBranch.includes('zoomAt') && !markerBranch.includes('setFollow') &&
     !markerBranch.includes('store.edges('),
@@ -886,10 +906,10 @@ function between(source: string, start: string, end: string): string {
     `zoom=${markerBranch.includes('zoomAt')}, follow=${markerBranch.includes('setFollow')}, ` +
     `branchEdges=${markerBranch.includes('store.edges(')}`);
 
-  const snapSource = between(appSource, 'private markerSnap(', 'private updateHover(');
+  const snapSource = between(appSource, 'private snapContext(', 'private placeCursorAt(');
   const snapQueries = snapSource.match(/store\.edges\(/g) ?? [];
   check('the snap context revalidates channel, domain, and radii then makes one bounded read',
-    snapSource.includes('const channel = this.markerA.channel;') &&
+    snapSource.includes('private snapContext(channel: number | null, center: number): MarkerSnapContext | null {') &&
     snapSource.includes('!Number.isInteger(channel) || channel < 0 || channel >= store.channelCount') &&
     snapSource.includes('this.channels[channel]?.enabled !== true') &&
     snapSource.includes('center < 0 || center > store.length - 1') &&
@@ -917,44 +937,49 @@ function between(source: string, start: string, end: string): string {
     `loop=${snappedSource.includes('for (') || snappedSource.includes('while')}`);
 
   const endSource = between(appSource, 'const end = (e: PointerEvent) => {', "plot.addEventListener('pointerup', end);");
-  check('ordinary click placement writes through setSample without any snap context',
-    endSource.includes('this.markerA.setSample(s, this.store.length);') &&
-    !endSource.includes('markerSnap') && !endSource.includes('edges('),
-    `click=${endSource.includes('this.markerA.setSample(s, this.store.length);')}, ` +
-    `snap=${endSource.includes('markerSnap')}, edges=${endSource.includes('edges(')}`);
-  const endRelease = 'const markerEnded = this.markerA.endDrag(e.pointerId);';
-  const endDragAt = endSource.indexOf(endRelease);
+  const endDragAt = endSource.indexOf('if (cursor.marker.endDrag(e.pointerId)) markerEnded = true;');
   const deleteAt = endSource.indexOf('pointers.delete(e.pointerId);');
   const captureReleaseAt = endSource.indexOf(
     'if (plot.hasPointerCapture(e.pointerId)) plot.releasePointerCapture(e.pointerId);');
   const endPinchAt = endSource.indexOf('if (pinch && pointers.size >= 2)');
-  const clickAt = endSource.indexOf('this.markerA.setSample(s, this.store.length);');
-  check('a matching pointer release ends the session before capture release and click placement',
+  check('a pointer release ends every matching session before capture release and pinch bookkeeping',
     deleteAt >= 0 && deleteAt < endDragAt && endDragAt < captureReleaseAt &&
-    captureReleaseAt < endPinchAt && endPinchAt < clickAt &&
+    captureReleaseAt < endPinchAt &&
+    endSource.includes('for (const cursor of this.cursors) {') &&
     endSource.includes('if (markerEnded) { this.dirty = true; return; }') &&
-    !endSource.includes('shiftKey'),
+    !endSource.includes('setSample(') && !endSource.includes('shiftKey'),
     `delete=${deleteAt}, endDrag=${endDragAt}, release=${captureReleaseAt}, ` +
-    `pinch=${endPinchAt}, click=${clickAt}, shift=${endSource.includes('shiftKey')}`);
+    `pinch=${endPinchAt}, shift=${endSource.includes('shiftKey')}`);
+  check('a single click never places, moves, or selects a cursor',
+    endSource.length > 0 && !endSource.includes('toSample(') &&
+    !endSource.includes('addCursor') && !/\bmoved\b/.test(appSource) &&
+    !appSource.includes('downX'),
+    `len=${endSource.length}, moved=${/\bmoved\b/.test(appSource)}, ` +
+    `downX=${appSource.includes('downX')}`);
 
   const lost = appSource.match(/addEventListener\('lostpointercapture'/g) ?? [];
   const lostSource = between(appSource, "plot.addEventListener('lostpointercapture'", "plot.addEventListener('pointerleave'");
-  check('exactly one lost-capture path exists and it ignores non-marker pointers',
-    lost.length === 1 && lostSource.includes('if (this.markerA.pointerId !== e.pointerId) return;') &&
+  check('exactly one lost-capture path exists and it cancels only the cursor that owns the pointer',
+    lost.length === 1 &&
+    lostSource.includes('const cursor = this.cursors.find((c) => c.marker.pointerId === e.pointerId);') &&
+    lostSource.includes('if (cursor === undefined) return;') &&
     lostSource.includes('pointers.delete(e.pointerId);') &&
-    lostSource.includes('this.markerA.cancelDrag();'),
-    `listeners=${lost.length}, guard=${lostSource.includes('if (this.markerA.pointerId !== e.pointerId) return;')}, ` +
+    lostSource.includes('cursor.marker.cancelDrag();'),
+    `listeners=${lost.length}, ` +
+    `owner=${lostSource.includes('const cursor = this.cursors.find((c) => c.marker.pointerId === e.pointerId);')}, ` +
     `delete=${lostSource.includes('pointers.delete(e.pointerId);')}`);
 
   const releaseSource = between(appSource, 'this.releaseMarkerPointer = () => {', "plot.addEventListener('pointerdown'");
-  check('terminal cleanup is a no-op without a session and touches only the marker pointer',
-    releaseSource.includes('const id = this.markerA.pointerId;') &&
-    releaseSource.includes('if (id === null) return;') &&
-    releaseSource.includes('this.markerA.cancelDrag();') &&
+  check('terminal cleanup is a no-op without a live session and touches only the dragging cursor',
+    releaseSource.includes('const cursor = this.draggingCursor();') &&
+    releaseSource.includes('const id = cursor?.marker.pointerId ?? null;') &&
+    releaseSource.includes('if (cursor === null || id === null) return;') &&
+    releaseSource.includes('cursor.marker.cancelDrag();') &&
     releaseSource.includes('pointers.delete(id);') &&
     releaseSource.includes('if (plot.hasPointerCapture(id)) plot.releasePointerCapture(id);') &&
-    !releaseSource.includes('pointers.clear()'),
-    `len=${releaseSource.length}, guard=${releaseSource.includes('if (id === null) return;')}, ` +
+    !releaseSource.includes('pointers.clear()') &&
+    !releaseSource.includes('cancelMarkerDrags'),
+    `len=${releaseSource.length}, guard=${releaseSource.includes('if (cursor === null || id === null) return;')}, ` +
     `clear=${releaseSource.includes('pointers.clear()')}`);
 
   const setIndices = [...appSource.matchAll(/this\.storeRef\.set\(/g)].map((m) => m.index!);
@@ -968,36 +993,48 @@ function between(source: string, start: string, end: string): string {
   const startSource = between(appSource, 'private async startCapture(', 'private async stopCapture(');
   const escapeAt = appSource.indexOf("if (e.key === 'Escape') {");
   const escapeSource = escapeAt >= 0 ? appSource.slice(escapeAt, escapeAt + 200) : '';
-  check('capture adoption clears the marker while hardware start retains its sample',
-    adoptSource.includes('this.markerA.clear();') &&
-    startSource.length > 0 && !startSource.includes('this.markerA.clear();'),
-    `adoptClear=${adoptSource.includes('this.markerA.clear();')}, ` +
-    `startClear=${startSource.includes('this.markerA.clear();')}`);
-  check('Escape cancels marker dragging before clearing the sample',
+  check('capture adoption clears every cursor while hardware start retains their samples',
+    adoptSource.includes('this.clearCursors();') &&
+    startSource.length > 0 && !startSource.includes('this.clearCursors();') &&
+    startSource.includes('this.releaseMarkerPointer();'),
+    `adoptClear=${adoptSource.includes('this.clearCursors();')}, ` +
+    `startClear=${startSource.includes('this.clearCursors();')}, ` +
+    `startRelease=${startSource.includes('this.releaseMarkerPointer();')}`);
+  check('Escape cancels cursor dragging before clearing the list and rebuilding the panel',
     escapeSource.length > 0 &&
     escapeSource.indexOf('this.releaseMarkerPointer();') >= 0 &&
-    escapeSource.indexOf('this.releaseMarkerPointer();') < escapeSource.indexOf('this.markerA.clear();'),
+    escapeSource.indexOf('this.releaseMarkerPointer();') < escapeSource.indexOf('this.clearCursors();') &&
+    escapeSource.indexOf('this.clearCursors();') < escapeSource.indexOf('this.renderPanels();'),
     `len=${escapeSource.length}`);
 
   const debugStart = appSource.indexOf('readonly debug = {');
   const hoverAtDebug = appSource.indexOf('hoverAt: (cssX: number, cssY: number)', debugStart);
   const debugSource = debugStart >= 0 && hoverAtDebug > debugStart
     ? appSource.slice(debugStart, hoverAtDebug) : '';
-  const setMarkerSource = between(debugSource, 'setMarker: (sample: number | null) => {', 'marker: () => ({');
-  check('the programmatic setter cancels dragging before the clamped write',
+  const setMarkerSource = between(debugSource, 'setMarker: (sample: number | null) => {', 'marker: () => {');
+  check('the programmatic setter cancels dragging before replacing the whole list',
     setMarkerSource.indexOf('this.releaseMarkerPointer();') >= 0 &&
     setMarkerSource.indexOf('this.releaseMarkerPointer();') <
-      setMarkerSource.indexOf('this.markerA.setSample(sample, this.store.length);'),
+      setMarkerSource.indexOf('this.clearCursors();') &&
+    setMarkerSource.includes('this.addCursor(sample);') &&
+    !setMarkerSource.includes('markerA'),
     `len=${setMarkerSource.length}`);
-  check('the debug surface exposes one single-marker setter and drag-state readout',
+  check('the debug surface exposes the active cursor, the list, and add/remove entry points',
     debugSource.includes('setMarker: (sample: number | null) => {') &&
-    debugSource.includes('marker: () => ({') &&
-    debugSource.includes('sample: this.markerA.sample,') &&
-    debugSource.includes('dragging: this.markerA.isDragging,') &&
-    debugSource.includes('started: this.markerA.started,') &&
-    debugSource.includes('pointerId: this.markerA.pointerId,') &&
-    debugSource.includes('channel: this.markerA.channel,') &&
-    !debugSource.includes('cursorB'),
+    debugSource.includes('marker: () => {') &&
+    debugSource.includes('id: cursor?.id ?? null,') &&
+    debugSource.includes('label: cursor?.marker.label ?? null,') &&
+    debugSource.includes('color: cursor?.marker.color ?? null,') &&
+    debugSource.includes('sample: cursor?.marker.sample ?? null,') &&
+    debugSource.includes('dragging: cursor?.marker.isDragging ?? false,') &&
+    debugSource.includes('started: cursor?.marker.started ?? false,') &&
+    debugSource.includes('pointerId: cursor?.marker.pointerId ?? null,') &&
+    debugSource.includes('channel: cursor?.marker.channel ?? null,') &&
+    debugSource.includes('cursors: () => this.cursors.map((cursor) => ({') &&
+    debugSource.includes('active: cursor.id === this.activeCursorId,') &&
+    debugSource.includes('addCursor: (sample: number) => this.addCursor(sample),') &&
+    debugSource.includes('removeCursor: (id: number) => this.removeCursor(id),') &&
+    !/\bcursorB\b/.test(debugSource),
     `len=${debugSource.length}, markerSetters=${(debugSource.match(/set[A-Z]\w*: \(/g) ?? []).join(',')}`);
 
   const debugEdges = between(
@@ -1011,12 +1048,12 @@ function between(source: string, start: string, end: string): string {
     debugEdges.includes('if (start >= end) return [];') &&
     debugEdges.includes('return Array.from(store.edges(channel, start, end));') &&
     !debugEdges.includes('Math.floor(lo)') && !debugEdges.includes('Math.ceil(hi)') &&
-    !debugEdges.includes('cursorB'),
+    !/\bcursorB\b/.test(debugEdges),
     `len=${debugEdges.length}, window=${debugEdges.includes('store.edges(channel, start, end)')}, ` +
     `floorLo=${debugEdges.includes('Math.floor(lo)')}, ceilHi=${debugEdges.includes('Math.ceil(hi)')}`);
 
   const rowAtSource = between(appSource, 'private rowAt(cssY: number)', 'private tryGrabMarker(');
-  const grabMarkerSource = between(appSource, 'private tryGrabMarker(', 'private updateHover(');
+  const grabMarkerSource = between(appSource, 'private tryGrabMarker(', 'private snapContext(');
   const hoverSource = between(appSource, 'private updateHover(', 'private setFollow(');
   check('the hover and marker press paths share one row hit-test',
     rowAtSource.includes('cssY >= box.top && cssY < box.top + box.height') &&
@@ -1077,11 +1114,139 @@ function between(source: string, start: string, end: string): string {
     appSource, 'private drawAxisCanvas(', 'private drawLaneSurfaces(');
   const axisPaint = axisCanvasSource.indexOf(
     'drawAxis(ctx, ticks, wCss, hCss, this.palette);');
-  const chipPaint = axisCanvasSource.indexOf('this.markerA.drawChip(');
-  check('the axis canvas paints the marker chip after the axis background fill',
-    axisCanvasSource.length > 0 && axisPaint >= 0 && chipPaint > axisPaint &&
-    axisCanvasSource.includes('paintMarkerChip(ctx, x, wCss, hCss, color, label, this.palette);'),
-    `len=${axisCanvasSource.length}, axis=${axisPaint}, chip=${chipPaint}`);
+  const layoutAt = axisCanvasSource.indexOf('layoutCursorChips(');
+  const chipPaint = axisCanvasSource.indexOf(
+    'paintMarkerChip(ctx, chip.cssX, wCss, hCss, cursor.marker.color, chip.label, this.palette);');
+  check('the axis canvas lays out cursor chips after the axis background fill',
+    axisCanvasSource.length > 0 && axisPaint >= 0 && layoutAt > axisPaint && chipPaint > layoutAt &&
+    axisCanvasSource.includes('chips.push({ id: cursor.id, label: cursor.marker.label, cssX: this.toPx(sample) });') &&
+    axisCanvasSource.includes('(label) => ctx.measureText(label).width + 2 * AXIS.markerChip.padX') &&
+    axisCanvasSource.includes("if (cursor === null) continue;") &&
+    !axisCanvasSource.includes('markerA'),
+    `len=${axisCanvasSource.length}, axis=${axisPaint}, layout=${layoutAt}, chip=${chipPaint}`);
+
+  const dblSource = between(
+    appSource, "plot.addEventListener('dblclick'", '// Dragging the axis');
+  const dblListeners = appSource.match(/'dblclick'/g) ?? [];
+  check('a double-click places one cursor from the pointer sample and bails on an empty store',
+    dblListeners.length === 1 &&
+    dblSource.includes('if (this.store.length === 0) return;') &&
+    dblSource.includes('const raw = Math.round(this.toSample(e.clientX - rect.left));') &&
+    dblSource.includes('this.placeCursorAt(raw, e.clientY - rect.top);') &&
+    (dblSource.match(/this\.addCursor\(/g) ?? []).length === 0,
+    `listeners=${dblListeners.length}, len=${dblSource.length}`);
+  check('double-click no longer zooms to fit or invalidates the viewport continuation anchor',
+    dblSource.length > 0 && !dblSource.includes('zoomToFit') &&
+    !dblSource.includes('noteViewportIntent'),
+    `len=${dblSource.length}, fit=${dblSource.includes('zoomToFit')}, ` +
+    `intent=${dblSource.includes('noteViewportIntent')}`);
+
+  const placementSource = between(appSource, 'private placeCursorAt(', 'private grabCandidates(');
+  check('placement snaps through the shared window and edge helpers, never a second radius rule',
+    placementSource.includes('this.addCursor(this.snapPlacement(raw, cssY) ?? raw);') &&
+    placementSource.includes('const snap = this.snapContext(this.rowAt(cssY)?.spec.channel ?? null, raw);') &&
+    placementSource.includes('markerEdgeWindow(raw, snap.queryRadiusSamples, this.store.length)') &&
+    placementSource.includes('nearestMarkerEdge(') &&
+    placementSource.includes('raw, snap.exactRadiusSamples,') &&
+    !placementSource.includes('MARKER_SNAP_RADIUS_CSS') &&
+    !placementSource.includes('store.edges('),
+    `len=${placementSource.length}, row=${placementSource.includes('this.rowAt(cssY)')}, ` +
+    `literals=${placementSource.includes('MARKER_SNAP_RADIUS_CSS')}`);
+  check('placement and dragging derive their snap context from the same helper',
+    placementSource.includes('this.snapContext(') &&
+    markerBranch.includes('snap: this.snapContext(cursor.marker.channel, sample),') &&
+    (appSource.match(/this\.snapContext\(/g) ?? []).length === 2,
+    `contexts=${(appSource.match(/this\.snapContext\(/g) ?? []).length}`);
+
+  check('the press grabs the nearest cursor in band and calls tryGrab on that cursor only',
+    grabMarkerSource.includes('const candidate = nearestCursorGrab(this.grabCandidates(), pointerCssX);') &&
+    grabMarkerSource.includes('if (candidate === null) return false;') &&
+    grabMarkerSource.includes('const cursor = this.cursorById(candidate.id);') &&
+    grabMarkerSource.includes('markerCssX: candidate.cssX,') &&
+    (grabMarkerSource.match(/\.tryGrab\(/g) ?? []).length === 1,
+    `len=${grabMarkerSource.length}, grabs=${(grabMarkerSource.match(/\.tryGrab\(/g) ?? []).length}`);
+  const consumedBlock = between(moveSource, 'if (consumed) {', 'if (pinch && pointers.size >= 2) {');
+  check('a press alone never changes the active cursor while a started drag activates it',
+    grabMarkerSource.length > 0 && !grabMarkerSource.includes('activeCursorId') &&
+    consumedBlock.includes('if (cursor.marker.started) this.activeCursorId = cursor.id;'),
+    `grabActive=${grabMarkerSource.includes('activeCursorId')}, ` +
+    `started=${consumedBlock.includes('if (cursor.marker.started) this.activeCursorId = cursor.id;')}`);
+  const candidateSource = between(appSource, 'private grabCandidates(', 'private cursorById(');
+  check('grab candidates come from every cursor that has a sample',
+    candidateSource.includes('for (const cursor of this.cursors) {') &&
+    candidateSource.includes('if (sample === null) continue;') &&
+    candidateSource.includes('candidates.push({ id: cursor.id, cssX: this.toPx(sample) });'),
+    `len=${candidateSource.length}`);
+
+  const addSource = between(appSource, 'private addCursor(', 'private removeCursor(');
+  check('adding a cursor clamps first, ignores an impossible sample, and marks one frame',
+    addSource.includes('marker.setSample(sample, this.store.length);') &&
+    addSource.includes('if (marker.sample === null) return;') &&
+    addSource.includes('const id = this.nextCursorId++;') &&
+    addSource.includes('this.cursors.push({ id, marker });') &&
+    addSource.includes('this.renumberCursors();') &&
+    addSource.indexOf('this.renumberCursors();') < addSource.indexOf('this.activeCursorId = id;') &&
+    addSource.includes('this.renderPanels();') && addSource.includes('this.dirty = true;'),
+    `len=${addSource.length}`);
+  const removeSource = between(appSource, 'private removeCursor(', 'private clearCursors(');
+  check('removing a cursor renumbers, recolours, and repaints the survivors',
+    removeSource.includes('const index = this.cursors.findIndex((cursor) => cursor.id === id);') &&
+    removeSource.includes('this.cursors.splice(index, 1);') &&
+    removeSource.includes('this.renumberCursors();') &&
+    removeSource.includes('this.renderPanels();') && removeSource.includes('this.dirty = true;'),
+    `len=${removeSource.length}`);
+  const renumberSource = between(appSource, 'private renumberCursors(', 'private addCursor(');
+  check('order labels and colours are recomputed from the list position on every mutation',
+    renumberSource.includes('const labels = cursorLabels(this.cursors.length);') &&
+    renumberSource.includes('marker.setLabel(labels[index]!);') &&
+    renumberSource.includes('marker.setColor(cursorColor(index));'),
+    `len=${renumberSource.length}`);
+  const clearSource = between(appSource, 'private clearCursors(', 'private cancelMarkerDrags(');
+  check('clearing the list drops every cursor and the active identity',
+    clearSource.includes('this.cursors = [];') && clearSource.includes('this.activeCursorId = null;'),
+    `len=${clearSource.length}`);
+  check('the cursor list has no count cap',
+    !/MAX_CURSORS|CURSOR_LIMIT|maxCursors|CURSOR_MAX/.test(appSource) &&
+    (appSource.match(/this\.nextCursorId\+\+/g) ?? []).length === 1,
+    `limit=${/MAX_CURSORS|CURSOR_LIMIT|maxCursors|CURSOR_MAX/.test(appSource)}`);
+
+  const cancelSource = between(appSource, 'private cancelMarkerDrags(): void {', '}');
+  check('the pinch cancellation cancels every live session and never mutates the list',
+    cancelSource.includes('for (const cursor of this.cursors) cursor.marker.cancelDrag();') &&
+    !cancelSource.includes('clearCursors') && !cancelSource.includes('this.cursors =') &&
+    !cancelSource.includes('endDrag'),
+    `len=${cancelSource.length}, clear=${cancelSource.includes('clearCursors')}, ` +
+    `assign=${cancelSource.includes('this.cursors =')}, end=${cancelSource.includes('endDrag')}`);
+
+  const retentionSource = between(appSource, 'private enforceLoopRetention(', 'private async stopCapture(');
+  check('loop retention drops cursors whose sample fell off the front and rebuilds once',
+    retentionSource.includes('const beforeDrop = this.cursors.length;') &&
+    retentionSource.includes('this.cursors = this.cursors.filter((cursor) => cursor.marker.sample !== null);') &&
+    retentionSource.includes('if (this.cursors.length !== beforeDrop) {') &&
+    retentionSource.indexOf('this.cursors = this.cursors.filter(') <
+      retentionSource.indexOf('this.renumberCursors();') &&
+    retentionSource.indexOf('this.renumberCursors();') < retentionSource.indexOf('this.renderPanels();') &&
+    retentionSource.includes('if (this.activeCursorId !== null && this.cursorById(this.activeCursorId) === null) {') &&
+    retentionSource.includes('this.activeCursorId = last === undefined ? null : last.id;') &&
+    (retentionSource.match(/this\.renderPanels\(\);/g) ?? []).length === 1,
+    `len=${retentionSource.length}, filter=${retentionSource.includes('this.cursors = this.cursors.filter(')}, ` +
+    `renumber=${retentionSource.includes('this.renumberCursors();')}, ` +
+    `render=${retentionSource.includes('this.renderPanels();')}, ` +
+    `active=${retentionSource.includes('this.cursorById(this.activeCursorId) === null')}, ` +
+    `renders=${(retentionSource.match(/this\.renderPanels\(\);/g) ?? []).length}`);
+
+  const workspaceSource = fs.readFileSync('src/ui/workspacePreferences.ts', 'utf8');
+  const snapshotSource = between(appSource, 'private workspaceSnapshot()', 'private persistWorkspace()');
+  check('cursor state is session-only and never enters the workspace snapshot',
+    !/cursor/i.test(workspaceSource) && !/cursor/i.test(snapshotSource),
+    `workspace=${/cursor/i.test(workspaceSource)}, snapshot=${/cursor/i.test(snapshotSource)}`);
+  check('the application takes colours and labels from the shared cursor-set model',
+    appSource.includes("from './cursorSet.js'") &&
+    appSource.includes('cursorColor(this.cursors.length)') &&
+    appSource.includes('cursorLabels(this.cursors.length)') &&
+    !appSource.includes('MEASURE_COLORS'),
+    `set=${appSource.includes("from './cursorSet.js'")}, ` +
+    `palette=${appSource.includes('MEASURE_COLORS')}`);
 }
 
 {
@@ -1100,18 +1265,19 @@ function between(source: string, start: string, end: string): string {
   const toggleGrabbing =
     appSource.includes("classList.toggle('marker-grabbing', next === 'grabbing')");
   const syncBody = between(appSource, 'private syncMarkerCursor(', 'private wireToolbar(');
-  check('the cursor setter toggles both state classes, reuses the shared band, and schedules no repaint',
+  check('the cursor setter toggles both state classes through the shared nearest-grab band',
     toggleGrab && toggleGrabbing &&
     syncBody.includes('markerPointerCursor(') &&
-    syncBody.includes('sample === null ? null : this.toPx(sample), this.markerA.isDragging,') &&
+    syncBody.includes('nearestCursorGrab(this.grabCandidates(), pointerCssX)') &&
+    syncBody.includes('nearest?.cssX ?? null, this.draggingCursor() !== null,') &&
     syncBody.includes('if (next === this.markerCursor) return;') &&
     !syncBody.includes('this.dirty') && !syncBody.includes('Math.abs('),
     `grab=${toggleGrab}, grabbing=${toggleGrabbing}, len=${syncBody.length}, ` +
     `dirty=${syncBody.includes('this.dirty')}, band=${syncBody.includes('Math.abs(')}`);
 
   const syncCalls = appSource.match(/this\.syncMarkerCursor\(/g) ?? [];
-  check('every pointer entry, exit, release, wheel, and placement site resyncs the cursor',
-    syncCalls.length === 8, `calls=${syncCalls.length}`);
+  check('every pointer entry, exit, release, and wheel site resyncs the cursor',
+    syncCalls.length === 7, `calls=${syncCalls.length}`);
 
   const syncAt = appSource.indexOf('private syncMarkerCursor(');
   check('the cursor setter sits after setFollow so every hover slice keeps its bounds',
@@ -1119,7 +1285,7 @@ function between(source: string, start: string, end: string): string {
     syncAt < appSource.indexOf('private wireToolbar('),
     `sync=${syncAt}, follow=${appSource.indexOf('private setFollow(')}`);
 
-  const markerDebug = between(appSource, 'marker: () => ({', 'edges: (channel: number');
+  const markerDebug = between(appSource, 'marker: () => {', 'cursors: () =>');
   check('the debug readout exposes the live cursor state',
     markerDebug.includes('cursor: this.markerCursor,'),
     `len=${markerDebug.length}, cursor=${markerDebug.includes('cursor: this.markerCursor,')}`);

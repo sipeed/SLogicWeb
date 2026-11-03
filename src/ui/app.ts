@@ -67,7 +67,7 @@ import {
 } from './workspacePreferences.js';
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
-import { COLORS, MEASURE_COLORS, ROWS } from './metrics.js';
+import { AXIS, COLORS, ROWS } from './metrics.js';
 import { Overlay, paintMarkerChip, type HoverMeasurement } from './overlay.js';
 import { PanelResizer } from './panelResizer.js';
 import { StoreRef } from './storeRef.js';
@@ -88,7 +88,13 @@ import {
   type CaptureStartOrigin, type CaptureStopReason, type CaptureViewportAnchor,
 } from './captureViewport.js';
 import { RepeatCaptureTimer } from './repeatCapture.js';
-import { markerPointerCursor, markerSnapRadii, type MarkerCursor } from './markerGeometry.js';
+import {
+  markerEdgeWindow, markerPointerCursor, markerSnapRadii, nearestMarkerEdge, type MarkerCursor,
+} from './markerGeometry.js';
+import {
+  cursorColor, cursorLabels, layoutCursorChips, nearestCursorGrab,
+  type CursorChip, type CursorGrabCandidate,
+} from './cursorSet.js';
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
 
@@ -106,6 +112,11 @@ interface Lane {
   /** Index into displayRows(decoder). */
   displayRow: number;
   laneChannel: number;
+}
+
+interface CursorLine {
+  id: number;
+  marker: WaveformMarker;
 }
 
 export class App {
@@ -188,7 +199,9 @@ export class App {
   private lostSerial = '';
   private abort: AbortController | null = null;
 
-  private readonly markerA = new WaveformMarker('A', MEASURE_COLORS[0]!);
+  private cursors: CursorLine[] = [];
+  private nextCursorId = 1;
+  private activeCursorId: number | null = null;
   private releaseMarkerPointer: () => void = () => {};
   private hover: HoverMeasurement | null = null;
   private markerCursor: MarkerCursor = null;
@@ -846,7 +859,7 @@ export class App {
     if (this.running && this.store.length > 0) {
       this.overlay.drawLiveEdge(this.toPx(this.store.length));
     }
-    this.markerA.draw(this.overlay, (sample) => this.toPx(sample));
+    for (const cursor of this.cursors) cursor.marker.draw(this.overlay, (sample) => this.toPx(sample));
     if (this.hover) this.overlay.drawHover(this.hover);
 
     this.renderStatus();
@@ -863,11 +876,22 @@ export class App {
     if (!ctx) throw new DiagnosticError('ui.axisContext');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawAxis(ctx, ticks, wCss, hCss, this.palette);
-    this.markerA.drawChip({
-      drawChip: (x, color, label) => {
-        paintMarkerChip(ctx, x, wCss, hCss, color, label, this.palette);
-      },
-    }, (sample) => this.toPx(sample));
+    const chips: CursorChip[] = [];
+    for (const cursor of this.cursors) {
+      const sample = cursor.marker.sample;
+      if (sample === null) continue;
+      chips.push({ id: cursor.id, label: cursor.marker.label, cssX: this.toPx(sample) });
+    }
+    if (chips.length === 0) return;
+    ctx.font = AXIS.markerChip.font;
+    const placed = layoutCursorChips(
+      chips, (label) => ctx.measureText(label).width + 2 * AXIS.markerChip.padX,
+    );
+    for (const chip of placed) {
+      const cursor = this.cursorById(chip.id);
+      if (cursor === null) continue;
+      paintMarkerChip(ctx, chip.cssX, wCss, hCss, cursor.marker.color, chip.label, this.palette);
+    }
   }
 
   private drawLaneSurfaces(boxes: readonly RowBox[]): void {
@@ -963,20 +987,19 @@ export class App {
       this.dirty = true;
     }, { passive: false });
 
-    // One pointer drags (pan) or clicks (cursor); two pointers pinch-zoom around their
+    // One pointer drags (pan) or grabs a cursor; two pointers pinch-zoom around their
     // midpoint. Touch is pointer events here too - #plot carries `touch-action: pan-y`,
     // so the browser keeps vertical scrolling and hands everything else to this code.
     const pointers = new Map<number, { x: number; y: number }>();
     let pinch: { dist: number; midX: number } | null = null;
     let dragging = false;
     let lastX = 0;
-    let downX = 0;
-    let moved = 0;
     this.releaseMarkerPointer = () => {
-      const id = this.markerA.pointerId;
+      const cursor = this.draggingCursor();
+      const id = cursor?.marker.pointerId ?? null;
       this.syncMarkerCursor(null);
-      if (id === null) return;
-      this.markerA.cancelDrag();
+      if (cursor === null || id === null) return;
+      cursor.marker.cancelDrag();
       pointers.delete(id);
       if (plot.hasPointerCapture(id)) plot.releasePointerCapture(id);
     };
@@ -986,18 +1009,15 @@ export class App {
       plot.setPointerCapture(e.pointerId);
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()] as [{ x: number; y: number }, { x: number; y: number }];
-        this.markerA.cancelDrag();
+        this.cancelMarkerDrags();
         pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), midX: (a.x + b.x) / 2 };
         dragging = false;
-        moved = 1000;   // a pinch never ends in a cursor placement
       } else if (pointers.size === 1) {
         this.stack.syncSize();
         const rect = plot.getBoundingClientRect();
         const grabbed = this.tryGrabMarker(e, rect);
         dragging = !grabbed;
         lastX = e.clientX;
-        downX = e.clientX;
-        moved = 0;
         if (grabbed) {
           this.hover = null;
           this.syncMarkerCursor(e.clientX - rect.left);
@@ -1009,18 +1029,22 @@ export class App {
       const rect = plot.getBoundingClientRect();
       this.syncMarkerCursor(e.clientX - rect.left);
       if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (this.markerA.isDragging) {
+      const cursor = this.draggingCursor();
+      if (cursor !== null) {
         this.stack.syncSize();
         const sample = this.toSample(e.clientX - rect.left);
-        const consumed = this.markerA.move({
+        const consumed = cursor.marker.move({
           pointerId: e.pointerId,
           clientX: e.clientX,
           clientY: e.clientY,
           sample,
           captureLength: this.store.length,
-          snap: this.markerSnap(sample),
+          snap: this.snapContext(cursor.marker.channel, sample),
         });
-        if (consumed) { this.dirty = true; return; }
+        if (consumed) {
+          if (cursor.marker.started) this.activeCursorId = cursor.id;
+          this.dirty = true; return;
+        }
       }
       if (pinch && pointers.size >= 2) {
         const [a, b] = [...pointers.values()] as [{ x: number; y: number }, { x: number; y: number }];
@@ -1041,7 +1065,6 @@ export class App {
         const dpr = globalThis.devicePixelRatio || 1;
         const dx = e.clientX - lastX;
         lastX = e.clientX;
-        moved += Math.abs(dx);
         this.stack.panPixels(-dx * dpr);
         this.noteViewportIntent();
         this.dirty = true;
@@ -1051,7 +1074,10 @@ export class App {
     });
     const end = (e: PointerEvent) => {
       pointers.delete(e.pointerId);
-      const markerEnded = this.markerA.endDrag(e.pointerId);
+      let markerEnded = false;
+      for (const cursor of this.cursors) {
+        if (cursor.marker.endDrag(e.pointerId)) markerEnded = true;
+      }
       if (plot.hasPointerCapture(e.pointerId)) plot.releasePointerCapture(e.pointerId);
       this.syncMarkerCursor(e.clientX - plot.getBoundingClientRect().left);
       if (markerEnded) { this.dirty = true; return; }
@@ -1062,31 +1088,19 @@ export class App {
         pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), midX: (a.x + b.x) / 2 };
       } else if (pinch) {
         pinch = null;
-        // The finger that stays down keeps panning; it must not read as a click.
         const rest = [...pointers.values()][0];
-        if (rest) { dragging = true; lastX = rest.x; moved = 1000; }
+        if (rest) { dragging = true; lastX = rest.x; }
       }
       if (!dragging || pointers.size > 0) return;
       dragging = false;
-      // A pointercancel is the browser taking the gesture for itself - with
-      // `touch-action: pan-y` that is every vertical scroll of the channel stack,
-      // which has near-zero horizontal displacement and must not read as a click.
-      if (e.type === 'pointercancel') return;
-      // A click, not a drag: place a cursor.
-      if (moved < 3 && Math.abs(e.clientX - downX) < 3 && this.store.length > 0) {
-        const rect = plot.getBoundingClientRect();
-        const s = Math.round(this.toSample(e.clientX - rect.left));
-        this.markerA.setSample(s, this.store.length);
-        this.syncMarkerCursor(e.clientX - rect.left);
-        this.dirty = true;
-      }
     };
     plot.addEventListener('pointerup', end);
     plot.addEventListener('pointercancel', end);
     plot.addEventListener('lostpointercapture', (e) => {
-      if (this.markerA.pointerId !== e.pointerId) return;
+      const cursor = this.cursors.find((c) => c.marker.pointerId === e.pointerId);
+      if (cursor === undefined) return;
       pointers.delete(e.pointerId);
-      this.markerA.cancelDrag();
+      cursor.marker.cancelDrag();
       this.syncMarkerCursor(null);
       this.dirty = true;
     });
@@ -1095,10 +1109,11 @@ export class App {
       this.syncMarkerCursor(null);
       this.dirty = true;
     });
-    plot.addEventListener('dblclick', () => {
-      this.noteViewportIntent();
-      this.stack.zoomToFit();
-      this.dirty = true;
+    plot.addEventListener('dblclick', (e) => {
+      if (this.store.length === 0) return;
+      const rect = plot.getBoundingClientRect();
+      const raw = Math.round(this.toSample(e.clientX - rect.left));
+      this.placeCursorAt(raw, e.clientY - rect.top);
     });
 
     // Dragging the axis pans, which is what a time ruler is for.
@@ -1148,7 +1163,8 @@ export class App {
       }
       if (e.key === 'Escape') {
         this.releaseMarkerPointer();
-        this.markerA.clear();
+        this.clearCursors();
+        this.renderPanels();
         this.dirty = true;
       }
     });
@@ -1170,22 +1186,25 @@ export class App {
   }
 
   private tryGrabMarker(e: PointerEvent, rect: DOMRect): boolean {
-    const sample = this.markerA.sample;
-    if (sample === null) return false;
+    const pointerCssX = e.clientX - rect.left;
+    const candidate = nearestCursorGrab(this.grabCandidates(), pointerCssX);
+    if (candidate === null) return false;
+    const cursor = this.cursorById(candidate.id);
+    if (cursor === null) return false;
     const row = this.rowAt(e.clientY - rect.top);
-    return this.markerA.tryGrab({
+    const grabbed = cursor.marker.tryGrab({
       pointerId: e.pointerId,
       clientX: e.clientX,
       clientY: e.clientY,
-      pointerCssX: e.clientX - rect.left,
-      markerCssX: this.toPx(sample),
+      pointerCssX,
+      markerCssX: candidate.cssX,
       channel: row?.spec.channel ?? null,
       captureLength: this.store.length,
     });
+    return grabbed;
   }
 
-  private markerSnap(center: number): MarkerSnapContext | null {
-    const channel = this.markerA.channel;
+  private snapContext(channel: number | null, center: number): MarkerSnapContext | null {
     const store = this.store;
     if (channel === null) return null;
     if (!Number.isInteger(channel) || channel < 0 || channel >= store.channelCount) return null;
@@ -1200,6 +1219,85 @@ export class App {
       queryRadiusSamples: radii.queryRadiusSamples,
       readEdges: (lo, hi) => store.edges(channel, lo, hi),
     };
+  }
+
+  private placeCursorAt(raw: number, cssY: number): void {
+    this.addCursor(this.snapPlacement(raw, cssY) ?? raw);
+  }
+
+  private snapPlacement(raw: number, cssY: number): number | null {
+    const snap = this.snapContext(this.rowAt(cssY)?.spec.channel ?? null, raw);
+    if (snap === null) return null;
+    const window = markerEdgeWindow(raw, snap.queryRadiusSamples, this.store.length);
+    if (window === null) return null;
+    return nearestMarkerEdge(
+      snap.readEdges(window.lo, window.hi), raw, snap.exactRadiusSamples,
+    );
+  }
+
+  private grabCandidates(): CursorGrabCandidate[] {
+    const candidates: CursorGrabCandidate[] = [];
+    for (const cursor of this.cursors) {
+      const sample = cursor.marker.sample;
+      if (sample === null) continue;
+      candidates.push({ id: cursor.id, cssX: this.toPx(sample) });
+    }
+    return candidates;
+  }
+
+  private cursorById(id: number | null): CursorLine | null {
+    if (id === null) return null;
+    return this.cursors.find((cursor) => cursor.id === id) ?? null;
+  }
+
+  private activeCursor(): CursorLine | null {
+    return this.cursorById(this.activeCursorId);
+  }
+
+  private draggingCursor(): CursorLine | null {
+    return this.cursors.find((cursor) => cursor.marker.isDragging) ?? null;
+  }
+
+  private renumberCursors(): void {
+    const labels = cursorLabels(this.cursors.length);
+    for (let index = 0; index < this.cursors.length; index++) {
+      this.cursors[index]!.marker.setLabel(labels[index]!);
+      this.cursors[index]!.marker.setColor(cursorColor(index));
+    }
+  }
+
+  private addCursor(sample: number): void {
+    const marker = new WaveformMarker('', cursorColor(this.cursors.length));
+    marker.setSample(sample, this.store.length);
+    if (marker.sample === null) return;
+    const id = this.nextCursorId++;
+    this.cursors.push({ id, marker });
+    this.renumberCursors();
+    this.activeCursorId = id;
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private removeCursor(id: number): void {
+    const index = this.cursors.findIndex((cursor) => cursor.id === id);
+    if (index < 0) return;
+    this.cursors.splice(index, 1);
+    if (this.activeCursorId === id) {
+      const last = this.cursors[this.cursors.length - 1];
+      this.activeCursorId = last === undefined ? null : last.id;
+    }
+    this.renumberCursors();
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private clearCursors(): void {
+    this.cursors = [];
+    this.activeCursorId = null;
+  }
+
+  private cancelMarkerDrags(): void {
+    for (const cursor of this.cursors) cursor.marker.cancelDrag();
   }
 
   /**
@@ -1309,9 +1407,10 @@ export class App {
   }
 
   private syncMarkerCursor(pointerCssX: number | null): void {
-    const sample = this.markerA.sample;
+    const nearest = pointerCssX === null
+      ? null : nearestCursorGrab(this.grabCandidates(), pointerCssX);
     const next = markerPointerCursor(
-      pointerCssX, sample === null ? null : this.toPx(sample), this.markerA.isDragging,
+      pointerCssX, nearest?.cssX ?? null, this.draggingCursor() !== null,
     );
     if (next === this.markerCursor) return;
     this.markerCursor = next;
@@ -1680,8 +1779,11 @@ export class App {
     // Cursor positions share the axis's origin: T=0 is the trigger sample when there
     // is one, so a pre-trigger cursor reads as the negative time the axis shows.
     const origin = this.triggerSampleIndex ?? 0;
-    const markerSample = this.markerA.sample;
-    if (markerSample !== null) parts.push(`A ${formatDuration((markerSample - origin) / sr)}`);
+    const active = this.activeCursor();
+    const markerSample = active?.marker.sample ?? null;
+    if (active !== null && markerSample !== null) {
+      parts.push(`${active.marker.label} ${formatDuration((markerSample - origin) / sr)}`);
+    }
 
     this.el.status.replaceChildren();
     parts.forEach((p, i) => {
@@ -1758,7 +1860,7 @@ export class App {
       a.result = null; a.index = null; a.status = 'idle'; a.note = { kind: 'pending' };
     }
     this.resetBusBuilds();
-    this.markerA.clear();
+    this.clearCursors();
     this.triggerState = 'off';
     this.triggerSampleIndex = null;
     this.droppedTotal = 0;
@@ -2188,9 +2290,20 @@ export class App {
     // Bus builders need no reset: their frontier is absolute (BusBuilder skips ahead past
     // the drop), and analogFrame's cache key carries store.droppedSamples, so a stale
     // frame can never alias a new generation at the same length.
-    const markerSample = this.markerA.sample;
-    if (markerSample !== null && !this.markerA.isDragging) {
-      this.markerA.setSample(markerSample - drop >= 0 ? markerSample - drop : null, store.length);
+    for (const cursor of this.cursors) {
+      const sample = cursor.marker.sample;
+      if (sample === null || cursor.marker.isDragging) continue;
+      cursor.marker.setSample(sample - drop >= 0 ? sample - drop : null, store.length);
+    }
+    const beforeDrop = this.cursors.length;
+    this.cursors = this.cursors.filter((cursor) => cursor.marker.sample !== null);
+    if (this.cursors.length !== beforeDrop) {
+      if (this.activeCursorId !== null && this.cursorById(this.activeCursorId) === null) {
+        const last = this.cursors[this.cursors.length - 1];
+        this.activeCursorId = last === undefined ? null : last.id;
+      }
+      this.renumberCursors();
+      this.renderPanels();
     }
     if (this.triggerSampleIndex !== null) {
       this.triggerSampleIndex = this.triggerSampleIndex - drop >= 0 ? this.triggerSampleIndex - drop : null;
@@ -2552,19 +2665,34 @@ export class App {
     },
     setMarker: (sample: number | null) => {
       this.releaseMarkerPointer();
-      this.markerA.setSample(sample, this.store.length);
+      this.clearCursors();
+      if (sample === null) this.renderPanels();
+      else this.addCursor(sample);
       this.dirty = true;
     },
-    marker: () => ({
-      label: this.markerA.label,
-      color: this.markerA.color,
-      sample: this.markerA.sample,
-      dragging: this.markerA.isDragging,
-      started: this.markerA.started,
-      pointerId: this.markerA.pointerId,
-      channel: this.markerA.channel,
-      cursor: this.markerCursor,
-    }),
+    marker: () => {
+      const cursor = this.activeCursor();
+      return {
+        id: cursor?.id ?? null,
+        label: cursor?.marker.label ?? null,
+        color: cursor?.marker.color ?? null,
+        sample: cursor?.marker.sample ?? null,
+        dragging: cursor?.marker.isDragging ?? false,
+        started: cursor?.marker.started ?? false,
+        pointerId: cursor?.marker.pointerId ?? null,
+        channel: cursor?.marker.channel ?? null,
+        cursor: this.markerCursor,
+      };
+    },
+    cursors: () => this.cursors.map((cursor) => ({
+      id: cursor.id,
+      label: cursor.marker.label,
+      color: cursor.marker.color,
+      sample: cursor.marker.sample,
+      active: cursor.id === this.activeCursorId,
+    })),
+    addCursor: (sample: number) => this.addCursor(sample),
+    removeCursor: (id: number) => this.removeCursor(id),
     edges: (channel: number, lo: number, hi: number) => {
       const store = this.store;
       if (!Number.isInteger(channel) || channel < 0 || channel >= store.channelCount) return [];

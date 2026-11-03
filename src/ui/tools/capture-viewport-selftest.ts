@@ -132,7 +132,6 @@ const stack = fs.readFileSync('src/ui/waveformStack.ts', 'utf8');
     between(app, "plot.addEventListener('wheel'", '// One pointer'),
     between(app, 'if (pinch && pointers.size >= 2)', '      if (dragging) {'),
     between(app, '      if (dragging) {', 'this.updateHover'),
-    between(app, "plot.addEventListener('dblclick'", '// Dragging the axis'),
     between(app, "this.el.axis.addEventListener('pointermove'", 'const axisEnd'),
     between(app, "if (e.key === 'f')", "if (e.key === ' ')"),
     between(app, "must<HTMLButtonElement>('btn-fit').addEventListener('click'", "must<HTMLButtonElement>('btn-settings').addEventListener('click'"),
@@ -140,9 +139,13 @@ const stack = fs.readFileSync('src/ui/waveformStack.ts', 'utf8');
     between(app, 'zoomToAnnotation: (analyzerIndex', 'snapshot:'),
   ];
   check('each explicit viewport action invalidates continuation restoration',
-    app.includes('private noteViewportIntent()') && intentCalls === 9 &&
+    app.includes('private noteViewportIntent()') && intentCalls === 8 &&
     sites.every((site) => site.includes('this.noteViewportIntent();')),
     `intentCalls=${intentCalls}, sites=${sites.map((site) => site.includes('this.noteViewportIntent();')).join(',')}`);
+  const dbl = between(app, "plot.addEventListener('dblclick'", '// Dragging the axis');
+  check('the double-click placement gesture is not a viewport action',
+    dbl.length > 0 && !dbl.includes('noteViewportIntent') && !dbl.includes('zoomToFit'),
+    `len=${dbl.length}`);
 }
 
 {

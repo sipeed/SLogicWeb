@@ -439,7 +439,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     'this.drawLaneBubbles(boxes, wCss);',
     'this.overlay.drawTrigger(',
     'this.overlay.drawLiveEdge(',
-    'this.markerA.draw(this.overlay,',
+    'for (const cursor of this.cursors) cursor.marker.draw(this.overlay,',
     'this.overlay.drawHover(this.hover);',
   ];
   const positions = paintOrder.map((needle) => drawSource.indexOf(needle));

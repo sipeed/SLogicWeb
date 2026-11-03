@@ -9,10 +9,6 @@ export interface MarkerPaintTarget {
   drawCursor(x: number, color: string): void;
 }
 
-export interface MarkerChipTarget {
-  drawChip(x: number, color: string, label: string): void;
-}
-
 export interface MarkerGrabRequest {
   pointerId: number;
   clientX: number;
@@ -47,14 +43,30 @@ interface MarkerDragSession {
 }
 
 export class WaveformMarker {
-  readonly label: string;
-  readonly color: string;
+  private labelValue: string;
+  private colorValue: string;
   private value: number | null = null;
   private drag: MarkerDragSession | null = null;
 
   constructor(label: string, color: string) {
-    this.label = label;
-    this.color = color;
+    this.labelValue = label;
+    this.colorValue = color;
+  }
+
+  get label(): string {
+    return this.labelValue;
+  }
+
+  get color(): string {
+    return this.colorValue;
+  }
+
+  setLabel(next: string): void {
+    this.labelValue = next;
+  }
+
+  setColor(next: string): void {
+    this.colorValue = next;
   }
 
   get sample(): number | null {
@@ -90,11 +102,6 @@ export class WaveformMarker {
   draw(target: MarkerPaintTarget, toPx: (sample: number) => number): void {
     if (this.value === null) return;
     target.drawCursor(toPx(this.value), this.color);
-  }
-
-  drawChip(target: MarkerChipTarget, toPx: (sample: number) => number): void {
-    if (this.value === null) return;
-    target.drawChip(toPx(this.value), this.color, this.label);
   }
 
   tryGrab(request: MarkerGrabRequest): boolean {
