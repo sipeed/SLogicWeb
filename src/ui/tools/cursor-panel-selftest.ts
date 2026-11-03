@@ -54,6 +54,8 @@ const distanceSection = slice(panel,
 const sideControlSource = slice(panel, 'function distanceSideControl(', 'function distanceAddButton(');
 const sideIdSource = slice(panel, 'export function cursorDistanceSideId(', 'function distanceSideControl(');
 const addControlSource = slice(panel, 'function distanceAddButton(', 'function distanceAddIcon(');
+const addRowSource = slice(distanceSection, "const addRow = div('cursor-dist-add-row');",
+  'distanceSec.body.appendChild(addRow);');
 const distanceUpdate = slice(panel,
   'updateCursorDistances(rows: readonly CursorDistanceRowView[]): void {',
   'updateCursors(rows: readonly CursorRowView[]): void {');
@@ -586,13 +588,32 @@ const distanceRowsSource = slice(app,
 
 {
   const legendAt = distanceSection.indexOf('distanceSec.header.appendChild(distanceLegend);');
-  const addAt = distanceSection.indexOf('distanceSec.header.appendChild(distanceAddButton(');
-  check('the section head carries the translated legend ahead of the add control',
-    legendAt >= 0 && addAt > legendAt &&
+  const headAppends = distanceSection.match(/distanceSec\.header\.appendChild\(/g) ?? [];
+  check('the section head carries only the title and the translated legend',
+    legendAt >= 0 && headAppends.length === 1 &&
     distanceSection.includes("distanceLegend.className = 'cursor-legend';") &&
     distanceSection.includes("distanceLegend.textContent = t('capturePanel.cursorDistanceFormat');") &&
+    !distanceSection.includes('distanceSec.header.appendChild(distanceAddButton(') &&
     !distanceSection.includes('distanceSec.body.appendChild(distanceLegend)'),
-    `legend=${legendAt}, add=${addAt}`);
+    `legend=${legendAt}, headAppends=${headAppends.length}`);
+}
+
+{
+  const emptyAt = distanceSection.indexOf('if (v.cursorDistances.length === 0) {');
+  const listAt = distanceSection.indexOf("const list = div('cursor-dist-list');");
+  const addRowAt = distanceSection.indexOf("const addRow = div('cursor-dist-add-row');");
+  const addAt = distanceSection.indexOf('addRow.appendChild(distanceAddButton(');
+  const bodyAddAt = distanceSection.indexOf('distanceSec.body.appendChild(addRow);');
+  const addCalls = distanceSection.match(/distanceAddButton\(/g) ?? [];
+  const addRowRule = slice(css, '.cursor-dist-add-row {', '}');
+  check("the add control is the section body's last line, left-aligned",
+    emptyAt >= 0 && listAt > emptyAt && addRowAt > listAt && addAt > addRowAt &&
+    bodyAddAt > addAt && addCalls.length === 1 && addRowSource.length > 0 &&
+    !distanceSection.slice(bodyAddAt + 1).includes('distanceSec.body.appendChild(') &&
+    addRowRule.includes('display: flex;') && addRowRule.includes('align-items: center;') &&
+    addRowRule.includes('justify-content: flex-start;') && !addRowRule.includes('!important'),
+    `empty=${emptyAt}, list=${listAt}, row=${addRowAt}, add=${addAt}, body=${bodyAddAt}, ` +
+    `calls=${addCalls.length}, rule=${addRowRule.length} chars`);
 }
 
 {
@@ -640,12 +661,12 @@ const distanceRowsSource = slice(app,
 
 {
   check('the add control refuses the sixteenth row through the shared cap literal',
-    distanceSection.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,') &&
-    distanceSection.includes('() => this.cb.onAddCursorDistance(),') &&
+    addRowSource.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,') &&
+    addRowSource.includes('() => this.cb.onAddCursorDistance(),') &&
     panel.includes("from './cursorDistance.js';") &&
     MAX_CURSOR_DISTANCE_ROWS === 15,
-    `guard=${distanceSection.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,')}, ` +
-    `callback=${distanceSection.includes('this.cb.onAddCursorDistance()')}, ` +
+    `guard=${addRowSource.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,')}, ` +
+    `callback=${addRowSource.includes('this.cb.onAddCursorDistance()')}, ` +
     `cap=${MAX_CURSOR_DISTANCE_ROWS}`);
 
   check('the add control reuses the shared compact action shape and names itself',
@@ -661,21 +682,22 @@ const distanceRowsSource = slice(app,
     `disabled=${addControlSource.includes('b.disabled = disabled;')}, ` +
     `inline=${addControlSource.includes('style.')}`);
 
+  const ownAddRule = /\.cursor-dist-add\s*\{/.test(css);
   check('the add geometry comes from the shared action class, not a copied rule',
-    !css.includes('.cursor-dist-add') && css.includes('.analyzer-act {') &&
+    !ownAddRule && css.includes('.analyzer-act {') &&
     css.includes('.analyzer-act svg { display: block; width: 13px; height: 13px; }'),
-    `ownRule=${css.includes('.cursor-dist-add')}`);
+    `ownRule=${ownAddRule}`);
 
   const titleWrites = (addControlSource.match(/\.title = /g) ?? []).length;
   check('the capped add control keeps the add label as its single tooltip',
-    distanceSection.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,') &&
+    addRowSource.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,') &&
     addControlSource.includes("const label = t('capturePanel.cursorDistanceAdd');") &&
     addControlSource.includes('b.disabled = disabled;') &&
     addControlSource.includes('b.title = label;') &&
     titleWrites === 1 &&
     !addControlSource.includes('disabled ?') &&
     !addControlSource.includes("'capturePanel.cursorDistanceAdd' +"),
-    `titles=${titleWrites}, cap=${distanceSection.includes('MAX_CURSOR_DISTANCE_ROWS,')}, ` +
+    `titles=${titleWrites}, cap=${addRowSource.includes('MAX_CURSOR_DISTANCE_ROWS,')}, ` +
     `conditional=${addControlSource.includes('disabled ?')}`);
 }
 

@@ -660,10 +660,6 @@ export class CapturePanel {
     distanceLegend.className = 'cursor-legend';
     distanceLegend.textContent = t('capturePanel.cursorDistanceFormat');
     distanceSec.header.appendChild(distanceLegend);
-    distanceSec.header.appendChild(distanceAddButton(
-      v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,
-      () => this.cb.onAddCursorDistance(),
-    ));
     if (v.cursorDistances.length === 0) {
       const hint = document.createElement('p');
       hint.className = 'cursor-dist-hint';
@@ -697,6 +693,12 @@ export class CapturePanel {
       }
       distanceSec.body.appendChild(list);
     }
+    const addRow = div('cursor-dist-add-row');
+    addRow.appendChild(distanceAddButton(
+      v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,
+      () => this.cb.onAddCursorDistance(),
+    ));
+    distanceSec.body.appendChild(addRow);
     this.root.appendChild(distanceSec.el);
 
     // ---- advanced test mode + raw USB console
