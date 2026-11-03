@@ -689,14 +689,40 @@ const distanceRowsSource = slice(app,
   const aAt = distanceSection.indexOf("distanceSideControl(row, 'a', v.cursors,");
   const markAt = distanceSection.indexOf("mark.className = 'cursor-dist-mark';");
   const bAt = distanceSection.indexOf("distanceSideControl(row, 'b', v.cursors,");
-  const removeAt = distanceSection.indexOf('const remove = cursorRemoveButton(');
   const deltaAt = distanceSection.indexOf("delta.className = 'cursor-dist-delta';");
-  check('the row is side A, minus mark, side B, remove control, delta in that DOM order',
-    aAt >= 0 && markAt > aAt && bAt > markAt && removeAt > bAt && deltaAt > removeAt &&
-    distanceSection.includes('item.append(a.el, mark, b.el, remove, delta, a.popover, b.popover);') &&
+  const removeAt = distanceSection.indexOf('const remove = cursorRemoveButton(');
+  const tailAt = distanceSection.indexOf("const tail = div('cursor-dist-tail');");
+  const tailAppendAt = distanceSection.indexOf('tail.append(delta, remove);');
+  const appendAt = distanceSection.indexOf(
+    'item.append(a.el, mark, b.el, tail, a.popover, b.popover);');
+  check('the row is side A, minus mark, side B, then one tail holding the delta and remove',
+    aAt >= 0 && markAt > aAt && bAt > markAt && deltaAt > bAt && removeAt > deltaAt &&
+    tailAt > removeAt && tailAppendAt > tailAt && appendAt > tailAppendAt &&
+    !distanceSection.includes('item.append(a.el, mark, b.el, remove, delta, a.popover, b.popover);') &&
+    !distanceSection.includes('item.append(a.el, mark, b.el, delta, remove, a.popover, b.popover);') &&
     distanceSection.includes("mark.textContent = '−';") &&
     distanceSection.includes("mark.setAttribute('aria-hidden', 'true');"),
-    `a=${aAt}, mark=${markAt}, b=${bAt}, remove=${removeAt}, delta=${deltaAt}`);
+    `a=${aAt}, mark=${markAt}, b=${bAt}, delta=${deltaAt}, remove=${removeAt}, ` +
+    `tail=${tailAt}, tailAppend=${tailAppendAt}, append=${appendAt}`);
+}
+
+{
+  const tailRule = slice(css, '.cursor-dist-tail {', '.cursor-dist-delta {');
+  const rowAppend = slice(distanceSection,
+    'item.append(a.el, mark, b.el,', 'list.appendChild(item);');
+  const tailIsOneItem = rowAppend.includes('tail, a.popover, b.popover);') &&
+    !rowAppend.includes('delta,') && !rowAppend.includes('remove,');
+  check('the delta and the remove control share one wrapping flex item',
+    tailRule.length > 0 &&
+    tailRule.includes('display: flex;') &&
+    tailRule.includes('flex: 1 0 auto;') &&
+    tailRule.includes('align-items: center;') &&
+    tailRule.includes('gap: 6px;') &&
+    !tailRule.includes('!important') &&
+    distanceSection.includes('tail.append(delta, remove);') &&
+    tailIsOneItem,
+    `rule=${tailRule.length} chars, oneItem=${tailIsOneItem}, ` +
+    `append=${rowAppend.replace(/\s+/g, ' ').trim()}`);
 }
 
 {

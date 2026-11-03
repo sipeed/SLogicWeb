@@ -1289,6 +1289,7 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
   box-shadow: inset 0 0 0 1px var(--border-high);
 }
 .cursor-dist-mark { flex: none; font-size: 10px; line-height: 1; color: var(--text50); }
+.cursor-dist-tail { display: flex; flex: 1 0 auto; align-items: center; gap: 6px; }
 .cursor-dist-delta {
   flex: 1 0 auto; min-width: 0;
   color: var(--text80); font-size: 11px; font-variant-numeric: tabular-nums;

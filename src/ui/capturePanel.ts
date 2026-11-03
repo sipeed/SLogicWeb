@@ -683,14 +683,16 @@ export class CapturePanel {
         mark.textContent = '−';
         const b = distanceSideControl(row, 'b', v.cursors,
           (cursorId) => this.cb.onPickCursorDistance(row.id, 'b', cursorId));
+        const delta = document.createElement('span');
+        delta.className = 'cursor-dist-delta';
+        delta.textContent = row.delta;
         const remove = cursorRemoveButton(
           t('capturePanel.cursorDistanceRemove', { row: row.row }),
           () => this.cb.onRemoveCursorDistance(row.id),
         );
-        const delta = document.createElement('span');
-        delta.className = 'cursor-dist-delta';
-        delta.textContent = row.delta;
-        item.append(a.el, mark, b.el, remove, delta, a.popover, b.popover);
+        const tail = div('cursor-dist-tail');
+        tail.append(delta, remove);
+        item.append(a.el, mark, b.el, tail, a.popover, b.popover);
         list.appendChild(item);
       }
       distanceSec.body.appendChild(list);
