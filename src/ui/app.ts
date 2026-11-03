@@ -53,6 +53,7 @@ import {
   MAX_SAMPLES, levelAt, loadFiles, loadLwcap, saveLwcap,
 } from './captureIO.js';
 import { connectSamplerate } from './connectDefaults.js';
+import { formatCursorTimes } from './cursorTime.js';
 import { sameUsbDevice } from './deviceIdentity.js';
 import { formatCount, formatDuration, formatFreq, formatRate,
   formatAnalyzerNote, formatCaptureLabel, formatStatusError,
@@ -1284,7 +1285,7 @@ export class App {
 
   private cursorRows(): CursorRowView[] {
     const origin = this.triggerSampleIndex ?? 0;
-    const rows: CursorRowView[] = [];
+    const rows: Omit<CursorRowView, 'time'>[] = [];
     for (const cursor of this.cursors) {
       const sample = cursor.marker.sample;
       if (sample === null) continue;
@@ -1296,7 +1297,8 @@ export class App {
         sample,
       });
     }
-    return rows;
+    const times = formatCursorTimes(rows, 1 / this.store.samplerate);
+    return rows.map((row, index) => ({ ...row, time: times[index]! }));
   }
 
   private focusCursor(id: number): void {

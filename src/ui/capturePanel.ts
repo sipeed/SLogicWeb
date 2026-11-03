@@ -59,6 +59,7 @@ export interface CursorRowView {
   color: string;
   seconds: number;
   sample: number;
+  time: string;
 }
 
 export interface CapturePanelView {
@@ -115,7 +116,7 @@ export class CapturePanel {
       if (row === undefined) continue;
       const pos = item.querySelector<HTMLElement>('.cursor-pos');
       if (pos === null) continue;
-      pos.textContent = `${formatDuration(row.seconds)}/${row.sample}`;
+      pos.textContent = `${row.time}/${row.sample}`;
     }
   }
 
@@ -610,7 +611,7 @@ export class CapturePanel {
         });
         const pos = document.createElement('span');
         pos.className = 'cursor-pos';
-        pos.textContent = `${formatDuration(row.seconds)}/${row.sample}`;
+        pos.textContent = `${row.time}/${row.sample}`;
         const remove = cursorRemoveButton(t('capturePanel.removeCursor', { label: row.label }),
           () => this.cb.onRemoveCursor(row.id));
         item.append(order, pos, remove);

@@ -86,11 +86,13 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
 }
 
 {
-  check('the position cell is formatDuration(seconds) joined to the absolute sample by /',
-    cursorSection.includes('pos.textContent = `${formatDuration(row.seconds)}/${row.sample}`;') &&
+  check('the position cell is the row time joined to the absolute sample by /',
+    cursorSection.includes('pos.textContent = `${row.time}/${row.sample}`;') &&
+    !cursorSection.includes('formatDuration(row.seconds)') &&
     panel.includes("from './format.js'") &&
     panel.includes('formatDuration,'),
-    `composed=${cursorSection.includes('${formatDuration(row.seconds)}/${row.sample}')}`);
+    `composed=${cursorSection.includes('${row.time}/${row.sample}')}, ` +
+    `rederived=${cursorSection.includes('formatDuration(row.seconds)')}`);
 }
 
 {
@@ -250,6 +252,34 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
 }
 
 {
+  const view = slice(panel, 'export interface CursorRowView {', 'export interface CapturePanelView {');
+  check('the row view carries the resolved time beside its seconds and sample',
+    view.includes('seconds: number;') && view.includes('sample: number;') &&
+    view.includes('time: string;'), `view=${view.length} chars`);
+
+  const body = slice(app, 'private cursorRows(): CursorRowView[] {',
+    'private focusCursor(id: number): void {');
+  const calls = (body.match(/formatCursorTimes\(/g) ?? []).length;
+  check('App resolves every row time from one neighbour-aware call over the cursor list',
+    body.length > 0 && calls === 1 &&
+    body.includes('const times = formatCursorTimes(rows, 1 / this.store.samplerate);') &&
+    body.includes('return rows.map((row, index) => ({ ...row, time: times[index]! }));') &&
+    app.includes("import { formatCursorTimes } from './cursorTime.js';") &&
+    !body.includes('formatDuration'),
+    `body=${body.length} chars, calls=${calls}, ` +
+    `import=${app.includes("from './cursorTime.js'")}, ` +
+    `reformatted=${body.includes('formatDuration')}`);
+
+  const sites = slice(panel, 'updateCursors(rows: readonly CursorRowView[]): void {',
+    'private fillProgress(progress:');
+  const policy = ['formatCursorTimes', 'Math.log10', 'toFixed', 'formatDuration'];
+  const leaks = policy.filter((needle) => cursorSection.includes(needle) || sites.includes(needle));
+  check('the panel projects the resolved time and owns no precision policy of its own',
+    sites.length > 0 && leaks.length === 0 && !panel.includes("from './cursorTime.js'"),
+    `leaks=${JSON.stringify(leaks)}, sites=${sites.length} chars`);
+}
+
+{
   const render = slice(app, 'this.capturePanel.render({', 'this.analyzerPanel.render({');
   check('the view hands the rows to the capture panel',
     render.includes('cursors: this.cursorRows(),') &&
@@ -325,8 +355,8 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
   const writeBans = structural.concat(['dataset', 'className']);
   const writeHits = writeBans.filter((needle) => write.includes(needle));
   check('the write site touches only the position text of an existing row',
-    write.includes('pos.textContent = `${formatDuration(row.seconds)}/${row.sample}`;') &&
-    writeHits.length === 0,
+    write.includes('pos.textContent = `${row.time}/${row.sample}`;') &&
+    !write.includes('formatDuration') && writeHits.length === 0,
     `hits=${JSON.stringify(writeHits)}, text=${write.includes('pos.textContent')}`);
 
   check('the update resolves rows by data-cursor-id and ignores ids it does not know',
