@@ -394,6 +394,7 @@ export const ru: Messages = {
   'capturePanel.dropped': 'потеряно образцов из-за пропусков (помечены как разрывы): {samples}',
   'capturePanel.cursors': 'Курсоры',
   'capturePanel.cursorEmpty': 'Дважды щёлкните по осциллограмме, чтобы поставить курсор.',
+  'capturePanel.cursorFormat': 'время / отсчёты',
   'capturePanel.removeCursor': 'Удалить курсор {label}',
   'capturePanel.focusCursor': 'Центрировать вид на курсоре {label}',
   'capturePanel.advanced': 'Расширенные',

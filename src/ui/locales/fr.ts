@@ -403,6 +403,7 @@ export const fr: Messages = {
   'capturePanel.dropped': 'échantillons perdus lors de pertes de données (marqués comme lacunes) : {samples}',
   'capturePanel.cursors': 'Curseurs',
   'capturePanel.cursorEmpty': 'Double-cliquez sur la forme d’onde pour placer un curseur.',
+  'capturePanel.cursorFormat': 'temps / échantillons',
   'capturePanel.removeCursor': 'Supprimer le curseur {label}',
   'capturePanel.focusCursor': 'Centrer la vue sur le curseur {label}',
   'capturePanel.advanced': 'Avancé',

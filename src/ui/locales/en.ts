@@ -404,6 +404,7 @@ export const en = {
   'capturePanel.dropped': '{samples} samples lost to dropouts, marked as gaps',
   'capturePanel.cursors': 'Cursors',
   'capturePanel.cursorEmpty': 'Double-click the waveform to place a cursor.',
+  'capturePanel.cursorFormat': 'time / sample',
   'capturePanel.removeCursor': 'Remove cursor {label}',
   'capturePanel.focusCursor': 'Centre the view on cursor {label}',
   'capturePanel.advanced': 'Advanced',

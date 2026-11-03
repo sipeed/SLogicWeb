@@ -351,6 +351,7 @@ export const zhCN: Messages = {
   'capturePanel.dropped': '{samples} 个样本因传输丢失，已标记为间隙',
   'capturePanel.cursors': '光标',
   'capturePanel.cursorEmpty': '在波形上双击即可放置光标。',
+  'capturePanel.cursorFormat': '时间 / 采样点',
   'capturePanel.removeCursor': '移除光标 {label}',
   'capturePanel.focusCursor': '将视图居中到光标 {label}',
   'capturePanel.advanced': '高级',

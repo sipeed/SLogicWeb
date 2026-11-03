@@ -180,6 +180,57 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
 }
 
 {
+  const legend = slice(cursorSection, "const legend = document.createElement('span');",
+    "const list = div('cursor-list');");
+  check('the section head names the row format with the translated legend',
+    legend.length > 0 && legend.includes("legend.className = 'cursor-legend';") &&
+    legend.includes("legend.textContent = t('capturePanel.cursorFormat');") &&
+    !legend.includes('legend.style'),
+    `class=${legend.includes("legend.className = 'cursor-legend';")}, ` +
+    `text=${legend.includes("t('capturePanel.cursorFormat')")}, ` +
+    `inline=${legend.includes('legend.style')}, legend=${legend.length} chars`);
+
+  const legendInBody = cursorSection.includes('cursorSec.body.appendChild(legend)');
+  check('the legend rides the section head, never the scrolling body',
+    cursorSection.includes('cursorSec.header.appendChild(legend);') && !legendInBody &&
+    cursorSection.indexOf('cursorSec.header.appendChild(legend);') <
+      cursorSection.indexOf("div('cursor-list')"),
+    `head=${cursorSection.includes('cursorSec.header.appendChild(legend);')}, ` +
+    `body=${legendInBody}`);
+
+  const emptySlice = slice(cursorSection, 'if (v.cursors.length === 0) {', '} else {');
+  const listBranch = slice(cursorSection, '} else {', 'cursorSec.body.appendChild(list);');
+  check('the legend labels a rendered list only, so the empty hint stays alone',
+    emptySlice.length > 0 && !emptySlice.includes('cursorFormat') &&
+    !emptySlice.includes('cursor-legend') &&
+    listBranch.includes("t('capturePanel.cursorFormat')"),
+    `empty=${emptySlice.length} chars, emptyFormat=${emptySlice.includes('cursorFormat')}, ` +
+    `emptyClass=${emptySlice.includes('cursor-legend')}, ` +
+    `listFormat=${listBranch.includes('cursorFormat')}`);
+}
+
+{
+  const key = 'capturePanel.cursorFormat' as const satisfies MessageKey;
+  const catalogs: [string, Readonly<Record<string, string>>][] = [
+    ['en', en], ['zh-CN', zhCN], ['ru', ru], ['fr', fr],
+  ];
+  const observed = catalogs.map(([locale, dict]) => [locale, dict[key] ?? ''] as const);
+  const blankOrMalformed = observed
+    .filter(([, text]) => text.trim() === '' || !text.includes('/') || text.includes('{'))
+    .map(([locale, text]) => [locale, text]);
+  check('all four catalogs define the cursor format legend as an unparameterised slash pair',
+    blankOrMalformed.length === 0 && observed.find(([locale]) => locale === 'en')?.[1] === 'time / sample',
+    `malformed=${JSON.stringify(blankOrMalformed)}, ` +
+    `english=${JSON.stringify(observed.find(([locale]) => locale === 'en')?.[1])}`);
+
+  const copied = observed.filter(([locale, text]) => locale !== 'en' && text === (en[key] ?? ''))
+    .map(([locale]) => locale);
+  check('no locale reuses the English cursor format legend',
+    copied.length === 0,
+    `copied=${JSON.stringify(copied)}, values=${JSON.stringify(observed)}`);
+}
+
+{
   const rows = slice(app, 'private cursorRows(): CursorRowView[] {', 'private removeCursor(id: number): void {');
   check('App derives the row time from the trigger origin and the live samplerate',
     rows.includes('const origin = this.triggerSampleIndex ?? 0;') &&
@@ -384,6 +435,19 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
     !chipRule.includes('!important'),
     `absent=${JSON.stringify(absentResets)}, ` +
     `box=${chipRule.includes('min-width: 18px; height: 16px; padding: 0 4px;')}`);
+}
+
+{
+  const rule = slice(css, '.cursor-legend {', '}');
+  const required = ['flex: none;', 'color: var(--text50);', 'font-size: 10px;',
+    'font-weight: 400;', 'font-variant-numeric: tabular-nums;', 'white-space: nowrap;'];
+  const absentProps = required.filter((prop) => !rule.includes(prop));
+  const declarations = (css.match(/\.cursor-legend/g) ?? []).length;
+  check('the sheet styles the legend as a muted tabular 10 px caption',
+    rule.length > 0 && absentProps.length === 0 && !rule.includes('!important') &&
+    !rule.includes('margin') && declarations === 1,
+    `absent=${JSON.stringify(absentProps)}, important=${rule.includes('!important')}, ` +
+    `margin=${rule.includes('margin')}, declarations=${declarations}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

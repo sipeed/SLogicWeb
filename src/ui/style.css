@@ -1260,6 +1260,14 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text80); font-variant-numeric: tabular-nums;
 }
+.cursor-legend {
+  flex: none;
+  color: var(--text50);
+  font-size: 10px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .analyzer-name { min-width: 54px; }
 .analyzer-status {
   flex: 1; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

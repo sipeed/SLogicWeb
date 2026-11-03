@@ -587,6 +587,10 @@ export class CapturePanel {
       hint.textContent = t('capturePanel.cursorEmpty');
       cursorSec.body.appendChild(hint);
     } else {
+      const legend = document.createElement('span');
+      legend.className = 'cursor-legend';
+      legend.textContent = t('capturePanel.cursorFormat');
+      cursorSec.header.appendChild(legend);
       const list = div('cursor-list');
       for (const row of v.cursors) {
         const item = div('cursor-row');
