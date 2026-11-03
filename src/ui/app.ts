@@ -104,8 +104,8 @@ import {
   type CursorDistanceRow, type DistanceSide,
 } from './cursorDistance.js';
 import {
-  addEdgeRow as appendEdgeRow, assignEdgeChannel, assignEdgeCursor, countCursorEdges,
-  CURSOR_EDGE_EMPTY_RESULT, removeEdgeRow as dropEdgeRow,
+  addEdgeRow as appendEdgeRow, assignEdgeChannel, assignEdgeCursor, clearEdgeCursors, countCursorEdges,
+  CURSOR_EDGE_EMPTY_RESULT, pruneEdgeChannels, pruneEdgeCursors, removeEdgeRow as dropEdgeRow,
   type CursorEdgeRow,
 } from './cursorEdges.js';
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
@@ -626,6 +626,7 @@ export class App {
       this.dirty = true;
     }
     this.settings = next;
+    this.reconcileEdgeChannels();
     this.persistWorkspace();
     this.relayout();
     this.renderPanels();
@@ -799,6 +800,7 @@ export class App {
 
   private afterChannelChange(): void {
     this.settings = clampSettings({ ...this.settings }, this.rateCeilings);
+    this.reconcileEdgeChannels();
     this.persistWorkspace();
     this.relayout();
     this.renderPanels();
@@ -815,6 +817,7 @@ export class App {
     this.order.splice(dst, 0, moving.index);
     this.persistWorkspace();
     this.relayout();
+    this.renderPanels();
   }
 
   // ------------------------------------------------------------------ frame
@@ -1363,6 +1366,10 @@ export class App {
     return this.enabledChannels().map((channel) => channel.index);
   }
 
+  private reconcileEdgeChannels(): void {
+    this.edgeRows = pruneEdgeChannels(this.edgeRows, new Set(this.edgeChannels()));
+  }
+
   private addEdgeRow(): void {
     const rows = appendEdgeRow(this.edgeRows, this.nextEdgeRowId, this.edgeChannels()[0] ?? null);
     if (rows === this.edgeRows) return;
@@ -1421,7 +1428,7 @@ export class App {
       let result = CURSOR_EDGE_EMPTY_RESULT;
       const aSample = row.a === null ? undefined : samples.get(row.a);
       const bSample = row.b === null ? undefined : samples.get(row.b);
-      if (!this.running && this.store.length > 0 && row.channel !== null && channels.has(row.channel) &&
+      if (this.store.length > 0 && row.channel !== null && channels.has(row.channel) &&
           aSample !== undefined && bSample !== undefined &&
           aSample <= this.store.length && bSample <= this.store.length) {
         result = countCursorEdges(this.store, row.channel, aSample, bSample).cell;
@@ -1461,6 +1468,9 @@ export class App {
     this.distanceRows = pruneDistancePairs(
       this.distanceRows, new Set(this.cursors.map((cursor) => cursor.id)),
     );
+    this.edgeRows = pruneEdgeCursors(
+      this.edgeRows, new Set(this.cursors.map((cursor) => cursor.id)),
+    );
     this.renderPanels();
     this.dirty = true;
   }
@@ -1469,6 +1479,7 @@ export class App {
     this.cursors = [];
     this.activeCursorId = null;
     this.distanceRows = clearDistancePairs(this.distanceRows);
+    this.edgeRows = clearEdgeCursors(this.edgeRows);
   }
 
   private cancelMarkerDrags(): void {
@@ -2050,6 +2061,7 @@ export class App {
       { ...this.settings, channels: channelWidthForProbes(store.channelCount) }, this.rateCeilings,
     );
     this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));
+    this.reconcileEdgeChannels();
     this.persistWorkspace();
     this.relayout();
     this.stack.zoomToFit();
@@ -2253,6 +2265,7 @@ export class App {
       { ...this.settings, channels: width, samplerate }, this.rateCeilings,
     );
     this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));
+    this.reconcileEdgeChannels();
     this.persistWorkspace();
     this.relayout();
   }
@@ -2293,6 +2306,7 @@ export class App {
       const model = Math.max(cfg.channels, this.device?.maxChannels ?? this.channels.length);
       this.channels = defaultChannels(model).map((c) => ({ ...c, enabled: masks[c.index] ?? true }));
       this.order = this.channels.map((c) => c.index);
+      this.reconcileEdgeChannels();
       this.persistWorkspace();
       for (const a of this.analyzers) {
         a.result = null; a.index = null; a.status = 'idle'; a.note = { kind: 'pending' };
@@ -2490,10 +2504,14 @@ export class App {
       this.distanceRows = pruneDistancePairs(
         this.distanceRows, new Set(this.cursors.map((cursor) => cursor.id)),
       );
+      this.edgeRows = pruneEdgeCursors(
+        this.edgeRows, new Set(this.cursors.map((cursor) => cursor.id)),
+      );
       this.renderPanels();
     } else if (shifted && this.panel === 'device') {
       this.capturePanel.updateCursors(this.cursorRows());
       this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
+      this.capturePanel.updateCursorEdges(this.cursorEdgeRows());
     }
     this.hover = null;
   }

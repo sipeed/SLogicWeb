@@ -59,6 +59,9 @@ const addRowSource = slice(distanceSection, "const addRow = div('cursor-dist-add
   'distanceSec.body.appendChild(addRow);');
 const distanceUpdate = slice(panel,
   'updateCursorDistances(rows: readonly CursorDistanceRowView[]): void {',
+  'updateCursorEdges(rows: readonly CursorEdgeRowView[]): void {');
+const edgeUpdate = slice(panel,
+  'updateCursorEdges(rows: readonly CursorEdgeRowView[]): void {',
   'updateCursors(rows: readonly CursorRowView[]): void {');
 const distanceRowsSource = slice(app,
   'private cursorDistanceRows(): CursorDistanceRowView[] {',
@@ -1393,9 +1396,10 @@ const edgeMethodsSource = slice(app,
     edgeRowsSource.includes('row: index + 1,'),
     `source=${edgeRowsSource.length} chars`);
 
-  check('only complete, available, in-range rows on a usable idle capture invoke the exact counter',
+  check('only complete, available, in-range rows on a usable current capture invoke the exact counter',
     edgeRowsSource.includes('let result = CURSOR_EDGE_EMPTY_RESULT;') &&
-    edgeRowsSource.includes('!this.running && this.store.length > 0 && row.channel !== null && channels.has(row.channel)') &&
+    edgeRowsSource.includes('this.store.length > 0 && row.channel !== null && channels.has(row.channel)') &&
+    !edgeRowsSource.includes('!this.running') &&
     edgeRowsSource.includes('aSample !== undefined && bSample !== undefined &&') &&
     edgeRowsSource.includes('aSample <= this.store.length && bSample <= this.store.length') &&
     edgeRowsSource.includes('countCursorEdges(this.store, row.channel, aSample, bSample).cell') &&
@@ -1414,8 +1418,74 @@ const edgeMethodsSource = slice(app,
   const move = slice(app, "plot.addEventListener('pointermove', (e) => {", 'const end = (e: PointerEvent) => {');
   check('pointer movement never recomputes edge counts; the existing drag-end rebuild owns refresh',
     !move.includes('cursorEdgeRows') && !move.includes('countCursorEdges') &&
-    !move.includes('updateCursorEdges') && !panel.includes('updateCursorEdges('),
+    !move.includes('updateCursorEdges'),
     `move=${move.length} chars`);
+}
+
+{
+  const remove = slice(app, 'private removeCursor(id: number): void {', 'private clearCursors(): void {');
+  const removePrune = remove.indexOf('this.edgeRows = pruneEdgeCursors(');
+  const removeRender = remove.indexOf('this.renderPanels();');
+  check('deleting a cursor prunes its id from edge rows before the rebuild without dropping rows',
+    removePrune >= 0 && removeRender > removePrune &&
+    remove.slice(removePrune, removeRender).includes(
+      'new Set(this.cursors.map((cursor) => cursor.id)),') &&
+    !remove.includes('this.edgeRows = []'),
+    `prune=${removePrune}, render=${removeRender}`);
+
+  const clear = slice(app, 'private clearCursors(): void {', 'private cancelMarkerDrags(): void {');
+  check('clearing cursors empties both edge sides while preserving every row and channel',
+    clear.includes('this.edgeRows = clearEdgeCursors(this.edgeRows);') &&
+    !clear.includes('this.edgeRows = []') && !clear.includes('assignEdgeChannel'),
+    `clear=${clear.length} chars`);
+
+  const reconcile = slice(app, 'private reconcileEdgeChannels(): void {', 'private addEdgeRow(): void {');
+  const channelCallers = [
+    slice(app, 'private applySettings(s: CaptureSettings): void {', 'private configureChannel('),
+    slice(app, 'private afterChannelChange(): void {', 'private reorder('),
+    slice(app, 'private adoptCapture(store: SampleStore', 'private save(): void {'),
+    slice(app, 'private adoptDeviceChannels(device: Device): void {', 'private async startCapture('),
+    slice(app, 'private async startCapture(', 'private enforceLoopRetention('),
+  ];
+  check('mask, width, device, file, and hardware-capture transitions reconcile absolute channels in state',
+    reconcile.includes('this.edgeRows = pruneEdgeChannels(this.edgeRows, new Set(this.edgeChannels()));') &&
+    channelCallers.every((caller) => caller.includes('this.reconcileEdgeChannels();')),
+    `callers=${channelCallers.map((caller) => caller.includes('this.reconcileEdgeChannels();')).join(',')}`);
+
+  const reorder = slice(app, 'private reorder(from: number, to: number): void {', '// ------------------------------------------------------------------ frame');
+  const configure = slice(app, 'private configureChannel(', 'private relayout(): void {');
+  check('reorder and rename retain edge identities while rebuilding current labels and channel order',
+    reorder.includes('this.renderPanels();') && !reorder.includes('pruneEdge') &&
+    !reorder.includes('assignEdge') && !configure.includes('pruneEdge') &&
+    !configure.includes('assignEdge') && configure.includes('this.renderPanels();'),
+    `reorderRender=${reorder.includes('this.renderPanels();')}`);
+
+  const retention = slice(app, 'private enforceLoopRetention(store: SampleStore): void {',
+    'private async stopCapture(');
+  const drop = retention.indexOf('if (this.cursors.length !== beforeDrop) {');
+  const prune = retention.indexOf('this.edgeRows = pruneEdgeCursors(');
+  const render = retention.indexOf('this.renderPanels();', Math.max(0, drop));
+  check('a retention drop prunes deleted cursor ids from edge rows before its whole-panel refresh',
+    drop >= 0 && prune > drop && render > prune &&
+    retention.slice(prune, render).includes('new Set(this.cursors.map((cursor) => cursor.id)),'),
+    `drop=${drop}, prune=${prune}, render=${render}`);
+
+  const shift = slice(retention, "} else if (shifted && this.panel === 'device') {", 'this.hover = null;');
+  const cursorAt = shift.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
+  const distanceAt = shift.indexOf('this.capturePanel.updateCursorDistances(this.cursorDistanceRows());');
+  const edgeAt = shift.indexOf('this.capturePanel.updateCursorEdges(this.cursorEdgeRows());');
+  check('a retention shift refreshes edge results after adjusted cursor and distance rows, without a rebuild',
+    cursorAt >= 0 && distanceAt > cursorAt && edgeAt > distanceAt && !shift.includes('renderPanels('),
+    `cursor=${cursorAt}, distance=${distanceAt}, edge=${edgeAt}`);
+
+  const structural = ['replaceChildren', 'appendChild', 'insertBefore', 'remove(', 'innerHTML',
+    'createElement'].filter((needle) => edgeUpdate.includes(needle));
+  check('the retention edge updater resolves stable row ids and rewrites only result text',
+    edgeUpdate.includes("this.root.querySelectorAll<HTMLElement>('.cursor-edge-row')") &&
+    edgeUpdate.includes('byId.get(Number(item.dataset.edgeId))') &&
+    edgeUpdate.includes("item.querySelector<HTMLElement>('.cursor-edge-result')") &&
+    edgeUpdate.includes('result.textContent = row.result;') && structural.length === 0,
+    `source=${edgeUpdate.length} chars, structural=${JSON.stringify(structural)}`);
 }
 
 {

@@ -157,6 +157,18 @@ export class CapturePanel {
     }
   }
 
+  updateCursorEdges(rows: readonly CursorEdgeRowView[]): void {
+    const byId = new Map<number, CursorEdgeRowView>();
+    for (const row of rows) byId.set(row.id, row);
+    for (const item of this.root.querySelectorAll<HTMLElement>('.cursor-edge-row')) {
+      const row = byId.get(Number(item.dataset.edgeId));
+      if (row === undefined) continue;
+      const result = item.querySelector<HTMLElement>('.cursor-edge-result');
+      if (result === null) continue;
+      result.textContent = row.result;
+    }
+  }
+
   updateCursors(rows: readonly CursorRowView[]): void {
     const byId = new Map<number, CursorRowView>();
     for (const row of rows) byId.set(row.id, row);
