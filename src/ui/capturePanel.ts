@@ -107,6 +107,18 @@ export class CapturePanel {
     this.fillProgress(progress);
   }
 
+  updateCursors(rows: readonly CursorRowView[]): void {
+    const byId = new Map<number, CursorRowView>();
+    for (const row of rows) byId.set(row.id, row);
+    for (const item of this.root.querySelectorAll<HTMLElement>('.cursor-row')) {
+      const row = byId.get(Number(item.dataset.cursorId));
+      if (row === undefined) continue;
+      const pos = item.querySelector<HTMLElement>('.cursor-pos');
+      if (pos === null) continue;
+      pos.textContent = `${formatDuration(row.seconds)}/${row.sample}`;
+    }
+  }
+
   private fillProgress(progress: NonNullable<CapturePanelView['progress']>): void {
     this.liveNote!.textContent = t('capturePanel.recording', {
       seconds: progress.seconds.toFixed(2),

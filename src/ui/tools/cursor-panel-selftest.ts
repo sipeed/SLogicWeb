@@ -245,6 +245,76 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
   check('a drag move redraws without rebuilding the panel',
     move.length > 0 && !move.includes('renderPanels(') && move.includes('if (consumed) {'),
     `move=${move.length} chars, render=${move.includes('renderPanels(')}`);
+
+  const consumed = slice(move, 'if (consumed) {', 'this.dirty = true; return;');
+  const activateAt = consumed.indexOf('this.activeCursorId = cursor.id;');
+  const updateAt = consumed.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
+  check('a consumed drag move refreshes the open cursor list in place, after the move',
+    consumed.length > 0 && activateAt >= 0 && updateAt > activateAt &&
+    consumed.slice(0, updateAt).includes("if (this.panel === 'device')") &&
+    !consumed.includes('renderPanels('),
+    `consumed=${consumed.length} chars, activate=${activateAt}, update=${updateAt}`);
+}
+
+{
+  const update = slice(panel, 'updateCursors(rows: readonly CursorRowView[]): void {',
+    "private fillProgress(progress: NonNullable<CapturePanelView['progress']>): void {");
+  const writeAt = update.indexOf("const pos = item.querySelector<HTMLElement>('.cursor-pos');");
+  const write = writeAt < 0 ? '' : update.slice(writeAt);
+  const structural = ['replaceChildren', 'appendChild', 'insertBefore', 'remove(',
+    'innerHTML', 'style', 'createElement'];
+  const structuralHits = structural.filter((needle) => update.includes(needle));
+  check('the live row update walks the rendered rows and rewrites nothing but their text',
+    update.length > 0 && write.includes('textContent') && structuralHits.length === 0 &&
+    update.indexOf('this.root.querySelectorAll') >= 0 &&
+    update.indexOf("this.root.querySelectorAll<HTMLElement>('.cursor-row')") >
+      update.indexOf('new Map<number, CursorRowView>()'),
+    `update=${update.length} chars, write=${write.length} chars, hits=${JSON.stringify(structuralHits)}`);
+
+  const writeBans = structural.concat(['dataset', 'className']);
+  const writeHits = writeBans.filter((needle) => write.includes(needle));
+  check('the write site touches only the position text of an existing row',
+    write.includes('pos.textContent = `${formatDuration(row.seconds)}/${row.sample}`;') &&
+    writeHits.length === 0,
+    `hits=${JSON.stringify(writeHits)}, text=${write.includes('pos.textContent')}`);
+
+  check('the update resolves rows by data-cursor-id and ignores ids it does not know',
+    update.includes('byId.get(Number(item.dataset.cursorId))') &&
+    update.includes('if (row === undefined) continue;') &&
+    update.includes('if (pos === null) continue;') &&
+    !update.includes('this.cb.'),
+    `dataset=${update.includes('item.dataset.cursorId')}, ` +
+    `skip=${update.includes('if (row === undefined) continue;')}`);
+
+  check('an unrendered panel has no rows to walk, so the update is a no-op there',
+    update.length > 0 && !update.includes('cursorSec') &&
+    !update.includes('replaceChildren') && update.includes("'.cursor-row'") &&
+    !update.includes('this.cursorRows'),
+    `liveWalk=${update.includes("this.root.querySelectorAll<HTMLElement>('.cursor-row')")}`);
+}
+
+{
+  const retention = slice(app, 'private enforceLoopRetention(store: SampleStore): void {',
+    'private async stopCapture(');
+  const shiftAt = retention.indexOf('if (cursor.marker.sample !== sample) shifted = true;');
+  const branchAt = retention.indexOf("} else if (shifted && this.panel === 'device') {");
+  const updateAt = retention.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
+  const originAt = retention.indexOf('this.triggerSampleIndex = this.triggerSampleIndex - drop >= 0');
+  check('a retention shift with an intact cursor list refreshes the rows in place',
+    retention.length > 0 && shiftAt >= 0 && branchAt > shiftAt && updateAt > branchAt &&
+    originAt >= 0 && originAt < shiftAt &&
+    retention.lastIndexOf('this.triggerSampleIndex = this.triggerSampleIndex - drop >= 0') < updateAt,
+    `retention=${retention.length} chars, shift=${shiftAt}, branch=${branchAt}, ` +
+    `update=${updateAt}, origin=${originAt}`);
+
+  const renders = retention.match(/renderPanels\(\)/g) ?? [];
+  const updates = retention.match(/updateCursors\(/g) ?? [];
+  const dropAt = retention.indexOf('if (this.cursors.length !== beforeDrop) {');
+  check('a retention drop keeps the single whole-panel render and the drop branch wins',
+    renders.length === 1 && updates.length === 1 && dropAt >= 0 && dropAt < branchAt &&
+    retention.indexOf('this.renderPanels();') > dropAt &&
+    retention.indexOf('this.renderPanels();') < branchAt,
+    `renders=${renders.length}, updates=${updates.length}, drop=${dropAt}, branch=${branchAt}`);
 }
 
 {

@@ -1046,6 +1046,7 @@ export class App {
         });
         if (consumed) {
           if (cursor.marker.started) this.activeCursorId = cursor.id;
+          if (this.panel === 'device') this.capturePanel.updateCursors(this.cursorRows());
           this.dirty = true; return;
         }
       }
@@ -2323,10 +2324,15 @@ export class App {
     // Bus builders need no reset: their frontier is absolute (BusBuilder skips ahead past
     // the drop), and analogFrame's cache key carries store.droppedSamples, so a stale
     // frame can never alias a new generation at the same length.
+    if (this.triggerSampleIndex !== null) {
+      this.triggerSampleIndex = this.triggerSampleIndex - drop >= 0 ? this.triggerSampleIndex - drop : null;
+    }
+    let shifted = false;
     for (const cursor of this.cursors) {
       const sample = cursor.marker.sample;
       if (sample === null || cursor.marker.isDragging) continue;
       cursor.marker.setSample(sample - drop >= 0 ? sample - drop : null, store.length);
+      if (cursor.marker.sample !== sample) shifted = true;
     }
     const beforeDrop = this.cursors.length;
     this.cursors = this.cursors.filter((cursor) => cursor.marker.sample !== null);
@@ -2337,9 +2343,8 @@ export class App {
       }
       this.renumberCursors();
       this.renderPanels();
-    }
-    if (this.triggerSampleIndex !== null) {
-      this.triggerSampleIndex = this.triggerSampleIndex - drop >= 0 ? this.triggerSampleIndex - drop : null;
+    } else if (shifted && this.panel === 'device') {
+      this.capturePanel.updateCursors(this.cursorRows());
     }
     this.hover = null;
   }
