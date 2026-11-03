@@ -404,6 +404,7 @@ export const fr: Messages = {
   'capturePanel.cursors': 'Curseurs',
   'capturePanel.cursorEmpty': 'Double-cliquez sur la forme d’onde pour placer un curseur.',
   'capturePanel.removeCursor': 'Supprimer le curseur {label}',
+  'capturePanel.focusCursor': 'Centrer la vue sur le curseur {label}',
   'capturePanel.advanced': 'Avancé',
   'capturePanel.testMode': 'Mode de test de l’appareil (prochaine capture)',
   'capturePanel.testNormal': 'Normal',

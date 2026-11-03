@@ -137,9 +137,10 @@ const stack = fs.readFileSync('src/ui/waveformStack.ts', 'utf8');
     between(app, "must<HTMLButtonElement>('btn-fit').addEventListener('click'", "must<HTMLButtonElement>('btn-settings').addEventListener('click'"),
     between(app, 'setViewportSeconds: (a: number', 'setMarker:'),
     between(app, 'zoomToAnnotation: (analyzerIndex', 'snapshot:'),
+    between(app, 'private focusCursor(', 'private removeCursor('),
   ];
   check('each explicit viewport action invalidates continuation restoration',
-    app.includes('private noteViewportIntent()') && intentCalls === 8 &&
+    app.includes('private noteViewportIntent()') && intentCalls === 9 &&
     sites.every((site) => site.includes('this.noteViewportIntent();')),
     `intentCalls=${intentCalls}, sites=${sites.map((site) => site.includes('this.noteViewportIntent();')).join(',')}`);
   const dbl = between(app, "plot.addEventListener('dblclick'", '// Dragging the axis');

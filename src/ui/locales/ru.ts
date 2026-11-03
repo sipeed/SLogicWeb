@@ -395,6 +395,7 @@ export const ru: Messages = {
   'capturePanel.cursors': 'Курсоры',
   'capturePanel.cursorEmpty': 'Дважды щёлкните по осциллограмме, чтобы поставить курсор.',
   'capturePanel.removeCursor': 'Удалить курсор {label}',
+  'capturePanel.focusCursor': 'Центрировать вид на курсоре {label}',
   'capturePanel.advanced': 'Расширенные',
   'capturePanel.testMode': 'Тестовый режим устройства (для следующего захвата)',
   'capturePanel.testNormal': 'Обычный',

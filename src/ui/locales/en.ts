@@ -405,6 +405,7 @@ export const en = {
   'capturePanel.cursors': 'Cursors',
   'capturePanel.cursorEmpty': 'Double-click the waveform to place a cursor.',
   'capturePanel.removeCursor': 'Remove cursor {label}',
+  'capturePanel.focusCursor': 'Centre the view on cursor {label}',
   'capturePanel.advanced': 'Advanced',
   'capturePanel.testMode': 'Device test mode (next capture)',
   'capturePanel.testNormal': 'Normal',

@@ -329,6 +329,7 @@ export class App {
       onChannelWidth: (n) => this.setChannelWidth(n),
       onUsbControl: (command) => this.usbControl(command),
       onRemoveCursor: (id) => this.removeCursor(id),
+      onFocusCursor: (id) => this.focusCursor(id),
     });
     this.analyzerPanel = new AnalyzerPanel(panelHost, {
       onAttach: (id, ch, opts) => void this.attachAnalyzer(id, ch, opts),
@@ -1295,6 +1296,18 @@ export class App {
       });
     }
     return rows;
+  }
+
+  private focusCursor(id: number): void {
+    const cursor = this.cursorById(id);
+    const sample = cursor?.marker.sample ?? null;
+    if (sample === null) return;
+    this.noteViewportIntent();
+    const span = this.stack.viewport.end - this.stack.viewport.start;
+    this.stack.setViewport(sample - span / 2, sample + span / 2);
+    this.activeCursorId = id;
+    this.renderPanels();
+    this.dirty = true;
   }
 
   private removeCursor(id: number): void {

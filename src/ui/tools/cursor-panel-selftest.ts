@@ -109,6 +109,30 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
     panel.includes('chipForeground'),
     `bg=${cursorSection.includes('order.style.background = row.color;')}, ` +
     `fg=${cursorSection.includes('order.style.color = chipForeground(row.color);')}`);
+
+  const chip = slice(cursorSection, "const order = document.createElement('button');",
+    "const pos = document.createElement('span');");
+  check('the order chip is a real button so the jump is keyboard reachable',
+    chip.length > 0 && chip.includes("order.type = 'button';"),
+    `chip=${chip.length} chars, type=${chip.includes("order.type = 'button';")}`);
+
+  check('the chip is named by the translated focus label in both title and aria-label',
+    chip.includes("const focusLabel = t('capturePanel.focusCursor', { label: row.label });") &&
+    chip.includes('order.title = focusLabel;') &&
+    chip.includes("order.setAttribute('aria-label', focusLabel);"),
+    `label=${chip.includes('capturePanel.focusCursor')}, ` +
+    `title=${chip.includes('order.title = focusLabel;')}, ` +
+    `aria=${chip.includes("order.setAttribute('aria-label', focusLabel);")}`);
+
+  check('clicking the chip focuses exactly its own cursor through the panel callback',
+    chip.includes("order.addEventListener('click', () => this.cb.onFocusCursor(row.id));") &&
+    panel.includes('onFocusCursor(id: number): void;'),
+    `wired=${chip.includes('this.cb.onFocusCursor(row.id)')}, ` +
+    `callback=${panel.includes('onFocusCursor(id: number): void;')}`);
+
+  check('the chip keeps Space for its own activation instead of the capture shortcut',
+    chip.includes("order.addEventListener('keydown', (e) => {\n          if (e.key === ' ') e.stopPropagation();\n        });"),
+    `guarded=${chip.includes("if (e.key === ' ') e.stopPropagation();")}`);
 }
 
 {
@@ -147,6 +171,12 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
   check('the list branch is the else of the empty-state branch (mutually exclusive rows)',
     listInsideElse,
     `else=${cursorSection.indexOf('} else {')}, list=${cursorSection.indexOf("div('cursor-list')")}`);
+
+  const emptyBranch = slice(cursorSection, 'if (v.cursors.length === 0) {', '} else {');
+  check('the empty hint reuses the shared panel note class',
+    emptyBranch.length > 0 && emptyBranch.includes("const hint = div('panel-note');") &&
+    !emptyBranch.includes('cursor-row'),
+    `branch=${emptyBranch.length} chars, note=${emptyBranch.includes("div('panel-note')")}`);
 }
 
 {
@@ -175,6 +205,33 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
     app.includes('onRemoveCursor: (id) => this.removeCursor(id),'),
     `view=${render.includes('cursors: this.cursorRows(),')}, ` +
     `callback=${app.includes('onRemoveCursor: (id) => this.removeCursor(id),')}`);
+
+  check('the panel focus callback routes to App.focusCursor',
+    app.includes('onFocusCursor: (id) => this.focusCursor(id),'),
+    `wired=${app.includes('onFocusCursor: (id) => this.focusCursor(id),')}`);
+
+  const focus = slice(app, 'private focusCursor(id: number): void {',
+    'private removeCursor(id: number): void {');
+  const intentAt = focus.indexOf('this.noteViewportIntent();');
+  const setAt = focus.indexOf('this.stack.setViewport(');
+  check('the jump invalidates the continuation anchor before moving the viewport',
+    focus.length > 0 && intentAt >= 0 && setAt > intentAt,
+    `focus=${focus.length} chars, intent=${intentAt}, set=${setAt}`);
+
+  check('the jump centres on the cursor sample and keeps the zoom span',
+    focus.includes('const span = this.stack.viewport.end - this.stack.viewport.start;') &&
+    focus.includes('this.stack.setViewport(sample - span / 2, sample + span / 2);') &&
+    !focus.includes('zoomToFit') && !focus.includes('samplesPerPixel') &&
+    !focus.includes('setViewportSeconds'),
+    `span=${focus.includes('this.stack.viewport.end - this.stack.viewport.start')}, ` +
+    `call=${focus.includes('this.stack.setViewport(sample - span / 2, sample + span / 2);')}`);
+
+  check('a sample-less cursor has no jump target and the jumped cursor becomes active',
+    focus.includes('if (sample === null) return;') &&
+    focus.includes('this.activeCursorId = id;') &&
+    focus.includes('this.renderPanels();') && focus.includes('this.dirty = true;'),
+    `sample=${focus.includes('if (sample === null) return;')}, ` +
+    `active=${focus.includes('this.activeCursorId = id;')}`);
 }
 
 {
@@ -193,33 +250,42 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
 {
   const keys = [
     'capturePanel.cursors', 'capturePanel.cursorEmpty', 'capturePanel.removeCursor',
+    'capturePanel.focusCursor',
   ] as const satisfies readonly MessageKey[];
   const catalogs: [string, Readonly<Record<string, string>>][] = [
     ['en', en], ['zh-CN', zhCN], ['ru', ru], ['fr', fr],
   ];
+  const value = (dict: Readonly<Record<string, string>>, key: string): string => dict[key] ?? '';
+
   const missing = catalogs.flatMap(([locale, dict]) =>
-    keys.filter((key) => typeof dict[key] !== 'string' || dict[key]!.trim() === '')
-      .map((key) => `${locale}:${key}`));
-  check('all four catalogs define the three cursor keys with non-empty values',
+    keys.filter((key) => value(dict, key).trim() === '').map((key) => `${locale}:${key}`));
+  check('all four catalogs define the four cursor keys with non-empty values',
     missing.length === 0, `missing=${JSON.stringify(missing)}`);
 
   const english = {
     'capturePanel.cursors': 'Cursors',
     'capturePanel.cursorEmpty': 'Double-click the waveform to place a cursor.',
     'capturePanel.removeCursor': 'Remove cursor {label}',
+    'capturePanel.focusCursor': 'Centre the view on cursor {label}',
   };
-  const mismatched = keys.filter((key) => en[key] !== english[key]);
+  const mismatched = keys.filter((key) => value(en, key) !== english[key]);
   check('the English values are the contracted strings',
     mismatched.length === 0,
-    `mismatched=${JSON.stringify(mismatched.map((key) => [key, en[key]]))}`);
+    `mismatched=${JSON.stringify(mismatched.map((key) => [key, value(en, key)]))}`);
 
   const placeholderMissing = catalogs.filter(([, dict]) =>
-    !dict['capturePanel.removeCursor']!.includes('{label}')).map(([locale]) => locale);
+    !value(dict, 'capturePanel.removeCursor').includes('{label}')).map(([locale]) => locale);
   check('every catalog keeps the {label} placeholder in the remove label',
     placeholderMissing.length === 0, `missing=${JSON.stringify(placeholderMissing)}`);
 
+  const focusPlaceholderMissing = catalogs.filter(([, dict]) =>
+    !value(dict, 'capturePanel.focusCursor').includes('{label}')).map(([locale]) => locale);
+  check('every catalog keeps the {label} placeholder in the focus label',
+    focusPlaceholderMissing.length === 0, `missing=${JSON.stringify(focusPlaceholderMissing)}`);
+
   const copied = catalogs.filter(([locale]) => locale !== 'en')
-    .filter(([, dict]) => keys.some((key) => dict[key] === en[key])).map(([locale]) => locale);
+    .filter(([, dict]) => keys.some((key) => value(dict, key) === value(en, key)))
+    .map(([locale]) => locale);
   check('no locale reuses the English cursor prose',
     copied.length === 0, `copied=${JSON.stringify(copied)}`);
 }
@@ -236,6 +302,18 @@ const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appe
     block.includes('font-variant-numeric: tabular-nums;') &&
     block.includes('text-overflow: ellipsis;'),
     `block=${block.length} chars, important=${block.includes('!important')}`);
+
+  const chipRule = slice(css, '.cursor-idx {', '.cursor-pos {');
+  const resets = ['border: 0;', 'cursor: pointer;', 'font-family: inherit;', 'appearance: none;'];
+  const absentResets = resets.filter((prop) => !chipRule.includes(prop));
+  check('the chip drops the UA button chrome and keeps the measured chip box',
+    absentResets.length === 0 &&
+    chipRule.includes('min-width: 18px; height: 16px; padding: 0 4px;') &&
+    chipRule.includes('border-radius: 3px;') &&
+    chipRule.includes('font-size: 10px; font-weight: 600;') &&
+    !chipRule.includes('!important'),
+    `absent=${JSON.stringify(absentResets)}, ` +
+    `box=${chipRule.includes('min-width: 18px; height: 16px; padding: 0 4px;')}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

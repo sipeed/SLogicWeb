@@ -48,6 +48,7 @@ export interface CapturePanelCallbacks {
   onChannelWidth(channels: number): void;
   onUsbControl(command: string): Promise<string>;
   onRemoveCursor(id: number): void;
+  onFocusCursor(id: number): void;
 }
 
 export type CapturePanelState = 'ready' | 'capturing' | 'stopping' | 'waiting' | 'completed';
@@ -578,11 +579,19 @@ export class CapturePanel {
       for (const row of v.cursors) {
         const item = div('cursor-row');
         item.dataset.cursorId = String(row.id);
-        const order = document.createElement('span');
+        const order = document.createElement('button');
+        order.type = 'button';
         order.className = 'cursor-idx';
         order.textContent = row.label;
         order.style.background = row.color;
         order.style.color = chipForeground(row.color);
+        const focusLabel = t('capturePanel.focusCursor', { label: row.label });
+        order.title = focusLabel;
+        order.setAttribute('aria-label', focusLabel);
+        order.addEventListener('click', () => this.cb.onFocusCursor(row.id));
+        order.addEventListener('keydown', (e) => {
+          if (e.key === ' ') e.stopPropagation();
+        });
         const pos = document.createElement('span');
         pos.className = 'cursor-pos';
         pos.textContent = `${formatDuration(row.seconds)}/${row.sample}`;

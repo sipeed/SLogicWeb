@@ -352,6 +352,7 @@ export const zhCN: Messages = {
   'capturePanel.cursors': '光标',
   'capturePanel.cursorEmpty': '在波形上双击即可放置光标。',
   'capturePanel.removeCursor': '移除光标 {label}',
+  'capturePanel.focusCursor': '将视图居中到光标 {label}',
   'capturePanel.advanced': '高级',
   'capturePanel.testMode': '设备测试模式（下次采集生效）',
   'capturePanel.testNormal': '正常',
