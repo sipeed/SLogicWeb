@@ -1,6 +1,7 @@
 import {
-  MAX_CURSOR_EDGE_ROWS, addEdgeRow, assignEdgeChannel, assignEdgeCursor, clearEdgeCursors,
-  pruneEdgeChannels, pruneEdgeCursors, removeEdgeRow, type CursorEdgeRow,
+  CURSOR_EDGE_EMPTY_RESULT, CURSOR_EDGE_QUERY_WINDOW, MAX_CURSOR_EDGE_ROWS, addEdgeRow,
+  assignEdgeChannel, assignEdgeCursor, clearEdgeCursors, countCursorEdges, pruneEdgeChannels,
+  pruneEdgeCursors, removeEdgeRow, type CursorEdgeRow, type EdgeCounts, type EdgeSampleSource,
 } from '../cursorEdges.js';
 
 interface TestResult {
@@ -37,6 +38,91 @@ const cells = (rows: readonly CursorEdgeRow[]): string => rows.map((row) =>
   `${row.channel === null ? '-' : row.channel}`).join(',');
 
 const json = (value: unknown): string => JSON.stringify(value);
+
+interface EdgeRequest {
+  readonly channel: number;
+  readonly start: number;
+  readonly end: number;
+}
+
+class WaveformSource implements EdgeSampleSource {
+  readonly length: number;
+  readonly requests: EdgeRequest[] = [];
+
+  constructor(
+    private readonly levels: ArrayLike<number>,
+    private readonly maxRequestWidth = Number.POSITIVE_INFINITY,
+  ) {
+    this.length = levels.length;
+  }
+
+  edges(channel: number, startSample: number, endSample: number): Int32Array {
+    if (!Number.isInteger(startSample) || !Number.isInteger(endSample) ||
+        startSample < 1 || endSample > this.length || startSample > endSample) {
+      throw new Error(`invalid reference query [${startSample}, ${endSample})`);
+    }
+    if (endSample - startSample > this.maxRequestWidth) {
+      throw new Error(`query width ${endSample - startSample} exceeds ${this.maxRequestWidth}`);
+    }
+    this.requests.push({ channel, start: startSample, end: endSample });
+    const positions: number[] = [];
+    for (let p = startSample; p < endSample; p += 1) {
+      if (this.levels[p] !== this.levels[p - 1]) positions.push(p);
+    }
+    return Int32Array.from(positions);
+  }
+
+  sampleAt(channel: number, index: number): number {
+    if (channel !== 0 || !Number.isInteger(index) || index < 0 || index >= this.length) {
+      throw new Error(`invalid reference sample ${channel}@${index}`);
+    }
+    return this.levels[index];
+  }
+}
+
+function togglingWaveform(length: number, positions: readonly number[], initial = 0): Uint8Array {
+  const levels = new Uint8Array(length);
+  const transitions = new Set(positions);
+  let level = initial;
+  for (let p = 0; p < length; p += 1) {
+    if (transitions.has(p)) level = level === 0 ? 1 : 0;
+    levels[p] = level;
+  }
+  return levels;
+}
+
+function referenceCounts(
+  levels: ArrayLike<number>, aSample: number, bSample: number,
+): Omit<EdgeCounts, 'cell'> {
+  const lo = Math.min(aSample, bSample);
+  const hi = Math.min(Math.max(aSample, bSample), levels.length - 1);
+  let rising = 0;
+  let falling = 0;
+  for (let p = lo + 1; p <= hi; p += 1) {
+    if (levels[p] === levels[p - 1]) continue;
+    if (levels[p] === 1) rising += 1;
+    else falling += 1;
+  }
+  return { rising, falling, total: rising + falling };
+}
+
+function countsText(counts: Omit<EdgeCounts, 'cell'>): string {
+  return `${counts.rising}/${counts.falling}/${counts.total}`;
+}
+
+function requestText(requests: readonly EdgeRequest[]): string {
+  return requests.map((request) =>
+    `${request.channel}:[${request.start},${request.end})`).join(',');
+}
+
+function throws(action: () => unknown): boolean {
+  try {
+    action();
+    return false;
+  } catch {
+    return true;
+  }
+}
 
 check('the edge-row cap is exactly fifteen',
   MAX_CURSOR_EDGE_ROWS === 15, `MAX_CURSOR_EDGE_ROWS=${MAX_CURSOR_EDGE_ROWS}`);
@@ -265,6 +351,142 @@ check('the edge-row cap is exactly fifteen',
   check('replaying every reducer yields identical output and leaves the shared input unchanged',
     json(first) === json(second) && json(input) === before,
     `first=${first.join(' | ')}, input=${json(input)}`);
+}
+
+check('the production edge query window is exactly 262144 sample positions',
+  CURSOR_EDGE_QUERY_WINDOW === 262_144, `window=${CURSOR_EDGE_QUERY_WINDOW}`);
+
+check('an incomplete measurement has a distinct placeholder rather than a fabricated zero',
+  CURSOR_EDGE_EMPTY_RESULT === '-/-/-' && CURSOR_EDGE_EMPTY_RESULT !== ['0', '0', '0'].join('/'),
+  `placeholder=${CURSOR_EDGE_EMPTY_RESULT}`);
+
+{
+  const levels = togglingWaveform(31, [10, 20, 30]);
+  const source = new WaveformSource(levels);
+  const cases: readonly [number, number, string][] = [
+    [0, 30, '2/1/3'],
+    [10, 30, '1/1/2'],
+    [30, 10, '1/1/2'],
+    [0, 10, '1/0/1'],
+    [10, 20, '0/1/1'],
+    [0, 20, '1/1/2'],
+    [20, 30, '1/0/1'],
+  ];
+  for (const [a, b, expected] of cases) {
+    const got = countCursorEdges(source, 0, a, b);
+    const reference = referenceCounts(levels, a, b);
+    check(`directed counts for cursors ${a} and ${b} follow (left, right]`,
+      countsText(got) === expected && countsText(reference) === expected && got.cell === expected,
+      `got=${got.cell}, reference=${countsText(reference)}, expected=${expected}`);
+  }
+
+  const beforeEqual = source.requests.length;
+  const equal = countCursorEdges(source, 0, 10, 10);
+  check('equal cursor positions are a valid empty interval and issue no store query',
+    equal.rising === 0 && equal.falling === 0 && equal.total === 0 && equal.cell === '0/0/0' &&
+    source.requests.length === beforeEqual,
+    `counts=${equal.cell}, queries=${source.requests.length - beforeEqual}`);
+
+  const constant = new WaveformSource(new Uint8Array(12));
+  const zero = countCursorEdges(constant, 0, 0, 11);
+  check('a valid constant interval reports exact zero rather than the incomplete placeholder',
+    zero.cell === '0/0/0' && constant.requests.length === 1,
+    `counts=${zero.cell}, queries=${constant.requests.length}`);
+
+  const leftInclusive: EdgeCounts = {
+    rising: 1,
+    falling: 1,
+    total: 2,
+    cell: '1/1/2',
+  };
+  check('the independent boundary control can reject an inclusive-left/exclusive-right result',
+    countsText(referenceCounts(levels, 0, 30)) !== countsText(leftInclusive),
+    `reference=${countsText(referenceCounts(levels, 0, 30))}, wrong=${countsText(leftInclusive)}`);
+}
+
+{
+  const positions = Array.from({ length: 2000 }, (_, index) => index + 1);
+  const levels = togglingWaveform(2001, positions);
+  const got = countCursorEdges(new WaveformSource(levels), 0, 0, 2000);
+  const reference = referenceCounts(levels, 0, 2000);
+  check('result composition groups thousands for rising, falling, and total independently',
+    got.rising === 1000 && got.falling === 1000 && got.total === 2000 &&
+    got.cell === '1,000/1,000/2,000' && countsText(reference) === '1000/1000/2000',
+    `got=${got.cell}, reference=${countsText(reference)}`);
+}
+
+{
+  const levels = togglingWaveform(31, Array.from({ length: 29 }, (_, index) => index + 1));
+  const source = new WaveformSource(levels, 4);
+  const got = countCursorEdges(source, 0, 2, 29, 4);
+  const reference = referenceCounts(levels, 2, 29);
+  const expectedRequests = '0:[3,7),0:[7,11),0:[11,15),0:[15,19),0:[19,23),0:[23,27),0:[27,30)';
+  check('small forced windows scan every chunk exactly once with contiguous half-open requests',
+    requestText(source.requests) === expectedRequests &&
+    source.requests.every((request) => request.end - request.start <= 4),
+    `requests=${requestText(source.requests)}`);
+  check('chunk boundaries preserve exact entered-level counts without omissions or duplicates',
+    got.rising === 14 && got.falling === 13 && got.total === 27 && got.cell === '14/13/27' &&
+    countsText(reference) === countsText(got),
+    `got=${got.cell}, reference=${countsText(reference)}`);
+}
+
+{
+  const levels = togglingWaveform(262_146, [1, 262_144, 262_145]);
+  const source = new WaveformSource(levels, CURSOR_EDGE_QUERY_WINDOW);
+  const got = countCursorEdges(source, 0, 0, 262_145);
+  check('the default counter never requests more than the production window and scans the tail',
+    requestText(source.requests) === '0:[1,262145),0:[262145,262146)' &&
+    source.requests.every((request) => request.end - request.start <= CURSOR_EDGE_QUERY_WINDOW),
+    `requests=${requestText(source.requests)}`);
+  check('production-width chunking matches the independent full-waveform reference',
+    got.cell === '2/1/3' && countsText(referenceCounts(levels, 0, 262_145)) === countsText(got),
+    `got=${got.cell}, reference=${countsText(referenceCounts(levels, 0, 262_145))}`);
+}
+
+{
+  const source = new WaveformSource(togglingWaveform(8, [2, 5]));
+  const invalidPositions: readonly [string, number, number][] = [
+    ['NaN A', Number.NaN, 1],
+    ['infinite A', Number.POSITIVE_INFINITY, 1],
+    ['negative-infinity B', 1, Number.NEGATIVE_INFINITY],
+    ['fractional A', 1.5, 3],
+    ['fractional B', 1, 3.5],
+    ['negative A', -1, 3],
+    ['A beyond capture', 9, 3],
+    ['B beyond capture', 1, 9],
+    ['unsafe integer A', Number.MAX_SAFE_INTEGER + 1, 1],
+  ];
+  for (const [name, a, b] of invalidPositions) {
+    check(`invalid cursor input fails loudly: ${name}`,
+      throws(() => countCursorEdges(source, 0, a, b)), `a=${a}, b=${b}`);
+  }
+
+  const invalidChannels = [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY];
+  check('negative, fractional, and non-finite channels fail before any store query',
+    invalidChannels.every((channel) => throws(() => countCursorEdges(source, channel, 0, 5))) &&
+    source.requests.length === 0,
+    `channels=${invalidChannels.join(',')}, queries=${source.requests.length}`);
+
+  const invalidWindows = [0, -1, 1.5, Number.NaN, CURSOR_EDGE_QUERY_WINDOW + 1];
+  check('invalid or over-limit test windows fail rather than weakening the allocation bound',
+    invalidWindows.every((window) => throws(() => countCursorEdges(source, 0, 0, 5, window))) &&
+    source.requests.length === 0,
+    `windows=${invalidWindows.join(',')}, queries=${source.requests.length}`);
+
+  const invalidLengths = [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY];
+  check('invalid source lengths fail loudly instead of producing NaN or clipped guesses',
+    invalidLengths.every((length) => throws(() => countCursorEdges({
+      length,
+      edges: () => new Int32Array(0),
+      sampleAt: () => 0,
+    }, 0, 0, 0))),
+    `lengths=${invalidLengths.join(',')}`);
+
+  const invalidLevel = new WaveformSource(Uint8Array.from([0, 2]));
+  check('an entered level other than zero or one fails loudly instead of guessing direction',
+    throws(() => countCursorEdges(invalidLevel, 0, 0, 1)),
+    `requests=${requestText(invalidLevel.requests)}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
