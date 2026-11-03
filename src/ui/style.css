@@ -1327,6 +1327,34 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
 .cursor-dist-choice:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .cursor-dist-choice-mark { width: 14px; flex: none; color: var(--primary); }
 .cursor-dist-popover-empty { margin: 0; padding: 4px 8px; color: var(--muted-foreground); font-size: 11px; }
+.cursor-edge-head > span:first-child {
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cursor-edge-list { display: flex; flex-direction: column; gap: 6px; }
+.cursor-edge-row {
+  display: flex; flex-wrap: wrap; align-items: center;
+  column-gap: 6px; row-gap: 2px;
+  font-size: 11px;
+}
+.cursor-edge-mark { flex: none; }
+.cursor-edge-tail { display: flex; flex: 1 0 auto; align-items: center; gap: 6px; }
+.cursor-edge-result {
+  flex: 1 0 auto; min-width: 0;
+  color: var(--text80); font-size: 11px; font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cursor-edge-add-row { display: flex; align-items: center; justify-content: flex-start; }
+.cursor-edge-hint { margin: 0; font-size: 10px; color: var(--text50); line-height: 1.5; }
+.cursor-edge-channel { flex: 0 0 58px; width: 58px; gap: 0; }
+.cursor-edge-channel > label {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+.cursor-edge-channel .select-trigger {
+  height: 20px; min-height: 20px; padding: 1px 4px; gap: 2px;
+  font-size: 10px; line-height: 16px;
+}
+.cursor-edge-channel .select-trigger-icon { width: 10px; height: 10px; }
 .analyzer-name { min-width: 54px; }
 .analyzer-status {
   flex: 1; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1384,7 +1412,8 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
 :is(html[data-theme="dark"], html[data-theme="light"]) .advanced summary { color: var(--foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .panel-sub,
 :is(html[data-theme="dark"], html[data-theme="light"]) .panel-note,
-:is(html[data-theme="dark"], html[data-theme="light"]) .cursor-dist-hint { color: var(--muted-foreground); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .cursor-dist-hint,
+:is(html[data-theme="dark"], html[data-theme="light"]) .cursor-edge-hint { color: var(--muted-foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .decoder-detail { color: var(--foreground); }
 
 /* Dark theme: panel controls take the shadcn control shape - control radius, --input

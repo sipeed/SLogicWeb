@@ -4,6 +4,7 @@ import { ru } from '../locales/ru.js';
 import { fr } from '../locales/fr.js';
 import { MAX_CURSOR_DISTANCE_ROWS, distanceCell, seedDistanceRow,
   type CursorDistanceRow } from '../cursorDistance.js';
+import { CURSOR_EDGE_EMPTY_RESULT, MAX_CURSOR_EDGE_ROWS } from '../cursorEdges.js';
 import { formatCount } from '../format.js';
 import type { MessageKey } from '../i18n.js';
 
@@ -61,6 +62,18 @@ const distanceUpdate = slice(panel,
   'updateCursors(rows: readonly CursorRowView[]): void {');
 const distanceRowsSource = slice(app,
   'private cursorDistanceRows(): CursorDistanceRowView[] {',
+  'private edgeChannels(): number[] {');
+const edgeSection = slice(panel,
+  "const edgeSec = section(t('capturePanel.cursorEdges'));",
+  'this.root.appendChild(edgeSec.el)');
+const edgeSideControlSource = slice(panel, 'function edgeSideControl(', 'function edgeAddButton(');
+const edgeSideIdSource = slice(panel, 'export function cursorEdgeSideId(', 'function edgeSideControl(');
+const edgeAddControlSource = slice(panel, 'function edgeAddButton(', 'function appendIconPath(');
+const edgeRowsSource = slice(app,
+  'private cursorEdgeRows(): CursorEdgeRowView[] {',
+  'private focusCursor(id: number): void {');
+const edgeMethodsSource = slice(app,
+  'private edgeChannels(): number[] {',
   'private cursorRows(): CursorRowView[] {');
 
 {
@@ -80,11 +93,12 @@ const distanceRowsSource = slice(app,
     'this.root.appendChild(triggerSec.el)',
     'this.root.appendChild(cursorSec.el)',
     'this.root.appendChild(distanceSec.el)',
+    'this.root.appendChild(edgeSec.el)',
     'this.root.appendChild(advanced)',
   ].map((needle) => panel.indexOf(needle));
   const ascending = ordered.every((index, i) => index >= 0 && (i === 0 || index > ordered[i - 1]!));
-  check('the device panel order is channels, capture, trigger, cursors, cursor distance, advanced',
-    ascending && ordered.length === 6, `indices=${ordered.join(',')}`);
+  check('the device panel order is channels, capture, trigger, cursors, distance, edges, advanced',
+    ascending && ordered.length === 7, `indices=${ordered.join(',')}`);
 }
 
 {
@@ -1015,7 +1029,7 @@ const distanceRowsSource = slice(app,
   const renderAt = pick.indexOf('this.renderPanels();');
   const lookupAt = pick.indexOf('const invoker = document.getElementById(cursorDistanceSideId(rowId, side));');
   const focusAt = pick.indexOf('if (invoker !== null) invoker.focus();');
-  const focusCalls = (app.match(/\.focus\(\)/g) ?? []).length;
+  const focusCalls = (pick.match(/\.focus\(\)/g) ?? []).length;
   check('a pick hands focus back to the rebuilt side button after the panel rebuild',
     renderAt >= 0 && lookupAt > renderAt && focusAt > lookupAt && focusCalls === 1 &&
     app.includes('import { CapturePanel, cursorDistanceSideId,') &&
@@ -1162,6 +1176,315 @@ const distanceRowsSource = slice(app,
     malformed.length === 0 && !legend.some(([locale]) => locale !== 'en' &&
       legend[0]?.[1] === legend.find(([l]) => l === locale)?.[1]),
     `values=${JSON.stringify(legend)}`);
+}
+
+{
+  const cursorDistanceAppend = panel.indexOf('this.root.appendChild(distanceSec.el)');
+  const edgeAppend = panel.indexOf('this.root.appendChild(edgeSec.el)');
+  const advanced = panel.indexOf("const advanced = document.createElement('details')");
+  check('the Edges section immediately follows Cursor distance and precedes Advanced',
+    edgeSection.length > 0 && cursorDistanceAppend >= 0 && edgeAppend > cursorDistanceAppend &&
+    advanced > edgeAppend && panel.includes("const edgeSec = section(t('capturePanel.cursorEdges'));"),
+    `distance=${cursorDistanceAppend}, edges=${edgeAppend}, advanced=${advanced}`);
+
+  const headAppends = edgeSection.match(/edgeSec\.header\.appendChild\(/g) ?? [];
+  check('the Edges head carries only its translated rising/falling/total legend',
+    edgeSection.includes("edgeSec.header.classList.add('cursor-edge-head');") &&
+    edgeSection.includes("edgeLegend.className = 'cursor-legend';") &&
+    edgeSection.includes("edgeLegend.textContent = t('capturePanel.cursorEdgesFormat');") &&
+    headAppends.length === 1 && !edgeSection.includes('edgeSec.body.appendChild(edgeLegend)'),
+    `headAppends=${headAppends.length}`);
+}
+
+{
+  const emptyAt = edgeSection.indexOf('if (v.cursorEdges.length === 0) {');
+  const listAt = edgeSection.indexOf("const list = div('cursor-edge-list');");
+  const emptyBranch = emptyAt < 0 ? '' : edgeSection.slice(emptyAt, listAt);
+  check('the Edges empty hint distinguishes too few cursors from no measurement rows',
+    emptyAt >= 0 && listAt > emptyAt && emptyBranch.includes('t(v.cursors.length < 2') &&
+    emptyBranch.includes("? 'capturePanel.cursorEdgesEmpty' : 'capturePanel.cursorEdgesNoRows');") &&
+    emptyBranch.includes("hint.className = 'cursor-edge-hint';"),
+    `empty=${emptyAt}, list=${listAt}, branch=${emptyBranch.length} chars`);
+
+  const addRowAt = edgeSection.indexOf("const edgeAddRow = div('cursor-edge-add-row');");
+  const addAt = edgeSection.indexOf('edgeAddRow.appendChild(edgeAddButton(');
+  const bodyAddAt = edgeSection.indexOf('edgeSec.body.appendChild(edgeAddRow);');
+  check('the bottom Edges add action is left aligned, capped at fifteen, and wired to App',
+    addRowAt > listAt && addAt > addRowAt && bodyAddAt > addAt &&
+    !edgeSection.slice(bodyAddAt + 1).includes('edgeSec.body.appendChild(') &&
+    edgeSection.includes('v.cursorEdges.length >= MAX_CURSOR_EDGE_ROWS,') &&
+    edgeSection.includes('() => this.cb.onAddCursorEdge(),') &&
+    MAX_CURSOR_EDGE_ROWS === 15 &&
+    slice(css, '.cursor-edge-add-row {', '}').includes('justify-content: flex-start;'),
+    `row=${addRowAt}, add=${addAt}, body=${bodyAddAt}, cap=${MAX_CURSOR_EDGE_ROWS}`);
+
+  check('the Edges add button reuses the shared compact action and plus icon',
+    edgeAddControlSource.includes("b.className = 'analyzer-act cursor-edge-add';") &&
+    edgeAddControlSource.includes('b.disabled = disabled;') &&
+    edgeAddControlSource.includes("const label = t('capturePanel.cursorEdgesAdd');") &&
+    edgeAddControlSource.includes('b.appendChild(distanceAddIcon());') &&
+    edgeAddControlSource.includes("b.addEventListener('click', onAdd);") &&
+    !/\.cursor-edge-add\s*\{/.test(css),
+    `source=${edgeAddControlSource.length} chars`);
+}
+
+{
+  const aAt = edgeSection.indexOf("edgeSideControl(row, 'a', v.cursors,");
+  const markAt = edgeSection.indexOf("mark.className = 'cursor-dist-mark cursor-edge-mark';");
+  const bAt = edgeSection.indexOf("edgeSideControl(row, 'b', v.cursors,");
+  const atAt = edgeSection.indexOf("at.className = 'cursor-dist-mark cursor-edge-mark';");
+  const channelAt = edgeSection.indexOf('const channel = selectControl(');
+  const resultAt = edgeSection.indexOf("result.className = 'cursor-edge-result';");
+  const tailAt = edgeSection.indexOf("const tail = div('cursor-edge-tail');");
+  const appendAt = edgeSection.indexOf(
+    'item.append(a.el, mark, b.el, at, channel.el, tail, a.popover, b.popover);');
+  check('each Edges row is A, minus, B, @, channel, then one result/remove tail',
+    edgeSection.includes('item.dataset.edgeId = String(row.id);') &&
+    aAt >= 0 && markAt > aAt && bAt > markAt && atAt > bAt && channelAt > atAt &&
+    resultAt > channelAt && tailAt > resultAt && appendAt > tailAt &&
+    edgeSection.includes("mark.textContent = '−';") && edgeSection.includes("at.textContent = '@';") &&
+    edgeSection.includes('tail.append(result, remove);') &&
+    edgeSection.includes('result.textContent = row.result;'),
+    `a=${aAt}, mark=${markAt}, b=${bAt}, at=${atAt}, channel=${channelAt}, ` +
+    `result=${resultAt}, tail=${tailAt}, append=${appendAt}`);
+
+  const rowRule = slice(css, '.cursor-edge-row {', '.cursor-edge-mark {');
+  const tailRule = slice(css, '.cursor-edge-tail {', '.cursor-edge-result {');
+  const resultRule = slice(css, '.cursor-edge-result {', '.cursor-edge-add-row {');
+  const truncation = ['text-overflow', 'overflow: hidden', 'ellipsis']
+    .filter((needle) => resultRule.includes(needle));
+  check('Edges rows use the distance adaptive-wrap geometry and never truncate results',
+    rowRule.includes('display: flex; flex-wrap: wrap; align-items: center;') &&
+    rowRule.includes('column-gap: 6px; row-gap: 2px;') &&
+    tailRule.includes('display: flex; flex: 1 0 auto; align-items: center; gap: 6px;') &&
+    resultRule.includes('flex: 1 0 auto; min-width: 0;') &&
+    resultRule.includes('font-variant-numeric: tabular-nums;') &&
+    resultRule.includes('white-space: nowrap;') && truncation.length === 0,
+    `row=${rowRule.length}, tail=${tailRule.length}, result=${resultRule.length}, ` +
+    `truncation=${JSON.stringify(truncation)}`);
+}
+
+{
+  check('edge cursor chips share the distance set/unset appearance and current cursor colours',
+    edgeSideControlSource.includes(
+      "el.className = 'cursor-idx cursor-dist-side cursor-edge-side' + (pick === null ? ' is-unset' : '');") &&
+    edgeSideControlSource.includes("el.textContent = pick === null ? '–' : pick.label;") &&
+    edgeSideControlSource.includes('el.style.background = pick.color;') &&
+    edgeSideControlSource.includes('el.style.color = chipForeground(pick.color);') &&
+    css.includes('.cursor-dist-side.is-unset {'),
+    `class=${edgeSideControlSource.includes('cursor-dist-side cursor-edge-side')}, ` +
+    `unset=${edgeSideControlSource.includes('is-unset')}`);
+
+  check('edge cursor controls have row/side-specific translated names and preserve Space activation',
+    edgeSideControlSource.includes(
+      "t(side === 'a' ? 'capturePanel.cursorEdgesStart' : 'capturePanel.cursorEdgesEnd',") &&
+    edgeSideControlSource.includes('{ row: row.row });') &&
+    edgeSideControlSource.includes('el.title = name;') &&
+    edgeSideControlSource.includes("el.setAttribute('aria-label', name);") &&
+    edgeSideControlSource.includes("if (e.key === ' ') e.stopPropagation();"),
+    `source=${edgeSideControlSource.length} chars`);
+
+  check('each edge cursor chip anchors its own native auto popover with distinct invoker/menu ids',
+    edgeSideIdSource.includes('return `cursor-edge-${rowId}-${side}`;') &&
+    edgeSideControlSource.includes('const id = cursorEdgeSideId(row.id, side);') &&
+    edgeSideControlSource.includes('const menuId = `${id}-menu`;') &&
+    edgeSideControlSource.includes('el.id = id;') &&
+    edgeSideControlSource.includes('popover.id = menuId;') &&
+    edgeSideControlSource.includes("el.setAttribute('popovertarget', menuId);") &&
+    edgeSideControlSource.includes("popover.setAttribute('popover', 'auto');") &&
+    edgeSideControlSource.includes("el.style.setProperty('anchor-name', `--${id}`);") &&
+    edgeSideControlSource.includes("popover.style.setProperty('position-anchor', `--${id}`);") &&
+    edgeSideControlSource.includes("popover.className = 'cursor-dist-popover cursor-edge-popover';") &&
+    !edgeSideControlSource.includes('document.addEventListener') &&
+    !edgeSideControlSource.includes('window.addEventListener'),
+    `id=${edgeSideIdSource.length} chars, control=${edgeSideControlSource.length} chars`);
+
+  check('edge picker rows reuse the distance choice anatomy and restore invoker focus on close',
+    edgeSideControlSource.includes(
+      "choice.className = 'cursor-dist-choice cursor-edge-choice' + (current ? ' is-current' : '');") &&
+    edgeSideControlSource.includes('choice.dataset.cursorId = String(cursor.id);') &&
+    edgeSideControlSource.includes('pos.textContent = cursorCellText(cursor);') &&
+    edgeSideControlSource.includes("choice.addEventListener('click', () => onPick(cursor.id));") &&
+    edgeSideControlSource.includes("popover.addEventListener('toggle', () => {") &&
+    edgeSideControlSource.includes('if (el.isConnected) el.focus();'),
+    `choice=${edgeSideControlSource.includes('cursor-dist-choice cursor-edge-choice')}, ` +
+    `focus=${edgeSideControlSource.includes('if (el.isConnected) el.focus();')}`);
+}
+
+{
+  check('the compact channel select has an explicit unset and enabled channels in App display order',
+    edgeSection.includes("['', t('capturePanel.cursorEdgesUnset')],") &&
+    edgeSection.includes('...v.cursorEdgeChannels.map((channel): SelectOptionTuple => [String(channel), `D${channel}`]),') &&
+    edgeSection.includes('`cursor.edge.channel.${row.id}`,') &&
+    edgeSection.includes("t('capturePanel.cursorEdgesChannel', { row: row.row }),") &&
+    edgeSection.includes("row.channel === null ? '' : String(row.channel),") &&
+    !edgeSection.includes(['createElement(', "'select'", ')'].join('')),
+    `unset=${edgeSection.includes('capturePanel.cursorEdgesUnset')}, ` +
+    `channels=${edgeSection.includes('v.cursorEdgeChannels.map')}`);
+
+  check('channel changes commit an absolute channel or null through the row-scoped callback',
+    edgeSection.includes("channel.el.classList.add('cursor-edge-channel');") &&
+    edgeSection.includes("channel.addEventListener('change', () => this.cb.onPickCursorEdgeChannel(") &&
+    edgeSection.includes("row.id, channel.value === '' ? null : Number(channel.value),"),
+    `change=${edgeSection.includes('onPickCursorEdgeChannel')}`);
+
+  const channelRule = slice(css, '.cursor-edge-channel {', '.cursor-edge-channel > label {');
+  const labelRule = slice(css, '.cursor-edge-channel > label {', '.cursor-edge-channel .select-trigger {');
+  const triggerRule = slice(css, '.cursor-edge-channel .select-trigger {',
+    '.cursor-edge-channel .select-trigger-icon {');
+  check('the channel field is compact while its associated accessible label remains present',
+    channelRule.includes('flex: 0 0 58px; width: 58px; gap: 0;') &&
+    labelRule.includes('position: absolute; width: 1px; height: 1px;') &&
+    labelRule.includes('clip-path: inset(50%);') &&
+    triggerRule.includes('height: 20px; min-height: 20px; padding: 1px 4px; gap: 2px;') &&
+    !triggerRule.includes('animation:') && !triggerRule.includes('!important'),
+    `field=${channelRule.length}, label=${labelRule.length}, trigger=${triggerRule.length}`);
+}
+
+{
+  check('the four edge callbacks are panel inputs, not panel-local session state',
+    panel.includes('onAddCursorEdge(): void;') &&
+    panel.includes('onRemoveCursorEdge(rowId: number): void;') &&
+    panel.includes('onPickCursorEdge(rowId: number, side: DistanceSide, cursorId: number): void;') &&
+    panel.includes('onPickCursorEdgeChannel(rowId: number, channel: number | null): void;') &&
+    !edgeSection.includes('countCursorEdges') && !edgeSection.includes('.edges(') &&
+    !edgeSection.includes('sampleAt(') && !edgeSection.includes('formatCount('),
+    `section=${edgeSection.length} chars`);
+
+  check('App owns monotonically allocated edge rows and routes every panel callback',
+    app.includes('private edgeRows: readonly CursorEdgeRow[] = [];') &&
+    app.includes('private nextEdgeRowId = 1;') &&
+    app.includes('onAddCursorEdge: () => this.addEdgeRow(),') &&
+    app.includes('onRemoveCursorEdge: (rowId) => this.removeEdgeRow(rowId),') &&
+    app.includes('onPickCursorEdge: (rowId, side, cursorId) => this.pickEdgeCursor(rowId, side, cursorId),') &&
+    app.includes('onPickCursorEdgeChannel: (rowId, channel) => this.pickEdgeChannel(rowId, channel),'),
+    `methods=${edgeMethodsSource.length} chars`);
+
+  check('a new edge row defaults to the first enabled available channel and respects the pure cap',
+    edgeMethodsSource.includes(
+      'appendEdgeRow(this.edgeRows, this.nextEdgeRowId, this.edgeChannels()[0] ?? null)') &&
+    edgeMethodsSource.includes('return this.enabledChannels().map((channel) => channel.index);') &&
+    edgeMethodsSource.includes('if (rows === this.edgeRows) return;') &&
+    edgeMethodsSource.indexOf('this.nextEdgeRowId++;') >
+      edgeMethodsSource.indexOf('if (rows === this.edgeRows) return;') &&
+    edgeMethodsSource.includes('this.edgeRows = dropEdgeRow(this.edgeRows, rowId);'),
+    `source=${edgeMethodsSource.length} chars`);
+
+  const pick = slice(app,
+    'private pickEdgeCursor(rowId: number, side: DistanceSide, cursorId: number): void {',
+    'private pickEdgeChannel(rowId: number, channel: number | null): void {');
+  const renderAt = pick.indexOf('this.renderPanels();');
+  const focusAt = pick.indexOf('if (invoker !== null) invoker.focus();');
+  check('cursor and channel picks update App state, rebuild, and restore cursor-invoker focus',
+    pick.includes('this.edgeRows = assignEdgeCursor(this.edgeRows, rowId, side, cursorId);') &&
+    pick.includes('document.getElementById(cursorEdgeSideId(rowId, side))') &&
+    renderAt >= 0 && focusAt > renderAt &&
+    edgeMethodsSource.includes('this.edgeRows = assignEdgeChannel(this.edgeRows, rowId, channel);'),
+    `render=${renderAt}, focus=${focusAt}`);
+}
+
+{
+  check('App projects cursor identities and labels without deriving measurements in the panel',
+    edgeRowsSource.includes('const labels = cursorLabels(this.cursors.length);') &&
+    edgeRowsSource.includes(
+      'sides.set(cursor.id, { id: cursor.id, label: labels[index]!, color: cursorColor(index) });') &&
+    edgeRowsSource.includes('a: row.a === null ? null : sides.get(row.a) ?? null,') &&
+    edgeRowsSource.includes('b: row.b === null ? null : sides.get(row.b) ?? null,') &&
+    edgeRowsSource.includes('row: index + 1,'),
+    `source=${edgeRowsSource.length} chars`);
+
+  check('only complete, available, in-range rows on a usable idle capture invoke the exact counter',
+    edgeRowsSource.includes('let result = CURSOR_EDGE_EMPTY_RESULT;') &&
+    edgeRowsSource.includes('!this.running && this.store.length > 0 && row.channel !== null && channels.has(row.channel)') &&
+    edgeRowsSource.includes('aSample !== undefined && bSample !== undefined &&') &&
+    edgeRowsSource.includes('aSample <= this.store.length && bSample <= this.store.length') &&
+    edgeRowsSource.includes('countCursorEdges(this.store, row.channel, aSample, bSample).cell') &&
+    edgeRowsSource.includes('channel: row.channel !== null && channels.has(row.channel) ? row.channel : null,') &&
+    CURSOR_EDGE_EMPTY_RESULT === '-/-/-',
+    `empty=${CURSOR_EDGE_EMPTY_RESULT}, source=${edgeRowsSource.length} chars`);
+
+  const render = slice(app, 'this.capturePanel.render({', 'this.analyzerPanel.render({');
+  check('the capture view carries resolved edge rows and the enabled available channel list',
+    render.includes('cursorEdges: this.cursorEdgeRows(),') &&
+    render.includes('cursorEdgeChannels: this.edgeChannels(),') &&
+    panel.includes('cursorEdges: readonly CursorEdgeRowView[];') &&
+    panel.includes('cursorEdgeChannels: readonly number[];'),
+    `rows=${render.includes('cursorEdges:')}, channels=${render.includes('cursorEdgeChannels:')}`);
+
+  const move = slice(app, "plot.addEventListener('pointermove', (e) => {", 'const end = (e: PointerEvent) => {');
+  check('pointer movement never recomputes edge counts; the existing drag-end rebuild owns refresh',
+    !move.includes('cursorEdgeRows') && !move.includes('countCursorEdges') &&
+    !move.includes('updateCursorEdges') && !panel.includes('updateCursorEdges('),
+    `move=${move.length} chars`);
+}
+
+{
+  const keys = [
+    'capturePanel.cursorEdges', 'capturePanel.cursorEdgesFormat',
+    'capturePanel.cursorEdgesEmpty', 'capturePanel.cursorEdgesNoRows',
+    'capturePanel.cursorEdgesAdd', 'capturePanel.cursorEdgesRemove',
+    'capturePanel.cursorEdgesStart', 'capturePanel.cursorEdgesEnd',
+    'capturePanel.cursorEdgesChannel', 'capturePanel.cursorEdgesUnset',
+  ] as const satisfies readonly MessageKey[];
+  const catalogs: [string, Readonly<Record<string, string>>][] = [
+    ['en', en], ['zh-CN', zhCN], ['ru', ru], ['fr', fr],
+  ];
+  const value = (dict: Readonly<Record<string, string>>, key: string): string => dict[key] ?? '';
+  const missing = catalogs.flatMap(([locale, dict]) =>
+    keys.filter((key) => value(dict, key).trim() === '').map((key) => `${locale}:${key}`));
+  check('all four catalogs define the ten Edges strings',
+    missing.length === 0 && keys.length === 10, `missing=${JSON.stringify(missing)}`);
+
+  const english: Record<string, string> = {
+    'capturePanel.cursorEdges': 'Edges',
+    'capturePanel.cursorEdgesFormat': 'Rising/Falling/Edges',
+    'capturePanel.cursorEdgesEmpty': 'Place two cursors on the waveform to count edges between them.',
+    'capturePanel.cursorEdgesNoRows': 'Add a row to count edges between two cursors.',
+    'capturePanel.cursorEdgesAdd': 'Add an edge row',
+    'capturePanel.cursorEdgesRemove': 'Remove edge row {row}',
+    'capturePanel.cursorEdgesStart': 'Choose the first cursor for edge row {row}',
+    'capturePanel.cursorEdgesEnd': 'Choose the second cursor for edge row {row}',
+    'capturePanel.cursorEdgesChannel': 'Choose the channel for edge row {row}',
+    'capturePanel.cursorEdgesUnset': '–',
+  };
+  const mismatched = keys.filter((key) => value(en, key) !== english[key]);
+  check('the English Edges copy matches the approved measurement vocabulary',
+    mismatched.length === 0,
+    `mismatched=${JSON.stringify(mismatched.map((key) => [key, value(en, key)]))}`);
+
+  const rowKeys = keys.filter((key) => english[key].includes('{row}'));
+  const placeholderMissing = catalogs.flatMap(([locale, dict]) =>
+    rowKeys.filter((key) => !value(dict, key).includes('{row}')).map((key) => `${locale}:${key}`));
+  const placeholderExtra = catalogs.flatMap(([locale, dict]) =>
+    keys.filter((key) => !rowKeys.includes(key) && value(dict, key).includes('{row}'))
+      .map((key) => `${locale}:${key}`));
+  check('every locale keeps {row} on exactly the four row-bearing Edges labels',
+    rowKeys.length === 4 && placeholderMissing.length === 0 && placeholderExtra.length === 0,
+    `rows=${JSON.stringify(rowKeys)}, missing=${JSON.stringify(placeholderMissing)}, ` +
+    `extra=${JSON.stringify(placeholderExtra)}`);
+
+  const proseKeys = keys.filter((key) => key !== 'capturePanel.cursorEdgesUnset');
+  const copied = catalogs.filter(([locale]) => locale !== 'en')
+    .filter(([, dict]) => proseKeys.some((key) => value(dict, key) === value(en, key)))
+    .map(([locale]) => locale);
+  check('no locale reuses English Edges prose; the symbolic unset stays locale-neutral',
+    copied.length === 0 && catalogs.every(([, dict]) =>
+      value(dict, 'capturePanel.cursorEdgesUnset') === '–'),
+    `copied=${JSON.stringify(copied)}`);
+
+  const hints = catalogs.map(([locale, dict]) => [locale,
+    value(dict, 'capturePanel.cursorEdgesEmpty'), value(dict, 'capturePanel.cursorEdgesNoRows')] as const);
+  const legends = catalogs.map(([locale, dict]) =>
+    [locale, value(dict, 'capturePanel.cursorEdgesFormat')] as const);
+  check('Edges hints stay distinct and every legend names a three-part slash readout',
+    hints.every(([, empty, noRows]) => empty !== noRows) &&
+    legends.every(([, legend]) => legend.split('/').length === 3),
+    `hints=${JSON.stringify(hints)}, legends=${JSON.stringify(legends)}`);
+
+  check('the themed Edges hint uses the same muted token as Cursor distance',
+    css.includes(':is(html[data-theme="dark"], html[data-theme="light"]) .cursor-dist-hint,\n' +
+      ':is(html[data-theme="dark"], html[data-theme="light"]) .cursor-edge-hint { color: var(--muted-foreground); }'),
+    `themed=${css.includes('.cursor-edge-hint { color: var(--muted-foreground); }')}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

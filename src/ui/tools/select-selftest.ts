@@ -695,11 +695,21 @@ check(
     "labelled(t('capturePanel.testMode')",
   ].filter((needle) => capture.includes(needle));
   check(
-    'all four capture selects are migrated to selectControl with stable keys',
-    missingKeys.length === 0 && controlCalls === 4 && oldNativeSites.length === 0 &&
+    'all four existing capture selects plus edge channels use selectControl with stable keys',
+    missingKeys.length === 0 && controlCalls === 5 && oldNativeSites.length === 0 &&
       oldLabelled.length === 0,
     `missingKeys=${JSON.stringify(missingKeys)}, controlCalls=${controlCalls}, ` +
     `oldNativeSites=${JSON.stringify(oldNativeSites)}, oldLabelled=${JSON.stringify(oldLabelled)}`,
+  );
+
+  check(
+    'each edge row channel uses a row-stable select key, a translated row label, and an explicit unset option',
+    capture.includes('`cursor.edge.channel.${row.id}`') &&
+      capture.includes("t('capturePanel.cursorEdgesChannel', { row: row.row })") &&
+      capture.includes("['', t('capturePanel.cursorEdgesUnset')]") &&
+      capture.includes("channel.el.classList.add('cursor-edge-channel')"),
+    `key=${capture.includes('`cursor.edge.channel.${row.id}`')}, ` +
+      `unset=${capture.includes("['', t('capturePanel.cursorEdgesUnset')]")}`,
   );
 
   const appendedRoots = [

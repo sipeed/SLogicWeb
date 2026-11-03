@@ -38,6 +38,7 @@ import { captureSecondsFromTime, maxCaptureSeconds, MIN_CAPTURE_SECONDS,
 } from './captureTime.js';
 import { capturePostTriggerSamples } from './capturePolicy.js';
 import { MAX_CURSOR_DISTANCE_ROWS, type DistanceSide } from './cursorDistance.js';
+import { MAX_CURSOR_EDGE_ROWS } from './cursorEdges.js';
 import { acquisitionTimeControl } from './timeControl.js';
 import { DEFAULT_TIME_UNIT, maxTimeValue, timeUnitForRange, type TimeUnit } from './timeUnits.js';
 import {
@@ -55,6 +56,10 @@ export interface CapturePanelCallbacks {
   onAddCursorDistance(): void;
   onRemoveCursorDistance(rowId: number): void;
   onPickCursorDistance(rowId: number, side: DistanceSide, cursorId: number): void;
+  onAddCursorEdge(): void;
+  onRemoveCursorEdge(rowId: number): void;
+  onPickCursorEdge(rowId: number, side: DistanceSide, cursorId: number): void;
+  onPickCursorEdgeChannel(rowId: number, channel: number | null): void;
 }
 
 export type CapturePanelState = 'ready' | 'capturing' | 'stopping' | 'waiting' | 'completed';
@@ -82,6 +87,15 @@ export interface CursorDistanceRowView {
   delta: string;
 }
 
+export interface CursorEdgeRowView {
+  id: number;
+  row: number;
+  a: CursorDistanceSideView | null;
+  b: CursorDistanceSideView | null;
+  channel: number | null;
+  result: string;
+}
+
 export interface CapturePanelView {
   settings: CaptureSettings;
   channels: readonly ChannelState[];
@@ -103,6 +117,8 @@ export interface CapturePanelView {
   triggerState: 'off' | 'waiting' | 'triggered' | 'not-found';
   cursors: readonly CursorRowView[];
   cursorDistances: readonly CursorDistanceRowView[];
+  cursorEdges: readonly CursorEdgeRowView[];
+  cursorEdgeChannels: readonly number[];
 }
 
 export class CapturePanel {
@@ -701,6 +717,71 @@ export class CapturePanel {
     distanceSec.body.appendChild(addRow);
     this.root.appendChild(distanceSec.el);
 
+    const edgeSec = section(t('capturePanel.cursorEdges'));
+    edgeSec.header.classList.add('cursor-edge-head');
+    const edgeLegend = document.createElement('span');
+    edgeLegend.className = 'cursor-legend';
+    edgeLegend.textContent = t('capturePanel.cursorEdgesFormat');
+    edgeSec.header.appendChild(edgeLegend);
+    if (v.cursorEdges.length === 0) {
+      const hint = document.createElement('p');
+      hint.className = 'cursor-edge-hint';
+      hint.textContent = t(v.cursors.length < 2
+        ? 'capturePanel.cursorEdgesEmpty' : 'capturePanel.cursorEdgesNoRows');
+      edgeSec.body.appendChild(hint);
+    } else {
+      const list = div('cursor-edge-list');
+      for (const row of v.cursorEdges) {
+        const item = div('cursor-edge-row');
+        item.dataset.edgeId = String(row.id);
+        const a = edgeSideControl(row, 'a', v.cursors,
+          (cursorId) => this.cb.onPickCursorEdge(row.id, 'a', cursorId));
+        const mark = document.createElement('span');
+        mark.className = 'cursor-dist-mark cursor-edge-mark';
+        mark.setAttribute('aria-hidden', 'true');
+        mark.textContent = '−';
+        const b = edgeSideControl(row, 'b', v.cursors,
+          (cursorId) => this.cb.onPickCursorEdge(row.id, 'b', cursorId));
+        const at = document.createElement('span');
+        at.className = 'cursor-dist-mark cursor-edge-mark';
+        at.setAttribute('aria-hidden', 'true');
+        at.textContent = '@';
+        const channelOptions: SelectOptionTuple[] = [
+          ['', t('capturePanel.cursorEdgesUnset')],
+          ...v.cursorEdgeChannels.map((channel): SelectOptionTuple => [String(channel), `D${channel}`]),
+        ];
+        const channel = selectControl(
+          `cursor.edge.channel.${row.id}`,
+          t('capturePanel.cursorEdgesChannel', { row: row.row }),
+          channelOptions,
+          row.channel === null ? '' : String(row.channel),
+        );
+        channel.el.classList.add('cursor-edge-channel');
+        channel.addEventListener('change', () => this.cb.onPickCursorEdgeChannel(
+          row.id, channel.value === '' ? null : Number(channel.value),
+        ));
+        const result = document.createElement('span');
+        result.className = 'cursor-edge-result';
+        result.textContent = row.result;
+        const remove = cursorRemoveButton(
+          t('capturePanel.cursorEdgesRemove', { row: row.row }),
+          () => this.cb.onRemoveCursorEdge(row.id),
+        );
+        const tail = div('cursor-edge-tail');
+        tail.append(result, remove);
+        item.append(a.el, mark, b.el, at, channel.el, tail, a.popover, b.popover);
+        list.appendChild(item);
+      }
+      edgeSec.body.appendChild(list);
+    }
+    const edgeAddRow = div('cursor-edge-add-row');
+    edgeAddRow.appendChild(edgeAddButton(
+      v.cursorEdges.length >= MAX_CURSOR_EDGE_ROWS,
+      () => this.cb.onAddCursorEdge(),
+    ));
+    edgeSec.body.appendChild(edgeAddRow);
+    this.root.appendChild(edgeSec.el);
+
     // ---- advanced test mode + raw USB console
     const advanced = document.createElement('details');
     advanced.className = 'advanced';
@@ -937,6 +1018,93 @@ function distanceAddIcon(): SVGSVGElement {
   icon.setAttribute('aria-hidden', 'true');
   for (const d of ['M12 5v14', 'M5 12h14']) appendIconPath(icon, d);
   return icon;
+}
+
+export function cursorEdgeSideId(rowId: number, side: DistanceSide): string {
+  return `cursor-edge-${rowId}-${side}`;
+}
+
+function edgeSideControl(
+  row: CursorEdgeRowView, side: DistanceSide, cursors: readonly CursorRowView[],
+  onPick: (cursorId: number) => void,
+): { el: HTMLButtonElement; popover: HTMLDivElement } {
+  const pick = side === 'a' ? row.a : row.b;
+  const id = cursorEdgeSideId(row.id, side);
+  const menuId = `${id}-menu`;
+  const el = document.createElement('button');
+  el.type = 'button';
+  el.id = id;
+  el.className = 'cursor-idx cursor-dist-side cursor-edge-side' + (pick === null ? ' is-unset' : '');
+  el.dataset.edgeId = String(row.id);
+  el.dataset.side = side;
+  el.textContent = pick === null ? '–' : pick.label;
+  if (pick !== null) {
+    el.style.background = pick.color;
+    el.style.color = chipForeground(pick.color);
+  }
+  el.style.setProperty('anchor-name', `--${id}`);
+  el.setAttribute('popovertarget', menuId);
+  const action = t(side === 'a' ? 'capturePanel.cursorEdgesStart' : 'capturePanel.cursorEdgesEnd',
+    { row: row.row });
+  const name = `${action}: ${pick === null ? t('capturePanel.cursorDistanceUnset') : pick.label}`;
+  el.title = name;
+  el.setAttribute('aria-label', name);
+  el.addEventListener('keydown', (e) => {
+    if (e.key === ' ') e.stopPropagation();
+  });
+
+  const popover = document.createElement('div');
+  popover.id = menuId;
+  popover.className = 'cursor-dist-popover cursor-edge-popover';
+  popover.setAttribute('popover', 'auto');
+  popover.style.setProperty('position-anchor', `--${id}`);
+  if (cursors.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'cursor-dist-popover-empty';
+    empty.textContent = t('capturePanel.cursorEmpty');
+    popover.appendChild(empty);
+  } else {
+    for (const cursor of cursors) {
+      const current = pick !== null && pick.id === cursor.id;
+      const choice = document.createElement('button');
+      choice.type = 'button';
+      choice.className = 'cursor-dist-choice cursor-edge-choice' + (current ? ' is-current' : '');
+      choice.dataset.cursorId = String(cursor.id);
+      const mark = document.createElement('span');
+      mark.className = 'cursor-dist-choice-mark';
+      mark.setAttribute('aria-hidden', 'true');
+      mark.textContent = current ? '✓' : '';
+      const chip = document.createElement('span');
+      chip.className = 'cursor-idx';
+      chip.textContent = cursor.label;
+      chip.style.background = cursor.color;
+      chip.style.color = chipForeground(cursor.color);
+      const pos = document.createElement('span');
+      pos.className = 'cursor-pos';
+      pos.textContent = cursorCellText(cursor);
+      choice.append(mark, chip, pos);
+      choice.addEventListener('click', () => onPick(cursor.id));
+      popover.appendChild(choice);
+    }
+  }
+  popover.addEventListener('toggle', () => {
+    if (popover.matches(':popover-open')) return;
+    if (el.isConnected) el.focus();
+  });
+  return { el, popover };
+}
+
+function edgeAddButton(disabled: boolean, onAdd: () => void): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'analyzer-act cursor-edge-add';
+  b.disabled = disabled;
+  const label = t('capturePanel.cursorEdgesAdd');
+  b.title = label;
+  b.setAttribute('aria-label', label);
+  b.appendChild(distanceAddIcon());
+  b.addEventListener('click', onAdd);
+  return b;
 }
 
 function appendIconPath(icon: SVGSVGElement, d: string): void {

@@ -818,6 +818,7 @@ const baseSettings: CaptureSettings = {
     'capturePanel.statusWaitingDetail', 'capturePanel.statusCompletedDetail',
     'capturePanel.singleFiniteNote', 'capturePanel.singleUnlimitedNote',
     'capturePanel.repeatFiniteNote',
+    'capturePanel.cursorEdges', 'capturePanel.cursorEdgesEmpty', 'capturePanel.cursorEdgesChannel',
     'diagnostic.ui.localeLoad', 'diagnostic.io.nothingToSave',
     'diagnostic.file.unsupported', 'diagnostic.file.lwcap.magic',
     'diagnostic.file.lwcap.channels', 'diagnostic.file.lwcap.gapSpan',

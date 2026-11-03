@@ -41,9 +41,9 @@ import {
   type BusViewState,
 } from './busView.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
-import { CapturePanel, cursorDistanceSideId, type CapturePanelState, type CapturePanelView,
-  type CursorDistanceRowView, type CursorDistanceSideView,
-  type CursorRowView } from './capturePanel.js';
+import { CapturePanel, cursorDistanceSideId, cursorEdgeSideId,
+  type CapturePanelState, type CapturePanelView, type CursorDistanceRowView, type CursorDistanceSideView,
+  type CursorEdgeRowView, type CursorRowView } from './capturePanel.js';
 import {
   CHANNEL_BANK_SIZE, busChannelBank, captureWidthTiers, channelBankIndices, channelBankStart,
   busOutOfWidth, lockedChannelBanks,
@@ -103,6 +103,11 @@ import {
   pruneDistancePairs, removeDistanceRow as dropDistanceRow, seedDistanceRow,
   type CursorDistanceRow, type DistanceSide,
 } from './cursorDistance.js';
+import {
+  addEdgeRow as appendEdgeRow, assignEdgeChannel, assignEdgeCursor, countCursorEdges,
+  CURSOR_EDGE_EMPTY_RESULT, removeEdgeRow as dropEdgeRow,
+  type CursorEdgeRow,
+} from './cursorEdges.js';
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
 
@@ -212,6 +217,8 @@ export class App {
   private activeCursorId: number | null = null;
   private distanceRows: readonly CursorDistanceRow[] = [];
   private nextDistanceRowId = 1;
+  private edgeRows: readonly CursorEdgeRow[] = [];
+  private nextEdgeRowId = 1;
   private releaseMarkerPointer: () => void = () => {};
   private hover: HoverMeasurement | null = null;
   private markerCursor: MarkerCursor = null;
@@ -343,6 +350,10 @@ export class App {
       onRemoveCursorDistance: (rowId) => this.removeDistanceRow(rowId),
       onPickCursorDistance: (rowId, side, cursorId) =>
         this.pickDistanceCursor(rowId, side, cursorId),
+      onAddCursorEdge: () => this.addEdgeRow(),
+      onRemoveCursorEdge: (rowId) => this.removeEdgeRow(rowId),
+      onPickCursorEdge: (rowId, side, cursorId) => this.pickEdgeCursor(rowId, side, cursorId),
+      onPickCursorEdgeChannel: (rowId, channel) => this.pickEdgeChannel(rowId, channel),
     });
     this.analyzerPanel = new AnalyzerPanel(panelHost, {
       onAttach: (id, ch, opts) => void this.attachAnalyzer(id, ch, opts),
@@ -1348,6 +1359,35 @@ export class App {
     }));
   }
 
+  private edgeChannels(): number[] {
+    return this.enabledChannels().map((channel) => channel.index);
+  }
+
+  private addEdgeRow(): void {
+    const rows = appendEdgeRow(this.edgeRows, this.nextEdgeRowId, this.edgeChannels()[0] ?? null);
+    if (rows === this.edgeRows) return;
+    this.edgeRows = rows;
+    this.nextEdgeRowId++;
+    this.renderPanels();
+  }
+
+  private removeEdgeRow(rowId: number): void {
+    this.edgeRows = dropEdgeRow(this.edgeRows, rowId);
+    this.renderPanels();
+  }
+
+  private pickEdgeCursor(rowId: number, side: DistanceSide, cursorId: number): void {
+    this.edgeRows = assignEdgeCursor(this.edgeRows, rowId, side, cursorId);
+    this.renderPanels();
+    const invoker = document.getElementById(cursorEdgeSideId(rowId, side));
+    if (invoker !== null) invoker.focus();
+  }
+
+  private pickEdgeChannel(rowId: number, channel: number | null): void {
+    this.edgeRows = assignEdgeChannel(this.edgeRows, rowId, channel);
+    this.renderPanels();
+  }
+
   private cursorRows(): CursorRowView[] {
     const origin = this.triggerSampleIndex ?? 0;
     const rows: Omit<CursorRowView, 'time'>[] = [];
@@ -1364,6 +1404,37 @@ export class App {
     }
     const times = formatCursorTimes(rows, 1 / this.store.samplerate);
     return rows.map((row, index) => ({ ...row, time: times[index]! }));
+  }
+
+  private cursorEdgeRows(): CursorEdgeRowView[] {
+    const labels = cursorLabels(this.cursors.length);
+    const sides = new Map<number, CursorDistanceSideView>();
+    const samples = new Map<number, number>();
+    for (let index = 0; index < this.cursors.length; index++) {
+      const cursor = this.cursors[index]!;
+      sides.set(cursor.id, { id: cursor.id, label: labels[index]!, color: cursorColor(index) });
+      const sample = cursor.marker.sample;
+      if (sample !== null && Number.isFinite(sample)) samples.set(cursor.id, sample);
+    }
+    const channels = new Set(this.edgeChannels());
+    return this.edgeRows.map((row, index) => {
+      let result = CURSOR_EDGE_EMPTY_RESULT;
+      const aSample = row.a === null ? undefined : samples.get(row.a);
+      const bSample = row.b === null ? undefined : samples.get(row.b);
+      if (!this.running && this.store.length > 0 && row.channel !== null && channels.has(row.channel) &&
+          aSample !== undefined && bSample !== undefined &&
+          aSample <= this.store.length && bSample <= this.store.length) {
+        result = countCursorEdges(this.store, row.channel, aSample, bSample).cell;
+      }
+      return {
+        id: row.id,
+        row: index + 1,
+        a: row.a === null ? null : sides.get(row.a) ?? null,
+        b: row.b === null ? null : sides.get(row.b) ?? null,
+        channel: row.channel !== null && channels.has(row.channel) ? row.channel : null,
+        result,
+      };
+    });
   }
 
   private focusCursor(id: number): void {
@@ -1798,6 +1869,8 @@ export class App {
         triggerState: this.triggerState,
         cursors: this.cursorRows(),
         cursorDistances: this.cursorDistanceRows(),
+        cursorEdges: this.cursorEdgeRows(),
+        cursorEdgeChannels: this.edgeChannels(),
       });
     } else {
       this.analyzerPanel.render({
