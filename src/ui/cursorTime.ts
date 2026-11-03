@@ -14,13 +14,16 @@ export interface CursorTime {
   seconds: number;
 }
 
-interface Entry {
-  sample: number;
+interface Span {
   seconds: number;
   scale: number;
   unit: string;
   cap: number;
   sig: number;
+}
+
+interface Entry extends Span {
+  sample: number;
   limit: number;
 }
 
@@ -33,31 +36,38 @@ function decimalsCap(period: number, scale: number): number {
   return Math.min(MAX_DECIMALS, Math.max(0, Math.ceil(-Math.log10(period / scale))));
 }
 
-function render(entry: Entry): string {
-  if (!Number.isFinite(entry.seconds)) return '-';
-  if (entry.seconds === 0) return '0 s';
-  const value = entry.seconds / entry.scale;
-  const digits = Math.max(0, entry.sig - 1 - Math.floor(Math.log10(Math.abs(value))));
-  return `${value.toFixed(Math.min(digits, entry.cap))} ${entry.unit}`;
+function normalizePeriod(samplePeriod: number): number {
+  return Number.isFinite(samplePeriod) && samplePeriod > 0 ? samplePeriod : Number.MIN_VALUE;
+}
+
+function spanOf(seconds: number, period: number): Span {
+  const { scale, unit } = unitFor(seconds);
+  return { seconds, scale, unit, cap: decimalsCap(period, scale), sig: BASELINE_SIG };
+}
+
+function render(span: Span): string {
+  if (!Number.isFinite(span.seconds)) return '-';
+  if (span.seconds === 0) return '0 s';
+  const value = span.seconds / span.scale;
+  const digits = Math.max(0, span.sig - 1 - Math.floor(Math.log10(Math.abs(value))));
+  return `${value.toFixed(Math.min(digits, span.cap))} ${span.unit}`;
+}
+
+export function formatCursorSpan(seconds: number, samplePeriod: number): string {
+  const text = render(spanOf(seconds, normalizePeriod(samplePeriod)));
+  return Number.isFinite(seconds) && seconds > 0 ? `+${text}` : text;
 }
 
 export function formatCursorTimes(times: readonly CursorTime[], samplePeriod: number): string[] {
-  const period = Number.isFinite(samplePeriod) && samplePeriod > 0
-    ? samplePeriod
-    : Number.MIN_VALUE;
+  const period = normalizePeriod(samplePeriod);
   const entries: Entry[] = times.map((time) => {
-    const { scale, unit } = unitFor(time.seconds);
-    const cap = decimalsCap(period, scale);
+    const span = spanOf(time.seconds, period);
     const measurable = Number.isFinite(time.seconds) && time.seconds !== 0;
-    const magnitude = measurable ? Math.floor(Math.log10(Math.abs(time.seconds / scale))) : 0;
+    const magnitude = measurable ? Math.floor(Math.log10(Math.abs(time.seconds / span.scale))) : 0;
     return {
+      ...span,
       sample: time.sample,
-      seconds: time.seconds,
-      scale,
-      unit,
-      cap,
-      sig: BASELINE_SIG,
-      limit: measurable ? Math.max(BASELINE_SIG, magnitude + 1 + cap) : BASELINE_SIG,
+      limit: measurable ? Math.max(BASELINE_SIG, magnitude + 1 + span.cap) : BASELINE_SIG,
     };
   });
 

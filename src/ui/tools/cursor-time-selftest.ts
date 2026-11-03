@@ -1,4 +1,4 @@
-import { formatCursorTimes, type CursorTime } from '../cursorTime.js';
+import { formatCursorSpan, formatCursorTimes, type CursorTime } from '../cursorTime.js';
 import { formatDuration } from '../format.js';
 
 interface FsLike {
@@ -260,6 +260,68 @@ const periodCap = (period: number, seconds: number): number =>
 }
 
 {
+  const period = 1e-8;
+  const cases = [
+    { seconds: 10e-9, expected: '+10 ns' },
+    { seconds: 2.5e-6, expected: '+2.50 us' },
+    { seconds: 2.5e-3, expected: '+2.500 ms' },
+    { seconds: 1.266e-3, expected: '+1.266 ms' },
+    { seconds: 999.99999e-3, expected: '+1000.0 ms' },
+  ];
+  const mismatches = cases
+    .map((row) => ({ row, text: formatCursorSpan(row.seconds, period) }))
+    .filter(({ row, text }) => text !== row.expected)
+    .map(({ row, text }) =>
+      `${row.seconds}=${JSON.stringify(text)} want=${JSON.stringify(row.expected)}`);
+  check('a positive span carries an explicit plus and the cursor row ladder',
+    mismatches.length === 0,
+    `cases=${cases.length}, mismatches=${JSON.stringify(mismatches)}`);
+}
+
+{
+  const plus = formatCursorSpan(2.5e-3, 1e-8);
+  const zero = formatCursorSpan(0, 1e-8);
+  const negative = formatCursorSpan(-2.5e-3, 1e-8);
+  const negativeSmall = formatCursorSpan(-10e-9, 1e-8);
+  const nonFinite = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]
+    .map((seconds) => formatCursorSpan(seconds, 1e-8));
+  check('a span signs only a finite non-zero delta and never prefixes zero or a failure',
+    plus === '+2.500 ms' && zero === '0 s' && negative === '-2.500 ms' &&
+    negativeSmall === '-10 ns' && nonFinite.every((text) => text === '-'),
+    `plus=${plus}, zero=${zero}, negative=${negative}, negativeSmall=${negativeSmall}, ` +
+    `nonFinite=${JSON.stringify(nonFinite)}`);
+}
+
+{
+  const nsAt1Msps = formatCursorSpan(1.4e-9, 1e-6);
+  const msAt1kSps = formatCursorSpan(1.2345e-3, 1e-3);
+  check('a coarse sample period caps the span at the period instead of inventing sub-period digits',
+    nsAt1Msps === '+1 ns' && msAt1kSps === '+1 ms',
+    `1.4 ns @ 1 MS/s -> ${nsAt1Msps} (uncapped '+1.400 ns'); ` +
+    `1.2345 ms @ 1 kS/s -> ${msAt1kSps} (uncapped '+1.234 ms')`);
+}
+
+{
+  const periods = [0, Number.NaN, Number.POSITIVE_INFINITY, -1];
+  const texts = periods.map((period) => formatCursorSpan(2.5e-6, period));
+  check('an unusable sample period saturates the decimal cap instead of leaking NaN digits',
+    texts.every((text) => text === '+2.500 us'),
+    `texts=${JSON.stringify(texts)}`);
+}
+
+{
+  const isolated = format([123400, 98123400, 450000000], 100e6);
+  const escalated = format([123400, 123401], 100e6);
+  const shared = format([123400, 123400], 100e6);
+  check('the shared span renderer leaves the cursor rows byte-identical to their previous output',
+    same(isolated, ['1.234 ms', '981.2 ms', '4.500 s']) &&
+    same(escalated, ['1.23400 ms', '1.23401 ms']) &&
+    same(shared, ['1.234 ms', '1.234 ms']),
+    `isolated=${JSON.stringify(isolated)}, escalated=${JSON.stringify(escalated)}, ` +
+    `shared=${JSON.stringify(shared)}`);
+}
+
+{
   const source = fs.readFileSync('src/ui/cursorTime.ts', 'utf8');
   const forbidden = ['import ', 'document', 'window', 'addEventListener', '//', '/*', 'as any',
     'as unknown'];
@@ -269,6 +331,17 @@ const periodCap = (period: number, seconds: number): number =>
     source.includes('export function formatCursorTimes(') &&
     source.includes('export interface CursorTime {'),
     `hits=${JSON.stringify(hits)}`);
+}
+
+{
+  const source = fs.readFileSync('src/ui/cursorTime.ts', 'utf8');
+  const toFixedSites = source.split('.toFixed(').length - 1;
+  const capSites = source.split('decimalsCap(').length - 1;
+  check('the span and the cursor rows compose their decimals through one shared ladder',
+    toFixedSites === 1 && capSites === 2 &&
+    source.includes('export function formatCursorSpan('),
+    `toFixedSites=${toFixedSites}, decimalsCapSites=${capSites}, ` +
+    `spanExported=${source.includes('export function formatCursorSpan(')}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
