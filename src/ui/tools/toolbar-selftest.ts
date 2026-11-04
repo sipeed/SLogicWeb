@@ -615,6 +615,59 @@ check(
     `body=${JSON.stringify(toggleBody.replace(/\s+/g, ' '))}`,
 );
 
+const fullscreenGlyphBody = (name: string): string =>
+  new RegExp(`<svg[^>]*class="toolbar-item-icon ${name}"[^>]*>([\\s\\S]*?)<\\/svg>`)
+    .exec(fullscreenMarkup)?.[1] ?? '';
+const enterGlyphBody = fullscreenGlyphBody('fullscreen-icon-enter');
+const exitGlyphBody = fullscreenGlyphBody('fullscreen-icon-exit');
+const fullscreenSvgCount = fullscreenMarkup.match(/<svg\b/g)?.length ?? 0;
+const fullscreenDualGlyphs = fullscreenSvgCount === 2 &&
+  enterGlyphBody.includes('M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5') &&
+  exitGlyphBody.includes('M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5') &&
+  !exitGlyphBody.includes('M8 3H3v5') &&
+  fullscreenMarkup.includes('aria-pressed="false"');
+
+const hideGlyphsRule = '#toolbar .toolbar-fullscreen .toolbar-item-icon { display: none; }';
+const showActiveGlyphRule = '#toolbar .toolbar-fullscreen:not([aria-pressed="true"]) .fullscreen-icon-enter,\n' +
+  '#toolbar .toolbar-fullscreen[aria-pressed="true"] .fullscreen-icon-exit { display: block; }';
+const activeMediaRule =
+  '#toolbar .toolbar-fullscreen[aria-pressed="true"] .toolbar-item-media { color: var(--primary); }';
+const themeGlyphRuleIndex =
+  css.indexOf('#toolbar .toolbar-theme[data-mode="system"] .theme-icon-system { display: block; }');
+const fullscreenCssStart = css.indexOf(hideGlyphsRule);
+const activeMediaIndex = css.indexOf(activeMediaRule);
+const fullscreenCss = fullscreenCssStart >= 0 && activeMediaIndex > fullscreenCssStart
+  ? css.slice(fullscreenCssStart, activeMediaIndex + activeMediaRule.length) : '';
+const fullscreenCssSequenced = fullscreenCssStart > themeGlyphRuleIndex && themeGlyphRuleIndex >= 0 &&
+  fullscreenCss.includes(showActiveGlyphRule) && fullscreenCss.includes(activeMediaRule) &&
+  !fullscreenCss.includes('transition') && !fullscreenCss.includes('animation');
+
+const fullscreenChangeWiring =
+  app.includes("document.addEventListener('fullscreenchange', () => this.renderToolbarState());");
+const renderToolbarBody = methodBody('private renderToolbarState(): void {');
+const fullscreenStateNeedles = [
+  'const full = document.fullscreenElement !== null;',
+  'document.fullscreenEnabled === false',
+  'this.el.fullscreen.disabled =',
+  "setAttribute('aria-pressed', String(full))",
+  "t('toolbar.fullscreen')",
+  "t('toolbar.exitFullscreenTitle')",
+  "t('toolbar.enterFullscreenTitle')",
+  "t('toolbar.fullscreenUnavailable')",
+];
+const missingFullscreenState = fullscreenStateNeedles.filter((needle) => !renderToolbarBody.includes(needle));
+const fullscreenStateIsRuntime =
+  !renderToolbarBody.includes('localStorage') &&
+  !renderToolbarBody.includes('this.el.fullscreen.classList');
+check(
+  'the fullscreen command reflects the live document state through one source and CSS glyph selection',
+  fullscreenDualGlyphs && fullscreenCssSequenced && fullscreenChangeWiring &&
+    missingFullscreenState.length === 0 && fullscreenStateIsRuntime,
+  `glyphs=${fullscreenSvgCount}, state=${fullscreenDualGlyphs}, css=${fullscreenCssSequenced}, ` +
+    `wired=${fullscreenChangeWiring}, missing=${JSON.stringify(missingFullscreenState)}, ` +
+    `runtime=${fullscreenStateIsRuntime}`,
+);
+
 const assistantIndex = toolbar.indexOf(`id="${assistantCommandId}"`);
 const assistantButtonStart = assistantIndex >= 0 ? toolbar.lastIndexOf('<button', assistantIndex) : -1;
 const assistantButtonEnd = assistantIndex >= 0 ? toolbar.indexOf('</button>', assistantIndex) : -1;

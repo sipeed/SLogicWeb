@@ -47,6 +47,8 @@ export const fr: Messages = {
   'toolbar.saveTitle': 'Enregistrer cette capture en .lwcap',
   'toolbar.fitTitle': 'Zoomer sur toute la capture',
   'toolbar.enterFullscreenTitle': 'Passer en plein écran',
+  'toolbar.exitFullscreenTitle': 'Quitter le plein écran',
+  'toolbar.fullscreenUnavailable': 'Plein écran indisponible',
   'toolbar.sidebarTitle': 'Choisir le panneau latéral droit',
   'toolbar.themeTitle': 'Changer de thème',
   'toolbar.languageTitle': 'Choisir la langue',

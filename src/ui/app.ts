@@ -1630,6 +1630,7 @@ export class App {
       this.dirty = true;
     });
     must<HTMLButtonElement>('btn-fullscreen').addEventListener('click', () => void this.toggleFullscreen());
+    document.addEventListener('fullscreenchange', () => this.renderToolbarState());
     must<HTMLButtonElement>('btn-settings').addEventListener('click', () => {
       // Keep the channel dialog and this transient menu from competing for focus.
       this.channelList.closeDialog();
@@ -1941,6 +1942,13 @@ export class App {
     this.el.open.setAttribute('aria-label', t('toolbar.open'));
     this.el.save.setAttribute('aria-label', t('toolbar.save'));
     this.el.fit.setAttribute('aria-label', t('toolbar.fit'));
+    const full = document.fullscreenElement !== null;
+    const fullscreenUnavailable = document.fullscreenEnabled === false;
+    this.el.fullscreen.disabled = fullscreenUnavailable;
+    this.el.fullscreen.setAttribute('aria-pressed', String(full));
+    this.el.fullscreen.setAttribute('aria-label', t('toolbar.fullscreen'));
+    this.el.fullscreen.title = fullscreenUnavailable ? t('toolbar.fullscreenUnavailable')
+      : full ? t('toolbar.exitFullscreenTitle') : t('toolbar.enterFullscreenTitle');
     this.el.settings.setAttribute('aria-label', t('settings.title'));
     this.el.language.setAttribute('aria-label', t('toolbar.languageTitle'));
     this.el.theme.setAttribute('aria-label', t('toolbar.themeTitle'));

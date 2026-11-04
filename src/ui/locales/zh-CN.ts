@@ -45,6 +45,8 @@ export const zhCN: Messages = {
   'toolbar.saveTitle': '将本次采集保存为 .lwcap',
   'toolbar.fitTitle': '缩放以显示整个采集',
   'toolbar.enterFullscreenTitle': '进入全屏',
+  'toolbar.exitFullscreenTitle': '退出全屏',
+  'toolbar.fullscreenUnavailable': '当前环境不支持全屏',
   'toolbar.sidebarTitle': '选择右侧边栏',
   'toolbar.themeTitle': '切换主题',
   'toolbar.languageTitle': '选择语言',

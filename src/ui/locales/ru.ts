@@ -47,6 +47,8 @@ export const ru: Messages = {
   'toolbar.saveTitle': 'Сохранить этот захват как .lwcap',
   'toolbar.fitTitle': 'Масштабировать на весь захват',
   'toolbar.enterFullscreenTitle': 'Перейти в полноэкранный режим',
+  'toolbar.exitFullscreenTitle': 'Выйти из полноэкранного режима',
+  'toolbar.fullscreenUnavailable': 'Полноэкранный режим недоступен',
   'toolbar.sidebarTitle': 'Выбор правой боковой панели',
   'toolbar.themeTitle': 'Тема: выбор режима',
   'toolbar.languageTitle': 'Выбор языка',

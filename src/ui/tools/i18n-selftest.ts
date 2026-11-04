@@ -807,6 +807,7 @@ const baseSettings: CaptureSettings = {
     'toolbar.shortStopping', 'toolbar.shortOpen', 'toolbar.shortSave',
     'toolbar.shortFit', 'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage', 'toolbar.shortTheme',
     'toolbar.shortSidebar', 'toolbar.fullscreen', 'toolbar.enterFullscreenTitle',
+    'toolbar.exitFullscreenTitle', 'toolbar.fullscreenUnavailable',
     'trigger.anyEdge',
     'channels.settings', 'channels.name', 'channels.color', 'channels.customColor',
     'channels.colorField', 'channels.hue',

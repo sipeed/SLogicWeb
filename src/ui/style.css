@@ -312,6 +312,10 @@ html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dar
 #toolbar .toolbar-theme[data-mode="light"] .theme-icon-light,
 #toolbar .toolbar-theme[data-mode="dark"] .theme-icon-dark,
 #toolbar .toolbar-theme[data-mode="system"] .theme-icon-system { display: block; }
+#toolbar .toolbar-fullscreen .toolbar-item-icon { display: none; }
+#toolbar .toolbar-fullscreen:not([aria-pressed="true"]) .fullscreen-icon-enter,
+#toolbar .toolbar-fullscreen[aria-pressed="true"] .fullscreen-icon-exit { display: block; }
+#toolbar .toolbar-fullscreen[aria-pressed="true"] .toolbar-item-media { color: var(--primary); }
 
 @media (max-width: 760px) {
   #toolbar { gap: 4px; padding: 6px; }

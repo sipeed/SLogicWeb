@@ -51,6 +51,8 @@ export const en = {
   'toolbar.saveTitle': 'Save this capture as .lwcap',
   'toolbar.fitTitle': 'Zoom to the whole capture',
   'toolbar.enterFullscreenTitle': 'Enter fullscreen',
+  'toolbar.exitFullscreenTitle': 'Exit fullscreen',
+  'toolbar.fullscreenUnavailable': 'Fullscreen unavailable',
   'toolbar.sidebarTitle': 'Choose right sidebar',
   'toolbar.themeTitle': 'Toggle theme',
   'toolbar.languageTitle': 'Choose language',
