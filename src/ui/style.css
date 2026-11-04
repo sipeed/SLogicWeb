@@ -230,7 +230,7 @@ html, body {
 }
 
 #toolbar .spacer { flex: 1 1 12px; min-width: 0; }
-#toolbar .toolbar-switch-group { display: flex; align-items: center; flex: none; gap: 6px; }
+#toolbar .toolbar-group { display: flex; align-items: center; flex: none; gap: 6px; }
 
 .pill, .mini, .primary, .danger, .seg {
   background: var(--bg20);
@@ -315,7 +315,7 @@ html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dar
 
 @media (max-width: 760px) {
   #toolbar { gap: 4px; padding: 6px; }
-  #toolbar .toolbar-switch-group { gap: 4px; }
+  #toolbar .toolbar-group { gap: 4px; }
   #toolbar button.toolbar-item { width: 38px; height: 38px; padding: 4px; }
   #toolbar .toolbar-separator,
   #toolbar .spacer { display: none; }

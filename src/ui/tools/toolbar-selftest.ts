@@ -547,15 +547,17 @@ const spacerToAssistant = spacerIndex >= 0 && assistantButtonStart > spacerIndex
   ? toolbar.slice(spacerIndex, assistantButtonStart) : '';
 const assistantDirectlyAfterSpacer = spacerToAssistant.length > 0 &&
   !spacerToAssistant.includes('<button') && !spacerToAssistant.includes('role="separator"');
-const switchGroupStart = toolbar.indexOf('<div class="toolbar-switch-group"');
-const switchGroupClose = switchGroupStart >= 0 ? toolbar.indexOf('</div>', switchGroupStart) : -1;
-const switchGroupEnd = switchGroupClose >= 0 ? switchGroupClose + '</div>'.length : -1;
+const groupStarts = [...toolbar.matchAll(/<div class="toolbar-group"[^>]*>/g)].map((match) => match.index ?? -1);
+const groupEnd = (start: number) => toolbar.indexOf('</div>', start) + '</div>'.length;
+const switchGroupStart = groupStarts[0] ?? -1;
+const switchGroupEnd = switchGroupStart >= 0 ? groupEnd(switchGroupStart) : -1;
 const switchGroupMarkup = switchGroupStart >= 0 && switchGroupEnd > switchGroupStart
   ? toolbar.slice(switchGroupStart, switchGroupEnd) : '';
 const languageIndex = switchGroupMarkup.indexOf(`id="${languageCommandId}"`);
 const themeIndex = switchGroupMarkup.indexOf(`id="${themeCommandId}"`);
 const switchGroupButtons = switchGroupMarkup.match(/<button\b/g)?.length ?? 0;
-const switchGroupOrder = languageIndex >= 0 && themeIndex > languageIndex && switchGroupButtons === 2;
+const switchGroupOrder = groupStarts.length === 1 && languageIndex >= 0 && themeIndex > languageIndex &&
+  switchGroupButtons === 2;
 const switchGroupAccessible = switchGroupMarkup.includes('role="group"') &&
   switchGroupMarkup.includes('aria-label="Language and theme"') &&
   switchGroupMarkup.includes('data-i18n-aria-label="toolbar.switchGroup"');
@@ -582,15 +584,15 @@ check(
   `between=${sidebarDirectlyAfterGroup}, final=${sidebarIsFinalCommand}`,
 );
 
-const switchGroupRule = /#toolbar \.toolbar-switch-group \{([\s\S]*?)\}/.exec(css)?.[1] ?? '';
-const switchGroupRules = [...css.matchAll(/#toolbar \.toolbar-switch-group[^{}]*\{([^{}]*)\}/g)]
+const groupRule = /#toolbar \.toolbar-group \{([\s\S]*?)\}/.exec(css)?.[1] ?? '';
+const groupRules = [...css.matchAll(/#toolbar \.toolbar-group[^{}]*\{([^{}]*)\}/g)]
   .map((match) => match[1]);
-const switchGroupPlain = switchGroupRule.includes('display: flex') && switchGroupRules.length >= 2 &&
-  switchGroupRules.every((rule) => !/(background|border|border-radius|overflow)\s*:/.test(rule));
+const groupPlain = groupRule.includes('display: flex') && groupRules.length >= 2 &&
+  groupRules.every((rule) => !/(background|border|border-radius|overflow)\s*:/.test(rule));
 check(
   'the language/theme wrapper groups ordinary unclipped buttons without pill decoration',
-  switchGroupPlain,
-  `plain=${switchGroupPlain}, rules=${switchGroupRules.length}`,
+  groupPlain,
+  `plain=${groupPlain}, rules=${groupRules.length}`,
 );
 
 const assistantMarkup = commandMarkup(assistantCommandId);
