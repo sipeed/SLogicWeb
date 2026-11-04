@@ -98,18 +98,147 @@ post-trigger samples to the sink. The `triggered` callback also reports the trig
 sample's zero-based position in that emitted stream. The UI uses it as `T=0`, draws a
 vertical T marker, and labels every retained pre-trigger sample with negative time. The right
 panel owns the global pre-trigger percentage and `Enable Mask`; disabling that mask leaves all
-per-channel modes intact and merely bypasses the matcher. The bounded
-search allowance is the output budget plus the pre-trigger window, so a trigger at the
-nominal budget boundary can still produce its final post-trigger sample. If that
+per-channel modes intact and merely bypasses the matcher. The UI's search allowance is
+mode-specific: Repeat inspects one sweep's sample budget (output plus retained prefix) and
+then reports `not-found`, so a missed wave ends as completed and the next Interval retries
+(see B1 below); Single waits indefinitely for its one trigger, and Loop is unbounded. The
+allowance is what makes a trigger at the nominal budget boundary still produce its final
+post-trigger sample. If that
 allowance is exhausted or the user stops first, `onTriggerState('not-found')` is reported
 and the search prefix is discarded. Trigger-disabled captures keep the direct streaming path.
 The implementation is tested for 4/8/16/32/64/128-channel sample widths and carries
 partial wide samples across USB transfer boundaries.
 
 When a software trigger is enabled, a timer capture's duration starts at the trigger sample,
-not at `start()`: the matcher waits indefinitely while refreshing its bounded pre-trigger
-ring, then emits the prefix plus the configured post-trigger duration. A manual stop before
-the match reports no trigger and discards the ring.
+not at `start()`: a Single matcher waits indefinitely while refreshing its bounded pre-trigger
+ring. The matcher arms immediately, so a condition that is already true can match before
+that ring fills. The emitted total remains the configured pre+post budget, which makes the
+post-trigger span longer than the requested post by the missing prefix; the session
+retained-range model still assumes the requested split, so a Fixed view that depends on the
+extended tail can fall back to follow. That early-match split is a known limitation. A
+manual stop before the match reports no trigger and discards the ring.
+
+In Loop mode a software trigger also owns the viewport after it fires. The reported index
+is in emitted-stream coordinates, so the App converts it to `reported - droppedSamples`
+before using it as `T=0`; the retained window may already have dropped front samples while
+the matcher was emitting. Two windows are kept apart: the data window D (Loop Duration L,
+with T at the configured pre-trigger fraction, 0% on D's 0 s left edge) and the user's
+ViewWindow V, stored as offsets from T. D's span is fixed and D never pans; V can be
+zoomed and panned anywhere inside D, and Fit resets V to all of D.
+
+An analog loop trigger advances D in local, phase-aligned steps. The page scans the ADC
+group byte of each chunk at a bounded stride (about twenty million reads per second) and
+records crossings. Only when samples exist beyond D's right edge does it plan a step: a
+local block budget (whole signal periods when known, at most L/4, never more than the
+fresh data) and the latest reported edge T' in `(T, T + budget]`, searched back from the
+budget's end. It drops the front of D by `T' - T` and appends exactly that many new
+samples at the tail; the rest of the new data waits for the next step. A strided scan
+reports a crossing at the scanned sample; the scanner re-checks the scanned interval at
+sample resolution, so the anchor is sample-exact except when a crossing straddles a chunk
+boundary. The step is edge-to-edge - an integer number of signal periods for a periodic
+input - so D keeps its phase and V updates in place. The store front drop is floored to
+the 64-sample quantum, but that residue changes only store-relative coordinates: V's
+offsets from T are unchanged, so it cannot shift the displayed waveform.
+
+The lock means "the current data and trigger configuration still produce edges". It is
+taken on the match, kept by every local step, and released only when no new edge has
+appeared for one whole D (the data/config no longer triggers). If edges return while a
+Loop runs free, the page locks again automatically. Fit, zoom and pan never release the
+lock. While waiting, the store may carry a bounded excess over D (at most one window;
+otherwise the larger of 50 ms and 65,536 samples, capped by 64 MiB of samples). While
+locked, it also retains the new data the next local step needs: one crossing gap and, if
+the signal stops, the quiet-window tail (f*D). The post-enforce bound is therefore
+D + slack + max(f*D, one gap), plus at most one delivery block before the enforce pass; a
+hard cap below the 2^31-sample store ceiling disarms the trigger and trims to D instead
+of letting an append overflow (the panel says so; restart to re-arm). Follow-latest
+resumes on a release only if it was
+active at the lock. Digital loop triggers keep a one-shot lock: they never roll, so the
+front drops normally and the view releases to follow once T leaves the retained window
+(the status line says so). The lock and the crossing record are display state: no sample
+is copied and the trigger ring keeps its existing bounds. Single and Repeat captures and
+a trigger-disabled Loop keep their normal viewport rules.
+
+A trigger-locked Loop keeps T on its trigger phase and D's span fixed. A viewport gesture
+moves only V: zoom changes V's span (bounded by D), pan moves V inside D, and the stored
+offsets from T are then applied unchanged on every local step. The waveform under V
+therefore does not scroll, and T may sit off-screen after a pan; the axis still puts 0 s
+at T. The overview strip maps the same fixed D window, and its gestures clamp V the same
+way.
+
+Sessions and sweeps are modelled explicitly in `captureSession.ts`. A new session starts
+FollowLive; a user pan/zoom records a Fixed interval relative to the display origin (T when
+the sweep has a trigger, else its start); Fixed survives Repeat waves while it fits the
+sweep's retained range and otherwise falls back to the mode default, never an automatic
+Fit. A Repeat sweep therefore never leaves a Fixed viewport empty: the previous completed
+wave is retained as a layer (`repeatDisplay.ts`), and while the running sweep waits for its
+trigger or has not reached the viewport, the old wave (with its own T) stays displayed. Once
+the new sweep has data, `RepeatCompositeStore` serves its samples up to the frontier and the
+old wave's samples beyond it in the same time frame; a mixed query merges every source bin
+into each overlapping composite column (a source bin crossing a column boundary may
+contribute to both - a bounded, conservative smear), while NO_DATA is decided from the
+display's exact gap spans so `query` and `gaps()` agree. `Overlay.drawRegionTint` distinguishes
+the old and current regions with two background surfaces (no vertical rule). FollowLive
+reads the running store directly. A Repeat sweep that finds no trigger inspects one sweep's
+sample budget, stops as completed with an empty store, reports the miss, and lets the next
+Interval retry. Stopping a session while the previous wave is held adopts that wave as the
+capture, so the plot, Save, measurement and the assistant all describe the same samples; a
+marker placed on the old layer is remapped by the same origin offset. While the composite
+is displayed the analog bus pyramid is suspended (its length is stable while its contents
+change behind the frontier), and the bounded live/provisional envelope reads the composite
+directly with the frontier in its frame-cache key. The Loop display's
+local block plan (`displaySwap.ts`) is instrumentation for the matcher stride, anchor step,
+budget block and retained bytes; the auto-roll itself still advances one scanned crossing at
+a time.
+
+The host matcher also has a `mode: 'continuous'` form for a device-side loop path
+(`SoftwareTriggerConfig.mode`). After its first match it re-arms on the same unbounded
+emitted stream and reports every later match at its absolute emitted-stream sample index;
+`matchCount` and `lastTriggerSampleIndex` are authoritative even when `reportGapSamples`
+throttles the callback, and `reconfigure()` remains live until the stream is terminal.
+A `level` condition matches every emitted sample that still holds it, so a continuous
+level trigger can produce one match per sample; use a rising/falling/edge condition (or
+`reportGapSamples`) for pulse-rate events. Continuous scanning may stride
+(`SoftwareTriggerConfig.scan`, default stride 1) to bound
+CPU; a strided candidate hit is refined at stride 1 so the reported index is exact, but
+candidates are `stride + 1` apart, so a pulse that lies entirely in the `stride` samples
+between two candidates can be missed - keep the stride below the narrowest pulse that must
+be caught. When a finite output budget ends between candidates, the remaining samples up to
+the budget are refined at stride 1, so a crossing in the final tail is still reported. The
+two scan buffers (history and refinement scratch) are capped at 64 MiB together, in
+addition to the pre-trigger ring's own 64 MiB prefix cap; one-shot matching allocates
+neither. Sample packing and whole-sample carry across USB transfers are unchanged. A live
+retune after the first match recompiles only what changed: a condition or scan-policy edit
+restarts edge continuity at the next sample, while a tuning-only edit (`reportGapSamples`
+or an identical scan policy) keeps the scan state so an edge straddling the edit is not
+lost. The App does not select this mode yet; until it does, Loop keeps the page-side analog
+scanner and the one-shot digital lock described above, and Single/Repeat always use
+one-shot.
+
+The overview strip maps a fixed loop window while a loop runs (its true start `T - f*L`
+while locked, so the 64-sample front-drop residue cannot shift it; the newest window in
+free run), so its scale, ticks and viewport frame do not
+follow the retained length; the density inside it rolls. A manual pan/zoom does not pause
+the roll: the chosen viewport keeps its coordinates in that fixed window, and each
+period-aligned roll replaces the samples under it, so a sub-window such as 30+5 us stays
+at 30+5 us while its waveform updates in place. A new capture re-arms the trigger lock.
+
+While the matcher is still waiting, its conditions can be retuned in place
+(`SoftwareTrigger.reconfigure`, reached through `Device.updateSoftwareTrigger`): the
+condition set is recompiled, edge continuity restarts so no transition is invented across
+the edit, and the pre-trigger ring, emitted-stream accounting and inspected-sample budget
+are preserved. Digital modes, the source family, condition removal and the analog level can
+therefore be adjusted during the wait; removing every condition restarts the capture so it
+runs free. The capture width, retained-prefix size and output budget are fixed for a running
+capture and cannot be retuned. In one-shot mode, once the matcher has matched, the
+capture's trigger is frozen: later edits are pending for the next acquisition, except
+that a Loop's page-side analog detector is retuned in place and the lock survives only
+while the new condition keeps producing edges. Global trigger is an arming decision for
+the acquisition: turning it off while waiting restarts the capture free-running, turning
+it off after a match releases the view in place and tears the page detector down so it
+cannot re-lock, and turning it on in a capture that started free-running restarts the
+acquisition because the one-shot matcher cannot begin matching mid-stream. In continuous
+mode the matcher stays live after a match (see above) and accepts edits until it completes
+or reports no trigger.
 
 `query` being sublinear in sample count is the whole ballgame for the framerate metric.
 Build the mip pyramid on append. Two implementations satisfy the contract:

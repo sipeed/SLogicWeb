@@ -109,9 +109,10 @@ const primaryEnd = primaryStart >= 0 ? app.indexOf('\n  }', primaryStart) : -1;
 const primaryBody = primaryStart >= 0 && primaryEnd > primaryStart
   ? app.slice(primaryStart, primaryEnd)
   : '';
-const primaryRoutes = primaryBody.includes('if (this.stopping) return;') &&
+const primaryRoutes = primaryBody.includes('if (this.stopping) {') &&
+  primaryBody.includes('this.cancelPendingTriggerRestart();') &&
   primaryBody.includes('if (this.running || this.repeatTimer.pending) void this.stopCapture();') &&
-  primaryBody.includes('else if (this.device) void this.startCapture();') &&
+  primaryBody.includes('else void this.startCapture();') &&
   !primaryBody.includes('loadDemo');
 const clickDispatch = app.includes(
   "this.el.transport.addEventListener('click', () => this.primaryAction())");
@@ -128,10 +129,22 @@ check(
     `spaceBody=${JSON.stringify(spaceBody.replace(/\s+/g, ' '))}`,
 );
 
+// Start with no board is a connection request, never a demo mode.
+const startHead = app.split('private async startCapture(')[1]
+  ?.split('const device = this.device;')[0] ?? '';
+const startConnects = startHead.includes("if (origin !== 'manual') return;") &&
+  startHead.includes("if (await this.connect() !== 'connected' || !this.device) return;") &&
+  !startHead.includes('error.start');
+check(
+  'Start with no board opens the device chooser and leaves the app idle when cancelled',
+  startConnects,
+  `startHead=${JSON.stringify(startHead.replace(/\s+/g, ' '))}`,
+);
+
 const transportStateNeedles = [
   ": showStop ? t('toolbar.stop') : t('toolbar.start')",
   ": showStop ? t('toolbar.shortStop') : t('toolbar.shortStart')",
-  'btn.disabled = this.stopping || (this.device === null && !showStop);',
+  'btn.disabled = (this.stopping && !this.triggerRestartPending) ||\n      (this.device === null && !showStop);',
   ": this.device ? t('toolbar.startTitle') : t('toolbar.connectHint')",
 ];
 const missingTransportState = transportStateNeedles.filter((needle) => !app.includes(needle));
@@ -373,7 +386,7 @@ check(
 );
 
 const stalePredicate = runDecodeBody.includes(
-  'const stale = (): boolean => this.store !== store || !this.analyzers.includes(a);');
+  'const stale = (): boolean => this.captureStore !== store || !this.analyzers.includes(a);');
 const staleGuardCount = runDecodeBody.match(/if \(stale\(\)\) return;/g)?.length ?? 0;
 const resultPublishedAfterGuard = staleGuardCount === 2 &&
   runDecodeBody.indexOf('if (stale()) return;') < runDecodeBody.indexOf('a.result = result;') &&

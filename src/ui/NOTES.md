@@ -969,7 +969,9 @@ row above the channels. This reconstructs an ADC's output from its parallel data
 - Without a clock, any bit change makes a new value. Those values are drawn as steps,
   because a combinational value holds between changes.
 - Encodings: unsigned, two's complement, offset binary.
-- A full scale in volts relabels the axis: `V = offset + value / 2^n x full scale`.
+- A full scale in volts relabels the axis over the code span's 2^n − 1 steps
+  (`V = offset + value / (2^n − 1) x full scale`), so an 8-bit converter's 255 reads the
+  full scale exactly and 128 its midpoint.
 
 **Drawing** (`busView.ts`, `Overlay.drawAnalog`).
 - The analog row is a renderer row (`RowSpec.kind = 'analog'`), covered with `fillLane`
@@ -980,8 +982,12 @@ row above the channels. This reconstructs an ADC's output from its parallel data
   column.
 - Zoomed out, it uses the min/max pyramid, which `pumpBusBuilders` builds a 6 ms slice
   per frame once a capture is complete. The part not built yet stays empty and fills in.
-- During a live capture there is no pyramid, so wide windows show a "zoom in" note.
-- Frames are cached by window, so hover redraws are free.
+- During a live capture there is no pyramid, so wide windows show a "zoom in" note. In a
+  high-rate analog Loop (above 160 MB/s), overview construction is deferred until stop;
+  zooming into the exact-sample path or stopping the capture replaces the placeholder.
+- Frames are cached by their visible window end, loop origin, pyramid progress and live
+  state, so unrelated appends do not invalidate a fixed historical window and hover
+  redraws are free.
 - Trace colours are the vivid channel tones (`busColor`). The muted analyzer palette sank
   into the grid as a 1 px trace.
 
@@ -1006,5 +1012,405 @@ AnalyzerPanel clears its host whenever it re-renders itself (on decoder hydratio
 one), and a section appended after it disappeared at random until it had its own host.
 
 Hover over the analog row reads the value at the pointer (and volts when a full scale is
-set). Bus views are session state, like analyzers: not persisted, kept across captures,
-and rebuilt for each new one.
+set). Bus views are session state, like analyzers: persisted with the workspace, kept
+across captures, and rebuilt for each new one.
+
+**The SLogic32U3 ADC module (`Analog` buttons).** A group of eight inputs is one 8-bit
+converter's output; four groups exist, A0–A3, and only groups wholly inside the capture
+width are read (HSync `adc.rs`, `model.rs`). Each row of eight chips ends in an `Analog`
+button, always in the same place so a 4 CH row lines up. Clicking it turns the bank into
+its analog channel directly - no dialog:
+
+- The code is MSB-first: input 0 of the group is the code's MSB. `bitOrder` is pinned to
+  `msb`, so a test pattern cannot flip the converter wiring.
+- Name `A0`–`A3`, range ±15 V (code 0 = −15 V, 255 = +15 V), unsigned, line style; the
+  eight source inputs are hidden from the plot because they are the converter's data bus.
+- The button is disabled on the 16U3 (no module), on a partial 4 CH row, and while a
+  capture runs. An existing bank, for example one restored from an older workspace, is
+  normalized to this definition on load.
+- While a group is read, the sample rates are those its 800 MHz PLL divides down to from
+  100 MHz up (100/160/200/400/800 MHz), intersected with the link's ceiling. The rate is
+  clamped to the fastest allowed value at or below the current one.
+- Triggers still scan the captured bytes, so a condition on D0–D7 sees converter codes,
+  not logic levels. The panel says so.
+
+**Gap.** The vendor's ADC module reads codes from its converter; it does not make the
+eight inputs digital channels while they are read. logicweb has no device command for
+that takeover, because the module's bytes are captured like any other input, so the
+analog view is host-side interpretation and the digital rows are only hidden.
+
+## 22. Capture modes: one duration, and a live clock separate from ingest
+
+**Single** captures one budget and stops; **Repeat** does the same, waits, and starts
+again, with the previous wave kept on screen while the new one fills in behind it (see
+§26); **Loop** runs until stopped and keeps only the newest window. The window is a sample count (1024-sample quanta, capped
+by `LOOP_RETENTION_MAX_BYTES`), because that is what memory bounds; the panel shows it as
+a duration, and all three modes now call that control **Duration**.
+
+`carryCaptureDuration` (`capturePolicy.ts`) keeps one duration across the modes and the
+sample rate, as HSync does ("changing the rate, the channels or the mode keeps the capture
+about as long", DESIGN.md §4):
+
+- Entering Loop converts the Single/Repeat duration to samples at the actual, clamped
+  rate (unless the caller set a new window in the same edit).
+- Leaving Loop converts the window back to seconds.
+- Changing the rate while looping rescales the window by the same ratio.
+- In Loop mode `seconds` mirrors the window, so either side reads one value. Quantizing
+  to 1024 samples and the memory ceiling can shorten the carried duration; the panel shows
+  the resulting ceiling.
+
+**Refresh is not ingest.** Every chunk is appended as it arrives (`store.append`, the
+loop front dropped in 64-sample quanta, `enforceLoopRetention`), but the screen redraws on
+a 50 ms clock - HSync's `STATUS_INTERVAL` for telling the interface of progress. The
+decision lives in `liveRefresh.ts` (`liveDrawDue`), is called from the animation-frame
+callback, and applies only to new data; pan, zoom, hover, markers and trigger-state
+changes set the ordinary dirty flag and draw in the next frame. Consequences:
+
+- A 32 ch/200 MS/s loop (800 MB/s) used to suspend drawing entirely; it now shows a live
+  view at 20 fps while background bus-overview builds are skipped above 160 MB/s and
+  finish after the stop.
+- The progress text in the device panel updates every 500 ms; the waveform, status bar
+  and live edge update on the 50 ms clock.
+- Nothing in the data path renders or touches the DOM, so a burst of small transfers
+  cannot force a render per transfer.
+
+## 23. The whole-capture preview strip (overview)
+
+A 44 px canvas (`#overview`) sits above the time axis, first child of `#plot-col`. It is
+sticky like the axis (`#axis` moves to `top: var(--overview-h)`), and `#labels-spacer`
+covers both, so labels, strip and rows stay aligned while the channel stack scrolls.
+
+**What it shows.** `OverviewStrip` queries each enabled channel over the whole retained
+capture with one `store.query(channel, 0, length, bins)` per channel, `bins` = strip CSS
+width. Two shares per column:
+
+- **activity** (the envelope): channels whose column contains an edge (`ColumnView.edge`);
+- **high** (the quiet floor): channels whose column is high.
+
+Gaps (`packed & GAP_BIT`) are painted underneath in the no-data colour. This is a
+capture browser, not a second waveform: it answers where the data moves and where the
+current view is. The result is cached on the store identity, `length`,
+`droppedSamples`, bin count and channel set, so pan/zoom/hover redraws only the frame.
+
+**Viewport frame and navigation.** The frame maps the viewport linearly onto
+`[0, length)`, clipped to the strip with a 3 px minimum. Interactions mirror HSync's
+verified overview:
+
+- click or drag centers the viewport on the pointer's sample, preserving the span;
+- an unmodified wheel scrolls the channel stack (it is inside `#scroll-area`), Ctrl+wheel
+  zooms the time axis around the pointer, and Shift+wheel pans it horizontally - the same
+  mapping the plot and the axis use;
+- every viewport gesture calls `noteViewportIntent()` first, so follow-latest and a
+  pending Repeat anchor cannot pull the view back.
+
+The strip also draws a **fixed time scale** along its bottom: major ticks of the whole
+capture, labelled trigger-relative like the axis, at roughly 120 px intervals
+(`computeTicks` with a 12 px minor spacing). The scale does not move with the viewport;
+only the frame does. The strip is 56 px tall, 16 px of which are the scale.
+
+The strip lives outside `#plot` so the plot's marker/hover/pinch machinery never sees
+these events; its canvas has `aria-hidden` and no translated text, so the i18n markup
+tests stay exact. The app still owns the viewport: the strip only calls
+`centerOverview`, `panOverview` and `zoomOverview`, which use `stack.setViewport` and the
+existing renderer clamps.
+
+**Zoom-out stops at the whole capture.** `ViewTransform.clampTo` now defaults to
+`minVisibleFraction: 1`: the furthest zoom-out is the data extent, so a 10 ms capture can
+no longer be shown as 20 ms with half the screen blank (HSync clamps samplesPerPixel to
+extent/width). Follow-live-edge still passes 0, because its window must survive a capture
+that is only a few milliseconds old.
+
+**Limits.** For a Loop capture the strip shows the retained window only; a left history
+marker proportional to `droppedSamples` is not drawn. Analog banks contribute only their
+visible channels: the hidden source bits are excluded, so the strip does not show the
+converter's data-bus activity. A 32-channel live-loop rebuild is 32 queries per 50 ms
+frame; it is cached between frames and has not been measured on hardware.
+
+**The staged Duration control.** `timeControl.ts` + `timeScale.ts` replace the per-unit
+linear slider. The thumb moves through stages, changing unit as it crosses fixed
+thresholds in seconds: below 1 ms microseconds, below 5 s milliseconds (so 5000 ms is the
+crossing to seconds), below 60 s seconds, then minutes; Single additionally ends in the
+warning-coloured Unlimited notch. Within a stage the step is a whole number of its unit,
+snapped to 1-2-5 and capped at 256 positions, so the stage stays draggable. The numeric
+field is the exact editor and accepts fractions in the unit the select shows; the select
+auto-follows the stage but can be overridden (for example to type 134.2 s while the slider
+sits in the minute stage). The finite top of a minute stage is its last whole minute;
+values above it are reachable through the numeric field. `time-scale-selftest` pins the
+thresholds, boundary ownership, position mapping, Unlimited share and formatting.
+
+## 24. Editing settings while a capture runs
+
+The acquisition keeps the configuration it started with; the panel edits the *next* one.
+All six controls stay live while running: channel width, Analog, sample rate, threshold,
+Duration and Repeat Interval. The mode buttons, test-mode selector, global trigger
+source/mask/pre-trigger and digital trigger editors stay locked because changing them
+mid-acquisition is not meaningful.
+Analog slope/level/removal on the ADC row remain editable as next-acquisition settings;
+section 25 covers their live triangle and source highlighting.
+
+- **Single**: `captureLimitSamples`, the store rate and width are fixed at start. Edits
+  apply when the next Capture starts.
+- **Repeat**: each wave calls `startCapture` with the current `settings`, so the next wave
+  picks up every edit; `finishCapture` schedules that wave with the latest interval.
+- **Loop**: a Duration edit is applied to the running retention window on the next frame
+  (`loopRetentionLen`, then `enforceLoopRetention` and a bus-builder reset). Analog is a
+  display-only view and applies immediately. Rate, width and threshold cannot be applied
+  to an already-streaming store, so they wait for the next start; the panel says so.
+
+`renderChannelCount()` keeps the running store's width authoritative for rows,
+availability and bank locks, while the capture panel shows the pending width. This is
+what keeps "the current result unaffected" true when the width is edited mid-run. The
+panel prints `pendingApply` (or `pendingApplyLoop`) while running.
+
+Terminology: the primary action is **Capture** (not Start) and the Repeat control is
+**Interval**, in every catalog.
+
+## 25. ADC trigger, inline channel editor, and the scope display
+
+**Analog trigger.** Only a bus carrying the explicit `analogGroup` marker (set by the
+Analog button, never inferred from eight bits) is an ADC group; a generic 8-bit bus and a
+16U3 therefore cannot become analog by accident. An ADC group can trigger on a rising or
+falling crossing of a voltage (`analogTriggers`, keyed by the bank start). The UI offers
+Off/R/F and a −15…15 V level, snapped to the converter code grid; rising code 0 and
+falling code 255 are unreachable and are moved one code inward;
+the engine converts the voltage to the converter's 0…255 code and compares the
+bit-reversed group byte (`REVERSED_BYTE`) sample by sample. Digital conditions on the
+group's inputs are ignored while the group is analog, and a level is dropped when its
+bank is removed or hidden by a width change. A combined one-digital + one-analog fast
+path keeps the common gate + crossing case off the generic per-condition loop. Rising fires on
+`previous < level && current >= level`, falling on `previous > level && current <= level`;
+the first sample after a gap cannot fire (`previousAnalog` is reset). The engine evaluates
+all supplied conditions on the same complete sample; the application exposes either
+multiple ANDed digital conditions or exactly one analog crossing, never a mixed source.
+The gap API (`noteGap`,
+`resetContinuity`) is implemented and tested, but the current SLogic transport does not
+report short-transfer dropouts (`_onDropout` is unused), so it is not yet wired in
+production; until it is, a loss can be bridged silently. The app's dropout handler does
+not insert filler while waiting for a software trigger, so a future reporting path cannot
+shift T. Only the 32U3's four groups are
+offered; an analog trigger for a bank that is no longer displayed is ignored. The trigger
+remains host-side: the ADC module reads the inputs like any other sample, so the device
+protocol is unchanged. Level resolution is 30 V / 255 ≈ 0.118 V; the panel shows the
+requested level and the engine rounds to the nearest code. Unlike libsigrok's pre-fill
+gate, the host matcher arms from the first complete sample: an early match can have a
+short prefix, so the configured pre-trigger duration is an upper bound (the panel says
+"up to"). This immediate-arming behavior is intentional and is not wire-protocol state.
+The host crossing has no vendor-style hysteresis. Analog banks intentionally keep their
+fixed MSB-first live-input interpretation in device test modes 1/2; those built-in
+patterns are LSB-first in the vendor Auto rule, so analog voltage display and analog
+triggering in those modes are unsupported. Use Normal mode for analog acquisition.
+
+**Runtime edits and source highlighting.** Analog slope, level, removal and the ruler
+triangle remain editable while a capture runs. While the matcher is still **waiting**, the
+edit retunes the active search immediately (`SoftwareTrigger.reconfigure` through
+`Device.updateSoftwareTrigger`): conditions are recompiled, edge continuity restarts, and
+the pre-trigger ring, emitted-stream accounting and search budget are preserved. Digital
+channel trigger modes, the Global trigger source, condition removal and the ruler drag are
+editable in that state too; the panel shows no pending note. Removing every condition
+restarts the capture so it runs free. Once the matcher has matched, the capture's trigger
+is frozen: edits become pending configuration for the next acquisition (including the next
+Repeat wave), and the trigger section prints `pendingTrigger` for source, preview list,
+armed summary and ruler, with one exception: a Loop analog lock retunes its page-side
+crossing detector in place and keeps the lock only while the new condition produces
+edges. Global trigger is an arming decision for the acquisition: off while waiting
+restarts free-running, off after a match releases the view in place and tears down the
+page detector (so a released view cannot re-lock), and on in a capture that started
+free-running restarts the acquisition to arm the one-shot matcher. Pending removal is not
+shown as a configuration error. The capture
+width, pre-trigger percentage (it sizes the ring) and output budget stay locked for a
+running capture. Configured trigger
+icons and thresholds stay visible in a neutral style; only the globally enabled selected
+source—Digital or Analog—uses the same bright warning colour. Switching sources therefore
+never makes the inactive analog family look armed, and digital icons no longer use purple
+merely because a mode is configured.
+
+**Inline channel editor.** The per-channel modal and colour picker are gone. A channel
+row's name is double-click editable and its trigger glyph opens one small popover with
+all six trigger modes and a reset-to-`D{index}` action; Enter commits a name, Escape
+discards it, outside clicks close. Trigger edits reconcile live with a running capture
+(see the runtime-edit rules above); a name-only commit must not reset the trigger
+detector. Renaming remains available. Colour is part of the channel identity and is not
+editable.
+The popover is shared and lives in the document, positioned against the row; it is not a
+modal and installs no backdrop. An open analog editor keeps its draft and focus across
+capture-trigger relayouts, re-anchoring to the replacement row button instead of closing.
+
+**Scope display.** Analog rows share one vertical coordinate system across the trace,
+graticule, voltage ruler, 0 V line and trigger (`scopeScale.ts`). The padded row contains
+four divisions; `voltsPerDiv` uses 0.5/1/2/5/10/20 V steps and defaults to 10 V/div.
+The ruler is inside the **right** edge of the waveform row. Visible ticks are fixed
+voltages with their units (including fractional and negative values); a label that would
+be cut in half by the V/Div or trigger chip is omitted, and during the 140 ms scale
+animation a pair closer than one label height keeps only the outer label. 0 V is the thick
+line and the other divisions are visible fine lines. Vertical dragging moves the complete
+ruler and its 0 V-anchored divisions together. Wheel zoom changes V/Div with a 140 ms
+spatial extension/contraction animation: fixed voltage marks move farther from or closer
+to 0 V, rather than remaining at four division slots while only their labels change.
+Reduced-motion preferences disable the interpolation. The left A0–A3 control has no scale,
+trigger-level or 0 V readout/handle; its hover/focus bottom handle only snaps row height to
+the four existing 80/120/160/240 CSS px stops. The right ruler carries the bottom-right
+V/Div label (unit from the locale) and a trigger-aligned R/F voltage chip, all on the same
+canvas geometry as the trace. When the trigger level is in the lowest division the R/F
+chip slides left instead of covering the V/Div readout, keeping its Y on the trigger line.
+Double-clicking the ruler (or pressing Home while it is focused; a drag focuses it) restores
+0 V to 50% and V/Div to 10 through the normal animated, persisted scope writer; a
+browser-cancelled drag reverts its preview instead of committing it. Code values map to
+volts with the module's fixed ±15 V scale. Traces are reconstructed with
+a Catmull-Rom curve (a practical band-limited interpolation for an irregular point set)
+instead of digital steps; wide windows draw a translucent min/max envelope with a smoothed
+centreline. When the exact timeline truncates or the pyramid builder is absent or behind
+(a fast loop suspends background builds), the frame fills unbuilt columns from a bounded,
+evenly sampled min/max of the visible samples. The provisional envelope is slightly
+lighter than the built one, always draws instead of a blank row, and is replaced by the
+exact envelope as the builder advances. Clocked buses wait for their builder: sampling a
+latched bus at unrelated positions would report values it never held.
+
+**Loop trigger view lock.** In Loop mode an armed software trigger (digital or analog)
+owns the viewport once it fires. Two windows are kept apart: the data window D (Loop
+Duration L, T at the configured pre-trigger fraction, 0% on the 0 s left edge) and the
+user's ViewWindow V, stored as offsets from T. The device reports the match in
+emitted-stream coordinates, but the sink may have dropped front samples during the same
+transfer, so the App converts it to `reported - droppedSamples` once (a match already
+behind the store front cannot be pinned). D's span is fixed and never pans; V can be
+zoomed and panned anywhere inside D; Fit resets V to all of D.
+
+An analog loop trigger advances D in local, phase-aligned steps like a scope's running
+display. While the chunks are appended, the page scans the ADC group byte at a bounded
+stride (about 20 M reads/s) and records crossings (thinned to one per loop-window/64).
+When samples exist beyond D's right edge, one retention call plans a step: a local block
+budget (whole signal periods when known, at most L/4, never more than the fresh data) and
+the latest recorded edge T' in `(T, T + budget]`, searched back from the budget's end. It
+then drops D's front by `T' - T` and appends exactly that many new samples at the tail;
+the rest of the new data waits for the next step. The step is edge-to-edge — one or more
+whole signal periods for a periodic input — so D keeps its phase and V updates in place.
+The front drop is floored to the store's 64-sample quantum, but that residue changes only
+store-relative coordinates: V's offsets from T are unchanged, so it cannot shift the
+displayed waveform. Between steps the view holds still; it is not following the live
+edge. The store may carry the new data the next local step needs: one crossing gap and,
+if the signal stops, the quiet-window tail (f*D). The post-enforce bound is
+D + slack + max(f*D, one gap), plus at most one delivery block before the enforce pass; a
+hard cap below the 2^31-sample store ceiling disarms the trigger in place, trims to D and
+keeps the capture running (`triggerMemoryReleased`; restart to re-arm). The visible window
+never exceeds the loop Duration.
+
+The lock means "the current data and trigger configuration still produce edges": taken on
+the match, kept by every local step, and released only when no new edge appears for one
+whole D. If edges return while a Loop runs free, the page locks automatically again. Fit
+(button, double-click, `F`), zoom and pan never release the lock; they only move V inside
+D. Follow-latest resumes on a release only if it was active when the lock was taken.
+Digital loop triggers keep a one-shot lock: they never roll, the front drops normally,
+and the view releases to follow once T leaves the retained window; the status line says
+so. Single and Repeat captures and a loop with
+no trigger keep their existing viewport rules. The pre-trigger buffer remains meaningful
+in every mode: while the matcher waits, the ring is the only source of samples before T,
+and in a loop the percentage is also T's position in D. There is no separate analog
+buffer — ADC crossings are matched on the same complete samples.
+
+A trigger-locked Loop keeps T on its trigger phase and D's span fixed; the user's gesture
+owns only V. A zoom changes V's span (time/div, bounded by D), a pan moves V inside D
+(T may leave the screen; the axis still puts 0 s at T), and the stored offsets from T are
+applied unchanged on every local step. This is what makes a fixed observation window
+phase-stable while the store front moves on the 64-sample grid: the visible absolute
+position is anchored to T', not to the drop residue. The roll always advances D, not the
+possibly zoomed V.
+
+The overview strip follows the same rule: while a loop runs it maps the fixed loop window
+(locked: its true start T - f*L, so the 64-sample drop residue cannot shift the strip;
+free-run: the newest window) so its scale, ticks and
+viewport frame do not follow the retained length, and a gesture on a locked view moves V
+inside D and is clamped there — it never re-anchors T.
+
+**Global Trigger and the ADC row controls.** The trigger section is titled *Global
+trigger* and starts with a Digital/Analog source choice. Digital arms any number of the
+per-channel conditions configured from the channel rows; Analog arms exactly one ADC
+crossing, because the level must fix one time base. The section below the source is a
+preview list only: digital rows show `D{ch}` and its mode, analog rows show `A{group}`,
+the slope and the threshold; each row's ✕ clears that channel back to None. There are no
+slope/level editors in the panel.
+
+An analog group is configured from its own left row: the trigger glyph at the right of
+the A0–A3 row opens `Trigger on A0` (None/Rising edge/Falling edge plus a level input).
+Slope and level are applied together; None removes the trigger immediately. The right
+ruler shows the threshold (`R 1.235 V`) on its trigger line, while the row button keeps
+separate configured and globally armed styling. Setting
+one group switches the source to Analog and replaces any other analog trigger. The dashed
+trigger line on the plot is itself draggable and keyboard-operable, with a small warning
+triangle in the right ruler; dragging changes the level through the same inverse voltage
+mapping as the trace. It follows vertical pan and V/Div zoom. The Global trigger list
+reflects the committed level.
+
+**Scale bar and graticule.** A transparent hit host overlays the right ruler, but only its
+16 px grip receives pointer input, leaving labels and the plot visible and clickable. The
+grip and trigger marker support keyboard arrows and expose their values through ARIA; a
+drag focuses the bar, so Home is the keyboard equivalent of double-click reset. A
+double-click on the trigger marker (which covers the grip at its level) also resets the
+scope instead of falling through to the plot's time zoom. The marker triangle, the dashed
+line and the `R/F` chip share one visibility rule, so a level at the padded edge never
+shows a handle without its line and label.
+Display-only zero/scale previews preserve the analog frame cache and avoid rebuilding all
+row DOM on each pointer move; wheel persistence and readout rebuilding are debounced.
+
+## 26. Session, sweep, and the Repeat two-layer display
+
+The config → sampling → display pipeline is described by four nouns, and the code keeps
+them separate instead of special-casing Single/Repeat/Loop at each step:
+
+- **Session** — one Capture → Stop run (`captureSession.ts`, `CaptureSession`). It owns
+  the view policy and the sweep bookkeeping.
+- **Sweep** — one device RUN → STOP. Single has one, Repeat has one per Interval, Loop is
+  one unbounded sweep. The settings are snapshotted at each sweep start, so a Repeat edit
+  applies to the next wave.
+- **Retention** — the sample range a sweep retains (the Duration, or the Loop window).
+- **Viewport** — the visible sub-range. Its policy is FollowLive (right edge at the newest
+  sample), Fixed (a user interval relative to the display origin), or, for Loop with a
+  matched trigger, triggerLocked. A new session always starts FollowLive; Fixed survives
+  only inside the session (across Repeat waves). A Fixed interval that no longer fits the
+  sweep's retention falls back to the mode default — FollowLive, or triggerLocked for Loop
+  with an active trigger — and never silently auto-Fits.
+
+With a trigger sample the display origin is T, so T is exactly 0 s and retained
+pre-trigger data has negative time (`displaySwap.ts`, `relativeSecondsAtSample`). Without
+a trigger the origin is the sweep start.
+
+**Repeat never shows a vacuum.** The App keeps the previous completed sweep as a
+`RepeatLayerStore` and the running one in `waveStore`. While the new sweep is still
+waiting for its trigger, or has not delivered its first block, the previous wave (and its
+own T) stays on screen and data-driven redraws are held; only a user gesture draws. The
+hand-over also waits until a received trigger's T sample is actually in the store, so a
+coalesced prefix cannot expose the new wave before its origin exists. Once the new wave has
+data, a Fixed viewport is served by `RepeatCompositeStore`: it answers
+`query`/`edges`/`gaps` from the new store up to its frontier and maps the old store's
+samples into the same index space for everything beyond it, using
+`delta = backOrigin - frontOrigin`. `query` aggregates every source bin into every
+composite column it overlaps, so a wide column keeps its pulse and transition. A source
+bin that crosses a column boundary contributes its levels and edge to both columns - a
+deliberate, conservative one-column smear. The gap bit is not smeared: it is re-derived
+from the display's exact gap spans, so a column is NO_DATA only when it really overlaps an
+unknown sample and `query` agrees with `gaps()`. Columns with no layer behind them
+(including the synthetic gap when the origins differ) are NO_DATA. FollowLive never needs
+the old layer — it only looks at the newest samples — so it reads the new store directly.
+
+The two regions are shown by background tints, not a rule: `Overlay.drawRegionTint` paints
+the old region with `repeatPreviousSurface` and the current region with
+`repeatCurrentSurface` on the grid canvas (before the gridlines; the canvas's
+`mix-blend-mode` makes an opaque tint read as "behind" the opaque waveform canvases). The
+tints are requested only while the composite is displayed and an old region is visible.
+The overview strip and the main axis share the displayed store, and the trigger marker
+comes from the displayed wave, so the held old frame keeps its T.
+
+B1 is explicit: a Repeat wave that finds no trigger stops as `completed` with an empty
+store, the panel reports the miss, the session stays Capturing, and the next Interval
+retries. The previous wave is not replaced by that empty search. The miss is reachable
+because a Repeat sweep's matcher inspects one sweep's sample budget before reporting
+`not-found` (`triggerSearchSamples`); Single keeps waiting indefinitely for its one
+trigger and Loop is unbounded.
+
+**Loop local updates and instrumentation.** The auto-roll still advances one scanned
+crossing at a time; the device matcher owns the first, precise match. `planLoopSwap` plans
+a local block: whole periods, bounded by the frame budget, memory and at most a quarter of
+the visible window in the App's readout. That plan is instrumentation, not a global
+repaint: the panel prints the display matcher's stride and scan rate, the last anchor step,
+the budget block/refresh and the retained bytes. The crossing scanner's stride follows the
+sample rate (about 20 M reads/s); its reported crossings are spaced by the loop window/64,
+which is a whole number of signal periods, so the median interval is a phase-aligned block
+size rather than necessarily the signal period itself.

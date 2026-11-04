@@ -176,7 +176,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
   const importsPolicy = app.includes("import { computeChannelRowHeight } from './channelLayout.js';");
   const delegates = app.includes(
-    'const base = computeChannelRowHeight(plotH, enabled.length, this.lanes.length);',
+    'const base = computeChannelRowHeight(plotH, shown.length, this.lanes.length);',
   );
   const duplicateClamp = app.includes('Math.max(ROWS.minRowHeight');
   check('App.relayout delegates to the tested policy without a duplicate clamp',
@@ -198,11 +198,11 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `slice=${configureSource.length}, armsOnEdge=${armsOnEdge}, ` +
     `storedPrevious=${storedPrevious}, noAutoDisarm=${noAutoDisarm}`);
 
-  const clampStart = app.indexOf('function clampSettings(');
+  const clampStart = app.indexOf('function clampCaptureSettings(');
   const clampEnd = clampStart >= 0 ? app.indexOf('\n}\n', clampStart) : -1;
   const clampSource = clampEnd > clampStart ? app.slice(clampStart, clampEnd) : '';
   const clampAutoArm = clampSource.includes('edgeTriggerAutoArms');
-  check('clampSettings stays a pure clamp with no auto-arm invariant',
+  check('clampCaptureSettings stays a pure clamp with no auto-arm invariant',
     clampSource.length > 0 && !clampAutoArm,
     `slice=${clampSource.length}, autoArmInClamp=${clampAutoArm}`);
 
@@ -226,142 +226,52 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const channelList = fs.readFileSync('src/ui/channelList.ts', 'utf8');
   const rowStart = channelList.indexOf('export class ChannelList');
   const rowSource = channelList.slice(rowStart, channelList.indexOf('function triggerModeName'));
-  const dialogSource = channelList.slice(0, rowStart);
-  const rowSimplified = !rowSource.includes('ch-enable') && !rowSource.includes('ch-trigger') &&
-    !rowSource.includes("const name = document.createElement('input')");
-  const readOnlyEntry = rowSource.includes("const tag = document.createElement('span')") &&
-    rowSource.includes('tag.textContent = cell.channel.name') &&
-    !rowSource.includes("'ch-name'") &&
-    rowSource.includes("settings.className = 'ch-settings'") &&
-    rowSource.includes('this.settingsDialog.open(settings, cell)');
-  check('channel rows keep only a read-only name and gear settings entry',
-    rowStart >= 0 && rowSimplified && readOnlyEntry,
-    `rowStart=${rowStart}, simplified=${rowSimplified}, readOnlyEntry=${readOnlyEntry}`);
+  const inlineEntry = rowSource.includes("trigger.className = 'ch-trigger'") &&
+    rowSource.includes("this.openEditor(trigger, cell, 'trigger')") &&
+    rowSource.includes("tag.addEventListener('dblclick'") &&
+    rowSource.includes("this.openEditor(trigger, cell, 'name')") &&
+    rowSource.includes('triggerIcon(cell.trigger.mode)') &&
+    !rowSource.includes('ch-settings') && !rowSource.includes('settingsDialog');
+  check('channel rows expose a name double-click and a trigger glyph as one inline editor',
+    rowStart >= 0 && inlineEntry, `rowStart=${rowStart}, inline=${inlineEntry}`);
 
-  const exactModes = "const TRIGGER_MODES: readonly TriggerMode[] = ['falling', 'rising', 'edge', 'high', 'low', 'dont-care'];";
-  const nativeModal = dialogSource.includes("document.createElement('dialog')") &&
-    dialogSource.includes('this.dialog.showModal();') &&
-    dialogSource.includes("this.dialog.setAttribute('aria-labelledby', 'channel-settings-title')");
-  const oneSavePath = dialogSource.includes("form.addEventListener('submit', this.onSubmit)") &&
-    dialogSource.includes('this.onConfigure(channel, config);') &&
-    dialogSource.includes('this.onSaved(channel);');
-  check('channel dialog uses one native-modal save path with all six modes',
-    dialogSource.includes(exactModes) && nativeModal && oneSavePath,
-    `modes=${dialogSource.includes(exactModes)}, native=${nativeModal}, save=${oneSavePath}`);
+  const popover = rowSource.includes("this.editor.className = 'ch-editor-popover'") &&
+    rowSource.includes("this.editor.setAttribute('role', 'dialog')") &&
+    rowSource.includes("if (event.isComposing) return;") &&
+    rowSource.includes('nameInput.select();') &&
+    rowSource.includes("this.editor.contains(document.activeElement)") &&
+    rowSource.includes('this.editor.hidden = false') &&
+    rowSource.includes('private commitEditor(index: number, name: string, mode: TriggerMode)') &&
+    rowSource.includes('this.cb.onConfigure(index, { name, mode })') &&
+    rowSource.includes('this.closeEditor();') &&
+    rowSource.includes("if (event.key === 'Escape'") &&
+    rowSource.includes('nameInput.select()');
+  const sixModes = rowSource.includes('for (const mode of TRIGGER_MODES_MENU)') &&
+    rowSource.includes("item.setAttribute('aria-checked'") &&
+    rowSource.includes('item.disabled = cell.trigger.disabled') &&
+    rowSource.includes("mode === 'dont-care' ? ' none'") &&
+    rowSource.includes("t('channels.triggerAllNote')") &&
+    rowSource.includes("className = 'ch-original-id'");
+  check('the inline popover offers all six trigger modes and dismisses a name draft on Escape',
+    popover && sixModes, `popover=${popover}, modes=${sixModes}`);
 
-  const kvRows = (dialogSource.match(/channel-settings-field channel-settings-kv/g) ?? []).length === 2 &&
-    dialogSource.includes("this.triggerFieldset.setAttribute('aria-labelledby', this.triggerLabel.id)") &&
-    dialogSource.includes("div('channel-settings-field channel-settings-color-field')") &&
-    dialogSource.includes('fields.append(nameField, triggerField, colorField);');
-  check('name and trigger use KV rows while color stays vertical and last',
-    kvRows,
-    `nameTriggerRows=${(dialogSource.match(/channel-settings-field channel-settings-kv/g) ?? []).length}, colorLast=${dialogSource.includes('fields.append(nameField, triggerField, colorField);')}`);
+  const noColor = !channelList.includes('HsvPicker') &&
+    !channelList.includes('CHANNEL_COLOR_PRESETS') &&
+    !channelList.includes('selectedColor') &&
+    !channelList.includes('channel-settings-dialog') &&
+    !channelList.includes("type = 'color'");
+  const resetToNumber = rowSource.includes('nameInput.value = defaultChannelName(index)') &&
+    rowSource.includes("event.key === 'Enter'");
+  check('colour editing is gone; rename resets to D{index} and commits on Enter',
+    noColor && resetToNumber, `noColor=${noColor}, reset=${resetToNumber}`);
 
-  const nameReset = dialogSource.includes("const nameControl = div('channel-settings-name-control');") &&
-    dialogSource.includes("this.resetNameButton = button('', 'channel-name-reset');") &&
-    dialogSource.includes("this.resetNameButton.type = 'button';") &&
-    dialogSource.includes('nameControl.append(this.nameInput, this.resetNameButton);') &&
-    dialogSource.includes('nameField.append(this.nameLabel, nameControl);') &&
-    dialogSource.includes('this.nameInput.value = defaultChannelName(this.channel);') &&
-    dialogSource.includes("this.resetNameButton.addEventListener('click', () => {");
-  check('the name control pairs the input with an explicit-type draft reset button',
-    nameReset,
-    `resetControl=${nameReset}`);
-
-  const colorGrid = dialogSource.includes('for (const color of CHANNEL_COLOR_PRESETS)') &&
-    dialogSource.includes('colorGrid.appendChild(this.customColorButton);') &&
-    dialogSource.includes("this.colorPalette.setAttribute('popover', 'auto');") &&
-    dialogSource.includes("this.customColorButton.setAttribute('popovertarget', this.colorPalette.id);") &&
-    dialogSource.includes('colorField.append(this.colorLabel, colorGrid, this.colorPalette);') &&
-    dialogSource.includes('this.selectedColor = cell.channel.color;') &&
-    dialogSource.includes('color: this.selectedColor,');
-  check('15 presets plus one custom Popover keep the existing atomic color payload',
-    colorGrid,
-    `presetGridAndCustomPopover=${colorGrid}`);
-
-  const styleSheet = fs.readFileSync('src/ui/style.css', 'utf8');
-  const staticFill = !dialogSource.includes('customColorButton.style.background') &&
-    /\.channel-color-custom\s*\{[^}]*background:\s*var\(--bg20\)/.test(styleSheet) &&
-    /html\[data-theme="light"\]\s+\.channel-color-custom\s*\{[^}]*background:\s*var\(--bg30\)/.test(styleSheet);
-  const markBody = styleSheet.match(/\.channel-color-custom-mark\s*\{([^}]*)\}/)?.[1] ?? '';
-  const bareMark = markBody.includes('color: var(--foreground)') &&
-    !markBody.includes('background') && !markBody.includes('border');
-  check('the custom swatch keeps a static brighter fill and a bare foreground plus',
-    staticFill && bareMark,
-    `staticFill=${staticFill}, bareMark=${bareMark}`);
-
-  const pickerStructure = dialogSource.includes('new HsvPicker(') &&
-    dialogSource.includes("this.customColorButton.setAttribute('popovertarget', this.colorPalette.id)") &&
-    dialogSource.includes('this.colorPalette.appendChild(this.colorPicker.element)') &&
-    dialogSource.includes("this.colorPalette.setAttribute('aria-label', t('channels.customColor'))") &&
-    dialogSource.includes('this.colorPicker.renderStrings();') &&
-    !dialogSource.includes('CHANNEL_PALETTE_COLORS') &&
-    !dialogSource.includes('showPicker') &&
-    !dialogSource.includes('moreColorsButton') &&
-    !dialogSource.includes('paletteSwatches') &&
-    !/\.type\s*=\s*'color'/.test(dialogSource);
-  check('the custom swatch opens an in-app HSV picker with no matrix or native input',
-    pickerStructure,
-    `pickerStructure=${pickerStructure}`);
-
-  const toggleStart = dialogSource.indexOf("this.colorPalette.addEventListener('toggle'");
-  const toggleEnd = toggleStart >= 0 ? dialogSource.indexOf('\n    });', toggleStart) : -1;
-  const toggleBody = toggleEnd > toggleStart ? dialogSource.slice(toggleStart, toggleEnd) : '';
-  const initIndex = toggleBody.indexOf('this.colorPicker.setColor(this.selectedColor)');
-  const focusIndex = toggleBody.indexOf('this.colorPicker.focus()');
-  const pickerLifecycle = initIndex >= 0 && focusIndex > initIndex &&
-    toggleBody.includes(':popover-open') &&
-    toggleBody.includes('this.colorPicker.endDrag();') &&
-    dialogSource.includes('this.selectedColor = hex;') &&
-    dialogSource.includes('this.syncColorSelection();');
-  check('the picker initializes before focus on open and ends drags on close',
-    pickerLifecycle,
-    `init@${initIndex}, focus@${focusIndex}, lifecycle=${pickerLifecycle}`);
-
-  const focusoutClose = dialogSource.includes("this.colorPalette.addEventListener('focusout'") &&
-    dialogSource.includes('event.relatedTarget') &&
-    dialogSource.includes('this.colorPalette.contains(next)') &&
-    dialogSource.includes('this.hideColorPalette();');
-  check('the picker closes when keyboard focus leaves it',
-    focusoutClose,
-    `focusoutClose=${focusoutClose}`);
-
-  const pickerSheet = /\.channel-color-field\s*\{[^}]*width:\s*100%/.test(styleSheet) &&
-    /\.channel-color-hue\s*\{[^}]*height:\s*12px/.test(styleSheet) &&
-    /\.channel-color-preview\s*\{[^}]*display:\s*grid/.test(styleSheet) &&
-    /\.channel-color-palette\s*\{[^}]*width:\s*252px/.test(styleSheet);
-  check('the picker keeps the popover geometry and full-width themed widgets',
-    pickerSheet,
-    `pickerSheet=${pickerSheet}`);
-
-  const descriptionRemoved = !dialogSource.includes('aria-describedby') &&
-    !dialogSource.includes('channel-settings-description') &&
-    !dialogSource.includes('channels.dialogDescription') &&
-    dialogSource.includes("this.dialog.setAttribute('aria-labelledby', 'channel-settings-title')");
-  check('channel dialog removes its description but keeps its visible title relationship',
-    descriptionRemoved,
-    `descriptionRemoved=${descriptionRemoved}`);
-
-  const dualEdgeGlyph = channelList.includes("mode === 'edge' ? t('trigger.anyEdge')") &&
-    channelList.includes("mode === 'edge' ? 'M1 12H5V4H10M14 4H19V12H23'") &&
+  const anyEdgeGlyph = channelList.includes("mode === 'edge' ? t('trigger.anyEdge')") &&
+    channelList.includes("mode === 'edge' ? 'M1 4H6L18 12H23M1 12H6L18 4H23'") &&
+    channelList.includes("mode === 'dont-care'") &&
+    channelList.includes("'M6 8H18'") &&
     channelList.includes("path.setAttribute('stroke-linejoin', 'round')");
-  check('dual-edge has a translated accessible name and a redesigned stepped glyph',
-    dualEdgeGlyph,
-    `dualEdgeGlyph=${dualEdgeGlyph}`);
-
-  const noGlobalListeners = !channelList.includes('document.addEventListener') &&
-    !channelList.includes('window.addEventListener');
-  const discardPaths = dialogSource.includes("this.dialog.addEventListener('cancel'") &&
-    dialogSource.includes('if (event.target === this.dialog) {') &&
-    dialogSource.includes("this.cancelButton.addEventListener('click', () => this.dismiss(true))");
-  check('dialog dismissal paths need no document or window listeners',
-    noGlobalListeners && discardPaths,
-    `noGlobalListeners=${noGlobalListeners}, discardPaths=${discardPaths}`);
-
-  const backdropFocus = dialogSource.includes('event.preventDefault();\n        this.dismiss(true);');
-  check('backdrop pointerdown cannot retarget focus after dismissal',
-    backdropFocus,
-    `preventDefaultBeforeDismiss=${backdropFocus}`);
+  check('any-edge has a translated name and an X glyph; None is a dash',
+    anyEdgeGlyph, `anyEdgeGlyph=${anyEdgeGlyph}`);
 
   const capturePanel = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
   const waveformStack = fs.readFileSync('src/ui/waveformStack.ts', 'utf8');
@@ -434,7 +344,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const paintOrder = [
     'this.overlay.beginFrame();',
     'this.overlay.drawGrid(ticks);',
-    'this.drawLaneSurfaces(boxes);',
+    'this.drawLaneSurfaces(boxes, repeatTints);',
     'this.overlay.drawLevels(',
     'this.drawLaneBubbles(boxes, wCss);',
     'this.overlay.drawTrigger(',
@@ -603,12 +513,12 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `lateFlagGone=${!appSrc.includes('this.captureIsLoop && (this.running || this.stopping) ? { snapshot: true as const }')}`);
   const progressSplit =
     appSrc.includes('const loop = this.captureIsLoop;') &&
-    appSrc.includes('samples: loop ? this.store.length + this.droppedTotal : this.store.length') &&
-    appSrc.includes('bytesPerSampleForChannels(this.store.channelCount)');
+    appSrc.includes('samples: loop ? captured.length + this.droppedTotal : captured.length') &&
+    appSrc.includes('bytesPerSampleForChannels(captured.channelCount)');
   check('progressView splits loop totals from retained bytes',
     progressSplit,
-    `total=${appSrc.includes('samples: loop ? this.store.length + this.droppedTotal : this.store.length')}, ` +
-    `retained=${appSrc.includes('bytesPerSampleForChannels(this.store.channelCount)')}`);
+    `total=${appSrc.includes('samples: loop ? captured.length + this.droppedTotal : captured.length')}, ` +
+    `retained=${appSrc.includes('bytesPerSampleForChannels(captured.channelCount)')}`);
   check('the panel, trigger budget and real start path share stored mode without scope ownership',
     directMode,
     `panel=${panel.includes('capturePostTriggerSamples(s)')}, ` +
@@ -679,17 +589,17 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const frameEnd = frameStart >= 0 ? appSrc.indexOf('private draw()', frameStart) : -1;
   const frameSrc = frameEnd > frameStart ? appSrc.slice(frameStart, frameEnd) : '';
   const highRateGuard = frameSrc.includes('this.running && this.captureIsLoop &&') &&
-    frameSrc.includes('this.store.samplerate * bytesPerSampleForChannels(this.store.channelCount) >= LOOP_SUSPEND_MIN_BYTES_PER_SEC');
-  const suspendAt = frameSrc.indexOf('if (highRateLoop) return;');
-  const statusAt = frameSrc.indexOf('if (highRateLoop) this.renderStatus();');
-  check('high-rate loop drawing yields to ingestion without suspending other captures',
-    highRateGuard && suspendAt >= 0 && statusAt >= 0 && statusAt < suspendAt &&
-    frameSrc.includes('if (!highRateLoop) this.pumpBusBuilders();') &&
-    suspendAt < frameSrc.indexOf('this.dirty = false') &&
+    frameSrc.includes('this.store.samplerate * bytesPerSampleForChannels(this.store.channelCount) >= LOOP_BUILD_SUSPEND_BYTES_PER_SEC');
+  const throttledLive = frameSrc.includes('liveDrawDue(now, this.liveDrawAt, this.livePending, this.running)') &&
+    frameSrc.includes('this.liveDrawAt = now;') &&
     frameSrc.includes('now - this.runningPanelAt > 500') &&
-    appSrc.includes('const LOOP_SUSPEND_MIN_BYTES_PER_SEC = 160e6;') &&
+    !frameSrc.includes('if (highRateLoop) return;');
+  const buildersOff = frameSrc.includes('if (!highRateLoop) this.pumpBusBuilders();');
+  check('high-rate loop skips background bus builds but keeps a throttled live view',
+    highRateGuard && throttledLive && buildersOff &&
+    appSrc.includes('const LOOP_BUILD_SUSPEND_BYTES_PER_SEC = 160e6;') &&
     !frameSrc.includes('loopDrawAfter'),
-    `guard=${suspendAt >= 0}, status=${statusAt >= 0}, ordered=${statusAt >= 0 && statusAt < suspendAt}`);
+    `guard=${highRateGuard}, live=${throttledLive}, builders=${buildersOff}`);
   const startDrawAt = startSrc.indexOf('this.draw();');
   const startHintAt = startSrc.indexOf("this.el.hint.style.display = 'none';");
   check('a new capture clears the previous frame before device streaming starts',
@@ -703,10 +613,15 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   check('a retention drop leaves bus builders on their absolute frontier (no reset)',
     !enforceSrc.includes('b.builder?.reset') && !enforceSrc.includes('b.cache = null;'),
     `resetGone=${!enforceSrc.includes('b.builder?.reset')}, cacheGone=${!enforceSrc.includes('b.cache = null;')}`);
-  // HSync's checked_sub: the trigger position is store-relative session state, so a drop
-  // shifts it left and clears it once the trigger sample itself leaves retention.
-  const triggerShift = enforceSrc.includes(
-    'this.triggerSampleIndex - drop >= 0 ? this.triggerSampleIndex - drop : null');
+  // The trigger position is store-relative session state: a front drop translates it
+  // left and clears it once the trigger sample itself leaves retention. The ViewWindow
+  // is stored as offsets from T, so it translates by the same amount and keeps its
+  // pixels. The 64-sample drop quantum is internal and never changes the phase.
+  const triggerShift =
+    enforceSrc.includes('const next = this.triggerSampleIndex! - drop;') &&
+    enforceSrc.includes('this.triggerSampleIndex = next >= 0 && next < store.length ? next : null;') &&
+    enforceSrc.includes('this.stack.restoreViewport(view.start - drop, view.end - drop);') &&
+    !enforceSrc.includes('heldTriggerSample');
   check('a retention drop shifts the trigger marker and clears it once it leaves the window',
     triggerShift, `checkedSub=${triggerShift}`);
 
@@ -716,15 +631,21 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   adcStore.append(new Uint8Array(adcWords.buffer));
   const adcSpec: BusSpec = { bits: [0, 1, 2, 3, 4, 5, 6, 7], clock: null, encoding: 'unsigned' };
   const adcView = (): BusViewState => ({
-    id: 'bus-0', name: 'bus', spec: adcSpec, color: '#fff', fullScaleV: null, offsetV: 0,
+    id: 'bus-0', name: 'bus', spec: adcSpec, color: '#fff', fullScaleV: null, offsetV: 0, bitOrder: 'lsb',
     style: 'line', heightCss: 120, hideSources: false, builder: null, builtFor: null, cache: null,
   });
   const adcAt = (i: number): number => Math.floor(i / 250) & 0xff;
 
   const adcNoBuilder = analogFrame(adcStore, adcView(), 0, 40_000, 100, true);
-  check('analogFrame live without a builder stays the live placeholder',
-    adcNoBuilder.kind === 'empty' && adcNoBuilder.reason === 'live',
-    `kind=${adcNoBuilder.kind}`);
+  const noBuilderFinite = adcNoBuilder.kind === 'columns' &&
+    Array.from({ length: 100 }, (_, c) => adcNoBuilder.min[c]! <= adcNoBuilder.max[c]!).every(Boolean);
+  check('analogFrame samples a coarse envelope when no pyramid exists (fast loop)',
+    adcNoBuilder.kind === 'columns' && adcNoBuilder.provisional === true && noBuilderFinite &&
+    adcNoBuilder.min[0]! <= 1 && adcNoBuilder.max[0]! >= 0 &&
+    adcNoBuilder.min[99]! >= 158 && adcNoBuilder.max[99]! <= 160,
+    adcNoBuilder.kind === 'columns'
+      ? `c0=${adcNoBuilder.min[0]}..${adcNoBuilder.max[0]} c99=${adcNoBuilder.min[99]}..${adcNoBuilder.max[99]} provisional=${adcNoBuilder.provisional}`
+      : `kind=${adcNoBuilder.kind}`);
 
   const adcBuilt = adcView();
   adcBuilt.builder = new BusBuilder(adcStore, adcSpec);
@@ -733,7 +654,8 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   check('analogFrame live draws pyramid columns once built',
     adcLiveFull.kind === 'columns' &&
     adcLiveFull.min[0] === adcAt(0) && adcLiveFull.max[0] === adcAt(1_023) &&
-    adcLiveFull.min[99] === adcAt(38_912) && adcLiveFull.max[99] === adcAt(39_999),
+    adcLiveFull.min[99] === adcAt(38_912) && adcLiveFull.max[99] === adcAt(39_999) &&
+    adcLiveFull.provisional !== true,
     adcLiveFull.kind === 'columns'
       ? `c0=${adcLiveFull.min[0]}..${adcLiveFull.max[0]} c99=${adcLiveFull.min[99]}..${adcLiveFull.max[99]}`
       : `kind=${adcLiveFull.kind}`);
@@ -742,12 +664,18 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   adcPartial.builder = new BusBuilder(adcStore, adcSpec, adcStore.length, 4096);
   adcPartial.builder.step(0);
   const adcLivePart = analogFrame(adcStore, adcPartial, 0, 40_000, 100, true);
-  check('analogFrame live leaves columns past doneUpTo empty',
-    adcLivePart.kind === 'columns' &&
-    adcLivePart.min[0] === adcAt(0) && adcLivePart.max[10] === adcAt(4095) &&
-    Number.isNaN(adcLivePart.min[11]) && Number.isNaN(adcLivePart.max[99]),
+  const builtMatch = adcLivePart.kind === 'columns' && adcLiveFull.kind === 'columns' &&
+    Array.from({ length: 10 }, (_, c) =>
+      adcLivePart.min[c] === adcLiveFull.min[c] && adcLivePart.max[c] === adcLiveFull.max[c]).every(Boolean);
+  const tailFinite = adcLivePart.kind === 'columns' &&
+    Array.from({ length: 89 }, (_, i) => {
+      const c = i + 11;
+      return adcLivePart.min[c]! <= adcLivePart.max[c]!;
+    }).every(Boolean);
+  check('analogFrame keeps built columns exact and samples the unbuilt tail',
+    builtMatch && tailFinite && adcLivePart.kind === 'columns' && adcLivePart.provisional === true,
     adcLivePart.kind === 'columns'
-      ? `doneUpTo=${adcPartial.builder.pyramid.doneUpTo} c10=${adcLivePart.max[10]} c11=${adcLivePart.min[11]}`
+      ? `doneUpTo=${adcPartial.builder.pyramid.doneUpTo} built=${builtMatch} tail=${tailFinite} provisional=${adcLivePart.provisional}`
       : `kind=${adcLivePart.kind}`);
 
   // A drop can reach the store after the pump last called setLength: the one-bus-per-frame

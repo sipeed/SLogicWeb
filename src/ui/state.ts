@@ -69,6 +69,10 @@ export interface CaptureSettings {
   repeatIntervalSeconds: number;
   /** Loop window as a sample count (HSync's SampleLimit), not a duration. */
   loopSamples: number;
+  /** ADC trigger crossings, keyed by the analog group's bank start (0/8/16/24). */
+  analogTriggers: Record<number, AnalogTriggerSetting>;
+  /** Which trigger family arms: digital conditions may be many, analog exactly one. */
+  triggerSource: 'digital' | 'analog';
   /** Hardware data source: normal pins, USB maximum-speed pattern, or simulator. */
   testMode: 0 | 1 | 2;
   /** Global trigger enable mask. Per-channel modes remain stored when this is false. */
@@ -85,6 +89,12 @@ export interface CaptureSettings {
   preTriggerPercent: number;
 }
 
+export interface AnalogTriggerSetting {
+  kind: 'rising' | 'falling';
+  /** Crossing level in volts on the ADC module's ±15 V range. */
+  volts: number;
+}
+
 export const THRESHOLD_VOLT_OPTIONS = [0.6, 0.9, 1.2, 1.5, 1.65, 1.8, 2.5, 3.3] as const;
 
 export function defaultCaptureSettings(): CaptureSettings {
@@ -97,6 +107,8 @@ export function defaultCaptureSettings(): CaptureSettings {
     singleUnlimited: false,
     repeatIntervalSeconds: REPEAT_INTERVAL_SECONDS.default,
     loopSamples: DEFAULT_LOOP_SAMPLES,
+    analogTriggers: {},
+    triggerSource: 'digital',
     testMode: 0,
     triggerEnableMask: false,
     softwareTrigger: false,

@@ -4,11 +4,11 @@
  * The capture panel - the right-hand device panel, modelled on
  * a conventional capture-settings panel.
  *
- * Layout: a device header with the product name, a "Digital"
- * section with a channel-width selector and rows of eight channel chips filled with the
- * channel colour when enabled, each full row preceded by its oscilloscope button, a
- * sample-rate dropdown and a voltage dropdown side by side, then a segmented capture-mode
- * control.
+ * Layout: a device header with the product name, a "Digital" section with a channel-width
+ * selector and rows of eight channel chips filled with the channel colour when enabled,
+ * each row followed by its Analog button (at the right end, so a 4 CH row lines up with
+ * the rest), a sample-rate dropdown and a voltage dropdown side by side, then a segmented
+ * capture-mode control.
  *
  * Two things it has to show that a native tool would not: the WebUSB permission state, and the
  * **sample ceiling**. `src/data`'s `append` throws past 2^31 samples, which at this
@@ -20,10 +20,11 @@ import { SAMPLERATES_HZ, vrefCode, vrefVolts } from '../device/index.js';
 import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import {
-  formatCount, formatDuration, formatRate, formatStatusDetail, statusDetailOf,
+  formatBytes, formatCount, formatDuration, formatRate, formatStatusDetail, statusDetailOf,
 } from './format.js';
 import {
-  CHANNEL_BANK_SIZE, channelBankIndices, channelBankRange, channelBankStarts, lockedChannelBanks,
+  CHANNEL_BANK_SIZE, analogSamplerates, analogTriggerVolts, channelBankIndices, channelBankRange, channelBankStarts,
+  lockedChannelBanks,
 } from './channelBanks.js';
 import { t } from './i18n.js';
 import { chipForeground } from './metrics.js';
@@ -33,22 +34,20 @@ import type { CaptureSettings, ChannelState } from './state.js';
 import {
   clampLoopSamples, LOOP_WINDOW_QUANTUM, maxLoopSamples, THRESHOLD_VOLT_OPTIONS,
 } from './state.js';
-import { captureSecondsFromTime, maxCaptureSeconds, MIN_CAPTURE_SECONDS,
-  REPEAT_INTERVAL_SECONDS, repeatIntervalSecondsFromTime,
+import {
+  maxCaptureSeconds, MIN_CAPTURE_SECONDS, REPEAT_INTERVAL_SECONDS,
 } from './captureTime.js';
 import { capturePostTriggerSamples } from './capturePolicy.js';
 import { MAX_CURSOR_DISTANCE_ROWS, type DistanceSide } from './cursorDistance.js';
 import { MAX_CURSOR_EDGE_ROWS } from './cursorEdges.js';
 import { acquisitionTimeControl } from './timeControl.js';
-import { DEFAULT_TIME_UNIT, maxTimeValue, timeUnitForRange, type TimeUnit } from './timeUnits.js';
-import {
-  DEFAULT_LOOP_TIME_UNIT, loopSamplesFromTime, type LoopTimeUnit,
-} from './loopTime.js';
+import { triggerPanelNotes, triggerStatusNote } from './triggerStatus.js';
 
 export interface CapturePanelCallbacks {
   onSettings(next: CaptureSettings): void;
   onToggleChannel(index: number, enabled: boolean): void;
-  onOpenBank(start: number): void;
+  /** Turn the bank's ADC-analog reading on or off; the button is its only control. */
+  onToggleAnalog(start: number): void;
   onChannelWidth(channels: number): void;
   onUsbControl(command: string): Promise<string>;
   onRemoveCursor(id: number): void;
@@ -101,11 +100,32 @@ export interface CursorEdgeChannelView {
   name: string;
 }
 
+/**
+ * Read-only Loop display instrumentation. `anchorStepSamples` is how far the last
+ * auto-roll advanced the anchored window (one scanned crossing, i.e. a whole number of
+ * signal periods); `blockSamples` is what the block planner could swap in under the
+ * current frame/memory budget. Both are in samples.
+ */
+export interface LoopDisplayMetrics {
+  stride: number;
+  scanRateHz: number;
+  /** Median of adjacent reported crossings; 0 until two have been seen. */
+  periodSamples: number;
+  anchorStepSamples: number;
+  blockSamples: number;
+  blockBytes: number;
+  refreshHz: number;
+  retainedBytes: number;
+  fullWindow: boolean;
+}
+
 export interface CapturePanelView {
   settings: CaptureSettings;
   channels: readonly ChannelState[];
   widthOptions: readonly number[];
   buses: readonly BusViewState[];
+  /** Analog groups (A0–A3) the current device and width expose; 0 disables the buttons. */
+  analogGroups: number;
   deviceName: string | null;
   running: boolean;
   stopping: boolean;
@@ -124,21 +144,53 @@ export interface CapturePanelView {
   cursorDistances: readonly CursorDistanceRowView[];
   cursorEdges: readonly CursorEdgeRowView[];
   cursorEdgeChannels: readonly CursorEdgeChannelView[];
+  /** A loop trigger matches, but its sample was evicted before the page could lock on it. */
+  triggerViewLost: boolean;
+  /** The match message is waiting for the block that carries T; not a release. */
+  triggerViewPending: boolean;
+  /** A loop trigger currently owns the viewport (released when the data stops triggering). */
+  triggerLocked: boolean;
+  /** The running acquisition actually armed a software trigger. */
+  triggerArmed: boolean;
+  /** The trigger was released by the Loop store's hard memory cap. */
+  triggerAutoDisarmed: boolean;
+  /** The live settings request a trigger with at least one effective condition. */
+  settingsArmed: boolean;
+  /** A live analog edit cannot arm at the active capture's board/rate. */
+  triggerRetuneRejected: boolean;
+  /** The loop lock is rolling on scanned analog crossings (not the one-shot digital lock). */
+  triggerAnalogRolling: boolean;
+  /** Samples of pre-trigger history the running matcher actually retained. */
+  activeTriggerPreSamples: number | undefined;
+  /** Loop display matcher/swap readout; null outside a running analog Loop. */
+  loopMetrics?: LoopDisplayMetrics | null;
+  /** A previous Repeat Interval missed its trigger; the session is retrying. */
+  repeatMissed?: boolean;
 }
+
+/** The fields needed to refresh the trigger-state notes without rebuilding the panel. */
+export type TriggerStatusView = Pick<CapturePanelView,
+  'running' | 'stopping' | 'triggerState' | 'triggerViewLost' | 'triggerViewPending' |
+  'triggerLocked' | 'triggerAnalogRolling' | 'triggerArmed' | 'triggerAutoDisarmed' |
+  'settingsArmed' | 'repeatMissed'> & { mode: CaptureSettings['mode'] };
 
 export class CapturePanel {
   private advancedOpen = false;
   private consoleLines: string[] = [];
   private liveNote: HTMLElement | null = null;
   private lostNote: HTMLElement | null = null;
+  /** The dynamic arming/pending/memory notes, refreshed without a panel rebuild. */
+  private triggerNotesEl: HTMLElement | null = null;
+  /** The "Armed: ..." summary, hidden once the acquisition no longer just waits. */
+  private triggerArmedEl: HTMLElement | null = null;
   private droppedNote: HTMLElement | null = null;
   private statusDetail: HTMLElement | null = null;
   private progressEl: HTMLElement | null = null;
   private progressBar: HTMLElement | null = null;
   private progressValue: HTMLElement | null = null;
-  private captureTimeUnit: TimeUnit = DEFAULT_TIME_UNIT;
-  private repeatIntervalUnit: TimeUnit = DEFAULT_TIME_UNIT;
-  private loopTimeUnit: LoopTimeUnit = DEFAULT_LOOP_TIME_UNIT;
+  private triggerStatusEl: HTMLElement | null = null;
+  private loopMatcherEl: HTMLElement | null = null;
+  private loopSwapEl: HTMLElement | null = null;
 
   constructor(
     private readonly root: HTMLElement,
@@ -183,6 +235,153 @@ export class CapturePanel {
       const pos = item.querySelector<HTMLElement>('.cursor-pos');
       if (pos === null) continue;
       pos.textContent = cursorCellText(row);
+    }
+  }
+
+  /**
+   * Refresh the trigger-state notes only. Repeat waves do not rebuild the panel, so the
+   * waiting/triggered text would otherwise stay stale for the whole sweep.
+   */
+  updateTriggerStatus(status: TriggerStatusView): void {
+    this.fillTriggerStatus(status);
+    this.fillTriggerNotes(status);
+  }
+
+  /**
+   * Refresh only the dynamic trigger notes. Repeat waves and the digital-lock eviction
+   * path do not rebuild the panel, so the "Armed" summary and pending/arming notes would
+   * otherwise stay in the DOM after the state they describe has passed.
+   */
+  private fillTriggerNotes(v: TriggerStatusView): void {
+    const host = this.triggerNotesEl;
+    if (!host) return;
+    host.replaceChildren();
+    const notes = triggerPanelNotes({
+      running: v.running,
+      stopping: v.stopping,
+      mode: v.mode,
+      triggerState: v.triggerState,
+      settingsArmed: v.settingsArmed,
+      triggerArmed: v.triggerArmed,
+      triggerLocked: v.triggerLocked,
+      triggerAnalogRolling: v.triggerAnalogRolling,
+      triggerViewPending: v.triggerViewPending,
+      triggerAutoDisarmed: v.triggerAutoDisarmed,
+    });
+    if (notes.arming) {
+      const arming = div('panel-note live');
+      arming.textContent = t('capturePanel.armingTrigger');
+      host.appendChild(arming);
+    }
+    if (notes.memoryReleased) {
+      const released = div('panel-note error');
+      released.textContent = t('capturePanel.triggerMemoryReleased');
+      host.appendChild(released);
+    }
+    if (notes.pending) {
+      const pending = div('panel-note');
+      pending.textContent = t('capturePanel.pendingTrigger');
+      host.appendChild(pending);
+    }
+    if (this.triggerArmedEl) this.triggerArmedEl.hidden = !notes.armedSummary;
+  }
+
+  /** The status-view subset of the full panel view, for the text-only refresh path. */
+  private triggerStatusFrom(v: CapturePanelView, mode: CaptureSettings['mode']): TriggerStatusView {
+    return {
+      mode,
+      running: v.running,
+      stopping: v.stopping,
+      triggerState: v.triggerState,
+      triggerViewLost: v.triggerViewLost,
+      triggerViewPending: v.triggerViewPending,
+      triggerLocked: v.triggerLocked,
+      triggerAnalogRolling: v.triggerAnalogRolling,
+      triggerArmed: v.triggerArmed,
+      triggerAutoDisarmed: v.triggerAutoDisarmed,
+      settingsArmed: v.settingsArmed,
+      repeatMissed: v.repeatMissed === true,
+    };
+  }
+
+  private fillTriggerStatus(v: TriggerStatusView): void {
+    const host = this.triggerStatusEl;
+    if (!host) return;
+    host.replaceChildren();
+    const note = triggerStatusNote(v);
+    if (note === 'waiting') {
+      const wait = div('panel-note live');
+      wait.textContent = t('capturePanel.waitingTrigger');
+      host.appendChild(wait);
+    } else if (note === 'viewLost') {
+      // The loop window is shorter than one transfer: say why the view did not lock
+      // instead of leaving the "Triggered" claim contradicting the rolling plot.
+      const lost = div('panel-note error');
+      lost.textContent = t('capturePanel.triggerViewLost');
+      host.appendChild(lost);
+    } else if (note === 'loopAnalog' || note === 'loopDigital') {
+      // A digital loop lock is one-shot and never rolls, so it must not claim the
+      // analog local-step advance.
+      const hit = div('panel-note live');
+      hit.textContent = t(note === 'loopAnalog'
+        ? 'capturePanel.triggeredLoop' : 'capturePanel.triggeredLoopDigital');
+      host.appendChild(hit);
+    } else if (note === 'loopReleased' || note === 'loopReleasedDigital') {
+      const released = div(note === 'loopReleased' ? 'panel-note' : 'panel-note error');
+      released.textContent = t(note === 'loopReleased'
+        ? 'capturePanel.triggerLoopReleased' : 'capturePanel.triggerLoopReleasedDigital');
+      host.appendChild(released);
+    } else if (note === 'triggered') {
+      const hit = div('panel-note live');
+      hit.textContent = t('capturePanel.triggered');
+      host.appendChild(hit);
+    } else if (note === 'notFound' && !(v.repeatMissed && v.mode === 'repeat')) {
+      const miss = div('panel-note error');
+      // finish() discards the rolling search prefix - nothing was recorded.
+      miss.textContent = t('capturePanel.triggerNotFound');
+      host.appendChild(miss);
+    }
+
+    if (v.repeatMissed && v.mode === 'repeat') {
+      // B1: the miss belongs to an earlier Interval. Keep it visible while the session
+      // retries, rather than letting the next wave's "waiting" note erase the news.
+      const miss = div('panel-note error');
+      miss.textContent = t('capturePanel.repeatMissRetry');
+      host.appendChild(miss);
+    }
+  }
+
+  /**
+   * Refresh only the Loop instrumentation text. Called on the running panel's 500 ms
+   * cadence; a full render here would rebuild inputs and drop focus.
+   */
+  updateLoopMetrics(metrics: LoopDisplayMetrics | null): void {
+    const matcher = this.loopMatcherEl;
+    const swap = this.loopSwapEl;
+    if (!matcher || !swap) return;
+    if (!metrics) {
+      matcher.hidden = true;
+      swap.hidden = true;
+      return;
+    }
+    matcher.hidden = false;
+    matcher.textContent = t('capturePanel.loopMatcher', {
+      stride: formatCount(metrics.stride),
+      rate: formatRate(metrics.scanRateHz),
+    });
+    if (metrics.blockSamples > 0 && metrics.refreshHz > 0) {
+      swap.hidden = false;
+      swap.textContent = t('capturePanel.loopSwap', {
+        step: formatCount(metrics.anchorStepSamples),
+        block: formatCount(metrics.blockSamples),
+        refresh: formatRate(metrics.refreshHz),
+        retained: formatBytes(metrics.retainedBytes),
+      });
+    } else {
+      // Before the first block there is nothing to swap; a "0 at -" line reads like a
+      // defect. The matcher line alone is enough while arming.
+      swap.hidden = true;
+      swap.textContent = '';
     }
   }
 
@@ -238,6 +437,9 @@ export class CapturePanel {
     this.progressEl = null;
     this.progressBar = null;
     this.progressValue = null;
+    this.triggerStatusEl = null;
+    this.loopMatcherEl = null;
+    this.loopSwapEl = null;
 
     // ---- channels
     const chSec = section(t('capturePanel.digital'));
@@ -253,7 +455,7 @@ export class CapturePanel {
         b.className = 'seg' + (s.channels === n ? ' on' : '');
         b.textContent = `${n}CH`;
         b.dataset.channelWidth = String(n);
-        b.disabled = v.running || v.stopping;
+        b.disabled = v.stopping;
         if (b.disabled) {
           b.title = t('capturePanel.channelWidthBusy');
           b.setAttribute('aria-label', b.title);
@@ -266,54 +468,62 @@ export class CapturePanel {
 
     const banks = div('channel-banks');
     const activeBanks = lockedChannelBanks(v.buses, v.channels.length);
+    const analogBusy = v.stopping;
     for (const start of channelBankStarts(v.channels.length)) {
       const indices = channelBankIndices(start, v.channels.length);
       const range = channelBankRange(start, v.channels.length);
-      const locked = activeBanks.has(start);
+      const active = activeBanks.has(start);
+      const group = start / CHANNEL_BANK_SIZE;
+      const name = `A${group}`;
       const bank = div('channel-bank');
       bank.dataset.bankStart = String(start);
-      if (indices.length === CHANNEL_BANK_SIZE) {
-        bank.appendChild(oscilloscopeButton(start, activeBanks.has(start), range,
-          () => this.cb.onOpenBank(start)));
-        bank.appendChild(div('channel-bank-sep'));
+
+      if (active) {
+        // The eight inputs are the converter's data bus while it is read, so the row is
+        // the analog channel itself, not eight logic chips (HSync's Analog toggle).
+        const cell = div('analog-cell');
+        cell.dataset.analogCell = String(start);
+        cell.textContent = t('capturePanel.analogCell', { name });
+        cell.title = t('capturePanel.analogEnable', { range, name });
+        bank.appendChild(cell);
+      } else {
+        const grid = div('chip-grid channel-bank-grid');
+        grid.dataset.bankGrid = String(start);
+        grid.setAttribute('role', 'group');
+        grid.setAttribute('aria-label', range);
+        for (const index of indices) {
+          const c = v.channels[index]!;
+          const chip = document.createElement('button');
+          chip.className = 'chip' + (c.enabled ? ' on' : '');
+          chip.textContent = `D${c.index}`;
+          chip.title = c.name;
+          chip.dataset.channel = String(c.index);
+          chip.setAttribute('aria-pressed', String(c.enabled));
+          if (c.enabled) {
+            chip.style.background = c.color;
+            chip.style.color = chipForeground(c.color);
+          } else {
+            chip.style.borderColor = c.color;
+          }
+          chip.addEventListener('click', () => this.cb.onToggleChannel(c.index, !c.enabled));
+          grid.appendChild(chip);
+        }
+        bank.appendChild(grid);
       }
 
-      const grid = div('chip-grid channel-bank-grid');
-      grid.dataset.bankGrid = String(start);
-      grid.dataset.adcLocked = String(locked);
-      grid.setAttribute('role', 'group');
-      grid.setAttribute('aria-label', range);
-      for (const index of indices) {
-        const c = v.channels[index]!;
-        const chip = document.createElement('button');
-        chip.className = 'chip' + (c.enabled ? ' on' : '') + (locked ? ' adc-locked' : '');
-        chip.textContent = `D${c.index}`;
-        chip.title = locked ? t('capturePanel.channelLocked', { name: c.name, range }) : c.name;
-        chip.dataset.channel = String(c.index);
-        chip.dataset.adcLocked = String(locked);
-        chip.disabled = locked;
-        chip.setAttribute('aria-pressed', String(c.enabled));
-        if (locked) chip.setAttribute('aria-label', chip.title);
-        if (c.enabled) {
-          chip.style.background = c.color;
-          chip.style.color = chipForeground(c.color);
-        } else {
-          chip.style.borderColor = c.color;
-        }
-        chip.addEventListener('click', () => this.cb.onToggleChannel(c.index, !c.enabled));
-        grid.appendChild(chip);
-      }
-      if (locked) {
-        const overlay = document.createElement('span');
-        overlay.className = 'adc-channel-overlay';
-        overlay.dataset.adcOverlay = String(start);
-        const label = document.createElement('span');
-        label.className = 'adc-channel-overlay-label';
-        label.textContent = t('capturePanel.oscilloscopeActive');
-        overlay.appendChild(label);
-        grid.appendChild(overlay);
-      }
-      bank.append(grid);
+      // One button per row, always in the same place: at the right of the eight slots.
+      // A partial row (4 CH) and the 16U3 still show it, disabled, so every row lines up.
+      const usable = indices.length === CHANNEL_BANK_SIZE && group < v.analogGroups;
+      const hint = analogBusy
+        ? t('capturePanel.analogBusy')
+        : active
+          ? t('capturePanel.analogDisable', { name })
+          : !usable
+            ? t(indices.length !== CHANNEL_BANK_SIZE ? 'capturePanel.analogNeedsEight'
+              : 'capturePanel.analogUnsupported')
+            : t('capturePanel.analogEnable', { range, name });
+      bank.appendChild(analogButton(start, active, usable && !analogBusy, hint,
+        () => this.cb.onToggleAnalog(start)));
       banks.appendChild(bank);
     }
     chSec.body.appendChild(banks);
@@ -321,8 +531,12 @@ export class CapturePanel {
     // ---- rate + threshold
     const rowRT = div('field-row');
     const ceiling = v.maxSamplerateHz[s.channels] ?? 200e6;
-    const rateOptions: SelectOptionTuple[] = SAMPLERATES_HZ
-      .filter((r) => r <= ceiling)
+    const supported = SAMPLERATES_HZ.filter((r) => r <= ceiling);
+    // The ADC module's sample clock must come from its 800 MHz PLL (HSync adc.rs), so an
+    // active analog group narrows the list to that PLL's divisors from 100 MHz up.
+    const analogRates = activeBanks.size > 0 ? analogSamplerates(supported) : [];
+    const selectable = analogRates.length > 0 ? analogRates : supported;
+    const rateOptions: SelectOptionTuple[] = selectable
       .map((r) => [String(r), formatRate(r)]);
     const rate = selectControl(
       'capture.sampleRate',
@@ -346,6 +560,12 @@ export class CapturePanel {
     rowRT.appendChild(th.el);
     chSec.body.appendChild(rowRT);
 
+    if (activeBanks.size > 0) {
+      const analogNote = div('panel-note');
+      analogNote.textContent = t('capturePanel.analogRateNote');
+      chSec.body.appendChild(analogNote);
+    }
+
     const code = vrefCode(s.thresholdVolts);
     const note = div('panel-note');
     note.textContent = t('capturePanel.dacNote', {
@@ -360,6 +580,7 @@ export class CapturePanel {
     // ---- mode
     const modeSec = section(t('capturePanel.capture'));
     const modeLocked = v.running || v.stopping || v.repeatPending;
+    const timeLocked = v.stopping;
     const seg = div('segmented');
     for (const [id, text] of [
       ['single', t('capturePanel.modeSingle')], ['repeat', t('capturePanel.modeRepeat')],
@@ -374,6 +595,25 @@ export class CapturePanel {
       seg.appendChild(b);
     }
     modeSec.body.appendChild(seg);
+
+    if (v.running) {
+      const pending = div('panel-note');
+      pending.textContent = t(s.mode === 'loop'
+        ? 'capturePanel.pendingApplyLoop' : 'capturePanel.pendingApply');
+      modeSec.body.appendChild(pending);
+    }
+    if (s.mode === 'repeat') {
+      // A text legend for the two Repeat surfaces: the distinction must not rely on
+      // colour alone, and the same wording explains the hand-over during a Fixed view.
+      const layers = div('panel-note');
+      layers.textContent = t('capturePanel.repeatLayersNote');
+      modeSec.body.appendChild(layers);
+      if (s.triggerEnableMask) {
+        const search = div('panel-note');
+        search.textContent = t('capturePanel.repeatSearchNote');
+        modeSec.body.appendChild(search);
+      }
+    }
 
     const badgeKeys = {
       ready: 'capturePanel.statusReady',
@@ -444,16 +684,13 @@ export class CapturePanel {
 
     const maxSeconds = maxCaptureSeconds(s.samplerate);
     if (s.mode === 'single' || s.mode === 'repeat') {
-      this.captureTimeUnit = timeUnitForRange(this.captureTimeUnit, MIN_CAPTURE_SECONDS, maxSeconds) ?? 'us';
       const duration = acquisitionTimeControl({
         key: 'capture.duration',
         label: t('capturePanel.duration'),
-        unitLabel: t('capturePanel.timeUnit'),
-        unit: this.captureTimeUnit,
         seconds: s.seconds,
         minSeconds: MIN_CAPTURE_SECONDS,
         maxSeconds,
-        disabled: modeLocked,
+        disabled: timeLocked,
         ...(s.mode === 'single' ? {
           unlimited: {
             active: s.singleUnlimited,
@@ -461,44 +698,21 @@ export class CapturePanel {
             onSelect: () => this.cb.onSettings({ ...s, singleUnlimited: true }),
           },
         } : {}),
-        onValue: (value, unit) => {
-          const seconds = captureSecondsFromTime(value, unit, s.samplerate);
-          if (seconds !== null) this.cb.onSettings({ ...s, seconds, singleUnlimited: false });
-        },
-        onUnit: (unit, value) => {
-          this.captureTimeUnit = unit;
-          if (s.mode === 'single' && s.singleUnlimited) {
-            this.cb.onSettings({ ...s });
-            return;
-          }
-          if (value === null) return;
-          const seconds = captureSecondsFromTime(value, unit, s.samplerate);
-          if (seconds !== null) this.cb.onSettings({ ...s, seconds });
+        onValue: (seconds) => {
+          this.cb.onSettings({ ...s, seconds, singleUnlimited: false });
         },
       });
       modeSec.body.appendChild(duration.el);
       if (s.mode === 'repeat') {
-        this.repeatIntervalUnit = timeUnitForRange(
-          this.repeatIntervalUnit, REPEAT_INTERVAL_SECONDS.min, REPEAT_INTERVAL_SECONDS.max,
-        ) ?? 'us';
         const interval = acquisitionTimeControl({
           key: 'capture.repeatInterval',
           label: t('capturePanel.repeatInterval'),
-          unitLabel: t('capturePanel.timeUnit'),
-          unit: this.repeatIntervalUnit,
           seconds: s.repeatIntervalSeconds,
           minSeconds: REPEAT_INTERVAL_SECONDS.min,
           maxSeconds: REPEAT_INTERVAL_SECONDS.max,
-          disabled: modeLocked,
-          onValue: (value, unit) => {
-            const seconds = repeatIntervalSecondsFromTime(value, unit);
-            if (seconds !== null) this.cb.onSettings({ ...s, repeatIntervalSeconds: seconds });
-          },
-          onUnit: (unit, value) => {
-            this.repeatIntervalUnit = unit;
-            if (value === null) return;
-            const seconds = repeatIntervalSecondsFromTime(value, unit);
-            if (seconds !== null) this.cb.onSettings({ ...s, repeatIntervalSeconds: seconds });
+          disabled: timeLocked,
+          onValue: (seconds) => {
+            this.cb.onSettings({ ...s, repeatIntervalSeconds: seconds });
           },
         });
         modeSec.body.appendChild(interval.el);
@@ -507,25 +721,18 @@ export class CapturePanel {
       const maxSamples = maxLoopSamples(s.channels);
       const minSeconds = LOOP_WINDOW_QUANTUM / s.samplerate;
       const maxWindowSeconds = maxSamples / s.samplerate;
-      this.loopTimeUnit = timeUnitForRange(this.loopTimeUnit, minSeconds, maxWindowSeconds) ?? 'us';
       const windowControl = acquisitionTimeControl({
         key: 'capture.loopWindow',
-        label: t('capturePanel.loopRetention'),
-        unitLabel: t('capturePanel.timeUnit'),
-        unit: this.loopTimeUnit,
+        // Loop is a rolling single capture; its window is the capture's duration, and the
+        // panel calls it that in every mode (HSync's acquisition menu does the same).
+        label: t('capturePanel.duration'),
         seconds: clampLoopSamples(s.loopSamples, s.channels) / s.samplerate,
         minSeconds,
         maxSeconds: maxWindowSeconds,
-        disabled: modeLocked,
-        onValue: (value, unit) => {
-          const samples = loopSamplesFromTime(value, unit, s.samplerate, s.channels);
-          if (samples !== null) this.cb.onSettings({ ...s, loopSamples: samples });
-        },
-        onUnit: (unit, value) => {
-          this.loopTimeUnit = unit;
-          if (value === null) return;
-          const samples = loopSamplesFromTime(value, unit, s.samplerate, s.channels);
-          if (samples !== null) this.cb.onSettings({ ...s, loopSamples: samples });
+        disabled: timeLocked,
+        onValue: (seconds) => {
+          const samples = clampLoopSamples(Math.round(seconds * s.samplerate), s.channels);
+          this.cb.onSettings({ ...s, loopSamples: samples });
         },
       });
       modeSec.body.appendChild(windowControl.el);
@@ -538,16 +745,15 @@ export class CapturePanel {
         rate: formatRate(s.samplerate),
       });
     } else {
-      const finiteMax = maxTimeValue(maxSeconds, this.captureTimeUnit);
       if (s.mode === 'single' && s.singleUnlimited) {
         limit.textContent = t('capturePanel.singleUnlimitedNote');
       } else if (s.mode === 'single') {
         limit.textContent = t('capturePanel.singleFiniteNote', {
-          max: finiteMax, unit: this.captureTimeUnit,
+          max: formatDuration(maxSeconds),
         });
       } else {
         limit.textContent = t('capturePanel.repeatFiniteNote', {
-          max: finiteMax, unit: this.captureTimeUnit,
+          max: formatDuration(maxSeconds),
         });
       }
     }
@@ -555,13 +761,185 @@ export class CapturePanel {
 
     const triggerSec = section(t('capturePanel.softwareTrigger'));
     const mask = document.createElement('input');
-    mask.type = 'checkbox'; mask.checked = s.triggerEnableMask; mask.disabled = v.running || v.stopping;
+    mask.type = 'checkbox'; mask.checked = s.triggerEnableMask;
+    // Trigger edits are live while the matcher waits and pending after it matches; only
+    // a capture that is already tearing down refuses them.
+    mask.disabled = v.stopping;
     mask.title = t('capturePanel.enableTrigger');
     mask.setAttribute('aria-label', mask.title);
     triggerSec.header.appendChild(mask);
     mask.addEventListener('change', () => this.cb.onSettings({ ...s, triggerEnableMask: mask.checked }));
     triggerSec.body.hidden = !s.triggerEnableMask;
     if (s.triggerEnableMask) {
+      // Analog triggering needs an active ADC group, and its preview below only reflects
+      // triggers configured on those rows, so resolve the group set before the buttons.
+      const analogBanks = [...new Set(v.buses
+        .filter((bus) => bus.analogGroup !== undefined)
+        .map((bus) => bus.analogGroup! * CHANNEL_BANK_SIZE))]
+        .filter((start) => start + CHANNEL_BANK_SIZE <= v.channels.length)
+        .sort((a, b) => a - b);
+      const analogAvailable = analogBanks.length > 0;
+      const hiddenInputs = new Set<number>();
+      for (const start of analogBanks) {
+        for (let offset = 0; offset < CHANNEL_BANK_SIZE; offset++) hiddenInputs.add(start + offset);
+      }
+      const digitalConditions = s.triggerConditions
+        .filter((condition) => !hiddenInputs.has(condition.channel));
+      const settingsArmed = v.settingsArmed;
+      // Every trigger control is editable while the capture runs: a waiting matcher is
+      // retuned in place, a matched one keeps its matcher and the edit is pending for the
+      // next acquisition (the pending note says so). A matched Loop analog detector is
+      // the exception: it retunes live.
+      const triggerEditable = !v.stopping;
+
+      const sourceSeg = div('segmented trigger-source');
+      sourceSeg.setAttribute('role', 'group');
+      sourceSeg.setAttribute('aria-label', t('capturePanel.triggerSource'));
+      for (const [source, label] of [
+        ['digital', t('capturePanel.triggerDigital')],
+        ['analog', t('capturePanel.triggerAnalog')],
+      ] as const) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'seg' + (s.triggerSource === source ? ' on' : '');
+        button.textContent = label;
+        button.dataset.triggerSource = source;
+        const analogUnavailable = source === 'analog' && !analogAvailable;
+        button.disabled = !triggerEditable || analogUnavailable;
+        if (analogUnavailable) {
+          // There is no ADC group to arm, so say how to make one (or why there cannot be).
+          button.title = v.analogGroups > 0
+            ? t('capturePanel.analogEnable', {
+              range: channelBankRange(0, v.channels.length),
+              name: 'A0',
+            })
+            : t(v.channels.length < CHANNEL_BANK_SIZE
+              ? 'capturePanel.analogNeedsEight'
+              : 'capturePanel.analogUnsupported');
+          button.setAttribute('aria-label', button.title);
+        }
+        button.addEventListener('click', () => {
+          if (source === 'analog') {
+            // Only one ADC crossing can fix the time base; keep the first stored one.
+            const first = Object.entries(s.analogTriggers ?? {})
+              .sort(([a], [b]) => Number(a) - Number(b))[0];
+            const analogTriggers = first
+              ? { [Number(first[0])]: first[1] } : {};
+            this.cb.onSettings({ ...s, triggerSource: source, analogTriggers });
+          } else {
+            this.cb.onSettings({ ...s, triggerSource: source });
+          }
+        });
+        sourceSeg.appendChild(button);
+      }
+      triggerSec.body.appendChild(sourceSeg);
+      this.triggerNotesEl = div('trigger-notes');
+      this.triggerArmedEl = null;
+      triggerSec.body.appendChild(this.triggerNotesEl);
+      if (!settingsArmed && !v.stopping) {
+        // The one mistake this section invites: enabling the trigger and never picking a
+        // condition, which silently arms nothing.
+        const empty = div('panel-note error');
+        empty.textContent = t('capturePanel.noCondition');
+        triggerSec.body.appendChild(empty);
+      }
+
+      if (v.triggerRetuneRejected) {
+        // The device cannot arm this analog condition at the running rate/board; the
+        // edit is pending for the next acquisition, not silently armed.
+        const rejected = div('panel-note error');
+        rejected.textContent = t('capturePanel.triggerRetuneRejected');
+        triggerSec.body.appendChild(rejected);
+      }
+
+      if (s.triggerSource === 'digital') {
+        if (digitalConditions.length === 0) {
+          const empty = div('panel-note error');
+          empty.textContent = t('capturePanel.noDigitalTrigger');
+          triggerSec.body.appendChild(empty);
+        } else {
+          const list = div('global-trigger-list');
+          for (const condition of digitalConditions) {
+            const row = div('global-trigger-row');
+            const name = document.createElement('span');
+            name.className = 'global-trigger-name';
+            name.textContent = `D${condition.channel}`;
+            const mode = document.createElement('span');
+            mode.className = 'global-trigger-mode';
+            mode.textContent = digitalConditionLabel(condition.kind, condition.level);
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'global-trigger-remove';
+            remove.textContent = '×';
+            remove.title = t('capturePanel.removeTrigger', { channel: `D${condition.channel}` });
+            remove.setAttribute('aria-label', remove.title);
+            remove.disabled = !triggerEditable;
+            remove.addEventListener('click', () => {
+              const triggerModes = { ...s.triggerModes, [condition.channel]: 'dont-care' as const };
+              const triggerConditions = s.triggerConditions
+                .filter((candidate) => candidate.channel !== condition.channel);
+              this.cb.onSettings({ ...s, triggerModes, triggerConditions });
+            });
+            row.append(name, mode, remove);
+            list.appendChild(row);
+          }
+          triggerSec.body.appendChild(list);
+        }
+      } else {
+        const note = div('panel-note');
+        note.textContent = t('capturePanel.analogSingleNote');
+        triggerSec.body.appendChild(note);
+        const configured = analogBanks
+          .filter((start) => s.analogTriggers?.[start] !== undefined);
+        if (configured.length === 0) {
+          // While the matcher waits, removing the last condition restarts the capture as
+          // a free run; after a match the removal is pending for the next acquisition.
+          // Neither is a configuration error.
+          const empty = div(v.running || v.stopping ? 'panel-note' : 'panel-note error');
+          const firstBank = analogBanks[0];
+          if (firstBank !== undefined) {
+            // The Trigger control is on the ADC row in the left column; this section only
+            // previews and removes what that row configured.
+            empty.textContent = t('channels.triggerTip', {
+              name: `A${firstBank / CHANNEL_BANK_SIZE}`,
+              mode: t('trigger.none'),
+            });
+          } else {
+            // No ADC group to point at; the Analog source button above is disabled too.
+            empty.textContent = t('capturePanel.noAnalogTrigger');
+          }
+          triggerSec.body.appendChild(empty);
+        } else {
+          const list = div('global-trigger-list');
+          for (const start of configured) {
+            const setting = s.analogTriggers[start]!;
+            const name = `A${start / CHANNEL_BANK_SIZE}`;
+            const row = div('global-trigger-row');
+            const rowName = document.createElement('span');
+            rowName.className = 'global-trigger-name';
+            rowName.textContent = name;
+            const mode = document.createElement('span');
+            mode.className = 'global-trigger-mode';
+            mode.textContent =
+              `${t(setting.kind === 'rising' ? 'trigger.rising' : 'trigger.falling')} ` +
+              `${analogTriggerVolts(setting.kind, setting.volts).toFixed(4)} V`;
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'global-trigger-remove';
+            remove.textContent = '×';
+            remove.title = t('capturePanel.removeTrigger', { channel: name });
+            remove.setAttribute('aria-label', remove.title);
+            // Analog level/slope/removal edits are pending-run settings and remain live.
+            remove.addEventListener('click', () => {
+              this.cb.onSettings({ ...s, analogTriggers: {} });
+            });
+            row.append(rowName, mode, remove);
+            list.appendChild(row);
+          }
+          triggerSec.body.appendChild(list);
+        }
+      }
+
       const preOptions: SelectOptionTuple[] = [
         // Percent-notation options stay literal: they are notation, not prose.
         ['0', t('capturePanel.noPreTrigger')], ['10', '10%'], ['25', '25%'], ['50', '50%'], ['75', '75%'],
@@ -575,58 +953,81 @@ export class CapturePanel {
       pre.disabled = v.running || v.stopping;
       pre.addEventListener('change', () => this.cb.onSettings({ ...s, preTriggerPercent: Number(pre.value) }));
       triggerSec.body.appendChild(pre.el);
+      if (s.mode === 'loop' && s.triggerEnableMask) {
+        // In a loop the percentage is the trigger's horizontal position, not only how
+        // much history is kept. The analog note describes the local roll; the digital
+        // note must not claim re-anchoring, because a digital lock is one-shot. A running
+        // capture whose scanner was torn down still follows its configured source for
+        // this explanation.
+        const analogConfigured = s.triggerSource === 'analog' &&
+          analogBanks.some((start) => s.analogTriggers?.[start] !== undefined);
+        const analog = v.triggerAnalogRolling || analogConfigured;
+        const loopNote = div('panel-note');
+        loopNote.textContent = t(analog
+          ? 'capturePanel.loopTriggerNote' : 'capturePanel.loopTriggerNoteDigital');
+        triggerSec.body.appendChild(loopNote);
+      }
 
       // The one mistake this section invites: enabling the trigger and never picking a
       // condition, which silently arms nothing. Say what is armed, or what is missing.
       const armed = div('panel-note');
-      if (s.triggerConditions.length === 0) {
-        armed.classList.add('error');
-        armed.textContent = t('capturePanel.noCondition');
-      } else {
-        const what = s.triggerConditions
-          .map((c) => `D${c.channel} ${c.kind === 'level'
-            ? t(c.level ? 'capturePanel.condHigh' : 'capturePanel.condLow')
-            : t(c.kind === 'rising' ? 'capturePanel.condRising'
-              : c.kind === 'falling' ? 'capturePanel.condFalling' : 'capturePanel.condEdge')}`)
-          .join(t('capturePanel.condJoiner'));
+      const digitalWhat = s.triggerSource === 'digital'
+        ? digitalConditions.map((c) =>
+          `D${c.channel} ${digitalConditionLabel(c.kind, c.level)}`)
+        : [];
+      const analogWhat = s.triggerSource === 'analog'
+        ? analogBanks
+          .filter((start) => s.analogTriggers?.[start] !== undefined)
+          .map((start) => {
+            const setting = s.analogTriggers[start]!;
+            return `A${start / CHANNEL_BANK_SIZE} ` +
+              t(setting.kind === 'rising' ? 'trigger.rising' : 'trigger.falling') +
+              ` ${analogTriggerVolts(setting.kind, setting.volts).toFixed(4)} V`;
+          })
+        : [];
+      if (digitalWhat.length > 0 || analogWhat.length > 0) {
+        const what = [...digitalWhat, ...analogWhat].join(t('capturePanel.condJoiner'));
         // The *effective* pre-trigger window, with the same clamps startCapture
         // applies: percent of the post-trigger budget (of the loop window in loop
         // mode), capped by the 64 MiB retained prefix. Promising the raw percentage
         // would overstate it exactly when the cap bites (e.g. 50% of 1 s at
         // 16ch/200M is capped at ~167 ms).
         const post = capturePostTriggerSamples(s);
-        const pre = Math.min(
-          Math.max(0, post - 1),
-          Math.max(0, Math.floor(post * s.preTriggerPercent / 100)),
-          Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bytesPerSampleForChannels(s.channels)),
-        );
-        const capped = pre < Math.floor(post * s.preTriggerPercent / 100);
+        // A running matcher's retained prefix was sized at start; Duration edits cannot
+        // grow or shrink it, so the armed note must not claim the new setting's window.
+        const requestedPre = Math.floor(post * s.preTriggerPercent / 100);
+        const preSamples = v.running && v.activeTriggerPreSamples !== undefined
+          ? v.activeTriggerPreSamples
+          : Math.min(
+            Math.max(0, post - 1),
+            Math.max(0, requestedPre),
+            Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bytesPerSampleForChannels(s.channels)),
+          );
+        const capped = preSamples < requestedPre;
         armed.textContent = capped
           ? t('capturePanel.armedCapped', {
             what,
-            duration: formatDuration(pre / s.samplerate),
+            duration: formatDuration(preSamples / s.samplerate),
             megabytes: MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / 1048576,
           })
           : t('capturePanel.armed', {
             what,
-            duration: formatDuration(pre / s.samplerate),
+            duration: formatDuration(preSamples / s.samplerate),
           });
+        this.triggerArmedEl = armed;
+        triggerSec.body.appendChild(armed);
       }
-      triggerSec.body.appendChild(armed);
 
-      if (v.triggerState === 'waiting') {
-        const wait = div('panel-note live');
-        wait.textContent = t('capturePanel.waitingTrigger');
-        triggerSec.body.appendChild(wait);
-      } else if (v.triggerState === 'triggered') {
-        const hit = div('panel-note live');
-        hit.textContent = t('capturePanel.triggered');
-        triggerSec.body.appendChild(hit);
-      } else if (v.triggerState === 'not-found') {
-        const miss = div('panel-note error');
-        // finish() discards the rolling search prefix - nothing was recorded.
-        miss.textContent = t('capturePanel.triggerNotFound');
-        triggerSec.body.appendChild(miss);
+      this.triggerStatusEl = div('trigger-status');
+      triggerSec.body.appendChild(this.triggerStatusEl);
+      this.updateTriggerStatus(this.triggerStatusFrom(v, s.mode));
+
+      if (v.loopMetrics) {
+        this.loopMatcherEl = div('panel-note');
+        this.loopSwapEl = div('panel-note');
+        triggerSec.body.appendChild(this.loopMatcherEl);
+        triggerSec.body.appendChild(this.loopSwapEl);
+        this.updateLoopMetrics(v.loopMetrics);
       }
     }
 
@@ -824,6 +1225,11 @@ export class CapturePanel {
     source.addEventListener('change', () =>
       this.cb.onSettings({ ...s, testMode: Number(source.value) as 0 | 1 | 2 }));
     body.appendChild(source.el);
+    if (s.testMode !== 0) {
+      const analogNote = div('panel-note');
+      analogNote.textContent = t('capturePanel.testModeAnalog');
+      body.appendChild(analogNote);
+    }
 
     const consoleLabel = document.createElement('label');
     consoleLabel.className = 'advanced-console-label';
@@ -882,38 +1288,20 @@ export class CapturePanel {
   }
 }
 
-function oscilloscopeButton(
-  start: number, active: boolean, range: string, onOpen: () => void,
+function analogButton(
+  start: number, active: boolean, enabled: boolean, hint: string, onToggle: () => void,
 ): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
-  b.className = 'adc-button' + (active ? ' on' : '');
-  b.dataset.adcOpen = String(start);
-  b.dataset.adcActive = String(active);
-  b.setAttribute('aria-haspopup', 'dialog');
-  const state = t(active ? 'capturePanel.oscilloscopeEnabled' : 'capturePanel.oscilloscopeDisabled');
-  b.setAttribute('aria-label', t('capturePanel.oscilloscopeConfig', { range, state }));
-  b.title = b.getAttribute('aria-label')!;
-  const namespace = 'http://www.w3.org/2000/svg';
-  const icon = document.createElementNS(namespace, 'svg');
-  icon.setAttribute('viewBox', '0 0 24 24');
-  icon.setAttribute('aria-hidden', 'true');
-  icon.setAttribute('fill', 'none');
-  icon.setAttribute('stroke', 'currentColor');
-  icon.setAttribute('stroke-width', '1.8');
-  icon.setAttribute('stroke-linecap', 'round');
-  icon.setAttribute('stroke-linejoin', 'round');
-  const screen = document.createElementNS(namespace, 'rect');
-  screen.setAttribute('x', '3');
-  screen.setAttribute('y', '4');
-  screen.setAttribute('width', '18');
-  screen.setAttribute('height', '16');
-  screen.setAttribute('rx', '2');
-  const waveform = document.createElementNS(namespace, 'path');
-  waveform.setAttribute('d', 'M6 14h3l2-5 3 7 2-4h2');
-  icon.append(screen, waveform);
-  b.appendChild(icon);
-  b.addEventListener('click', onOpen);
+  b.className = 'analog-button' + (active ? ' on' : '');
+  b.dataset.analogToggle = String(start);
+  b.dataset.analogActive = String(active);
+  b.textContent = t('capturePanel.analog');
+  b.disabled = !enabled;
+  b.title = hint;
+  b.setAttribute('aria-label', hint);
+  b.setAttribute('aria-pressed', String(active));
+  b.addEventListener('click', onToggle);
   return b;
 }
 
@@ -1133,6 +1521,12 @@ function appendIconPath(icon: SVGSVGElement, d: string): void {
   path.setAttribute('stroke-linecap', 'round');
   path.setAttribute('stroke-linejoin', 'round');
   icon.appendChild(path);
+}
+
+function digitalConditionLabel(kind: 'level' | 'rising' | 'falling' | 'edge', level?: number): string {
+  return kind === 'level' ? t(level ? 'channels.triggerHigh' : 'channels.triggerLow')
+    : t(kind === 'rising' ? 'trigger.rising'
+      : kind === 'falling' ? 'trigger.falling' : 'trigger.anyEdge');
 }
 
 function nearest(list: readonly number[], v: number): number {

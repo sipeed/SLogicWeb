@@ -208,7 +208,7 @@ function check(name: string, pass: boolean, detail: string): void {
 {
   const got = translate(undefined, 'toolbar.start');
   check('translate with no dict falls back to English',
-    got === 'Start', got);
+    got === 'Capture', got);
 }
 
 {
@@ -814,7 +814,7 @@ function check(name: string, pass: boolean, detail: string): void {
 
 const baseSettings: CaptureSettings = {
   channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'single', seconds: 1,
-  singleUnlimited: false, repeatIntervalSeconds: 1, loopSamples: 16_000_000,
+  singleUnlimited: false, repeatIntervalSeconds: 1, loopSamples: 16_000_000, analogTriggers: {}, triggerSource: 'digital',
   testMode: 0, triggerEnableMask: true, softwareTrigger: true, triggerModes: {},
   triggerConditions: [], triggerChannel: 0,
   triggerKind: 'rising', triggerLevel: 1, preTriggerPercent: 10,
@@ -858,8 +858,13 @@ const baseSettings: CaptureSettings = {
   const retired = [
     'channels.dialogDescription', 'channels.moreColors', 'bus.fixedBits', 'bus.dragToOrder',
     'bus.bankEnabledNote', 'bus.bankDisableNote', 'bus.bankDisabledNote',
+    'bus.bankDialogTitle', 'bus.enableBank', 'bus.channelOrder',
+    'capturePanel.oscilloscopeConfig', 'capturePanel.oscilloscopeEnabled',
+    'capturePanel.oscilloscopeDisabled', 'capturePanel.channelLocked',
+    'capturePanel.oscilloscopeActive', 'capturePanel.oscilloscopeTakeover',
     'capturePanel.loop', 'capturePanel.retentionSamples', 'capturePanel.retentionNote',
-    'capturePanel.loopCeilingNote', 'capturePanel.oscilloscopeTakeover',
+    'capturePanel.loopRetention', 'capturePanel.timeUnit',
+    'capturePanel.loopCeilingNote',
     'capturePanel.freeRun', 'capturePanel.timer', 'capturePanel.durationS',
     'capturePanel.repeatIntervalS', 'capturePanel.loopSamples',
     'capturePanel.repeatPending', 'capturePanel.ceilingNote',
@@ -904,8 +909,10 @@ const baseSettings: CaptureSettings = {
     'channels.triggerMode', 'channels.cancel',
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',
     'analyzerPanel.decoderSearchLabel',
-    'bus.defaultName', 'bus.enableBank',
-    'capturePanel.channelWidth', 'capturePanel.statusReady', 'capturePanel.statusCapturing',
+    'bus.defaultName',
+    'capturePanel.channelWidth', 'capturePanel.analog', 'capturePanel.analogCell',
+    'capturePanel.analogEnable', 'capturePanel.analogRateNote',
+    'capturePanel.statusReady', 'capturePanel.statusCapturing',
     'capturePanel.statusStopping', 'capturePanel.statusWaiting', 'capturePanel.statusCompleted',
     'capturePanel.statusWaitingDetail', 'capturePanel.statusCompletedDetail',
     'capturePanel.singleFiniteNote', 'capturePanel.singleUnlimitedNote',
