@@ -1305,6 +1305,14 @@ check('a narrower device keeps the restored channel mask',
   deviceBody.includes('defaultChannels(max).map((c) => ({ ...c, enabled: masks[c.index] ?? true }))'),
   deviceBody.replace(/\s+/g, ' ').trim());
 
+const startBody = app.split('private async startCapture(')[1]
+  ?.split('private enforceLoopRetention(')[0] ?? '';
+check('a capture start carries the channel metadata instead of rebuilding defaults',
+  startBody.includes('carryChannelState(this.channels, model)') &&
+  !startBody.includes('defaultChannels(') &&
+  startBody.includes('this.persistWorkspace();'),
+  startBody.replace(/\s+/g, ' ').trim());
+
 const widthSetterBody = app.split('private setChannelWidth(channels: number): void')[1]
   ?.split('private afterChannelChange(')[0] ?? '';
 const afterMaskBody = app.split('private afterChannelChange(): void {')[1]?.split('\n  }')[0] ?? '';

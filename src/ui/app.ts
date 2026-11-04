@@ -76,6 +76,7 @@ import { PanelResizer } from './panelResizer.js';
 import { StoreRef } from './storeRef.js';
 import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannels, defaultChannelName, channelColor,
+  carryChannelState,
   DEFAULT_TRIGGER_MODE,
   edgeTriggerAutoArms, clampLoopSamples, DEFAULT_LOOP_SAMPLES, loopDropSamples,
   modesToConditions, triggerModeFromCondition, mappedCaptureChannels,
@@ -2306,9 +2307,8 @@ export class App {
       this.releaseMarkerPointer();
       this.storeRef.set(store);
       this.resetBusBuilds();
-      const masks = this.channels.map((c) => c.enabled);
       const model = Math.max(cfg.channels, this.device?.maxChannels ?? this.channels.length);
-      this.channels = defaultChannels(model).map((c) => ({ ...c, enabled: masks[c.index] ?? true }));
+      this.channels = carryChannelState(this.channels, model);
       this.order = this.channels.map((c) => c.index);
       this.reconcileEdgeChannels();
       this.persistWorkspace();
