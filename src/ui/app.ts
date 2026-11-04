@@ -43,7 +43,7 @@ import {
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
 import { CapturePanel, cursorDistanceSideId, cursorEdgeSideId,
   type CapturePanelState, type CapturePanelView, type CursorDistanceRowView, type CursorDistanceSideView,
-  type CursorEdgeRowView, type CursorRowView } from './capturePanel.js';
+  type CursorEdgeChannelView, type CursorEdgeRowView, type CursorRowView } from './capturePanel.js';
 import {
   CHANNEL_BANK_SIZE, busChannelBank, captureWidthTiers, channelBankIndices, channelBankStart,
   busOutOfWidth, lockedChannelBanks,
@@ -1366,6 +1366,10 @@ export class App {
     return this.enabledChannels().map((channel) => channel.index);
   }
 
+  private edgeChannelOptions(): CursorEdgeChannelView[] {
+    return this.enabledChannels().map((channel) => ({ index: channel.index, name: channel.name }));
+  }
+
   private reconcileEdgeChannels(): void {
     this.edgeRows = pruneEdgeChannels(this.edgeRows, new Set(this.edgeChannels()));
   }
@@ -1881,7 +1885,7 @@ export class App {
         cursors: this.cursorRows(),
         cursorDistances: this.cursorDistanceRows(),
         cursorEdges: this.cursorEdgeRows(),
-        cursorEdgeChannels: this.edgeChannels(),
+        cursorEdgeChannels: this.edgeChannelOptions(),
       });
     } else {
       this.analyzerPanel.render({

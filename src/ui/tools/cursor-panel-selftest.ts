@@ -1317,13 +1317,13 @@ const edgeMethodsSource = slice(app,
 {
   check('the compact channel select has an explicit unset and enabled channels in App display order',
     edgeSection.includes("['', t('capturePanel.cursorEdgesUnset')],") &&
-    edgeSection.includes('...v.cursorEdgeChannels.map((channel): SelectOptionTuple => [String(channel), `D${channel}`]),') &&
+    edgeSection.includes('...v.cursorEdgeChannels.map((channel): SelectOptionTuple => [String(channel.index), `D${channel.index}`]),') &&
     edgeSection.includes('`cursor.edge.channel.${row.id}`,') &&
     edgeSection.includes("t('capturePanel.cursorEdgesChannel', { row: row.row }),") &&
     edgeSection.includes("row.channel === null ? '' : String(row.channel),") &&
     !edgeSection.includes(['createElement(', "'select'", ')'].join('')),
     `unset=${edgeSection.includes('capturePanel.cursorEdgesUnset')}, ` +
-    `channels=${edgeSection.includes('v.cursorEdgeChannels.map')}`);
+    `channels=${edgeSection.includes('String(channel.index)')}`);
 
   check('channel changes commit an absolute channel or null through the row-scoped callback',
     edgeSection.includes("channel.el.classList.add('cursor-edge-channel');") &&
@@ -1408,12 +1408,16 @@ const edgeMethodsSource = slice(app,
     `empty=${CURSOR_EDGE_EMPTY_RESULT}, source=${edgeRowsSource.length} chars`);
 
   const render = slice(app, 'this.capturePanel.render({', 'this.analyzerPanel.render({');
-  check('the capture view carries resolved edge rows and the enabled available channel list',
+  const edgeChannelView = slice(panel, 'export interface CursorEdgeChannelView {', 'export interface CapturePanelView {').trim();
+  check('the capture view carries resolved edge rows and the named enabled available channels',
     render.includes('cursorEdges: this.cursorEdgeRows(),') &&
-    render.includes('cursorEdgeChannels: this.edgeChannels(),') &&
+    render.includes('cursorEdgeChannels: this.edgeChannelOptions(),') &&
     panel.includes('cursorEdges: readonly CursorEdgeRowView[];') &&
-    panel.includes('cursorEdgeChannels: readonly number[];'),
-    `rows=${render.includes('cursorEdges:')}, channels=${render.includes('cursorEdgeChannels:')}`);
+    panel.includes('cursorEdgeChannels: readonly CursorEdgeChannelView[];') &&
+    edgeChannelView === 'export interface CursorEdgeChannelView {\n  index: number;\n  name: string;\n}' &&
+    app.includes('return this.enabledChannels().map((channel) => ({ index: channel.index, name: channel.name }));'),
+    `rows=${render.includes('cursorEdges:')}, channels=${render.includes('cursorEdgeChannels:')}, ` +
+    `view=${edgeChannelView.length} chars`);
 
   const move = slice(app, "plot.addEventListener('pointermove', (e) => {", 'const end = (e: PointerEvent) => {');
   check('pointer movement never recomputes edge counts; the existing drag-end rebuild owns refresh',

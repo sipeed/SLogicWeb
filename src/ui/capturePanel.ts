@@ -96,6 +96,11 @@ export interface CursorEdgeRowView {
   result: string;
 }
 
+export interface CursorEdgeChannelView {
+  index: number;
+  name: string;
+}
+
 export interface CapturePanelView {
   settings: CaptureSettings;
   channels: readonly ChannelState[];
@@ -118,7 +123,7 @@ export interface CapturePanelView {
   cursors: readonly CursorRowView[];
   cursorDistances: readonly CursorDistanceRowView[];
   cursorEdges: readonly CursorEdgeRowView[];
-  cursorEdgeChannels: readonly number[];
+  cursorEdgeChannels: readonly CursorEdgeChannelView[];
 }
 
 export class CapturePanel {
@@ -760,7 +765,7 @@ export class CapturePanel {
         at.textContent = '@';
         const channelOptions: SelectOptionTuple[] = [
           ['', t('capturePanel.cursorEdgesUnset')],
-          ...v.cursorEdgeChannels.map((channel): SelectOptionTuple => [String(channel), `D${channel}`]),
+          ...v.cursorEdgeChannels.map((channel): SelectOptionTuple => [String(channel.index), `D${channel.index}`]),
         ];
         const channel = selectControl(
           `cursor.edge.channel.${row.id}`,
