@@ -192,9 +192,21 @@ export function matchLocale(tag: string): Locale | null {
   return null;
 }
 
-/** Validate a stored value against the known locales; anything else means 'en'. */
-export function pickLocale(stored: string | null): Locale {
-  return (LOCALES as readonly string[]).includes(stored ?? '') ? stored as Locale : 'en';
+function isSupportedLocale(value: string): value is Locale {
+  return (LOCALES as readonly string[]).includes(value);
+}
+
+/**
+ * Resolve the active locale: a stored supported locale wins, else the first
+ * matchable `preferred` entry, else 'en'. An unusable stored value counts as absent.
+ */
+export function pickLocale(stored: string | null, preferred: readonly string[] = []): Locale {
+  if (stored !== null && isSupportedLocale(stored)) return stored;
+  for (const tag of preferred) {
+    const matched = matchLocale(tag);
+    if (matched !== null) return matched;
+  }
+  return 'en';
 }
 
 /**

@@ -14,7 +14,9 @@
  *
  *   - formatMessage interpolates exactly, and leaves an unknown `{var}` literal in
  *     the output instead of swallowing it (the visible-failure contract);
- *   - pickLocale falls back to 'en' for absent and for unknown stored values;
+ *   - pickLocale prefers a stored supported locale, then the browser preference list
+ *     in declaration order, then 'en' (an unusable stored value does not short-circuit
+ *     the match - it counts as absent);
  *   - matchLocale maps a BCP-47 tag to a supported locale - exact form first, then
  *     the primary subtag - and never prefix-matches ('e', 'english', 'zhx' stay null);
  *   - translate() falls back to the English string when a dict lacks the key - the
@@ -114,6 +116,52 @@ function check(name: string, pass: boolean, detail: string): void {
   check('pickLocale falls back to en for absent/unknown, keeps known locales',
     absent === 'en' && unknown === 'en' && knownEn === 'en' && knownFr === 'fr',
     `null→${absent}, xx-YY→${unknown}, en→${knownEn}, fr→${knownFr}`);
+}
+
+{
+  const table: [string, readonly string[], Locale][] = [
+    ['ru', ['fr-FR'], 'ru'], ['en', ['fr-FR'], 'en'], ['fr', ['de-DE'], 'fr'],
+  ];
+  const bad = table.find(([stored, preferred, want]) => pickLocale(stored, preferred) !== want);
+  check('pickLocale keeps a stored locale ahead of the browser preference list',
+    bad === undefined,
+    bad ? `stored ${bad[0]} + ${JSON.stringify(bad[1])}→${pickLocale(bad[0], bad[1])}, want ${bad[2]}`
+      : table.map(([stored, preferred, want]) =>
+        `${stored}+${JSON.stringify(preferred)}→${pickLocale(stored, preferred)}=${want}`).join(', '));
+}
+
+{
+  const table: [string | null, readonly string[], Locale][] = [
+    [null, ['de-DE', 'ru'], 'ru'],
+    [null, ['fr-FR', 'ru'], 'fr'],
+    [null, ['de-DE', 'zh-Hans-CN'], 'zh-CN'],
+    [null, ['de-DE', 'it-IT'], 'en'],
+  ];
+  const bad = table.find(([stored, preferred, want]) => pickLocale(stored, preferred) !== want);
+  check('pickLocale takes the first supported tag in browser preference order',
+    bad === undefined,
+    bad ? `${JSON.stringify(bad[1])}→${pickLocale(bad[0], bad[1])}, want ${bad[2]}`
+      : table.map(([stored, preferred, want]) =>
+        `${JSON.stringify(preferred)}→${pickLocale(stored, preferred)}=${want}`).join(', '));
+}
+
+{
+  const table: [string | null, readonly string[], Locale][] = [
+    ['xx-YY', ['de-DE', 'ru'], 'ru'],
+    ['fr-DE', ['de-DE', 'ru'], 'ru'],
+    ['xx-YY', ['fr-FR'], 'fr'],
+    ['xx-YY', [], 'en'],
+    ['', ['fr-FR'], 'fr'],
+    [null, [], 'en'],
+  ];
+  const bad = table.find(([stored, preferred, want]) => pickLocale(stored, preferred) !== want);
+  check('pickLocale treats an unusable stored value as absent and keeps matching',
+    bad === undefined,
+    bad ? `stored ${JSON.stringify(bad[0])} + ${JSON.stringify(bad[1])}→`
+      + `${pickLocale(bad[0], bad[1])}, want ${bad[2]}`
+      : table.map(([stored, preferred, want]) =>
+        `${JSON.stringify(stored)}+${JSON.stringify(preferred)}→${pickLocale(stored, preferred)}`
+        + `=${want}`).join(', '));
 }
 
 // -------------------------------------------------------- language tag matching
