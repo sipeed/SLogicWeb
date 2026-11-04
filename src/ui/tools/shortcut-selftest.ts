@@ -305,6 +305,77 @@ function forbiddenDialogTokens(source: string): string[] {
     `mutatedMissing=${missingDialogNeedles(mutated).length}, realMissing=${missingDialogNeedles(source).length}`);
 }
 
+function methodBody(source: string, marker: string): string {
+  const start = source.indexOf(marker);
+  if (start < 0) return '';
+  const end = source.indexOf('\n  }', start);
+  return end < 0 ? source.slice(start) : source.slice(start, end);
+}
+
+function dialogConstructions(source: string): number {
+  return source.match(/new ShortcutsDialog\(/g)?.length ?? 0;
+}
+
+{
+  check('App constructs exactly one reference dialog and keeps it in one field',
+    dialogConstructions(appSource) === 1 &&
+    appSource.includes('private readonly shortcutsDialog: ShortcutsDialog;') &&
+    methodBody(appSource, 'constructor() {').includes('this.shortcutsDialog = new ShortcutsDialog();'),
+    `constructions=${dialogConstructions(appSource)}, ` +
+    `field=${appSource.includes('private readonly shortcutsDialog: ShortcutsDialog;')}`);
+}
+
+{
+  const mutated = `${appSource}\nconst extra = new ShortcutsDialog();\n`;
+  check('control: a second construction is detected by the same count predicate',
+    mutated !== appSource && dialogConstructions(mutated) === 2 && dialogConstructions(appSource) === 1,
+    `mutated=${dialogConstructions(mutated)}, real=${dialogConstructions(appSource)}`);
+}
+
+{
+  const items = methodBody(appSource, 'private settingsItems(');
+  const displayAt = items.indexOf("label: t('settings.detailedLabels')");
+  const rowAt = items.indexOf("t('settings.shortcuts')");
+  const row = rowAt >= 0 ? items.slice(rowAt) : '';
+  const closeAt = row.indexOf('this.channelList.closeDialog();');
+  const openAt = row.indexOf('this.shortcutsDialog.open(this.el.settings);');
+  const displayToggle = displayAt >= 0 && items.includes('checked: this.detailedLabels');
+  const shortcutsRow = row.includes("hint: '▸'") && closeAt >= 0 && openAt >= 0 && closeAt < openAt;
+  check('the settings menu keeps the display toggle and adds the shortcuts row that opens the dialog',
+    displayToggle && shortcutsRow && rowAt > displayAt,
+    `displayToggle=${displayToggle}, shortcutsRow=${shortcutsRow}, order=${displayAt}:${rowAt}`);
+}
+
+{
+  const start = appSource.indexOf("must<HTMLButtonElement>('btn-settings').addEventListener('click'");
+  const end = start >= 0 ? appSource.indexOf('\n    });', start) : -1;
+  const handler = start >= 0 && end > start ? appSource.slice(start, end) : '';
+  const closes = handler.includes('this.channelList.closeDialog()') &&
+    ['sidebarMenu', 'languageMenu', 'themeMenu']
+      .every((menu) => handler.includes(`this.${menu}.close('outside')`));
+  check('the settings handler keeps closing the channel dialog and the other menus before its own toggle',
+    closes && handler.includes('this.settingsMenu.toggle(this.settingsItems())'),
+    `closes=${closes}, length=${handler.length}`);
+}
+
+{
+  const body = methodBody(appSource, 'private retranslate(): void {');
+  const guard = 'if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings();';
+  const renderBody = methodBody(appSource, 'private renderPanels(');
+  check('retranslate refreshes the reference strings only while the dialog is open',
+    body.includes(guard) && !body.includes('this.shortcutsDialog.open(') &&
+    renderBody.length > 0 && !renderBody.includes('shortcutsDialog'),
+    `guard=${body.includes(guard)}, retranslate=${body.length}, renderPanels=${renderBody.length}`);
+}
+
+{
+  const keydowns = appSource.match(/addEventListener\('keydown'/g)?.length ?? 0;
+  check('app.ts adds no markup strings and only the single plot keydown listener',
+    !appSource.includes('innerHTML') && keydowns === 1 &&
+    appSource.includes("window.addEventListener('keydown'"),
+    `innerHTML=${appSource.includes('innerHTML')}, keydowns=${keydowns}`);
+}
+
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

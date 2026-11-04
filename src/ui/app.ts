@@ -71,6 +71,7 @@ import {
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
 import { shortcutIdFor } from './shortcuts.js';
+import { ShortcutsDialog } from './shortcutsDialog.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
 import { Overlay, paintMarkerChip, type HoverMeasurement } from './overlay.js';
 import { PanelResizer } from './panelResizer.js';
@@ -160,6 +161,7 @@ export class App {
   private readonly sidebarMenu: SettingsMenu;
   private readonly languageMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
+  private readonly shortcutsDialog: ShortcutsDialog;
   private detailedLabels = true;
   private lastWorkspaceSnapshot: string | null = null;
   private pendingToolbarViewport: { start: number; end: number; follow: boolean } | null = null;
@@ -318,6 +320,7 @@ export class App {
     this.sidebarMenu = new SettingsMenu(this.el.sidebar, 'sidebar-menu');
     this.languageMenu = new SettingsMenu(this.el.language, 'language-menu');
     this.themeMenu = new SettingsMenu(this.el.theme, 'theme-menu');
+    this.shortcutsDialog = new ShortcutsDialog();
     this.el.theme.dataset.mode = getMode();
     this.resizer = new PanelResizer(this.el.resizer, this.el.side, this.el.main);
 
@@ -1707,6 +1710,14 @@ export class App {
           this.relayout();
         },
       },
+      {
+        label: t('settings.shortcuts'),
+        hint: '▸',
+        onPick: () => {
+          this.channelList.closeDialog();
+          this.shortcutsDialog.open(this.el.settings);
+        },
+      },
     ];
   }
 
@@ -1821,6 +1832,7 @@ export class App {
       this.bankBusDrafts.set(start, retranslateBankBusConfig(draft));
     }
     applyStaticI18n(document);
+    if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings();
     this.relayout();       // channel cells rebuild; an open channel dialog closes here
     this.renderPanels();   // side panels + toolbar chrome
     this.assistantPanel?.render();  // its chrome only; the conversation is history

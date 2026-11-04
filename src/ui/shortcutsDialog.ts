@@ -52,6 +52,10 @@ export class ShortcutsDialog {
     });
   }
 
+  get isOpen(): boolean {
+    return this.dialog.open;
+  }
+
   open(anchor: HTMLElement | null): void {
     this.invoker = anchor;
     this.renderStrings();

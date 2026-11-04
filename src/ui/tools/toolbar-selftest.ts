@@ -956,9 +956,19 @@ const detailedLabelsToggle = settingsItemsBody.includes("label: t('settings.deta
   settingsItemsBody.includes('this.detailedLabels = !this.detailedLabels;') &&
   settingsItemsBody.includes('this.reflectDetailedLabels();');
 const detailedLabelsDefault = app.includes('private detailedLabels = true;');
-const settingsDisplayOnly = !settingsItemsBody.includes("t('settings.language')") &&
+const shortcutsRowAt = settingsItemsBody.indexOf("t('settings.shortcuts')");
+const shortcutsRowBody = shortcutsRowAt >= 0 ? settingsItemsBody.slice(shortcutsRowAt) : '';
+const detailedLabelsRowAt = settingsItemsBody.indexOf("label: t('settings.detailedLabels')");
+const shortcutsRowOpensDialog = shortcutsRowBody.includes("hint: '▸'") &&
+  shortcutsRowBody.includes('this.channelList.closeDialog();') &&
+  shortcutsRowBody.includes('this.shortcutsDialog.open(this.el.settings);') &&
+  shortcutsRowBody.indexOf('this.channelList.closeDialog();') <
+    shortcutsRowBody.indexOf('this.shortcutsDialog.open(this.el.settings);') &&
+  !shortcutsRowBody.includes('checked:');
+const settingsRowsScoped = !settingsItemsBody.includes("t('settings.language')") &&
   !settingsItemsBody.includes('LOCALES.map') && !settingsItemsBody.includes('children:') &&
-  (settingsItemsBody.match(/onPick:/g)?.length ?? 0) === 1;
+  (settingsItemsBody.match(/onPick:/g)?.length ?? 0) === 2 &&
+  detailedLabelsRowAt >= 0 && shortcutsRowAt > detailedLabelsRowAt;
 const constructorBody = methodBody('constructor() {');
 const detailedLabelsReflection = app.includes("document.documentElement.removeAttribute('data-toolbar-labels')") &&
   app.includes("document.documentElement.setAttribute('data-toolbar-labels', 'off')") &&
@@ -966,9 +976,11 @@ const detailedLabelsReflection = app.includes("document.documentElement.removeAt
   constructorBody.includes('this.reflectDetailedLabels();') &&
   settingsItemsBody.includes('this.reflectDetailedLabels();');
 check(
-  'settings owns only the checked default-on detailed-label display toggle',
-  detailedLabelsToggle && detailedLabelsDefault && detailedLabelsReflection && settingsDisplayOnly,
-  `toggle=${detailedLabelsToggle}, default=${detailedLabelsDefault}, reflection=${detailedLabelsReflection}, displayOnly=${settingsDisplayOnly}`,
+  'settings offers the checked default-on display toggle and one row that opens the shortcuts reference',
+  detailedLabelsToggle && detailedLabelsDefault && detailedLabelsReflection && settingsRowsScoped &&
+    shortcutsRowOpensDialog,
+  `toggle=${detailedLabelsToggle}, default=${detailedLabelsDefault}, reflection=${detailedLabelsReflection}, ` +
+  `rows=${settingsRowsScoped}, shortcuts=${shortcutsRowOpensDialog}`,
 );
 
 const viewportRestoreOrder = [
