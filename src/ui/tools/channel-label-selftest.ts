@@ -6,11 +6,15 @@ import type { ChannelState } from '../state.js';
 
 const nodeProcess = (() => {
   const p = (globalThis as {
-    process?: { exit(code: number): never };
+    process?: { exit(code: number): never; getBuiltinModule?(name: string): unknown };
   }).process;
   if (!p || typeof p.exit !== 'function') throw new Error('this entry point only runs under node');
   return p;
 })();
+
+interface FsLike {
+  readFileSync(path: string, encoding: 'utf8'): string;
+}
 
 interface TestResult {
   name: string;
@@ -102,6 +106,60 @@ const fixture: ChannelState[] = defaultChannels(8).map((c) => ({
     sameRow(holed[0]!, fixture[0]!) && sameRow(holed[1]!, defaults3[1]!) &&
     sameRow(holed[2]!, fixture[2]!),
     `${holed.map(describeRow).join(', ')}, holeWant=${describeRow(defaults3[1]!)}`);
+}
+
+// --------------------------------------------- channel-model rebuild sites
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const occursOnce = (needle: string): boolean => app.split(needle).length === 2;
+  const bodyBetween = (start: string, end: string): string =>
+    occursOnce(start) && occursOnce(end) ? app.split(start)[1].split(end)[0] : '';
+  const orderWrites = (body: string): number => body.split('this.order = ').length - 1;
+
+  const deviceBody = bodyBetween('private adoptDeviceChannels(', 'private async startCapture(');
+  const startBody = bodyBetween('private async startCapture(', 'private enforceLoopRetention(');
+  const adoptBody = bodyBetween('private adoptCapture(', 'private save(');
+
+  const sanctioned = [
+    'this.channels = (workspace.channels ?? defaultChannels(16)).map((channel, index) => ({ ...channel, index }));',
+    'this.channels = defaultChannels(store.channelCount);',
+    'this.channels = carryChannelState(this.channels, max);',
+    'this.channels = carryChannelState(this.channels, model);',
+  ];
+  const missing = sanctioned.filter((site) => !occursOnce(site));
+  const siteCount = app.split('this.channels = ').length - 1;
+
+  const defaultSites = [
+    'private channels: ChannelState[] = defaultChannels(16);',
+    '(workspace.channels ?? defaultChannels(16)).map(',
+    'this.channels = defaultChannels(store.channelCount);',
+  ];
+  const strayDefaults = defaultSites.filter((site) => !occursOnce(site));
+  const defaultCount = app.split('defaultChannels(').length - 1;
+
+  const orderAfterCarry = (body: string): boolean => {
+    const carryAt = body.indexOf('carryChannelState(this.channels,');
+    const orderAt = body.indexOf('restoreOrder(this.order, this.channels.length)');
+    return carryAt >= 0 && orderAt > carryAt && !body.includes('this.order = this.channels.map(') &&
+      orderWrites(body) === 1;
+  };
+  const deviceOrder = orderAfterCarry(deviceBody);
+  const startOrder = orderAfterCarry(startBody);
+  const identityOrder = adoptBody.includes('this.order = this.channels.map((c) => c.index);');
+  const noDefaultsInResize = !deviceBody.includes('defaultChannels(') &&
+    !startBody.includes('defaultChannels(');
+
+  check('every App channel-model rebuild is sanctioned and rebuilds the order after the carry',
+    siteCount === 4 && missing.length === 0 && defaultCount === 3 && strayDefaults.length === 0 &&
+    noDefaultsInResize && deviceOrder && startOrder && identityOrder,
+    `sites=${siteCount}, missing=${missing.length === 0 ? 'none' : missing.join(' | ')}, ` +
+    `defaultChannels=${defaultCount}, strayDefaults=${strayDefaults.length}, ` +
+    `noDefaultsInResize=${noDefaultsInResize}, ` +
+    `orderWrites=${orderWrites(deviceBody)}/${orderWrites(startBody)}, deviceOrder=${deviceOrder}, ` +
+    `startOrder=${startOrder}, adoptIdentityOrder=${identityOrder}`);
 }
 
 // ---------------------------------------------------------------------- report
