@@ -21,6 +21,9 @@ import type { Bubble } from './annotationLayout.js';
 import type { AnalogFrame } from './busView.js';
 import { canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { AXIS, BUBBLE, GRID, ROWS } from './metrics.js';
+import {
+  SCOPE_DIVISIONS, SCOPE_PAD_CSS, formatScopeVolts, scopeGeometry, scopeTickIndices,
+} from './scopeScale.js';
 import type { TickSet } from './timeAxis.js';
 
 export interface HoverMeasurement {
@@ -43,6 +46,103 @@ export interface HoverMeasurement {
 const MIN_BRACKET_PX = 6;
 /** [SOURCE] the readout box is offset 30 px to the side away from the pointer. */
 const READOUT_OFFSET = 30;
+
+/**
+ * Catmull-Rom reconstruction through the analog points. The ADC is a sampled signal, so a
+ * straight polyline makes every sample a corner; this is the practical band-limited
+ * interpolation the scope look wants (a windowed sinc on an irregular point set is not
+ * well defined). The caller clips it to the row.
+ */
+function smoothTrace(
+  c: CanvasRenderingContext2D, xs: readonly number[], ys: readonly number[], y: (v: number) => number,
+): void {
+  if (xs.length === 0) return;
+  c.moveTo(xs[0]!, y(ys[0]!));
+  for (let i = 0; i < xs.length - 1; i++) {
+    const x0 = xs[Math.max(0, i - 1)]!, y0 = ys[Math.max(0, i - 1)]!;
+    const x1 = xs[i]!, y1 = ys[i]!;
+    const x2 = xs[i + 1]!, y2 = ys[i + 1]!;
+    const x3 = xs[Math.min(xs.length - 1, i + 2)]!, y3 = ys[Math.min(xs.length - 1, i + 2)]!;
+    for (let step = 1; step <= 12; step++) {
+      const t = step / 12;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const px = 0.5 * ((2 * x1) + (-x0 + x2) * t +
+        (2 * x0 - 5 * x1 + 4 * x2 - x3) * t2 + (-x0 + 3 * x1 - 3 * x2 + x3) * t3);
+      const py = 0.5 * ((2 * y1) + (-y0 + y2) * t +
+        (2 * y0 - 5 * y1 + 4 * y2 - y3) * t2 + (-y0 + 3 * y1 - 3 * y2 + y3) * t3);
+      c.lineTo(px, y(py));
+    }
+  }
+}
+
+/**
+ * One horizontal span of Repeat-display surface, in CSS px inside the plot.
+ *
+ * Regions are x ranges only: the same two surfaces run across every visible row, and no
+ * vertical rule is drawn at the boundary (the two background colours are the whole
+ * signal). The caller supplies the colour, normally
+ * `CanvasPalette.repeatPreviousSurface` or `CanvasPalette.repeatCurrentSurface`.
+ */
+export interface RegionTint {
+  /** Left edge, CSS px from the plot's left edge. */
+  startCss: number;
+  /** Right edge (exclusive), CSS px. */
+  endCss: number;
+  color: string;
+}
+
+/**
+ * A vertical span the tint may cover: one row's trace band, in CSS px from the plot's
+ * top. `band` excludes the row separator, so the separator keeps the colour the
+ * renderer gave it.
+ */
+export interface RegionTintRow {
+  top: number;
+  band: number;
+}
+
+/** A snapped device-pixel-aligned fill, still expressed in CSS px. */
+export interface RegionTintRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+}
+
+/**
+ * Resolve Repeat-display regions into fill rects: clamp x to the plot, snap every edge
+ * to a device pixel (so a region border cannot land half-on a pixel at a fractional
+ * DPR), and clip each region to each row's trace band. Pure, so the layout can be
+ * tested without a canvas.
+ */
+export function regionTintRects(
+  regions: readonly RegionTint[],
+  rows: readonly RegionTintRow[],
+  widthCss: number,
+  dpr: number,
+): RegionTintRect[] {
+  if (!(widthCss > 0) || !(dpr > 0) || !Number.isFinite(widthCss) || !Number.isFinite(dpr)) {
+    return [];
+  }
+  const snap = (v: number): number => Math.round(v * dpr) / dpr;
+  const out: RegionTintRect[] = [];
+  for (const region of regions) {
+    if (!Number.isFinite(region.startCss) || !Number.isFinite(region.endCss)) continue;
+    const x0 = snap(Math.max(0, Math.min(widthCss, region.startCss)));
+    const x1 = snap(Math.max(0, Math.min(widthCss, region.endCss)));
+    if (!(x1 > x0)) continue;
+    for (const row of rows) {
+      if (!Number.isFinite(row.top) || !Number.isFinite(row.band) || !(row.band > 0)) continue;
+      const y0 = snap(row.top);
+      const y1 = snap(row.top + row.band);
+      if (!(y1 > y0)) continue;
+      out.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0, color: region.color });
+    }
+  }
+  return out;
+}
 
 export class Overlay {
   readonly grid: HTMLCanvasElement;
@@ -99,6 +199,61 @@ export class Overlay {
   }
 
   /**
+   * [CHOSEN] Repeat display: show which part of the plot still holds the PREVIOUS sweep
+   * and which part the CURRENT sweep has already filled.
+   *
+   * This is drawn on the GRID canvas, not the annotation canvas, and before `drawGrid()`.
+   * The waveform canvases are opaque (`alpha: false`), so no element can literally be
+   * drawn behind them. The grid canvas is the layer that reproduces "behind" optically:
+   * it composites with `mix-blend-mode: lighten` in the dark theme and `darken` in the
+   * light one (style.css), so an opaque surface a little lighter than the dark plot (or
+   * darker than the white one) replaces the background, while a channel trace - brighter
+   * than the tint in dark, darker in light - wins the per-channel comparison and keeps
+   * its colour. The annotation canvas stays above the grid canvas, so cursors, bubbles,
+   * lane surfaces and the hover readout are never tinted by this call.
+   *
+   * `rows` are the trace bands to clip to (the row separator is excluded), in CSS px from
+   * the top of the plot. Each region is an x span with its own surface colour; no
+   * vertical line is drawn. Ordering in the frame:
+   *
+   *   overlay.beginFrame();
+   *   overlay.drawRegionTint(regions, boxes);
+   *   overlay.drawGrid(ticks);
+   *
+   * Calling it before `drawGrid()` keeps the gridlines visible over both surfaces; they
+   * are stroked after the tint on the same canvas, so their measured colours survive.
+   */
+  drawRegionTint(regions: readonly RegionTint[], rows: readonly RegionTintRow[]): void {
+    this.paintRegionTint(this.gridCtx, regions, rows);
+  }
+
+  /**
+   * The same tint on the annotation canvas, for rows the App repaints opaquely after the
+   * grid pass (analyzer lanes, analog rows and blank rows). Without this the Repeat
+   * surfaces would be cut at every such row and read as a third region. The waveform rows
+   * stay untouched: the annotation canvas is transparent over them, so only the caller's
+   * opaque row surfaces need re-tinting.
+   */
+  drawRegionTintOverlay(regions: readonly RegionTint[], rows: readonly RegionTintRow[]): void {
+    this.paintRegionTint(this.ctx, regions, rows);
+  }
+
+  private paintRegionTint(
+    ctx: CanvasRenderingContext2D,
+    regions: readonly RegionTint[],
+    rows: readonly RegionTintRow[],
+  ): void {
+    const rects = regionTintRects(regions, rows, this.wCss, this.dpr);
+    if (rects.length === 0) return;
+    ctx.save();
+    for (const r of rects) {
+      ctx.fillStyle = r.color;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+    ctx.restore();
+  }
+
+  /**
    * [MEASURED] 1 CSS px wide, dashed 3 on / 3 off, dropped from every minor tick through
    * the whole stack. The gridline at a MAJOR tick is dimmer than at a minor one
    * (`#262629` against `#39393D`) - checked on all four majors of
@@ -135,6 +290,28 @@ export class Overlay {
   }
 
   /**
+   * A covered row with a centred one-line note, for a channel the capture lacks. Only the
+   * trace band is covered, so the row keeps its separator like the channel rows around it.
+   */
+  drawBlankRow(
+    top: number, band: number, note: string, tint?: readonly RegionTint[] | null,
+  ): void {
+    this.fillLane(top, band);
+    if (tint) this.drawRegionTintOverlay(tint, [{ top, band }]);
+    const c = this.ctx;
+    // The caller draws levels and bubbles right after this row; beginFrame() only
+    // clears, so alignment and font set here would leak into them. Keep the note's
+    // canvas state local.
+    c.save();
+    c.fillStyle = this.palette.text50;
+    c.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(note, this.wCss / 2, top + band / 2);
+    c.restore();
+  }
+
+  /**
    * One parallel-bus (ADC) row: the value as an analog trace over the full-scale range.
    *
    * Column frames come in device pixels and are drawn there, one bar per pixel from the
@@ -146,18 +323,69 @@ export class Overlay {
   drawAnalog(o: {
     top: number; band: number; frame: AnalogFrame; yMin: number; yMax: number;
     color: string; style: 'line' | 'step'; labels: { top: string; bottom: string }; note: string;
+    /** ADC scope rows: a smooth reconstruction and a vertical V/Div grid. */
+    smooth?: boolean;
+    scope?: {
+      voltsPerDiv: number; zeroPosition: number; offsetV: number; fullScaleV: number;
+      /** Target V/Div: fixed voltage ticks move through the animated display scale. */
+      tickVoltsPerDiv?: number;
+      /** Localized scale unit after the number, e.g. "V/div" or "V/格". */
+      voltsPerDivUnit?: string;
+      /** The armed analog trigger level and slope, drawn on the shared geometry. */
+      triggerVolts?: number;
+      triggerKind?: 'rising' | 'falling';
+    };
   }): void {
     const c = this.ctx;
-    const pad = 6;
-    const h = Math.max(1, o.band - 2 * pad);
-    const y = (v: number) => o.top + pad + ((o.yMax - v) / (o.yMax - o.yMin || 1)) * h;
+    const scope = o.scope;
+    // The trace, graticule, ruler and trigger all use `scopeGeometry`; App uses the same
+    // module to place its drag handles, so a canvas tick cannot drift from its handle.
+    const geometry = scope
+      ? scopeGeometry(o.top, o.band, scope.voltsPerDiv, scope.zeroPosition) : null;
+    const pad = SCOPE_PAD_CSS;
+    const h = geometry ? geometry.innerHeight : Math.max(1, o.band - 2 * pad);
+    const y = (v: number): number => geometry && scope
+      ? geometry.yVolts(scope.offsetV + (v / 255) * scope.fullScaleV)
+      : o.top + pad + ((o.yMax - v) / (o.yMax - o.yMin || 1)) * h;
+    // Tick labels use the target scale while their Y positions use the animated one.
+    // Thus a real voltage mark (1 V, 2 V, ...) travels away from or toward 0 V as the
+    // ruler extends/contracts; recomputing labels from the animated V/Div would instead
+    // pin every tick to the same four division positions and merely change its text.
+    const perDiv = geometry ? (geometry.topV - geometry.bottomV) / SCOPE_DIVISIONS : 0;
+    const tickStep = scope?.tickVoltsPerDiv ?? perDiv;
+    const ticks = geometry ? scopeTickIndices(geometry, tickStep) : [];
     c.save();
     c.beginPath();
     c.rect(0, o.top, this.wCss, o.band);
     c.clip();
 
-    // Zero line for signed encodings, and the full-scale labels.
-    if (o.yMin < 0 && o.yMax > 0) {
+    if (geometry && scope) {
+      // The graticule is anchored at 0 V: every visible integer division is drawn, so
+      // moving the trace never leaves a sparse or mislabelled scale. 0 V is the thick
+      // line; the others stay thin so a trace crossing them is not visually cut.
+      c.strokeStyle = this.palette.text50;
+      c.lineWidth = 1;
+      c.globalAlpha = 0.7;
+      for (const k of ticks) {
+        if (k === 0) continue;
+        const yy = Math.round(geometry.yVolts(k * tickStep)) + 0.5;
+        c.beginPath();
+        c.moveTo(0, yy);
+        c.lineTo(this.wCss, yy);
+        c.stroke();
+      }
+      if (geometry.bottomV <= 0 && geometry.topV >= 0) {
+        c.globalAlpha = 0.95;
+        c.strokeStyle = this.palette.text50;
+        c.lineWidth = 2;
+        const y0 = Math.round(geometry.yVolts(0)) + 0.5;
+        c.beginPath();
+        c.moveTo(0, y0);
+        c.lineTo(this.wCss, y0);
+        c.stroke();
+      }
+      c.globalAlpha = 1;
+    } else if (o.yMin < 0 && o.yMax > 0) {
       c.strokeStyle = this.palette.gridMajor;
       c.setLineDash([3, 3]);
       c.lineWidth = 1;
@@ -173,7 +401,48 @@ export class Overlay {
     c.strokeStyle = o.color;
     c.lineWidth = 1.25;
     c.lineJoin = 'round';
-    if (f.kind === 'columns') {
+    if (f.kind === 'columns' && o.smooth) {
+      // The zoomed-out half: a translucent min/max envelope with a smooth centreline,
+      // not one opaque bar per column. Columns are device px; this path draws in CSS px.
+      //
+      // A run is the contiguous span of known columns between NaN columns (a gap, or a
+      // region the builder has not reached). Each run is filled and smoothed on its own:
+      // joining across a NaN would paint unknown time as signal. Provisional columns are
+      // sampled rather than built, so their envelope is a touch lighter.
+      const d = this.dpr;
+      const len = f.min.length;
+      const known = (x: number): boolean =>
+        !Number.isNaN(f.min[x]!) && !Number.isNaN(f.max[x]!);
+      c.globalAlpha = f.provisional ? 0.22 : 0.34;
+      for (let x = 0; x < len;) {
+        if (!known(x)) { x++; continue; }
+        let end = x;
+        while (end + 1 < len && known(end + 1)) end++;
+        c.beginPath();
+        c.moveTo(x / d, y(f.max[x]!));
+        for (let i = x + 1; i <= end; i++) c.lineTo(i / d, y(f.max[i]!));
+        for (let i = end; i >= x; i--) c.lineTo(i / d, y(f.min[i]!));
+        c.closePath();
+        c.fill();
+        x = end + 1;
+      }
+      c.globalAlpha = 1;
+      for (let x = 0; x < len;) {
+        if (!known(x)) { x++; continue; }
+        let end = x;
+        while (end + 1 < len && known(end + 1)) end++;
+        const cx: number[] = [];
+        const cy: number[] = [];
+        for (let i = x; i <= end; i++) {
+          cx.push(i / d);
+          cy.push((f.min[i]! + f.max[i]!) / 2);
+        }
+        c.beginPath();
+        smoothTrace(c, cx, cy, y);
+        c.stroke();
+        x = end + 1;
+      }
+    } else if (f.kind === 'columns') {
       c.setTransform(1, 0, 0, 1, 0, 0);
       const d = this.dpr;
       for (let x = 0; x < f.min.length; x++) {
@@ -190,6 +459,35 @@ export class Overlay {
         const y1 = Math.ceil(y(lo) * d);
         c.fillRect(x, y0, 1, Math.max(Math.round(d), y1 - y0));
       }
+    } else if (f.kind === 'points' && o.smooth) {
+      const d = this.dpr;
+      let runX: number[] = [];
+      let runY: number[] = [];
+      c.beginPath();
+      let lastY = 0;
+      let hasLast = false;
+      const flush = (): void => {
+        smoothTrace(c, runX, runY, y);
+        if (runX.length > 0) {
+          lastY = runY[runY.length - 1]!;
+          hasLast = true;
+        }
+        runX = [];
+        runY = [];
+      };
+      for (let i = 0; i < f.count; i++) {
+        const v = f.v[i]!;
+        if (Number.isNaN(v)) { flush(); continue; }
+        runX.push(f.x[i]! / d);
+        runY.push(v);
+      }
+      flush();
+      // Hold the last value to the right edge only when the frame itself ends on a known
+      // sample. A trailing NaN is unknown time (a gap, or a trigger-anchored view whose
+      // right part is not captured yet) and must not be painted as a flat line.
+      const endsKnown = f.count > 0 && !Number.isNaN(f.v[f.count - 1]!);
+      if (hasLast && endsKnown) c.lineTo(this.wCss, y(lastY));
+      c.stroke();
     } else if (f.kind === 'points') {
       const d = this.dpr;
       const xs: number[] = [];
@@ -230,11 +528,104 @@ export class Overlay {
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     c.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
     c.fillStyle = this.palette.text50;
-    c.textAlign = 'left';
-    c.textBaseline = 'top';
-    c.fillText(o.labels.top, 4, o.top + 2);
-    c.textBaseline = 'bottom';
-    c.fillText(o.labels.bottom, 4, o.top + o.band - 2);
+    if (geometry && scope) {
+      // The armed trigger level, on the same geometry as the trace. App owns the pointer
+      // handle; the line is painted now and its readout goes above the ruler labels below.
+      if (scope.triggerVolts !== undefined && scope.triggerVolts >= geometry.bottomV &&
+          scope.triggerVolts <= geometry.topV) {
+        c.globalAlpha = 0.9;
+        c.strokeStyle = this.palette.warning;
+        c.lineWidth = 1;
+        c.setLineDash([4, 3]);
+        const ty = Math.round(geometry.yVolts(scope.triggerVolts)) + 0.5;
+        c.beginPath();
+        c.moveTo(0, ty);
+        c.lineTo(this.wCss, ty);
+        c.stroke();
+        c.setLineDash([]);
+        c.globalAlpha = 1;
+      }
+      // The voltage ruler is on the right, inside the analog row. The plot has no
+      // reserved right gutter, so the rule sits just inside the canvas edge and the
+      // labels are right-aligned against it; the top and bottom edge labels are gone
+      // because every division, including the visible extremes, now has one label.
+      const rulerX = Math.round(this.wCss - 6) + 0.5;
+      c.strokeStyle = this.palette.text50;
+      c.lineWidth = 1;
+      c.globalAlpha = 0.75;
+      c.beginPath();
+      c.moveTo(rulerX, geometry.yVolts(geometry.topV));
+      c.lineTo(rulerX, geometry.yVolts(geometry.bottomV));
+      c.stroke();
+      c.textAlign = 'right';
+      c.textBaseline = 'middle';
+      c.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+
+      // Compact readouts share the ruler rather than consuming the left channel control.
+      // Their opaque chips sit on top of the tick labels, so a label that would be cut in
+      // half by a chip is left out below. Placement is decided first for the same reason.
+      const scaleLabel =
+        `${scope.tickVoltsPerDiv ?? scope.voltsPerDiv} ${scope.voltsPerDivUnit ?? 'V/div'}`;
+      const scaleX = rulerX - 6;
+      const scaleY = o.top + o.band - 10;
+      const scaleWidth = c.measureText(scaleLabel).width + 8;
+      const vdiv = { x0: scaleX - scaleWidth, x1: scaleX, y0: scaleY - 8, y1: scaleY + 8 };
+      const triggerVisible = scope.triggerVolts !== undefined && scope.triggerKind !== undefined &&
+        scope.triggerVolts >= geometry.bottomV && scope.triggerVolts <= geometry.topV;
+      const triggerLabel = triggerVisible
+        ? `${scope.triggerKind === 'rising' ? 'R' : 'F'} ${formatScopeVolts(scope.triggerVolts!)}`
+        : '';
+      const triggerY = triggerVisible ? geometry.yVolts(scope.triggerVolts!) : 0;
+      const triggerWidth = triggerVisible ? c.measureText(triggerLabel).width + 8 : 0;
+      // Right edge of the trigger chip. A level in the lowest division would otherwise
+      // paint over the V/div readout: slide the chip left instead, keeping its Y on the
+      // trigger line.
+      let triggerX = rulerX - 12;
+      if (triggerVisible && triggerY + 8 > vdiv.y0 && triggerY - 8 < vdiv.y1) {
+        triggerX = vdiv.x0 - 2;
+      }
+      const hidesLabel = (yy: number): boolean =>
+        (yy > vdiv.y0 && yy < vdiv.y1) ||
+        (triggerVisible && yy > triggerY - 8 && yy < triggerY + 8);
+
+      let lastLabelY: number | null = null;
+      for (const k of ticks) {
+        const volts = k * tickStep;
+        const yy = Math.round(geometry.yVolts(volts)) + 0.5;
+        c.beginPath();
+        c.moveTo(rulerX - 4, yy);
+        c.lineTo(rulerX, yy);
+        c.stroke();
+        if (hidesLabel(yy)) continue;
+        // During the animated zoom a changing scale can place marks closer than the 10 px
+        // label; keep the outermost of a crowded pair rather than overprinting both.
+        if (lastLabelY !== null && lastLabelY - yy < 11) continue;
+        lastLabelY = yy;
+        c.fillStyle = this.palette.text50;
+        c.fillText(formatScopeVolts(volts), rulerX - 6, yy);
+      }
+      c.globalAlpha = 1;
+
+      c.fillStyle = this.palette.bg;
+      roundRect(c, vdiv.x0, vdiv.y0, scaleWidth, 16, 3);
+      c.fill();
+      c.fillStyle = this.palette.text50;
+      c.fillText(scaleLabel, scaleX - 4, scaleY);
+
+      if (triggerVisible) {
+        c.fillStyle = this.palette.bg;
+        roundRect(c, triggerX - triggerWidth, triggerY - 8, triggerWidth, 16, 3);
+        c.fill();
+        c.fillStyle = this.palette.warning;
+        c.fillText(triggerLabel, triggerX - 4, triggerY);
+      }
+    } else {
+      c.textAlign = 'left';
+      c.textBaseline = 'top';
+      c.fillText(o.labels.top, 4, o.top + 2);
+      c.textBaseline = 'bottom';
+      c.fillText(o.labels.bottom, 4, o.top + o.band - 2);
+    }
     c.restore();
   }
 
@@ -337,11 +728,14 @@ export class Overlay {
     c.textBaseline = 'top';
     const label = 'T';
     const w = c.measureText(label).width + 10;
+    // A trigger pinned to 0 s sits on the left edge; keep the chip fully on the canvas
+    // rather than clipping half of it.
+    const chipX = Math.min(Math.max(0, x - w / 2), Math.max(0, this.wCss - w));
     c.fillStyle = this.palette.warning;
-    roundRect(c, x - w / 2, 0, w, 15, 2);
+    roundRect(c, chipX, 0, w, 15, 2);
     c.fill();
     c.fillStyle = this.palette.bg;
-    c.fillText(label, x - w / 2 + 5, 2);
+    c.fillText(label, chipX + 5, 2);
     c.restore();
   }
 

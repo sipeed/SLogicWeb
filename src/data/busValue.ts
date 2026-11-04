@@ -270,8 +270,12 @@ export class BusPyramid {
     }
   }
 
-  /** Follow the store's drop frontier. */
+  /** Follow the store's drop frontier. The build frontier is store-relative, so a drop
+   *  that lands between two builder steps shrinks it now rather than leaving a stale
+   *  `doneUpTo` that would claim already-evicted samples are built. */
   setOrigin(dropped: number): void {
+    const advanced = dropped - this.origin;
+    if (advanced > 0) this.doneUpTo = Math.max(0, this.doneUpTo - advanced);
     this.origin = dropped;
   }
 

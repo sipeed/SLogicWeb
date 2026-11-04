@@ -15,20 +15,39 @@
  */
 
 import {
-  BusBuilder, busRange, busSteps, latchedBefore, type BusSpec,
+  BusBuilder, busRange, busSteps, busValue, latchedBefore, readCode, type BusSpec,
 } from '../data/busValue.js';
-import type { SampleStore } from '../data/types.js';
+import type { GapSpan, SampleStore } from '../data/types.js';
 
 export type BusDrawStyle = 'line' | 'step';
+
+/**
+ * Which end of a contiguous bit run carries the code's MSB.
+ *
+ * `auto` follows the device: on live inputs Sipeed's ADC module wires CH0 to the MSB,
+ * while the firmware's built-in test patterns send their bytes LSB first (vendor
+ * CHANGELOG, "ADC bit order" - ngscopeclient calls the same rule *Auto*). Test mode 0 is
+ * the normal input path, so auto means MSB there and LSB in any test pattern (modes 1
+ * and 2). The explicit settings do not depend on the capture mode. A bus whose bits are
+ * not a contiguous run has no meaningful end, so the order is ignored for it.
+ */
+export type BusBitOrder = 'auto' | 'msb' | 'lsb';
 
 export interface BusViewConfig {
   name: string;
   usesDefaultName?: boolean;
   spec: BusSpec;
+  bitOrder: BusBitOrder;
   color: string;
   /** Volts for the full code range (2^n LSB); null shows raw values. */
   fullScaleV: number | null;
   offsetV: number;
+  /** Set only by the Analog button: this view is the ADC group `analogGroup` (0–3). */
+  analogGroup?: number;
+  /** Analog scope vertical scale; null fits the full code range. */
+  voltsPerDiv?: number | null;
+  /** Where 0 V sits in the row, 0 (top) .. 1 (bottom); default 0.5. */
+  zeroPosition?: number;
   /** Points joined by lines (an ADC's samples) or held as steps. */
   style: BusDrawStyle;
   heightCss: number;
@@ -63,9 +82,41 @@ const EXACT_SPP = 256;
 /** And never over a window wider than this (the steps would be too many to cache). */
 const EXACT_WINDOW = 4_000_000;
 
+/**
+ * Sample positions one coarse frame may spend on provisional columns, per bus. The
+ * pyramid is the authoritative envelope, but a fast loop deliberately stops building it
+ * (the ingest path has priority) and the builder always lags a live edge. Sampling a
+ * bounded number of points per column keeps a coarse min/max envelope on screen instead
+ * of a blank row; the next frame with a more complete pyramid replaces it. The budget is
+ * POSITIONS: each costs one `readCode`, i.e. `bits.length` sample reads, so 24k positions
+ * is about 1 ms for an 8-bit bank and 4-6 ms for a 32-bit user bus on a desktop. The
+ * fast-loop draw cadence is 50 ms and this path only runs while the built envelope is
+ * unavailable.
+ */
+const PROVISIONAL_READ_BUDGET = 24_000;
+const PROVISIONAL_MIN_PER_COL = 2;
+const PROVISIONAL_MAX_PER_COL = 64;
+/** Sample reads the App may spend on all provisional columns in one draw. */
+const PROVISIONAL_FRAME_READS = 240_000;
+let frameReadsLeft: number | null = null;
+
+/**
+ * Start a draw's shared provisional budget. Without this (direct API use, tests) each
+ * frame is budgeted independently; the App brackets its draw so four analog banks plus
+ * user buses cannot multiply the cost of one frame.
+ */
+export function beginAnalogFrameBudget(reads = PROVISIONAL_FRAME_READS): void {
+  frameReadsLeft = Math.max(0, reads);
+}
+
+export function endAnalogFrameBudget(): void {
+  frameReadsLeft = null;
+}
+
 export type AnalogFrame =
   | { kind: 'points'; x: Float64Array; v: Float64Array; count: number }
-  | { kind: 'columns'; min: Float64Array; max: Float64Array }
+  /** `provisional`: some columns were sampled, not built, so the envelope is coarse. */
+  | { kind: 'columns'; min: Float64Array; max: Float64Array; provisional?: boolean }
   | { kind: 'empty'; reason: 'no-capture' | 'live' };
 
 /** The value range the row's height spans: full scale for the bit width. */
@@ -76,7 +127,10 @@ export function busYRange(cfg: BusViewConfig): { min: number; max: number } {
 /** A value as the row labels it: volts when a full scale is set, else the raw value. */
 export function busLabel(cfg: BusViewConfig, v: number): string {
   if (cfg.fullScaleV === null) return String(v);
-  const volts = cfg.offsetV + (v / 2 ** cfg.spec.bits.length) * cfg.fullScaleV;
+  // The code range spans 2^n - 1 steps, not 2^n: for the ADC module code 255 is +15 V
+  // exactly, and its code-128 reading is the 0 V midpoint (HSync adc.rs, step 30/255).
+  const steps = 2 ** cfg.spec.bits.length - 1;
+  const volts = cfg.offsetV + (v / steps) * cfg.fullScaleV;
   const abs = Math.abs(volts);
   return abs !== 0 && abs < 1 ? `${(volts * 1000).toPrecision(4)} mV` : `${volts.toPrecision(4)} V`;
 }
@@ -111,6 +165,25 @@ export function runStart(bits: readonly number[]): { start: number; msbFirst: bo
   return run ? { start: Math.min(...bits), msbFirst: run === 'down' } : { start: bits[0] ?? 0, msbFirst: false };
 }
 
+/** What `order` means for a capture in `testMode`; see `BusBitOrder` for the rule. */
+export function resolveBusBitOrder(order: BusBitOrder, testMode: number): 'msb' | 'lsb' {
+  if (order !== 'auto') return order;
+  return testMode === 0 ? 'msb' : 'lsb';
+}
+
+/**
+ * The config with its bit run oriented for `testMode`. Only a contiguous run is touched:
+ * arbitrary per-bit wiring was chosen channel by channel and has no "end". Returns the
+ * same object when nothing changes, so callers can use identity to skip work.
+ */
+export function applyBusBitOrder<T extends BusViewConfig>(config: T, testMode: number): T {
+  if (busRun(config.spec.bits) === null) return config;
+  const wantMsb = resolveBusBitOrder(config.bitOrder, testMode) === 'msb';
+  const isMsb = runStart(config.spec.bits).msbFirst;
+  if (wantMsb === isMsb) return config;
+  return { ...config, spec: swapBusOrder(config.spec) };
+}
+
 /**
  * "D0–D11 · ↑D12": the bits from LSB to MSB, then the clock. A reversed contiguous bus
  * reads "D11–D0" - LSB first, like every other summary.
@@ -133,8 +206,15 @@ export function analogFrame(
   store: SampleStore, bv: BusViewState, start: number, end: number, widthPx: number, live: boolean,
 ): AnalogFrame {
   if (store.length === 0 || widthPx <= 0 || !(end > start)) return { kind: 'empty', reason: 'no-capture' };
-  // droppedSamples distinguishes two loop generations at the same length/doneUpTo.
-  const key = [store.length, store.droppedSamples, start, end, widthPx, bv.builder?.pyramid.doneUpTo ?? -1].join(':');
+  // A fixed historical window must survive unrelated appends. `visibleEnd` changes only
+  // when the window itself reaches the growing edge; loop drops still invalidate by origin.
+  // A Repeat composite keeps its length while its current-wave frontier advances, so its
+  // frontier is part of the key: the provisional/live envelope must follow the fill.
+  const visibleEnd = Math.min(store.length, Math.ceil(end));
+  const frontier = (store as SampleStore & { frontier?: number }).frontier;
+  const key = [visibleEnd, store.droppedSamples, start, end, widthPx,
+    bv.builder?.pyramid.doneUpTo ?? -1, live,
+    frontier === undefined ? '' : frontier].join(':');
   if (bv.cache?.key === key) return bv.cache.frame;
   const frame = compute(store, bv, start, end, widthPx, live);
   bv.cache = { key, frame };
@@ -174,24 +254,102 @@ function compute(
       return { kind: 'columns', min, max };
     }
   }
-  if (!bv.builder) return { kind: 'empty', reason: live ? 'live' : 'no-capture' };
-  const pyramid = bv.builder.pyramid;
-  // The bins are absolute, so `range()` converts through the window origin the builder
-  // carries - refresh it from the store here rather than trusting the pump. A drop can
-  // land between the pump's `setLength` and this draw (a bus the one-bus-per-frame pump
-  // has not reached yet, or the stop drain, where the pump does not run at all), and a
-  // stale origin reads bins the window has already left, i.e. pre-drop data.
-  pyramid.setOrigin(store.droppedSamples);
+  const pyramid = bv.builder?.pyramid ?? null;
+  if (pyramid) {
+    // The bins are absolute, so `range()` converts through the window origin the builder
+    // carries - refresh it from the store here rather than trusting the pump. A drop can
+    // land between the pump's `setLength` and this draw (a bus the one-bus-per-frame pump
+    // has not reached yet, or the stop drain, where the pump does not run at all), and a
+    // stale origin reads bins the window has already left, i.e. pre-drop data.
+    pyramid.setOrigin(store.droppedSamples);
+  }
+  const done = pyramid ? Math.min(store.length, pyramid.doneUpTo) : 0;
+  const gaps = store.gaps();
+  const gapCursor = { at: 0 };
+  const bits = Math.max(1, bv.spec.bits.length);
+  // Positions the shared frame budget can still afford for this bus (or the direct-call
+  // per-bus budget). Below the two-per-column floor, leave the columns unknown rather
+  // than blow the frame budget.
+  const positions = Math.min(
+    PROVISIONAL_READ_BUDGET,
+    frameReadsLeft === null ? PROVISIONAL_READ_BUDGET : Math.floor(frameReadsLeft / bits),
+  );
+  const wanted = Math.floor(positions / Math.max(1, widthPx));
+  const perCol = wanted < PROVISIONAL_MIN_PER_COL
+    ? 0 : Math.min(PROVISIONAL_MAX_PER_COL, wanted);
   const min = new Float64Array(widthPx).fill(Number.NaN);
   const max = new Float64Array(widthPx).fill(Number.NaN);
+  let provisional = false;
+  let known = 0;
+  let probed = 0;
   for (let c = 0; c < widthPx; c++) {
     const a = start + c * spp;
     const b = a + spp;
-    if (b <= 0 || a >= Math.min(store.length, pyramid.doneUpTo)) continue;
-    const r = pyramid.range(Math.max(0, a), Math.min(b, pyramid.doneUpTo));
-    if (r) { min[c] = r.min; max[c] = r.max; }
+    if (b <= 0 || a >= store.length) continue;
+    const lo = Math.max(0, a);
+    const hi = Math.min(b, store.length);
+    let mn = Number.POSITIVE_INFINITY;
+    let mx = Number.NEGATIVE_INFINITY;
+    if (pyramid && done > lo) {
+      const r = pyramid.range(lo, Math.min(hi, done));
+      if (r) { mn = r.min; mx = r.max; }
+    }
+    // Nothing is built past `done` (fast loop, or a builder still walking forward). A
+    // bounded sample of that part is the difference between a coarse envelope and no
+    // waveform at all. Clocked buses latch on edges, so a plain sample is not their
+    // value; they keep the exact path and wait for the builder.
+    const probeLo = Math.max(lo, done);
+    if (perCol > 0 && probeLo < hi && !bv.spec.clock) {
+      const r = provisionalRange(store, bv.spec, probeLo, hi, gaps, gapCursor, perCol);
+      probed++;
+      if (r) {
+        if (r.min < mn) mn = r.min;
+        if (r.max > mx) mx = r.max;
+        provisional = true;
+      }
+    }
+    if (mn <= mx) { min[c] = mn; max[c] = mx; known++; }
   }
-  return { kind: 'columns', min, max };
+  if (frameReadsLeft !== null) {
+    frameReadsLeft = Math.max(0, frameReadsLeft - probed * perCol * bits);
+  }
+  // A clocked bus with no built columns has nothing truthful to show yet; keep the
+  // existing live/empty note rather than inventing latched values.
+  if (known === 0) return { kind: 'empty', reason: live ? 'live' : 'no-capture' };
+  return provisional
+    ? { kind: 'columns', min, max, provisional: true }
+    : { kind: 'columns', min, max };
+}
+
+/**
+ * Min/max over up to `perCol` evenly spread samples of [a, b). This is a coarse envelope,
+ * not the exact one: `perCol` bounds the work by the frame width instead of the window
+ * (which can be 2^31 samples in a loop). Positions inside a capture gap are unknown and
+ * skipped. Returns null when every sampled position is unknown.
+ */
+function provisionalRange(
+  store: SampleStore, spec: BusSpec, a: number, b: number, gaps: readonly GapSpan[],
+  cursor: { at: number }, perCol: number,
+): { min: number; max: number } | null {
+  const lo = Math.max(0, Math.floor(a));
+  const hi = Math.min(store.length, Math.ceil(b));
+  if (hi <= lo) return null;
+  const width = hi - lo;
+  const n = spec.bits.length;
+  let mn = Number.POSITIVE_INFINITY;
+  let mx = Number.NEGATIVE_INFINITY;
+  for (let k = 0; k < perCol; k++) {
+    const p = lo + Math.floor(((k + 0.5) * width) / perCol);
+    if (p < lo || p >= hi) continue;
+    // Gaps are sorted and the column walk moves forward; advance the shared cursor
+    // instead of searching from the start for every sample.
+    while (cursor.at < gaps.length && gaps[cursor.at]!.endSample <= p) cursor.at++;
+    if (cursor.at < gaps.length && gaps[cursor.at]!.startSample <= p) continue;
+    const v = busValue(readCode(store, spec.bits, p), n, spec.encoding);
+    if (v < mn) mn = v;
+    if (v > mx) mx = v;
+  }
+  return mn <= mx ? { min: mn, max: mx } : null;
 }
 
 /** The value at one sample, for the hover readout. NaN when unknown. */

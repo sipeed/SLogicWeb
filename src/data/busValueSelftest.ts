@@ -440,6 +440,26 @@ export function runBusValueSuite(): BusTestResult[] {
   }
 
   {
+    // doneUpTo is store-relative. A drop between two builder steps must shrink it now,
+    // or a frame drawn before the next step would treat evicted samples as built (a
+    // blank tail of the bus row) - see analogFrame's unbuilt-column probe.
+    const p = new BusPyramid(8 * BUS_LEAF);
+    p.doneUpTo = 8 * BUS_LEAF;
+    p.setOrigin(0);
+    p.setOrigin(2 * BUS_LEAF);
+    const shrunk = p.doneUpTo === 6 * BUS_LEAF;
+    p.setOrigin(2 * BUS_LEAF);
+    const idempotent = p.doneUpTo === 6 * BUS_LEAF;
+    p.setOrigin(BUS_LEAF);
+    const backwards = p.doneUpTo === 6 * BUS_LEAF;
+    p.setOrigin(100 * BUS_LEAF);
+    const clamped = p.doneUpTo === 0;
+    check('setOrigin shrinks the build frontier on a drop, never grows it',
+      shrunk && idempotent && backwards && clamped ? ''
+        : `shrunk=${shrunk}, idempotent=${idempotent}, backwards=${backwards}, clamped=${clamped}`);
+  }
+
+  {
     const SLOW = 4096;
     const len = 40_000;
     const w = new Uint16Array(len);

@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  CHANNEL_BANK_SIZE, CHANNEL_WIDTH_OPTIONS, busChannelBank, busOutOfWidth, captureWidthTiers,
-  channelBankIndices, channelBankRange, channelBankStart, channelBankStarts, channelWidthOptions,
-  lockedChannelBanks,
+  ADC_CLOCK_HZ, ADC_FULL_SCALE_V, ADC_MIN_SAMPLERATE_HZ, ADC_OFFSET_V, ANALOG_GROUP_COUNT,
+  CHANNEL_BANK_SIZE, CHANNEL_WIDTH_OPTIONS, analogBankActive, analogBusConfig, analogCodeFromVolts,
+  analogGroupCount, analogSamplerates, analogTriggerVolts, analogVoltsFromCode, busChannelBank,
+  busOutOfWidth, captureWidthTiers,
+  channelBankIndices,
+  channelBankRange, channelBankStart, channelBankStarts, channelWidthOptions, lockedChannelBanks,
 } from '../channelBanks.js';
-import { defaultBankBusConfig, normalizeBankBusConfig } from '../busPanel.js';
+import { busLabel } from '../busView.js';
+import { SAMPLERATES_HZ } from '../../device/index.js';
 
 const nodeProcess = (() => {
   const p = (globalThis as {
@@ -46,72 +50,107 @@ check('bank start uses the absolute channel index',
     busChannelBank(spec([1, 2, 3, 4, 5, 6, 7, 8])) === null &&
     busChannelBank(spec([0, 1, 2, 3, 4, 5, 6, 8])) === null &&
     busChannelBank(spec([0, 1, 2, 3, 4, 5, 6, 6])) === null;
-  check('only eight aligned consecutive data bits identify an oscilloscope bank',
+  check('only eight aligned consecutive data bits identify an analog bank',
     recognized && rejected, `recognized=${recognized}, rejected=${rejected}`);
 }
 
 {
-  const base = defaultBankBusConfig(16, 8);
-  const reversed = normalizeBankBusConfig({
-    ...base,
-    spec: {
-      bits: [15, 14, 13, 12, 11, 10, 9, 8],
-      clock: { channel: 3, edge: 'falling' },
-      encoding: 'twos',
-    },
-  }, 16, 8);
-  const inside = normalizeBankBusConfig({
-    ...base, spec: { ...base.spec, clock: { channel: 10, edge: 'rising' } },
-  }, 16, 8);
-  const outside = normalizeBankBusConfig({
-    ...base, spec: { ...base.spec, clock: { channel: 99, edge: 'rising' } },
-  }, 16, 8);
-  const shuffled = normalizeBankBusConfig({
-    ...base,
-    spec: { ...base.spec, bits: [10, 15, 8, 12, 9, 14, 11, 13] },
-  }, 16, 8);
-  const repaired = normalizeBankBusConfig({
-    ...base,
-    spec: { ...base.spec, bits: [10, 10, 99, 8, 7, -1, 12] },
-  }, 16, 8);
-  const normalized = base.spec.bits.join(',') === '8,9,10,11,12,13,14,15' &&
-    reversed.spec.bits.join(',') === '15,14,13,12,11,10,9,8' &&
-    shuffled.spec.bits.join(',') === '10,15,8,12,9,14,11,13' &&
-    repaired.spec.bits.join(',') === '10,8,12,9,11,13,14,15' &&
-    reversed.spec.clock?.channel === 3 && reversed.spec.clock.edge === 'falling' &&
-    reversed.spec.encoding === 'twos' && inside.spec.clock === null && outside.spec.clock === null;
-  let invalid = false;
-  try { defaultBankBusConfig(4, 0); } catch (e) { invalid = e instanceof RangeError; }
-  check('fixed-bank config preserves arbitrary order, repairs invalid bits and drops invalid clocks',
-    normalized && invalid, `normalized=${normalized}, invalidStart=${invalid}`);
+  // HSync model.rs: the SLogic32U3's ADC module has four groups, the 16U3 none, and a
+  // group is read only when its whole eight inputs are inside the wire mode.
+  const counts = [4, 8, 16, 32, 64].map(analogGroupCount).join(',');
+  const activeAt = (channels: number) => analogBankActive([analogBusConfig(0, 32, '#fff')], channels);
+  const genericEight = { spec: { bits: [0, 1, 2, 3, 4, 5, 6, 7], clock: null, encoding: 'unsigned' as const } };
+  const markerOnly = !analogBankActive([genericEight], 8) &&
+    lockedChannelBanks([genericEight], 8).size === 0;
+  const gated = analogGroupCount(8) === 1 && analogGroupCount(16) === 2 &&
+    analogGroupCount(32) === 4 && analogGroupCount(128) === ANALOG_GROUP_COUNT &&
+    analogGroupCount(4) === 0 && analogGroupCount(0) === 0 && markerOnly;
+  check('analog groups cover complete eight-input banks up to the module\'s four',
+    counts === '0,1,2,4,4' && gated && activeAt(8) && !activeAt(4),
+    `counts=${counts}, active@8=${activeAt(8)}, active@4=${activeAt(4)}, markerOnly=${markerOnly}`);
 }
 
 {
-  const base = defaultBankBusConfig(16, 0);
-  const custom = normalizeBankBusConfig({ ...base, name: '  CUSTOM  ', usesDefaultName: false }, 16, 0);
-  const blank = normalizeBankBusConfig({ ...base, name: ' ', usesDefaultName: false }, 16, 0);
-  const defaults = base.name === 'Analog waveform' && base.usesDefaultName === true &&
-    blank.name === 'Analog waveform' && blank.usesDefaultName === true;
-  const customized = custom.name === 'CUSTOM' && custom.usesDefaultName !== true;
-  check('bank names track the default marker while custom and blank drafts keep distinct semantics',
-    defaults && customized,
-    `base=${base.name}/${base.usesDefaultName}, custom=${custom.name}/${custom.usesDefaultName}, ` +
-    `blank=${blank.name}/${blank.usesDefaultName}`);
+  const codes = [-15, 0, 15, -99, 99].map(analogCodeFromVolts);
+  const volts = [0, 128, 255].map(analogVoltsFromCode);
+  check('ADC trigger levels map the module\'s ±15 V range onto codes 0..255',
+    codes.join(',') === '0,128,255,0,255' &&
+    Math.abs(volts[0]! + 15) < 1e-9 && Math.abs(volts[1]!) < 0.06 &&
+    Math.abs(volts[2]! - 15) < 1e-9,
+    `codes=${codes.join(',')}, volts=${volts.join(',')}`);
+}
+
+{
+  const rising = analogTriggerVolts('rising', -15);
+  const falling = analogTriggerVolts('falling', 15);
+  const mid = analogTriggerVolts('rising', 1.2);
+  check('trigger levels snap to the converter grid and move the unreachable endpoints inward',
+    rising > -15 && rising < -14.8 && falling > 14.8 && falling < 15 &&
+    Math.abs(mid - 1.2353) < 0.001,
+    `rising=${rising}, falling=${falling}, mid=${mid}`);
+}
+
+{
+  // HSync adc.rs: divisors of the module's 800 MHz clock from 100 MHz up; only the
+  // slower divisors where the link cannot carry that minimum.
+  const under = (ceiling: number) => SAMPLERATES_HZ.filter((r) => r <= ceiling);
+  const mhz = (rates: number[]) => rates.map((r) => r / 1e6).join(',');
+  const wide = mhz(analogSamplerates(under(800e6)));
+  const narrow = mhz(analogSamplerates(under(200e6)));
+  const usb2 = mhz(analogSamplerates(under(10e6)));
+  const odd = analogSamplerates([1.4e9, 5e6]);
+  check('analog rates divide the 800 MHz clock from 100 MHz, or fall back to slower divisors',
+    ADC_CLOCK_HZ === 800e6 && ADC_MIN_SAMPLERATE_HZ === 100e6 &&
+    wide === '100,160,200,400,800' && narrow === '100,160,200' &&
+    usb2 === '5,8,10' && odd.length === 1 && odd[0] === 5e6,
+    `wide=${wide}, narrow=${narrow}, usb2=${usb2}, odd=${odd.join(',')}`);
+}
+
+{
+  const atZero = analogBusConfig(0, 32, '#4C9AFF');
+  const atOne = analogBusConfig(8, 16, '#4C9AFF');
+  const fixed = atZero.name === 'A0' && atOne.name === 'A1' &&
+    atZero.bitOrder === 'msb' && atZero.spec.encoding === 'unsigned' &&
+    atZero.spec.clock === null && atZero.hideSources === true &&
+    atZero.fullScaleV === 30 && atZero.offsetV === -15 &&
+    ADC_FULL_SCALE_V === 30 && ADC_OFFSET_V === -15;
+  // MSB first: input 0 is the converter's MSB, so the LSB-first bit list ends with it.
+  const msbFirst = atZero.spec.bits.join(',') === '7,6,5,4,3,2,1,0' &&
+    atOne.spec.bits.join(',') === '15,14,13,12,11,10,9,8';
+  let invalid = false;
+  try { analogBusConfig(4, 8, '#fff'); } catch (e) { invalid = e instanceof RangeError; }
+  check('the Analog button creates a fixed MSB-first A0-A3 view over ±15 V',
+    fixed && msbFirst && invalid,
+    `name=${atZero.name}/${atOne.name}, bits0=${atZero.spec.bits}, bits1=${atOne.spec.bits}, ` +
+    `order=${atZero.bitOrder}, scale=${atZero.offsetV}..${atZero.fullScaleV}, invalid=${invalid}`);
+}
+
+{
+  // Code 0 is -15 V and code 255 is +15 V; the midpoint code reads ~0 V (HSync's test
+  // allows 0.06 V for 128).
+  const view = analogBusConfig(0, 8, '#fff');
+  const low = busLabel(view, 0);
+  const mid = busLabel(view, 128);
+  const high = busLabel(view, 255);
+  const midVolts = Number.parseFloat(mid) * (mid.includes('mV') ? 1e-3 : 1);
+  check('analog codes map onto the module\'s ±15 V range',
+    low === '-15.00 V' && high === '15.00 V' && Math.abs(midVolts) < 0.06,
+    `0=${low}, 128=${mid}, 255=${high}`);
 }
 
 {
   const spec = (bits: number[]) => ({ bits, clock: null, encoding: 'unsigned' as const });
   const bankZero = spec([0, 1, 2, 3, 4, 5, 6, 7]);
   const locked = lockedChannelBanks([
-    { spec: spec([15, 14, 13, 12, 11, 10, 9, 8]) },
-    { spec: spec([0, 1, 2, 3]) },
-    { spec: spec([1, 2, 3, 4, 5, 6, 7, 8]) },
+    { spec: spec([15, 14, 13, 12, 11, 10, 9, 8]), analogGroup: 1 },
+    { spec: spec([0, 1, 2, 3]), analogGroup: 0 },
+    { spec: spec([1, 2, 3, 4, 5, 6, 7, 8]), analogGroup: 0 },
   ]);
-  const narrow = lockedChannelBanks([{ spec: bankZero }], 4);
-  const valid = lockedChannelBanks([{ spec: bankZero }], 8);
+  const narrow = lockedChannelBanks([{ spec: bankZero, analogGroup: 0 }], 4);
+  const valid = lockedChannelBanks([{ spec: bankZero, analogGroup: 0 }], 8);
   const clocked = { ...bankZero, clock: { channel: 8, edge: 'rising' as const } };
-  const clockNarrow = lockedChannelBanks([{ spec: clocked }], 8);
-  const clockWide = lockedChannelBanks([{ spec: clocked }], 16);
+  const clockNarrow = lockedChannelBanks([{ spec: clocked, analogGroup: 0 }], 8);
+  const clockWide = lockedChannelBanks([{ spec: clocked, analogGroup: 0 }], 16);
   check('locked banks require an aligned eight-bit bus whose whole spec is valid at the current width',
     locked.size === 1 && locked.has(8) && !locked.has(0) && narrow.size === 0 &&
     valid.size === 1 && valid.has(0) && clockNarrow.size === 0 && clockWide.size === 1 && clockWide.has(0),
@@ -128,190 +167,103 @@ check('bank start uses the absolute channel index',
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
   const busPanel = fs.readFileSync('src/ui/busPanel.ts', 'utf8');
   const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
-  const scopeBlockStart = panel.indexOf('if (indices.length === CHANNEL_BANK_SIZE) {');
-  const scopeBlock = scopeBlockStart >= 0
-    ? panel.slice(scopeBlockStart, panel.indexOf('const grid = div(', scopeBlockStart))
-    : '';
-  const grouped = panel.includes('for (const start of channelBankStarts(v.channels.length))') &&
+
+  const rows = panel.includes('for (const start of channelBankStarts(v.channels.length))') &&
     panel.includes('const indices = channelBankIndices(start, v.channels.length);') &&
-    scopeBlockStart >= 0 &&
-    scopeBlock.includes('oscilloscopeButton') && scopeBlock.includes("div('channel-bank-sep')") &&
-    !panel.includes('channel-bank-head') &&
-    panel.includes("div('chip-grid channel-bank-grid')") &&
-    panel.includes('chSec.body.appendChild(banks)');
-  const accessible = panel.includes("grid.setAttribute('role', 'group')") &&
-    panel.includes("grid.setAttribute('aria-label', range)") &&
-    panel.includes("chip.setAttribute('aria-pressed', String(c.enabled))");
-  const wired = app.includes('onChannelWidth: (n) => this.setChannelWidth(n)') &&
-    !panel.includes('capturePanel.all') && !panel.includes('channel-enabled-count');
-  const grid = sheet.includes('grid-template-columns: repeat(8, minmax(0, 1fr))') &&
-    sheet.includes('.channel-bank-sep') && !sheet.includes('.channel-bank-head') &&
-    sheet.includes('.channel-bank { display: flex; align-items: center; gap: 6px; min-width: 0; }') &&
-    sheet.includes('.channel-bank-grid { flex: 1 1 auto; position: relative; min-width: 0; }');
-  check('the real Device panel renders accessible eight-channel banks through App state',
-    grouped && accessible && wired && grid,
-    `grouped=${grouped}, accessible=${accessible}, wired=${wired}, grid=${grid}`);
-
-  const retiredControls = !panel.includes('channel-bank-toggle') &&
-    !panel.includes('channel-bank-title') && !panel.includes('channel-bank-count') &&
-    !panel.includes('capturePanel.bankToggle') && !panel.includes('capturePanel.bankLocked') &&
-    !panel.includes('onToggleBank') && !app.includes('onToggleBank') &&
-    !app.includes('setBankEnabled');
-  check('the per-bank toggle, its group title and its count are gone from panel and App',
-    retiredControls, `retiredControls=${retiredControls}`);
-
-  const retiredSheet = !sheet.includes('.channel-bank-toggle') &&
-    !sheet.includes('.channel-bank-title') && !sheet.includes('.channel-bank-count');
-  check('the retired per-bank control styles are gone from the sheet',
-    retiredSheet, `retiredSheet=${retiredSheet}`);
-
-  const iconStart = panel.indexOf('function oscilloscopeButton');
-  const iconRest = iconStart < 0 ? '' : panel.slice(iconStart);
-  const icon = iconRest.slice(0, iconRest.indexOf('\n}\n') + 3);
-  const iconOnly = iconStart >= 0 && icon.includes('createElementNS') &&
-    icon.includes("b.setAttribute('aria-haspopup', 'dialog')") && !icon.includes('textContent');
-  const dialog = busPanel.split('export class BankBusDialog')[1] ?? '';
-  const sharedFields = busPanel.includes('function busAdvancedFields') &&
-    (busPanel.match(/busAdvancedFields\(/g) ?? []).length === 2 && busPanel.includes('clockOptions') &&
-    !dialog.includes('busAdvancedFields') && !busPanel.includes('bankStart');
-  const draftOrderWrite = dialog.includes('    };\n    writeOrder();\n    order.disabled = context.locked;');
-  const orderChange = dialog.includes("    order.addEventListener('change', writeOrder);\n    body.appendChild(order.el);");
-  const orderMode = dialog.includes("const order = selectControl('bus.channelOrder', t('bus.channelOrder')") &&
-    dialog.includes("[['lsb', 'LSB'], ['msb', 'MSB']]") &&
-    dialog.includes("runStart(config.spec.bits).msbFirst ? 'msb' : 'lsb'") &&
-    dialog.includes("bits: runBits(this.start, CHANNEL_BANK_SIZE, this.channelCount, order.value === 'msb')") &&
-    draftOrderWrite && orderChange &&
-    !dialog.includes('new Oscilloscope' + 'ChannelGrid') && !dialog.includes("t('bus.drag" + "ToOrder')") &&
-    !dialog.includes("t('bus.msbFirst')") && !dialog.includes("t('bus.perBit')") &&
-    !dialog.includes('bankEnabledNote');
-  const disclosures = dialog.includes('details?.el.remove()') &&
-    !dialog.includes("document.createElement('details')") && !dialog.includes("t('bus.advanced')") &&
-    !dialog.includes('oscilloscopeAdvanced');
-  const nativeDialog = busPanel.includes('this.dialog.showModal()') &&
-    busPanel.indexOf("this.dialog.close('applied')") >= 0 &&
-    busPanel.indexOf("this.dialog.close('applied')") < busPanel.indexOf('this.cb.onConfirm(this.start');
-  const realState = panel.includes('buses: readonly BusViewState[]') &&
-    app.includes('buses: this.busViews') && app.includes('this.configureBankBus(start, cfg, enabled)') &&
-    app.includes('if (active) this.updateBus(active.id, next, true);') && app.includes('else this.addBus(next);');
-  check('the bank dialog uses shared advanced fields and a two-mode canonical order draft',
-    iconOnly && sharedFields && orderMode && disclosures && nativeDialog && realState,
-    `iconOnly=${iconOnly}, sharedFields=${sharedFields}, orderMode=${orderMode}, ` +
-    `disclosures=${disclosures}, nativeDialog=${nativeDialog}, realState=${realState}`);
-
-  const bankSettings = app.split('private configureBankBus(')[1]?.split('private resetBusBuilds(')[0] ?? '';
-  const loopDecoupled = !dialog.includes('loopSamples') && !dialog.includes('maxLoopTimeValue') &&
-    !dialog.includes('data-loop-input') && !dialog.includes('bank-bus-loop') &&
-    !app.includes('bankCaptureSettings') &&
-    !app.includes('channelWidthForProbes(config.spec.clock.channel + 1)') &&
-    !bankSettings.includes('channels:') &&
-    (bankSettings.match(/this\.settings = clampSettings\(\{ \.\.\.this\.settings \}, this\.rateCeilings\);/g) ?? []).length === 1 &&
-    !app.includes('loopSamples: preview.loopSamples') && !app.includes('captureChannels: preview.channels');
-  const updateBus = app.split('private updateBus(')[1]?.split('private removeBus(')[0] ?? '';
-  const names = busPanel.includes("t('bus.defaultName')") &&
-    app.includes('retranslateBankBusConfig(bus)') && app.includes('retranslateBankBusConfig(draft)') &&
-    updateBus.includes('if (!preserveDefaultName && next.name !== current.name) delete next.usesDefaultName;') &&
-    app.includes('this.updateBus(active.id, next, true)');
-  const locks = dialog.includes('enable.disabled = context.locked') &&
-    dialog.includes('confirm.disabled = context.locked') && dialog.includes('order.disabled = context.locked') &&
-    app.includes('if (this.running || this.stopping ||') && app.includes('locked: this.running || this.stopping');
-  const noBankSwap = busPanel.includes('if (busChannelBank(b.spec) === null) {');
-  const editBus = app.split('private editBus(')[1]?.split('private addBus(')[0] ?? '';
-  const bankEditor = editBus.includes('const bank = busChannelBank(bus.spec)') &&
-    editBus.includes('bank !== null && this.openBankBus(bank)') && editBus.includes('this.busPanel.edit(bus)') &&
-    app.includes('private openBankBus(start: number): boolean') &&
-    app.includes('length !== CHANNEL_BANK_SIZE) return false;') && app.includes('return true;') &&
-    app.includes('onEditBus: (id) => this.editBus(id)') && app.includes('onEdit: (id) => this.editBus(id)') &&
-    busPanel.includes("edit.addEventListener('click', () => this.cb.onEdit(b.id))");
-  check('the bank dialog no longer owns the loop window and App keeps loopSamples in settings',
-    loopDecoupled && names && locks && noBankSwap && bankEditor,
-    `loopDecoupled=${loopDecoupled}, names=${names}, locks=${locks}, noBankSwap=${noBankSwap}, bankEditor=${bankEditor}`);
-
-  const modelLock = (app.match(/lockedChannelBanks\(this.busViews, this.displayChannelCount\(\)\)/g) ?? []).length >= 2 &&
-    app.includes('locked.has(channelBankStart(c.index))');
-  const visualLock = panel.includes('lockedChannelBanks(v.buses, v.channels.length)') &&
-    panel.includes('grid.dataset.adcLocked = String(locked)') && panel.includes('chip.disabled = locked') &&
-    panel.includes("t('capturePanel.oscilloscopeActive')") &&
-    sheet.includes('pointer-events: none') && sheet.includes('brightness(0.88)');
-  check('active bus banks enforce model locks and render the non-interactive localized overlay',
-    modelLock && visualLock, `modelLock=${modelLock}, visualLock=${visualLock}`);
-
-  const widthPanel = panel.includes('const widthOptions = v.widthOptions;') &&
+    panel.includes('const active = activeBanks.has(start);') &&
+    panel.includes('const usable = indices.length === CHANNEL_BANK_SIZE && group < v.analogGroups;');
+  const rightSide = panel.includes('bank.appendChild(analogButton(start, active, usable && !analogBusy, hint,') &&
+    panel.indexOf('bank.appendChild(grid);') >= 0 &&
+    panel.indexOf('bank.appendChild(grid);') < panel.indexOf('bank.appendChild(analogButton(');
+  const analogCell = panel.includes("const cell = div('analog-cell');") &&
+    panel.includes("cell.textContent = t('capturePanel.analogCell', { name });") &&
+    panel.includes("cell.title = t('capturePanel.analogEnable', { range, name });");
+  const button = panel.includes("b.textContent = t('capturePanel.analog');") &&
+    panel.includes("b.disabled = !enabled;") &&
+    panel.includes("b.setAttribute('aria-pressed', String(active));") &&
+    panel.includes("b.dataset.analogToggle = String(start);");
+  const widthSelector = panel.includes('const widthOptions = v.widthOptions;') &&
     panel.includes('widthOptions: readonly number[];') &&
+    panel.includes("b.textContent = `${n}CH`") &&
+    panel.includes('b.disabled = v.stopping;');
+  check('the Device panel renders one right-side Analog button per bank, including partial rows',
+    rows && rightSide && analogCell && button && widthSelector,
+    `rows=${rows}, right=${rightSide}, cell=${analogCell}, button=${button}, width=${widthSelector}`);
+
+  const analogRates = panel.includes('const analogRates = activeBanks.size > 0 ? analogSamplerates(supported) : [];') &&
+    panel.includes('const selectable = analogRates.length > 0 ? analogRates : supported;') &&
+    panel.includes("t('capturePanel.analogRateNote')");
+  const clamp = app.includes('private clampSettings(s: CaptureSettings): CaptureSettings') &&
+    app.includes('analogBankActive(this.busViews, s.channels)') &&
+    app.includes('analogSamplerates(SAMPLERATES_HZ.filter((rate) => rate <= ceiling))') &&
+    app.includes('if (allowed.length > 0 && !allowed.includes(samplerate))');
+  check('an active analog bank narrows the rate list to the ADC clock\'s divisors',
+    analogRates && clamp, `panel=${analogRates}, clamp=${clamp}`);
+
+  const toggle = app.includes('onToggleAnalog: (start) => this.toggleAnalog(start)') &&
+    app.includes('private toggleAnalog(start: number): void') &&
+    app.includes('if (start / CHANNEL_BANK_SIZE >= this.analogGroups()) return;') &&
+    app.includes('analogBusConfig(start, this.channels.length, color)') &&
+    app.includes('this.busViews = this.busViews.filter((b) => b.analogGroup !== group);') &&
+    app.includes('this.afterChannelChange();');
+  const groups = app.includes('private analogGroups(): number') &&
+    app.includes('private deviceAnalogGroups(): number') &&
+    app.includes('(this.device.maxChannels ?? 0) >= 32') &&
+    app.includes('this.loadedCapture() && this.channels.length >= 32') &&
+    app.includes('analogGroupCount(this.renderChannelCount())') &&
+    app.includes('analogGroups: this.analogGroups(),');
+  const normalization = app.includes('private normalizeAnalogBanks(): void') &&
+    app.includes('this.normalizeAnalogBanks();') &&
+    app.includes('if (this.deviceAnalogGroups() === 0) {') &&
+    app.includes('this.busViews = this.busViews.filter((bus) => bus.analogGroup === undefined);');
+  check('App toggles the bank directly, gates it to the 32U3 and normalizes restored banks',
+    toggle && groups && normalization, `toggle=${toggle}, groups=${groups}, normalize=${normalization}`);
+
+  const retired = !panel.includes('oscilloscopeButton') && !panel.includes('oscilloscope') &&
+    !panel.includes('channel-bank-sep') && !panel.includes('adc-channel-overlay') &&
+    !panel.includes('chip.disabled = locked') &&
+    !app.includes('BankBusDialog') && !app.includes('bankBusDrafts') &&
+    !app.includes('openBankBus') && !app.includes('configureBankBus') &&
+    !app.includes('retranslateBankBusConfig') && !app.includes('normalizeBankBusConfig') &&
+    !busPanel.includes('BankBusDialog') && !busPanel.includes('bus.bankDialogTitle') &&
+    !busPanel.includes('bus.enableBank');
+  const fixedBank = app.includes('if (bus.analogGroup !== undefined) return;') &&
+    busPanel.includes("if (b.analogGroup === undefined) {\n          const edit = button(t('bus.editButton'), 'bus-btn');");
+  check('the enable/MSB-LSB dialog is gone; an analog bank is fixed and not editable as a bus',
+    retired && fixedBank, `retired=${retired}, fixed=${fixedBank}`);
+
+  const sheetRules = sheet.includes('.analog-button {') && sheet.includes('.analog-button.on') &&
+    sheet.includes('.analog-button:disabled') && sheet.includes('.analog-cell {') &&
+    !sheet.includes('.adc-button') && !sheet.includes('.channel-bank-sep') &&
+    !sheet.includes('.adc-channel-overlay') && !sheet.includes('.adc-locked');
+  check('the sheet styles the text button and the analog cell, with the icon controls removed',
+    sheetRules, `rules=${sheetRules}`);
+
+  const widthPanel = panel.includes('widthOptions: readonly number[];') &&
     !panel.includes('channelWidthOptions(') &&
-    panel.includes("b.className = 'seg' + (s.channels === n ? ' on' : '')") &&
-    panel.includes('b.textContent = `${n}CH`') &&
-    panel.includes("b.dataset.channelWidth = String(n)") &&
-    panel.includes('b.disabled = v.running || v.stopping') &&
-    panel.includes("b.title = t('capturePanel.channelWidthBusy')") &&
-    panel.includes("widths.setAttribute('aria-label', t('capturePanel.channelWidth'))") &&
     panel.includes('onChannelWidth(channels: number): void') &&
     panel.includes('chSec.header.appendChild(widths)');
-  const widthSetter = app.split('private setChannelWidth(channels: number): void')[1]?.split('private afterChannelChange(')[0] ?? '';
   const widthApp = app.includes('onChannelWidth: (n) => this.setChannelWidth(n)') &&
-    app.includes('private setChannelWidth(channels: number): void') &&
     app.includes('widthOptions: this.widthTiers()') &&
-    app.includes('return captureWidthTiers(') &&
-    app.includes("return this.captureLabel.kind === 'loaded';") &&
     app.includes('if (!this.widthTiers().includes(channels)) return;') &&
-    app.includes('!busOutOfWidth(bus.spec, channels)') &&
-    app.includes('if (channels !== this.settings.channels) this.widthExplicit = true;') &&
-    widthSetter.includes('if (this.running || this.stopping) return;') &&
-    widthSetter.includes('this.applySettings({ ...this.settings, channels });') &&
-    !widthSetter.includes('enabled = i < channels') &&
-    !app.includes('neededWidth(');
+    app.includes('this.applySettings({ ...this.settings, channels });');
   const widthSheet = sheet.includes('.digital-section .panel-section-head > .channel-widths { flex: none; }') &&
     sheet.includes('.channel-widths .seg { padding: 1px 6px; font-size: 10px; }');
   check('the Device panel renders the channel-width selector through the App width setter',
     widthPanel && widthApp && widthSheet,
     `panel=${widthPanel}, app=${widthApp}, sheet=${widthSheet}`);
 
-  const slicedPanels = (app.match(/channels: this\.channels\.slice\(0, this\.displayChannelCount\(\)\),/g) ?? []).length >= 2;
+  const busGuards = app.includes('this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, channels));') &&
+    app.includes('if (busOutOfWidth(cfg.spec, this.renderChannelCount())) return null;') &&
+    app.includes('if (busOutOfWidth(cfg.spec, this.renderChannelCount())) return false;') &&
+    !app.includes('scopeOutOfWidth');
   const clipApp = app.includes('private displayChannelCount(): number') &&
     app.includes('return this.loadedCapture() ? this.channels.length : this.settings.channels;') &&
-    app.includes('private channelAvailable(index: number): boolean') &&
-    app.includes('index < Math.min(this.displayChannelCount(), this.store.channelCount)') &&
-    app.includes('filter((c) => this.channelAvailable(c.index) && c.enabled)') &&
-    slicedPanels &&
-    app.includes('buses: this.busViews, channelCount: this.displayChannelCount(), captureLocked:') &&
-    app.includes('if (index >= this.displayChannelCount()) return;') &&
-    app.includes('if (!enabled && lockedChannelBanks(this.busViews, this.displayChannelCount())') &&
-    app.includes('const want = new Set(list.filter((i) => i >= 0 && i < this.displayChannelCount()));') &&
-    app.includes('const model = Math.max(cfg.channels, this.device?.maxChannels ?? this.channels.length);') &&
-    app.includes('if (c.index >= this.displayChannelCount()) continue;');
-  const adoptBus = app.split('private adoptCapture(')[1]?.split('private save(')[0] ?? '';
-  const deviceBus = app.split('private adoptDeviceChannels(')[1]?.split('private async startCapture(')[0] ?? '';
-  const bootBus = app.split('const workspace = readWorkspaceSnapshot();')[1]
-    ?.split('this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(')[0] ?? '';
-  const bootGuard = bootBus.includes('this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));');
-  const busGuards = app.includes('this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, channels));') &&
-    adoptBus.includes('this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));') &&
-    deviceBus.includes('this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));') &&
-    bootGuard &&
-    app.includes('if (busOutOfWidth(cfg.spec, this.displayChannelCount())) return null;') &&
-    app.includes('if (busOutOfWidth(cfg.spec, this.displayChannelCount())) return false;') &&
-    app.includes('if (busOutOfWidth(b.spec, this.displayChannelCount())) return;') &&
-    !widthSetter.includes('bankBusDrafts') &&
-    !app.includes('scopeOutOfWidth');
-  check('width switching, restored state and bus edits all share the out-of-width test',
-    busGuards,
-    `switch=${app.includes('!busOutOfWidth(bus.spec, channels)')}, ` +
-    `add=${app.includes('if (busOutOfWidth(cfg.spec, this.displayChannelCount())) return null;')}, ` +
-    `update=${app.includes('if (busOutOfWidth(cfg.spec, this.displayChannelCount())) return false;')}, ` +
-    `boot=${bootGuard}, ` +
-    `adopt=${adoptBus.includes('!busOutOfWidth(bus.spec, this.displayChannelCount())')}, ` +
-    `device=${deviceBus.includes('!busOutOfWidth(bus.spec, this.displayChannelCount())')}, ` +
-    `rows=${app.includes('if (busOutOfWidth(b.spec, this.displayChannelCount())) return;')}, ` +
-    `drafts=${!widthSetter.includes('bankBusDrafts')}`);
-
-  check('channels past the selected width never reach the panel, rows or the assistant mask',
-    clipApp,
-    `display=${app.includes('private displayChannelCount(): number')}, ` +
-    `rows=${app.includes('filter((c) => this.channelAvailable(c.index) && c.enabled)')}, ` +
-    `panels=${slicedPanels}, ` +
-    `busPanel=${app.includes('channelCount: this.displayChannelCount(), captureLocked:')}, ` +
-    `toggle=${app.includes('if (index >= this.displayChannelCount()) return;')}, ` +
-    `assistant=${app.includes('const want = new Set(list.filter((i) => i >= 0 && i < this.displayChannelCount()));')}, ` +
-    `model=${app.includes('const model = Math.max(cfg.channels')}`);
+    app.includes('if (index >= this.renderChannelCount()) return;') &&
+    app.includes('lockedChannelBanks(this.busViews, this.renderChannelCount())') &&
+    app.includes('private renderChannelCount(): number');
+  check('width switching and channel locks still share the out-of-width test',
+    busGuards && clipApp, `guards=${busGuards}, clip=${clipApp}`);
 }
 
 {
@@ -321,22 +273,22 @@ check('bank start uses the absolute channel index',
   const options = channelWidthOptions(4).join(',') + '|' + channelWidthOptions(8).join(',') + '|' +
     channelWidthOptions(16).join(',') + '|' + channelWidthOptions(32).join(',') + '|' +
     channelWidthOptions(128).join(',');
-  const edge = channelWidthOptions(7).join(',') === '' && channelWidthOptions(0).join(',') === '' &&
-    channelWidthOptions(17).join(',') === '8,16';
+  const edge = channelWidthOptions(7).join(',') === '4' && channelWidthOptions(0).join(',') === '' &&
+    channelWidthOptions(17).join(',') === '4,8,16' && channelWidthOptions(3).join(',') === '';
   check('channel width options follow the model width without inventing tiers',
-    CHANNEL_WIDTH_OPTIONS.join(',') === '8,16,32' && options === '|8|8,16|8,16,32|8,16,32' && edge,
+    CHANNEL_WIDTH_OPTIONS.join(',') === '4,8,16,32' && options === '4|4,8|4,8,16|4,8,16,32|4,8,16,32' && edge,
     `declared=${CHANNEL_WIDTH_OPTIONS}, 4=${channelWidthOptions(4)}, 8=${channelWidthOptions(8)}, ` +
     `16=${channelWidthOptions(16)}, 32=${channelWidthOptions(32)}, 128=${channelWidthOptions(128)}, ` +
-    `7=${channelWidthOptions(7)}, 17=${channelWidthOptions(17)}`);
+    `3=${channelWidthOptions(3)}, 7=${channelWidthOptions(7)}, 17=${channelWidthOptions(17)}`);
 
-  const tiers = ['null,false', '16,false', '32,false', '8,false', '32,true', '16,true'];
   const tierValues = [
     captureWidthTiers(null, false), captureWidthTiers(16, false), captureWidthTiers(32, false),
     captureWidthTiers(8, false), captureWidthTiers(32, true), captureWidthTiers(16, true),
   ].map((list) => list.join(','));
   check('width tiers need a connected device and a capture that does not fix the width',
-    tierValues.join('|') === '|8,16|8,16,32|8||',
-    tiers.map((t, i) => `${t}=[${tierValues[i]}]`).join(', '));
+    tierValues.join('|') === '|4,8,16|4,8,16,32|4,8||',
+    ['null,false', '16,false', '32,false', '8,false', '32,true', '16,true']
+      .map((t, i) => `${t}=[${tierValues[i]}]`).join(', '));
 
   const clock20 = busOutOfWidth(spec([0, 1, 2, 3, 4, 5, 6, 7], 20), 16);
   const clock20Wide = busOutOfWidth(spec([0, 1, 2, 3, 4, 5, 6, 7], 20), 32);

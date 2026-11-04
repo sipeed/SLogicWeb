@@ -10,11 +10,11 @@
 
 import { MAX_BUS_BITS, validateBusSpec, type BusEncoding, type BusSpec } from '../data/busValue.js';
 import {
-  BUS_HEIGHTS, DEFAULT_BUS_HEIGHT, busSummary, runBits, runStart, swapBusOrder,
-  type BusDrawStyle, type BusViewConfig, type BusViewState,
+  BUS_HEIGHTS, DEFAULT_BUS_HEIGHT, applyBusBitOrder, busSummary, resolveBusBitOrder, runBits, runStart,
+  swapBusOrder, type BusBitOrder, type BusDrawStyle, type BusViewConfig, type BusViewState,
 } from './busView.js';
 import { button, div, labelled, section } from './capturePanel.js';
-import { CHANNEL_BANK_SIZE, busChannelBank, channelBankIndices, channelBankRange } from './channelBanks.js';
+import { CHANNEL_BANK_SIZE, channelBankIndices } from './channelBanks.js';
 import { t, type MessageKey } from './i18n.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 
@@ -22,6 +22,8 @@ export interface BusPanelView {
   buses: readonly BusViewState[];
   /** Channels a bus may use: the current capture's, or the device's when there is none. */
   channelCount: number;
+  /** The capture's test mode: `auto` bit order resolves against it. */
+  testMode: number;
   captureLocked: boolean;
 }
 
@@ -39,17 +41,22 @@ const ENCODINGS: [BusEncoding, MessageKey][] = [
 export function cloneBusConfig(c: BusViewConfig): BusViewConfig {
   return {
     name: c.name, color: c.color, fullScaleV: c.fullScaleV, offsetV: c.offsetV, style: c.style,
-    heightCss: c.heightCss, hideSources: c.hideSources,
+    heightCss: c.heightCss, hideSources: c.hideSources, bitOrder: c.bitOrder,
+    ...(c.analogGroup !== undefined ? { analogGroup: c.analogGroup } : {}),
+    ...(c.voltsPerDiv !== undefined ? { voltsPerDiv: c.voltsPerDiv } : {}),
+    ...(c.zeroPosition !== undefined ? { zeroPosition: c.zeroPosition } : {}),
     ...(c.usesDefaultName ? { usesDefaultName: true } : {}),
     spec: { bits: [...c.spec.bits], clock: c.spec.clock ? { ...c.spec.clock } : null, encoding: c.spec.encoding },
   };
 }
 
-export function defaultBusConfig(channelCount: number): BusViewConfig {
+export function defaultBusConfig(channelCount: number, testMode = 0): BusViewConfig {
   const n = Math.min(8, channelCount);
+  const msbFirst = resolveBusBitOrder('auto', testMode) === 'msb';
   return {
     name: 'ADC',
-    spec: { bits: Array.from({ length: n }, (_, i) => i), clock: null, encoding: 'unsigned' },
+    spec: { bits: runBits(0, n, channelCount, msbFirst), clock: null, encoding: 'unsigned' },
+    bitOrder: 'auto',
     color: '#4C9AFF',
     fullScaleV: null,
     offsetV: 0,
@@ -92,16 +99,6 @@ export function normalizeBankBusConfig(
   else delete next.usesDefaultName;
   next.spec = { bits, clock, encoding: config.spec.encoding };
   return next;
-}
-
-export function defaultBankBusConfig(channelCount: number, start: number): BusViewConfig {
-  return normalizeBankBusConfig({
-    ...defaultBusConfig(channelCount), name: t('bus.defaultName'), usesDefaultName: true,
-  }, channelCount, start);
-}
-
-export function retranslateBankBusConfig<T extends BusViewConfig>(config: T): T {
-  return config.usesDefaultName ? { ...config, name: t('bus.defaultName') } : config;
 }
 
 type BusDraftUpdate = (patch: Partial<BusViewConfig>, spec?: Partial<BusSpec>) => void;
@@ -224,6 +221,8 @@ function busAdvancedFields(d: BusViewConfig, options: BusAdvancedFieldsOptions):
 
 interface BusConfigFieldsOptions {
   channelCount: number;
+  /** The capture's test mode: `auto` bit order resolves against it. */
+  testMode: number;
   onRebuild(next: BusViewConfig, keepPerBitOpen: boolean): void;
 }
 
@@ -242,7 +241,11 @@ function busConfigFields(d: BusViewConfig, options: BusConfigFieldsOptions): Bus
   body.appendChild(labelled(t('bus.name'), name));
 
   const run = runStart(d.spec.bits);
-  // Width and the LSB channel fill the bits as a contiguous run, the common wiring.
+  // Width, the LSB channel and the bit order describe a contiguous run, the common wiring.
+  // Regenerating the run uses the declared order rather than the bits' current direction,
+  // so a draft that has not been committed yet (or was just switched to Auto) still lands
+  // on the orientation the settings ask for.
+  const msbFirst = resolveBusBitOrder(d.bitOrder, options.testMode) === 'msb';
   const row = div('field-row');
   const n = document.createElement('input');
   n.type = 'number';
@@ -251,23 +254,24 @@ function busConfigFields(d: BusViewConfig, options: BusConfigFieldsOptions): Bus
   n.value = String(d.spec.bits.length);
   n.addEventListener('change', () => {
     const width = Math.max(1, Math.min(MAX_BUS_BITS, cc, Math.round(Number(n.value)) || 1));
-    update({}, { bits: runBits(run.start, width, cc, run.msbFirst) });
+    update({}, { bits: runBits(run.start, width, cc, msbFirst) });
   });
   row.appendChild(labelled(t('bus.bits'), n));
   const start = selectControl('bus.start', t('bus.start'), chOptions, String(run.start));
-  start.addEventListener('change', () => update({}, { bits: runBits(Number(start.value), d.spec.bits.length, cc, run.msbFirst) }));
+  start.addEventListener('change', () => update({}, { bits: runBits(Number(start.value), d.spec.bits.length, cc, msbFirst) }));
   row.appendChild(start.el);
   body.appendChild(row);
 
-  const msb = document.createElement('label');
-  msb.className = 'bus-check';
-  const msbBox = document.createElement('input');
-  msbBox.type = 'checkbox';
-  msbBox.checked = run.msbFirst;
-  msbBox.disabled = d.spec.bits.length < 2;
-  msbBox.addEventListener('change', () => update({}, { bits: runBits(run.start, d.spec.bits.length, cc, msbBox.checked) }));
-  msb.append(msbBox, document.createTextNode(t('bus.msbFirst')));
-  body.appendChild(msb);
+  const order = selectControl('bus.bitOrder', t('bus.bitOrder'),
+    [['auto', t('bus.bitOrderAuto')], ['msb', t('bus.bitOrderMsb')], ['lsb', t('bus.bitOrderLsb')]],
+    d.bitOrder);
+  order.disabled = d.spec.bits.length < 2;
+  order.addEventListener('change', () => {
+    const bitOrder = order.value as BusBitOrder;
+    const msb = resolveBusBitOrder(bitOrder, options.testMode) === 'msb';
+    update({ bitOrder }, { bits: runBits(run.start, d.spec.bits.length, cc, msb) });
+  });
+  body.appendChild(order.el);
 
   // Any wiring: one channel per bit.
   const per = document.createElement('details');
@@ -322,7 +326,9 @@ export class BusPanel {
   render(v: BusPanelView): void {
     this.root.replaceChildren();
     if (this.editing && !v.buses.some((b) => b.id === this.editing)) { this.editing = null; this.draft = null; }
-    const draft = this.draft ??= defaultBusConfig(v.channelCount);
+    // The draft keeps Auto in step with the capture mode, even while the editor is open.
+    if (this.draft) this.draft = applyBusBitOrder(this.draft, v.testMode);
+    const draft = this.draft ??= defaultBusConfig(v.channelCount, v.testMode);
 
     const wrap = div('bus-panel');
     const head = div('panel-head');
@@ -350,18 +356,28 @@ export class BusPanel {
         info.textContent = `${busSummary(b.spec)} · ${t(ENCODINGS.find(([e]) => e === b.spec.encoding)![1])}${progress}`;
         info.title = info.textContent;
         row.append(sq, name, info);
-        if (busChannelBank(b.spec) === null) {
+        if (b.analogGroup === undefined) {
           const swap = button(t('bus.swapShort'), 'bus-btn');
           swap.title = t('bus.swap');
-          swap.addEventListener('click', () => this.cb.onUpdate(b.id, { ...cloneBusConfig(b), spec: swapBusOrder(b.spec) }));
+          swap.addEventListener('click', () => {
+            // Reversing is an explicit choice: pin the order so Auto does not undo it at
+            // the next test-mode change.
+            const flipped: BusBitOrder = resolveBusBitOrder(b.bitOrder, v.testMode) === 'msb' ? 'lsb' : 'msb';
+            this.cb.onUpdate(b.id, { ...cloneBusConfig(b), bitOrder: flipped, spec: swapBusOrder(b.spec) });
+          });
           row.appendChild(swap);
         }
-        const edit = button(t('bus.editButton'), 'bus-btn');
-        edit.addEventListener('click', () => this.cb.onEdit(b.id));
+        // An analog bank has one control, the Analog button in the Device panel; its
+        // wiring and name are the ADC module's, so it is not editable here.
+        if (b.analogGroup === undefined) {
+          const edit = button(t('bus.editButton'), 'bus-btn');
+          edit.addEventListener('click', () => this.cb.onEdit(b.id));
+          row.appendChild(edit);
+        }
         const remove = button(t('bus.remove'), 'bus-btn bus-btn--remove');
-        remove.disabled = v.captureLocked && busChannelBank(b.spec) !== null;
+        remove.disabled = v.captureLocked && b.analogGroup !== undefined;
         remove.addEventListener('click', () => this.cb.onRemove(b.id));
-        row.append(edit, remove);
+        row.appendChild(remove);
         s.body.appendChild(row);
       }
       wrap.appendChild(s.el);
@@ -380,6 +396,7 @@ export class BusPanel {
     const s = section(t(this.editing ? 'bus.edit' : 'bus.add'));
     const fields = busConfigFields(d, {
       channelCount: v.channelCount,
+      testMode: v.testMode,
       onRebuild: (next, keepPerBitOpen) => {
         this.draft = next;
         this.rerender(v);
@@ -398,9 +415,9 @@ export class BusPanel {
     const actions = div('bus-actions');
     const go = button(t(this.editing ? 'bus.save' : 'bus.addButton'), 'pill primary');
     const editingBank = this.editing !== null && v.buses
-      .some((bus) => bus.id === this.editing && busChannelBank(bus.spec) !== null);
+      .some((bus) => bus.id === this.editing && bus.analogGroup !== undefined);
     go.disabled = problems.length > 0 ||
-      (v.captureLocked && (editingBank || busChannelBank(current.spec) !== null));
+      (v.captureLocked && (editingBank || current.analogGroup !== undefined));
     go.addEventListener('click', () => {
       if (go.disabled) return;
       const cfg = fields.read();
@@ -417,150 +434,5 @@ export class BusPanel {
     }
     s.body.appendChild(actions);
     return s.el;
-  }
-}
-
-export interface BankBusDialogCallbacks {
-  onConfirm(start: number, config: BusViewConfig, enabled: boolean): void;
-}
-
-export interface BankBusDialogOpenContext {
-  locked: boolean;
-}
-
-interface BankBusDetails {
-  el: HTMLElement;
-  read(): BusViewConfig;
-}
-
-export class BankBusDialog {
-  private readonly dialog = document.createElement('dialog');
-  private start = 0;
-  private active = false;
-  private channelCount = 0;
-
-  constructor(private readonly cb: BankBusDialogCallbacks) {
-    this.dialog.className = 'channel-settings-dialog bank-bus-dialog';
-    this.dialog.setAttribute('aria-labelledby', 'bank-bus-dialog-title');
-    document.body.appendChild(this.dialog);
-    this.dialog.addEventListener('close', () => {
-      document.querySelector<HTMLButtonElement>(`[data-adc-open="${this.start}"]`)?.focus({ preventScroll: true });
-    });
-    this.dialog.addEventListener('pointerdown', (event) => {
-      if (event.target !== this.dialog) return;
-      const rect = this.dialog.getBoundingClientRect();
-      if (event.clientX >= rect.left && event.clientX <= rect.right &&
-        event.clientY >= rect.top && event.clientY <= rect.bottom) return;
-      event.preventDefault();
-      this.dialog.close('cancel');
-    });
-  }
-
-  open(
-    start: number, config: BusViewConfig, active: boolean, channelCount: number,
-    context: BankBusDialogOpenContext,
-  ): void {
-    this.start = start;
-    this.active = active;
-    this.channelCount = channelCount;
-    this.render(normalizeBankBusConfig(config, channelCount, start), context);
-    if (!this.dialog.open) this.dialog.showModal();
-    this.dialog.querySelector<HTMLInputElement>('[data-adc-enable]')?.focus({ preventScroll: true });
-  }
-
-  close(): void {
-    if (this.dialog.open) this.dialog.close('cancel');
-  }
-
-  private createDetails(config: BusViewConfig, context: BankBusDialogOpenContext): BankBusDetails {
-    const body = div('channel-settings-fields bank-bus-fields');
-    const name = document.createElement('input');
-    name.type = 'text';
-    name.value = config.name;
-    name.disabled = context.locked;
-    name.dataset.oscilloscopeName = '';
-    body.appendChild(labelled(t('bus.name'), name));
-
-    const order = selectControl('bus.channelOrder', t('bus.channelOrder'),
-      [['lsb', 'LSB'], ['msb', 'MSB']], runStart(config.spec.bits).msbFirst ? 'msb' : 'lsb');
-    const writeOrder = (): void => {
-      config.spec = {
-        ...config.spec,
-        bits: runBits(this.start, CHANNEL_BANK_SIZE, this.channelCount, order.value === 'msb'),
-      };
-    };
-    writeOrder();
-    order.disabled = context.locked;
-    order.addEventListener('change', writeOrder);
-    body.appendChild(order.el);
-
-    return {
-      el: body,
-      read: () => {
-        const next = cloneBusConfig(config);
-        const nameText = name.value.trim();
-        const usesDefaultName = nameText === '' || (config.usesDefaultName === true && nameText === config.name);
-        next.name = usesDefaultName ? t('bus.defaultName') : nameText;
-        if (usesDefaultName) next.usesDefaultName = true;
-        else delete next.usesDefaultName;
-        return next;
-      },
-    };
-  }
-
-  private render(config: BusViewConfig, context: BankBusDialogOpenContext): void {
-    const range = channelBankRange(this.start, this.channelCount);
-    const form = document.createElement('form');
-    form.className = 'channel-settings-form bank-bus-form';
-    const header = div('channel-settings-header');
-    const title = document.createElement('h2');
-    title.id = 'bank-bus-dialog-title';
-    title.textContent = t('bus.bankDialogTitle', { range });
-    header.appendChild(title);
-
-    const enableLabel = document.createElement('label');
-    enableLabel.className = 'bus-check bank-bus-enable';
-    const enable = document.createElement('input');
-    enable.type = 'checkbox';
-    enable.checked = this.active;
-    enable.disabled = context.locked;
-    enable.dataset.adcEnable = '';
-    enableLabel.append(enable, document.createTextNode(t('bus.enableBank')));
-
-    const actions = div('channel-settings-actions');
-    const cancel = button(t('bus.cancel'), 'pill');
-    cancel.type = 'button';
-    cancel.dataset.adcCancel = '';
-    cancel.addEventListener('click', () => this.dialog.close('cancel'));
-    const confirm = button(t('bus.confirm'), 'pill primary');
-    confirm.type = 'submit';
-    confirm.disabled = context.locked;
-    confirm.dataset.adcConfirm = '';
-    actions.append(cancel, confirm);
-
-    let details: BankBusDetails | null = null;
-    const syncDetails = (): void => {
-      if (!enable.checked) {
-        details?.el.remove();
-        return;
-      }
-      details ??= this.createDetails(config, context);
-      if (details.el.parentNode !== form) form.insertBefore(details.el, actions);
-    };
-    enable.addEventListener('change', syncDetails);
-
-    form.addEventListener('submit', (event) => {
-      event.preventDefault();
-      if (context.locked || !form.reportValidity()) return;
-      const enabled = enable.checked;
-      const current = enabled ? (details ??= this.createDetails(config, context)).read() : config;
-      const next = normalizeBankBusConfig(current, this.channelCount, this.start);
-      if (validateBusSpec(next.spec, this.channelCount).length > 0) return;
-      this.dialog.close('applied');
-      this.cb.onConfirm(this.start, next, enabled);
-    });
-    form.append(header, enableLabel, actions);
-    this.dialog.replaceChildren(form);
-    syncDetails();
   }
 }
