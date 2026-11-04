@@ -11,6 +11,7 @@ import { PlanarSampleStore } from '../../data/planarStore.js';
 import {
   analogFrame, applyBusBitOrder, beginAnalogFrameBudget, busRun, busSummary,
   endAnalogFrameBudget, resolveBusBitOrder, runBits, runStart, swapBusOrder,
+  type BusBitOrder,
   type BusViewConfig, type BusViewState,
 } from '../busView.js';
 
@@ -42,7 +43,7 @@ check('runBits and runStart round-trip', [false, true].every((m) => {
 
 // The A/D switch: which end of a contiguous run is the code's MSB.
 {
-  const cfg = (bits: number[], bitOrder: BusViewConfig['bitOrder']): BusViewConfig => ({
+  const cfg = (bits: number[], bitOrder: BusBitOrder): BusViewConfig => ({
     name: 'ADC', bitOrder, spec: { bits, clock: null, encoding: 'unsigned' },
     color: '#000000', fullScaleV: null, offsetV: 0, style: 'line', heightCss: 120, hideSources: false,
   });

@@ -57,7 +57,7 @@
         <span class="toolbar-item-label" aria-hidden="true" data-i18n="toolbar.shortDevice">Device</span>
       </button>
       <span class="toolbar-separator" role="separator" aria-orientation="vertical"></span>
-      <button id="transport" class="toolbar-item primary" data-i18n-title="toolbar.startTitle" title="Start a capture on the connected device" aria-label="Start">
+      <button id="transport" class="toolbar-item primary" data-i18n-title="toolbar.startTitle" title="Capture on the connected device" aria-label="Capture">
         <span class="toolbar-item-media">
           <svg class="toolbar-item-icon transport-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
             <path d="m8 5 11 7-11 7Z"></path>
@@ -66,7 +66,7 @@
             <rect x="6" y="6" width="12" height="12" rx="2"></rect>
           </svg>
         </span>
-        <span class="toolbar-item-label" aria-hidden="true" data-i18n="toolbar.shortStart">Start</span>
+        <span class="toolbar-item-label" aria-hidden="true" data-i18n="toolbar.shortStart">Capture</span>
       </button>
       <button id="btn-open" class="toolbar-item" data-i18n-title="toolbar.openTitle" title="Load a sigrok .sr session or a .lwcap" aria-label="Open…">
         <span class="toolbar-item-media">
@@ -172,6 +172,7 @@
         </div>
 
         <div id="plot-col">
+          <canvas id="overview" aria-hidden="true"></canvas>
           <canvas id="axis"></canvas>
           <div id="plot">
             <div id="wave-stack"></div>

@@ -211,6 +211,19 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
 }
 
 {
+  const finish = app.split('private finishCapture(')[1]?.split('private discardDecodeState')[0] ?? '';
+  const helper = app.split('private settleCursorsForStore(')[1]
+    ?.split('private settleHeldRepeatWave(')[0] ?? '';
+  const remapAt = finish.indexOf('this.applyPendingCursorDelta();');
+  const settleAt = finish.indexOf('this.settleCursorsForStore(captured.length);');
+  check('a sticky Repeat completion settles cursors to the completed wave',
+    remapAt >= 0 && settleAt > remapAt &&
+    helper.includes('sample === null || cursor.marker.isDragging || (sample >= 0 && sample < length)') &&
+    helper.includes('this.renumberCursors();') && helper.includes('this.renderPanels();'),
+    `remap=${remapAt}, settle=${settleAt}, helper=${helper.length}`);
+}
+
+{
   const open = app.split('private async openFiles(')[1]?.split('private adoptCapture(')[0] ?? '';
   const loadAt = open.indexOf('loadFiles(files)');
   const cancelsFirst = open.includes('private endPendingRepeatSession(): void') &&

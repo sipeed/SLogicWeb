@@ -231,15 +231,15 @@ const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = 
 {
   const texts = SHORTCUTS.map((entry) => shortcutActionText(entry));
   check('the dialog action text joins the labeled catalog keys with the two-label separator',
-    texts.join(' | ') === 'Start / Stop | Fit | Clear cursors' &&
-    SHORTCUTS[0]!.labels.length === 2 && t('toolbar.start') === 'Start',
+    texts.join(' | ') === 'Capture / Stop | Fit | Clear cursors' &&
+    SHORTCUTS[0]!.labels.length === 2 && t('toolbar.start') === 'Capture',
     `texts=${texts.join(' | ')}`);
 }
 
 {
   const swapped: ShortcutEntry = { ...SHORTCUTS[0]!, labels: ['toolbar.stop', 'toolbar.start'] };
   check('control: a swapped label pair does not reproduce the pinned action text',
-    shortcutActionText(swapped) === 'Stop / Start' &&
+    shortcutActionText(swapped) === 'Stop / Capture' &&
     shortcutActionText(swapped) !== shortcutActionText(SHORTCUTS[0]!),
     `swapped=${shortcutActionText(swapped)}, real=${shortcutActionText(SHORTCUTS[0]!)}`);
 }
@@ -369,11 +369,14 @@ function dialogConstructions(source: string): number {
 }
 
 {
+  const windowKeydowns = appSource.match(/window\.addEventListener\('keydown'/g)?.length ?? 0;
+  const documentKeydowns = appSource.match(/document\.addEventListener\('keydown'/g)?.length ?? 0;
   const keydowns = appSource.match(/addEventListener\('keydown'/g)?.length ?? 0;
-  check('app.ts adds no markup strings and only the single plot keydown listener',
-    !appSource.includes('innerHTML') && keydowns === 1 &&
-    appSource.includes("window.addEventListener('keydown'"),
-    `innerHTML=${appSource.includes('innerHTML')}, keydowns=${keydowns}`);
+  check('app.ts adds no markup strings, one window keydown, and no document-level keydown',
+    !appSource.includes('innerHTML') && windowKeydowns === 1 && documentKeydowns === 0 &&
+    keydowns >= 1 && appSource.includes("window.addEventListener('keydown'"),
+    `innerHTML=${appSource.includes('innerHTML')}, window=${windowKeydowns}, ` +
+    `document=${documentKeydowns}, scoped=${keydowns - windowKeydowns - documentKeydowns}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

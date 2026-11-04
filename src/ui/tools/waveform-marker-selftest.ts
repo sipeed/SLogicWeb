@@ -1137,7 +1137,7 @@ function between(source: string, start: string, end: string): string {
 
   const dblSource = between(
     appSource, "plot.addEventListener('dblclick'", '// Dragging the axis');
-  const dblListeners = appSource.match(/'dblclick'/g) ?? [];
+  const dblListeners = appSource.match(/plot\.addEventListener\('dblclick'/g) ?? [];
   check('a double-click places one cursor from the pointer sample and bails on an empty store',
     dblListeners.length === 1 &&
     dblSource.includes('if (this.store.length === 0) return;') &&

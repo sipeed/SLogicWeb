@@ -309,11 +309,14 @@ const startSrc = app.slice(
     gestures.includes('this.placeLockViewport();') &&
     !gestures.includes('triggerViewLock = null');
   const fit = app.slice(app.indexOf('private fitViewport()'),
-    app.indexOf('/**', app.indexOf('private fitViewport()') + 20));
-  const fitKeeps = fit.includes('const lock = this.triggerViewLock;') &&
-    fit.includes('this.triggerViewOffsetStart = -lock.fraction * this.loopRetentionLen;') &&
-    fit.includes('this.triggerViewOffsetEnd = (1 - lock.fraction) * this.loopRetentionLen;') &&
-    !fit.includes('this.triggerViewLock = null;');
+    app.indexOf('private fitLockedViewport()'));
+  const fitLock = app.slice(app.indexOf('private fitLockedViewport()'),
+    app.indexOf('private centerOverview'));
+  const fitKeeps = fit.includes('if (!this.fitLockedViewport()) this.stack.zoomToFit();') &&
+    fitLock.includes('const lock = this.triggerViewLock;') &&
+    fitLock.includes('this.triggerViewOffsetStart = -lock.fraction * this.loopRetentionLen;') &&
+    fitLock.includes('this.triggerViewOffsetEnd = (1 - lock.fraction) * this.loopRetentionLen;') &&
+    !fitLock.includes('this.triggerViewLock = null;');
   const roll = enforce.includes('this.rollLoopWindow(store);') &&
     enforce.includes('liveAbs - this.lastAnalogCrossingAbs > this.loopRetentionLen') &&
     enforce.includes('this.releaseLoopTrigger();') &&

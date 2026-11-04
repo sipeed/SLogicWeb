@@ -155,21 +155,22 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
       .match(/this\.clampLockView\(\);/g) ?? []).length === 3 &&
     !between(app, 'private centerOverview', 'private captureFixedView').includes('noteLockGesture');
   const fitSites = [
-    between(app, "plot.addEventListener('dblclick'", '// Dragging the axis'),
-    between(app, "if (e.key === 'f')", "if (e.key === ' ')"),
+    between(app, "if (shortcut === 'view.fit') {", "} else if (shortcut === 'cursors.clear') {"),
     between(app, "must<HTMLButtonElement>('btn-fit').addEventListener('click'", "must<HTMLButtonElement>('btn-settings').addEventListener('click'"),
   ];
   const fitBody = between(app, 'private fitViewport()', 'private centerOverview');
   check('each explicit viewport action is recorded as user intent',
     app.includes('private noteViewportIntent(): void') &&
-    intentCalls === 4 && explicitCalls === 2 && fitCalls === 3 && gestures &&
+    intentCalls === 5 && explicitCalls === 2 && fitCalls === 1 && gestures &&
     overviewIntent &&
-    fitSites.every((site) => site.includes('this.fitViewport();')) &&
+    fitSites[0]!.includes('this.fitLockedViewport()') &&
+    fitSites[0]!.includes('this.stack.zoomToFit();') &&
+    fitSites[1]!.includes('this.fitViewport();') &&
+    fitBody.includes('if (!this.fitLockedViewport()) this.stack.zoomToFit();') &&
     fitBody.includes('this.beginViewportGesture();') &&
     fitBody.includes('this.triggerViewOffsetStart = -lock.fraction * this.loopRetentionLen;'),
     `intentCalls=${intentCalls}, explicit=${explicitCalls}, fitCalls=${fitCalls}, ` +
-    `gestures=${gestures}, overview=${overviewIntent}, ` +
-    `fit=${fitSites.map((site) => site.includes('this.fitViewport();')).join(',')}`);
+    `gestures=${gestures}, overview=${overviewIntent}`);
 }
 
 {
@@ -220,54 +221,28 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
 }
 
 {
-  const start = between(app, 'private async startCapture(', 'private enforceLoopRetention');
-  const snapshot = between(start, 'const continuation =', 'const store =');
-  const manual = between(start, 'if (captureStartUsesDefaultWindow(origin)) {', '} else if (continuation?.followLatest)');
-  const follow = between(start, '} else if (continuation?.followLatest) {', '} else {');
-  const preserved = between(start, '} else if (continuation?.followLatest) {', 'this.renderPanels();');
-  check('Repeat continuation snapshots and restores the exact live viewport intent',
-    snapshot.includes('start: this.stack.viewport.start') &&
-    snapshot.includes('span: this.stack.viewport.end - this.stack.viewport.start') &&
-    snapshot.includes('followLatest: this.stack.followLatest') &&
-    snapshot.includes('this.repeatViewportAnchor = continuation;') &&
-    follow.includes('this.stack.restoreViewport(0, continuation.span);') &&
-    follow.includes('this.setFollow(true);') &&
-    preserved.includes('this.repeatViewportAnchor = null;') &&
-    preserved.includes('this.restoreRepeatViewport();'),
-    `snapshot=${snapshot.length}, follow=${follow.length}`);
-  check('manual Start installs the computed window and enables latest-follow',
-    manual.includes('this.stack.restoreViewport(0, span);') && manual.includes('this.setFollow(true);'),
-    `manual=${manual.length}`);
-}
-
-{
-  const finish = app.split('private finishCapture(')[1]?.split('private discardDecodeState')[0] ?? '';
-  const fitAt = finish.indexOf('this.stack.zoomToFit()');
-  const guardAt = finish.indexOf('if (fit)');
-  check('finish policy retains Single Fit while Repeat and manual Stop preserve the viewport',
-    finish.includes('const fit = captureFinishFits(this.settings.mode, reason)') &&
-    guardAt >= 0 && fitAt > guardAt && finish.includes("reason === 'manual' || fit") &&
-    finish.includes("this.startCapture('repeat')"),
-    `guard=${guardAt}, fit=${fitAt}`);
-}
-
-{
-  const intentCalls = (app.match(/this\.noteViewportIntent\(\)/g) ?? []).length;
-  const sites = [
-    between(app, "plot.addEventListener('wheel'", '// One pointer'),
-    between(app, 'if (pinch && pointers.size >= 2)', '      if (dragging) {'),
-    between(app, '      if (dragging) {', 'this.updateHover'),
-    between(app, "this.el.axis.addEventListener('pointermove'", 'const axisEnd'),
-    between(app, "if (shortcut === 'view.fit') {", "} else if (shortcut === 'cursors.clear') {"),
-    between(app, "must<HTMLButtonElement>('btn-fit').addEventListener('click'", "must<HTMLButtonElement>('btn-settings').addEventListener('click'"),
-    between(app, 'setViewportSeconds: (a: number', 'setMarker:'),
-    between(app, 'zoomToAnnotation: (analyzerIndex', 'snapshot:'),
-    between(app, 'private focusCursor(', 'private removeCursor('),
-  ];
-  check('each explicit viewport action invalidates continuation restoration',
-    app.includes('private noteViewportIntent()') && intentCalls === 9 &&
-    sites.every((site) => site.includes('this.noteViewportIntent();')),
-    `intentCalls=${intentCalls}, sites=${sites.map((site) => site.includes('this.noteViewportIntent();')).join(',')}`);
+  const wheelSite = between(app, 'const wheelNavigate = (e: WheelEvent', "plot.addEventListener('wheel'");
+  const pinchSite = between(app, 'if (pinch && pointers.size >= 2)', '      if (dragging) {');
+  const dragSite = between(app, '      if (dragging) {', 'this.updateHover');
+  const axisSite = between(app, "this.el.axis.addEventListener('pointermove'", 'const axisEnd');
+  const fitShortcut = between(app, "if (shortcut === 'view.fit') {", "} else if (shortcut === 'cursors.clear') {");
+  const fitButton = between(app, "must<HTMLButtonElement>('btn-fit').addEventListener('click'", "must<HTMLButtonElement>('btn-settings').addEventListener('click'");
+  const debugViewport = between(app, 'setViewportSeconds: (a: number', 'setMarker:');
+  const debugZoom = between(app, 'zoomToAnnotation: (analyzerIndex', 'snapshot:');
+  const focus = between(app, 'private focusCursor(', 'private removeCursor(');
+  check('each explicit viewport action routes through the intent or explicit-clamp helper',
+    app.includes('private noteViewportIntent()') && app.includes('private noteExplicitViewport()') &&
+    wheelSite.includes('this.noteViewportIntent();') &&
+    pinchSite.includes('this.noteViewportIntent();') &&
+    dragSite.includes('this.noteViewportIntent();') &&
+    axisSite.includes('this.noteViewportIntent();') &&
+    fitShortcut.includes('this.beginViewportGesture();') &&
+    fitShortcut.includes('this.fitLockedViewport()') &&
+    fitButton.includes('this.fitViewport();') &&
+    debugViewport.includes('this.noteExplicitViewport();') &&
+    debugZoom.includes('this.noteExplicitViewport();') &&
+    focus.includes('this.noteViewportIntent();'),
+    `wheel=${wheelSite.length}, pinch=${pinchSite.length}, drag=${dragSite.length}, axis=${axisSite.length}`);
   const dbl = between(app, "plot.addEventListener('dblclick'", '// Dragging the axis');
   check('the double-click placement gesture is not a viewport action',
     dbl.length > 0 && !dbl.includes('noteViewportIntent') && !dbl.includes('zoomToFit'),
@@ -277,44 +252,10 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
 {
   const draw = between(app, 'private draw(): void {', 'private drawLaneSurfaces');
   const syncAt = draw.indexOf('this.stack.syncSize();');
-  const restoreAt = draw.indexOf('this.restoreRepeatViewport();');
   const pendingAt = draw.indexOf('this.stack.setViewport(pendingViewport.start, pendingViewport.end);');
-  const pendingBody = between(draw, 'if (restorePending && pendingViewport) {', '    } else {');
-  check('draw applies width adaptation and toolbar restoration before any live anchor',
-    syncAt >= 0 && restoreAt > syncAt && pendingAt > syncAt && pendingAt < restoreAt &&
-    !pendingBody.includes('this.restoreRepeatViewport();') &&
-    draw.includes('} else {\n      this.restoreRepeatViewport();\n    }'),
-    `sync=${syncAt}, pending=${pendingAt}, restore=${restoreAt}, exclusive=${!pendingBody.includes('this.restoreRepeatViewport();')}`);
-}
-
-{
-  const cases = [
-    { body: between(app, 'if (!this.running && !this.stopping && this.repeatTimer.pending) {', 'if (!this.running || this.stopping) return;'), follow: true },
-    { body: between(app, "if (reason === 'manual') {", '    this.running = false;'), follow: true },
-    { body: between(app, 'private finishCapture(', 'private discardDecodeState'), follow: false },
-    { body: between(app, 'private adoptCapture(', 'private save()'), follow: false },
-    { body: between(app, 'private discardDevice()', 'private detachDevice()'), follow: false },
-    { body: between(app, 'private installDevice(', 'private usbDisconnected('), follow: false },
-    { body: between(app, "    } catch (e) {\n      this.repeatTimer.cancel();", '      const armed = this.startMutatedCapture;'), follow: false },
-  ];
-  const passed = cases.map((entry) => entry.body.includes('this.repeatViewportAnchor = null;') &&
-    (!entry.follow || entry.body.includes('this.setFollow(false);')));
-  check('each stop, finish, adoption, device and failed-start branch clears its own stale anchor',
-    passed.every(Boolean), `controls=${passed.join(',')}`);
-}
-
-{
-  const note = between(app, 'private noteViewportIntent()', 'private restoreRepeatViewport()');
-  const apply = between(app, 'private applySettings(', 'private configureChannel(');
-  const restore = between(app, 'private restoreRepeatViewport()', 'private syncMarkerCursor(');
-  check('user intent, mode replacement, and anchor restoration own their exact mutations',
-    note.includes('this.repeatViewportAnchor = null;') && note.includes('this.setFollow(false);') &&
-    apply.includes('if (next.mode !== this.settings.mode) this.repeatViewportAnchor = null;') &&
-    restore.includes('if (!anchor || anchor.followLatest) return;') &&
-    restore.includes('clampCaptureViewportAnchor(anchor, this.store.length)') &&
-    restore.includes('this.stack.restoreViewport(range.start, range.end);') &&
-    restore.includes('if (range.start === anchor.start) this.repeatViewportAnchor = null;'),
-    `note=${note.length}, apply=${apply.length}, restore=${restore.length}`);
+  check('draw applies width adaptation before the pending toolbar viewport',
+    syncAt >= 0 && pendingAt > syncAt,
+    `sync=${syncAt}, pending=${pendingAt}`);
 }
 
 check('the session model owns the policy rules the App imports',

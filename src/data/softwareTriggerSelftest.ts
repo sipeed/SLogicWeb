@@ -1684,6 +1684,20 @@ export function runSoftwareTriggerSuite(): SoftwareTriggerTestResult[] {
     detail: `matched=${no.trigger.matched}, output=${no.output.length}, inspected=${no.trigger.inspectedSamples}`,
   });
 
+  // Documented early-match rule: the host matcher arms from the first complete sample,
+  // so a level already true at RUN fires before the pre-trigger ring fills. The emitted
+  // total still respects the configured pre+post budget; only the split differs.
+  const early = collect(8, [1, 1, 1, 1], {
+    kind: 'level', level: 1, channel: 0, preTriggerSamples: 2, maxSamples: 4,
+  }, [1]);
+  results.push({
+    name: 'an early match keeps the total pre+post budget with a short prefix',
+    pass: early.trigger.matched && early.trigger.triggerSampleIndex === 0 &&
+      early.trigger.emittedSamples === 4 && early.output.length === 4,
+    detail: `matched=${early.trigger.matched}, T=${early.trigger.triggerSampleIndex}, ` +
+      `emitted=${early.trigger.emittedSamples}, bytes=${early.output.length}`,
+  });
+
   // The trigger may land exactly at the nominal output budget. The matcher must
   // inspect the retained-prefix allowance as well, otherwise a final falling
   // edge is incorrectly reported as absent before its post-trigger sample arrives.

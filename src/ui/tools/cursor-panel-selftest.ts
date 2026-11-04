@@ -423,8 +423,8 @@ const edgeMethodsSource = slice(app,
   const callSites = (app.match(/updateCursorDistances\(/g) ?? []).length;
   const rowSites = (app.match(/updateCursorDistances\(this\.cursorDistanceRows\(\)\)/g) ?? []).length;
   const compositions = (app.match(/private cursorDistanceRows\(\): CursorDistanceRowView\[\] \{/g) ?? []).length;
-  check('both distance refreshes read the one view-row composition, never an ad-hoc map',
-    callSites === 2 && rowSites === 2 && compositions === 1,
+  check('every distance refresh reads the one view-row composition, never an ad-hoc map',
+    callSites === 3 && rowSites === 3 && compositions === 1,
     `calls=${callSites}, rows=${rowSites}, compositions=${compositions}`);
 }
 
@@ -472,11 +472,11 @@ const edgeMethodsSource = slice(app,
   const shiftAt = retention.indexOf('if (cursor.marker.sample !== sample) shifted = true;');
   const branchAt = retention.indexOf("} else if (shifted && this.panel === 'device') {");
   const updateAt = retention.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
-  const originAt = retention.indexOf('this.triggerSampleIndex = this.triggerSampleIndex - drop >= 0');
+  const originAt = retention.indexOf('const next = this.triggerSampleIndex! - drop;');
   check('a retention shift with an intact cursor list refreshes the rows in place',
     retention.length > 0 && shiftAt >= 0 && branchAt > shiftAt && updateAt > branchAt &&
     originAt >= 0 && originAt < shiftAt &&
-    retention.lastIndexOf('this.triggerSampleIndex = this.triggerSampleIndex - drop >= 0') < updateAt,
+    retention.lastIndexOf('const next = this.triggerSampleIndex! - drop;') < updateAt,
     `retention=${retention.length} chars, shift=${shiftAt}, branch=${branchAt}, ` +
     `update=${updateAt}, origin=${originAt}`);
 

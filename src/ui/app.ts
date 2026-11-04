@@ -12,15 +12,15 @@
 import {
   appendLostSamples, createSampleStore, MAX_SOFTWARE_TRIGGER_PREFIX_BYTES,
 } from '../data/index.js';
-import type { SampleStore } from '../data/types.js';
+import { DROP_FRONT_QUANTUM, type SampleStore } from '../data/types.js';
 import { bytesPerSampleForChannels, channelWidthForProbes, isChannelCount } from '../types.js';
 import { DiagnosticError, diagnosticOf } from '../diagnostics.js';
 import {
-  MAX_SAMPLERATE_HZ, TransportDeadError, getGrantedDevicesOnBestThread, requestDeviceOnBestThread,
-  vrefCode, type CaptureConfig, type Device,
+  MAX_SAMPLERATE_HZ, SAMPLERATES_HZ, TransportDeadError, getGrantedDevicesOnBestThread,
+  requestDeviceOnBestThread, vrefCode, type CaptureConfig, type Device,
 } from '../device/index.js';
 import { WorkerSlogicDevice, workerTransport } from '../device/workerTransport.js';
-import { WheelIntent, wheelSpanFactor } from '../render/index.js';
+import { wheelSpanFactor } from '../render/index.js';
 import {
   AnnotationIndex, DecodeCancelledError, DecodeTimeoutError, EDGE_BUDGET, MAX_SAMPLE,
   annotationTexts, displayRows, getDecoder, hydrateDecoders, rowForClass, sharedDecodeClient,
@@ -32,23 +32,24 @@ import type { AssistantHost, CaptureOutcome } from '../assistant/tools.js';
 import { AnalyzerPanel } from './analyzerPanel.js';
 import { AssistantPanel } from './assistantPanel.js';
 import { BusBuilder, validateBusSpec } from '../data/busValue.js';
+import { BusPanel, cloneBusConfig, defaultBusConfig } from './busPanel.js';
 import {
-  BankBusDialog, BusPanel, cloneBusConfig, defaultBankBusConfig, defaultBusConfig, normalizeBankBusConfig,
-  retranslateBankBusConfig,
-} from './busPanel.js';
-import {
-  analogFrame, busColor, busLabel, busSummary, busValueAt, busYRange, type AnalogFrame, type BusViewConfig,
-  type BusViewState,
+  analogFrame, applyBusBitOrder, beginAnalogFrameBudget, busColor, busLabel, busSummary,
+  busValueAt, busYRange, endAnalogFrameBudget, type AnalogFrame,
+  type BusViewConfig, type BusViewState,
 } from './busView.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
 import { CapturePanel, cursorDistanceSideId, cursorEdgeSideId,
-  type CapturePanelState, type CapturePanelView, type CursorDistanceRowView, type CursorDistanceSideView,
-  type CursorEdgeChannelView, type CursorEdgeRowView, type CursorRowView } from './capturePanel.js';
+  type CapturePanelState, type CapturePanelView, type CursorDistanceRowView,
+  type CursorDistanceSideView, type CursorEdgeChannelView, type CursorEdgeRowView,
+  type CursorRowView, type LoopDisplayMetrics, type TriggerStatusView } from './capturePanel.js';
 import {
-  CHANNEL_BANK_SIZE, busChannelBank, captureWidthTiers, channelBankIndices, channelBankStart,
-  busOutOfWidth, lockedChannelBanks,
+  ANALOG_GROUP_COUNT, ADC_FULL_SCALE_V, ADC_OFFSET_V, CHANNEL_BANK_SIZE, analogBankActive,
+  analogBusConfig, analogCodeFromVolts, analogGroupCount, analogSamplerates, analogTriggerVolts,
+  busChannelBank,
+  captureWidthTiers, channelBankIndices, channelBankStart, busOutOfWidth, lockedChannelBanks,
 } from './channelBanks.js';
-import { ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration } from './channelList.js';
+import { ChannelList, type BusCell, type BusScopePatch, type ChannelCell, type ChannelConfiguration } from './channelList.js';
 import { computeChannelRowHeight } from './channelLayout.js';
 import {
   MAX_SAMPLES, levelAt, loadFiles, loadLwcap, saveLwcap,
@@ -73,7 +74,10 @@ import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
 import { shortcutIdFor } from './shortcuts.js';
 import { ShortcutsDialog } from './shortcutsDialog.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
-import { Overlay, paintMarkerChip, type HoverMeasurement } from './overlay.js';
+import {
+  Overlay, paintMarkerChip, type HoverMeasurement, type RegionTint,
+} from './overlay.js';
+import { OverviewStrip } from './overviewStrip.js';
 import { PanelResizer } from './panelResizer.js';
 import { StoreRef } from './storeRef.js';
 import {
@@ -82,17 +86,20 @@ import {
   DEFAULT_TRIGGER_MODE,
   edgeTriggerAutoArms, clampLoopSamples, DEFAULT_LOOP_SAMPLES, loopDropSamples,
   modesToConditions, triggerModeFromCondition, mappedCaptureChannels,
-  type AnalyzerState, type CaptureSettings, type ChannelState, type TriggerMode,
+  type AnalogTriggerSetting, type AnalyzerState, type CaptureSettings, type ChannelState,
+  type TriggerMode,
   type CaptureLabel, type StatusError,
 } from './state.js';
 import { stopFailureIsSilent } from './stopFailure.js';
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
 import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.js';
-import { capturePostTriggerSamples } from './capturePolicy.js';
+import { capturePostTriggerSamples, carryCaptureDuration } from './capturePolicy.js';
+import { liveDrawDue } from './liveRefresh.js';
+import type { CaptureStartOrigin, CaptureStopReason } from './captureViewport.js';
 import {
-  captureFinishFits, captureStartUsesDefaultWindow, clampCaptureViewportAnchor,
-  type CaptureStartOrigin, type CaptureStopReason, type CaptureViewportAnchor,
-} from './captureViewport.js';
+  beginSweep, createSession, resolveSessionView, secondsRangeToSamples,
+  sessionAfterTrigger, sessionWithManualView, triggerSearchSamples, type CaptureSession,
+} from './captureSession.js';
 import { RepeatCaptureTimer } from './repeatCapture.js';
 import {
   markerEdgeWindow, markerPointerCursor, markerSnapRadii, nearestMarkerEdge, type MarkerCursor,
@@ -113,6 +120,21 @@ import {
 } from './cursorEdges.js';
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
+import {
+  nextScopeVoltsPerDiv, scopeGeometry, scopeScaleAt, scopeVoltsAtY,
+} from './scopeScale.js';
+import {
+  captureLocksTriggerView, clampLoopViewOffsets, loopOverviewWindow, loopPendingLimit,
+  loopStoreLimit, mayReanchor, medianOfRecent, planLocalTriggerStep, reconcileTrigger,
+  relativeTriggerSample, resumeTriggerFollow, triggerSlackSamples, triggerViewFraction,
+  type TriggerReconcilePhase, type TriggerViewLock,
+} from './triggerViewport.js';
+import { AnalogCrossingScanner } from './analogCrossingScan.js';
+import {
+  RepeatCompositeStore, remapRepeatSample, repeatHoldReleased, repeatSurfacePixels,
+  type RepeatLayerStore,
+} from './repeatDisplay.js';
+import { planLoopSwap } from './displaySwap.js';
 
 /** Where Pyodide and the decoder zip live; content-hashed in hosted builds (vite.config.ts). */
 declare const __LOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
@@ -121,7 +143,18 @@ declare const __LOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
 type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number): number };
 type AcquireOutcome = 'connected' | 'cancelled' | 'failed';
 
-const LOOP_SUSPEND_MIN_BYTES_PER_SEC = 160e6;
+/**
+ * Hard ceiling for a rolling Loop store. The sample stores reject an append past
+ * 0x7fffffff samples; a trigger lock that would need more than this must release the
+ * view rather than risk that throw. The margin holds one 8 MiB delivery block at any
+ * channel width (8,388,608 samples at 4 channels).
+ */
+const LOOP_STORE_HARD_SAMPLES = 0x7fffffff - 0x1000000;
+/**
+ * Above this byte rate a loop capture skips its background bus-overview builds while it
+ * runs; the throttled waveform still draws every 50 ms. The builds finish after the stop.
+ */
+const LOOP_BUILD_SUSPEND_BYTES_PER_SEC = 160e6;
 
 interface Lane {
   analyzer: AnalyzerState;
@@ -139,6 +172,12 @@ export class App {
   private readonly storeRef: StoreRef;
   private readonly stack: WaveformStack;
   private readonly overlay: Overlay;
+  private readonly overview: OverviewStrip;
+  private readonly scopeHost: HTMLDivElement;
+  private readonly scopeBars = new Map<string, HTMLDivElement>();
+  private readonly scopeTriggers = new Map<string, HTMLDivElement>();
+  private readonly scopeScaleAnimations = new Map<string, { from: number; to: number; startedAt: number }>();
+  private scopeWheelPersist: number | null = null;
   private readonly channelList: ChannelList;
   private readonly capturePanel: CapturePanel;
   private readonly analyzerPanel: AnalyzerPanel;
@@ -149,14 +188,16 @@ export class App {
   /** Resolved when the running capture stops (the assistant waits on a capture). */
   private captureWaiters: (() => void)[] = [];
   private readonly busPanel: BusPanel;
-  private readonly bankBusDialog: BankBusDialog;
   /** Parallel-bus (ADC) views, drawn as analog rows above the channels. */
   private busViews: BusViewState[] = [];
-  private readonly bankBusDrafts = new Map<number, BusViewConfig>();
   private nextBus = 0;
   /** When the analyzers panel last re-rendered for a bus build's progress. */
   private busPanelAt = 0;
   private runningPanelAt = 0;
+  /** New samples are waiting for the next data-driven redraw (HSync's status cadence). */
+  private livePending = false;
+  /** When the screen was last drawn for any reason, in `performance.now()` terms. */
+  private liveDrawAt = 0;
   private readonly settingsMenu: SettingsMenu;
   private readonly sidebarMenu: SettingsMenu;
   private readonly languageMenu: SettingsMenu;
@@ -189,7 +230,39 @@ export class App {
   private deviceEpoch = 0;
   private stopPending: Promise<void> | null = null;
   private readonly repeatTimer = new RepeatCaptureTimer();
-  private repeatViewportAnchor: CaptureViewportAnchor | null = null;
+  /** The current Capture -> Stop session, or null when idle. */
+  private session: CaptureSession | null = null;
+  /** A user pan/zoom since the last draw; the next draw records it as the fixed view. */
+  private viewIntent = false;
+  private get repeatSession(): boolean { return this.session?.mode === 'repeat'; }
+  /** A repeat wave has started but not delivered data yet: keep the previous frame up. */
+  private repeatWaveHolding = false;
+  /** The previous completed Repeat wave: it fills the view until the current one reaches it. */
+  private repeatFront: RepeatLayerStore | null = null;
+  /** The current wave's own store (capture truth; `store` may be a Repeat composite). */
+  private waveStore: SampleStore | null = null;
+  /** Two-layer display for a Fixed Repeat viewport; null while following or between waves. */
+  private repeatComposite: RepeatCompositeStore | null = null;
+  /** The previous wave is on screen while the current one waits for its trigger. */
+  private repeatShowingFront = false;
+  /** The old wave's T while its frame is held, in that store's coordinates. */
+  private repeatHeldTrigger: number | null = null;
+  /** A Repeat wave missed its trigger; keep the note up until the next successful one. */
+  private repeatMissed = false;
+  /** The last manual stop adopted the held previous wave; ignore the drain's not-found. */
+  private settledHeldCapture = false;
+  /** Marker offset to apply once the display layer changes at a Repeat hand-over. */
+  private pendingCursorDelta: number | null = null;
+  /** Loop display instrumentation: inter-crossing intervals, median period estimate. */
+  private loopPeriodEstimates: number[] = [];
+  private loopPeriodSamples = 0;
+  /** Absolute sample position of the last displayed anchor block. */
+  private loopSwapCursorAbs = 0;
+  private loopLastAnchorStep = 0;
+  /** Capture shape of the last wave, to keep a Repeat session's layout off the wave path. */
+  private lastCaptureChannels = 0;
+  private lastCaptureRate = 0;
+  private lastCaptureTestMode = 0;
   private rateCeilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ;
   private running = false;
   /** True while WebUSB transfers from the previous run are being cancelled and drained. */
@@ -206,6 +279,54 @@ export class App {
   private triggerState: 'off' | 'waiting' | 'triggered' | 'not-found' = 'off';
   /** Trigger sample position in SampleStore; the time axis labels this sample T=0. */
   private triggerSampleIndex: number | null = null;
+  /** Pre-trigger percentage as a viewport fraction while a loop trigger is armed. */
+  private triggerViewFraction = 0;
+  /** A trigger fired but the anchored viewport has not been placed yet (next draw). */
+  private triggerViewPending = false;
+  /** The user's ViewWindow offsets relative to T, in samples (within the DurationWindow). */
+  private triggerViewOffsetStart = 0;
+  private triggerViewOffsetEnd = 0;
+  /** Latest edge reported by the display scanner; the lock releases after a quiet window. */
+  private lastAnalogCrossingAbs = Number.NEGATIVE_INFINITY;
+  /** An edge seen while unlocked; the next enforce re-locks the trigger view on it. */
+  private pendingRelockAbs: number | null = null;
+  /** A loop trigger is anchored to a valid edge in the current data. */
+  private triggerViewLock: TriggerViewLock | null = null;
+  /** The capture in flight was armed with a host-side matcher. */
+  private captureUsesSoftwareTrigger = false;
+  /** Fixed per-capture trigger parameters a live retune must not change. */
+  private captureTriggerBase: {
+    preTriggerSamples: number; maxSamples: number; searchLimitSamples: number;
+  } | null = null;
+  /** A settings change removed every condition; the capture is restarting free-run. */
+  private triggerRestartPending = false;
+  /** A user Stop during an automatic trigger restart cancels the pending start. */
+  private triggerRestartCancelled = false;
+  /**
+   * A trigger reconciliation was requested while device.start() was still arming; run it
+   * after the promise settles, re-evaluating the then-current settings and trigger state.
+   */
+  private triggerSyncDeferred = false;
+  /** True between calling device.start() and its promise settling. */
+  private captureArming = false;
+  /** Invalidates callbacks from a superseded acquisition (late worker messages). */
+  private captureGeneration = 0;
+  /** A retune was requested before the device finished arming; retry once after start. */
+  private triggerRetuneRequested = false;
+  /** The live analog edit cannot arm at this capture's board/rate; it is pending. */
+  private triggerRetuneRejected = false;
+  /** A loop trigger matched, but its sample was already dropped before the page heard. */
+  private triggerViewLost = false;
+  /** The trigger was released because the rolling Loop store hit its hard sample cap. */
+  private triggerAutoDisarmed = false;
+  /** Continuous ADC crossing detector for a locked loop analog trigger; null otherwise. */
+  private analogScanner: AnalogCrossingScanner | null = null;
+  /** Absolute emitted-stream positions of recent scanned ADC crossings (ascending). */
+  private analogCrossings: number[] = [];
+  /** Reused median scratch for the chronological period-estimate window. */
+  private loopPeriodScratch: number[] = [];
+  /** Extra samples the locked loop store may carry beyond its visible window. */
+  private loopTriggerSlackSamples = 0;
 
   private captureLabel: CaptureLabel = { kind: 'none' };
   private statusError: StatusError | null = null;
@@ -233,11 +354,11 @@ export class App {
   private panelBeforeAssistant: 'device' | 'analyzers' | null = 'device';
   private paintedTheme: ThemeId;
   private palette: CanvasPalette;
-  private readonly wheelIntent = new WheelIntent();
 
   // DOM
   private readonly el: {
     plot: HTMLDivElement; waveStack: HTMLDivElement; axis: HTMLCanvasElement;
+    overview: HTMLCanvasElement;
     scroll: HTMLDivElement; main: HTMLDivElement; resizer: HTMLDivElement;
     channelList: HTMLDivElement; side: HTMLDivElement; status: HTMLDivElement;
     hint: HTMLDivElement; transport: HTMLButtonElement;
@@ -255,6 +376,7 @@ export class App {
       resizer: must<HTMLDivElement>('panel-resizer'),
       waveStack: must<HTMLDivElement>('wave-stack'),
       axis: must<HTMLCanvasElement>('axis'),
+      overview: must<HTMLCanvasElement>('overview'),
       channelList: must<HTMLDivElement>('channel-list'),
       side: must<HTMLDivElement>('side-panel'),
       status: must<HTMLDivElement>('status'),
@@ -286,12 +408,6 @@ export class App {
         ...cloneBusConfig(config), id: `bus-${id}`, builder: null, builtFor: null, cache: null,
       }));
       this.nextBus = this.busViews.length;
-      this.bankBusDrafts = new Map(Object.entries(workspace.bankBusDrafts ?? {})
-        .map(([start, config]) => [Number(start), cloneBusConfig(config)]));
-      for (const bus of this.busViews) {
-        const bank = busChannelBank(bus.spec);
-        if (bank !== null) this.bankBusDrafts.set(bank, cloneBusConfig(bus));
-      }
     }
     this.analyzers = analyzerStatesFrom(workspace?.analyzers ?? []);
     this.nextAnalyzer = nextAnalyzerSequence(this.analyzers);
@@ -301,7 +417,7 @@ export class App {
     const triggerModes = workspace?.capture?.triggerModes ?? {};
     const triggerConditions = modesToConditions(triggerModes);
     const first = triggerConditions[0];
-    this.settings = clampSettings({
+    this.settings = this.clampSettings({
       ...defaultCaptureSettings(),
       ...(workspace?.capture ?? {}),
       channels: initialWidth,
@@ -310,7 +426,9 @@ export class App {
       triggerChannel: first?.channel ?? 0,
       triggerKind: first?.kind ?? 'rising',
       triggerLevel: first?.level ?? 1,
-    }, this.rateCeilings);
+    });
+    this.busViews = this.busViews
+      .map((bus) => applyBusBitOrder(bus, this.settings.testMode));
     this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));
     this.syncBankChannels();
     this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(this.workspaceSnapshot());
@@ -327,15 +445,28 @@ export class App {
     this.storeRef = new StoreRef(createSampleStore(channelWidthForProbes(this.channels.length), this.settings.samplerate));
     this.stack = new WaveformStack(this.el.waveStack, this.storeRef);
     this.overlay = new Overlay(this.el.plot);
+    this.scopeHost = document.createElement('div');
+    this.scopeHost.className = 'scope-scale-host';
+    this.el.plot.appendChild(this.scopeHost);
     this.paintedTheme = getTheme();
     this.palette = canvasPalette(this.paintedTheme);
     this.overlay.setPalette(this.palette);
+    this.overview = new OverviewStrip(this.el.overview, {
+      // Any strip gesture leaves follow mode. The lock is not released: the strip moves
+      // only the user's ViewWindow inside D, and V is clamped afterwards.
+      onIntent: () => { this.beginViewportGesture(); },
+      onCenter: (sample) => this.centerOverview(sample),
+      onPan: (samples) => this.panOverview(samples),
+      onZoom: (anchor, factor) => this.zoomOverview(anchor, factor),
+    });
     this.stack.setBaseTheme(baseTheme(this.paintedTheme));
     this.channelList = new ChannelList(this.el.channelList, {
       onConfigure: (channel, config) => this.configureChannel(channel, config),
       onReorder: (from, to) => this.reorder(from, to),
       onRemoveAnalyzer: (id) => this.removeAnalyzer(id),
       onEditBus: (id) => this.editBus(id),
+      onBusScope: (id, patch, commit) => this.configureBusScope(id, patch, commit),
+      onBusTrigger: (id, kind, volts) => this.configureAnalogTrigger(id, kind, volts),
     });
 
     const panelHost = document.createElement('div');
@@ -347,7 +478,7 @@ export class App {
     this.capturePanel = new CapturePanel(panelHost, {
       onSettings: (s) => this.applySettings(s),
       onToggleChannel: (i, on) => this.setChannelEnabled(i, on),
-      onOpenBank: (start) => this.openBankBus(start),
+      onToggleAnalog: (start) => this.toggleAnalog(start),
       onChannelWidth: (n) => this.setChannelWidth(n),
       onUsbControl: (command) => this.usbControl(command),
       onRemoveCursor: (id) => this.removeCursor(id),
@@ -378,9 +509,6 @@ export class App {
       onEdit: (id) => this.editBus(id),
       onUpdate: (id, cfg) => this.updateBus(id, cfg),
       onRemove: (id) => this.removeBus(id),
-    });
-    this.bankBusDialog = new BankBusDialog({
-      onConfirm: (start, cfg, enabled) => this.configureBankBus(start, cfg, enabled),
     });
 
     this.wireToolbar();
@@ -435,6 +563,13 @@ export class App {
 
   private get store(): SampleStore { return this.storeRef.target; }
 
+  /**
+   * The samples this acquisition has actually captured. `store` is the displayed store,
+   * which for a Fixed Repeat viewport is a composite of the current and previous wave;
+   * progress, labels, saving and the assistant must use the current wave's own store.
+   */
+  private get captureStore(): SampleStore { return this.waveStore ?? this.store; }
+
   private enabledChannels(): ChannelState[] {
     return this.order.map((i) => this.channels[i]!).filter((c) => this.channelAvailable(c.index) && c.enabled);
   }
@@ -446,6 +581,24 @@ export class App {
   private visibleChannels(): ChannelState[] {
     const hidden = new Set(this.busViews.filter((b) => b.hideSources).flatMap((b) => b.spec.bits));
     return this.enabledChannels().filter((c) => !hidden.has(c.index));
+  }
+
+  /**
+   * The channel rows on screen, in order: the visible channels plus enabled ones inside the
+   * selected width that the capture on screen does not have. Widening the width after a
+   * narrower capture must still show the new rows (the next capture fills them), and the
+   * capture already taken stays as it is rather than being thrown away.
+   */
+  private rowChannels(): ChannelState[] {
+    const hidden = new Set(this.busViews.filter((b) => b.hideSources).flatMap((b) => b.spec.bits));
+    const width = this.renderChannelCount();
+    return this.order.map((i) => this.channels[i]!).filter((c) =>
+      c.enabled && !hidden.has(c.index) && c.index < width &&
+      (this.channelAvailable(c.index) || c.index >= this.store.channelCount));
+  }
+
+  private captured(index: number): boolean {
+    return index < this.store.channelCount;
   }
 
   private loadedCapture(): boolean {
@@ -462,8 +615,103 @@ export class App {
     return this.loadedCapture() ? this.channels.length : this.settings.channels;
   }
 
+  /**
+   * The width of the data currently on screen: an acquisition keeps the width it was
+   * started with, so editing the pending width while it runs must not re-interpret its
+   * channels. Outside a run this is the selected (next) width.
+   */
+  private renderChannelCount(): number {
+    return this.running || this.stopping ? this.store.channelCount : this.displayChannelCount();
+  }
+
+  /**
+   * Clamp with the current device ceilings, and while any bank is read as analog, with
+   * the ADC module's rate rule as well. The rule depends on the candidate width, so it is
+   * derived from `s`, not from the committed settings.
+   */
+  private clampSettings(s: CaptureSettings): CaptureSettings {
+    // While a capture runs, its trigger configuration stays on the captured width even
+    // when the panel's pending width shrinks; the next run re-clamps to the new width.
+    const triggerChannels = this.running || this.stopping
+      ? this.renderChannelCount() : s.channels;
+    const clamped = clampCaptureSettings(
+      s, this.rateCeilings, analogBankActive(this.busViews, s.channels), triggerChannels,
+    );
+    // Analog trigger levels belong to a displayed ADC group. Removing the group drops
+    // the level (so re-adding it starts off), and its source inputs are not logic
+    // channels, so digital conditions on them are ignored while the group is analog.
+    const activeStarts = new Set(this.busViews
+      .filter((bus) => bus.analogGroup !== undefined)
+      .map((bus) => bus.analogGroup! * CHANNEL_BANK_SIZE));
+    const analogTriggers = Object.fromEntries(Object.entries(clamped.analogTriggers)
+      .filter(([start]) => activeStarts.has(Number(start)))) as Record<number, AnalogTriggerSetting>;
+    // An analog trigger is single-channel in every source: keep the lowest displayed bank
+    // and drop the rest, so a stored-but-inactive family can never show several badges.
+    const analogStarts = Object.keys(analogTriggers).map(Number).sort((a, b) => a - b);
+    if (analogStarts.length > 1) {
+      const first = analogStarts[0]!;
+      for (const key of Object.keys(analogTriggers)) {
+        if (Number(key) !== first) delete analogTriggers[Number(key)];
+      }
+    }
+    const hidden = this.hiddenTriggerChannels(activeStarts);
+    const digitalArmed = clamped.triggerSource === 'digital' &&
+      clamped.triggerConditions.some((condition) => !hidden.has(condition.channel));
+    const analogArmed = clamped.triggerSource === 'analog' &&
+      Object.keys(analogTriggers).length > 0;
+    return {
+      ...clamped, analogTriggers,
+      softwareTrigger: clamped.triggerEnableMask && (digitalArmed || analogArmed),
+    };
+  }
+
+  /** Inputs hidden under active analog groups: they are converter data, not logic. */
+  private hiddenTriggerChannels(starts?: Set<number>): Set<number> {
+    const hidden = new Set<number>();
+    const banks = starts ?? new Set(this.busViews
+      .filter((bus) => bus.analogGroup !== undefined)
+      .map((bus) => bus.analogGroup! * CHANNEL_BANK_SIZE));
+    for (const start of banks) {
+      for (let offset = 0; offset < CHANNEL_BANK_SIZE; offset++) hidden.add(start + offset);
+    }
+    return hidden;
+  }
+
+  /** Digital conditions minus inputs hidden under analog groups, plus the analog ones. */
+  private triggerPlan(s: CaptureSettings): {
+    digital: CaptureSettings['triggerConditions'];
+    analog: { start: number; kind: 'rising' | 'falling'; volts: number }[];
+  } {
+    if (s.triggerSource === 'analog') {
+      // An analog source fixes the time base on one crossing; a second group would only
+      // make the display jump between two edges.
+      return { digital: [], analog: this.activeAnalogTriggers(s).slice(0, 1) };
+    }
+    const hidden = this.hiddenTriggerChannels();
+    return {
+      digital: s.triggerConditions.filter((condition) => !hidden.has(condition.channel)),
+      analog: [],
+    };
+  }
+
+  /** Analog trigger entries whose bank is currently displayed as an ADC channel. */
+  private activeAnalogTriggers(
+    s: Pick<CaptureSettings, 'channels' | 'analogTriggers'>,
+  ): { start: number; kind: 'rising' | 'falling'; volts: number }[] {
+    const out: { start: number; kind: 'rising' | 'falling'; volts: number }[] = [];
+    const mapped = new Set(this.busViews
+      .filter((bus) => bus.analogGroup !== undefined)
+      .map((bus) => bus.analogGroup! * CHANNEL_BANK_SIZE));
+    for (const start of mapped) {
+      if (start + CHANNEL_BANK_SIZE > s.channels) continue;
+      const trigger = s.analogTriggers?.[start];
+      if (trigger) out.push({ start, kind: trigger.kind, volts: trigger.volts });
+    }
+    return out.sort((a, b) => a.start - b.start);
+  }
+
   private channelAvailable(index: number): boolean {
-    return index < Math.min(this.displayChannelCount(), this.store.channelCount);
+    return index < Math.min(this.renderChannelCount(), this.store.channelCount);
   }
 
   // ------------------------------------------------------------------ bus views
@@ -471,10 +719,282 @@ export class App {
   private busCells(): BusCell[] {
     return this.busViews.map((b) => ({
       id: b.id, name: b.name, summary: busSummary(b.spec), color: b.color, heightCss: b.heightCss,
+      ...(b.analogGroup !== undefined ? {
+        analog: true,
+        ...(this.settings.analogTriggers[b.analogGroup * CHANNEL_BANK_SIZE]
+          ? {
+            trigger: this.settings.analogTriggers[b.analogGroup * CHANNEL_BANK_SIZE]!,
+            triggerActive: this.settings.triggerEnableMask &&
+              this.settings.triggerSource === 'analog',
+          }
+          : {}),
+      } : {}),
     }));
   }
 
+  /** Configure/remove the analog trigger from the group's own row. */
+  /** Edit the analog trigger; while the matcher waits the change is applied live, after
+   *  a match it is pending configuration for the next acquisition. */
+  private configureAnalogTrigger(
+    id: string, kind: 'rising' | 'falling' | null, volts: number,
+  ): void {
+    const bus = this.busViews.find((candidate) => candidate.id === id);
+    if (!bus || bus.analogGroup === undefined) return;
+    const start = bus.analogGroup * CHANNEL_BANK_SIZE;
+    const analogTriggers = kind
+      ? {
+        [start]: {
+          kind,
+          volts: analogTriggerVolts(kind, Math.max(-15, Math.min(15, volts))),
+        },
+      }
+      : {};
+    this.applySettings({
+      ...this.settings,
+      ...(kind ? { triggerSource: 'analog' as const } : {}),
+      analogTriggers,
+    });
+  }
+
+  /**
+   * Push the current trigger settings into the matcher of a capture that is still
+   * waiting. The capture width, retained prefix and output budget are fixed at start;
+   * only the conditions change. Once the matcher has matched (or the capture is not
+   * running) this is a no-op: the edit then stays pending for the next acquisition,
+   * exactly as the panel says.
+   */
+  /**
+   * Reconcile a live trigger-settings edit with the running acquisition.
+   *
+   * The device matcher is one-shot: it can be retuned while waiting, but after a match
+   * only the page's continuous analog detector can follow new conditions. A loop that
+   * was started without a trigger cannot begin matching mid-stream, and turning the
+   * trigger off must tear the page detector down so a released view cannot re-lock on a
+   * condition the matcher never armed.
+   */
+  private syncActiveTrigger(): void {
+    if (!this.running || this.stopping) return;
+    const channels = this.store.channelCount;
+    if (!isChannelCount(channels)) return;
+    const plan = this.triggerPlan(this.settings);
+    const conditions = plan.digital
+      .filter((condition) => condition.channel < channels)
+      .map((condition) => ({
+        channel: condition.channel, kind: condition.kind, level: condition.level,
+      }));
+    const analog = plan.analog
+      .filter((trigger) => trigger.start + CHANNEL_BANK_SIZE <= channels)
+      .map((trigger) => ({
+        start: trigger.start, kind: trigger.kind, level: analogCodeFromVolts(trigger.volts),
+      }));
+    const phase: TriggerReconcilePhase =
+      this.triggerState === 'waiting' ? 'waiting' :
+      this.triggerState === 'triggered' ? 'triggered' :
+      this.triggerState === 'not-found' ? 'not-found' : 'off';
+    const action = reconcileTrigger({
+      running: this.running,
+      stopping: this.stopping,
+      loop: this.captureIsLoop,
+      captureArmed: this.captureUsesSoftwareTrigger,
+      phase,
+      settingsArmed: this.settings.triggerEnableMask &&
+        (conditions.length > 0 || analog.length > 0),
+    });
+    if (action === 'none') return;
+    if (this.captureArming) {
+      // No stop/start may overlap device.start(); re-evaluate after it settles.
+      this.triggerSyncDeferred = true;
+      return;
+    }
+    if (action === 'restart') {
+      // Arming cannot begin mid-stream; start a new acquisition with these settings.
+      this.restartCaptureForTrigger();
+      return;
+    }
+    if (action === 'disable') {
+      this.disableRunningTrigger();
+      return;
+    }
+    const base = this.captureTriggerBase;
+    if (!base) return;
+    // Keep the display's continuous re-anchor detector on the same condition as the
+    // matcher. A source change to digital drops it: digital locks are one-shot. An
+    // analog condition the device would reject (wrong board or ADC rate) is left out of
+    // the scanner too, so the page cannot re-anchor on a level the matcher never armed.
+    const liveAnalog = analog[0];
+    const adcRate = this.store.samplerate;
+    const analogAllowed = (this.device?.maxChannels ?? 0) >= 32 &&
+      adcRate >= 100e6 && 800e6 % adcRate === 0;
+    this.triggerRetuneRejected = liveAnalog !== undefined && !analogAllowed;
+    if (liveAnalog && analogAllowed) {
+      // A matched Loop may switch from a digital one-shot to an analog page detector
+      // live: the device matcher stays the record of the match, while the display can
+      // follow the new source. The reverse direction drops the scanner and keeps the
+      // current lock as a one-shot digital lock.
+      if (this.analogScanner) {
+        this.analogScanner.setCondition(liveAnalog);
+      } else if (this.captureIsLoop && this.loopRetentionLen > 0) {
+        this.analogScanner = new AnalogCrossingScanner({
+          channels,
+          condition: liveAnalog,
+          stride: Math.max(1, Math.ceil(this.store.samplerate / 20e6)),
+        });
+        this.loopTriggerSlackSamples = triggerSlackSamples(
+          this.loopRetentionLen, this.store.samplerate, bytesPerSampleForChannels(channels));
+      }
+    } else if (!liveAnalog) {
+      this.analogScanner = null;
+      this.loopTriggerSlackSamples = 0;
+    }
+    this.analogCrossings = [];
+    // The crossing condition changed; the previous inter-crossing median was measured on
+    // another level/slope and must not seed the block readout.
+    this.loopPeriodEstimates = [];
+    this.loopPeriodSamples = 0;
+    this.pendingRelockAbs = null;
+    if (this.triggerState === 'triggered' && this.triggerViewLock &&
+        this.triggerSampleIndex !== null) {
+      // Give the new condition one full window to produce an edge; the quiet-window
+      // release then applies if it never does. A digital plan has no scanner, so the
+      // lock remains one-shot and is released only when its window leaves retention.
+      this.lastAnalogCrossingAbs = this.store.droppedSamples + this.triggerSampleIndex;
+    }
+    if (this.triggerState !== 'waiting') return;
+    // A page-side transport can answer synchronously; a worker queues the message. Only a
+    // definite refusal (the device is still arming) is retried after start resolves.
+    if (this.triggerRetuneRejected) {
+      // The device's own guard would refuse this edit; keep the current matcher and say
+      // so in the panel instead of leaving it looking armed for this acquisition.
+      this.triggerRetuneRequested = false;
+      return;
+    }
+    type Retune = (config: Parameters<NonNullable<Device['updateSoftwareTrigger']>>[0]) => boolean | void;
+    const update = this.device?.updateSoftwareTrigger as Retune | undefined;
+    const applied = update?.({
+      channels,
+      conditions,
+      analog,
+      preTriggerSamples: base.preTriggerSamples,
+      maxSamples: base.maxSamples,
+      searchLimitSamples: base.searchLimitSamples,
+    });
+    this.triggerRetuneRequested = applied === false;
+  }
+
+  /**
+   * The running capture's trigger was turned off (or lost every live condition) after
+   * the matcher may already have fired. The device keeps streaming trigger-free; tear
+   * down the page detector and the lock too, so a released view cannot re-lock on a
+   * condition the matcher never armed.
+   */
+  private disableRunningTrigger(memory = false): void {
+    if (this.triggerViewLock) this.releaseLoopTrigger();
+    this.triggerAutoDisarmed = memory;
+    this.triggerSampleIndex = null;
+    this.triggerViewPending = false;
+    this.pendingRelockAbs = null;
+    this.triggerViewLost = false;
+    this.triggerViewOffsetStart = 0;
+    this.triggerViewOffsetEnd = 0;
+    this.analogScanner = null;
+    this.analogCrossings = [];
+    this.lastAnalogCrossingAbs = Number.NEGATIVE_INFINITY;
+    this.loopPeriodEstimates = [];
+    this.loopPeriodSamples = 0;
+    this.loopTriggerSlackSamples = 0;
+    this.loopSwapCursorAbs = 0;
+    this.loopLastAnchorStep = 0;
+    this.triggerRetuneRejected = false;
+    this.triggerRetuneRequested = false;
+    this.triggerSyncDeferred = false;
+    this.captureUsesSoftwareTrigger = false;
+    this.captureTriggerBase = null;
+    this.triggerState = 'off';
+    if (this.session?.policy.kind === 'triggerLocked') {
+      this.session = { ...this.session, policy: { kind: 'follow' } };
+    }
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  /** Stop and start the running capture so a new trigger setting owns it from zero. */
+  private restartCaptureForTrigger(): void {
+    if (this.triggerRestartPending) {
+      // A stop/start is already in flight. Re-evaluate after it settles; the in-flight
+      // start may already have read the older settings.
+      this.triggerSyncDeferred = true;
+      return;
+    }
+    if (this.captureArming) {
+      this.triggerSyncDeferred = true;
+      return;
+    }
+    this.triggerRestartPending = true;
+    this.triggerRestartCancelled = false;
+    void (async () => {
+      try {
+        await this.stopCapture('manual');
+        if (this.triggerRestartCancelled || this.device === null) {
+          // The user cancelled, or a transport teardown removed the device. Leave the
+          // capture stopped rather than starting an interactive connect behind their back.
+          this.triggerRestartCancelled = false;
+          this.triggerSyncDeferred = false;
+          return;
+        }
+        await this.startCapture('manual');
+      } finally {
+        this.triggerRestartPending = false;
+        // A settings edit during this restart's own arming deferred its reconcile; the
+        // in-flight start may have read the older settings, so run it now (re-evaluating
+        // the current state, not a stored action). This also covers the case where the
+        // deferred reconcile asked for another restart while this one was in flight.
+        if (this.triggerSyncDeferred && !this.triggerRestartCancelled) {
+          this.triggerSyncDeferred = false;
+          if (this.running && !this.stopping) this.syncActiveTrigger();
+        }
+      }
+    })();
+  }
+
+  /** Live scope controls on an analog bank: V/Div, row height and the 0 V position. */
+  private configureBusScope(
+    id: string, patch: BusScopePatch, commit: boolean,
+  ): void {
+    const index = this.busViews.findIndex((bus) => bus.id === id);
+    if (index < 0) return;
+    const bus = this.busViews[index]!;
+    if (bus.analogGroup === undefined) return;
+    const next = { ...bus };
+    if (patch.voltsPerDiv !== undefined &&
+        Number.isFinite(patch.voltsPerDiv) && patch.voltsPerDiv > 0) {
+      const from = this.scopeVoltsPerDiv(bus);
+      const to = patch.voltsPerDiv;
+      if (from !== to && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        this.scopeScaleAnimations.set(bus.id, { from, to, startedAt: performance.now() });
+      } else {
+        this.scopeScaleAnimations.delete(bus.id);
+      }
+      next.voltsPerDiv = to;
+    }
+    if (patch.zeroPosition !== undefined && Number.isFinite(patch.zeroPosition)) {
+      next.zeroPosition = Math.min(1, Math.max(0, patch.zeroPosition));
+    }
+    if (patch.heightCss !== undefined && Number.isFinite(patch.heightCss)) {
+      next.heightCss = Math.max(60, Math.min(400, Math.round(patch.heightCss)));
+    }
+    const heightChanged = next.heightCss !== bus.heightCss;
+    // Scope geometry is display-only: AnalogFrame contains sample codes, not volts or
+    // pixels, so vertical drags must retain the expensive frame cache.
+    this.busViews[index] = { ...next };
+    // Zero/V-Div previews only need the next canvas frame. Height changes (and the final
+    // commit that refreshes the controls) are the only reasons to rebuild row DOM.
+    if (heightChanged || commit) this.relayout();
+    this.dirty = true;
+    if (commit) this.persistWorkspace();
+  }
+
   private syncBankChannels(): void {
+    this.normalizeAnalogBanks();
     for (const bus of this.busViews) {
       if (busChannelBank(bus.spec) === null) continue;
       for (const channel of bus.spec.bits) {
@@ -487,15 +1007,17 @@ export class App {
   private editBus(id: string): void {
     const bus = this.busViews.find((candidate) => candidate.id === id);
     if (!bus) return;
-    const bank = busChannelBank(bus.spec);
-    if (bank !== null && this.openBankBus(bank)) return;
+    // An analog bank is fixed: MSB-first, A0-A3, ±15 V. Its only control is the Analog
+    // button, so the generic editor (bit order included) is not offered for it.
+    if (bus.analogGroup !== undefined) return;
     this.busPanel.edit(bus);
     this.selectPanel('analyzers');
   }
 
-  private addBus(cfg: BusViewConfig): string | null {
-    if (busOutOfWidth(cfg.spec, this.displayChannelCount())) return null;
-    if ((this.running || this.stopping) && busChannelBank(cfg.spec) !== null) return null;
+  private addBus(raw: BusViewConfig): string | null {
+    const cfg = applyBusBitOrder(raw, this.settings.testMode);
+    if (busOutOfWidth(cfg.spec, this.renderChannelCount())) return null;
+    if ((this.running || this.stopping) && cfg.analogGroup !== undefined) return null;
     const color = busColor(this.nextBus);
     const id = `bus-${this.nextBus++}`;
     this.busViews.push({ ...cfg, color, id, builder: null, builtFor: null, cache: null });
@@ -504,13 +1026,14 @@ export class App {
     return id;
   }
 
-  private updateBus(id: string, cfg: BusViewConfig, preserveDefaultName = false): boolean {
+  private updateBus(id: string, raw: BusViewConfig, preserveDefaultName = false): boolean {
     const i = this.busViews.findIndex((b) => b.id === id);
     if (i < 0) return false;
-    if (busOutOfWidth(cfg.spec, this.displayChannelCount())) return false;
+    const cfg = applyBusBitOrder(raw, this.settings.testMode);
+    if (busOutOfWidth(cfg.spec, this.renderChannelCount())) return false;
     const current = this.busViews[i]!;
     if ((this.running || this.stopping) &&
-      (busChannelBank(current.spec) !== null || busChannelBank(cfg.spec) !== null)) return false;
+      (current.analogGroup !== undefined || cfg.analogGroup !== undefined)) return false;
     const next = cloneBusConfig(cfg);
     if (!preserveDefaultName && next.name !== current.name) delete next.usesDefaultName;
     this.busViews[i] = { ...next, color: current.color, id, builder: null, builtFor: null, cache: null };
@@ -522,43 +1045,89 @@ export class App {
   private removeBus(id: string): boolean {
     const current = this.busViews.find((bus) => bus.id === id);
     if (!current) return false;
-    if ((this.running || this.stopping) && busChannelBank(current.spec) !== null) return false;
+    if (this.stopping && current.analogGroup !== undefined) return false;
     this.busViews = this.busViews.filter((b) => b.id !== id);
     this.afterChannelChange();
     return true;
   }
 
-  private openBankBus(start: number): boolean {
-    if (channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return false;
-    const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
-    const config = normalizeBankBusConfig(
-      active ?? this.bankBusDrafts.get(start) ?? defaultBankBusConfig(this.channels.length, start),
-      this.channels.length, start,
-    );
-    this.bankBusDialog.open(start, config, active !== undefined, this.channels.length, {
-      locked: this.running || this.stopping,
-    });
-    return true;
+  /**
+   * The Analog button: one click turns the bank's eight inputs into the ADC module's
+   * analog channel, another turns it back off. There is no dialog - the wiring (MSB
+   * first), name (A0-A3), ±15 V range and hidden sources are fixed by the module
+   * (HSync adc.rs) - and the sample rates follow from that choice.
+   */
+  private toggleAnalog(start: number): void {
+    // The analog view may change while a capture runs; stopping is the only moment the
+    // bus state is left alone. Showing or hiding a bank also changes the trigger plan,
+    // which afterChannelChange() retunes or restarts for a waiting matcher.
+    if (this.stopping) return;
+    if (channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return;
+    if (start / CHANNEL_BANK_SIZE >= this.analogGroups()) return;
+    const group = start / CHANNEL_BANK_SIZE;
+    const active = this.busViews.some((b) => b.analogGroup === group);
+    if (active) {
+      // Drop every view claiming this bank: a restored workspace or the assistant may
+      // have left more than one, and the button's state is per bank, not per view.
+      this.busViews = this.busViews.filter((b) => b.analogGroup !== group);
+    } else {
+      const color = busColor(this.nextBus);
+      const id = `bus-${this.nextBus++}`;
+      this.busViews.push({
+        ...analogBusConfig(start, this.channels.length, color),
+        id, builder: null, builtFor: null, cache: null,
+      });
+    }
+    this.syncBankChannels();
+    this.afterChannelChange();
   }
 
-  private configureBankBus(start: number, config: BusViewConfig, enabled: boolean): void {
-    if (this.running || this.stopping ||
-      channelBankIndices(start, this.channels.length).length !== CHANNEL_BANK_SIZE) return;
-    const next = normalizeBankBusConfig(config, this.channels.length, start);
-    this.bankBusDrafts.set(start, cloneBusConfig(next));
-    this.settings = clampSettings({ ...this.settings }, this.rateCeilings);
-    if (enabled) {
-      const active = this.busViews.find((b) => busChannelBank(b.spec) === start);
-      if (active) this.updateBus(active.id, next, true);
-      else this.addBus(next);
-      return;
+  /**
+   * Analog groups available to the view. Only the SLogic32U3 carries the ADC module
+   * (four groups, HSync model.rs); a 32-channel capture was necessarily recorded on one.
+   * A group exists only while its whole eight-input width is captured.
+   *
+   * An already active group is always offered, even before a board is connected (the
+   * workspace may have restored it) or on a device without the module (adoption drops it
+   * on connect), so the Analog button can always turn it back off.
+   */
+  private analogGroups(): number {
+    const width = analogGroupCount(this.renderChannelCount());
+    let active = 0;
+    for (const bus of this.busViews) {
+      if (bus.analogGroup !== undefined) active = Math.max(active, bus.analogGroup + 1);
     }
-    const remaining = this.busViews.filter((b) => busChannelBank(b.spec) !== start);
-    if (remaining.length !== this.busViews.length) {
-      this.busViews = remaining;
-      this.afterChannelChange();
-    }
-    this.persistWorkspace();
+    return Math.min(width, Math.max(this.deviceAnalogGroups(), active));
+  }
+
+  /** Groups the connected device (or a loaded 32-channel capture) can offer. */
+  private deviceAnalogGroups(): number {
+    if (this.device) return (this.device.maxChannels ?? 0) >= 32 ? ANALOG_GROUP_COUNT : 0;
+    return this.loadedCapture() && this.channels.length >= 32 ? ANALOG_GROUP_COUNT : 0;
+  }
+
+  /**
+   * A full aligned eight-channel bank is the converter's data bus, so every view claiming
+   * one is brought to the module's fixed definition: MSB first, A0-A3, ±15 V, sources
+   * hidden. Legacy workspaces and the assistant may have stored another order or range;
+   * the Analog cell must never describe a different reading than the one drawn.
+   */
+  private normalizeAnalogBanks(): void {
+    this.busViews = this.busViews.map((bus) => {
+      if (bus.analogGroup === undefined) return bus;
+      const start = bus.analogGroup * CHANNEL_BANK_SIZE;
+      if (start + CHANNEL_BANK_SIZE > this.channels.length) return bus;
+      const fixed = analogBusConfig(start, this.channels.length, bus.color);
+      const same = bus.name === fixed.name && bus.bitOrder === fixed.bitOrder &&
+        bus.fullScaleV === fixed.fullScaleV && bus.offsetV === fixed.offsetV &&
+        bus.hideSources === fixed.hideSources && bus.spec.encoding === fixed.spec.encoding &&
+        bus.spec.clock === null && bus.spec.bits.join(',') === fixed.spec.bits.join(',');
+      if (same) return bus;
+      return {
+        ...fixed, id: bus.id, heightCss: bus.heightCss, style: bus.style,
+        builder: null, builtFor: null, cache: null,
+      };
+    });
   }
 
   /** A new capture (or a growing one) invalidates every bus's overview and cache. */
@@ -572,6 +1141,16 @@ export class App {
    */
   private pumpBusBuilders(): void {
     if (this.stopping || this.store.length === 0) return;
+    // A Repeat composite's length is stable while its contents change behind the frontier;
+    // an append-only pyramid would never ingest the replacement and would serve stale
+    // analog envelopes. Leave the builders off while the composite is displayed: the
+    // bounded live/provisional path in analogFrame reads the composite correctly.
+    if (this.repeatComposite && this.storeRef.target === this.repeatComposite) {
+      for (const b of this.busViews) {
+        if (b.builder || b.builtFor) { b.builder = null; b.builtFor = null; b.cache = null; }
+      }
+      return;
+    }
     const store = this.store;
     for (const b of this.busViews) {
       if (b.builtFor !== store) {
@@ -585,7 +1164,10 @@ export class App {
       b.builder.setLength(store.length);
       if (b.builder.done) continue;
       const done = b.builder.step(this.running ? 4 : 6);
-      this.dirty = true;
+      // While running, this is new data for the throttled live view; after the capture it
+      // is background work whose progress still deserves an immediate frame.
+      if (this.running) this.livePending = true;
+      else this.dirty = true;
       const now = performance.now();
       if (this.panel === 'analyzers' && (done || now - this.busPanelAt > 300)) {
         this.busPanelAt = now;
@@ -595,15 +1177,295 @@ export class App {
     }
   }
 
-  private drawBusRows(boxes: readonly RowBox[]): void {
+  /** The displayed V/Div, easing both the trace and its ruler toward the configured value. */
+  private scopeVoltsPerDiv(bus: BusViewState): number {
+    const target = bus.voltsPerDiv ?? 10;
+    const animation = this.scopeScaleAnimations.get(bus.id);
+    if (!animation || animation.to !== target) return target;
+    const frame = scopeScaleAt(animation.from, animation.to, animation.startedAt, performance.now());
+    if (frame.done) this.scopeScaleAnimations.delete(bus.id);
+    else this.dirty = true;
+    return frame.value;
+  }
+
+  /** One transparent drag/wheel ruler on the right edge of every analog row. */
+  private syncScopeBars(): void {
+    const active = new Set<string>();
+    for (const box of this.stack.boxes()) {
+      if (box.spec.kind !== 'analog' || box.spec.bus === undefined) continue;
+      const bus = this.busViews[box.spec.bus];
+      if (!bus || bus.analogGroup === undefined) continue;
+      active.add(bus.id);
+      let bar = this.scopeBars.get(bus.id);
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.className = 'scope-scale-bar';
+        bar.dataset.busId = bus.id;
+        bar.tabIndex = 0;
+        bar.setAttribute('role', 'slider');
+        bar.setAttribute('aria-valuemin', '0');
+        bar.setAttribute('aria-valuemax', '100');
+        bar.setAttribute('aria-orientation', 'vertical');
+        const grip = document.createElement('div');
+        grip.className = 'scope-scale-grip';
+        grip.setAttribute('aria-hidden', 'true');
+        bar.appendChild(grip);
+        bar.addEventListener('pointerdown', (event) => this.dragScopeBar(event, bar!));
+        bar.addEventListener('wheel', (event) => this.wheelScopeBar(event, bar!), { passive: false });
+        bar.addEventListener('dblclick', (event) => this.resetScopeBar(event, bar!));
+        bar.addEventListener('keydown', (event) => this.keyScopeBar(event, bar!));
+        this.scopeHost.appendChild(bar);
+        this.scopeBars.set(bus.id, bar);
+      }
+      bar.style.top = `${box.top}px`;
+      bar.style.height = `${box.band}px`;
+      const label = t('bus.scaleBarTip');
+      if (bar.title !== label) bar.title = label;
+      if (bar.getAttribute('aria-label') !== label) bar.setAttribute('aria-label', label);
+
+      const zeroPosition = Math.min(1, Math.max(0, bus.zeroPosition ?? 0.5));
+      if (bar.getAttribute('aria-valuenow') !== String(Math.round(zeroPosition * 100))) {
+        bar.setAttribute('aria-valuenow', String(Math.round(zeroPosition * 100)));
+      }
+      const valueText = `${Math.round(zeroPosition * 100)}%, ${bus.voltsPerDiv ?? 10} ${t('bus.voltsPerDiv')}`;
+      if (bar.getAttribute('aria-valuetext') !== valueText) {
+        bar.setAttribute('aria-valuetext', valueText);
+      }
+      const perDiv = this.scopeVoltsPerDiv(bus);
+      const geometry = scopeGeometry(box.top, box.band, perDiv, zeroPosition);
+      const trigger = this.settings.triggerSource === 'analog' && this.settings.triggerEnableMask
+        ? this.settings.analogTriggers?.[bus.analogGroup * CHANNEL_BANK_SIZE] : undefined;
+      if (!trigger) {
+        const drag = this.scopeTriggers.get(bus.id);
+        if (drag) { drag.remove(); this.scopeTriggers.delete(bus.id); }
+        continue;
+      }
+      const y = geometry.yVolts(trigger.volts);
+      let drag = this.scopeTriggers.get(bus.id);
+      if (!drag) {
+        drag = document.createElement('div');
+        drag.className = 'scope-trigger-drag';
+        drag.dataset.busId = bus.id;
+        drag.title = t('bus.triggerDragTip');
+        drag.setAttribute('aria-label', drag.title);
+        drag.setAttribute('role', 'slider');
+        drag.setAttribute('aria-valuemin', '-15');
+        drag.setAttribute('aria-valuemax', '15');
+        drag.setAttribute('aria-orientation', 'vertical');
+        drag.tabIndex = 0;
+        drag.addEventListener('pointerdown', (event) => this.dragScopeTrigger(event, drag!));
+        drag.addEventListener('wheel', (event) => this.wheelScopeBar(event, drag!), { passive: false });
+        drag.addEventListener('keydown', (event) => this.keyScopeTrigger(event, drag!));
+        // The marker covers the ruler grip at its level. A double-click there means the
+        // same thing as on the ruler, not the plot's time zoom it would otherwise reach.
+        drag.addEventListener('dblclick', (event) => {
+          const bar = this.scopeBars.get(bus.id);
+          if (bar) this.resetScopeBar(event, bar);
+        });
+        this.scopeHost.appendChild(drag);
+        this.scopeTriggers.set(bus.id, drag);
+      }
+      // Exactly the ruler's own visibility rule (`overlay.drawAnalog`): the triangle,
+      // dashed line and R/F chip appear and disappear together.
+      const visible = trigger.volts >= geometry.bottomV && trigger.volts <= geometry.topV;
+      drag.hidden = !visible;
+      drag.style.top = `${Math.round(y) - 6}px`;
+      drag.setAttribute('aria-valuenow', trigger.volts.toFixed(2));
+      drag.setAttribute('aria-valuetext', `${trigger.volts.toFixed(3)} V`);
+    }
+    for (const [id, bar] of this.scopeBars) {
+      if (active.has(id)) continue;
+      bar.remove();
+      this.scopeBars.delete(id);
+    }
+    for (const [id, drag] of this.scopeTriggers) {
+      if (active.has(id)) continue;
+      drag.remove();
+      this.scopeTriggers.delete(id);
+    }
+    for (const id of this.scopeScaleAnimations.keys()) {
+      if (!active.has(id)) this.scopeScaleAnimations.delete(id);
+    }
+  }
+
+  private dragScopeBar(event: PointerEvent, bar: HTMLDivElement): void {
+    const bus = this.busViews.find((candidate) => candidate.id === bar.dataset.busId);
+    if (!bus || bus.analogGroup === undefined) return;
+    event.preventDefault();
+    event.stopPropagation();
+    // Home only works on a focused ruler; a drag is the natural way to focus it.
+    bar.focus({ preventScroll: true });
+    const startY = event.clientY;
+    const start = bus.zeroPosition ?? 0.5;
+    const height = scopeGeometry(0, bar.offsetHeight, bus.voltsPerDiv ?? 10, start).innerHeight;
+    let last = start;
+    const move = (ev: PointerEvent): void => {
+      last = Math.min(1, Math.max(0, start + (ev.clientY - startY) / height));
+      this.configureBusScope(bus.id, { zeroPosition: last }, false);
+    };
+    const finish = (commit: boolean): void => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', cancel);
+      // A browser-cancelled gesture is not a user edit: put the preview back.
+      this.configureBusScope(bus.id, { zeroPosition: commit ? last : start }, commit);
+    };
+    const up = (): void => finish(true);
+    const cancel = (): void => finish(false);
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up, { once: true });
+    document.addEventListener('pointercancel', cancel, { once: true });
+  }
+
+  private resetScopeBar(event: MouseEvent | KeyboardEvent, bar: HTMLDivElement): void {
+    const bus = this.busViews.find((candidate) => candidate.id === bar.dataset.busId);
+    if (!bus || bus.analogGroup === undefined) return;
+    event.preventDefault();
+    event.stopPropagation();
+    // Display-only reset: recenter 0 V and restore the normal 10 V/div scale. The usual
+    // writer keeps the spatial zoom animation and one persisted workspace commit.
+    this.configureBusScope(bus.id, { voltsPerDiv: 10, zeroPosition: 0.5 }, true);
+  }
+
+  private wheelScopeBar(event: WheelEvent, bar: HTMLDivElement): void {
+    const bus = this.busViews.find((candidate) => candidate.id === bar.dataset.busId);
+    if (!bus || bus.analogGroup === undefined) return;
+    // Ctrl zooms time and Shift pans it; those gestures belong to the plot, not V/Div.
+    if (event.ctrlKey || event.shiftKey || event.deltaY === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const current = bus.voltsPerDiv ?? 10;
+    const next = nextScopeVoltsPerDiv(current, event.deltaY < 0 ? -1 : 1);
+    if (next === current) return;
+    this.configureBusScope(bus.id, { voltsPerDiv: next }, false);
+    // Trackpad momentum may deliver dozens of events. Animate each target, but rebuild
+    // the controls and write the workspace once the wheel gesture settles.
+    if (this.scopeWheelPersist !== null) window.clearTimeout(this.scopeWheelPersist);
+    this.scopeWheelPersist = window.setTimeout(() => {
+      this.scopeWheelPersist = null;
+      this.configureBusScope(bus.id, {}, true);
+    }, 180);
+  }
+
+  private keyScopeBar(event: KeyboardEvent, bar: HTMLDivElement): void {
+    const bus = this.busViews.find((candidate) => candidate.id === bar.dataset.busId);
+    if (!bus || bus.analogGroup === undefined) return;
+    if (event.key === 'Home') {
+      this.resetScopeBar(event, bar);
+      return;
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      const delta = (event.key === 'ArrowUp' ? -1 : 1) * (event.shiftKey ? 0.1 : 0.02);
+      const zeroPosition = Math.min(1, Math.max(0, (bus.zeroPosition ?? 0.5) + delta));
+      this.configureBusScope(bus.id, { zeroPosition }, true);
+      return;
+    }
+    if (event.key !== '+' && event.key !== '=' && event.key !== '-') return;
+    event.preventDefault();
+    const current = bus.voltsPerDiv ?? 10;
+    const next = nextScopeVoltsPerDiv(current, event.key === '-' ? 1 : -1);
+    if (next !== current) this.configureBusScope(bus.id, { voltsPerDiv: next }, true);
+  }
+
+  private keyScopeTrigger(event: KeyboardEvent, drag: HTMLDivElement): void {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    const bus = this.busViews.find((candidate) => candidate.id === drag.dataset.busId);
+    if (!bus || bus.analogGroup === undefined) return;
+    const trigger = this.settings.analogTriggers[bus.analogGroup * CHANNEL_BANK_SIZE];
+    if (!trigger) return;
+    event.preventDefault();
+    const step = event.shiftKey ? 1 : ADC_FULL_SCALE_V / 255;
+    const volts = trigger.volts + (event.key === 'ArrowUp' ? step : -step);
+    this.configureAnalogTrigger(bus.id, trigger.kind, volts);
+  }
+
+  private dragScopeTrigger(event: PointerEvent, drag: HTMLDivElement): void {
+    const bus = this.busViews.find((candidate) => candidate.id === drag.dataset.busId);
+    if (!bus || bus.analogGroup === undefined) return;
+    const start = bus.analogGroup * CHANNEL_BANK_SIZE;
+    const trigger = this.settings.analogTriggers[start];
+    if (!trigger) return;
+    event.preventDefault();
+    event.stopPropagation();
+    drag.focus({ preventScroll: true });
+    const startY = event.clientY;
+    const startVolts = trigger.volts;
+    // A V/div animation may still be easing when the handle is grabbed. Re-read the
+    // displayed scale for every move so the drag follows the ruler the user can see,
+    // instead of a stale snapshot taken at pointerdown.
+    const row = this.scopeBars.get(bus.id);
+    const top = row?.offsetTop ?? 0;
+    const band = row?.offsetHeight ?? 120;
+    const zeroPosition = bus.zeroPosition ?? 0.5;
+    const originalSettings = this.settings;
+    const originalTriggerState = this.triggerState;
+    const originalTriggerSample = this.triggerSampleIndex;
+    const wasRunning = this.running;
+    let last = startVolts;
+    const move = (ev: PointerEvent): void => {
+      const perDiv = this.scopeVoltsPerDiv(bus);
+      const startTraceY = scopeGeometry(top, band, perDiv, zeroPosition).yVolts(startVolts);
+      const atY = startTraceY + (ev.clientY - startY);
+      last = Math.max(-15, Math.min(15, scopeVoltsAtY(atY, top, band, perDiv, zeroPosition)));
+      // Volts-only preview: bypassing applySettings avoids panel/layout churn. Do not add
+      // rate/width/mode/retention edits here; those need its running-capture guards.
+      const next = this.clampSettings({
+        ...this.settings,
+        triggerSource: 'analog',
+        analogTriggers: { [start]: { kind: trigger.kind, volts: analogTriggerVolts(trigger.kind, last) } },
+      });
+      if (!this.running && !this.stopping && triggerSettingsChanged(this.settings, next)) {
+        this.triggerState = 'off';
+        this.clearTriggerSample();
+      }
+      const triggerChanged = triggerSettingsChanged(this.settings, next);
+      this.settings = next;
+      if (triggerChanged) this.syncActiveTrigger();
+      this.dirty = true;
+    };
+    const finish = (commit: boolean): void => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', cancel);
+      if (!commit) {
+        // A browser-cancelled gesture is not a user edit: restore the level (and, when
+        // idle, the trigger state the preview may have cleared). During a run T and the
+        // lock belong to the live matcher and retention may have shifted them under the
+        // gesture, so they are never restored here; the matcher is retuned to the level
+        // the UI now shows.
+        const restored = triggerSettingsChanged(this.settings, originalSettings);
+        this.settings = originalSettings;
+        if (!wasRunning) {
+          this.triggerState = originalTriggerState;
+          this.triggerSampleIndex = originalTriggerSample;
+        }
+        if (restored) this.syncActiveTrigger();
+      }
+      this.relayout();
+      this.renderPanels();
+      if (commit) this.persistWorkspace();
+    };
+    const up = (): void => finish(true);
+    const cancel = (): void => finish(false);
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up, { once: true });
+    document.addEventListener('pointercancel', cancel, { once: true });
+  }
+
+  private drawBusRows(
+    boxes: readonly RowBox[], tint: readonly RegionTint[] | null,
+  ): void {
     const view = this.stack.view;
     const store = this.store;
     for (const box of boxes) {
       if (box.spec.kind !== 'analog') continue;
       const bv = this.busViews[box.spec.bus ?? -1];
       if (!bv) continue;
-      // The analog row is a renderer row with a trace in it; cover it first.
+      // The analog row is a renderer row with a trace in it; cover it first, then carry
+      // the Repeat two-wave tint across it like every other row.
       this.overlay.fillLane(box.top, box.height);
+      if (tint) this.overlay.drawRegionTintOverlay(tint, [{ top: box.top, band: box.band }]);
       const valid = store.length > 0 && validateBusSpec(bv.spec, store.channelCount).length === 0;
       const frame: AnalogFrame = valid
         ? analogFrame(store, bv, view.start, view.end, view.widthPx, this.running)
@@ -612,10 +1474,29 @@ export class App {
         : frame.reason === 'live' ? t('bus.liveNote')
           : store.length > 0 ? t('bus.badChannels') : '';
       const r = busYRange(bv);
+      const analogBank = bv.analogGroup !== undefined;
+      const analogTrigger = analogBank && this.settings.triggerEnableMask &&
+        this.settings.triggerSource === 'analog'
+        ? this.settings.analogTriggers?.[bv.analogGroup! * CHANNEL_BANK_SIZE] : undefined;
+      const scope = analogBank ? {
+        voltsPerDiv: this.scopeVoltsPerDiv(bv),
+        tickVoltsPerDiv: bv.voltsPerDiv ?? 10,
+        voltsPerDivUnit: t('bus.voltsPerDiv'),
+        zeroPosition: Math.min(1, Math.max(0, bv.zeroPosition ?? 0.5)),
+        offsetV: bv.offsetV,
+        fullScaleV: bv.fullScaleV ?? ADC_FULL_SCALE_V,
+        ...(analogTrigger ? {
+          triggerVolts: analogTrigger.volts,
+          triggerKind: analogTrigger.kind,
+        } : {}),
+      } : undefined;
       this.overlay.drawAnalog({
         top: box.top, band: box.band, frame, yMin: r.min, yMax: r.max, color: bv.color,
         // A combinational bus holds its value between bit changes: steps are the truth.
-        style: bv.spec.clock ? bv.style : 'step',
+        // An ADC row is sampled analog data, so it gets a smooth reconstruction instead.
+        style: analogBank ? 'line' : bv.spec.clock ? bv.style : 'step',
+        smooth: analogBank,
+        ...(scope ? { scope } : {}),
         labels: { top: busLabel(bv, r.max), bottom: busLabel(bv, r.min) },
         note,
       });
@@ -624,46 +1505,89 @@ export class App {
 
   private applySettings(s: CaptureSettings): void {
     if (s.samplerate !== this.settings.samplerate) this.samplerateExplicit = true;
-    const next = clampSettings(s, this.rateCeilings);
-    if (next.mode !== this.settings.mode) this.repeatViewportAnchor = null;
-    if (triggerSettingsChanged(this.settings, next)) {
+    // Clamp first (the rate may hit a ceiling), then carry the duration across a mode or
+    // rate change at the rate the capture will actually use.
+    const next = carryCaptureDuration(this.settings, this.clampSettings(s));
+    const testModeChanged = next.testMode !== this.settings.testMode;
+    const triggerChanged = triggerSettingsChanged(this.settings, next);
+    if (!this.running && !this.stopping && triggerChanged) {
       this.triggerState = 'off';
-      this.triggerSampleIndex = null;
+      this.clearTriggerSample();
       this.dirty = true;
     }
+    // Loop is continuous, so its retention window can follow a Duration edit on the very
+    // next frame. Rate and width edits are capture configuration (the running store cannot
+    // be reinterpreted); carryCaptureDuration also changes loopSamples when it rescales
+    // for a rate, which must not be applied to the old-rate store.
+    const liveLoopWindow = this.running && this.captureIsLoop &&
+      next.loopSamples !== this.settings.loopSamples &&
+      next.samplerate === this.settings.samplerate &&
+      next.channels === this.settings.channels;
+    if (liveLoopWindow) {
+      const storeChannels = isChannelCount(this.store.channelCount)
+        ? this.store.channelCount : next.channels;
+      this.loopRetentionLen = clampLoopSamples(next.loopSamples, storeChannels);
+      // The carried slack is derived from the window; keep the two in step.
+      this.loopTriggerSlackSamples = this.analogScanner
+        ? triggerSlackSamples(this.loopRetentionLen, this.store.samplerate,
+          bytesPerSampleForChannels(storeChannels))
+        : 0;
+      // The DurationWindow changed size: re-clamp the user's ViewWindow into it. The
+      // trigger lock, T and the local roll are untouched.
+      if (this.triggerViewLock) this.clampLockView();
+      this.enforceLoopRetention(this.storeRef);
+      this.resetBusBuilds();
+    }
     this.settings = next;
+    if (triggerChanged) this.syncActiveTrigger();
+    if (testModeChanged) {
+      // Auto bit order follows the mode (MSB on live input, LSB on test patterns). A bus
+      // whose bits shifted needs its pyramid rebuilt; unchanged buses keep their builder.
+      // Analog banks are pinned to msb for real input; built-in LSB-first test patterns
+      // are not a supported analog voltage/trigger source (the Advanced panel says so).
+      this.busViews = this.busViews.map((bus) => {
+        const oriented = applyBusBitOrder(bus, next.testMode);
+        return oriented === bus ? bus : { ...oriented, builder: null, builtFor: null, cache: null };
+      });
+    }
     this.reconcileEdgeChannels();
     this.persistWorkspace();
     this.relayout();
     this.renderPanels();
   }
 
-  /** Commit one channel-dialog draft. Name and color metadata stay editable during
-   * capture, while trigger modes retain the existing running/stopping lock. */
+  /** Commit one inline channel edit. The name stays editable during capture; trigger
+   * modes reconcile live with the running acquisition (see `syncActiveTrigger`). Colour
+   * is not editable. */
   private configureChannel(channel: number, config: ChannelConfiguration): void {
     const current = this.channels[channel];
     if (!current) return;
     const name = config.name.trim() || defaultChannelName(channel);
     this.channels[channel] = { ...current, name, color: config.color };
 
-    if (!this.running && !this.stopping) {
+    // A name-only edit must not touch the trigger detector: it would reset crossing
+    // continuity and can release a held lock for no reason.
+    const editable = !this.stopping;
+    if (editable) {
       const previous = this.settings.triggerModes[channel] ?? DEFAULT_TRIGGER_MODE;
       const triggerModes = { ...this.settings.triggerModes, [channel]: config.mode };
       const triggerConditions = modesToConditions(triggerModes);
       const first = triggerConditions[0] ?? {
         channel, kind: 'level' as const, level: 1 as const,
       };
-      const next = clampSettings({
+      const next = this.clampSettings({
         ...this.settings, triggerModes, triggerConditions,
         triggerChannel: first.channel, triggerKind: first.kind, triggerLevel: first.level,
         ...(edgeTriggerAutoArms(previous, config.mode, this.settings.triggerEnableMask)
           ? { triggerEnableMask: true } : {}),
-      }, this.rateCeilings);
-      if (triggerSettingsChanged(this.settings, next)) {
+      });
+      const triggerChanged = triggerSettingsChanged(this.settings, next);
+      if (!this.running && triggerChanged) {
         this.triggerState = 'off';
-        this.triggerSampleIndex = null;
+        this.clearTriggerSample();
       }
       this.settings = next;
+      if (triggerChanged) this.syncActiveTrigger();
     }
 
     this.persistWorkspace();
@@ -685,20 +1609,23 @@ export class App {
     // Analog (parallel-bus) rows sit above the channels and take their height first.
     const analogRows: RowSpec[] = [];
     this.busViews.forEach((b, i) => {
-      if (busOutOfWidth(b.spec, this.displayChannelCount())) return;
+      if (busOutOfWidth(b.spec, this.renderChannelCount())) return;
       analogRows.push({
         kind: 'analog', channel: Math.min(b.spec.bits[0] ?? 0, Math.max(0, this.store.channelCount - 1)),
         heightCss: b.heightCss, bus: i,
       });
     });
     const analogH = analogRows.reduce((sum, r) => sum + r.heightCss, 0);
+    this.overview.syncSize();
     const axisH = this.el.axis.offsetHeight || 30;
-    const plotH = Math.max(120, (this.el.scroll.clientHeight || 630) - axisH - analogH);
+    const overviewH = this.el.overview.offsetHeight || 56;
+    const plotH = Math.max(120, (this.el.scroll.clientHeight || 630) - axisH - overviewH - analogH);
     const enabled = this.visibleChannels();
     this.lanes = this.computeLanes(enabled);
     const channelColors = this.channels.map((channel) => channel.color);
+    const shown = this.rowChannels();
 
-    if (enabled.length === 0) {
+    if (shown.length === 0) {
       this.stack.setRows(analogRows, channelColors);
       this.channelList.render([]);
       this.channelList.renderBuses(this.busCells());
@@ -707,11 +1634,11 @@ export class App {
       return;
     }
 
-    const base = computeChannelRowHeight(plotH, enabled.length, this.lanes.length);
+    const base = computeChannelRowHeight(plotH, shown.length, this.lanes.length);
 
     const rows: RowSpec[] = [...analogRows];
     const cells: ChannelCell[] = [];
-    for (const c of enabled) {
+    for (const c of shown) {
       const mine = this.lanes.filter((l) => l.laneChannel === c.index);
       for (const l of mine) {
         rows.push({
@@ -719,7 +1646,9 @@ export class App {
           analyzer: this.analyzers.indexOf(l.analyzer),
         });
       }
-      rows.push({ kind: 'channel', channel: c.index, heightCss: base });
+      rows.push(this.captured(c.index)
+        ? { kind: 'channel', channel: c.index, heightCss: base }
+        : { kind: 'blank', channel: 0, shows: c.index, heightCss: base });
       cells.push({
         channel: c,
         heightCss: base + mine.length * ROWS.laneHeight,
@@ -727,7 +1656,11 @@ export class App {
         analyzers: this.analyzers.filter((a) => this.chipChannels(a).includes(c.index)),
         trigger: {
           mode: this.settings.triggerModes[c.index] ?? DEFAULT_TRIGGER_MODE,
-          disabled: this.running || this.stopping,
+          armed: this.settings.triggerEnableMask && this.settings.triggerSource === 'digital' &&
+            (this.settings.triggerModes[c.index] ?? DEFAULT_TRIGGER_MODE) !== 'dont-care',
+          // A waiting matcher is retuned in place; a matched one keeps its trigger and
+          // the edit is pending for the next acquisition. Only stopping refuses edits.
+          disabled: this.stopping,
         },
       });
     }
@@ -786,26 +1719,45 @@ export class App {
   }
 
   private setChannelEnabled(index: number, enabled: boolean): void {
-    if (index >= this.displayChannelCount()) return;
+    if (index >= this.renderChannelCount()) return;
     const c = this.channels[index];
     if (!c) return;
-    if (!enabled && lockedChannelBanks(this.busViews, this.displayChannelCount()).has(channelBankStart(index))) return;
+    if (!enabled && lockedChannelBanks(this.busViews, this.renderChannelCount()).has(channelBankStart(index))) return;
     if (!enabled && this.enabledChannels().length <= 1) return;   // never zero rows
     c.enabled = enabled;
     this.afterChannelChange();
   }
 
   private setChannelWidth(channels: number): void {
-    if (this.running || this.stopping) return;
+    // Editable while running: the new width applies to the next capture; the current
+    // acquisition keeps the width (and therefore the rows) it started with.
+    if (this.stopping) return;
     if (!this.widthTiers().includes(channels)) return;
     if (!isChannelCount(channels) || channels > this.channels.length) return;
-    this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, channels));
+    // A running capture keeps its rows; the width change is pending and the out-of-width
+    // views are removed when the capture ends (finishCapture).
+    if (!this.running) {
+      this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, channels));
+    }
     if (channels !== this.settings.channels) this.widthExplicit = true;
     this.applySettings({ ...this.settings, channels });
   }
 
   private afterChannelChange(): void {
-    this.settings = clampSettings({ ...this.settings }, this.rateCeilings);
+    // Enabling an analog bank can clamp the *pending* rate to the ADC clock; carry the
+    // duration so the next capture keeps its length.
+    const next = carryCaptureDuration(this.settings, this.clampSettings({ ...this.settings }));
+    const triggerChanged = triggerSettingsChanged(this.settings, next);
+    if (!this.running && !this.stopping && triggerChanged) {
+      this.triggerState = 'off';
+      this.clearTriggerSample();
+      this.dirty = true;
+    }
+    this.settings = next;
+    // Showing or hiding an ADC group drops or restores analog conditions, so it is a
+    // trigger-configuration change too: retune a waiting matcher (or restart free-run)
+    // instead of leaving the panel and the active matcher disagreeing.
+    if (triggerChanged) this.syncActiveTrigger();
     this.reconcileEdgeChannels();
     this.persistWorkspace();
     this.relayout();
@@ -813,7 +1765,7 @@ export class App {
   }
 
   private reorder(from: number, to: number): void {
-    const enabled = this.visibleChannels();
+    const enabled = this.rowChannels();
     const moving = enabled[from];
     const target = enabled[to];
     if (!moving || !target) return;
@@ -832,16 +1784,35 @@ export class App {
     requestAnimationFrame(this.frame);
     const now = performance.now();
     const highRateLoop = this.running && this.captureIsLoop &&
-      this.store.samplerate * bytesPerSampleForChannels(this.store.channelCount) >= LOOP_SUSPEND_MIN_BYTES_PER_SEC;
+      this.store.samplerate * bytesPerSampleForChannels(this.store.channelCount) >= LOOP_BUILD_SUSPEND_BYTES_PER_SEC;
+    // Bus overviews are background work: skip them on the fastest loop streams so the
+    // ingest path keeps the link, and let them finish after the capture stops.
     if (!highRateLoop) this.pumpBusBuilders();
-    if (this.running && now - this.runningPanelAt > 500) {
+    if (this.running && !this.repeatWaveHolding && now - this.runningPanelAt > 500) {
       this.runningPanelAt = now;
-      if (this.panel === 'device') this.capturePanel.updateProgress(this.progressView());
-      if (highRateLoop) this.renderStatus();
+      if (this.panel === 'device') {
+        this.capturePanel.updateProgress(this.progressView());
+        // A Repeat wave does not rebuild the panel; refresh the trigger state (waiting /
+        // triggered / miss) as decided text instead of leaving the last wave's note up.
+        this.capturePanel.updateTriggerStatus(this.triggerStatusView());
+        // The loop's matcher/swap readout changes with arriving samples; update only its
+        // text, never rebuild the panel (that would drop focus mid-edit).
+        if (this.captureIsLoop) this.capturePanel.updateLoopMetrics(this.computeLoopMetrics());
+      }
     }
-    if (!this.dirty && !this.running) return;
-    if (highRateLoop) return;
+    // Interactions (`dirty`) draw in the next frame. New samples (`livePending`) draw on
+    // a fixed cadence, like HSync telling the interface of progress every 50 ms instead
+    // of on every packet. Even the fastest loop now shows a live view, at that cadence.
+    // A Repeat wave that is still waiting for its trigger keeps the previous frame: its
+    // pre-trigger samples are arriving, but there is nothing new to show yet. A user
+    // gesture (`dirty`) still draws, using the held wave and its own T.
+    if (!this.dirty && (this.repeatWaveHolding ||
+        !liveDrawDue(now, this.liveDrawAt, this.livePending, this.running))) {
+      return;
+    }
     this.dirty = false;
+    this.livePending = false;
+    this.liveDrawAt = now;
     try {
       this.draw();
     } catch (e) {
@@ -850,17 +1821,29 @@ export class App {
   };
 
   private draw(): void {
+    // A quiet Repeat wave keeps the previous frame until its first samples arrive; a
+    // blank store would otherwise flash the plot and axis at every wave boundary.
+    if (this.repeatWaveHolding && this.store.length === 0) return;
+    // A pan/zoom gesture ran after the last draw; record the interval it produced.
+    if (this.viewIntent) this.captureFixedView();
     const pendingViewport = this.pendingToolbarViewport;
     this.pendingToolbarViewport = null;
     const restorePending = pendingViewport !== null &&
       this.stack.view.start === pendingViewport.start && this.stack.view.end === pendingViewport.end;
-    this.stack.syncSize();
+    const rescaled = this.stack.syncSize();
     if (restorePending && pendingViewport) {
       this.stack.setViewport(pendingViewport.start, pendingViewport.end);
       this.stack.setFollowLatest(pendingViewport.follow);
-    } else {
-      this.restoreRepeatViewport();
     }
+    // A Repeat wave that now has something to show hands the plot over before the view
+    // policy is resolved, so the first frame after the hand-over already uses the new
+    // wave's origin and policy (no stale fixed/follow frame).
+    this.releaseRepeatHold();
+    this.applySessionView();
+    this.applyTriggerViewAnchor(rescaled);
+    // The policy is resolved: only a Fixed Repeat viewport needs the previous wave as a
+    // second layer. Doing this after the resolve keeps FollowLive off the composite.
+    this.updateRepeatDisplay();
     const wCss = this.el.plot.clientWidth;
     const hCss = this.el.plot.clientHeight;
     this.overlay.syncSize(wCss, hCss);
@@ -868,8 +1851,9 @@ export class App {
 
     this.stack.render();
     const view = this.stack.view;
+    this.syncScopeBars();
     const sr = this.store.samplerate;
-    const timeOrigin = this.triggerSampleIndex ?? 0;
+    const timeOrigin = this.displayOriginSample();
     const ticks = computeTicks(
       ((view.start - timeOrigin) / sr) * 1e12,
       ((view.end - timeOrigin) / sr) * 1e12,
@@ -879,24 +1863,69 @@ export class App {
     this.drawAxisCanvas(ticks, wCss);
 
     this.overlay.beginFrame();
-    this.overlay.drawGrid(ticks);
     const boxes = this.stack.boxes();
-    this.drawLaneSurfaces(boxes);
+    const repeatTints = this.repeatTintRegions();
+    if (repeatTints) {
+      // On the grid canvas, before its gridlines: the tint is the layer "behind" the
+      // opaque waveform canvases. No vertical rule - the two surfaces are the signal.
+      this.overlay.drawRegionTint(repeatTints, boxes);
+    }
+    this.overlay.drawGrid(ticks);
+    this.drawLaneSurfaces(boxes, repeatTints);
+    for (const b of boxes) {
+      if (b.spec.kind === 'blank') {
+        this.overlay.drawBlankRow(b.top, b.band, t('plot.notCaptured'), repeatTints);
+      }
+    }
     this.overlay.drawLevels(boxes.map((b) => ({
       top: b.top, band: b.band, isChannel: b.spec.kind === 'channel',
     })));
     this.drawLaneBubbles(boxes, wCss);
-    this.drawBusRows(boxes);
-
-    if (this.triggerSampleIndex !== null) {
-      this.overlay.drawTrigger(this.toPx(this.triggerSampleIndex));
+    beginAnalogFrameBudget();
+    try {
+      this.drawBusRows(boxes, repeatTints);
+    } finally {
+      endAnalogFrameBudget();
     }
 
-    if (this.running && this.store.length > 0) {
-      this.overlay.drawLiveEdge(this.toPx(this.store.length));
+    const triggerAt = this.displayTriggerSample();
+    if (triggerAt !== null) {
+      this.overlay.drawTrigger(this.toPx(triggerAt));
+    }
+
+    // The live edge belongs to the current wave, not to the composite's far end: a Fixed
+    // Repeat viewport keeps old data beyond the frontier, and a held previous frame is
+    // not live at all.
+    const liveAt = this.repeatShowingFront ? null : this.captureStore.length;
+    if (this.running && liveAt !== null && liveAt > 0) {
+      this.overlay.drawLiveEdge(this.toPx(liveAt));
     }
     for (const cursor of this.cursors) cursor.marker.draw(this.overlay, (sample) => this.toPx(sample));
     if (this.hover) this.overlay.drawHover(this.hover);
+    const overviewView = this.stack.viewport;
+    const overviewWindow = this.overviewWindow();
+    const originSample = this.displayOriginSample();
+    const overviewRate = this.store.samplerate;
+    const secondsAt = (sample: number): number =>
+      overviewRate > 0 ? (sample - originSample) / overviewRate : 0;
+    this.overview.render({
+      store: this.store,
+      channels: this.enabledChannels().map((channel) => channel.index),
+      viewport: overviewView,
+      windowStart: overviewWindow.start,
+      windowSpan: overviewWindow.span,
+      triggerSample: triggerAt,
+      // A Repeat composite's length includes the old wave; its density still changes as
+      // the current wave's frontier advances, so key the cache on that frontier.
+      dataEnd: this.captureStore.length,
+      originLabel: t(triggerAt !== null
+        ? 'overview.originTrigger' : 'overview.originStart'),
+      viewportTitle: t('overview.viewport', {
+        from: formatDuration(secondsAt(overviewView.start)),
+        to: formatDuration(secondsAt(overviewView.end)),
+      }),
+      palette: this.palette,
+    });
 
     this.renderStatus();
   }
@@ -930,12 +1959,16 @@ export class App {
     }
   }
 
-  private drawLaneSurfaces(boxes: readonly RowBox[]): void {
+  private drawLaneSurfaces(
+    boxes: readonly RowBox[], tint: readonly RegionTint[] | null,
+  ): void {
     for (const box of boxes) {
       if (box.spec.kind !== 'lane') continue;
       // The lane is a renderer row, so it currently holds a trace and a separator. Cover
-      // it before drawing into it - NOTES.md section 2.
+      // it before drawing into it - NOTES.md section 2. The Repeat tint is painted on
+      // the annotation canvas too, so the two-wave surface does not stop at this row.
       this.overlay.fillLane(box.top, box.height);
+      if (tint) this.overlay.drawRegionTintOverlay(tint, [{ top: box.top, band: box.band }]);
     }
   }
 
@@ -999,28 +2032,43 @@ export class App {
   private wirePlot(): void {
     const plot = this.el.plot;
 
-    plot.addEventListener('wheel', (e) => {
+    // Wheel without a modifier scrolls the channel stack vertically, as it does anywhere
+    // else in the page. Ctrl zooms the time axis; Shift pans it horizontally. This is the
+    // interaction users know from HSync and DSView; treating every wheel as zoom made the
+    // unmodified wheel unable to reach channels below the fold.
+    const wheelNavigate = (e: WheelEvent, left: number): void => {
+      // The browser's own Ctrl+wheel page zoom must be stopped even before any capture
+      // exists; only after that is it safe to treat an empty store as a no-op.
+      if (!e.ctrlKey && !e.shiftKey) return;
       e.preventDefault();
       if (this.store.length === 0) return;
       const dpr = globalThis.devicePixelRatio || 1;
-      const rect = plot.getBoundingClientRect();
-      const x = (e.clientX - rect.left) * dpr;
-      const intent = this.wheelIntent.classify(e.deltaX, e.deltaY, performance.now());
-      if (intent === 'zoom') {
-        // [SOURCE] zoomFactor = 2 ^ ((isPhysicalWheel ? 0.5 : 1) * scale * -deltaY / 120),
-        // so one 120-unit notch is exactly sqrt(2) and Shift makes it 10x finer.
-        // [UNVERIFIED] telling a physical wheel from a trackpad: the spec does not say how
-        // A browser does not report it directly. A large, quantised deltaY with
-        // no deltaX is the usual signature.
+      if (e.ctrlKey) {
+        if (e.deltaY === 0) return;
+        // [SOURCE] one 120-unit notch is exactly sqrt(2).
+        // [UNVERIFIED] telling a physical wheel from a trackpad: a large, quantised
+        // deltaY with no deltaX is the usual signature; a browser does not report it.
         const physical = e.deltaX === 0 && Math.abs(e.deltaY) >= 100 && Number.isInteger(e.deltaY);
-        const f = wheelSpanFactor(e.deltaY, { isPhysicalWheel: physical, shift: e.shiftKey });
-        this.stack.zoomAt(x, f);
+        this.stack.zoomAt((e.clientX - left) * dpr,
+          wheelSpanFactor(e.deltaY, { isPhysicalWheel: physical, shift: false }));
       } else {
-        this.stack.panPixels(e.deltaX * dpr);
+        const dx = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+        this.stack.panPixels(dx * dpr);
       }
-      this.syncMarkerCursor(e.clientX - rect.left);
       this.noteViewportIntent();
       this.dirty = true;
+    };
+    plot.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey && !e.shiftKey) return;
+      e.preventDefault();
+      if (this.store.length === 0) return;
+      const left = plot.getBoundingClientRect().left;
+      wheelNavigate(e, left);
+      this.syncMarkerCursor(e.clientX - left);
+    }, { passive: false });
+    this.el.axis.addEventListener('wheel', (e) => {
+      const left = this.el.axis.getBoundingClientRect().left;
+      wheelNavigate(e, left);
     }, { passive: false });
 
     // One pointer drags (pan) or grabs a cursor; two pointers pinch-zoom around their
@@ -1049,7 +2097,7 @@ export class App {
         pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), midX: (a.x + b.x) / 2 };
         dragging = false;
       } else if (pointers.size === 1) {
-        this.stack.syncSize();
+        this.syncPlotSize();
         const rect = plot.getBoundingClientRect();
         const grabbed = this.tryGrabMarker(e, rect);
         dragging = !grabbed;
@@ -1104,6 +2152,8 @@ export class App {
         const dx = e.clientX - lastX;
         lastX = e.clientX;
         this.stack.panPixels(-dx * dpr);
+        // Any real pan ends a trigger-locked follow window; the lock itself only clamps
+        // the user's ViewWindow inside the data window.
         this.noteViewportIntent();
         this.dirty = true;
         return;
@@ -1188,15 +2238,17 @@ export class App {
       if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement ||
           target instanceof HTMLTextAreaElement) return;
       if (target instanceof HTMLElement &&
-          (target.isContentEditable || target.closest('.select-field, .assistant-panel, .cursor-dist-popover') !== null)) return;
+          (target.isContentEditable ||
+            target.closest('.select-field, .assistant-panel, .cursor-dist-popover') !== null ||
+            target.closest('.ch-editor-popover, button, [role="button"], [role="slider"]') !== null)) return;
       if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;
       const shortcut = shortcutIdFor(e.key);
       if (shortcut === 'capture.toggle') {
         e.preventDefault();
         this.primaryAction();
       } else if (shortcut === 'view.fit') {
-        this.noteViewportIntent();
-        this.stack.zoomToFit();
+        this.beginViewportGesture();
+        if (!this.fitLockedViewport()) this.stack.zoomToFit();
         this.dirty = true;
       } else if (shortcut === 'cursors.clear') {
         if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return;
@@ -1236,7 +2288,7 @@ export class App {
       clientY: e.clientY,
       pointerCssX,
       markerCssX: candidate.cssX,
-      channel: row?.spec.channel ?? null,
+      channel: row && row.spec.kind !== 'blank' ? row.spec.channel : null,
       captureLength: this.store.length,
     });
     return grabbed;
@@ -1506,7 +2558,7 @@ export class App {
     if (store.length === 0) { this.dirty = true; return; }
 
     const box = this.rowAt(cssY);
-    if (!box || box.spec.kind === 'lane') { this.dirty = true; return; }
+    if (!box || box.spec.kind === 'lane' || box.spec.kind === 'blank') { this.dirty = true; return; }
     if (box.spec.kind === 'analog') {
       const bv = this.busViews[box.spec.bus ?? -1];
       const s = Math.round(this.toSample(cssX));
@@ -1588,17 +2640,519 @@ export class App {
     this.stack.setFollowLatest(on);
   }
 
-  private noteViewportIntent(): void {
-    this.repeatViewportAnchor = null;
+  /** Forget the trigger position and any window it owned. Used by every T reset. */
+  private clearTriggerSample(): void {
+    this.triggerSampleIndex = null;
+    this.triggerViewPending = false;
+    this.triggerViewOffsetStart = 0;
+    this.triggerViewOffsetEnd = 0;
+    this.triggerViewLock = null;
+    this.triggerViewLost = false;
+    this.triggerAutoDisarmed = false;
+  }
+
+  /** Bookkeeping shared by every viewport gesture. */
+  private beginViewportGesture(): void {
+    if (this.session) this.viewIntent = true;
     this.setFollow(false);
   }
 
-  private restoreRepeatViewport(): void {
-    const anchor = this.repeatViewportAnchor;
-    if (!anchor || anchor.followLatest) return;
-    const range = clampCaptureViewportAnchor(anchor, this.store.length);
-    this.stack.restoreViewport(range.start, range.end);
-    if (range.start === anchor.start) this.repeatViewportAnchor = null;
+  /**
+   * A viewport gesture finished. The trigger owns the DurationWindow, not the view: the
+   * gesture may pan/zoom the user's ViewWindow anywhere inside D, but it never moves T,
+   * never resets V to T, and never releases the lock. Clamping V into D is the only
+   * coupling.
+   */
+  private noteViewportIntent(): void {
+    this.beginViewportGesture();
+    this.clampLockView();
+  }
+
+  /** Keep the ViewWindow inside the DurationWindow; T and the lock are untouched. */
+  private clampLockView(): void {
+    const lock = this.triggerViewLock;
+    if (!lock || this.triggerSampleIndex === null) return;
+    const D = this.loopRetentionLen;
+    if (!(D > 0)) return;
+    const view = this.stack.view;
+    const clamped = clampLoopViewOffsets(
+      view.start - this.triggerSampleIndex,
+      view.end - this.triggerSampleIndex,
+      lock.fraction, D,
+    );
+    this.triggerViewOffsetStart = clamped.start;
+    this.triggerViewOffsetEnd = clamped.end;
+    this.placeLockViewport();
+  }
+
+  /** Place the user's ViewWindow at its stored offsets from the current T. */
+  private placeLockViewport(): void {
+    if (this.triggerSampleIndex === null) return;
+    const start = this.triggerSampleIndex + this.triggerViewOffsetStart;
+    const end = this.triggerSampleIndex + this.triggerViewOffsetEnd;
+    if (end > start) this.stack.restoreViewport(start, end);
+  }
+
+  /** Explicit viewport command (assistant/screenshot driver): clamp like a gesture. */
+  private noteExplicitViewport(): void {
+    this.beginViewportGesture();
+    this.clampLockView();
+  }
+
+  /**
+   * Fit resets the user's ViewWindow to the whole DurationWindow. It is a view command
+   * only: the data window, T and the trigger lock are untouched.
+   */
+  private fitViewport(): void {
+    this.beginViewportGesture();
+    if (!this.fitLockedViewport()) this.stack.zoomToFit();
+    this.dirty = true;
+  }
+
+  /**
+   * Fit a held Loop view to its data window. Returns false when no lock owns the view,
+   * so the caller can fall back to the ordinary zoom-to-fit.
+   */
+  private fitLockedViewport(): boolean {
+    const lock = this.triggerViewLock;
+    if (lock && this.triggerSampleIndex !== null && this.loopRetentionLen > 0) {
+      this.triggerViewOffsetStart = -lock.fraction * this.loopRetentionLen;
+      this.triggerViewOffsetEnd = (1 - lock.fraction) * this.loopRetentionLen;
+      this.placeLockViewport();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * The extent the overview strip represents. A running loop shows its loop window, not
+   * the retained length: a locked view maps the true data window [T - f*L, T + (1-f)*L]
+   * (a local roll can leave the store front up to 63 samples before that start, so the
+   * front is NOT the window origin), and a free run shows the newest window. Keeping the
+   * span fixed is what stops the strip's scale and frame from shrinking and scrolling as
+   * the store grows and drops.
+   */
+  private overviewWindow(): { start: number; span: number } {
+    return loopOverviewWindow({
+      loop: this.captureIsLoop,
+      length: this.store.length,
+      retention: this.loopRetentionLen,
+      lockFraction: this.triggerViewLock?.fraction ?? null,
+      triggerSample: this.triggerSampleIndex,
+    });
+  }
+
+  /** Overview click/drag: put the viewport's center on `sample`, preserving its span. */
+  private centerOverview(sample: number): void {
+    if (this.store.length <= 0) return;
+    const view = this.stack.viewport;
+    const span = view.end - view.start;
+    this.stack.setViewport(sample - span / 2, sample + span / 2);
+    this.clampLockView();
+    this.dirty = true;
+  }
+
+  /** Overview horizontal wheel: move the viewport by `samples`, preserving its span. */
+  private panOverview(samples: number): void {
+    if (this.store.length <= 0) return;
+    const view = this.stack.viewport;
+    this.stack.setViewport(view.start + samples, view.end + samples);
+    this.clampLockView();
+    this.dirty = true;
+  }
+
+  /** Overview wheel zoom: keep `anchor` fixed while the visible span scales by `factor`. */
+  private zoomOverview(anchor: number, factor: number): void {
+    if (this.store.length <= 0 || !(factor > 0) || !Number.isFinite(factor)) return;
+    const view = this.stack.viewport;
+    if (!(view.end > view.start)) return;
+    const span = view.end - view.start;
+    const start = anchor - (anchor - view.start) * factor;
+    this.stack.setViewport(start, start + span * factor);
+    this.clampLockView();
+    this.dirty = true;
+  }
+
+  /** The gesture changed the view; store it as this session's fixed T-relative interval. */
+  private captureFixedView(): void {
+    this.viewIntent = false;
+    const session = this.session;
+    const sr = this.store.samplerate;
+    if (!session || !(sr > 0)) return;
+    // The displayed origin, not just the current wave's T: while a Repeat wave waits,
+    // the previous wave's T anchors the view the user is actually moving.
+    const origin = this.displayOriginSample();
+    const view = this.stack.view;
+    if (!(view.end > view.start)) return;
+    this.session = sessionWithManualView(session,
+      (view.start - origin) / sr, (view.end - origin) / sr);
+  }
+
+  /**
+   * The current sweep's retained range, in seconds relative to T (or to the sweep start
+   * when it has no trigger). `triggerActive` is true only once a trigger sample exists.
+   * The window is the sweep's configured/expected range, not the live store: a Fixed
+   * view that the sweep will cover later is not stale yet.
+   */
+  private sessionRetainedSeconds(): {
+    startSec: number; endSec: number; triggerActive: boolean;
+  } {
+    const sr = this.store.samplerate;
+    if (!(sr > 0)) return { startSec: 0, endSec: 0, triggerActive: false };
+    const triggerActive = this.triggerSampleIndex !== null;
+    if (this.captureUsesSoftwareTrigger && this.captureTriggerBase) {
+      const pre = this.captureTriggerBase.preTriggerSamples / sr;
+      const post = Math.max(0,
+        this.captureLimitSamples - this.captureTriggerBase.preTriggerSamples) / sr;
+      return { startSec: -pre, endSec: post, triggerActive };
+    }
+    return { startSec: 0, endSec: this.captureLimitSamples / sr, triggerActive };
+  }
+
+  /**
+   * Resolve and apply the session's view policy for the current sweep.
+   *
+   * FollowLive keeps the renderer's right-edge pin; Fixed restores the stored T-relative
+   * interval; a Fixed interval that no longer fits the sweep's retained range falls back
+   * to the mode default (never an automatic Fit). The Loop trigger lock still owns the
+   * Loop viewport in this stage, so Loop is skipped here.
+   */
+  private applySessionView(): void {
+    const session = this.session;
+    if (!session || this.settings.mode === 'loop') return;
+    // While the previous Repeat wave is still on screen, its own T and the previous
+    // policy are what the user sees; the new wave's policy applies once it owns the plot.
+    if (this.repeatShowingFront) return;
+    // While a sweep waits for its trigger, the previous display and view stay valid.
+    if (this.captureUsesSoftwareTrigger && this.triggerSampleIndex === null) return;
+    const sr = this.store.samplerate;
+    if (!(sr > 0)) return;
+    const retained = this.sessionRetainedSeconds();
+    const resolved = resolveSessionView(session, {
+      triggerActive: retained.triggerActive,
+      retained: { startSec: retained.startSec, endSec: retained.endSec },
+      fraction: this.triggerViewFraction,
+    });
+    this.session = resolved.session;
+    if (resolved.policy.kind === 'fixed') {
+      const range = secondsRangeToSamples(resolved.view, sr);
+      const origin = this.triggerSampleIndex ?? 0;
+      const start = origin + range.start;
+      const end = origin + range.end;
+      const view = this.stack.view;
+      if (Math.abs(view.start - start) > 0.5 || Math.abs(view.end - end) > 0.5) {
+        this.stack.restoreViewport(start, end);
+      }
+      if (this.stack.followLatest) this.setFollow(false);
+      return;
+    }
+    // FollowLive (the default, and the Fixed-out-of-range fallback): keep the current
+    // span and pin its right edge to the newest sample.
+    if (!this.stack.followLatest) this.setFollow(true);
+  }
+
+  /**
+   * Choose what the Repeat display shows: the current wave alone (FollowLive, or no old
+   * layer), the previous wave while the current one waits for its trigger, or the
+   * two-layer composite that keeps a Fixed viewport filled while the new wave advances.
+   *
+   * Called after the session policy is resolved, because only a Fixed viewport needs the
+   * old layer: FollowLive always looks at the newest samples and never past them.
+   */
+  private updateRepeatDisplay(): void {
+    if (!this.repeatSession || this.settings.mode !== 'repeat' || !this.waveStore) return;
+    if (this.repeatShowingFront) return;
+    const back = this.waveStore;
+    const front = this.repeatFront;
+    const fixed = this.session?.policy.kind === 'fixed';
+    if (fixed && front && front.store !== back &&
+        (back.length > 0 || front.store.length > 0)) {
+      const origin = this.triggerSampleIndex ?? 0;
+      if (!this.repeatComposite ||
+          this.repeatComposite.front !== front.store ||
+          this.repeatComposite.back !== back ||
+          this.repeatComposite.frontOrigin !== front.origin) {
+        this.repeatComposite = new RepeatCompositeStore(back, origin, front);
+      } else {
+        this.repeatComposite.setBackOrigin(origin);
+      }
+      if (this.storeRef.target !== this.repeatComposite) this.setDisplayStore(this.repeatComposite);
+      this.applyPendingCursorDelta();
+      return;
+    }
+    this.repeatComposite = null;
+    this.setDisplayStore(back);
+    this.applyPendingCursorDelta();
+  }
+
+  /**
+   * Apply the previous-wave-to-current-wave cursor offset after a display hand-over.
+   * A cursor whose old-layer sample has no counterpart in the new store is dropped,
+   * with the same policy the tool used before the cursor list replaced marker A.
+   */
+  private applyPendingCursorDelta(): void {
+    const delta = this.pendingCursorDelta;
+    if (delta === null) return;
+    this.pendingCursorDelta = null;
+    let changed = false;
+    const survivors: CursorLine[] = [];
+    for (const cursor of this.cursors) {
+      const sample = cursor.marker.sample;
+      if (sample === null || cursor.marker.isDragging) {
+        // A live drag's sample comes from the pointer; the next pointermove re-derives
+        // it against the new display, so translating it mid-gesture would fight it.
+        survivors.push(cursor);
+        continue;
+      }
+      const remapped = remapRepeatSample(sample, delta, this.store.length);
+      if (remapped === null) { changed = true; continue; }
+      cursor.marker.setSample(remapped, this.store.length);
+      changed = true;
+      survivors.push(cursor);
+    }
+    if (!changed) return;
+    const before = this.cursors.length;
+    this.cursors = survivors;
+    if (this.cursors.length !== before) {
+      if (this.activeCursorId !== null && this.cursorById(this.activeCursorId) === null) {
+        const last = this.cursors[this.cursors.length - 1];
+        this.activeCursorId = last === undefined ? null : last.id;
+      }
+      this.renumberCursors();
+      this.distanceRows = pruneDistancePairs(
+        this.distanceRows, new Set(this.cursors.map((cursor) => cursor.id)),
+      );
+      this.edgeRows = pruneEdgeCursors(
+        this.edgeRows, new Set(this.cursors.map((cursor) => cursor.id)),
+      );
+      // A dropped cursor changes the row list; a pure shift only rewrites its cells.
+      this.renderPanels();
+    } else if (this.panel === 'device') {
+      this.capturePanel.updateCursors(this.cursorRows());
+      this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
+      this.capturePanel.updateCursorEdges(this.cursorEdgeRows());
+    }
+    this.dirty = true;
+  }
+
+  /**
+   * The previous wave stops owning the plot as soon as this one can show something: its
+   * first samples when trigger-free, or its trigger's data block. Called before the
+   * session view is resolved so the same frame uses the new display origin.
+   */
+  private releaseRepeatHold(): void {
+    if (!this.repeatShowingFront) return;
+    const back = this.waveStore;
+    if (!back) return;
+    if (!repeatHoldReleased({
+      showingFront: this.repeatShowingFront,
+      backLength: back.length,
+      softwareTrigger: this.captureUsesSoftwareTrigger,
+      triggerState: this.triggerState,
+      triggerSampleIndex: this.triggerSampleIndex,
+    })) return;
+    const front = this.repeatFront;
+    if (front && this.cursors.some((cursor) =>
+      cursor.marker.sample !== null && !cursor.marker.isDragging)) {
+      // The plot is moving from the old store's coordinates to the current wave's. The
+      // offset is the same one the composite uses for the old layer.
+      this.pendingCursorDelta = (this.triggerSampleIndex ?? 0) - front.origin;
+    }
+    this.repeatShowingFront = false;
+    this.repeatHeldTrigger = null;
+  }
+
+  /** The displayed store's T: the current wave's trigger, or the held old wave's T. */
+  private displayTriggerSample(): number | null {
+    if (this.repeatShowingFront) return this.repeatHeldTrigger;
+    return this.triggerSampleIndex ?? this.repeatHeldTrigger;
+  }
+
+  /** The displayed store's T: the current wave's trigger, or the held old wave's T. */
+  private displayOriginSample(): number {
+    return this.displayTriggerSample() ?? 0;
+  }
+
+  /**
+   * Repeat background tints: the old span(s) and the current wave's span in the viewport.
+   * Only requested while the composite is displayed and an old region is actually
+   * visible; the two surfaces are the whole signal (no vertical rule).
+   */
+  private repeatTintRegions(): RegionTint[] | null {
+    const composite = this.repeatComposite;
+    if (!composite || this.storeRef.target !== composite) return null;
+    const rate = composite.samplerate;
+    if (!(rate > 0)) return null;
+    const view = this.stack.view;
+    const origin = composite.backOrigin;
+    const surface = repeatSurfacePixels(composite, {
+      startSec: (view.start - origin) / rate,
+      endSec: (view.end - origin) / rate,
+    }, this.el.plot.clientWidth);
+    if (!surface || surface.old.length === 0) return null;
+    const tints: RegionTint[] = surface.old.map((span) => ({
+      startCss: span.x0, endCss: span.x1, color: this.palette.repeatPreviousSurface,
+    }));
+    if (surface.current) {
+      tints.push({
+        startCss: surface.current.x0, endCss: surface.current.x1,
+        color: this.palette.repeatCurrentSurface,
+      });
+    }
+    return tints;
+  }
+
+  private clearRepeatLayers(): void {
+    // A session ended while the two-layer composite was displayed: the previous wave is
+    // not part of this capture, so hand the plot back to the current store. (A running
+    // wave reaching this path has already been stopped; a partial capture may therefore
+    // show blank time beyond its end, which is the truth.)
+    if (this.repeatComposite && this.storeRef.target === this.repeatComposite && this.waveStore) {
+      this.setDisplayStore(this.waveStore);
+    }
+    // A cursor placed on old-layer time may sit past a partial current capture. Same
+    // policy as a hand-over: drop it rather than pull it to the end of a shorter wave.
+    const wave = this.waveStore;
+    if (wave) this.settleCursorsForStore(wave.length);
+    this.pendingCursorDelta = null;
+    this.repeatFront = null;
+    this.repeatComposite = null;
+    this.repeatShowingFront = false;
+    this.repeatHeldTrigger = null;
+  }
+
+  /**
+   * Drop cursors whose samples do not exist in a store of `length`. A live drag keeps
+   * its pointer-derived sample because the next pointermove re-derives it.
+   */
+  private settleCursorsForStore(length: number): void {
+    const before = this.cursors.length;
+    this.cursors = this.cursors.filter((cursor) => {
+      const sample = cursor.marker.sample;
+      return sample === null || cursor.marker.isDragging || (sample >= 0 && sample < length);
+    });
+    if (this.cursors.length === before) return;
+    if (this.activeCursorId !== null && this.cursorById(this.activeCursorId) === null) {
+      const last = this.cursors[this.cursors.length - 1];
+      this.activeCursorId = last === undefined ? null : last.id;
+    }
+    this.renumberCursors();
+    this.distanceRows = pruneDistancePairs(
+      this.distanceRows, new Set(this.cursors.map((cursor) => cursor.id)),
+    );
+    this.edgeRows = pruneEdgeCursors(
+      this.edgeRows, new Set(this.cursors.map((cursor) => cursor.id)),
+    );
+    this.renderPanels();
+  }
+
+  /**
+   * A stopped/ended Repeat session whose current wave never showed anything keeps the
+   * previous completed wave on screen. Make that wave the capture as well, so the plot,
+   * the status, Save and the assistant all describe the same samples. Called before the
+   * display layers are cleared.
+   */
+  private settleHeldRepeatWave(): void {
+    if (!this.repeatShowingFront) return;
+    const front = this.repeatFront;
+    if (!front) return;
+    this.waveStore = front.store;
+    this.triggerSampleIndex = front.hasTrigger ? front.origin : null;
+    this.triggerState = front.hasTrigger ? 'triggered' : 'off';
+    this.settledHeldCapture = true;
+    this.setDisplayStore(front.store);
+    this.repeatShowingFront = false;
+    this.repeatHeldTrigger = null;
+    this.repeatComposite = null;
+    this.pendingCursorDelta = null;
+  }
+
+  /**
+   * Settle a held previous wave and give it the capture label its samples deserve. The
+   * stopped-session paths that do not go through `finishCapture` use this; otherwise a
+   * miss's "0 samples / no trigger" label would sit on top of the adopted wave.
+   */
+  private settleAndLabelHeldWave(): void {
+    this.settleHeldRepeatWave();
+    if (!this.settledHeldCapture) return;
+    const captured = this.captureStore;
+    const sr = captured.samplerate;
+    this.captureLabel = {
+      kind: 'live', samples: captured.length, rate: sr, seconds: captured.length / sr,
+    };
+  }
+
+  /**
+   * Swap what the renderer reads without touching the capture. A Repeat wave boundary
+   * moves between the current store, the previous wave and their composite; those are
+   * the same samples in the same coordinate space, so the marker and the view survive.
+   * Capture replacement still uses `storeRef.set` and releases the marker pointer first.
+   */
+  private setDisplayStore(store: SampleStore): void {
+    if (this.storeRef.target === store) return;
+    this.storeRef.set(store);
+  }
+
+  /**
+   * Place the initial trigger view. After that the lock is never re-applied by a frame:
+   * the local roll updates T and the stored ViewWindow offsets keep V in place. A
+   * plot-width change only re-clamps V; `syncSize` has already preserved the time scale.
+   */
+  private applyTriggerViewAnchor(rescaled: boolean): void {
+    if (this.triggerViewPending) {
+      // A pending placement belongs to an armed acquisition. A disabled trigger (mask
+      // off, or a disarmed capture) must never pin a view from a late match message.
+      if (!this.captureUsesSoftwareTrigger || !this.settings.triggerEnableMask) {
+        this.triggerViewPending = false;
+        this.triggerSampleIndex = null;
+        return;
+      }
+      // The trigger message can precede the coalesced transport block that carries the
+      // sample (it is posted as soon as the matcher matches). Place the view only once
+      // the store actually holds T, so the first locked frame is not a blank future
+      // window; the pending flag survives until then.
+      if (this.triggerSampleIndex === null || this.triggerSampleIndex >= this.store.length) return;
+      this.triggerViewPending = false;
+      const D = this.triggerRollSpan();
+      const fraction = this.triggerViewFraction;
+      this.triggerViewOffsetStart = -fraction * D;
+      this.triggerViewOffsetEnd = (1 - fraction) * D;
+      this.triggerViewLock = {
+        fraction,
+        resumeFollow: this.stack.followLatest,
+      };
+      this.triggerAutoDisarmed = false;
+      // The scanner runs before the block is appended, so it may already have reported
+      // crossings after T in this same block. Keep the latest real edge; resetting to T
+      // would shorten the quiet window and release the lock early.
+      this.lastAnalogCrossingAbs = Math.max(
+        this.lastAnalogCrossingAbs,
+        this.store.droppedSamples + this.triggerSampleIndex,
+      );
+      this.placeLockViewport();
+      return;
+    }
+    if (!rescaled) return;
+    this.clampLockView();
+  }
+
+  /**
+   * The DurationWindow length in samples. It is the base for the local roll budget and
+   * for the initial T fraction; the user's ViewWindow span is independent of it.
+   */
+  private triggerRollSpan(): number {
+    if (this.captureIsLoop && this.loopRetentionLen > 0) return this.loopRetentionLen;
+    const view = this.stack.view;
+    return Math.max(1, view.end - view.start);
+  }
+
+  /**
+   * Stack size sync from a pointer handler. A plot-width change rescales the sample range,
+   * so a trigger-locked viewport must be re-placed now: the next draw's `syncSize()` would
+   * already see the new width and report no rescale.
+   */
+  private syncPlotSize(): void {
+    if (this.stack.syncSize()) this.applyTriggerViewAnchor(true);
   }
 
   private syncMarkerCursor(pointerCssX: number | null): void {
@@ -1628,9 +3182,7 @@ export class App {
     });
     must<HTMLButtonElement>('btn-save').addEventListener('click', () => this.save());
     must<HTMLButtonElement>('btn-fit').addEventListener('click', () => {
-      this.noteViewportIntent();
-      this.stack.zoomToFit();
-      this.dirty = true;
+      this.fitViewport();
     });
     must<HTMLButtonElement>('btn-fullscreen').addEventListener('click', () => void this.toggleFullscreen());
     document.addEventListener('fullscreenchange', () => this.renderToolbarState());
@@ -1756,11 +3308,11 @@ export class App {
         testMode: this.settings.testMode,
         triggerEnableMask: this.settings.triggerEnableMask,
         triggerModes: { ...this.settings.triggerModes },
+        analogTriggers: { ...this.settings.analogTriggers },
+        triggerSource: this.settings.triggerSource,
         preTriggerPercent: this.settings.preTriggerPercent,
       },
       busViews: this.busViews.map((bus) => cloneBusConfig(bus)),
-      bankBusDrafts: Object.fromEntries([...this.bankBusDrafts]
-        .map(([start, config]) => [start, cloneBusConfig(config)])),
       analyzers: this.analyzers.map((a): PersistedAnalyzer => ({
         id: a.id,
         decoderId: a.decoderId,
@@ -1823,44 +3375,118 @@ export class App {
   /** Re-render every string in the shell after a locale change. */
   private retranslate(): void {
     this.settingsMenu.close('retranslate');
-    this.bankBusDialog.close();
     this.sidebarMenu.close('retranslate');
     this.languageMenu.close('retranslate');
     this.themeMenu.close('retranslate');
-    this.busViews = this.busViews.map((bus) => retranslateBankBusConfig(bus));
-    for (const [start, draft] of this.bankBusDrafts) {
-      this.bankBusDrafts.set(start, retranslateBankBusConfig(draft));
-    }
     applyStaticI18n(document);
     if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings();
     this.relayout();       // channel cells rebuild; an open channel dialog closes here
     this.renderPanels();   // side panels + toolbar chrome
     this.assistantPanel?.render();  // its chrome only; the conversation is history
     this.renderStatus();   // status line
+    this.dirty = true;     // canvas labels (the overview origin, tick units) re-render
   }
 
-  private progressView(): NonNullable<CapturePanelView['progress']> {
-    const loop = this.captureIsLoop;
+  /**
+   * Loop display instrumentation, computed from the same parameters the block planner
+   * uses. This is a readout, not a control: the auto-roll advances one scanned crossing
+   * at a time, and the block is what the frame budget could carry if a swap were made.
+   */
+  /** The fields the trigger-state notes need, for their text-only refresh path. */
+  private triggerStatusView(): TriggerStatusView {
+    return {
+      mode: this.settings.mode,
+      running: this.running,
+      stopping: this.stopping,
+      triggerState: this.triggerState,
+      triggerViewLost: this.triggerViewLost,
+      triggerViewPending: this.triggerViewPending,
+      triggerLocked: this.triggerViewLock !== null,
+      triggerAnalogRolling: this.analogScanner !== null,
+      triggerArmed: this.captureUsesSoftwareTrigger && this.running && !this.stopping,
+      triggerAutoDisarmed: this.triggerAutoDisarmed,
+      settingsArmed: this.triggerSettingsArmed(),
+      repeatMissed: this.repeatMissed,
+    };
+  }
+
+  /** Whether the current settings request a trigger with at least one in-width condition. */
+  private triggerSettingsArmed(): boolean {
+    if (!this.settings.triggerEnableMask) return false;
+    const channels = this.store.channelCount;
+    if (!isChannelCount(channels)) return false;
+    const plan = this.triggerPlan(this.settings);
+    return plan.digital.some((condition) => condition.channel < channels) ||
+      plan.analog.some((trigger) => trigger.start + CHANNEL_BANK_SIZE <= channels);
+  }
+
+  private computeLoopMetrics(): LoopDisplayMetrics | null {
+    if (!this.captureIsLoop || !this.analogScanner) return null;
+    const store = this.store;
+    const rate = store.samplerate;
+    const channels = store.channelCount;
+    if (!(rate > 0) || !isChannelCount(channels)) return null;
+    const liveAbs = store.length + store.droppedSamples;
+    const D = this.loopRetentionLen > 0 ? this.loopRetentionLen : 1;
+    // The local roll's budget is based on the fresh data beyond the DurationWindow's
+    // right edge, not on the user's (possibly zoomed) ViewWindow span.
+    const triggerAbs = this.triggerSampleIndex === null
+      ? null : store.droppedSamples + this.triggerSampleIndex;
+    const fraction = this.triggerViewLock?.fraction ?? 0;
+    const available = triggerAbs === null
+      ? Math.max(0, liveAbs - this.loopSwapCursorAbs)
+      : Math.max(0, liveAbs - (triggerAbs + (1 - fraction) * D));
+    const plan = planLoopSwap({
+      samplerate: rate,
+      channels,
+      availableSamples: available,
+      windowSamples: Math.max(1, D),
+      // A local update should not repaint the whole window: at most a quarter of it,
+      // unless the frame budget already makes the block smaller.
+      maxWindowFraction: 0.25,
+      ...(this.loopPeriodSamples >= 1 ? { periodSamples: this.loopPeriodSamples } : {}),
+    });
+    const bytesPerSample = bytesPerSampleForChannels(channels);
+    return {
+      stride: this.analogScanner.stride,
+      scanRateHz: rate / this.analogScanner.stride,
+      periodSamples: this.loopPeriodSamples,
+      anchorStepSamples: this.loopLastAnchorStep,
+      blockSamples: plan.blockSamples,
+      blockBytes: plan.blockBytes,
+      refreshHz: plan.estimatedRefreshHz,
+      retainedBytes: this.loopRetentionLen * bytesPerSample,
+      fullWindow: plan.fullWindow,
+    };
+  }
+
+  private progressView(): NonNullable<CapturePanelView['progress']> {    const loop = this.captureIsLoop;
     const unlimited = this.settings.mode === 'single' && this.settings.singleUnlimited;
+    // Acquisition progress is the current wave's, not the Repeat display composite's.
+    const captured = this.captureStore;
     return {
       seconds: this.captureStart > 0 ? (performance.now() - this.captureStart) / 1000 : 0,
-      samples: loop ? this.store.length + this.droppedTotal : this.store.length,
+      samples: loop ? captured.length + this.droppedTotal : captured.length,
       bytes: loop
-        ? this.store.length * bytesPerSampleForChannels(this.store.channelCount)
+        ? captured.length * bytesPerSampleForChannels(captured.channelCount)
         : this.captureBytes,
       lost: this.lostSamples,
       dropped: this.droppedTotal,
-      kept: this.store.length,
-      limit: loop ? this.loopRetentionLen : 0,
+      kept: captured.length,
+      limit: loop ? loopStoreLimit(
+        this.loopRetentionLen,
+        (this.triggerViewLock !== null || this.triggerViewPending) && this.analogScanner !== null,
+        this.loopTriggerSlackSamples,
+      ) : 0,
       targetSamples: loop || unlimited ? null : this.captureLimitSamples,
     };
   }
 
   private capturePanelState(): CapturePanelState {
     if (this.stopping) return 'stopping';
-    if (this.repeatTimer.pending) return 'waiting';
+    if (this.repeatTimer.pending) return this.repeatSession ? 'capturing' : 'waiting';
     if (this.running) return 'capturing';
-    return this.store.length > 0 ? 'completed' : 'ready';
+    return this.captureStore.length > 0 ? 'completed' : 'ready';
   }
 
   private renderPanels(): void {
@@ -1895,13 +3521,17 @@ export class App {
         channels: this.channels.slice(0, this.displayChannelCount()),
         widthOptions: this.widthTiers(),
         buses: this.busViews,
+        analogGroups: this.analogGroups(),
         deviceName: this.device?.name ?? null,
         running: this.running,
         stopping: this.stopping,
         repeatPending: this.repeatTimer.pending,
         captureState: this.capturePanelState(),
-        result: this.store.length > 0
-          ? { samples: this.store.length, seconds: this.store.length / this.store.samplerate }
+        result: this.captureStore.length > 0
+          ? {
+            samples: this.captureStore.length,
+            seconds: this.captureStore.length / this.captureStore.samplerate,
+          }
           : null,
         progress: this.running ? this.progressView() : null,
         maxSamplerateHz: this.rateCeilings,
@@ -1910,26 +3540,52 @@ export class App {
         cursorDistances: this.cursorDistanceRows(),
         cursorEdges: this.cursorEdgeRows(),
         cursorEdgeChannels: this.edgeChannelOptions(),
+        triggerViewLost: this.triggerViewLost,
+        triggerViewPending: this.triggerViewPending,
+        triggerLocked: this.triggerViewLock !== null,
+        triggerRetuneRejected: this.triggerRetuneRejected,
+        triggerAnalogRolling: this.analogScanner !== null,
+        triggerArmed: this.captureUsesSoftwareTrigger && this.running && !this.stopping,
+        triggerAutoDisarmed: this.triggerAutoDisarmed,
+        settingsArmed: this.triggerSettingsArmed(),
+        activeTriggerPreSamples: this.running && this.captureTriggerBase
+          ? this.captureTriggerBase.preTriggerSamples : undefined,
+        loopMetrics: this.running && this.captureIsLoop ? this.computeLoopMetrics() : null,
+        repeatMissed: this.repeatMissed,
       });
     } else {
       this.analyzerPanel.render({
         channels: this.channels.slice(0, this.displayChannelCount()),
         analyzers: this.analyzers,
-        captureChannels: this.store.channelCount,
-        hasCapture: this.store.length > 0,
+        captureChannels: this.captureStore.channelCount,
+        hasCapture: this.captureStore.length > 0,
         warm: this.decodeWarm,
         busy: this.decodeBusy,
       });
       this.busPanel.render({
-        buses: this.busViews, channelCount: this.displayChannelCount(), captureLocked: this.running || this.stopping,
+        buses: this.busViews, channelCount: this.displayChannelCount(),
+        testMode: this.settings.testMode,
+        captureLocked: this.stopping,
       });
     }
   }
 
   private primaryAction(): void {
-    if (this.stopping) return;
+    if (this.stopping) {
+      // An automatic trigger restart is waiting for this stop; cancel its start so the
+      // user's Stop is not overridden by a capture they did not ask for.
+      this.cancelPendingTriggerRestart();
+      return;
+    }
     if (this.running || this.repeatTimer.pending) void this.stopCapture();
-    else if (this.device) void this.startCapture();
+    else void this.startCapture();
+  }
+
+  /** A Stop during an automatic trigger restart cancels the pending start. */
+  private cancelPendingTriggerRestart(): boolean {
+    if (!this.stopping || !this.triggerRestartPending) return false;
+    this.triggerRestartCancelled = true;
+    return true;
   }
 
   /**
@@ -1979,18 +3635,24 @@ export class App {
     }
     btn.classList.toggle('primary', !showStop);
     btn.classList.toggle('danger', showStop);
-    btn.disabled = this.stopping || (this.device === null && !showStop);
+    btn.disabled = (this.stopping && !this.triggerRestartPending) ||
+      (this.device === null && !showStop);
     btn.title = this.stopping ? t('toolbar.stoppingTitle')
       : showStop ? t('toolbar.stopTitle')
         : this.device ? t('toolbar.startTitle') : t('toolbar.connectHint');
   }
 
   private renderStatus(): void {
-    const store = this.store;
+    // Capture statistics describe the current wave. A held previous frame is the only
+    // exception: the capture is empty while the old wave is what the user sees, so report
+    // that wave and say which one it is.
+    const showingPrevious = this.repeatShowingFront;
+    const store = showingPrevious ? this.store : this.captureStore;
     const view = this.stack.view;
     const sr = store.samplerate;
     const parts: string[] = [];
     parts.push(formatCaptureLabel(this.captureLabel));
+    if (showingPrevious) parts.push(t('status.previousWave'));
     if (store.length > 0) {
       if (this.captureIsLoop && (this.running || this.droppedTotal > 0)) {
         parts.push(t('status.loop', {
@@ -2004,7 +3666,7 @@ export class App {
     }
     // Cursor positions share the axis's origin: T=0 is the trigger sample when there
     // is one, so a pre-trigger cursor reads as the negative time the axis shows.
-    const origin = this.triggerSampleIndex ?? 0;
+    const origin = this.displayOriginSample();
     const active = this.activeCursor();
     const markerSample = active?.marker.sample ?? null;
     if (active !== null && markerSample !== null) {
@@ -2056,8 +3718,18 @@ export class App {
   private async openFiles(files: File[]): Promise<void> {
     try {
       this.statusError = null;
+      // An opened capture replaces the store the running sink appends to; stop first so
+      // the sink cannot keep dropping/retaining the imported data. A Repeat wave in
+      // teardown or between waves can still arm the next interval, so end it before and
+      // after the load.
+      if (this.running) await this.stopCapture('manual');
+      if (this.stopPending) await this.stopPending;
+      this.endPendingRepeatSession();
       const t0 = performance.now();
       const cap = await loadFiles(files);
+      if (this.running) await this.stopCapture('manual');
+      if (this.stopPending) await this.stopPending;
+      this.endPendingRepeatSession();
       this.adoptCapture(cap.store, cap.channelNames,
         { kind: 'loaded', source: cap.sourceDescription, ms: Math.round(performance.now() - t0) });
     } catch (e) {
@@ -2065,12 +3737,37 @@ export class App {
     }
   }
 
+  /**
+   * End a Repeat session that is between waves (or whose teardown is still settling) and
+   * adopt a held previous wave if that is what the display shows. Used by the file-open
+   * path, which must not let a timer start a device sweep behind an import.
+   */
+  private endPendingRepeatSession(): void {
+    if (this.running) return;
+    const betweenWaves = this.repeatTimer.pending ||
+      (this.session !== null && this.repeatSession);
+    if (!betweenWaves) return;
+    this.repeatTimer.cancel();
+    this.settleAndLabelHeldWave();
+    this.session = null;
+    this.repeatWaveHolding = false;
+    this.repeatMissed = false;
+    this.clearRepeatLayers();
+    this.relayout();
+    this.renderPanels();
+    this.renderStatus();
+    this.dirty = true;
+  }
+
   private adoptCapture(store: SampleStore, names: string[], label: CaptureLabel): void {
     this.repeatTimer.cancel();
-    this.repeatViewportAnchor = null;
     this.discardDecodeState();
     this.releaseMarkerPointer();
     this.storeRef.set(store);
+    this.waveStore = store;
+    this.repeatMissed = false;
+    this.settledHeldCapture = false;
+    this.clearRepeatLayers();
     this.channels = defaultChannels(store.channelCount);
     for (let i = 0; i < this.channels.length; i++) {
       // Keep real names ("SDA"); drop auto-generated ones that would just repeat the
@@ -2088,14 +3785,21 @@ export class App {
     this.resetBusBuilds();
     this.clearCursors();
     this.triggerState = 'off';
-    this.triggerSampleIndex = null;
+    this.clearTriggerSample();
+    this.session = null;
+    this.analogScanner = null;
+    this.analogCrossings = [];
+    this.loopTriggerSlackSamples = 0;
+    this.triggerRetuneRejected = false;
+    this.captureUsesSoftwareTrigger = false;
+    this.captureTriggerBase = null;
     this.droppedTotal = 0;
     this.captureIsLoop = false;
     this.captureLabel = label;
     this.widthExplicit = false;
-    this.settings = clampSettings(
-      { ...this.settings, channels: channelWidthForProbes(store.channelCount) }, this.rateCeilings,
-    );
+    this.settings = carryCaptureDuration(this.settings, this.clampSettings(
+      { ...this.settings, channels: channelWidthForProbes(store.channelCount) },
+    ));
     this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));
     this.reconcileEdgeChannels();
     this.persistWorkspace();
@@ -2107,8 +3811,8 @@ export class App {
 
   private save(): void {
     try {
-      if (this.store.length === 0) throw new DiagnosticError('io.nothingToSave');
-      const blob = saveLwcap(this.store, this.channels.map((c) => c.name));
+      if (this.captureStore.length === 0) throw new DiagnosticError('io.nothingToSave');
+      const blob = saveLwcap(this.captureStore, this.channels.map((c) => c.name));
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `capture-${new Date().toISOString().replace(/[:.]/g, '-')}.lwcap`;
@@ -2123,7 +3827,6 @@ export class App {
 
   private discardDevice(): number {
     this.repeatTimer.cancel();
-    this.repeatViewportAnchor = null;
     const device = this.device;
     this.deviceEpoch += 1;
     if (device) {
@@ -2140,13 +3843,24 @@ export class App {
       this.running = false;
       this.stopping = false;
       this.finishCapture();
+    } else if (this.session && this.repeatSession) {
+      // Lost during a Repeat retry interval: there is no running capture to finish, but
+      // the session must still end and a held previous wave must become the capture.
+      this.settleAndLabelHeldWave();
+      this.session = null;
+      this.repeatWaveHolding = false;
+      this.repeatMissed = false;
+      this.clearRepeatLayers();
+      this.relayout();
+      this.renderPanels();
+      this.renderStatus();
+      this.dirty = true;
     }
     return epoch;
   }
 
   private installDevice(d: Device, epoch: number): boolean {
     this.repeatTimer.cancel();
-    this.repeatViewportAnchor = null;
     if (epoch !== this.deviceEpoch && this.device !== null) {
       d.terminate();
       return false;
@@ -2291,14 +4005,20 @@ export class App {
       // the initial 16-channel placeholder and WaveformRenderer rejects it as out of range.
       this.releaseMarkerPointer();
       this.storeRef.set(createSampleStore(max, samplerate));
+      this.waveStore = this.storeRef.target;
     }
     if (this.store.length === 0 && max !== this.channels.length) {
       this.channels = carryChannelState(this.channels, max);
       this.order = restoreOrder(this.order, this.channels.length);
     }
-    this.settings = clampSettings(
-      { ...this.settings, channels: width, samplerate }, this.rateCeilings,
-    );
+    // A device without the ADC module cannot read a restored analog bank; dropping the
+    // view keeps the panel from offering a channel this board has no converter for.
+    if (this.deviceAnalogGroups() === 0) {
+      this.busViews = this.busViews.filter((bus) => bus.analogGroup === undefined);
+    }
+    // A board change may clamp the rate; keep a loop window's duration across it.
+    const adopted = this.clampSettings({ ...this.settings, channels: width, samplerate });
+    this.settings = carryCaptureDuration(this.settings, adopted);
     this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));
     this.reconcileEdgeChannels();
     this.persistWorkspace();
@@ -2307,8 +4027,15 @@ export class App {
 
   private async startCapture(origin: CaptureStartOrigin = 'manual'): Promise<void> {
     if (this.running || this.stopping || this.repeatTimer.pending) return;
-    if (!this.device) { this.fail('error.start', new DiagnosticError('device.notConnected')); return; }
+    this.settledHeldCapture = false;
+    if (!this.device) {
+      // Start with no board opens the chooser: the click is the user gesture WebUSB
+      // requires, and cancelling simply leaves the app idle. There is no demo fallback.
+      if (origin !== 'manual') return;
+      if (await this.connect() !== 'connected' || !this.device) return;
+    }
     const device = this.device;
+    const generation = ++this.captureGeneration;
     try {
       this.statusError = null;
       this.startMutatedCapture = false;
@@ -2326,22 +4053,36 @@ export class App {
       }
       const mode = this.settings.mode;
       const isLoop = mode === 'loop';
-      const continuation = origin === 'repeat' ? {
-        start: this.stack.viewport.start,
-        span: this.stack.viewport.end - this.stack.viewport.start,
-        followLatest: this.stack.followLatest,
-      } : null;
-      this.repeatViewportAnchor = continuation;
+      // A Repeat session owns one Capture→Stop period: the first (manual) start renders
+      // the panel once, and the interval waves that follow keep the same layout, panel and
+      // previous frame until their data arrives. Without this the panel/DOM is rebuilt and
+      // the screen flashes at every Capture→Stop wave.
+      const quietRepeat = origin === 'repeat' && this.repeatSession && mode === 'repeat' &&
+        cfg.channels === this.lastCaptureChannels && cfg.samplerate === this.lastCaptureRate &&
+        (cfg.testMode ?? 0) === this.lastCaptureTestMode;
+      const newSession = origin !== 'repeat' || this.session === null ||
+        this.session.mode !== mode;
+      const session = newSession || !this.session ? createSession(mode) : this.session;
+      // Every device RUN is one sweep; a Repeat session keeps its policy across them.
+      this.session = beginSweep(session);
+      this.viewIntent = false;
+      if (newSession) this.repeatMissed = false;
+      this.lastCaptureChannels = cfg.channels;
+      this.lastCaptureRate = cfg.samplerate;
+      this.lastCaptureTestMode = cfg.testMode ?? 0;
+      this.repeatWaveHolding = quietRepeat;
       const store = createSampleStore(cfg.channels, cfg.samplerate);
+      this.waveStore = store;
       this.discardDecodeState();
       this.releaseMarkerPointer();
-      this.storeRef.set(store);
       this.resetBusBuilds();
-      const model = Math.max(cfg.channels, this.device?.maxChannels ?? this.channels.length);
-      this.channels = carryChannelState(this.channels, model);
-      this.order = restoreOrder(this.order, this.channels.length);
-      this.reconcileEdgeChannels();
-      this.persistWorkspace();
+      if (!quietRepeat) {
+        const model = Math.max(cfg.channels, this.device?.maxChannels ?? this.channels.length);
+        this.channels = carryChannelState(this.channels, model);
+        this.order = restoreOrder(this.order, this.channels.length);
+        this.reconcileEdgeChannels();
+        this.persistWorkspace();
+      }
       for (const a of this.analyzers) {
         a.result = null; a.index = null; a.status = 'idle'; a.note = { kind: 'pending' };
       }
@@ -2349,40 +4090,109 @@ export class App {
       this.lostSamples = 0;
       this.droppedTotal = 0;
       this.captureIsLoop = isLoop;
-      this.triggerSampleIndex = null;
-      const softwareTrigger = this.settings.softwareTrigger;
+      this.clearTriggerSample();
+      this.captureUsesSoftwareTrigger = false;
+      this.captureTriggerBase = null;
+      this.triggerRetuneRequested = false;
+      this.triggerRetuneRejected = false;
+      this.triggerSyncDeferred = false;
+      this.captureArming = false;
+      const plan = this.triggerPlan(this.settings);
+      const analogTriggers = plan.analog.filter((trigger) =>
+        trigger.start + CHANNEL_BANK_SIZE <= cfg.channels);
+      const softwareTrigger = this.settings.triggerEnableMask &&
+        (plan.digital.length > 0 || analogTriggers.length > 0);
+      this.captureUsesSoftwareTrigger = softwareTrigger;
+      // Loop + trigger freezes the viewport on T. The pre-trigger percentage is then the
+      // trigger's horizontal position (0% = the 0 s left edge); single/repeat keep using
+      // the ordinary live viewport rules.
+      this.triggerViewFraction = captureLocksTriggerView(mode, softwareTrigger)
+        ? triggerViewFraction(this.settings.preTriggerPercent) : 0;
       this.captureStart = softwareTrigger ? 0 : performance.now();
       const postTriggerSamples = capturePostTriggerSamples(this.settings);
       this.captureLimitSamples = isLoop ? MAX_SAMPLES - 1 : postTriggerSamples;
       this.startMutatedCapture = true;
       this.triggerState = softwareTrigger ? 'waiting' : 'off';
+      // A Repeat wave with a trigger waits for its match; meanwhile the previous completed
+      // wave stays on screen with its own T, so the view never falls into a vacuum. A
+      // trigger-free wave can show the new layer immediately (the composite fills the
+      // part it has not reached from the old one).
+      const front = quietRepeat && this.repeatFront &&
+        this.repeatFront.store.channelCount === cfg.channels &&
+        this.repeatFront.store.samplerate === cfg.samplerate ? this.repeatFront : null;
+      this.repeatFront = front;
+      this.repeatComposite = null;
+      this.repeatShowingFront = false;
+      this.repeatHeldTrigger = null;
+      this.pendingCursorDelta = null;
+      if (front) {
+        // The previous wave stays the displayed store until this one can show something:
+        // its first sample (trigger-free) or its trigger match. That is what removes the
+        // vacuum from a Fixed viewport at the wave boundary.
+        this.repeatShowingFront = true;
+        this.repeatHeldTrigger = front.hasTrigger ? front.origin : null;
+      } else {
+        this.releaseMarkerPointer();
+        this.storeRef.set(store);
+      }
       this.captureLabel = { kind: 'capturing', channels: cfg.channels, rate: cfg.samplerate };
+      // A quiet wave does not rebuild the panel or plot, but the status line must stop
+      // describing the previous wave's completed capture and show the new interval.
+      if (quietRepeat) {
+        this.renderStatus();
+        if (this.panel === 'device') {
+          this.capturePanel.updateTriggerStatus(this.triggerStatusView());
+        }
+      }
       this.running = true;
       this.runningPanelAt = 0;
-      this.relayout();
-      if (captureStartUsesDefaultWindow(origin)) {
+      if (!quietRepeat) this.relayout();
+      if (origin !== 'repeat' || newSession) {
+        // A new session starts in FollowLive with the default live window. Repeat waves
+        // keep the view the session policy resolved last time; the next draw applies it.
         const span = Math.max(1000, Math.round(cfg.samplerate * 0.05));
         this.stack.restoreViewport(0, span);
         this.setFollow(true);
-      } else if (continuation?.followLatest) {
-        this.stack.restoreViewport(0, continuation.span);
-        this.setFollow(true);
-        this.repeatViewportAnchor = null;
-      } else {
-        this.restoreRepeatViewport();
       }
-      this.renderPanels();
 
       const bytesPerSample = bytesPerSampleForChannels(cfg.channels);
       this.loopRetentionLen = isLoop
         ? clampLoopSamples(this.settings.loopSamples, cfg.channels)
         : 0;
-      this.draw();
+      // A locked loop analog trigger advances its window on later crossings. Detection
+      // runs on the page's raw chunks (strided, so its cost follows the rate, not the
+      // data volume); the device matcher still owns the first match and every other
+      // trigger mode.
+      const analogStart = isLoop && softwareTrigger ? analogTriggers[0] : undefined;
+      this.analogScanner = null;
+      this.analogCrossings = [];
+      this.lastAnalogCrossingAbs = Number.NEGATIVE_INFINITY;
+      this.pendingRelockAbs = null;
+      this.loopTriggerSlackSamples = 0;
+      this.loopPeriodEstimates = [];
+      this.loopPeriodSamples = 0;
+      this.loopSwapCursorAbs = 0;
+      this.loopLastAnchorStep = 0;
+      if (analogStart) {
+        this.analogScanner = new AnalogCrossingScanner({
+          channels: cfg.channels,
+          condition: {
+            start: analogStart.start,
+            kind: analogStart.kind,
+            level: analogCodeFromVolts(analogStart.volts),
+          },
+          // About twenty million byte reads per second at any sample rate.
+          stride: Math.max(1, Math.ceil(cfg.samplerate / 20e6)),
+        });
+        this.loopTriggerSlackSamples = triggerSlackSamples(
+          this.loopRetentionLen, cfg.samplerate, bytesPerSample);
+      }
+      // Rendered after the loop scanner exists so the panel's first frame already carries
+      // the display-matcher/block readout (arming included, not only after the trigger).
+      if (!quietRepeat) this.renderPanels();
+      if (!quietRepeat) this.draw();
       this.el.hint.style.display = 'none';
-      const triggerConditions = this.settings.triggerConditions.length
-        ? this.settings.triggerConditions
-        : [{ channel: this.settings.triggerChannel, kind: this.settings.triggerKind,
-          level: this.settings.triggerLevel }];
+      const triggerConditions = plan.digital;
       // The pre-trigger ring is a percent of the capture's own budget: the timer/free
       // post-trigger length, or the loop window (the trigger's position inside it).
       const preTriggerBase = isLoop ? this.loopRetentionLen : postTriggerSamples;
@@ -2398,17 +4208,76 @@ export class App {
         // the post-trigger window, not the prefix - the trigger keeps its full ring.
         this.captureLimitSamples = Math.min(MAX_SAMPLES - 1, postTriggerSamples + preTriggerSamples);
       }
+      // A Repeat sweep's search allowance is one sweep's sample budget: a missing trigger
+      // then reports not-found, which B1 turns into a miss + next-Interval retry. Single
+      // waits indefinitely for its one trigger and Loop is unbounded.
+      const triggerSearchLimit = triggerSearchSamples(mode, this.captureLimitSamples);
+      // A live retune may change conditions but not these: the ring was sized here and
+      // the emitted-stream budget fixes the store's stop point.
+      this.captureTriggerBase = softwareTrigger ? {
+        preTriggerSamples,
+        maxSamples: isLoop ? Number.POSITIVE_INFINITY : this.captureLimitSamples,
+        searchLimitSamples: triggerSearchLimit,
+      } : null;
+      this.captureArming = true;
       await device.start(cfg, (chunk) => {
+        // A late message from a superseded acquisition must never touch the new store.
+        if (generation !== this.captureGeneration) return;
         // Chunks arriving while `stopping` are the drained tail of this capture - the
         // reads that had already completed when stop began, plus the flushed coalescing
         // block. Dropping them truncated every manually stopped capture by up to one
         // sink block (~10 ms at 32ch/200M).
         if (!this.running && !this.stopping) return;
+        if (chunk.length > 0 && !(this.repeatShowingFront &&
+            this.captureUsesSoftwareTrigger && this.triggerState === 'waiting')) {
+          // A Repeat wave waiting for its trigger has already received pre-trigger
+          // samples; those must not end the old-frame hold. Its trigger does.
+          this.repeatWaveHolding = false;
+        }
         if (isLoop) {
+          // Scan before appending: the chunk's first sample has this absolute position in
+          // the emitted stream, the same numbering the trigger index uses.
+          // Scan while the trigger owns the view (before placement, and while a lock is
+          // active) and after a release: new edges are what take the lock again. A
+          // disabled trigger never scans, so a stale condition cannot re-lock the view.
+          const phase: TriggerReconcilePhase =
+            this.triggerState === 'waiting' ? 'waiting' :
+            this.triggerState === 'triggered' ? 'triggered' :
+            this.triggerState === 'not-found' ? 'not-found' : 'off';
+          const waitingForTrigger = this.captureIsLoop && this.captureUsesSoftwareTrigger &&
+            this.triggerState === 'waiting';
+          const mayRelock = mayReanchor({
+            running: this.running,
+            stopping: this.stopping,
+            loop: this.captureIsLoop,
+            captureArmed: this.captureUsesSoftwareTrigger,
+            phase,
+            mask: this.settings.triggerEnableMask,
+            locked: this.triggerViewLock !== null,
+            pending: this.triggerViewPending,
+          });
+          if (this.analogScanner && chunk.length > 0 && this.settings.triggerEnableMask &&
+              (this.triggerViewLock !== null || this.triggerViewPending ||
+               waitingForTrigger || mayRelock)) {
+            const base = store.length + store.droppedSamples;
+            const gap = Math.max(1, Math.floor(this.loopRetentionLen / 64));
+            this.analogScanner.scan(chunk, base, (abs) => this.recordAnalogCrossing(abs), gap);
+          }
+          // A trigger lock that would need more than the store's hard sample budget has
+          // already lost the retention race: bounded memory wins over an anchor that can
+          // no longer be kept. The guard is before append so the store can never throw.
+          const chunkSamples = Math.floor(chunk.length /
+            bytesPerSampleForChannels(store.channelCount));
+          if (this.captureUsesSoftwareTrigger &&
+              store.length + chunkSamples > LOOP_STORE_HARD_SAMPLES) {
+            this.disableRunningTrigger(true);
+            const drop = loopDropSamples(store.length, this.loopRetentionLen);
+            if (drop > 0) this.dropLoopFront(store, drop);
+          }
           this.captureBytes += chunk.length;
           store.append(chunk);
           this.enforceLoopRetention(this.storeRef);
-          this.dirty = true;
+          this.livePending = true;
           return;
         }
         const room = (this.captureLimitSamples - store.length) * bytesPerSample;
@@ -2417,9 +4286,10 @@ export class App {
         // progress readout past the capture.
         this.captureBytes += Math.min(room, chunk.length);
         store.append(room < chunk.length ? chunk.subarray(0, room) : chunk);
-        this.dirty = true;
+        this.livePending = true;
         if (store.length >= this.captureLimitSamples) void this.stopCapture('completed');
       }, (pos, missing) => {
+        if (generation !== this.captureGeneration) return;
         // A transfer the device could not fill. Append filler for the lost samples so
         // store time keeps tracking device time, then mark that span untrusted.
         //
@@ -2438,9 +4308,21 @@ export class App {
               counted: pos, stored: store.length + this.droppedTotal,
             }));
         }
+        // Waiting for a software trigger, the store holds nothing yet; filler would
+        // shift every later sample away from the device timeline. (The transport does
+        // not report dropouts yet; when it does, its trigger must also noteGap.) Count
+        // the loss for the status only.
+        if (softwareTrigger && this.triggerState === 'waiting') {
+          this.lostSamples += missing;
+          this.livePending = true;
+          return;
+        }
         const n = appendLostSamples(store, missing, this.captureLimitSamples);
         if (n === 0) return;
         this.lostSamples += n;
+        this.livePending = true;
+        // A crossing across the gap is unknowable; restart the scan from the next chunk.
+        this.analogScanner?.resetContinuity();
         if (isLoop) { this.enforceLoopRetention(this.storeRef); return; }
         if (store.length >= this.captureLimitSamples) void this.stopCapture('completed');
       }, softwareTrigger ? {
@@ -2451,29 +4333,95 @@ export class App {
         // The transport says when bounded delivery is complete (trigger budget emitted,
         // or finite host budget delivered). This is the stop signal that does not depend
         // on this side's sample arithmetic agreeing with the transport's to the sample.
-        onEnd: () => { if (this.running) void this.stopCapture('completed'); },
+        onEnd: () => {
+          if (generation !== this.captureGeneration) return;
+          if (this.running) void this.stopCapture('completed');
+        },
         softwareTrigger: {
           channels: cfg.channels,
           conditions: triggerConditions.map((c) => ({
             channel: Math.min(c.channel, cfg.channels - 1), kind: c.kind, level: c.level,
           })),
-          channel: Math.min(triggerConditions[0]!.channel, cfg.channels - 1),
-          kind: triggerConditions[0]!.kind,
-          level: triggerConditions[0]!.level,
+          ...(triggerConditions[0] ? {
+            channel: Math.min(triggerConditions[0].channel, cfg.channels - 1),
+            kind: triggerConditions[0].kind,
+            level: triggerConditions[0].level,
+          } : {}),
+          analog: analogTriggers.map((a) => ({
+            start: a.start, kind: a.kind, level: analogCodeFromVolts(a.volts),
+          })),
           preTriggerSamples,
           maxSamples: isLoop ? Number.POSITIVE_INFINITY : this.captureLimitSamples,
-          searchLimitSamples: Number.POSITIVE_INFINITY,
+          searchLimitSamples: triggerSearchSamples(mode, this.captureLimitSamples),
         },
         onTriggerState: (state, triggerSampleIndex) => {
+          // A superseded acquisition or a disarmed trigger must not pin the view.
+          if (generation !== this.captureGeneration) return;
+          if (!this.captureUsesSoftwareTrigger || !this.settings.triggerEnableMask) return;
+          // A manual stop settles the held previous wave, then the device drain reports
+          // its still-waiting matcher as not-found. That is teardown noise, not a result
+          // for the captured previous wave; overwriting it would label N samples as
+          // "nothing recorded".
+          if (state === 'not-found' && this.settledHeldCapture &&
+              (this.stopping || !this.running)) return;
           this.triggerState = state;
           if (state === 'triggered' && triggerSampleIndex !== undefined) {
-            this.triggerSampleIndex = triggerSampleIndex;
+            // The device reports the index in the emitted stream, but the sink may have
+            // dropped front samples during the same transfer that produced the match.
+            // The plot, the marker and the retention shift all speak store-relative
+            // positions, so convert once here.
+            const sample = relativeTriggerSample(triggerSampleIndex, store.droppedSamples);
+            this.triggerSampleIndex = sample;
             this.captureStart = performance.now();
+            if (sample !== null && isLoop && softwareTrigger) {
+              this.triggerViewPending = true;
+              // Session bookkeeping: a matched Loop owns the view by phase lock. This is
+              // the same transition the fixed/follow policy uses; the lock itself is
+              // still applied by applyTriggerViewAnchor (Loop is not resolved per draw).
+              if (this.session) {
+                this.session = sessionAfterTrigger(this.session, this.triggerViewFraction);
+              }
+            } else if (sample === null && isLoop && softwareTrigger) {
+              // The post-match remainder of one transfer was longer than the loop window,
+              // so the trigger sample was already evicted. Say so: the plot keeps
+              // following and cannot pin a sample it no longer has.
+              this.triggerViewLost = true;
+            }
+            if (this.repeatSession && this.settings.mode === 'repeat') {
+              // Repeat: let the per-frame hand-over decide when the new wave has data.
+              // The trigger message can precede the block that carries T (coalescing), so
+              // `store.length` here is not evidence either way; `releaseRepeatHold` and
+              // `updateRepeatDisplay` re-check it on every draw.
+              this.repeatWaveHolding = false;
+              this.dirty = true;
+            }
+            // A miss note belongs to the previous Interval; this wave found its trigger.
+            if (this.repeatMissed) {
+              this.repeatMissed = false;
+              this.renderPanels();
+            }
           }
           this.dirty = true;
-          this.relayout();
-          this.renderPanels();
-          if (state === 'not-found') void this.stopCapture();
+          if (!this.repeatSession) {
+            this.relayout();
+            this.renderPanels();
+          } else if (this.panel === 'device') {
+            // The panel stays put during a Repeat session; only the state notes change.
+            this.capturePanel.updateTriggerStatus(this.triggerStatusView());
+          }
+          // B1: a Repeat wave that finds no trigger is one missed sweep, not the end of
+          // the session. Ending it as "completed" lets finishCapture schedule the next
+          // Interval while the panel reports the miss. Single keeps its own rule.
+          if (state === 'not-found') {
+            const repeatMiss = this.repeatSession && this.settings.mode === 'repeat';
+            if (repeatMiss) {
+              // The note must outlive this quiet wave's stop (which does not rebuild the
+              // panel): keep it until a later wave actually triggers.
+              this.repeatMissed = true;
+              this.renderPanels();
+            }
+            void this.stopCapture(repeatMiss ? 'completed' : 'manual');
+          }
         },
       } : {
         // Timer and non-loop free captures use a host-side sample budget known before
@@ -2483,22 +4431,44 @@ export class App {
         // of the first-byte and underrun watchdogs, ending only on a manual stop or a
         // device error (HSync semantics).
         ...(isLoop ? { loop: true } : { deviceSampleLimit: this.captureLimitSamples }),
-        onEnd: () => { if (this.running) void this.stopCapture('completed'); },
+        onEnd: () => {
+          if (generation !== this.captureGeneration) return;
+          if (this.running) void this.stopCapture('completed');
+        },
       });
+      this.captureArming = false;
+      // An edit made while the device was still arming could not reach its matcher.
+      // Re-evaluate the current settings and trigger state, not a stored action: the
+      // user may have changed it back, and the matcher may have fired meanwhile.
+      if (this.triggerSyncDeferred || this.triggerRetuneRequested) {
+        this.triggerSyncDeferred = false;
+        this.triggerRetuneRequested = false;
+        if (this.running && !this.stopping) this.syncActiveTrigger();
+      }
       if (!this.running) {
         if (this.stopPending) await this.stopPending;
         else if (this.device === device) await this.teardownDevice(device);
       }
     } catch (e) {
+      this.captureArming = false;
+      this.captureGeneration++;
+      this.triggerSyncDeferred = false;
+      // No sink of this failed start survives; do not leave a loop detector behind.
+      this.analogScanner = null;
+      this.analogCrossings = [];
+      this.loopTriggerSlackSamples = 0;
+      this.loopPeriodEstimates = [];
+      this.loopPeriodSamples = 0;
+      this.repeatWaveHolding = false;
+      this.session = null;
       this.repeatTimer.cancel();
-      this.repeatViewportAnchor = null;
-      const armed = this.startMutatedCapture;
+        const armed = this.startMutatedCapture;
       if (armed && this.device === device) this.deviceLost(e, false);
       this.running = false;
       if (this.startMutatedCapture) {
         this.startMutatedCapture = false;
         this.triggerState = 'off';
-        this.triggerSampleIndex = null;
+        this.clearTriggerSample();
       }
       this.relayout();
       this.fail('error.startCapture', e);
@@ -2509,16 +4479,241 @@ export class App {
     }
   }
 
+  /** Lock the view on a crossing seen while no lock was active (re-lock). */
+  private lockFromCrossing(rel: number, abs: number): void {
+    const D = this.loopRetentionLen;
+    if (!(D > 0) || rel < 0) return;
+    const fraction = this.triggerViewFraction;
+    this.triggerSampleIndex = rel;
+    // A re-lock starts from the whole data window, like the initial device match: the
+    // view was free-running and its span may not fit the new window. Fit/zoom/pan still
+    // never release a held lock.
+    this.triggerViewOffsetStart = -fraction * D;
+    this.triggerViewOffsetEnd = (1 - fraction) * D;
+    this.triggerViewLock = { fraction, resumeFollow: this.stack.followLatest };
+    this.triggerAutoDisarmed = false;
+    this.lastAnalogCrossingAbs = abs;
+    this.pendingRelockAbs = null;
+    this.triggerViewPending = false;
+    this.triggerViewLost = false;
+    this.placeLockViewport();
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  /** The current data + configuration no longer triggers: release the viewport. */
+  private releaseLoopTrigger(): void {
+    const lock = this.triggerViewLock;
+    if (!lock) return;
+    this.triggerViewLock = null;
+    this.triggerSampleIndex = null;
+    this.triggerViewPending = false;
+    this.pendingRelockAbs = null;
+    if (this.session?.policy.kind === 'triggerLocked') {
+      this.session = { ...this.session, policy: { kind: 'follow' } };
+    }
+    if (resumeTriggerFollow(lock.resumeFollow, this.running)) this.setFollow(true);
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  /**
+   * Loop retention. With a locked analog trigger the store may carry a bounded excess
+   * (the slack) so the front can stay put until a new crossing arrives; each local step
+   * moves the window to a real edge's phase, which is what makes a periodic waveform
+   * stand still instead of sliding. Without such a lock this is the ordinary drop-to-
+   * retention rule.
+   */
   private enforceLoopRetention(store: SampleStore): void {
-    const drop = loopDropSamples(store.length, this.loopRetentionLen);
+    // A loop software trigger emits its first block *before* the worker posts the
+    // 'triggered' message (the sink fills the block first). Dropping to the loop window
+    // here would evict the trigger sample, which is why a 1 ms window used to come up
+    // free-running even though the matcher had fired. Hold that block (bounded) until
+    // the message arrives and the lock is placed.
+    const awaitingTrigger = this.running && this.captureIsLoop &&
+      this.captureUsesSoftwareTrigger && this.triggerState === 'waiting';
+    if (awaitingTrigger || this.triggerViewPending) {
+      const bytes = bytesPerSampleForChannels(store.channelCount);
+      const pendingLimit = loopPendingLimit(
+        this.loopRetentionLen, this.loopTriggerSlackSamples, bytes);
+      const drop = loopDropSamples(store.length, pendingLimit);
+      if (drop > 0) this.dropLoopFront(store, drop);
+      else this.hover = null;
+      return;
+    }
+    // Re-lock on an edge seen while the view was free. The scan happens before the chunk
+    // is appended, so wait until the data is actually in the store.
+    if (!this.triggerViewLock && !this.triggerViewPending && this.pendingRelockAbs !== null) {
+      const rel = this.pendingRelockAbs - store.droppedSamples;
+      if (rel >= 0 && rel < store.length) {
+        this.lockFromCrossing(rel, this.pendingRelockAbs);
+      }
+    }
+    // One local, phase-aligned step per arrival: choose an edge inside the current
+    // window's prefix (bounded by the fresh data) instead of replacing the whole window
+    // or jumping to the newest available crossing.
+    const lock = this.triggerViewLock;
+    if (lock && this.analogScanner) {
+      this.rollLoopWindow(store);
+      const liveAbs = store.droppedSamples + store.length;
+      if (this.triggerViewLock && liveAbs - this.lastAnalogCrossingAbs > this.loopRetentionLen) {
+        // A whole Duration without a new edge: the current data + trigger configuration
+        // no longer triggers, so the lock has nothing to anchor to.
+        this.releaseLoopTrigger();
+      }
+    }
+    // While the lock is being placed (the trigger message may still be ahead of the
+    // coalesced block carrying T), keep the same slack: a sink block landing before the
+    // next draw must not evict the sample the deferred placement is waiting for.
+    const limit = loopStoreLimit(
+      this.loopRetentionLen,
+      (this.triggerViewLock !== null || this.triggerViewPending) && this.analogScanner !== null,
+      this.loopTriggerSlackSamples,
+    );
+    const drop = loopDropSamples(store.length, limit);
+    if (drop <= 0) { this.hover = null; return; }
+    // The clamp belongs to the analog roll protocol: the roll advances T by dropping
+    // exactly up to the new window start. With no scanner there is no roll, and a device
+    // match places T at most f*L into the store, so this clamp would reduce every drop
+    // to zero and grow the store without bound. Let the excess go; dropLoopFront
+    // translates T and releases the view once T is evicted.
+    const lockedView = this.analogScanner !== null ? this.triggerViewLock : null;
+    let safeDrop = drop;
+    if (lockedView && this.triggerSampleIndex !== null) {
+      const windowStart = this.triggerSampleIndex - lockedView.fraction * this.loopRetentionLen;
+      const beforeWindow = Math.floor(Math.max(0, windowStart) / DROP_FRONT_QUANTUM) *
+        DROP_FRONT_QUANTUM;
+      safeDrop = Math.min(drop, beforeWindow);
+    }
+    if (safeDrop <= 0) { this.hover = null; return; }
+    this.dropLoopFront(store, safeDrop);
+  }
+
+  /**
+   * One local roll of the DurationWindow. The budget is a local block (whole periods,
+   * at most a quarter of D, at most the fresh data); the chosen edge is the LATEST one
+   * in `(T, T + budget]`, searched back from T + budget. The oldest part of the window
+   * is dropped and the same number of new samples fills the tail; the rest of the new
+   * data waits for the next roll. V's offsets are untouched.
+   */
+  private rollLoopWindow(store: SampleStore): void {
+    const lock = this.triggerViewLock;
+    const T = this.triggerSampleIndex;
+    if (!lock || T === null) return;
+    const D = this.loopRetentionLen;
+    const channels = store.channelCount;
+    if (!(D > 0) || !isChannelCount(channels)) return;
+    const front = store.droppedSamples;
+    const live = front + store.length;
+    const triggerAbs = front + T;
+    const fraction = lock.fraction;
+    const fresh = live - (triggerAbs + (1 - fraction) * D);
+    if (!(fresh > 0)) return;
+    const plan = planLoopSwap({
+      samplerate: store.samplerate,
+      channels,
+      availableSamples: fresh,
+      windowSamples: D,
+      // A local update should not repaint the whole window.
+      maxWindowFraction: 0.25,
+      ...(this.loopPeriodSamples >= 1 ? { periodSamples: this.loopPeriodSamples } : {}),
+    });
+    let budget = plan.blockSamples;
+    // If the store carries more waiting new data than the lock's slack, the step must
+    // reach further forward: otherwise the backlog could exceed the retention bound and
+    // the only way to shrink the store would be to drop past T. The local block remains
+    // the normal target; this catch-up grows only when one arrival is larger than slack.
+    budget = Math.max(budget, fresh - this.loopTriggerSlackSamples);
+    if (!(budget > 0)) return;
+    // A long-period signal still deserves one step: let the budget reach the next real
+    // edge, never past the fresh data.
+    const next = this.analogCrossings.find((c) => c > triggerAbs);
+    if (next !== undefined) budget = Math.max(budget, Math.min(fresh, next - triggerAbs));
+    budget = Math.min(budget, fresh);
+    const step = planLocalTriggerStep({
+      triggerAbs,
+      frontAbs: front,
+      liveAbs: live,
+      windowSamples: D,
+      fraction,
+      blockSamples: Math.min(budget, fresh),
+      crossings: this.analogCrossings,
+      viewOffsetStart: this.triggerViewOffsetStart,
+      viewOffsetEnd: this.triggerViewOffsetEnd,
+    });
+    if (!step) return;
+    // Keep the old T alive across the drop; the final T is assigned from the step.
+    this.triggerSampleIndex = step.anchorAbs - front;
+    if (step.drop > 0) this.dropLoopFront(store, step.drop);
+    this.triggerSampleIndex = step.triggerSample;
+    this.stack.restoreViewport(step.viewStart, step.viewEnd);
+    while (this.analogCrossings.length > 0 && this.analogCrossings[0]! <= step.anchorAbs) {
+      this.analogCrossings.shift();
+    }
+    this.loopLastAnchorStep = step.step;
+    this.loopSwapCursorAbs = step.anchorAbs;
+    this.triggerViewPending = false;
+    this.triggerViewLost = false;
+    this.dirty = true;
+  }
+
+  /** Translate the store and every store-relative cursor by `drop`. */
+  private dropLoopFront(store: SampleStore, drop: number): void {
     if (drop <= 0) return;
     store.dropFront(drop);
     this.droppedTotal += drop;
     // Bus builders need no reset: their frontier is absolute (BusBuilder skips ahead past
     // the drop), and analogFrame's cache key carries store.droppedSamples, so a stale
     // frame can never alias a new generation at the same length.
-    if (this.triggerSampleIndex !== null) {
-      this.triggerSampleIndex = this.triggerSampleIndex - drop >= 0 ? this.triggerSampleIndex - drop : null;
+    const lock = this.triggerViewLock;
+    const hadTrigger = this.triggerSampleIndex !== null;
+    if (hadTrigger) {
+      // T is a sample cursor in the DurationWindow. It translates with the front drop;
+      // the ViewWindow (stored as offsets from T) rides along, so the trigger phase and
+      // the user's window keep their pixels.
+      const next = this.triggerSampleIndex! - drop;
+      this.triggerSampleIndex = next >= 0 && next < store.length ? next : null;
+    }
+    if (this.triggerSampleIndex === null) {
+      // The trigger message can precede the coalesced block that carries T (see
+      // applyTriggerViewAnchor). If that block is then evicted before the deferred lock
+      // is placed, the view never locked at all: report it rather than clearing the
+      // pending flag silently. A lock that already existed takes the release path below.
+      if (hadTrigger && this.triggerViewPending && this.triggerViewLock === null) {
+        if (!this.triggerViewLost) {
+          this.triggerViewLost = true;
+          // The data path does not redraw the panel; publish the state change now
+          // without a full rebuild (the cursor branch below may do one anyway).
+          if (this.panel === 'device') {
+            this.capturePanel.updateTriggerStatus(this.triggerStatusView());
+          }
+        }
+      }
+      this.triggerViewPending = false;
+      if (hadTrigger) this.pendingRelockAbs = null;
+    }
+    while (this.analogCrossings.length > 0 && this.analogCrossings[0]! < this.droppedTotal) {
+      this.analogCrossings.shift();
+    }
+    if (lock && hadTrigger) {
+      // The ViewWindow's absolute samples do not change when the front drops: shifting
+      // by the same amount keeps T's pixel and the user's window exactly where they were.
+      const view = this.stack.view;
+      this.stack.restoreViewport(view.start - drop, view.end - drop);
+      if (this.triggerSampleIndex === null) {
+        // T left the retained data: there is no edge left to anchor to.
+        this.triggerViewLock = null;
+        this.pendingRelockAbs = null;
+        if (this.session?.policy.kind === 'triggerLocked') {
+          this.session = { ...this.session, policy: { kind: 'follow' } };
+        }
+        if (resumeTriggerFollow(lock.resumeFollow, this.running)) this.setFollow(true);
+        // The one-shot digital lock is now spent; refresh the released status and the
+        // notes without waiting for an unrelated full render.
+        if (this.panel === 'device') {
+          this.capturePanel.updateTriggerStatus(this.triggerStatusView());
+        }
+      }
     }
     let shifted = false;
     for (const cursor of this.cursors) {
@@ -2550,24 +4745,85 @@ export class App {
     this.hover = null;
   }
 
+  /**
+   * Remember one scanned crossing for the display anchor. The scanner already spaces
+   * reports by the loop window's 1/64 (a real crossing each), so sixty-four entries cover
+   * one window and a periodic signal's phase is unaffected by which one is chosen.
+   */
+  private recordAnalogCrossing(abs: number): void {
+    // Adjacent reported crossings are separated by the scan's minimum gap, which is a
+    // whole number of signal periods (a subset of the real crossings). Their median is
+    // therefore a phase-aligned block size, not necessarily the signal period itself.
+    const last = this.analogCrossings[this.analogCrossings.length - 1];
+    if (last !== undefined && abs > last) {
+      // Keep the window chronological; the median uses a reused scratch array so the
+      // ingest path does not allocate per crossing.
+      this.loopPeriodEstimates.push(abs - last);
+      if (this.loopPeriodEstimates.length > 8) this.loopPeriodEstimates.shift();
+      this.loopPeriodSamples = medianOfRecent(
+        this.loopPeriodEstimates, this.loopPeriodScratch);
+    }
+    this.analogCrossings.push(abs);
+    if (this.analogCrossings.length > 128) this.analogCrossings.shift();
+    this.lastAnalogCrossingAbs = abs;
+    // The current data still produces edges. If the view was released (no edge for a
+    // whole window, or a configuration change that stopped triggering), a later edge
+    // re-locks automatically; the lock is a data/configuration state, not a user action.
+    // A disabled trigger is the exception: it must never re-lock on a stale condition.
+    const phase: TriggerReconcilePhase =
+      this.triggerState === 'waiting' ? 'waiting' :
+      this.triggerState === 'triggered' ? 'triggered' :
+      this.triggerState === 'not-found' ? 'not-found' : 'off';
+    if (mayReanchor({
+      running: this.running,
+      stopping: this.stopping,
+      loop: this.captureIsLoop,
+      captureArmed: this.captureUsesSoftwareTrigger,
+      phase,
+      mask: this.settings.triggerEnableMask,
+      locked: this.triggerViewLock !== null,
+      pending: this.triggerViewPending,
+    })) {
+      this.pendingRelockAbs = abs;
+    }
+  }
+
   private async stopCapture(reason: CaptureStopReason = 'manual'): Promise<void> {
     if (!this.running && !this.stopping && this.repeatTimer.pending) {
       this.repeatTimer.cancel();
-      this.repeatViewportAnchor = null;
+      // A miss leaves the previous wave held while the retry timer runs; stopping here
+      // must adopt it just like stopping a running wave, or the plot would keep showing
+      // a wave that the capture no longer represents (and Save would refuse it).
+      this.settleAndLabelHeldWave();
+      this.session = null;
+      this.repeatWaveHolding = false;
+      this.repeatMissed = false;
+      this.clearRepeatLayers();
       this.setFollow(false);
       this.relayout();
       this.renderPanels();
+      this.renderStatus();
       return;
     }
     if (!this.running || this.stopping) return;
+    // A Repeat session's interval waves stop and restart internally; the visible session
+    // stays "Capturing" with the Stop button. Only a user/manual stop changes the panel.
+    const quietRepeatWave = this.repeatSession && this.settings.mode === 'repeat' &&
+      reason === 'completed';
     if (reason === 'manual') {
       this.repeatTimer.cancel();
-      this.repeatViewportAnchor = null;
+      this.session = null;
+      this.repeatWaveHolding = false;
+      this.repeatMissed = false;
+      this.settleHeldRepeatWave();
+      this.clearRepeatLayers();
+      this.triggerSyncDeferred = false;
+      this.triggerAutoDisarmed = false;
       this.setFollow(false);
     }
     this.running = false;
     this.stopping = true;
-    this.renderPanels();
+    if (!quietRepeatWave) this.renderPanels();
     const pending = this.teardownDevice(this.device);
     this.stopPending = pending;
     try {
@@ -2598,21 +4854,79 @@ export class App {
   }
 
   private finishCapture(reason: CaptureStopReason = 'manual'): void {
-    const fit = captureFinishFits(this.settings.mode, reason);
-    if (reason === 'manual' || fit) this.setFollow(false);
-    this.restoreRepeatViewport();
-    this.repeatViewportAnchor = null;
-    const sr = this.store.samplerate;
+    // No more data will be scanned; the locked frame itself stays on screen.
+    this.analogScanner = null;
+    this.analogCrossings = [];
+    this.lastAnalogCrossingAbs = Number.NEGATIVE_INFINITY;
+    this.pendingRelockAbs = null;
+    this.loopTriggerSlackSamples = 0;
+    this.triggerRetuneRejected = false;
+    this.triggerAutoDisarmed = false;
+    // A pending width/board change becomes effective now: drop out-of-width buses and
+    // their trigger settings, and clamp the capture settings to the new width.
+    this.busViews = this.busViews.filter(
+      (bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));
+    this.settings = this.clampSettings({ ...this.settings });
+    const stickyWave = this.repeatSession && this.settings.mode === 'repeat' &&
+      reason === 'completed' && this.device !== null;
+    // Direct end paths (transport loss) do not pass through stopCapture; settle the held
+    // previous wave before the labels and capture store are read.
+    if (!stickyWave) this.settleHeldRepeatWave();
+    if (!stickyWave) this.persistWorkspace();
+    const captured = this.captureStore;
+    const sr = captured.samplerate;
     this.captureLabel = this.triggerState === 'not-found'
-      ? { kind: 'stoppedNoTrigger', samples: this.store.length }
-      : { kind: 'live', samples: this.store.length, rate: sr, seconds: this.store.length / sr };
-    if (reason === 'completed' && this.settings.mode === 'repeat' && this.device !== null) {
+      ? { kind: 'stoppedNoTrigger', samples: captured.length }
+      : { kind: 'live', samples: captured.length, rate: sr, seconds: captured.length / sr };
+    if (this.repeatSession && reason === 'completed' &&
+        this.settings.mode === 'repeat' && this.device !== null) {
       this.repeatTimer.schedule(this.settings.repeatIntervalSeconds, () => { void this.startCapture('repeat'); });
     }
-    if (fit) this.stack.zoomToFit();
-    this.relayout();
-    this.renderPanels();
-    this.dirty = true;
+    if (stickyWave) {
+      // The session stays in its Capturing state; only the waveform data changes.
+      if (captured.length > 0 && this.triggerState !== 'not-found') {
+        // This wave becomes the old layer for the next one. Displaying it alone is right
+        // now: the view policy was resolved against this wave's retained range, so no
+        // surviving Fixed viewport needs the previous layer.
+        if (this.repeatShowingFront && this.repeatFront &&
+            this.cursors.some((cursor) =>
+              cursor.marker.sample !== null && !cursor.marker.isDragging)) {
+          // A wave can complete before the next draw released the held front; remap the
+          // cursors into this wave's coordinates as the hand-over would have.
+          this.pendingCursorDelta = (this.triggerSampleIndex ?? 0) - this.repeatFront.origin;
+        }
+        this.repeatFront = {
+          store: captured,
+          origin: this.triggerSampleIndex ?? 0,
+          hasTrigger: this.triggerSampleIndex !== null,
+        };
+        this.repeatComposite = null;
+        this.repeatShowingFront = false;
+        this.repeatHeldTrigger = null;
+        this.setDisplayStore(captured);
+        this.applyPendingCursorDelta();
+        // The composite can be longer than this wave (a shorter budget was selected
+        // while it ran), so old-layer-only positions must not survive the swap.
+        this.settleCursorsForStore(captured.length);
+      }
+      // A missed trigger keeps the previous wave (and its T) on screen; the panel
+      // reports the miss and the next Interval retries.
+      this.repeatWaveHolding = false;
+      this.dirty = true;
+      if (this.panel === 'device') {
+        // The wave stopped naturally; the text-only state note must not keep saying it
+        // is still recording while the Interval runs.
+        this.capturePanel.updateTriggerStatus(this.triggerStatusView());
+      }
+    } else {
+      this.session = null;
+      this.repeatWaveHolding = false;
+      this.repeatMissed = false;
+      this.clearRepeatLayers();
+      this.relayout();
+      this.renderPanels();
+      this.dirty = true;
+    }
     const waiters = this.captureWaiters;
     this.captureWaiters = [];
     for (const w of waiters) w();
@@ -2661,9 +4975,9 @@ export class App {
   private async runDecode(id: string): Promise<void> {
     const a = this.analyzers.find((x) => x.id === id);
     if (!a) return;
-    const store = this.store as CountingStore;
+    const store = this.captureStore as CountingStore;
     const controller = new AbortController();
-    const stale = (): boolean => this.store !== store || !this.analyzers.includes(a);
+    const stale = (): boolean => this.captureStore !== store || !this.analyzers.includes(a);
     try {
       this.statusError = null;
       const { used, outside } = mappedCaptureChannels(a.channels, store.channelCount);
@@ -2767,11 +5081,11 @@ export class App {
 
   /** Enable exactly `list`, ignoring channels the device lacks. */
   private setEnabledChannels(list: number[]): void {
-    const want = new Set(list.filter((i) => i >= 0 && i < this.displayChannelCount()));
+    const want = new Set(list.filter((i) => i >= 0 && i < this.renderChannelCount()));
     if (want.size === 0) return;   // never zero rows
-    const locked = lockedChannelBanks(this.busViews, this.displayChannelCount());
+    const locked = lockedChannelBanks(this.busViews, this.renderChannelCount());
     for (const c of this.channels) {
-      if (c.index >= this.displayChannelCount()) continue;
+      if (c.index >= this.renderChannelCount()) continue;
       c.enabled = want.has(c.index) || locked.has(channelBankStart(c.index));
     }
     this.afterChannelChange();
@@ -2792,20 +5106,22 @@ export class App {
         repeatPending: this.repeatTimer.pending,
         error: this.statusError ? formatStatusError(this.statusError) : '',
         label: formatCaptureLabel(this.captureLabel),
-        samples: this.running && this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length,
+        samples: this.running && this.captureIsLoop
+          ? this.captureStore.length + this.droppedTotal : this.captureStore.length,
         dropped: this.droppedTotal,
-        samplerate: this.store.samplerate,
-        channelCount: this.store.channelCount,
+        samplerate: this.captureStore.samplerate,
+        channelCount: this.captureStore.channelCount,
         triggerState: this.triggerState,
         triggerSampleIndex: this.triggerSampleIndex,
         settings: this.settings,
         rateCeilings: this.rateCeilings,
+        widthTiers: this.widthTiers(),
         enabledChannels: this.enabledChannels().map((c) => c.index),
         channelNames: this.channels.map((c) => c.name),
         view: { start: this.stack.view.start, end: this.stack.view.end },
         decoderReady: this.decodeWarm,
       }),
-      store: () => this.store,
+      store: () => this.captureStore,
       analyzers: () => this.analyzers.map((a) => ({
         decoderId: a.decoderId,
         channels: a.channels,
@@ -2814,6 +5130,7 @@ export class App {
         note: formatAnalyzerNote(a.note),
         result: a.result,
       })),
+      setChannelWidth: (channels) => this.setChannelWidth(channels),
       applySettings: (patch, enabled) => {
         if (enabled) this.setEnabledChannels(enabled);
         this.debug.setSettings(patch);
@@ -2834,7 +5151,7 @@ export class App {
         window.clearTimeout(timer);
         return outcome;
       },
-      stop: () => this.stopCapture(),
+      stop: () => { this.cancelPendingTriggerRestart(); return this.stopCapture(); },
       attach: (id, channels, options) => this.attachAnalyzer(id, channels, options),
       removeAnalyzer: (index) => {
         const a = this.analyzers[index];
@@ -2844,7 +5161,7 @@ export class App {
       },
       setViewportSeconds: (a, b) => this.debug.setViewportSeconds(a, b),
       zoomToAnnotation: (analyzer, n) => this.debug.zoomToAnnotation(analyzer, n),
-      levelAt: (channel, sample) => levelAt(this.store, channel, sample),
+      levelAt: (channel, sample) => levelAt(this.captureStore, channel, sample),
       // The same paths the bus panel uses.
       buses: () => this.busViews.map((b) => ({ config: b, built: b.builder?.done ?? false })),
       addBus: (cfg) => {
@@ -2879,7 +5196,7 @@ export class App {
     getTheme: () => getTheme(),
     getMode: () => getMode(),
     start: () => this.startCapture(),
-    stop: () => this.stopCapture(),
+    stop: () => { this.cancelPendingTriggerRestart(); return this.stopCapture(); },
     attach: (id: string, ch: Record<number, number>, opts: Record<string, string | number> = {}) =>
       this.attachAnalyzer(id, ch, opts),
     setSettings: (s: Partial<CaptureSettings>) => {
@@ -2887,7 +5204,7 @@ export class App {
     },
     /** Add a parallel-bus view; missing fields take the panel's defaults. */
     addBus: (cfg: Partial<BusViewConfig> & { spec: BusViewConfig['spec'] }) =>
-      this.addBus({ ...defaultBusConfig(this.displayChannelCount()), ...cfg }),
+      this.addBus({ ...defaultBusConfig(this.displayChannelCount(), this.settings.testMode), ...cfg }),
     removeBus: (id: string) => this.removeBus(id),
     buses: () => this.busViews.map((b) => ({
       id: b.id, name: b.name, color: b.color, summary: busSummary(b.spec), hideSources: b.hideSources,
@@ -2898,8 +5215,8 @@ export class App {
     },
     setViewportSeconds: (a: number, b: number) => {
       const sr = this.store.samplerate;
-      this.noteViewportIntent();
       this.stack.setViewport(a * sr, b * sr);
+      this.noteExplicitViewport();
       this.dirty = true;
     },
     setMarker: (sample: number | null) => {
@@ -2947,7 +5264,8 @@ export class App {
       const current = this.channels[i];
       if (current) {
         this.configureChannel(i, {
-          name, mode: this.settings.triggerModes[i] ?? DEFAULT_TRIGGER_MODE, color: current.color,
+          name, mode: this.settings.triggerModes[i] ?? DEFAULT_TRIGGER_MODE,
+          color: current.color,
         });
       }
     },
@@ -2965,7 +5283,7 @@ export class App {
      * and reads consistently but reconstructs wrongly would otherwise look fine.
      */
     roundTripLwcap: async () => {
-      const store = this.store;
+      const store = this.captureStore;
       const before = { n: store.channelCount, sr: store.samplerate, len: store.length };
       const blob = saveLwcap(store, this.channels.map((c) => c.name));
       const back = loadLwcap(await blob.arrayBuffer(), 'round-trip');
@@ -2998,8 +5316,8 @@ export class App {
       const s = start[n]!;
       const e = Math.max(end[n]!, s + 1);
       const w = (e - s) * (1 + 2 * pad);
-      this.noteViewportIntent();
       this.stack.setViewport(s - (e - s) * pad, s - (e - s) * pad + w);
+      this.noteExplicitViewport();
       this.dirty = true;
       return true;
     },
@@ -3013,10 +5331,11 @@ export class App {
       transport: this.device instanceof WorkerSlogicDevice ? 'worker' : 'page',
       transportFallback: workerTransport.lastFallbackReason,
       warm: this.decodeWarm,
-      samples: this.running && this.captureIsLoop ? this.store.length + this.droppedTotal : this.store.length,
+      samples: this.running && this.captureIsLoop
+        ? this.captureStore.length + this.droppedTotal : this.captureStore.length,
       dropped: this.droppedTotal,
-      samplerate: this.store.samplerate,
-      channels: this.store.channelCount,
+      samplerate: this.captureStore.samplerate,
+      channels: this.captureStore.channelCount,
       triggerState: this.triggerState,
       triggerSampleIndex: this.triggerSampleIndex,
       trigger: {
@@ -3048,36 +5367,72 @@ export class App {
  * Start.
  *
  * Every MAX_SAMPLERATE_HZ value is itself in SAMPLERATES_HZ, so the clamp always lands on
- * a rate the device supports.
+ * a rate the device supports. With an analog bank active the ADC module additionally
+ * needs a sample clock divided from its 800 MHz PLL (HSync adc.rs), so the rate moves to
+ * the fastest allowed rate at or below the requested one - the same choice HSync's
+ * `reconcile_channels` makes.
  */
-function clampSettings(
+function clampCaptureSettings(
   s: CaptureSettings, ceilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ,
+  analog = false, triggerChannels: number = s.channels,
 ): CaptureSettings {
-  const samplerate = Math.min(s.samplerate, ceilings[s.channels] ?? 200e6);
+  const ceiling = ceilings[s.channels] ?? 200e6;
+  let samplerate = Math.min(s.samplerate, ceiling);
+  if (analog) {
+    const allowed = analogSamplerates(SAMPLERATES_HZ.filter((rate) => rate <= ceiling));
+    if (allowed.length > 0 && !allowed.includes(samplerate)) {
+      const below = allowed.filter((rate) => rate <= samplerate);
+      samplerate = below[below.length - 1] ?? allowed[0]!;
+    }
+  }
   const savedModes = s.triggerModes ?? {};
   const configuredConditions = Object.keys(savedModes).length ? modesToConditions(savedModes)
     : s.triggerConditions.length ? s.triggerConditions : s.softwareTrigger
       ? [{ channel: s.triggerChannel, kind: s.triggerKind, level: s.triggerLevel }]
       : [];
   const triggerConditions = configuredConditions
-    .filter((c) => c.channel >= 0 && c.channel < s.channels)
+    .filter((c) => c.channel >= 0 && c.channel < triggerChannels)
     .map((c) => ({ ...c }));
   const triggerModes: Record<number, TriggerMode> = { ...savedModes };
   for (const c of triggerConditions) {
     triggerModes[c.channel] = triggerModeFromCondition(c);
   }
+  const loopSamples = clampLoopSamples(s.loopSamples ?? DEFAULT_LOOP_SAMPLES, s.channels);
+  const analogTriggers: Record<number, AnalogTriggerSetting> = {};
+  for (const [key, value] of Object.entries(s.analogTriggers ?? {})) {
+    const start = Number(key);
+    if (!Number.isInteger(start) || start % CHANNEL_BANK_SIZE !== 0 ||
+        start + CHANNEL_BANK_SIZE > triggerChannels) continue;
+    if (value.kind !== 'rising' && value.kind !== 'falling') continue;
+    const volts = Number(value.volts);
+    if (!Number.isFinite(volts)) continue;
+    analogTriggers[start] = {
+      kind: value.kind,
+      volts: analogTriggerVolts(value.kind,
+        Math.max(ADC_OFFSET_V, Math.min(ADC_OFFSET_V + ADC_FULL_SCALE_V, volts))),
+    };
+  }
   return {
     ...s, samplerate,
-    seconds: clampCaptureSeconds(s.seconds, samplerate),
+    // One duration concept: in Loop mode it is the window's duration, so switching modes
+    // or changing the rate carries the same value (see carryCaptureDuration). The loop
+    // window may be shorter than Single's 1 ms minimum, so it is not clamped here.
+    seconds: s.mode === 'loop'
+      ? loopSamples / samplerate
+      : clampCaptureSeconds(s.seconds, samplerate),
     singleUnlimited: s.mode === 'single' && s.singleUnlimited === true,
     repeatIntervalSeconds: clampRepeatIntervalSeconds(s.repeatIntervalSeconds),
-    loopSamples: clampLoopSamples(s.loopSamples ?? DEFAULT_LOOP_SAMPLES, s.channels),
+    loopSamples,
     triggerEnableMask: s.triggerEnableMask ?? true,
     // Enable Mask is the sole global gate. Turning it off must not erase the
     // per-channel modes; turning it back on must restore the same conditions.
-    softwareTrigger: s.triggerEnableMask !== false && triggerConditions.length > 0,
+    softwareTrigger: s.triggerEnableMask !== false && (
+      s.triggerSource === 'analog'
+        ? Object.keys(analogTriggers).length > 0
+        : triggerConditions.length > 0),
+    analogTriggers,
     triggerModes,
-    triggerChannel: Math.max(0, Math.min(s.triggerChannel, s.channels - 1)),
+    triggerChannel: Math.max(0, Math.min(s.triggerChannel, triggerChannels - 1)),
     triggerConditions,
     preTriggerPercent: Math.max(0, Math.min(75, s.preTriggerPercent)),
   };
@@ -3086,7 +5441,8 @@ function clampSettings(
 /** Configuration edits describe a future capture; they must not leave the previous
  * capture's T origin and relative axis attached to a newly selected trigger. */
 function triggerSettingsChanged(a: CaptureSettings, b: CaptureSettings): boolean {
-  if (a.softwareTrigger !== b.softwareTrigger || a.triggerEnableMask !== b.triggerEnableMask ||
+  if (a.triggerSource !== b.triggerSource ||
+      a.softwareTrigger !== b.softwareTrigger || a.triggerEnableMask !== b.triggerEnableMask ||
       a.triggerChannel !== b.triggerChannel || a.triggerKind !== b.triggerKind ||
       a.triggerLevel !== b.triggerLevel || a.preTriggerPercent !== b.preTriggerPercent ||
       a.triggerConditions.length !== b.triggerConditions.length) return true;
@@ -3094,6 +5450,14 @@ function triggerSettingsChanged(a: CaptureSettings, b: CaptureSettings): boolean
   const bm = b.triggerModes ?? {};
   const modeKeys = new Set([...Object.keys(am), ...Object.keys(bm)]);
   for (const key of modeKeys) if (am[Number(key)] !== bm[Number(key)]) return true;
+  const aa = a.analogTriggers ?? {};
+  const ba = b.analogTriggers ?? {};
+  const analogKeys = new Set([...Object.keys(aa), ...Object.keys(ba)]);
+  for (const key of analogKeys) {
+    const x = aa[Number(key)];
+    const y = ba[Number(key)];
+    if (!x || !y || x.kind !== y.kind || x.volts !== y.volts) return true;
+  }
   return a.triggerConditions.some((x, i) => {
     const y = b.triggerConditions[i];
     return !y || x.channel !== y.channel || x.kind !== y.kind || x.level !== y.level;

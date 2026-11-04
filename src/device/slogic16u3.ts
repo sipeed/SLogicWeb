@@ -1015,8 +1015,12 @@ export class Slogic16U3 implements Device {
     this.rearmMs.clear();
     this.sinkMs.clear();
 
-    // Order matters and matches the driver. Verified for the same reason open() is: a
-    // stop the firmware missed shows up as a capture that starts mid-stream.
+    // Order matters: CTRL_STOP precedes reconfiguration (a stop the firmware missed
+    // would leave a capture starting mid-stream), and the pattern register is set before
+    // channels/rate/vref so a device left in Emulation cannot silently capture real
+    // input. libsigrok's canonical order is channel -> rate -> vref -> pattern; this
+    // deviation is hardware-verified for the test-mode counter path and is kept so the
+    // capture sequencing does not change.
     await programCtrl(bus, CTRL_STOP, (e) => this.trace(e), 'CTRL', 'start');
     // WebUSB has no per-transfer cancellation. stop() cancels pending reads by releasing
     // and re-claiming the interface; Chromium can leave the bulk pipe in an error state

@@ -100,25 +100,6 @@ export interface CursorEdgeChannelView {
   name: string;
 }
 
-/**
- * Read-only Loop display instrumentation. `anchorStepSamples` is how far the last
- * auto-roll advanced the anchored window (one scanned crossing, i.e. a whole number of
- * signal periods); `blockSamples` is what the block planner could swap in under the
- * current frame/memory budget. Both are in samples.
- */
-export interface LoopDisplayMetrics {
-  stride: number;
-  scanRateHz: number;
-  /** Median of adjacent reported crossings; 0 until two have been seen. */
-  periodSamples: number;
-  anchorStepSamples: number;
-  blockSamples: number;
-  blockBytes: number;
-  refreshHz: number;
-  retainedBytes: number;
-  fullWindow: boolean;
-}
-
 export interface CapturePanelView {
   settings: CaptureSettings;
   channels: readonly ChannelState[];
@@ -166,6 +147,25 @@ export interface CapturePanelView {
   loopMetrics?: LoopDisplayMetrics | null;
   /** A previous Repeat Interval missed its trigger; the session is retrying. */
   repeatMissed?: boolean;
+}
+
+/**
+ * Read-only Loop display instrumentation. `anchorStepSamples` is how far the last
+ * auto-roll advanced the anchored window (one scanned crossing, i.e. a whole number of
+ * signal periods); `blockSamples` is what the block planner could swap in under the
+ * current frame/memory budget. Both are in samples.
+ */
+export interface LoopDisplayMetrics {
+  stride: number;
+  scanRateHz: number;
+  /** Median of adjacent reported crossings; 0 until two have been seen. */
+  periodSamples: number;
+  anchorStepSamples: number;
+  blockSamples: number;
+  blockBytes: number;
+  refreshHz: number;
+  retainedBytes: number;
+  fullWindow: boolean;
 }
 
 /** The fields needed to refresh the trigger-state notes without rebuilding the panel. */
@@ -242,6 +242,51 @@ export class CapturePanel {
    * Refresh the trigger-state notes only. Repeat waves do not rebuild the panel, so the
    * waiting/triggered text would otherwise stay stale for the whole sweep.
    */
+  private fillProgress(progress: NonNullable<CapturePanelView['progress']>): void {
+    this.liveNote!.textContent = t('capturePanel.recording', {
+      seconds: progress.seconds.toFixed(2),
+      samples: progress.samples.toLocaleString(),
+      megabytes: (progress.bytes / 1e6).toFixed(1),
+    });
+    this.lostNote!.hidden = progress.lost <= 0;
+    this.lostNote!.textContent = t('capturePanel.dropped', { samples: progress.lost.toLocaleString() });
+    // The loop window line stays up for the whole run, not only once something was
+    // dropped: samples/limit/dropped is the loop status (HSync's LiveStatus).
+    this.droppedNote!.hidden = progress.limit <= 0;
+    if (progress.limit > 0) {
+      this.droppedNote!.textContent = t('capturePanel.loopWindow', {
+        kept: progress.kept.toLocaleString(),
+        limit: progress.limit.toLocaleString(),
+        dropped: progress.dropped.toLocaleString(),
+      });
+    }
+    const target = progress.targetSamples;
+    if (this.statusDetail) {
+      this.statusDetail.textContent = target !== null
+        ? t('capturePanel.statusFiniteDetail')
+        : progress.limit > 0
+          ? t('capturePanel.statusLoopDetail')
+          : t('capturePanel.statusUnlimitedDetail');
+    }
+    this.setStatusProgress(target !== null && target > 0 ? progress.samples / target * 100 : null);
+  }
+
+  private setStatusProgress(percent: number | null): void {
+    if (!this.progressEl || !this.progressBar || !this.progressValue) return;
+    const indeterminate = percent === null;
+    this.progressEl.dataset.indeterminate = String(indeterminate);
+    if (indeterminate) {
+      this.progressEl.removeAttribute('aria-valuenow');
+      this.progressValue.textContent = '';
+      this.progressBar.style.width = '100%';
+      return;
+    }
+    const rounded = Math.max(0, Math.min(100, Math.round(percent)));
+    this.progressEl.setAttribute('aria-valuenow', String(rounded));
+    this.progressValue.textContent = `${rounded}%`;
+    this.progressBar.style.width = `${rounded}%`;
+  }
+
   updateTriggerStatus(status: TriggerStatusView): void {
     this.fillTriggerStatus(status);
     this.fillTriggerNotes(status);
@@ -383,51 +428,6 @@ export class CapturePanel {
       swap.hidden = true;
       swap.textContent = '';
     }
-  }
-
-  private fillProgress(progress: NonNullable<CapturePanelView['progress']>): void {
-    this.liveNote!.textContent = t('capturePanel.recording', {
-      seconds: progress.seconds.toFixed(2),
-      samples: progress.samples.toLocaleString(),
-      megabytes: (progress.bytes / 1e6).toFixed(1),
-    });
-    this.lostNote!.hidden = progress.lost <= 0;
-    this.lostNote!.textContent = t('capturePanel.dropped', { samples: progress.lost.toLocaleString() });
-    // The loop window line stays up for the whole run, not only once something was
-    // dropped: samples/limit/dropped is the loop status (HSync's LiveStatus).
-    this.droppedNote!.hidden = progress.limit <= 0;
-    if (progress.limit > 0) {
-      this.droppedNote!.textContent = t('capturePanel.loopWindow', {
-        kept: progress.kept.toLocaleString(),
-        limit: progress.limit.toLocaleString(),
-        dropped: progress.dropped.toLocaleString(),
-      });
-    }
-    const target = progress.targetSamples;
-    if (this.statusDetail) {
-      this.statusDetail.textContent = target !== null
-        ? t('capturePanel.statusFiniteDetail')
-        : progress.limit > 0
-          ? t('capturePanel.statusLoopDetail')
-          : t('capturePanel.statusUnlimitedDetail');
-    }
-    this.setStatusProgress(target !== null && target > 0 ? progress.samples / target * 100 : null);
-  }
-
-  private setStatusProgress(percent: number | null): void {
-    if (!this.progressEl || !this.progressBar || !this.progressValue) return;
-    const indeterminate = percent === null;
-    this.progressEl.dataset.indeterminate = String(indeterminate);
-    if (indeterminate) {
-      this.progressEl.removeAttribute('aria-valuenow');
-      this.progressValue.textContent = '';
-      this.progressBar.style.width = '100%';
-      return;
-    }
-    const rounded = Math.max(0, Math.min(100, Math.round(percent)));
-    this.progressEl.setAttribute('aria-valuenow', String(rounded));
-    this.progressValue.textContent = `${rounded}%`;
-    this.progressBar.style.width = `${rounded}%`;
   }
 
   render(v: CapturePanelView): void {

@@ -31,6 +31,7 @@ import { defaultChannelName,
 export interface ChannelConfiguration {
   name: string;
   mode: TriggerMode;
+  color: string;
 }
 
 export interface ChannelCell {
@@ -170,7 +171,7 @@ export class ChannelList {
     nameInput.setAttribute('aria-label', t('channels.name'));
 
     const commitName = (): void => {
-      this.commitEditor(index, nameInput.value, cell.trigger.mode);
+      this.commitEditor(index, nameInput.value, cell.trigger.mode, cell.channel.color);
     };
 
     if (focus === 'name') {
@@ -232,7 +233,7 @@ export class ChannelList {
         check.setAttribute('aria-hidden', 'true');
         item.append(icon, label, check);
         item.addEventListener('click', () => {
-          this.commitEditor(index, cell.channel.name, mode);
+          this.commitEditor(index, cell.channel.name, mode, cell.channel.color);
         });
         menu.appendChild(item);
       }
@@ -381,9 +382,9 @@ export class ChannelList {
       ?? menu.querySelector<HTMLButtonElement>('.ch-trigger-item'))?.focus();
   }
 
-  private commitEditor(index: number, name: string, mode: TriggerMode): void {
+  private commitEditor(index: number, name: string, mode: TriggerMode, color: string): void {
     this.closeEditor(false);
-    this.cb.onConfigure(index, { name, mode });
+    this.cb.onConfigure(index, { name, mode, color });
     // The app rebuilds the rows synchronously; return focus to the same row's trigger.
     queueMicrotask(() => {
       this.root.querySelector<HTMLButtonElement>(`.ch-trigger[data-channel="${index}"]`)

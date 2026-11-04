@@ -41,7 +41,8 @@ const ENCODINGS: [BusEncoding, MessageKey][] = [
 export function cloneBusConfig(c: BusViewConfig): BusViewConfig {
   return {
     name: c.name, color: c.color, fullScaleV: c.fullScaleV, offsetV: c.offsetV, style: c.style,
-    heightCss: c.heightCss, hideSources: c.hideSources, bitOrder: c.bitOrder,
+    heightCss: c.heightCss, hideSources: c.hideSources,
+    ...(c.bitOrder !== undefined ? { bitOrder: c.bitOrder } : {}),
     ...(c.analogGroup !== undefined ? { analogGroup: c.analogGroup } : {}),
     ...(c.voltsPerDiv !== undefined ? { voltsPerDiv: c.voltsPerDiv } : {}),
     ...(c.zeroPosition !== undefined ? { zeroPosition: c.zeroPosition } : {}),
@@ -245,7 +246,7 @@ function busConfigFields(d: BusViewConfig, options: BusConfigFieldsOptions): Bus
   // Regenerating the run uses the declared order rather than the bits' current direction,
   // so a draft that has not been committed yet (or was just switched to Auto) still lands
   // on the orientation the settings ask for.
-  const msbFirst = resolveBusBitOrder(d.bitOrder, options.testMode) === 'msb';
+  const msbFirst = resolveBusBitOrder(d.bitOrder ?? 'auto', options.testMode) === 'msb';
   const row = div('field-row');
   const n = document.createElement('input');
   n.type = 'number';
@@ -264,7 +265,7 @@ function busConfigFields(d: BusViewConfig, options: BusConfigFieldsOptions): Bus
 
   const order = selectControl('bus.bitOrder', t('bus.bitOrder'),
     [['auto', t('bus.bitOrderAuto')], ['msb', t('bus.bitOrderMsb')], ['lsb', t('bus.bitOrderLsb')]],
-    d.bitOrder);
+    d.bitOrder ?? 'auto');
   order.disabled = d.spec.bits.length < 2;
   order.addEventListener('change', () => {
     const bitOrder = order.value as BusBitOrder;
@@ -362,7 +363,7 @@ export class BusPanel {
           swap.addEventListener('click', () => {
             // Reversing is an explicit choice: pin the order so Auto does not undo it at
             // the next test-mode change.
-            const flipped: BusBitOrder = resolveBusBitOrder(b.bitOrder, v.testMode) === 'msb' ? 'lsb' : 'msb';
+            const flipped: BusBitOrder = resolveBusBitOrder(b.bitOrder ?? 'auto', v.testMode) === 'msb' ? 'lsb' : 'msb';
             this.cb.onUpdate(b.id, { ...cloneBusConfig(b), bitOrder: flipped, spec: swapBusOrder(b.spec) });
           });
           row.appendChild(swap);

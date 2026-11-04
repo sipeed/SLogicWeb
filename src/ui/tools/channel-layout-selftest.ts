@@ -241,8 +241,8 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     rowSource.includes('nameInput.select();') &&
     rowSource.includes("this.editor.contains(document.activeElement)") &&
     rowSource.includes('this.editor.hidden = false') &&
-    rowSource.includes('private commitEditor(index: number, name: string, mode: TriggerMode)') &&
-    rowSource.includes('this.cb.onConfigure(index, { name, mode })') &&
+    rowSource.includes('private commitEditor(index: number, name: string, mode: TriggerMode, color: string)') &&
+    rowSource.includes('this.cb.onConfigure(index, { name, mode, color })') &&
     rowSource.includes('this.closeEditor();') &&
     rowSource.includes("if (event.key === 'Escape'") &&
     rowSource.includes('nameInput.select()');
@@ -528,18 +528,20 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const busPanel = loopFs.readFileSync('src/ui/busPanel.ts', 'utf8');
   const addBus = appSrc.split('private addBus(')[1]?.split('private updateBus(')[0] ?? '';
   const updateBus = appSrc.split('private updateBus(')[1]?.split('private removeBus(')[0] ?? '';
-  const removeBus = appSrc.split('private removeBus(')[1]?.split('private openBankBus(')[0] ?? '';
-  const scopeLocks = addBus.includes('(this.running || this.stopping) && busChannelBank(cfg.spec) !== null') &&
-    updateBus.includes('busChannelBank(current.spec) !== null || busChannelBank(cfg.spec) !== null') &&
-    removeBus.includes('(this.running || this.stopping) && busChannelBank(current.spec) !== null') &&
-    busPanel.includes('remove.disabled = v.captureLocked && busChannelBank(b.spec) !== null') &&
-    busPanel.includes('v.captureLocked && (editingBank || busChannelBank(current.spec) !== null)') &&
+  const removeBus = appSrc.split('private removeBus(')[1]?.split('private toggleAnalog(')[0] ?? '';
+  const scopeLocks = addBus.includes('(this.running || this.stopping) && cfg.analogGroup !== undefined') &&
+    updateBus.includes('(this.running || this.stopping) &&') &&
+    updateBus.includes('(current.analogGroup !== undefined || cfg.analogGroup !== undefined)') &&
+    removeBus.includes('if (this.stopping && current.analogGroup !== undefined) return false;') &&
+    busPanel.includes('remove.disabled = v.captureLocked && b.analogGroup !== undefined') &&
+    busPanel.includes('v.captureLocked && (editingBank || current.analogGroup !== undefined)') &&
     appSrc.includes("if (this.addBus(cfg) === null) throw new DiagnosticError('ui.captureLocked')") &&
     appSrc.includes("if (b && !this.updateBus(b.id, cfg)) throw new DiagnosticError('ui.captureLocked')") &&
     appSrc.includes("if (b && !this.removeBus(b.id)) throw new DiagnosticError('ui.captureLocked')");
-  check('running and stopping lock bank additions, edits and removal in both the view and App model',
-    scopeLocks, `add=${addBus.includes('busChannelBank(cfg.spec)')}, ` +
-    `update=${updateBus.includes('busChannelBank(cfg.spec)')}, remove=${removeBus.includes('busChannelBank(current.spec)')}, ` +
+  check('stopping locks bank add/edit/remove; a running capture permits the live analog retune',
+    scopeLocks, `add=${addBus.includes('cfg.analogGroup !== undefined')}, ` +
+    `update=${updateBus.includes('current.analogGroup !== undefined || cfg.analogGroup !== undefined')}, ` +
+    `remove=${removeBus.includes('this.stopping && current.analogGroup !== undefined')}, ` +
     `panel=${busPanel.includes('v.captureLocked')}`);
 
   const loopOpts = startSrc.includes(

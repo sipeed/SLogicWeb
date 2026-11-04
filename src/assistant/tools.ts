@@ -19,7 +19,8 @@ import { getDecoder, hydrateDecoders, listDecoders } from '../decode/registry.js
 import type { DecodeResult } from '../decode/types.js';
 import type { CaptureSettings, TriggerMode } from '../ui/state.js';
 import {
-  BUS_HEIGHTS, DEFAULT_BUS_HEIGHT, busLabel, busSummary, runBits, type BusViewConfig,
+  BUS_HEIGHTS, DEFAULT_BUS_HEIGHT, busLabel, busRun, busSummary, runBits, runStart,
+  type BusBitOrder, type BusViewConfig,
 } from '../ui/busView.js';
 import { busSteps, latchedBefore, validateBusSpec, MAX_BUS_BITS, type BusEncoding } from '../data/busValue.js';
 import type { ToolSpec } from './types.js';
@@ -42,6 +43,8 @@ export interface HostSnapshot {
   settings: CaptureSettings;
   /** Highest samplerate per capture width for the connected device. */
   rateCeilings: Readonly<Record<number, number>>;
+  /** Capture widths the width selector offers right now (empty without a device). */
+  widthTiers: number[];
   enabledChannels: number[];
   channelNames: string[];
   view: { start: number; end: number };
@@ -66,6 +69,8 @@ export interface AssistantHost {
   store(): SampleStore;
   analyzers(): readonly HostAnalyzer[];
   applySettings(patch: Partial<CaptureSettings>, enabledChannels?: number[]): void;
+  /** Select a capture width tier, as the width selector does. */
+  setChannelWidth(channels: number): void;
   /** Start a capture and resolve when it has stopped (or the timeout passed). */
   startAndWait(timeoutMs: number, signal: AbortSignal): Promise<CaptureOutcome>;
   stop(): Promise<void>;
@@ -224,8 +229,10 @@ function settingsView(s: CaptureSettings): Record<string, unknown> {
     trigger: {
       enabled: s.triggerEnableMask,
       armed: s.softwareTrigger,
+      source: s.triggerSource,
       pre_trigger_percent: s.preTriggerPercent,
       modes: s.triggerModes,
+      analog: s.analogTriggers,
     },
   };
 }
@@ -251,6 +258,7 @@ function stateView(host: AssistantHost): Record<string, unknown> {
       ...(st.triggerSampleIndex !== null ? { trigger_s: num(st.triggerSampleIndex / sr) } : {}),
     },
     settings: settingsView(st.settings),
+    capture_width_tiers: st.widthTiers,
     max_samplerate_hz_by_width: st.rateCeilings,
     enabled_channels: st.enabledChannels,
     channel_names: Object.fromEntries(st.enabledChannels.map((c) => [c, st.channelNames[c] ?? `D${c}`])),
@@ -302,22 +310,34 @@ function busAt(host: AssistantHost, index: unknown): HostBus {
 
 /**
  * Apply the bus_* tool fields to a configuration. Bits come from an explicit `bits` list
- * (LSB first) or from start_channel + width (+ msb_first), as in the panel.
+ * (LSB first) or from start_channel + width (+ msb_first / bit_order), as in the panel.
  */
 function busConfigFrom(i: Record<string, unknown>, base: BusViewConfig, channelCount: number): BusViewConfig {
   const c: BusViewConfig = { ...base, spec: { ...base.spec } };
   if (typeof i.name === 'string' && i.name.trim()) c.name = i.name.trim();
+  const order: BusBitOrder | null =
+    i.bit_order === 'auto' || i.bit_order === 'msb' || i.bit_order === 'lsb' ? i.bit_order : null;
   if (Array.isArray(i.bits)) {
     c.spec.bits = i.bits as number[];
-  } else if (typeof i.start_channel === 'number' || typeof i.width === 'number' || typeof i.msb_first === 'boolean') {
+    // A list is explicit wiring: keep its direction unless the caller asked for Auto.
+    c.bitOrder = order ?? (busRun(c.spec.bits)
+      ? runStart(c.spec.bits).msbFirst ? 'msb' : 'lsb'
+      : 'auto');
+  } else if (typeof i.start_channel === 'number' || typeof i.width === 'number' ||
+      typeof i.msb_first === 'boolean' || order !== null) {
     const cur = c.spec.bits;
     const start = typeof i.start_channel === 'number' ? i.start_channel : Math.min(...cur);
     const width = typeof i.width === 'number' ? i.width : cur.length;
-    const msbFirst = typeof i.msb_first === 'boolean' ? i.msb_first : cur.length > 1 && cur[0]! > cur[1]!;
+    const msbFirst = order !== null ? order === 'msb'
+      : typeof i.msb_first === 'boolean' ? i.msb_first
+        : cur.length > 1 && cur[0]! > cur[1]!;
     if (start + width > channelCount) {
       throw new Error(`D${start}+${width} bits runs past D${channelCount - 1}; this capture has ${channelCount} channels.`);
     }
     c.spec.bits = runBits(start, width, channelCount, msbFirst);
+    // Auto is left for the app to resolve against the live test mode; an explicit
+    // msb/lsb also pins a direction the user picked.
+    c.bitOrder = order ?? (msbFirst ? 'msb' : 'lsb');
   }
   if ('clock_channel' in i) {
     c.spec.clock = i.clock_channel === null ? null : { channel: i.clock_channel as number, edge: c.spec.clock?.edge ?? 'rising' };
@@ -341,7 +361,9 @@ const BUS_FIELDS: Record<string, unknown> = {
     description: 'Capture channels as bits, LSB FIRST. Use for arbitrary wiring; otherwise use start_channel + width.' },
   start_channel: { type: 'integer', minimum: 0, description: 'Lowest channel of a run of consecutive channels.' },
   width: { type: 'integer', minimum: 1, maximum: MAX_BUS_BITS, description: 'Number of bits in the run.' },
-  msb_first: { type: 'boolean', description: 'The start channel is the MSB (lines wired MSB-first). Default false: it is the LSB.' },
+  msb_first: { type: 'boolean', description: 'The start channel is the MSB (lines wired MSB-first). Default false: it is the LSB. Overridden by bit_order.' },
+  bit_order: { type: 'string', enum: ['auto', 'msb', 'lsb'],
+    description: 'Which end of the run is the MSB. auto: MSB on live input, LSB on test patterns (the device\'s ADC wiring). msb / lsb pin it regardless of mode. Default: auto for a new view.' },
   clock_channel: { type: ['integer', 'null'], minimum: 0,
     description: 'Data clock (e.g. an ADC\'s DCLK): latch on its edge. null: no clock, any bit change is a new value.' },
   clock_edge: { type: 'string', enum: ['rising', 'falling'], description: 'Clock edge that latches the data. Default rising.' },
@@ -557,11 +579,13 @@ export const TOOLS: AssistantTool[] = [
     description:
       'Change capture settings for the NEXT capture. Only the fields you pass change. ' +
       'Values are clamped to device limits; the result shows what was applied. The ' +
-      'capture width is an explicit tier (8CH/16CH/32CH); enabled_channels only masks ' +
-      'the display. ' +
+      'capture width is an explicit tier (4CH/8CH/16CH/32CH, see capture_width_tiers in ' +
+      'get_state) set by capture_width; enabled_channels only masks the display. ' +
       'trigger_modes maps a channel number to low/high/rising/falling/edge/dont-care; ' +
       'all conditions must hold at once (AND), and trigger_enabled gates them all.',
     inputSchema: obj({
+      capture_width: { type: 'integer', enum: [4, 8, 16, 32],
+        description: 'Capture width tier. Narrower widths reach higher samplerates (4 channels: up to 1400 MHz on the SLogic32 U3).' },
       enabled_channels: { type: 'array', items: { type: 'integer', minimum: 0 }, minItems: 1,
         description: 'Exactly these channels are enabled.' },
       samplerate_hz: { type: 'number', exclusiveMinimum: 0 },
@@ -616,12 +640,19 @@ export const TOOLS: AssistantTool[] = [
         patch.triggerModes = modes;
         patch.triggerConditions = [];
       }
+      const width = typeof i.capture_width === 'number' ? i.capture_width : undefined;
+      if (width !== undefined && !st.widthTiers.includes(width)) {
+        throw new Error(st.widthTiers.length
+          ? `A ${width}-channel capture is not offered; this device offers ${st.widthTiers.join('/')} channels.`
+          : 'The capture width can only be chosen with a device connected.');
+      }
       const enabled = Array.isArray(i.enabled_channels) ? i.enabled_channels as number[] : undefined;
       if (enabled) {
         const max = st.channelNames.length;
         const bad = enabled.filter((c) => c >= max);
         if (bad.length) throw new Error(`Channels ${bad.join(', ')} do not exist on this device (D0-D${max - 1}).`);
       }
+      if (width !== undefined) host.setChannelWidth(width);
       host.applySettings(patch, enabled);
       const after = host.snapshot();
       if (typeof i.samplerate_hz === 'number' && after.settings.samplerate !== i.samplerate_hz) {
@@ -737,7 +768,7 @@ export const TOOLS: AssistantTool[] = [
       'Show a parallel bus - typically an ADC\'s data lines - as one analog row: n channels ' +
       'combined into a value (LSB first), optionally latched on a clock channel\'s edge, ' +
       'decoded as unsigned / two\'s complement / offset binary and optionally scaled to ' +
-      'volts. Give either start_channel + width (+ msb_first) or an explicit bits list.',
+      'volts. Give either start_channel + width (+ msb_first or bit_order) or an explicit bits list.',
     inputSchema: obj(BUS_FIELDS),
     risk: 'act',
     run: async (i, host) => {
@@ -747,7 +778,7 @@ export const TOOLS: AssistantTool[] = [
       const channelCount = visibleChannelCount(host);
       const base: BusViewConfig = {
         name: 'ADC', color: '', fullScaleV: null, offsetV: 0, style: 'line', heightCss: DEFAULT_BUS_HEIGHT,
-        hideSources: false, spec: { bits: [0], clock: null, encoding: 'unsigned' },
+        hideSources: false, bitOrder: 'auto', spec: { bits: [0], clock: null, encoding: 'unsigned' },
       };
       const cfg = busConfigFrom({ width: 8, ...i }, base, channelCount);
       host.addBus(cfg);

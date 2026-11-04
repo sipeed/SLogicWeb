@@ -144,7 +144,7 @@ const UART = fixture.channelNames.findIndex((n) => /uart/i.test(n) && /rx/i.test
 function settings(): CaptureSettings {
   return {
     channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'single', seconds: 1,
-    singleUnlimited: false, repeatIntervalSeconds: 1, loopSamples: 16_000_000,
+    singleUnlimited: false, repeatIntervalSeconds: 1, loopSamples: 16_000_000, analogTriggers: {}, triggerSource: 'digital',
     testMode: 0,
     triggerEnableMask: false, softwareTrigger: false, triggerModes: { 2: 'high' }, triggerConditions: [],
     triggerChannel: 0, triggerKind: 'rising', triggerLevel: 1, preTriggerPercent: 10,
@@ -168,6 +168,7 @@ class FakeHost implements AssistantHost {
       samples: this.store_.length, dropped: 0,
       samplerate: this.store_.samplerate, channelCount: this.store_.channelCount, triggerState: 'off',
       triggerSampleIndex: null, settings: this.s, rateCeilings: { 16: 400e6, 32: 200e6 },
+      widthTiers: this.connected ? [4, 8, 16, 32] : [],
       enabledChannels: [0, 1, 2], channelNames: Array.from({ length: 32 }, (_, i) => fixture.channelNames[i] ?? `D${i}`),
       view: this.view, decoderReady: true,
     };
@@ -178,6 +179,8 @@ class FakeHost implements AssistantHost {
     this.applied.push({ patch, ...(enabled ? { enabled } : {}) });
     this.s = { ...this.s, ...patch, samplerate: Math.min(patch.samplerate ?? this.s.samplerate, 400e6) };
   }
+  widths: number[] = [];
+  setChannelWidth(channels: number): void { this.widths.push(channels); this.s = { ...this.s, channels: channels as CaptureSettings['channels'] }; }
   async startAndWait(): Promise<'finished'> { return 'finished'; }
   async stop(): Promise<void> { this.running = false; this.repeatPending = false; }
   async attach(id: string, channels: Record<number, number>, options: Record<string, string | number>): Promise<void> {
@@ -306,11 +309,29 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
   check('set_capture_settings rejects channels the device lacks', !badChan.ok, badChan.err);
   const setDescription = toolByName('set_capture_settings')?.description ?? '';
   check('the assistant describes an explicit width tier and a display-only mask',
-    SYSTEM_PROMPT.includes('8CH, 16CH or 32CH') && setDescription.includes('8CH/16CH/32CH') &&
+    SYSTEM_PROMPT.includes('4CH, 8CH, 16CH or 32CH') && setDescription.includes('4CH/8CH/16CH/32CH') &&
     setDescription.includes('only masks the display') &&
     !SYSTEM_PROMPT.includes('highest enabled channel') && !setDescription.includes('highest enabled channel'),
-    `promptTier=${SYSTEM_PROMPT.includes('8CH, 16CH or 32CH')}, ` +
-    `toolTier=${setDescription.includes('8CH/16CH/32CH')}`);
+    `promptTier=${SYSTEM_PROMPT.includes('4CH, 8CH, 16CH or 32CH')}, ` +
+    `toolTier=${setDescription.includes('4CH/8CH/16CH/32CH')}`);
+  const noDevice = await run('set_capture_settings', { capture_width: 4 }, host);
+  check('capture_width needs a connected device', !noDevice.ok && /device connected/.test(noDevice.err), noDevice.err);
+  host.connected = true;
+  const order: string[] = [];
+  const origWidth = host.setChannelWidth.bind(host);
+  const origApply = host.applySettings.bind(host);
+  host.setChannelWidth = (n: number) => { order.push(`width ${n}`); origWidth(n); };
+  host.applySettings = (patch, enabled) => { order.push('apply'); origApply(patch, enabled); };
+  const four = await run('set_capture_settings', { capture_width: 4, samplerate_hz: 1.4e9 }, host);
+  check('capture_width 4 selects the tier before the samplerate is clamped',
+    four.ok && host.widths.at(-1) === 4 && order.join(',') === 'width 4,apply' &&
+    (four.out as { applied: { capture_width: number } }).applied.capture_width === 4,
+    `${order.join(',')} ${JSON.stringify(four.out ?? four.err)}`);
+  const odd = await run('set_capture_settings', { capture_width: 64 }, host);
+  check('capture_width outside the tiers is refused by the schema or the tool', !odd.ok, odd.err);
+  host.setChannelWidth = origWidth;
+  host.applySettings = origApply;
+  host.connected = false;
   host.running = true;
   const busy = await run('set_capture_settings', { mode: 'timer' }, host);
   check('settings cannot change mid-capture', !busy.ok && /running/.test(busy.err), busy.err);

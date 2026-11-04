@@ -260,6 +260,8 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     testMode: 2 as const,
     triggerEnableMask: true,
     triggerModes: { 0: 'rising' as const, 3: 'dont-care' as const, 7: 'high' as const },
+    analogTriggers: {},
+    triggerSource: 'digital' as const,
     preTriggerPercent: 35,
   };
   const parsed = parseWorkspaceSnapshot(serializeWorkspaceSnapshot({
@@ -1232,8 +1234,8 @@ const persistWriters = [...new Set(appMethodNames
   .filter((name) => appMethodBody(name).includes('this.persistWorkspace();')))].sort();
 const expectedWriters = [
   'adoptCapture', 'adoptDeviceChannels', 'afterChannelChange', 'applySettings', 'attachAnalyzer',
-  'configureBankBus', 'configureChannel', 'removeAnalyzer', 'reorder', 'settingsItems',
-  'startCapture',
+  'configureBusScope', 'configureChannel', 'dragScopeTrigger', 'finishCapture', 'removeAnalyzer',
+  'reorder', 'settingsItems', 'startCapture',
 ].sort();
 const quietMethods = ['runDecode', 'discardDecodeState', 'renderPanels', 'relayout', 'retranslate'];
 const quiet = quietMethods.map((name) => ({ name, body: appMethodBody(name) }));
@@ -1248,7 +1250,7 @@ check('the committed mutation methods are the only workspace writers and no rend
 
 const writeMethods = [
   'applySettings', 'afterChannelChange', 'configureChannel', 'reorder', 'adoptCapture', 'adoptDeviceChannels',
-  'startCapture', 'configureBankBus',
+  'startCapture', 'configureBusScope',
 ];
 const missingWriteMethods = writeMethods.filter((name) =>
   !appMethodBody(name).includes('this.persistWorkspace();'));
@@ -1264,7 +1266,7 @@ const captureDerivation = constructorBody.includes('const triggerConditions = mo
   constructorBody.includes('triggerKind: first?.kind ?? \'rising\'') &&
   constructorBody.includes('triggerLevel: first?.level ?? 1') &&
   constructorBody.includes('channels: initialWidth') &&
-  constructorBody.includes('}, this.rateCeilings);');
+  constructorBody.includes('this.settings = this.clampSettings({');
 const sharedSettingsPath = app.includes('onSettings: (s) => this.applySettings(s)') &&
   app.includes('this.applySettings({ ...this.settings, ...s });') &&
   app.includes('private applySettings(s: CaptureSettings): void {');
@@ -1276,7 +1278,7 @@ check('capture restore rebuilds canonical trigger derivatives and panel/debug/as
   snapshotBody.includes('triggerModes: { ...this.settings.triggerModes }') &&
   !snapshotBody.includes('softwareTrigger') && !snapshotBody.includes('triggerConditions') &&
   !snapshotBody.includes('triggerChannel') && snapshotBody.includes('busViews: this.busViews.map') &&
-  snapshotBody.includes('bankBusDrafts: Object.fromEntries') &&
+  snapshotBody.includes('analogTriggers: { ...this.settings.analogTriggers }') &&
   !snapshotBody.includes('builder') && !snapshotBody.includes('builtFor') && !snapshotBody.includes('cache'),
   `derivation=${captureDerivation}, shared=${sharedSettingsPath}`);
 
@@ -1289,7 +1291,7 @@ const explicitRestore = 'this.samplerateExplicit = workspace?.capture?.samplerat
 const markAt = applySettingsBody.indexOf(explicitMark);
 const clampAt = applySettingsBody.indexOf('clampSettings(');
 const restoreAt = constructorBody.indexOf(explicitRestore);
-const composeAt = constructorBody.indexOf('this.settings = clampSettings(');
+const composeAt = constructorBody.indexOf('this.settings = this.clampSettings(');
 const explicitWiring = app.includes('private samplerateExplicit = false;') &&
   applySettingsBody.includes(`private applySettings(s: CaptureSettings): void {\n    ${explicitMark}`) &&
   applySettingsBody.split(explicitMark).length === 2 && markAt >= 0 && clampAt > markAt &&
@@ -1347,7 +1349,6 @@ check('the capture width is explicit state and a mask flip never rewrites it',
 
 const busRestoreWiring = constructorBody.includes('id: `bus-${id}`, builder: null, builtFor: null, cache: null') &&
   constructorBody.includes('this.nextBus = this.busViews.length;') &&
-  constructorBody.includes('this.bankBusDrafts.set(bank, cloneBusConfig(bus));') &&
   constructorBody.includes('this.syncBankChannels();');
 const busMutationWiring = ['addBus', 'updateBus', 'removeBus'].every((name) => {
   const start = app.indexOf(`private ${name}(`);
@@ -1356,7 +1357,7 @@ const busMutationWiring = ['addBus', 'updateBus', 'removeBus'].every((name) => {
 });
 check('restored views get fresh IDs/null runtime and all generic/bank mutations share normalized writes',
   busRestoreWiring && busMutationWiring &&
-  app.includes('this.settings = clampSettings({ ...this.settings }, this.rateCeilings);'),
+  app.includes('this.settings = this.clampSettings({ ...this.settings });'),
   `restore=${busRestoreWiring}, mutations=${busMutationWiring}`);
 
 const html = fs.readFileSync('index.html', 'utf8');

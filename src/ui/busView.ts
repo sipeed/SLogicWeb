@@ -37,7 +37,8 @@ export interface BusViewConfig {
   name: string;
   usesDefaultName?: boolean;
   spec: BusSpec;
-  bitOrder: BusBitOrder;
+  /** Defaults to `auto` for views restored from older workspaces. */
+  bitOrder?: BusBitOrder;
   color: string;
   /** Volts for the full code range (2^n LSB); null shows raw values. */
   fullScaleV: number | null;
@@ -178,7 +179,7 @@ export function resolveBusBitOrder(order: BusBitOrder, testMode: number): 'msb' 
  */
 export function applyBusBitOrder<T extends BusViewConfig>(config: T, testMode: number): T {
   if (busRun(config.spec.bits) === null) return config;
-  const wantMsb = resolveBusBitOrder(config.bitOrder, testMode) === 'msb';
+  const wantMsb = resolveBusBitOrder(config.bitOrder ?? 'auto', testMode) === 'msb';
   const isMsb = runStart(config.spec.bits).msbFirst;
   if (wantMsb === isMsb) return config;
   return { ...config, spec: swapBusOrder(config.spec) };
