@@ -1672,7 +1672,7 @@ export class App {
 
   private async toggleFullscreen(): Promise<void> {
     try {
-      if (document.fullscreenElement === null) await document.documentElement.requestFullscreen();
+      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
       else await document.exitFullscreen();
     } catch {
     }
@@ -1942,8 +1942,9 @@ export class App {
     this.el.open.setAttribute('aria-label', t('toolbar.open'));
     this.el.save.setAttribute('aria-label', t('toolbar.save'));
     this.el.fit.setAttribute('aria-label', t('toolbar.fit'));
-    const full = document.fullscreenElement !== null;
-    const fullscreenUnavailable = document.fullscreenEnabled === false;
+    const full = !!document.fullscreenElement;
+    const fullscreenUnavailable = document.fullscreenEnabled === false ||
+      typeof document.documentElement.requestFullscreen !== 'function';
     this.el.fullscreen.disabled = fullscreenUnavailable;
     this.el.fullscreen.setAttribute('aria-pressed', String(full));
     this.el.fullscreen.setAttribute('aria-label', t('toolbar.fullscreen'));

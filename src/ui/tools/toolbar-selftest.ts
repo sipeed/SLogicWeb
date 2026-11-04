@@ -601,7 +601,7 @@ const fullscreenWiringNeedles = [
 const missingFullscreenWiring = fullscreenWiringNeedles.filter((needle) => !app.includes(needle));
 const toggleBody = methodBody('private async toggleFullscreen(');
 const toggleGuardsEmptyState = toggleBody.includes(
-  'if (document.fullscreenElement === null) await document.documentElement.requestFullscreen();') &&
+  'if (!document.fullscreenElement) await document.documentElement.requestFullscreen();') &&
   toggleBody.includes('else await document.exitFullscreen();');
 const toggleSilentOnFailure = toggleGuardsEmptyState && /catch \{\s*\}/.test(toggleBody) &&
   !toggleBody.includes('noteViewportIntent') &&
@@ -646,8 +646,9 @@ const fullscreenChangeWiring =
   app.includes("document.addEventListener('fullscreenchange', () => this.renderToolbarState());");
 const renderToolbarBody = methodBody('private renderToolbarState(): void {');
 const fullscreenStateNeedles = [
-  'const full = document.fullscreenElement !== null;',
+  'const full = !!document.fullscreenElement;',
   'document.fullscreenEnabled === false',
+  "typeof document.documentElement.requestFullscreen !== 'function'",
   'this.el.fullscreen.disabled =',
   "setAttribute('aria-pressed', String(full))",
   "t('toolbar.fullscreen')",
