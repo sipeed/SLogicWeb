@@ -45,9 +45,13 @@ const css = read('src/ui/style.css');
 
 const BODY_BASE_RULE = '.panel-section-body { display: flex; flex-direction: column; gap: 8px; }';
 const BODY_HIDDEN_RULE = '.panel-section-body[hidden] { display: none; }';
+const HEAD_BASE_RULE = '.panel-section-head {';
+const HEAD_GAP_SELECTOR = '.panel-section-head:has(+ .panel-section-body[hidden])';
+const HEAD_GAP_RULE = `${HEAD_GAP_SELECTOR} { margin-bottom: 0; }`;
 const HIDE_SITE = 'triggerSec.body.hidden = !s.triggerEnableMask;';
 
 const hasHiddenBodyRule = (source: string): boolean => source.includes(BODY_HIDDEN_RULE);
+const hasHeadGapRule = (source: string): boolean => source.includes(HEAD_GAP_RULE);
 
 const mutateRule = (source: string, rule: string, replacement: string): string => {
   const escaped = rule.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
@@ -89,6 +93,37 @@ const sectionSource = tail(panel, 'export function section(title: string)');
     stripped !== css && weakened !== css && stripped.includes(BODY_BASE_RULE),
     `stripped=${hasHiddenBodyRule(stripped)}, weakened=${hasHiddenBodyRule(weakened)}, ` +
     `strippedLength=${stripped.length}, sheetLength=${css.length}`);
+}
+
+{
+  const gapAt = css.indexOf(HEAD_GAP_RULE);
+  const gapBlock = slice(css, HEAD_GAP_SELECTOR, '}');
+  check('a collapsed section drops the head gap: .panel-section-head:has(+ .panel-section-body[hidden]) { margin-bottom: 0; }',
+    hasHeadGapRule(css) && gapAt > css.indexOf(BODY_HIDDEN_RULE) &&
+    gapBlock.includes('margin-bottom: 0') && !gapBlock.includes('8px'),
+    `present=${hasHeadGapRule(css)}, gapAt=${gapAt}, block=${JSON.stringify(gapBlock.replace(/\s+/g, ' '))}`);
+}
+
+{
+  const headAt = css.indexOf(HEAD_BASE_RULE);
+  const headBlock = headAt < 0 ? '' : slice(css, HEAD_BASE_RULE, '}');
+  check('the head-without-body card keeps its own gap: .panel-section-head still carries margin-bottom: 8px',
+    headAt >= 0 && headBlock.includes('margin-bottom: 8px'),
+    `headAt=${headAt}, block=${JSON.stringify(headBlock.replace(/\s+/g, ' '))}`);
+}
+
+{
+  const zeroed = mutateRule(css, HEAD_GAP_RULE,
+    '.panel-section-head:has(+ .panel-section-body[hidden]) { margin-bottom: 8px; }');
+  const unguarded = mutateRule(css, HEAD_GAP_RULE,
+    '.panel-section-head:has(+ .panel-section-body) { margin-bottom: 0; }');
+  const strippedGap = mutateRule(css, HEAD_GAP_RULE, '');
+  check('control: the collapsed-gap needle fails for a deleted rule, an 8px declaration and an unguarded :has()',
+    !hasHeadGapRule(strippedGap) && !hasHeadGapRule(zeroed) && !hasHeadGapRule(unguarded) &&
+    strippedGap !== css && zeroed !== css && unguarded !== css &&
+    strippedGap.includes(HEAD_BASE_RULE) && strippedGap.includes(BODY_HIDDEN_RULE),
+    `stripped=${hasHeadGapRule(strippedGap)}, zeroed=${hasHeadGapRule(zeroed)}, ` +
+    `unguarded=${hasHeadGapRule(unguarded)}, strippedLength=${strippedGap.length}, sheetLength=${css.length}`);
 }
 
 {
