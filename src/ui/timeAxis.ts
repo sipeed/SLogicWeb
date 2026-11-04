@@ -52,6 +52,7 @@ export function computeTicks(
   endPs: number,
   widthCss: number,
   samplerateHz?: number,
+  minSpacing: number = AXIS.minTickSpacing,
 ): TickSet {
   if (!(endPs > startPs) || !(widthCss > 0)) {
     return { minorPs: 1, majorPs: 10, ticks: [], pinned: null };
@@ -63,7 +64,7 @@ export function computeTicks(
     ? 1e12 / samplerateHz : Infinity;
   const samplesVisible = spanPs / samplePeriodPs;
   if (Number.isFinite(samplePeriodPs) && (
-    samplePeriodPs * pxPerPs >= AXIS.minTickSpacing ||
+    samplePeriodPs * pxPerPs >= minSpacing ||
     samplesVisible <= MIN_SAMPLES_ON_SCREEN * (1 + 1e-9)
   )) {
     return computeSampleTicks(startPs, endPs, pxPerPs, samplePeriodPs);
@@ -71,7 +72,7 @@ export function computeTicks(
 
   // Smallest power of ten at least AXIS.minTickSpacing px wide. 1 ps is the floor: below
   // that there is nothing meaningful left to label.
-  let k = Math.ceil(Math.log10(AXIS.minTickSpacing / pxPerPs));
+  let k = Math.ceil(Math.log10(minSpacing / pxPerPs));
   if (!Number.isFinite(k)) k = 0;
   if (k < 0) k = 0;
   const minorPs = Math.pow(10, k);

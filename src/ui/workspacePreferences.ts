@@ -1,9 +1,9 @@
 import { isChannelCount, type ChannelCount } from '../types.js';
 import { SAMPLERATES_HZ } from '../device/index.js';
 import { validateBusSpec } from '../data/index.js';
-import { busChannelBank } from './channelBanks.js';
+import { ADC_FULL_SCALE_V, ADC_OFFSET_V, busChannelBank } from './channelBanks.js';
 import { cloneBusConfig, defaultBusConfig, normalizeBankBusConfig } from './busPanel.js';
-import { BUS_HEIGHTS, type BusViewConfig } from './busView.js';
+import { BUS_HEIGHTS, type BusBitOrder, type BusViewConfig } from './busView.js';
 import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannelName, defaultChannels,
   THRESHOLD_VOLT_OPTIONS,
@@ -40,6 +40,8 @@ export interface PersistedCaptureSettings {
   testMode: 0 | 1 | 2;
   triggerEnableMask: boolean;
   triggerModes: Record<number, TriggerMode>;
+  analogTriggers?: Record<string, { kind: 'rising' | 'falling'; volts: number }>;
+  triggerSource?: 'digital' | 'analog';
   preTriggerPercent: number;
 }
 
@@ -137,6 +139,8 @@ function restoreCapture(value: unknown, capacity: number): PersistedCaptureSetti
     testMode: defaults.testMode,
     triggerEnableMask: defaults.triggerEnableMask,
     triggerModes: {},
+    analogTriggers: {},
+    triggerSource: defaults.triggerSource,
     preTriggerPercent: defaults.preTriggerPercent,
   };
   if (!isRecord(value)) return capture;
@@ -172,6 +176,22 @@ function restoreCapture(value: unknown, capacity: number): PersistedCaptureSetti
   if (value.testMode === 0 || value.testMode === 1 || value.testMode === 2) capture.testMode = value.testMode;
   if (typeof value.triggerEnableMask === 'boolean') capture.triggerEnableMask = value.triggerEnableMask;
   capture.triggerModes = restoreTriggerModes(value.triggerModes, capacity);
+  if (isRecord(value.analogTriggers)) {
+    const restored: Record<string, { kind: 'rising' | 'falling'; volts: number }> = {};
+    for (const [key, raw] of Object.entries(value.analogTriggers)) {
+      const start = Number(key);
+      if (!Number.isInteger(start) || start < 0 || start % 8 !== 0 || start + 8 > capacity) continue;
+      if (!isRecord(raw)) continue;
+      const kind = raw.kind === 'rising' || raw.kind === 'falling' ? raw.kind : null;
+      const volts = typeof raw.volts === 'number' && Number.isFinite(raw.volts) ? raw.volts : null;
+      if (kind === null || volts === null) continue;
+      restored[String(start)] = { kind, volts: Math.max(-15, Math.min(15, volts)) };
+    }
+    capture.analogTriggers = restored;
+  }
+  if (value.triggerSource === 'digital' || value.triggerSource === 'analog') {
+    capture.triggerSource = value.triggerSource;
+  }
   if (typeof value.preTriggerPercent === 'number' && Number.isFinite(value.preTriggerPercent)) {
     capture.preTriggerPercent = value.preTriggerPercent;
   }
@@ -202,6 +222,21 @@ function restoreBusConfig(value: unknown, capacity: number): BusViewConfig | nul
       (typeof value.heightCss !== 'number' || !(BUS_HEIGHTS as readonly number[]).includes(value.heightCss))) {
     return null;
   }
+  const analogGroup = value.analogGroup;
+  if (analogGroup !== undefined &&
+      (typeof analogGroup !== 'number' || !Number.isInteger(analogGroup) ||
+        analogGroup < 0 || analogGroup > 3)) {
+    return null;
+  }
+  if (value.voltsPerDiv !== undefined && value.voltsPerDiv !== null &&
+      (typeof value.voltsPerDiv !== 'number' || !Number.isFinite(value.voltsPerDiv) || value.voltsPerDiv <= 0)) {
+    return null;
+  }
+  if (value.zeroPosition !== undefined &&
+      (typeof value.zeroPosition !== 'number' || !Number.isFinite(value.zeroPosition) ||
+        value.zeroPosition < 0 || value.zeroPosition > 1)) {
+    return null;
+  }
   const spec: BusViewConfig['spec'] = {
     bits: [...bits] as number[],
     clock,
@@ -212,8 +247,13 @@ function restoreBusConfig(value: unknown, capacity: number): BusViewConfig | nul
     ? value.color : defaults.color;
   const fullScaleV = value.fullScaleV === undefined ? defaults.fullScaleV
     : value.fullScaleV === null || value.fullScaleV === 0 ? null : value.fullScaleV;
+  // Snapshots written before the A/D switch have no order: treat them as Auto, which is
+  // what their bus would mean under the current device rules.
+  const bitOrder: BusBitOrder = value.bitOrder === 'msb' || value.bitOrder === 'lsb'
+    ? value.bitOrder : 'auto';
   const config: BusViewConfig = {
     name: typeof value.name === 'string' ? value.name.trim() : defaults.name,
+    bitOrder,
     color,
     fullScaleV,
     offsetV: value.offsetV ?? defaults.offsetV,
@@ -221,9 +261,21 @@ function restoreBusConfig(value: unknown, capacity: number): BusViewConfig | nul
     heightCss: value.heightCss ?? defaults.heightCss,
     hideSources: typeof value.hideSources === 'boolean' ? value.hideSources : defaults.hideSources,
     spec,
+    ...(value.voltsPerDiv !== undefined ? { voltsPerDiv: value.voltsPerDiv as number | null } : {}),
+    ...(value.zeroPosition !== undefined ? { zeroPosition: value.zeroPosition as number } : {}),
   };
   const bank = busChannelBank(spec);
   if (bank === null) return config;
+  if (typeof analogGroup === 'number') {
+    // The marker is only valid on the bank it names; a mismatched one is ignored.
+    if (analogGroup === bank / 8) config.analogGroup = analogGroup;
+  } else if (/^A[0-3]$/.test(config.name) &&
+             config.fullScaleV === ADC_FULL_SCALE_V && config.offsetV === ADC_OFFSET_V) {
+    // Legacy workspace: a full-bank bus predating the explicit marker used an A0-A3 name
+    // and the ADC's ±15 V span. Either alone is only a coincidence - a user may name an
+    // ordinary bus "A0" or enter ±15 V as its scale - so both must agree before migrating.
+    config.analogGroup = bank / 8;
+  }
   if (value.usesDefaultName === true) config.usesDefaultName = true;
   return normalizeBankBusConfig(config, capacity, bank);
 }
@@ -389,6 +441,8 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
       seconds: capture.seconds,
       repeatIntervalSeconds: capture.repeatIntervalSeconds ?? defaultCaptureSettings().repeatIntervalSeconds,
       loopSamples: capture.loopSamples,
+      analogTriggers: { ...(capture.analogTriggers ?? {}) },
+      triggerSource: capture.triggerSource ?? 'digital',
       testMode: capture.testMode,
       triggerEnableMask: capture.triggerEnableMask,
       triggerModes: Object.fromEntries(Object.entries(capture.triggerModes)

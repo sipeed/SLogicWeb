@@ -1,38 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+/**
+ * The staged acquisition-time control: a slider whose unit changes as it moves right
+ * (microseconds, milliseconds, seconds, minutes, then Unlimited), plus a numeric field
+ * and a read-only unit badge. The scale itself lives in `timeScale.ts`.
+ *
+ * The slider commits on `change`, not on every `input`, so dragging does not spam the
+ * settings path; the number and ARIA text follow the thumb while dragging. The numeric
+ * field accepts fractional values in the current unit, which keeps the exact editor
+ * available where the slider's stage step is coarse (for example 7.5 s between the
+ * one-second steps, or the exact device maximum above the last whole minute).
+ */
 
 import { selectControl, type SelectOptionTuple } from './select.js';
 import {
-  SLIDER_FINITE_MAX,
-  isUnlimitedTimeSlider,
-  timeSliderAriaValueText,
-  timeSliderFiniteMaxLabel,
-  timeSliderTrackGeometry,
-  timeValueFromSlider,
-  timeValueToSlider,
-} from './timeSlider.js';
-import {
-  TIME_UNITS, isPositiveInteger, isTimeUnit, maxTimeValue, minTimeValue,
-  timeUnitForRange, timeValueFromSeconds, type TimeUnit,
-} from './timeUnits.js';
+  buildTimeScale, finiteMaxValue, positionForSeconds, secondsInUnit, timeAtPosition,
+  unitValueText, type ScaleUnit,
+} from './timeScale.js';
 
-export interface TimeSliderBounds {
-  min: number;
-  max: number;
-  finiteMax: number;
-  unlimitedValue: number | null;
-}
-
-export function timeSliderBounds(
-  minSeconds: number, maxSeconds: number, unit: TimeUnit, unlimited = false,
-): TimeSliderBounds {
-  const track = timeSliderTrackGeometry(unlimited);
-  return {
-    min: minTimeValue(minSeconds, unit),
-    finiteMax: maxTimeValue(maxSeconds, unit),
-    max: track.max,
-    unlimitedValue: unlimited ? track.max : null,
-  };
-}
+const SCALE_UNIT_OPTIONS: SelectOptionTuple[] = [['us', 'us'], ['ms', 'ms'], ['s', 's'], ['min', 'min']];
 
 export interface AcquisitionTimeUnlimited {
   active: boolean;
@@ -43,23 +28,19 @@ export interface AcquisitionTimeUnlimited {
 export interface AcquisitionTimeControlOptions {
   key: string;
   label: string;
-  unitLabel: string;
-  unit: TimeUnit;
   seconds: number;
   minSeconds: number;
   maxSeconds: number;
   disabled: boolean;
   unlimited?: AcquisitionTimeUnlimited;
-  onValue(value: number, unit: TimeUnit): void;
-  onUnit(unit: TimeUnit, value: number | null): void;
+  onValue(seconds: number): void;
 }
 
 export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): { el: HTMLDivElement } {
-  const unit = timeUnitForRange(options.unit, options.minSeconds, options.maxSeconds) ?? options.unit;
   const hasUnlimited = options.unlimited !== undefined;
-  const bounds = timeSliderBounds(options.minSeconds, options.maxSeconds, unit, hasUnlimited);
-  const finiteValue = timeValueFromSeconds(options.seconds, unit, options.minSeconds, options.maxSeconds);
-  const unavailable = finiteValue === null || bounds.finiteMax < bounds.min;
+  const scale = buildTimeScale(options.minSeconds, options.maxSeconds, hasUnlimited);
+  const initial = positionForSeconds(scale, options.seconds);
+  const unavailable = scale.stages.length === 0 || scale.finiteMax === 0;
   const root = document.createElement('div');
   root.className = 'acquisition-time';
   root.dataset.timeControl = options.key;
@@ -81,23 +62,24 @@ export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): 
   range.className = 'acquisition-time-slider' + (hasUnlimited ? ' has-unlimited' : '');
   range.dataset.timeSlider = options.key;
   range.min = '0';
-  range.max = String(bounds.max);
+  range.max = String(scale.sliderMax);
   range.step = '1';
-  const initialPosition = options.unlimited?.active
-    ? bounds.unlimitedValue ?? SLIDER_FINITE_MAX
-    : timeValueToSlider(finiteValue ?? bounds.min, bounds.min, bounds.finiteMax) ?? 0;
-  range.value = String(initialPosition);
+  const startPosition = options.unlimited?.active
+    ? scale.unlimited ?? scale.finiteMax
+    : initial?.position ?? 0;
+  range.value = String(startPosition);
   range.disabled = options.disabled || unavailable;
   range.setAttribute('aria-label', options.label);
-  if (bounds.unlimitedValue !== null) range.dataset.unlimitedValue = String(bounds.unlimitedValue);
+  if (scale.unlimited !== null) range.dataset.unlimitedValue = String(scale.unlimited);
   sliderWrap.appendChild(range);
 
   if (options.unlimited) {
     const labels = document.createElement('div');
     labels.className = 'acquisition-time-slider-labels';
     const finite = document.createElement('span');
-    finite.textContent = String(bounds.finiteMax);
-    finite.title = timeSliderFiniteMaxLabel(bounds.finiteMax, unit);
+    const finiteTop = finiteMaxValue(scale);
+    finite.textContent = finiteTop ? `${finiteTop.value} ${finiteTop.unit}` : '';
+    finite.title = finite.textContent;
     const unlimited = document.createElement('span');
     unlimited.textContent = '∞';
     unlimited.title = options.unlimited.label;
@@ -108,141 +90,155 @@ export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): 
 
   const inputGroup = document.createElement('div');
   inputGroup.className = 'acquisition-time-input-group';
-  let number: HTMLInputElement | null = null;
+  const number = document.createElement('input');
+  number.type = 'number';
+  number.className = 'acquisition-time-value';
+  number.dataset.timeInput = options.key;
+  number.step = 'any';
+  number.autocomplete = 'off';
+  number.inputMode = 'decimal';
+  number.disabled = options.disabled || unavailable;
+  number.setAttribute('aria-label', options.label);
 
   const unlimitedValue = document.createElement('span');
   unlimitedValue.className = 'acquisition-time-unlimited';
   unlimitedValue.dataset.timeUnlimited = options.key;
   unlimitedValue.textContent = '∞';
-  unlimitedValue.hidden = options.unlimited?.active !== true;
   unlimitedValue.title = options.unlimited?.label ?? '';
   unlimitedValue.setAttribute('aria-label', options.unlimited?.label ?? '');
 
-  const unitOptions: SelectOptionTuple[] = TIME_UNITS.map((candidate) => [candidate, candidate]);
-  const unitControl = selectControl(`${options.key}.unit`, options.unitLabel, unitOptions, unit);
+  const unitControl = selectControl(
+    `${options.key}.unit`, options.label, SCALE_UNIT_OPTIONS, 'ms',
+  );
   unitControl.el.classList.add('acquisition-time-unit');
   unitControl.disabled = options.disabled || unavailable;
-  inputGroup.append(unlimitedValue, unitControl.el);
+  inputGroup.append(number, unlimitedValue, unitControl.el);
   body.append(sliderWrap, inputGroup);
   root.append(head, body);
 
   let unlimitedDraft = options.unlimited?.active === true;
-  let finiteDraft = finiteValue ?? bounds.min;
+  let unit: ScaleUnit = initial?.value.unit ?? scale.stages[0]?.unit ?? 'ms';
+
   const setFieldInvalid = (invalid: boolean): void => {
     if (invalid) root.dataset.invalid = 'true';
     else delete root.dataset.invalid;
-    if (number) {
-      if (invalid) number.setAttribute('aria-invalid', 'true');
-      else number.removeAttribute('aria-invalid');
-    }
+    if (invalid) number.setAttribute('aria-invalid', 'true');
+    else number.removeAttribute('aria-invalid');
   };
-  const syncRange = (updateNumber = true): void => {
-    const position = Number(range.value);
-    const unlimited = isUnlimitedTimeSlider(position, hasUnlimited);
-    unlimitedDraft = unlimited;
-    range.classList.toggle('is-unlimited', unlimited);
-    range.style.setProperty('--acquisition-fill', `${Math.min(position, SLIDER_FINITE_MAX) / SLIDER_FINITE_MAX * 100}%`);
-    unlimitedValue.hidden = !unlimited;
-    if (number) {
-      number.hidden = unlimited;
-      if (updateNumber && !unlimited) {
-        const value = timeValueFromSlider(position, bounds.min, bounds.finiteMax);
-        if (value !== null) number.value = String(value);
-      }
-    }
-    const aria = unlimited
-      ? options.unlimited?.label ?? ''
-      : number
-        ? `${number.value} ${unit}`
-        : timeSliderAriaValueText(position, bounds.min, bounds.finiteMax, unit);
-    range.setAttribute('aria-valuetext', aria);
+  const setUnit = (next: ScaleUnit): void => {
+    unit = next;
+    unitControl.value = next;
+    number.min = unitValueText(options.minSeconds, next);
+    number.max = unitValueText(options.maxSeconds, next);
   };
-  const commitValue = (value: number): void => {
-    const clamped = Math.min(bounds.finiteMax, Math.max(bounds.min, value));
-    finiteDraft = clamped;
-    const position = timeValueToSlider(clamped, bounds.min, bounds.finiteMax);
-    if (position !== null) range.value = String(position);
+  const setFill = (position: number): void => {
+    const fraction = scale.sliderMax > 0 ? position / scale.sliderMax : 0;
+    range.style.setProperty('--acquisition-fill', `${Math.min(100, Math.max(0, fraction * 100))}%`);
+  };
+  const showFinite = (seconds: number, updateNumber = true): void => {
+    unlimitedDraft = false;
+    number.hidden = false;
+    unlimitedValue.hidden = true;
+    range.classList.remove('is-unlimited');
+    const value = timeAtPosition(scale, positionForSeconds(scale, seconds)?.position ?? 0);
+    if (value) setUnit(value.unit);
+    if (updateNumber) number.value = unitValueText(seconds, unit);
+    range.setAttribute('aria-valuetext', `${unitValueText(seconds, unit)} ${unit}`);
+  };
+  const syncFromPosition = (position: number): void => {
+    setFill(position);
+    if (scale.unlimited !== null && position === scale.unlimited) {
+      unlimitedDraft = true;
+      range.classList.add('is-unlimited');
+      number.hidden = true;
+      unlimitedValue.hidden = false;
+      range.setAttribute('aria-valuetext', options.unlimited?.label ?? '');
+      return;
+    }
+    const value = timeAtPosition(scale, position);
+    if (!value) return;
+    showFinite(value.seconds);
+  };
+  const commitSeconds = (seconds: number): void => {
+    const clamped = Math.min(options.maxSeconds, Math.max(options.minSeconds, seconds));
     setFieldInvalid(false);
-    syncRange(false);
-    if (number) number.value = String(clamped);
-    range.setAttribute('aria-valuetext', `${clamped} ${unit}`);
-    options.onValue(clamped, unit);
+    options.onValue(clamped);
   };
 
-  function ensureNumber(): HTMLInputElement {
-    if (number) return number;
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.className = 'acquisition-time-value';
-    input.dataset.timeInput = options.key;
-    input.min = String(bounds.min);
-    input.max = String(bounds.finiteMax);
-    input.step = '1';
-    input.value = String(finiteDraft);
-    input.disabled = options.disabled || unavailable;
-    input.autocomplete = 'off';
-    input.inputMode = 'numeric';
-    input.setAttribute('aria-label', options.label);
-    inputGroup.insertBefore(input, unlimitedValue);
-    number = input;
-    input.addEventListener('input', () => {
-      const value = Number(input.value);
-      const position = timeValueToSlider(value, bounds.min, bounds.finiteMax);
-      if (position === null) {
-        setFieldInvalid(true);
-        return;
-      }
-      range.value = String(position);
-      finiteDraft = Math.min(bounds.finiteMax, Math.max(bounds.min, value));
-      setFieldInvalid(value < bounds.min || value > bounds.finiteMax);
-      syncRange(false);
-    });
-    input.addEventListener('change', () => {
-      const value = Number(input.value);
-      if (!isPositiveInteger(value)) {
-        setFieldInvalid(true);
-        input.reportValidity();
-        return;
-      }
-      if (value < bounds.min || value > bounds.finiteMax) input.reportValidity();
-      commitValue(value);
-    });
-    return input;
+  const initialSeconds = options.seconds;
+  setUnit(unit);
+  if (initial) {
+    number.value = unitValueText(initialSeconds, unit);
+    range.setAttribute('aria-valuetext', `${unitValueText(initialSeconds, unit)} ${unit}`);
   }
+  if (unlimitedDraft) {
+    number.hidden = true;
+    unlimitedValue.hidden = false;
+    range.classList.add('is-unlimited');
+    range.setAttribute('aria-valuetext', options.unlimited?.label ?? '');
+  } else {
+    number.hidden = false;
+    unlimitedValue.hidden = true;
+  }
+  setFill(Number(range.value));
+  setFieldInvalid(false);
 
   range.addEventListener('input', () => {
-    if (!isUnlimitedTimeSlider(Number(range.value), hasUnlimited)) ensureNumber();
     setFieldInvalid(false);
-    syncRange(true);
-    if (!unlimitedDraft) {
-      finiteDraft = timeValueFromSlider(Number(range.value), bounds.min, bounds.finiteMax) ?? finiteDraft;
-    }
+    syncFromPosition(Number(range.value));
   });
   range.addEventListener('change', () => {
-    if (isUnlimitedTimeSlider(Number(range.value), hasUnlimited)) {
+    const position = Number(range.value);
+    if (scale.unlimited !== null && position === scale.unlimited) {
       options.unlimited?.onSelect();
       return;
     }
-    const value = timeValueFromSlider(Number(range.value), bounds.min, bounds.finiteMax);
-    if (value !== null) commitValue(value);
+    const value = timeAtPosition(scale, position);
+    if (value) commitSeconds(value.seconds);
+  });
+
+  number.addEventListener('input', () => {
+    const typed = Number(number.value);
+    if (!Number.isFinite(typed) || typed <= 0) {
+      setFieldInvalid(true);
+      return;
+    }
+    const seconds = secondsInUnit(typed, unit);
+    setFieldInvalid(seconds < options.minSeconds || seconds > options.maxSeconds);
+    const placed = positionForSeconds(scale, seconds);
+    if (placed) {
+      range.value = String(placed.position);
+      setFill(placed.position);
+      range.setAttribute('aria-valuetext', `${unitValueText(seconds, unit)} ${unit}`);
+    }
+  });
+  number.addEventListener('change', () => {
+    const typed = Number(number.value);
+    if (!Number.isFinite(typed) || typed <= 0) {
+      setFieldInvalid(true);
+      number.reportValidity();
+      return;
+    }
+    const seconds = secondsInUnit(typed, unit);
+    if (seconds < options.minSeconds || seconds > options.maxSeconds) {
+      setFieldInvalid(true);
+      number.reportValidity();
+      return;
+    }
+    commitSeconds(seconds);
   });
 
   unitControl.addEventListener('change', () => {
-    if (!isTimeUnit(unitControl.value)) return;
-    const nextUnit = timeUnitForRange(unitControl.value, options.minSeconds, options.maxSeconds) ?? unit;
-    unitControl.value = nextUnit;
-    if (unlimitedDraft && options.unlimited && !options.unlimited.active) {
-      options.onUnit(nextUnit, null);
-      options.unlimited.onSelect();
+    const next = unitControl.value;
+    if (next !== 'us' && next !== 'ms' && next !== 's' && next !== 'min') {
+      unitControl.value = unit;
       return;
     }
-    const nextValue = unlimitedDraft
-      ? null
-      : timeValueFromSeconds(options.seconds, nextUnit, options.minSeconds, options.maxSeconds);
-    options.onUnit(nextUnit, nextValue);
+    setUnit(next);
+    const position = Math.min(scale.finiteMax, Number(range.value));
+    const value = timeAtPosition(scale, position);
+    if (value) number.value = unitValueText(value.seconds, next);
   });
-  if (!options.unlimited?.active) ensureNumber();
-  setFieldInvalid(false);
-  syncRange(false);
+
   return { el: root };
 }
