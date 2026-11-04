@@ -19,6 +19,12 @@
  *     the match - it counts as absent);
  *   - matchLocale maps a BCP-47 tag to a supported locale - exact form first, then
  *     the primary subtag - and never prefix-matches ('e', 'english', 'zhx' stay null);
+ *   - the boot path is observed rather than inferred: readBrowserLanguages() follows
+ *     navigator.languages -> navigator.language -> nothing, and initLocale() adopts a
+ *     matched browser language without writing storage while a stored locale still
+ *     wins. navigator/localStorage are replaced per case and restored from their
+ *     saved property descriptors in `finally` - these cases cover the wiring, they
+ *     are not a real browser;
  *   - translate() falls back to the English string when a dict lacks the key - the
  *     incomplete dict is a Partial<Messages> cast, so the Messages type itself stays
  *     intact;
@@ -46,8 +52,8 @@ import { zhCN } from '../locales/zh-CN.js';
 import { ru } from '../locales/ru.js';
 import { fr } from '../locales/fr.js';
 import {
-  formatMessage, getLocale, loadCatalog, LOCALE_LABELS, LOCALES, matchLocale, onLocaleChange,
-  pickLocale, setLocale, t, translate, type Locale,
+  formatMessage, getLocale, initLocale, loadCatalog, LOCALE_LABELS, LOCALES, matchLocale,
+  onLocaleChange, pickLocale, readBrowserLanguages, setLocale, t, translate, type Locale,
 } from '../i18n.js';
 import {
   formatAnalyzerNote, formatCaptureLabel, formatDiagnostic, formatMountedAnalyzerNote,
@@ -1086,6 +1092,162 @@ const baseSettings: CaptureSettings = {
   check('a failed catalog load keeps the previous locale',
     r === 'failed' && getLocale() === before,
     `result=${r}, locale=${getLocale()}`);
+}
+
+// ------------------------------------------- browser language detection
+// node 22 exposes a getter-only `navigator` (language 'en-HK') and no `localStorage`,
+// so both globals are replaced per case from saved property descriptors and restored
+// in `finally`; the boot path is observed here, the real browser is not.
+
+{
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+
+  const useNavigator = (value: unknown): void => {
+    if (value === undefined) {
+      Reflect.deleteProperty(globalThis, 'navigator');
+      return;
+    }
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, writable: true, value });
+  };
+  const useStorage = (value: Storage): void => {
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable: true, value });
+  };
+  const restoreGlobals = (): void => {
+    if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+    else Reflect.deleteProperty(globalThis, 'navigator');
+    if (storageDescriptor) Object.defineProperty(globalThis, 'localStorage', storageDescriptor);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
+  };
+
+  interface FakeStorage {
+    readonly api: Storage;
+    readonly store: Map<string, string>;
+    writes(): number;
+  }
+
+  const fakeStorage = (seed?: readonly [string, string]): FakeStorage => {
+    const store = new Map<string, string>(seed ? [seed] : []);
+    let count = 0;
+    const api = {
+      getItem: (key: string): string | null => store.get(key) ?? null,
+      setItem: (key: string, value: string): void => {
+        count += 1;
+        store.set(key, value);
+      },
+      removeItem: (key: string): void => { store.delete(key); },
+      clear: (): void => { store.clear(); },
+      key: (): string | null => null,
+      get length(): number { return store.size; },
+    } as unknown as Storage;
+    return { api, store, writes: () => count };
+  };
+
+  {
+    const table: [unknown, readonly string[]][] = [
+      [{ languages: ['fr-FR', 'fr'], language: 'en-US' }, ['fr-FR', 'fr']],
+      [{ language: 'ru-RU' }, ['ru-RU']],
+      [{ languages: [] }, []],
+      [{ languages: ['', '  '], language: 'de-DE' }, ['de-DE']],
+      [{ languages: [7, 'zu-ZA'], language: 'ru' }, ['zu-ZA']],
+      [undefined, []],
+    ];
+    const bad: string[] = [];
+    try {
+      for (const [nav, want] of table) {
+        useNavigator(nav);
+        const got = readBrowserLanguages();
+        if (JSON.stringify(got) !== JSON.stringify(want)) {
+          bad.push(`${JSON.stringify(nav)}→${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+        }
+      }
+    } finally {
+      restoreGlobals();
+    }
+    check('readBrowserLanguages follows languages -> language -> nothing, skipping unusable tags',
+      bad.length === 0,
+      bad.length === 0 ? `${table.length} navigator shapes` : bad.join('; '));
+  }
+
+  {
+    const fake = fakeStorage();
+    let locale: Locale = 'en';
+    let text = '';
+    let writes = -1;
+    let persisted: string | null = null;
+    try {
+      await setLocale('en');
+      useNavigator({ languages: ['fr-FR', 'fr'], language: 'fr-FR' });
+      useStorage(fake.api);
+      locale = await initLocale();
+      text = t('toolbar.start');
+      writes = fake.writes();
+      persisted = fake.store.get('logicweb.lang') ?? null;
+    } finally {
+      restoreGlobals();
+      await setLocale('en');
+    }
+    check('initLocale adopts the browser language on a fresh profile without persisting',
+      locale === 'fr' && text === fr['toolbar.start'] && text !== en['toolbar.start'] &&
+        writes === 0 && persisted === null,
+      `locale=${locale}, t=${JSON.stringify(text)}, writes=${writes}, `
+      + `stored=${JSON.stringify(persisted)}`);
+  }
+
+  {
+    const fake = fakeStorage();
+    let locale: Locale = 'fr';
+    try {
+      await setLocale('en');
+      useNavigator({ languages: ['de-DE', 'it-IT'], language: 'de-DE' });
+      useStorage(fake.api);
+      locale = await initLocale();
+    } finally {
+      restoreGlobals();
+      await setLocale('en');
+    }
+    check('initLocale stays on en when no browser language is supported',
+      locale === 'en' && fake.writes() === 0 && fake.store.size === 0,
+      `locale=${locale}, writes=${fake.writes()}, stored=${JSON.stringify([...fake.store])}`);
+  }
+
+  {
+    const fake = fakeStorage(['logicweb.lang', 'ru']);
+    let locale: Locale = 'en';
+    let text = '';
+    let writes = -1;
+    try {
+      await setLocale('en');
+      useNavigator({ languages: ['fr-FR'], language: 'fr-FR' });
+      useStorage(fake.api);
+      locale = await initLocale();
+      text = t('toolbar.start');
+      writes = fake.writes();
+    } finally {
+      restoreGlobals();
+      await setLocale('en');
+    }
+    check('initLocale keeps a stored locale over the browser language and writes nothing',
+      locale === 'ru' && text === ru['toolbar.start'] && writes === 0,
+      `locale=${locale}, t=${JSON.stringify(text)}, writes=${writes}`);
+  }
+
+  {
+    const fake = fakeStorage();
+    let result = '';
+    try {
+      await setLocale('en');
+      useStorage(fake.api);
+      result = await setLocale('fr');
+    } finally {
+      restoreGlobals();
+      await setLocale('en');
+    }
+    const persisted = fake.store.get('logicweb.lang') ?? null;
+    check('an explicit pick still persists exactly once',
+      result === 'committed' && fake.writes() === 1 && persisted === 'fr',
+      `result=${result}, writes=${fake.writes()}, stored=${JSON.stringify(persisted)}`);
+  }
 }
 
 // ---------------------------------------------------------------------- report

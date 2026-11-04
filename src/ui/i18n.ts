@@ -19,9 +19,10 @@
  * - Locale state is module-level with a subscriber set; panels do NOT subscribe -
  *   they call t() while rebuilding in render(), and App runs one re-render pass on
  *   change (re-render = clear and rebuild, so nothing stale survives).
- * - Persistence is localStorage['logicweb.lang'] [CHOSEN]; unknown or absent stored
- *   values fall back to 'en' (the mandated default - no browser auto-detection).
- *   The stored locale is read by initLocale() at boot, never at module evaluation.
+ * - Persistence is localStorage['logicweb.lang'] [CHOSEN]; a supported stored value
+ *   wins, otherwise the browser's language preferences are matched, otherwise 'en'.
+ *   Only an explicit pick writes storage: the stored locale is read by initLocale()
+ *   at boot (never at module evaluation), and the boot switch does not persist.
  * - The module is node-safe at top level (the tools/ self-test bundles it with
  *   --platform=node): module evaluation touches neither storage nor the DOM;
  *   every document/localStorage touch point sits inside a function.
@@ -210,6 +211,21 @@ export function pickLocale(stored: string | null, preferred: readonly string[] =
 }
 
 /**
+ * The browser's language preference chain: `navigator.languages` when it carries a
+ * usable tag, else `navigator.language`, else nothing (node, or a stripped navigator).
+ */
+export function readBrowserLanguages(): readonly string[] {
+  if (typeof navigator === 'undefined') return [];
+  const raw: readonly unknown[] = Array.isArray(navigator.languages) ? navigator.languages : [];
+  const usable = raw.filter(
+    (tag): tag is string => typeof tag === 'string' && tag.trim() !== '',
+  );
+  if (usable.length > 0) return usable;
+  const only: unknown = navigator.language;
+  return typeof only === 'string' && only.trim() !== '' ? [only] : [];
+}
+
+/**
  * Pure lookup + format against an explicit dict, with fallback to English. t()
  * binds the current locale's dict; the self-test drives this directly with a
  * deliberately incomplete Partial<Messages> to prove the fallback fires.
@@ -269,7 +285,11 @@ export function getLocale(): Locale {
  * `current` is left untouched and the persisted value is kept, so a transient
  * error retries next session.
  */
-export async function setLocale(locale: Locale): Promise<LocaleSwitchResult> {
+export function setLocale(locale: Locale): Promise<LocaleSwitchResult> {
+  return switchLocale(locale, true);
+}
+
+async function switchLocale(locale: Locale, persist: boolean): Promise<LocaleSwitchResult> {
   const token = ++requestToken;
   if (locale === current) return 'committed';
   try {
@@ -282,11 +302,13 @@ export async function setLocale(locale: Locale): Promise<LocaleSwitchResult> {
   }
   if (token !== requestToken) return 'superseded';
   current = locale;
-  try {
-    storage()?.setItem(STORAGE_KEY, locale);
-  } catch {
-    // Quota/security failures must not break the switch itself - the in-memory
-    // locale already changed; persistence is best-effort.
+  if (persist) {
+    try {
+      storage()?.setItem(STORAGE_KEY, locale);
+    } catch {
+      // Quota/security failures must not break the switch itself - the in-memory
+      // locale already changed; persistence is best-effort.
+    }
   }
   if (typeof document !== 'undefined') document.documentElement.lang = locale;
   for (const cb of listeners) cb();
@@ -294,14 +316,16 @@ export async function setLocale(locale: Locale): Promise<LocaleSwitchResult> {
 }
 
 /**
- * Boot hook: preload the persisted locale so the first App render paints in it.
- * Never rejects - a stored locale that fails to load leaves the module on `en`
- * with a warning, keeping boot off the loud-failure overlay path.
+ * Boot hook: commit the stored locale, else the browser language, so the first App
+ * render paints in it. Never persists and never rejects - a target that fails to
+ * load leaves the module on the current locale with a warning, keeping boot off the
+ * loud-failure overlay path.
  */
 export async function initLocale(): Promise<Locale> {
-  const stored = pickLocale(storage()?.getItem(STORAGE_KEY) ?? null);
-  if (stored !== current && (await setLocale(stored)) === 'failed') {
-    console.warn(`[i18n] staying on ${current}; stored ${stored} did not load`);
+  const stored = storage()?.getItem(STORAGE_KEY) ?? null;
+  const target = pickLocale(stored, readBrowserLanguages());
+  if (target !== current && (await switchLocale(target, false)) === 'failed') {
+    console.warn(`[i18n] staying on ${current}; ${target} did not load`);
   }
   return current;
 }
