@@ -247,16 +247,17 @@ function check(name: string, pass: boolean, detail: string): void {
   const expectedText = [
     'emptyHint.line1', 'emptyHint.line2',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortOpen', 'toolbar.shortSave',
-    'toolbar.shortFit', 'toolbar.shortSettings', 'toolbar.shortAssistant', 'toolbar.shortLanguage',
+    'toolbar.shortFit', 'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortAssistant', 'toolbar.shortLanguage',
     'toolbar.shortTheme', 'toolbar.shortSidebar',
   ];
   const expectedTitles = [
     'toolbar.startTitle', 'toolbar.openTitle', 'toolbar.saveTitle', 'toolbar.fitTitle',
+    'toolbar.enterFullscreenTitle',
     'toolbar.sidebarTitle', 'toolbar.themeTitle', 'toolbar.languageTitle', 'toolbar.assistantTitle',
     'settings.titleHint', 'panel.resizeTitle',
   ];
   const expectedAriaLabels = [
-    'panel.resizeLabel', 'toolbar.switchGroup',
+    'panel.resizeLabel', 'toolbar.switchGroup', 'toolbar.viewGroup',
   ];
 
   const missingTextKeys = expectedText.filter((k) => !textFound.has(k));
@@ -304,6 +305,7 @@ function check(name: string, pass: boolean, detail: string): void {
     ['btn-open', 'toolbar.open'],
     ['btn-save', 'toolbar.save'],
     ['btn-fit', 'toolbar.fit'],
+    ['btn-fullscreen', 'toolbar.fullscreen'],
     ['btn-settings', 'settings.title'],
     ['btn-assistant', 'toolbar.assistantTitle'],
     ['btn-language', 'toolbar.languageTitle'],
@@ -803,8 +805,8 @@ const baseSettings: CaptureSettings = {
     'toolbar.start', 'settings.language', 'settings.theme',
     'settings.detailedLabels', 'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortStop',
     'toolbar.shortStopping', 'toolbar.shortOpen', 'toolbar.shortSave',
-    'toolbar.shortFit', 'toolbar.shortSettings', 'toolbar.shortLanguage', 'toolbar.shortTheme',
-    'toolbar.shortSidebar',
+    'toolbar.shortFit', 'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage', 'toolbar.shortTheme',
+    'toolbar.shortSidebar', 'toolbar.fullscreen', 'toolbar.enterFullscreenTitle',
     'trigger.anyEdge',
     'channels.settings', 'channels.name', 'channels.color', 'channels.customColor',
     'channels.colorField', 'channels.hue',
@@ -874,6 +876,7 @@ const baseSettings: CaptureSettings = {
     ['toolbar.shortStop', 'toolbar.stop'], ['toolbar.shortStopping', 'toolbar.stopping'],
     ['toolbar.shortOpen', 'toolbar.open'],
     ['toolbar.shortSave', 'toolbar.save'], ['toolbar.shortFit', 'toolbar.fit'],
+    ['toolbar.shortFullscreen', 'toolbar.fullscreen'],
     ['toolbar.shortSettings', 'settings.title'], ['toolbar.shortAssistant', 'toolbar.assistantTitle'],
     ['toolbar.shortLanguage', 'toolbar.languageTitle'], ['toolbar.shortTheme', 'toolbar.themeTitle'],
     ['toolbar.shortSidebar', 'toolbar.sidebarTitle'],

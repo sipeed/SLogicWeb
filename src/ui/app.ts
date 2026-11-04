@@ -239,7 +239,7 @@ export class App {
     channelList: HTMLDivElement; side: HTMLDivElement; status: HTMLDivElement;
     hint: HTMLDivElement; transport: HTMLButtonElement;
     connect: HTMLButtonElement; open: HTMLButtonElement; save: HTMLButtonElement;
-    fit: HTMLButtonElement; settings: HTMLButtonElement; sidebar: HTMLButtonElement;
+    fit: HTMLButtonElement; fullscreen: HTMLButtonElement; settings: HTMLButtonElement; sidebar: HTMLButtonElement;
     language: HTMLButtonElement; theme: HTMLButtonElement; assistant: HTMLButtonElement;
     fileInput: HTMLInputElement;
   };
@@ -261,6 +261,7 @@ export class App {
       open: must<HTMLButtonElement>('btn-open'),
       save: must<HTMLButtonElement>('btn-save'),
       fit: must<HTMLButtonElement>('btn-fit'),
+      fullscreen: must<HTMLButtonElement>('btn-fullscreen'),
       settings: must<HTMLButtonElement>('btn-settings'),
       sidebar: must<HTMLButtonElement>('btn-sidebar'),
       language: must<HTMLButtonElement>('btn-language'),
@@ -1628,6 +1629,7 @@ export class App {
       this.stack.zoomToFit();
       this.dirty = true;
     });
+    must<HTMLButtonElement>('btn-fullscreen').addEventListener('click', () => void this.toggleFullscreen());
     must<HTMLButtonElement>('btn-settings').addEventListener('click', () => {
       // Keep the channel dialog and this transient menu from competing for focus.
       this.channelList.closeDialog();
@@ -1665,6 +1667,14 @@ export class App {
       this.themeMenu.close('outside');
       this.toggleAssistant();
     });
+  }
+
+  private async toggleFullscreen(): Promise<void> {
+    try {
+      if (document.fullscreenElement === null) await document.documentElement.requestFullscreen();
+      else await document.exitFullscreen();
+    } catch {
+    }
   }
 
   /**

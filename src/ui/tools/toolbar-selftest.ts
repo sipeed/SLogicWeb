@@ -397,12 +397,22 @@ check(
   `local=${localController}, guardedFinish=${finallyGuarded}, publish=${publishesController}, cancel=${cancelBindingKept}`,
 );
 
-const leftCommandIds = ['btn-connect', 'transport', 'btn-open', 'btn-save', 'btn-fit', 'btn-settings'];
+const leftCommandIds = ['btn-connect', 'transport', 'btn-open', 'btn-save', 'btn-fit', 'btn-fullscreen', 'btn-settings'];
 const assistantCommandId = 'btn-assistant';
 const languageCommandId = 'btn-language';
 const themeCommandId = 'btn-theme';
 const sidebarCommandId = 'btn-sidebar';
 const commandIds = [...leftCommandIds, assistantCommandId, languageCommandId, themeCommandId, sidebarCommandId];
+
+const toolbarGroupStarts = [...toolbar.matchAll(/<div class="toolbar-group"[^>]*>/g)]
+  .map((match) => match.index ?? -1);
+const toolbarGroupEnd = (start: number) => toolbar.indexOf('</div>', start) + '</div>'.length;
+const toolbarGroupRanges = toolbarGroupStarts.map((start) => ({ start, end: toolbarGroupEnd(start) }));
+const toolbarGroupOf = (id: string): { start: number; end: number; markup: string } | null => {
+  const at = toolbar.indexOf(`id="${id}"`);
+  const range = at < 0 ? undefined : toolbarGroupRanges.find((r) => at > r.start && at < r.end);
+  return range ? { ...range, markup: toolbar.slice(range.start, range.end) } : null;
+};
 
 function commandMarkup(id: string): string {
   const idIndex = toolbar.indexOf(`id="${id}"`);
@@ -503,50 +513,106 @@ const sidebarMarkup = commandMarkup(sidebarCommandId);
 const separatorCount = toolbar.match(/role="separator"/g)?.length ?? 0;
 const verticalSeparatorCount = toolbar.match(/aria-orientation="vertical"/g)?.length ?? 0;
 check(
-  'ten commands expose shadcn anatomy, one media wrapper and decorative short label each, distinct icons, and separators',
+  'eleven commands expose shadcn anatomy, one media wrapper and decorative short label each, distinct icons, and separators',
   anatomyFailures.length === 0 && iconSignatures.size === commandIds.length &&
     separatorCount === 2 && verticalSeparatorCount === 2,
   `failures=${JSON.stringify(anatomyFailures)}, icons=${iconSignatures.size}, separators=${separatorCount}/${verticalSeparatorCount}`,
 );
 
+const cornerBracketGlyph = 'M8 3H3v5';
 const fitMarkup = commandMarkup('btn-fit');
 const fitGlyphIsHorizontalSpan = fitMarkup.includes('M8 7l-5 5 5 5M16 7l5 5-5 5');
-const cornerBracketGlyphRetired = !toolbar.includes('M8 3H3v5');
+const cornerBracketGlyphRetired = !fitMarkup.includes(cornerBracketGlyph);
 check(
-  'the fit command shows the horizontal-span glyph and no command keeps the corner-bracket glyph',
+  'the fit command shows the horizontal-span glyph and no longer keeps the corner-bracket glyph',
   fitGlyphIsHorizontalSpan && cornerBracketGlyphRetired,
   `fitGlyph=${fitGlyphIsHorizontalSpan}, cornerBracketRetired=${cornerBracketGlyphRetired}`,
+);
+
+const fullscreenMarkup = commandMarkup('btn-fullscreen');
+const cornerBracketCount = toolbar.split(cornerBracketGlyph).length - 1;
+check(
+  'the fullscreen command owns the corner-bracket glyph and it stays unique to that command',
+  fullscreenMarkup.includes(cornerBracketGlyph) && cornerBracketCount === 1 &&
+    iconSignatures.size === commandIds.length,
+  `fullscreenGlyph=${fullscreenMarkup.includes(cornerBracketGlyph)}, count=${cornerBracketCount}, ` +
+    `icons=${iconSignatures.size}/${commandIds.length}`,
 );
 
 const fitIndex = toolbar.indexOf('id="btn-fit"');
 const spacerIndex = toolbar.indexOf('class="spacer"');
 const settingsIndex = toolbar.indexOf('id="btn-settings"');
-const settingsSeparatorIndex = settingsIndex >= 0
-  ? toolbar.lastIndexOf('role="separator"', settingsIndex)
+const fullscreenIndex = toolbar.indexOf('id="btn-fullscreen"');
+const viewGroup = toolbarGroupOf('btn-settings');
+const viewGroupFullscreen = toolbarGroupOf('btn-fullscreen');
+const viewGroupStart = viewGroup?.start ?? -1;
+const viewGroupEnd = viewGroup?.end ?? -1;
+const viewGroupMarkup = viewGroup?.markup ?? '';
+const viewGroupSeparatorIndex = viewGroupStart >= 0
+  ? toolbar.lastIndexOf('role="separator"', viewGroupStart)
   : -1;
-const settingsBeforeSpacer = fitIndex >= 0 && settingsSeparatorIndex > fitIndex &&
-  settingsIndex > settingsSeparatorIndex && spacerIndex > settingsIndex;
+const viewGroupBeforeSpacer = fitIndex >= 0 && viewGroupSeparatorIndex > fitIndex &&
+  viewGroupStart > viewGroupSeparatorIndex && spacerIndex > viewGroupEnd;
 const earlierCommandIndexes = leftCommandIds
-  .filter((id) => id !== 'btn-settings')
+  .filter((id) => id !== 'btn-settings' && id !== 'btn-fullscreen')
   .map((id) => toolbar.indexOf(`id="${id}"`));
-const settingsIsLastLeftCommand = settingsIndex >= 0 &&
-  earlierCommandIndexes.every((index) => index >= 0 && index < settingsIndex) &&
+const settingsIsLastLeftCommand = settingsIndex >= 0 && viewGroupStart >= 0 &&
+  earlierCommandIndexes.every((index) => index >= 0 && index < viewGroupStart) &&
   spacerIndex > settingsIndex;
 check(
-  'settings is the last left-aligned toolbar command before the spacer',
-  settingsBeforeSpacer && settingsIsLastLeftCommand,
-  `fit@${fitIndex}, settingsSeparator@${settingsSeparatorIndex}, settings@${settingsIndex}, spacer@${spacerIndex}`,
+  'the fit command precedes the view/settings group and settings is its last command before the spacer',
+  viewGroupBeforeSpacer && settingsIsLastLeftCommand,
+  `fit@${fitIndex}, separator@${viewGroupSeparatorIndex}, group@${viewGroupStart}..${viewGroupEnd}, ` +
+    `settings@${settingsIndex}, spacer@${spacerIndex}`,
 );
 
-const settingsToSpacer = settingsIndex >= 0 && spacerIndex > settingsIndex
-  ? toolbar.slice(settingsIndex, spacerIndex)
+const settingsToSpacer = viewGroupEnd > viewGroupStart && spacerIndex > viewGroupEnd
+  ? toolbar.slice(viewGroupEnd, spacerIndex)
   : '';
 const settingsDirectlyBeforeSpacer = settingsToSpacer.length > 0 &&
   !settingsToSpacer.includes('<button') && !settingsToSpacer.includes('role="separator"');
 check(
-  'no command or separator sits between settings and the spacer',
+  'no command or separator sits between the view and settings group and the spacer',
   settingsDirectlyBeforeSpacer,
   `segment=${JSON.stringify(settingsToSpacer.replace(/\s+/g, ' '))}`,
+);
+
+const viewGroupButtons = viewGroupMarkup.match(/id="(btn-[a-z]+)"/g)?.map((m) => m.slice(4, -1)) ?? [];
+const viewGroupAccessible = viewGroupMarkup.includes('role="group"') &&
+  viewGroupMarkup.includes('aria-label="View and settings"') &&
+  viewGroupMarkup.includes('data-i18n-aria-label="toolbar.viewGroup"');
+const viewGroupOrder = toolbarGroupRanges.length === 2 &&
+  viewGroupFullscreen !== null && viewGroupFullscreen.start === viewGroupStart &&
+  JSON.stringify(viewGroupButtons) === JSON.stringify(['btn-fullscreen', 'btn-settings']) &&
+  fullscreenIndex >= 0 && fullscreenIndex < settingsIndex;
+check(
+  'the view and settings group pairs the fullscreen command to the left of settings',
+  viewGroupAccessible && viewGroupOrder,
+  `groups=${toolbarGroupRanges.length}, buttons=${JSON.stringify(viewGroupButtons)}, ` +
+    `accessible=${viewGroupAccessible}, fullscreen@${fullscreenIndex}, settings@${settingsIndex}`,
+);
+
+const fullscreenWiringNeedles = [
+  "must<HTMLButtonElement>('btn-fullscreen').addEventListener('click'",
+  'private async toggleFullscreen(',
+  'document.documentElement.requestFullscreen()',
+  'document.exitFullscreen()',
+];
+const missingFullscreenWiring = fullscreenWiringNeedles.filter((needle) => !app.includes(needle));
+const toggleBody = methodBody('private async toggleFullscreen(');
+const toggleGuardsEmptyState = toggleBody.includes(
+  'if (document.fullscreenElement === null) await document.documentElement.requestFullscreen();') &&
+  toggleBody.includes('else await document.exitFullscreen();');
+const toggleSilentOnFailure = toggleGuardsEmptyState && /catch \{\s*\}/.test(toggleBody) &&
+  !toggleBody.includes('noteViewportIntent') &&
+  toggleBody.indexOf('document.documentElement.requestFullscreen()') <
+    toggleBody.indexOf('document.exitFullscreen()');
+check(
+  'the fullscreen command toggles the whole document and swallows a refused request',
+  missingFullscreenWiring.length === 0 && toggleSilentOnFailure &&
+    fullscreenMarkup.includes('aria-pressed="false"'),
+  `missing=${JSON.stringify(missingFullscreenWiring)}, silent=${toggleSilentOnFailure}, ` +
+    `body=${JSON.stringify(toggleBody.replace(/\s+/g, ' '))}`,
 );
 
 const assistantIndex = toolbar.indexOf(`id="${assistantCommandId}"`);
@@ -556,16 +622,14 @@ const spacerToAssistant = spacerIndex >= 0 && assistantButtonStart > spacerIndex
   ? toolbar.slice(spacerIndex, assistantButtonStart) : '';
 const assistantDirectlyAfterSpacer = spacerToAssistant.length > 0 &&
   !spacerToAssistant.includes('<button') && !spacerToAssistant.includes('role="separator"');
-const groupStarts = [...toolbar.matchAll(/<div class="toolbar-group"[^>]*>/g)].map((match) => match.index ?? -1);
-const groupEnd = (start: number) => toolbar.indexOf('</div>', start) + '</div>'.length;
-const switchGroupStart = groupStarts[0] ?? -1;
-const switchGroupEnd = switchGroupStart >= 0 ? groupEnd(switchGroupStart) : -1;
-const switchGroupMarkup = switchGroupStart >= 0 && switchGroupEnd > switchGroupStart
-  ? toolbar.slice(switchGroupStart, switchGroupEnd) : '';
+const switchGroup = toolbarGroupOf(languageCommandId);
+const switchGroupStart = switchGroup?.start ?? -1;
+const switchGroupEnd = switchGroup?.end ?? -1;
+const switchGroupMarkup = switchGroup?.markup ?? '';
 const languageIndex = switchGroupMarkup.indexOf(`id="${languageCommandId}"`);
 const themeIndex = switchGroupMarkup.indexOf(`id="${themeCommandId}"`);
 const switchGroupButtons = switchGroupMarkup.match(/<button\b/g)?.length ?? 0;
-const switchGroupOrder = groupStarts.length === 1 && languageIndex >= 0 && themeIndex > languageIndex &&
+const switchGroupOrder = languageIndex >= 0 && themeIndex > languageIndex &&
   switchGroupButtons === 2;
 const switchGroupAccessible = switchGroupMarkup.includes('role="group"') &&
   switchGroupMarkup.includes('aria-label="Language and theme"') &&
