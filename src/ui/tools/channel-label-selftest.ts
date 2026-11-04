@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
 
-import { channelColor, defaultChannelName, defaultChannels } from '../state.js';
+import { carryChannelState, channelColor, defaultChannelName, defaultChannels } from '../state.js';
+import type { ChannelState } from '../state.js';
 
 const nodeProcess = (() => {
   const p = (globalThis as {
@@ -51,6 +52,56 @@ function check(name: string, pass: boolean, detail: string): void {
   check('defaultChannels routes through defaultChannelName and the helper tracks its argument',
     routed && defaultChannelName(1) !== defaultChannelName(3),
     `routed=${routed}, D1=${defaultChannelName(1)}, D3=${defaultChannelName(3)}`);
+}
+
+// ------------------------------------------------------- carryChannelState
+
+const sameRow = (a: ChannelState, b: ChannelState): boolean =>
+  a.index === b.index && a.name === b.name && a.color === b.color && a.enabled === b.enabled;
+
+const describeRow = (c: ChannelState): string =>
+  `D${c.index}=${c.name}/${c.color}/${c.enabled ? 'on' : 'off'}`;
+
+const fixture: ChannelState[] = defaultChannels(8).map((c) => ({
+  ...c,
+  name: c.index === 1 ? 'SDA' : `user${c.index}`,
+  color: c.index === 1 ? '#123456' : `#00000${c.index}`,
+  enabled: c.index !== 0 && c.index !== 1,
+}));
+
+{
+  const grown = carryChannelState(fixture.slice(0, 4), 8);
+  const defaults = defaultChannels(8);
+  const kept = grown.slice(0, 4).every((c, i) => sameRow(c, fixture[i]!));
+  const fresh = grown.slice(4).every((c, i) => sameRow(c, defaults[4 + i]!));
+  check('carryChannelState grows 4→8 keeping metadata 0-3 and defaulting 4-7',
+    grown.length === 8 && grown.every((c, i) => c.index === i) && kept && fresh,
+    `${grown.map(describeRow).join(', ')}, kept=${kept}, fresh=${fresh}`);
+
+  const shrunk = carryChannelState(fixture, 4);
+  const shrinkKept = shrunk.every((c, i) => sameRow(c, fixture[i]!));
+  check('carryChannelState shrinks 8→4 keeping metadata 0-3 with identity indices',
+    shrunk.length === 4 && shrunk.every((c, i) => c.index === i) && shrinkKept,
+    `${shrunk.map(describeRow).join(', ')}, length=${shrunk.length}, kept=${shrinkKept}`);
+
+  const renamed = carryChannelState(fixture, 8)[1]!;
+  check('carryChannelState keeps a custom name, colour and a disabled mask verbatim',
+    renamed.name === 'SDA' && renamed.color === '#123456' && renamed.enabled === false &&
+    renamed.name !== defaultChannelName(1) && renamed.color !== channelColor(1),
+    `${describeRow(renamed)}, defaultName=${defaultChannelName(1)}, defaultColor=${channelColor(1)}`);
+
+  const fromEmpty = carryChannelState([], 5);
+  const emptyDefaults = defaultChannels(5);
+  check('carryChannelState over an empty previous model reproduces defaultChannels',
+    fromEmpty.length === 5 && fromEmpty.every((c, i) => sameRow(c, emptyDefaults[i]!)),
+    `${fromEmpty.map(describeRow).join(', ')}`);
+
+  const holed = carryChannelState([fixture[0], undefined, fixture[2]], 3);
+  const defaults3 = defaultChannels(3);
+  check('carryChannelState fills a hole from the default row',
+    sameRow(holed[0]!, fixture[0]!) && sameRow(holed[1]!, defaults3[1]!) &&
+    sameRow(holed[2]!, fixture[2]!),
+    `${holed.map(describeRow).join(', ')}, holeWant=${describeRow(defaults3[1]!)}`);
 }
 
 // ---------------------------------------------------------------------- report

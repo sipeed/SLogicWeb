@@ -238,6 +238,22 @@ export function defaultChannels(n: number): ChannelState[] {
   }));
 }
 
+export function carryChannelState(
+  previous: readonly (ChannelState | undefined)[],
+  count: number,
+): ChannelState[] {
+  return defaultChannels(count).map((fallback) => {
+    const prior = previous[fallback.index];
+    if (!prior) return fallback;
+    return {
+      index: fallback.index,
+      name: prior.name,
+      color: prior.color,
+      enabled: prior.enabled,
+    };
+  });
+}
+
 export function channelColor(index: number): string {
   return CHANNEL_COLORS[index % CHANNEL_COLORS.length]!;
 }
