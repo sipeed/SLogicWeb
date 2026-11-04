@@ -525,8 +525,14 @@ export const zhCN: Messages = {
   'settings.title': '设置',
   'settings.titleHint': '显示偏好',
   'settings.detailedLabels': '详细标签',
+  'settings.shortcuts': '键盘快捷键',
   'settings.language': '语言',
   'settings.theme': '主题',
+
+  // ----------------------------------------------------------- shortcuts
+  'shortcuts.title': '键盘快捷键',
+  'shortcuts.close': '关闭',
+  'shortcuts.clearCursors': '清除光标',
 
   // ------------------------------------------------------------ theme
   'theme.default': '默认',

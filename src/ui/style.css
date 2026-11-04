@@ -761,6 +761,62 @@ html[data-theme="light"] .channel-color-custom { background: var(--bg30); }
 }
 .channel-settings-cancel:hover { background: var(--muted); }
 
+/* ------------------------------------------------------------- shortcuts */
+
+.shortcuts-dialog {
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow-y: auto;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  animation: motion-pop var(--motion-fast) var(--motion-ease);
+}
+.shortcuts-dialog::backdrop {
+  background: rgb(0 0 0 / 60%);
+  animation: motion-fade var(--motion-fast) var(--motion-ease);
+}
+html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdrop); }
+.shortcuts-form { display: flex; flex-direction: column; gap: 16px; padding: 16px; }
+.shortcuts-header { display: flex; flex-direction: column; gap: 4px; }
+.shortcuts-header h2 { margin: 0; font-size: 14px; line-height: 20px; }
+.shortcuts-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.shortcuts-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.shortcuts-action { min-width: 0; overflow-wrap: break-word; }
+.shortcuts-key {
+  padding: 1px 6px;
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) - 4px);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.shortcuts-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.shortcuts-close {
+  padding: 3px 9px;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border: 1px solid var(--input);
+  border-radius: calc(var(--radius) - 4px);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+.shortcuts-close:hover { background: var(--muted); border-color: var(--primary); color: var(--foreground); }
+
 .select-popover, .settings-menu, .settings-flyout {
   background: var(--popover); color: var(--popover-foreground);
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -826,7 +882,8 @@ html[data-theme="light"] .channel-color-custom { background: var(--bg30); }
   box-shadow: 0 8px 24px var(--shadow);
 }
 :is(html[data-theme="dark"], html[data-theme="light"]) .channel-settings-dialog,
-:is(html[data-theme="dark"], html[data-theme="light"]) .channel-color-palette { box-shadow: 0 8px 24px var(--shadow); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .channel-color-palette,
+:is(html[data-theme="dark"], html[data-theme="light"]) .shortcuts-dialog { box-shadow: 0 8px 24px var(--shadow); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .tooltip { box-shadow: 0 4px 12px var(--shadow); }
 
 .ch-analyzer {

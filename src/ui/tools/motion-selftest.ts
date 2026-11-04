@@ -98,6 +98,9 @@ const MOTION_CONSUMERS: readonly string[] = [
   '.cursor-dist-popover',
   '.channel-settings-dialog',
   '.channel-settings-dialog::backdrop',
+  '.shortcuts-dialog',
+  '.shortcuts-dialog::backdrop',
+  '.shortcuts-close',
 ];
 
 const ENTRY_RULES: readonly string[] = [
@@ -106,6 +109,8 @@ const ENTRY_RULES: readonly string[] = [
   '.cursor-dist-popover',
   '.channel-settings-dialog',
   '.channel-settings-dialog::backdrop',
+  '.shortcuts-dialog',
+  '.shortcuts-dialog::backdrop',
 ];
 
 const BUTTON_CONSUMERS: readonly string[] = [

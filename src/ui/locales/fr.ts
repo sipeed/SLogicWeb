@@ -577,8 +577,14 @@ export const fr: Messages = {
   'settings.title': 'Paramètres',
   'settings.titleHint': 'Préférences d’affichage',
   'settings.detailedLabels': 'Libellés détaillés',
+  'settings.shortcuts': 'Raccourcis clavier',
   'settings.language': 'Langue',
   'settings.theme': 'Thème',
+
+  // ----------------------------------------------------------- shortcuts
+  'shortcuts.title': 'Raccourcis clavier',
+  'shortcuts.close': 'Fermer',
+  'shortcuts.clearCursors': 'Effacer les curseurs',
 
   // ------------------------------------------------------------ theme
   'theme.default': 'Par défaut',

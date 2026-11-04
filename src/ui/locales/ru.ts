@@ -568,8 +568,14 @@ export const ru: Messages = {
   'settings.title': 'Настройки',
   'settings.titleHint': 'Параметры отображения',
   'settings.detailedLabels': 'Подробные подписи',
+  'settings.shortcuts': 'Горячие клавиши',
   'settings.language': 'Язык',
   'settings.theme': 'Тема',
+
+  // ----------------------------------------------------------- shortcuts
+  'shortcuts.title': 'Горячие клавиши',
+  'shortcuts.close': 'Закрыть',
+  'shortcuts.clearCursors': 'Сбросить курсоры',
 
   // ------------------------------------------------------------ theme
   'theme.default': 'По умолчанию',

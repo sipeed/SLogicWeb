@@ -578,8 +578,14 @@ export const en = {
   'settings.title': 'Settings',
   'settings.titleHint': 'Display preferences',
   'settings.detailedLabels': 'Detailed labels',
+  'settings.shortcuts': 'Keyboard shortcuts',
   'settings.language': 'Language',
   'settings.theme': 'Theme',
+
+  // ----------------------------------------------------------- shortcuts
+  'shortcuts.title': 'Keyboard shortcuts',
+  'shortcuts.close': 'Close',
+  'shortcuts.clearCursors': 'Clear cursors',
 
   // ------------------------------------------------------------ theme
   'theme.default': 'Default',

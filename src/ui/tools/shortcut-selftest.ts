@@ -1,4 +1,10 @@
-import { SHORTCUTS, shortcutIdFor, type ShortcutId } from '../shortcuts.js';
+import { SHORTCUTS, shortcutIdFor, type ShortcutEntry, type ShortcutId } from '../shortcuts.js';
+import { shortcutActionText } from '../shortcutsDialog.js';
+import { t, type MessageKey } from '../i18n.js';
+import { en } from '../locales/en.js';
+import { zhCN } from '../locales/zh-CN.js';
+import { ru } from '../locales/ru.js';
+import { fr } from '../locales/fr.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
@@ -58,6 +64,11 @@ function branchesKeepTheirOwnAction(source: string): boolean {
   return BRANCH_ACTIONS.every(([anchor, action]) => branchBody(source, anchor).includes(action));
 }
 
+function entriesAreUnique(rows: readonly { id: string; key: string }[]): boolean {
+  return new Set(rows.map((row) => row.id)).size === rows.length &&
+    new Set(rows.map((row) => row.key)).size === rows.length;
+}
+
 const appSource = fs.readFileSync('src/ui/app.ts', 'utf8');
 const body = keydownBody(appSource);
 
@@ -73,8 +84,24 @@ const body = keydownBody(appSource);
   const ids = SHORTCUTS.map((entry) => entry.id);
   const keys = SHORTCUTS.map((entry) => entry.key);
   check('ids and KeyboardEvent.key values are both unique',
-    new Set(ids).size === 3 && new Set(keys).size === 3,
+    entriesAreUnique(SHORTCUTS) && SHORTCUTS.length === 3,
     `ids=${ids.join(',')}, keys=${JSON.stringify(keys)}`);
+}
+
+{
+  const duplicatedKey = SHORTCUTS.map((entry, index) =>
+    index === 1 ? { ...entry, key: SHORTCUTS[0]!.key } : { ...entry });
+  const duplicatedId = SHORTCUTS.map((entry, index) =>
+    index === 1 ? { ...entry, id: SHORTCUTS[0]!.id } : { ...entry });
+  check('control: a duplicated key or id fails the same uniqueness predicate',
+    entriesAreUnique(SHORTCUTS) && !entriesAreUnique(duplicatedKey) &&
+    !entriesAreUnique(duplicatedId) &&
+    duplicatedKey[1]!.key === duplicatedKey[0]!.key &&
+    duplicatedKey[1]!.id !== duplicatedKey[0]!.id &&
+    duplicatedId[1]!.id === duplicatedId[0]!.id,
+    `real=${entriesAreUnique(SHORTCUTS)}, dupKey=${entriesAreUnique(duplicatedKey)}, ` +
+    `dupId=${entriesAreUnique(duplicatedId)}, ` +
+    `keys=${JSON.stringify(duplicatedKey.map((entry) => entry.key))}`);
 }
 
 {
@@ -155,9 +182,127 @@ const body = keydownBody(appSource);
   const source = fs.readFileSync('src/ui/shortcuts.ts', 'utf8');
   const forbidden = ['document', 'window', 'addEventListener', '//', '/*'];
   const hits = forbidden.filter((token) => source.includes(token));
+  const typeImport = "import type { MessageKey } from './i18n.js';";
+  const bodySource = source.replace(typeImport, '');
   check('the catalogue touches no DOM or browser state and carries no comments',
-    hits.length === 0 && source.trimStart().startsWith('export type ShortcutId'),
-    `hits=${JSON.stringify(hits)}`);
+    hits.length === 0 && source.startsWith(typeImport) &&
+    bodySource.trimStart().startsWith('export type ShortcutId'),
+    `hits=${JSON.stringify(hits)}, typeOnlyImport=${source.startsWith(typeImport)}`);
+}
+
+{
+  const rows = SHORTCUTS.map((entry) => `${entry.id}|${entry.labels.join(',')}`).join(';');
+  check('every row names its command through catalog keys, in dispatch order',
+    rows === 'capture.toggle|toolbar.start,toolbar.stop;view.fit|toolbar.fit;' +
+      'cursors.clear|shortcuts.clearCursors',
+    `rows=${rows}`);
+}
+
+const SHORTCUT_KEY_VALUES: ReadonlyArray<readonly [MessageKey, readonly [string, string, string, string]]> = [
+  ['settings.shortcuts', ['Keyboard shortcuts', '键盘快捷键', 'Горячие клавиши', 'Raccourcis clavier']],
+  ['shortcuts.title', ['Keyboard shortcuts', '键盘快捷键', 'Горячие клавиши', 'Raccourcis clavier']],
+  ['shortcuts.close', ['Close', '关闭', 'Закрыть', 'Fermer']],
+  ['shortcuts.clearCursors', ['Clear cursors', '清除光标', 'Сбросить курсоры', 'Effacer les curseurs']],
+];
+
+const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = [
+  ['en', (key) => en[key]],
+  ['zh-CN', (key) => zhCN[key]],
+  ['ru', (key) => ru[key]],
+  ['fr', (key) => fr[key]],
+];
+
+{
+  const drift: string[] = [];
+  for (let index = 0; index < CATALOGS.length; index += 1) {
+    const locale = CATALOGS[index]![0];
+    const lookup = CATALOGS[index]![1];
+    for (const [key, values] of SHORTCUT_KEY_VALUES) {
+      const actual = lookup(key);
+      if (actual !== values[index]) drift.push(`${locale}:${key}=${JSON.stringify(actual)}`);
+    }
+  }
+  check('all four catalogs carry the four reference keys with their pinned values',
+    drift.length === 0 && SHORTCUT_KEY_VALUES.every(([key]) => en[key] !== undefined),
+    drift.length === 0 ? `${CATALOGS.length} catalogs x ${SHORTCUT_KEY_VALUES.length} keys match`
+      : drift.join('; '));
+}
+
+{
+  const texts = SHORTCUTS.map((entry) => shortcutActionText(entry));
+  check('the dialog action text joins the labeled catalog keys with the two-label separator',
+    texts.join(' | ') === 'Start / Stop | Fit | Clear cursors' &&
+    SHORTCUTS[0]!.labels.length === 2 && t('toolbar.start') === 'Start',
+    `texts=${texts.join(' | ')}`);
+}
+
+{
+  const swapped: ShortcutEntry = { ...SHORTCUTS[0]!, labels: ['toolbar.stop', 'toolbar.start'] };
+  check('control: a swapped label pair does not reproduce the pinned action text',
+    shortcutActionText(swapped) === 'Stop / Start' &&
+    shortcutActionText(swapped) !== shortcutActionText(SHORTCUTS[0]!),
+    `swapped=${shortcutActionText(swapped)}, real=${shortcutActionText(SHORTCUTS[0]!)}`);
+}
+
+const DIALOG_NEEDLES: readonly string[] = [
+  "document.createElement('dialog')",
+  "'shortcuts-dialog'",
+  "'aria-labelledby'",
+  "'shortcuts-title'",
+  'showModal()',
+  "addEventListener('cancel'",
+  'event.target !== this.dialog',
+  'preventDefault()',
+  'focus({ preventScroll: true })',
+  'this.invoker',
+  "t('shortcuts.title')",
+  "t('shortcuts.close')",
+  'shortcutActionText(entry)',
+  "createElement('kbd')",
+  "createElement('li')",
+];
+
+const DIALOG_FORBIDDEN: readonly string[] = [
+  'document.addEventListener',
+  'window.addEventListener',
+  'innerHTML',
+];
+
+function missingDialogNeedles(source: string): string[] {
+  return DIALOG_NEEDLES.filter((needle) => !source.includes(needle));
+}
+
+function forbiddenDialogTokens(source: string): string[] {
+  return DIALOG_FORBIDDEN.filter((needle) => source.includes(needle));
+}
+
+{
+  const source = fs.readFileSync('src/ui/shortcutsDialog.ts', 'utf8');
+  const missing = missingDialogNeedles(source);
+  const forbidden = forbiddenDialogTokens(source);
+  const comments = ['//', '/*'].filter((token) => source.includes(token));
+  check('the dialog is one persistent native modal with its listeners bound in the constructor',
+    missing.length === 0 && forbidden.length === 0 && comments.length === 0,
+    `missing=${JSON.stringify(missing)}, forbidden=${JSON.stringify(forbidden)}, ` +
+    `comments=${JSON.stringify(comments)}`);
+}
+
+{
+  const source = fs.readFileSync('src/ui/shortcutsDialog.ts', 'utf8');
+  const mutated = `${source}\ndocument.addEventListener('keydown', () => {});\n`;
+  check('control: a document-level listener is detected by the same negative predicate',
+    mutated !== source && forbiddenDialogTokens(mutated).length === 1 &&
+    forbiddenDialogTokens(source).length === 0,
+    `mutated=${forbiddenDialogTokens(mutated).length}, real=${forbiddenDialogTokens(source).length}`);
+}
+
+{
+  const source = fs.readFileSync('src/ui/shortcutsDialog.ts', 'utf8');
+  const mutated = source.replace('showModal()', 'show()');
+  check('control: dropping showModal() is detected by the same needle predicate',
+    mutated !== source && missingDialogNeedles(mutated).includes('showModal()') &&
+    missingDialogNeedles(source).length === 0,
+    `mutatedMissing=${missingDialogNeedles(mutated).length}, realMissing=${missingDialogNeedles(source).length}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
