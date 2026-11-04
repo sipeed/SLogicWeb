@@ -496,7 +496,7 @@ export class SelectControl extends EventTarget {
     this.close();
     if (this.el.isConnected) this.trigger.focus();
     if (!changed) return;
-    const scope = this.el.closest('.panel-host');
+    const scope = this.el.closest('.side-page');
     this.dispatchEvent(new Event('change', { bubbles: true }));
     if (!this.trigger.isConnected) {
       const replacement = scope?.querySelector<HTMLElement>(

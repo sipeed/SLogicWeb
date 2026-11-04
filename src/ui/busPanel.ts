@@ -314,10 +314,6 @@ export class BusPanel {
 
   constructor(private readonly root: HTMLElement, private readonly cb: BusPanelCallbacks) {}
 
-  set hidden(on: boolean) {
-    this.root.hidden = on;
-  }
-
   /** Open the editor on an existing bus (from its channel-list cell). */
   edit(bus: BusViewState): void {
     this.editing = bus.id;

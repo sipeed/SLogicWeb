@@ -59,6 +59,13 @@ export const zhCN: Messages = {
   'toolbar.sidebarNone': '无侧边栏',
 
   // ---------------------------------------------------------- side panel
+  'sidebar.pageCapture': '采集',
+  'sidebar.pageCursors': '光标',
+  'sidebar.pageDecoders': '解码器',
+  'sidebar.pagesLabel': '侧栏页面',
+  'sidebar.collapse': '收起侧栏',
+  'sidebar.expand': '展开侧栏',
+  'sidebar.cursorsPlaceholder': '光标测量将在下一步迁移到此页。',
   'panel.resizeLabel': '调整侧边栏宽度',
   'panel.resizeTitle': '拖动以调整侧边栏宽度',
 

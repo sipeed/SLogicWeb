@@ -1099,6 +1099,7 @@ html[data-theme="light"] .grid-canvas { mix-blend-mode: darken; }
 /* ---------------------------------------------------------------- side panel */
 
 #side-panel {
+  position: relative;
   width: var(--panel-effective-w);
   min-width: var(--panel-effective-w);
   background: var(--bg20);
@@ -1106,6 +1107,44 @@ html[data-theme="light"] .grid-canvas { mix-blend-mode: darken; }
   overflow-y: auto;
 }
 #side-panel.hidden { display: none; }
+
+.side-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: inherit;
+  border-bottom: 1px solid var(--border-low);
+}
+.side-pages { flex: 1; min-width: 0; }
+.side-pages .seg { min-width: 0; padding: 2px 2px; font-size: 11px; line-height: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.side-page { min-width: 0; }
+#side-panel > .side-page[hidden] { display: none; }
+.side-body { display: contents; }
+.side-placeholder { margin: 0; padding: 10px 12px; }
+
+.side-assistant {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg20);
+}
+#side-panel > .side-assistant[hidden] { display: none; }
+#side-panel[data-assistant="true"] { overflow: hidden; }
+
+.side-expand {
+  position: absolute;
+  top: 8px;
+  right: 0;
+  z-index: 5;
+}
+#main > .side-expand[hidden] { display: none; }
 
 #panel-resizer {
   position: absolute;
@@ -1608,9 +1647,10 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
    host's gap, never margins. Padding/gap live inside the scrollable panel - no shell
    metric moves (theme-selftest pins the freeze). */
 :is(html[data-theme="dark"], html[data-theme="light"]) #side-panel { background: var(--background); }
-:is(html[data-theme="dark"], html[data-theme="light"]) .panel-host {
+:is(html[data-theme="dark"], html[data-theme="light"]) .side-page {
   display: flex; flex-direction: column; gap: 8px; padding: 8px;
 }
+:is(html[data-theme="dark"], html[data-theme="light"]) .side-assistant { background: var(--background); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .panel-head,
 :is(html[data-theme="dark"], html[data-theme="light"]) .panel-section,
 :is(html[data-theme="dark"], html[data-theme="light"]) .advanced {
@@ -1783,15 +1823,8 @@ html[data-theme="light"] .uictrl-card-actions .mini:hover { background: var(--mu
 
 /* ---------------------------------------------------------------- AI assistant */
 
-/* The assistant fills the side panel as a column: chrome on top, the log scrolls, the
-   composer stays at the bottom. The panel itself stops scrolling so the composer never
-   leaves the screen. Both hosts toggle the `hidden` attribute, which any `display` rule
-   overrides - including the themed `.panel-host { display: flex }` card stack, whose
-   :is(html[...]) prefix outranks a plain `.panel-host[hidden]`. The id keeps this on top. */
-#side-panel > .panel-host[hidden], #side-panel > .assistant-panel[hidden] { display: none; }
-#side-panel.assistant-mode { display: flex; flex-direction: column; overflow: hidden; }
-#side-panel.assistant-mode.hidden { display: none; }
 .assistant-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.assistant-panel[hidden] { display: none; }
 .assistant-chrome {
   flex: 0 1 auto; max-height: 60%; overflow-y: auto;
   display: flex; flex-direction: column; gap: 8px; padding: 8px;
@@ -1924,11 +1957,7 @@ html[data-theme="light"] .uictrl-card-actions .mini:hover { background: var(--mu
 
 /* ---------------------------------------------------------------- parallel bus (ADC) */
 
-/* The bus section has its own host below the analyzer panel's; `contents` lets its
-   head and sections join that host's card stack, and the host drops its top padding so
-   the two stacks read as one. */
 .bus-panel { display: contents; }
-:is(html[data-theme="dark"], html[data-theme="light"]) .bus-host { padding-top: 0; }
 .bus-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 11px; min-width: 0; }
 .bus-row .bus-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bus-sq { flex: none; width: 10px; height: 10px; border-radius: 2px; }

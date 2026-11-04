@@ -743,21 +743,43 @@ const assistantShownBody = assistantShownStart >= 0 && assistantShownEnd > assis
   ? app.slice(assistantShownStart, assistantShownEnd)
   : '';
 const assistantShownSource = assistantShownBody.includes('s.visible && s.assistant');
+const assistantToggleAt = app.indexOf('private toggleAssistant(');
+const assistantToggleBody = methodBody('private toggleAssistant(');
+const spliceToggle = (body: string): string => assistantToggleAt >= 0 && assistantToggleBody.length > 0
+  ? app.slice(0, assistantToggleAt) + body + app.slice(assistantToggleAt + assistantToggleBody.length)
+  : '';
+const assistantToggleShape = (body: string): boolean => {
+  const showingAt = body.indexOf('const showing = this.assistantShown();');
+  const applyAt = body.indexOf('this.applySidebar(');
+  const closeAt = body.indexOf('nextAssistantState(this.sidebar)');
+  const openAt = body.indexOf('showAssistant(this.sidebar)');
+  const focusAt = body.indexOf('if (!showing) this.assistantPanel?.focusInput();');
+  return showingAt >= 0 && closeAt > showingAt && openAt > showingAt &&
+    applyAt > showingAt && applyAt < openAt && applyAt < closeAt && focusAt > openAt;
+};
+const assistantToggleSpread = assistantToggleBody.replace(
+  'showAssistant(this.sidebar)', '{ ...this.sidebar, assistant: true }');
+const assistantToggleSpreadApp = spliceToggle(assistantToggleSpread);
+const spreadKeepsWholeAppNeedle = assistantToggleSpreadApp.includes('showAssistant(this.sidebar)');
+const spreadStaysGreen = assistantToggleSpread !== assistantToggleBody &&
+  spreadKeepsWholeAppNeedle && assistantToggleShape(assistantToggleSpread);
 const assistantWiring = [
   "this.el.assistant.addEventListener('click'",
   'this.toggleAssistant();',
-  'this.applySidebar(nextAssistantState(this.sidebar));',
-  'if (this.sidebar.assistant) this.assistantPanel?.focusInput();',
   "this.el.assistant.setAttribute('aria-pressed', String(this.assistantShown()))",
-  'const assistant = this.assistantShown();',
+  'if (this.assistantShown()) {',
   "this.el.assistant.setAttribute('aria-label', t('toolbar.assistantTitle'))",
 ].filter((needle) => !app.includes(needle));
 check(
   'the assistant button is a toggle: aria-pressed and the visible flag come from one shown derivation',
   assistantMarkup.includes('aria-pressed="false"') && assistantMarkup.includes('aria-controls="side-panel"') &&
     assistantMarkup.includes('data-i18n-title="toolbar.assistantTitle"') &&
-    assistantWiring.length === 0 && assistantShownSource,
-  `missing=${JSON.stringify(assistantWiring)}, shownSource=${assistantShownSource}`,
+    assistantWiring.length === 0 && assistantShownSource &&
+    assistantToggleShape(assistantToggleBody) && !spreadStaysGreen,
+  `missing=${JSON.stringify(assistantWiring)}, shownSource=${assistantShownSource}, ` +
+  `toggle=${assistantToggleShape(assistantToggleBody)}, ` +
+  `spreadKeepsWholeAppNeedle=${spreadKeepsWholeAppNeedle}, ` +
+  `sliceCatchesSpread=${!assistantToggleShape(assistantToggleSpread)}`,
 );
 
 const disclosureNeedles = [

@@ -72,9 +72,11 @@ import {
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
 import {
-  DEFAULT_SIDEBAR_STATE, hideSidebar, selectSidebarPage,
-  toggleAssistant as nextAssistantState, type SidebarState,
+  DEFAULT_SIDEBAR_STATE, hideSidebar, selectSidebarPage, showAssistant,
+  toggleAssistant as nextAssistantState, toggleSidebarVisible,
+  type SidebarPage, type SidebarState,
 } from './sidebar.js';
+import { SidebarHost } from './sidebarHost.js';
 import { shortcutIdFor } from './shortcuts.js';
 import { ShortcutsDialog } from './shortcutsDialog.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
@@ -183,15 +185,14 @@ export class App {
   private readonly scopeScaleAnimations = new Map<string, { from: number; to: number; startedAt: number }>();
   private scopeWheelPersist: number | null = null;
   private readonly channelList: ChannelList;
-  private readonly capturePanel: CapturePanel;
-  private readonly analyzerPanel: AnalyzerPanel;
-  /** Holds the device and analyzer panels, which re-render by clearing it. */
-  private readonly panelHost: HTMLDivElement;
+  private capturePanel!: CapturePanel;
+  private analyzerPanel!: AnalyzerPanel;
+  private readonly sidebarHost: SidebarHost;
   /** Built on first open and never cleared: it owns a conversation and a draft. */
   private assistantPanel: AssistantPanel | null = null;
   /** Resolved when the running capture stops (the assistant waits on a capture). */
   private captureWaiters: (() => void)[] = [];
-  private readonly busPanel: BusPanel;
+  private busPanel!: BusPanel;
   /** Parallel-bus (ADC) views, drawn as analog rows above the channels. */
   private busViews: BusViewState[] = [];
   private nextBus = 0;
@@ -471,47 +472,14 @@ export class App {
       onBusTrigger: (id, kind, volts) => this.configureAnalogTrigger(id, kind, volts),
     });
 
-    const panelHost = document.createElement('div');
-    // The class hooks the dark theme's card stack (style.css): a flex column with a gap,
-    // so the cards space without margins. Under the default theme it styles nothing.
-    panelHost.className = 'panel-host';
-    this.el.side.appendChild(panelHost);
-    this.panelHost = panelHost;
-    this.capturePanel = new CapturePanel(panelHost, {
-      onSettings: (s) => this.applySettings(s),
-      onToggleChannel: (i, on) => this.setChannelEnabled(i, on),
-      onToggleAnalog: (start) => this.toggleAnalog(start),
-      onChannelWidth: (n) => this.setChannelWidth(n),
-      onUsbControl: (command) => this.usbControl(command),
-      onRemoveCursor: (id) => this.removeCursor(id),
-      onFocusCursor: (id) => this.focusCursor(id),
-      onAddCursorDistance: () => this.addDistanceRow(),
-      onRemoveCursorDistance: (rowId) => this.removeDistanceRow(rowId),
-      onPickCursorDistance: (rowId, side, cursorId) =>
-        this.pickDistanceCursor(rowId, side, cursorId),
-      onAddCursorEdge: () => this.addEdgeRow(),
-      onRemoveCursorEdge: (rowId) => this.removeEdgeRow(rowId),
-      onPickCursorEdge: (rowId, side, cursorId) => this.pickEdgeCursor(rowId, side, cursorId),
-      onPickCursorEdgeChannel: (rowId, channel) => this.pickEdgeChannel(rowId, channel),
+    this.sidebarHost = new SidebarHost(this.el.side, {
+      mount: (page, container) => this.mountSidebarPage(page, container),
+      select: (page) => this.selectPage(page),
+      collapse: () => this.handleCollapse(),
+      expand: () => this.handleExpand(),
     });
-    this.analyzerPanel = new AnalyzerPanel(panelHost, {
-      onAttach: (id, ch, opts) => void this.attachAnalyzer(id, ch, opts),
-      onRemove: (id) => this.removeAnalyzer(id),
-      onRedecode: (id) => void this.runDecode(id),
-      onCancel: () => this.abort?.abort(),
-    });
-    // Its own host: AnalyzerPanel clears panelHost whenever it re-renders itself (on
-    // decoder hydration, for one), which would wipe a section appended after it.
-    const busHost = document.createElement('div');
-    busHost.className = 'panel-host bus-host';
-    busHost.hidden = true;
-    this.el.side.appendChild(busHost);
-    this.busPanel = new BusPanel(busHost, {
-      onAdd: (cfg) => this.addBus(cfg),
-      onEdit: (id) => this.editBus(id),
-      onUpdate: (id, cfg) => this.updateBus(id, cfg),
-      onRemove: (id) => this.removeBus(id),
-    });
+    this.sidebarHost.containerFor('capture');
+    this.sidebarHost.containerFor('decoders');
 
     this.wireToolbar();
     this.wirePlot();
@@ -3240,8 +3208,11 @@ export class App {
 
   /** The toolbar shortcut to the assistant: open it, or close it and land on the page the user had. */
   private toggleAssistant(): void {
-    this.applySidebar(nextAssistantState(this.sidebar));
-    if (this.sidebar.assistant) this.assistantPanel?.focusInput();
+    const showing = this.assistantShown();
+    this.applySidebar(showing
+      ? nextAssistantState(this.sidebar)
+      : showAssistant(this.sidebar));
+    if (!showing) this.assistantPanel?.focusInput();
   }
 
   private settingsItems(): SettingsMenuItem[] {
@@ -3386,7 +3357,10 @@ export class App {
 
   private selectPanel(p: 'device' | 'analyzers' | 'assistant' | null): void {
     if (p === 'assistant') {
-      if (!this.sidebar.assistant) this.applySidebar(nextAssistantState(this.sidebar));
+      if (!this.assistantShown()) {
+        this.applySidebar(showAssistant(this.sidebar));
+        this.assistantPanel?.focusInput();
+      }
       return;
     }
     if (p === null) {
@@ -3394,6 +3368,72 @@ export class App {
       return;
     }
     this.applySidebar(selectSidebarPage(this.sidebar, p === 'device' ? 'capture' : 'decoders'));
+  }
+
+  private selectPage(page: SidebarPage): void {
+    this.applySidebar(selectSidebarPage(this.sidebar, page));
+  }
+
+  private handleCollapse(): void {
+    this.applySidebar(toggleSidebarVisible(this.sidebar));
+    this.sidebarHost.focusAfterCollapse();
+  }
+
+  private handleExpand(): void {
+    this.applySidebar(toggleSidebarVisible(this.sidebar));
+    if (this.assistantShown()) this.assistantPanel?.focusInput();
+    else this.sidebarHost.focusAfterExpand();
+  }
+
+  private mountSidebarPage(page: SidebarPage, container: HTMLElement): void {
+    if (page === 'capture') {
+      this.capturePanel = new CapturePanel(container, {
+        onSettings: (s) => this.applySettings(s),
+        onToggleChannel: (i, on) => this.setChannelEnabled(i, on),
+        onToggleAnalog: (start) => this.toggleAnalog(start),
+        onChannelWidth: (n) => this.setChannelWidth(n),
+        onUsbControl: (command) => this.usbControl(command),
+        onRemoveCursor: (id) => this.removeCursor(id),
+        onFocusCursor: (id) => this.focusCursor(id),
+        onAddCursorDistance: () => this.addDistanceRow(),
+        onRemoveCursorDistance: (rowId) => this.removeDistanceRow(rowId),
+        onPickCursorDistance: (rowId, side, cursorId) =>
+          this.pickDistanceCursor(rowId, side, cursorId),
+        onAddCursorEdge: () => this.addEdgeRow(),
+        onRemoveCursorEdge: (rowId) => this.removeEdgeRow(rowId),
+        onPickCursorEdge: (rowId, side, cursorId) => this.pickEdgeCursor(rowId, side, cursorId),
+        onPickCursorEdgeChannel: (rowId, channel) => this.pickEdgeChannel(rowId, channel),
+      });
+      return;
+    }
+    if (page === 'decoders') {
+      const analyzerRoot = document.createElement('div');
+      analyzerRoot.className = 'side-body';
+      const busRoot = document.createElement('div');
+      busRoot.className = 'side-body';
+      container.append(analyzerRoot, busRoot);
+      this.analyzerPanel = new AnalyzerPanel(analyzerRoot, {
+        onAttach: (id, ch, opts) => void this.attachAnalyzer(id, ch, opts),
+        onRemove: (id) => this.removeAnalyzer(id),
+        onRedecode: (id) => void this.runDecode(id),
+        onCancel: () => this.abort?.abort(),
+      });
+      this.busPanel = new BusPanel(busRoot, {
+        onAdd: (cfg) => this.addBus(cfg),
+        onEdit: (id) => this.editBus(id),
+        onUpdate: (id, cfg) => this.updateBus(id, cfg),
+        onRemove: (id) => this.removeBus(id),
+      });
+      return;
+    }
+    this.renderCursorsPlaceholder(container);
+  }
+
+  private renderCursorsPlaceholder(container: HTMLElement): void {
+    const note = document.createElement('p');
+    note.className = 'panel-note side-placeholder';
+    note.textContent = t('sidebar.cursorsPlaceholder');
+    container.replaceChildren(note);
   }
 
   /** Re-render every string in the shell after a locale change. */
@@ -3519,32 +3559,29 @@ export class App {
   }
 
   private syncSidebar(): void {
-    const assistant = this.assistantShown();
-    this.el.side.classList.toggle('hidden', !this.sidebar.visible);
+    this.sidebarHost.show(this.sidebar);
     this.resizer.setHidden(!this.sidebar.visible);
     this.renderToolbarState();
-    this.el.side.classList.toggle('assistant-mode', assistant);
-    this.panelHost.hidden = assistant;
-    this.busPanel.hidden = !this.decodersPageShown();
-    if (this.assistantPanel) this.assistantPanel.el.hidden = !assistant;
   }
 
   private renderSidebarContent(): void {
     if (!this.sidebar.visible) return;
-    if (this.sidebar.assistant) {
+    if (this.assistantShown()) {
       // The assistant is mounted once and only shown or hidden: re-rendering it on every
       // state change would drop a streaming answer, a pending approval and the draft.
       if (!this.assistantPanel) {
         this.assistantPanel = new AssistantPanel(this.assistantHost());
         this.assistantPanel.el.hidden = false;
-        this.el.side.appendChild(this.assistantPanel.el);
+        this.sidebarHost.assistantLayer().appendChild(this.assistantPanel.el);
         this.assistantPanel.render();
       }
       return;
     }
 
-    const host = this.panelHost;
-    host.replaceChildren();
+    if (this.sidebar.page === 'cursors') {
+      this.renderCursorsPlaceholder(this.sidebarHost.containerFor('cursors'));
+      return;
+    }
     if (this.sidebar.page === 'capture') {
       this.capturePanel.render({
         settings: this.settings,
@@ -3583,21 +3620,21 @@ export class App {
         loopMetrics: this.running && this.captureIsLoop ? this.computeLoopMetrics() : null,
         repeatMissed: this.repeatMissed,
       });
-    } else {
-      this.analyzerPanel.render({
-        channels: this.channels.slice(0, this.displayChannelCount()),
-        analyzers: this.analyzers,
-        captureChannels: this.captureStore.channelCount,
-        hasCapture: this.captureStore.length > 0,
-        warm: this.decodeWarm,
-        busy: this.decodeBusy,
-      });
-      this.busPanel.render({
-        buses: this.busViews, channelCount: this.displayChannelCount(),
-        testMode: this.settings.testMode,
-        captureLocked: this.stopping,
-      });
+      return;
     }
+    this.analyzerPanel.render({
+      channels: this.channels.slice(0, this.displayChannelCount()),
+      analyzers: this.analyzers,
+      captureChannels: this.captureStore.channelCount,
+      hasCapture: this.captureStore.length > 0,
+      warm: this.decodeWarm,
+      busy: this.decodeBusy,
+    });
+    this.busPanel.render({
+      buses: this.busViews, channelCount: this.displayChannelCount(),
+      testMode: this.settings.testMode,
+      captureLocked: this.stopping,
+    });
   }
 
   private primaryAction(): void {

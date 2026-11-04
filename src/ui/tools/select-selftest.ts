@@ -470,13 +470,13 @@ check(
   const focusLookup = '`.select-trigger[data-select-key="${CSS.escape(this.key)}"]`';
   const dispatchIndex = src.indexOf("this.dispatchEvent(new Event('change'");
   const escapeIndex = src.indexOf('CSS.escape(this.key)');
-  const scopedFocus = src.includes("this.el.closest('.panel-host')") &&
+  const scopedFocus = src.includes("this.el.closest('.side-page')") &&
     src.includes(focusLookup) &&
     dispatchIndex >= 0 && escapeIndex > dispatchIndex;
   check(
     'change is emitted before a scoped, CSS.escape-quoted stable-key focus lookup',
     scopedFocus,
-    `panelScope=${src.includes("this.el.closest('.panel-host')")}, lookup=${src.includes(focusLookup)}, ` +
+    `panelScope=${src.includes("this.el.closest('.side-page')")}, lookup=${src.includes(focusLookup)}, ` +
     `dispatch@${dispatchIndex}, escape@${escapeIndex}`,
   );
 

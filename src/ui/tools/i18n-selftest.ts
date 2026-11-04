@@ -908,6 +908,9 @@ const baseSettings: CaptureSettings = {
     'channels.resetName',
     'channels.triggerMode', 'channels.cancel',
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',
+    'sidebar.pageCapture', 'sidebar.pageCursors', 'sidebar.pageDecoders',
+    'sidebar.pagesLabel',
+    'sidebar.collapse', 'sidebar.expand', 'sidebar.cursorsPlaceholder',
     'analyzerPanel.decoderSearchLabel',
     'bus.defaultName',
     'capturePanel.channelWidth', 'capturePanel.analog', 'capturePanel.analogCell',
@@ -941,13 +944,17 @@ const baseSettings: CaptureSettings = {
     'diagnostic.render.contextLost',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
+  const enSpellings: readonly { locale: string; key: keyof Messages }[] = [
+    { locale: 'fr', key: 'sidebar.pageCapture' },
+  ];
   const bad: string[] = [];
   for (const l of LOCALES) {
     if (l === 'en') continue;
     const dict = dicts[l];
     if (!dict) { bad.push(`${l}: no catalog`); continue; }
     for (const k of probes) {
-      if (dict[k] === en[k]) bad.push(`${l}:${k} is still English`);
+      const allowed = enSpellings.some((entry) => entry.locale === l && entry.key === k);
+      if (dict[k] === en[k] && !allowed) bad.push(`${l}:${k} is still English`);
     }
   }
   check('each locale actually translates the salient probe keys',
