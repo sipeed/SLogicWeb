@@ -19,10 +19,11 @@
  * - Locale state is module-level with a subscriber set; panels do NOT subscribe -
  *   they call t() while rebuilding in render(), and App runs one re-render pass on
  *   change (re-render = clear and rebuild, so nothing stale survives).
- * - Persistence is localStorage['logicweb.lang'] [CHOSEN]; a supported stored value
- *   wins, otherwise the browser's language preferences are matched, otherwise 'en'.
- *   Only an explicit pick writes storage: the stored locale is read by initLocale()
- *   at boot (never at module evaluation), and the boot switch does not persist.
+ * - Persistence is localStorage['logicweb.lang'] [CHOSEN]. An explicit pick owns that
+ *   record and a stored shipping locale wins; without one the browser's language
+ *   preferences are matched (exactly equal tag, then primary subtag) and 'en' is the
+ *   last resort. initLocale() reads the record at boot (never at module evaluation)
+ *   and its own switch does not persist.
  * - The module is node-safe at top level (the tools/ self-test bundles it with
  *   --platform=node): module evaluation touches neither storage nor the DOM;
  *   every document/localStorage touch point sits inside a function.
@@ -249,8 +250,8 @@ function storage(): Storage | null {
 
 /**
  * The active locale. Always a locale whose catalog is in DICTS (the
- * load-before-commit invariant); module evaluation keeps the mandated `en`
- * default and initLocale() promotes the persisted choice once it has loaded.
+ * load-before-commit invariant); module evaluation keeps the `en` default and
+ * initLocale() promotes the stored or browser-detected choice once it has loaded.
  */
 let current: Locale = 'en';
 

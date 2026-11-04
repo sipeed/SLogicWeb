@@ -358,14 +358,21 @@ for i18next in a tree whose only runtime dependency is pyodide.
     --platform=node --outfile=/tmp/i18n-selftest.mjs && node /tmp/i18n-selftest.mjs
   ```
 
-- **Default is English, deliberately not the browser's language** - the choice is only
-  ever the user's explicit one, persisted in localStorage['logicweb.lang'] [CHOSEN];
-  absent or unknown stored values mean 'en'. The stored locale is read by
+- **The default locale follows the browser unless the user has picked one.** With no
+  usable localStorage['logicweb.lang'] [CHOSEN] record, the boot locale is the first
+  entry of the browser's preference chain (`navigator.languages`, falling back to
+  `navigator.language`) that matches a shipping locale - an exactly equal tag first,
+  then its primary subtag (`fr-FR` -> `fr`, `en-GB` -> `en`, `zh-TW` -> `zh-CN` because
+  there is one Chinese catalog) - and `en` only when nothing matches. Only an explicit
+  pick writes storage: the boot detection does not persist, so a user who never chose
+  keeps following the browser and one who chose is fixed to that choice. A stored value
+  that is no longer a shipping locale counts as no record. The record is read by
   `initLocale()` at boot, never at module evaluation.
 - **The non-English catalogs are code-split, not shipped in the entry chunk.** `en`
   stays statically imported as the fallback, but zh-CN/ru/fr sit behind literal
   `import()` specifiers in the `LOADERS` registry (`i18n.ts`) and reach the browser
-  only when that language is selected - a menu pick or a persisted preference.
+  only when that language is selected - a menu pick, a stored preference, or the
+  browser-language default.
   `vite build` emits one chunk per locale at the **dist root** (`dist/zh-CN-*.js`,
   `ru-*.js`, `fr-*.js`), not under `assets/`: `inlineEntryForFileOpen` inlines the
   entry script into `index.html` in every build, so a relative dynamic-import
@@ -403,19 +410,20 @@ for i18next in a tree whose only runtime dependency is pyodide.
   ordering landed. `current` never names a locale whose catalog is absent from
   `DICTS` (the load-before-commit invariant), and `t()` / `applyStaticI18n` keep
   reading `DICTS` synchronously with English as the constructed fallback.
-  `initLocale()` preloads the persisted catalog before `new App()` so the first
-  render paints in it; `main.ts` boots through an async IIFE because Vite's default
-  target rejects top-level await. `App.debug.setLocale` returns that promise now, so
-  scripts must `await logicweb.debug.setLocale('fr')`.
+  `initLocale()` preloads the stored-or-detected catalog before `new App()` so the
+  first render paints in it; `main.ts` boots through an async IIFE because Vite's
+  default target rejects top-level await. `App.debug.setLocale` returns that promise
+  now, so scripts must `await logicweb.debug.setLocale('fr')`.
 - **A failed catalog load is visible, not fatal.** The switch keeps the current
   locale, warns to the console, and leaves the persisted choice intact so a transient
   error retries next session; a menu pick surfaces it as `error.localeLoad` through
   the ordinary status-error path (the detail half renders the locale id, e.g.
   `...: fr`). A failure on a pick the user has already superseded stays silent.
-- **One known limitation: a persisted non-English locale can flash English static
-  chrome at boot.** Module scripts are deferred, so `data-i18n` markup can paint
-  before `initLocale()` resolves the persisted chunk; there is no fix short of
-  embedding the catalogs in the HTML.
+- **One known limitation: a non-English boot locale can flash English static chrome.**
+  That covers a stored preference and, since detection landed, every first visit whose
+  browser asks for zh-CN/ru/fr. Module scripts are deferred, so `data-i18n` markup can
+  paint before `initLocale()` resolves that chunk; there is no fix short of embedding
+  the catalogs in the HTML.
 - **The core is node-safe at module top level** (storage behind a typeof guard, no DOM
   touch outside functions) because the self-test bundles it for node.
 - **Session state that used to be pre-formatted English is structured data now.**
