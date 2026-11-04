@@ -991,7 +991,7 @@ function between(source: string, start: string, end: string): string {
 
   const adoptSource = between(appSource, 'private adoptCapture(', 'private save()');
   const startSource = between(appSource, 'private async startCapture(', 'private async stopCapture(');
-  const escapeSource = between(appSource, "if (e.key === 'Escape') {", 'this.dirty = true;');
+  const escapeSource = between(appSource, "if (shortcut === 'cursors.clear') {", 'this.dirty = true;');
   check('capture adoption clears every cursor while hardware start retains their samples',
     adoptSource.includes('this.clearCursors();') &&
     startSource.length > 0 && !startSource.includes('this.clearCursors();') &&

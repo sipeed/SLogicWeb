@@ -212,9 +212,9 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     ? app.slice(shortcutStart, shortcutEnd) : '';
   const dialogGuardIndex = shortcutBody.indexOf("closest('dialog[open]') !== null");
   const shortcutActions = [
-    shortcutBody.indexOf("e.key === 'f'"),
-    shortcutBody.indexOf("e.key === ' '"),
-    shortcutBody.indexOf("e.key === 'Escape'"),
+    shortcutBody.indexOf("if (shortcut === 'capture.toggle') {"),
+    shortcutBody.indexOf("else if (shortcut === 'view.fit') {"),
+    shortcutBody.indexOf("else if (shortcut === 'cursors.clear') {"),
   ];
   const dialogGuard = dialogGuardIndex >= 0 &&
     shortcutActions.every((index) => index > dialogGuardIndex);

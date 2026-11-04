@@ -70,6 +70,7 @@ import {
 } from './workspacePreferences.js';
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
+import { shortcutIdFor } from './shortcuts.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
 import { Overlay, paintMarkerChip, type HoverMeasurement } from './overlay.js';
 import { PanelResizer } from './panelResizer.js';
@@ -1186,16 +1187,15 @@ export class App {
       if (target instanceof HTMLElement &&
           (target.isContentEditable || target.closest('.select-field, .assistant-panel, .cursor-dist-popover') !== null)) return;
       if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;
-      if (e.key === 'f') {
+      const shortcut = shortcutIdFor(e.key);
+      if (shortcut === 'capture.toggle') {
+        e.preventDefault();
+        this.primaryAction();
+      } else if (shortcut === 'view.fit') {
         this.noteViewportIntent();
         this.stack.zoomToFit();
         this.dirty = true;
-      }
-      if (e.key === ' ') {
-        e.preventDefault();
-        this.primaryAction();
-      }
-      if (e.key === 'Escape') {
+      } else if (shortcut === 'cursors.clear') {
         if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return;
         this.releaseMarkerPointer();
         this.clearCursors();

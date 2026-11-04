@@ -133,7 +133,7 @@ const stack = fs.readFileSync('src/ui/waveformStack.ts', 'utf8');
     between(app, 'if (pinch && pointers.size >= 2)', '      if (dragging) {'),
     between(app, '      if (dragging) {', 'this.updateHover'),
     between(app, "this.el.axis.addEventListener('pointermove'", 'const axisEnd'),
-    between(app, "if (e.key === 'f')", "if (e.key === ' ')"),
+    between(app, "if (shortcut === 'view.fit') {", "} else if (shortcut === 'cursors.clear') {"),
     between(app, "must<HTMLButtonElement>('btn-fit').addEventListener('click'", "must<HTMLButtonElement>('btn-settings').addEventListener('click'"),
     between(app, 'setViewportSeconds: (a: number', 'setMarker:'),
     between(app, 'zoomToAnnotation: (analyzerIndex', 'snapshot:'),

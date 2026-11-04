@@ -115,10 +115,11 @@ const primaryRoutes = primaryBody.includes('if (this.stopping) return;') &&
   !primaryBody.includes('loadDemo');
 const clickDispatch = app.includes(
   "this.el.transport.addEventListener('click', () => this.primaryAction())");
-const spaceStart = app.indexOf("if (e.key === ' ') {");
+const spaceStart = app.indexOf("if (shortcut === 'capture.toggle') {");
 const spaceEnd = spaceStart >= 0 ? app.indexOf('\n      }', spaceStart) : -1;
 const spaceBody = spaceStart >= 0 && spaceEnd > spaceStart ? app.slice(spaceStart, spaceEnd) : '';
 const spaceDispatch = spaceBody.includes('this.primaryAction();') &&
+  spaceBody.includes('e.preventDefault();') &&
   !spaceBody.includes('startCapture') && !spaceBody.includes('stopCapture');
 check(
   'toolbar click and Space share one primary action preferring Stop, then Start',
