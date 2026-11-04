@@ -1314,6 +1314,17 @@ check('a capture start carries the channel metadata instead of rebuilding defaul
   startBody.includes('this.persistWorkspace();'),
   startBody.replace(/\s+/g, ' ').trim());
 
+const orderCarried = (body: string): boolean =>
+  body.includes('restoreOrder(this.order, this.channels.length)') &&
+  !body.includes('this.order = this.channels.map(');
+const orderWiring = orderCarried(deviceBody) && orderCarried(startBody) &&
+  app.split('this.order = this.channels.map((c) => c.index);').length === 2 &&
+  (app.split('private adoptCapture(')[1]?.split('private save(')[0] ?? '')
+    .includes('this.order = this.channels.map((c) => c.index);');
+check('both channel-model resize sites keep the display order as a permutation of the new count',
+  orderWiring,
+  `device=${orderCarried(deviceBody)}, start=${orderCarried(startBody)}, wiring=${orderWiring}`);
+
 const widthSetterBody = app.split('private setChannelWidth(channels: number): void')[1]
   ?.split('private afterChannelChange(')[0] ?? '';
 const afterMaskBody = app.split('private afterChannelChange(): void {')[1]?.split('\n  }')[0] ?? '';

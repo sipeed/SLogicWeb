@@ -96,7 +96,7 @@ function restoreChannels(value: unknown, fallbackChannelCount: ChannelCount): Pe
   return channels;
 }
 
-function restoreOrder(value: unknown, capacity: number): number[] {
+export function restoreOrder(value: unknown, capacity: number): number[] {
   const order: number[] = [];
   if (Array.isArray(value)) {
     for (const index of value) {

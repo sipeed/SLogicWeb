@@ -64,7 +64,7 @@ import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, set
 import { getMode, getTheme, onThemeChange, setMode, THEME_MODES, THEME_MODE_LABEL_KEYS,
   type ThemeId } from './theme.js';
 import {
-  analyzerStatesFrom, nextAnalyzerSequence, readWorkspaceSnapshot, serializeWorkspaceSnapshot,
+  analyzerStatesFrom, nextAnalyzerSequence, readWorkspaceSnapshot, restoreOrder, serializeWorkspaceSnapshot,
   WORKSPACE_SCHEMA_VERSION, writeWorkspaceSnapshot,
   type PersistedAnalyzer, type WorkspaceSnapshotV1,
 } from './workspacePreferences.js';
@@ -2263,7 +2263,7 @@ export class App {
     }
     if (this.store.length === 0 && max !== this.channels.length) {
       this.channels = carryChannelState(this.channels, max);
-      this.order = this.channels.map((c) => c.index);
+      this.order = restoreOrder(this.order, this.channels.length);
     }
     this.settings = clampSettings(
       { ...this.settings, channels: width, samplerate }, this.rateCeilings,
@@ -2308,7 +2308,7 @@ export class App {
       this.resetBusBuilds();
       const model = Math.max(cfg.channels, this.device?.maxChannels ?? this.channels.length);
       this.channels = carryChannelState(this.channels, model);
-      this.order = this.channels.map((c) => c.index);
+      this.order = restoreOrder(this.order, this.channels.length);
       this.reconcileEdgeChannels();
       this.persistWorkspace();
       for (const a of this.analyzers) {
