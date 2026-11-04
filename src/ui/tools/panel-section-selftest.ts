@@ -58,6 +58,90 @@ const mutateRule = (source: string, rule: string, replacement: string): string =
   return source.replace(new RegExp(escaped), replacement);
 };
 
+const MENTION = '.panel-section-body[hidden]';
+const THEME_SCOPE = /:is\(html\[data-theme=|html\[data-theme=/;
+
+interface CssRule {
+  selector: string;
+  body: string;
+}
+
+const collectRules = (source: string): CssRule[] => {
+  const text = source.replace(/\/\*[\s\S]*?\*\//g, '');
+  const out: CssRule[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    const open = text.indexOf('{', cursor);
+    if (open < 0) break;
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < text.length; i += 1) {
+      if (text[i] === '{') depth += 1;
+      else if (text[i] === '}') {
+        depth -= 1;
+        if (depth === 0) { close = i; break; }
+      }
+    }
+    if (close < 0) break;
+    const body = text.slice(open + 1, close);
+    if (body.includes('{')) {
+      out.push(...collectRules(body));
+    } else {
+      const boundary = Math.max(
+        text.lastIndexOf('}', open), text.lastIndexOf('{', open - 1), text.lastIndexOf(';', open));
+      out.push({
+        selector: text.slice(boundary + 1, open).replace(/\s+/g, ' ').trim(),
+        body: body.replace(/\s+/g, ' ').replace(/;\s*$/, '').trim(),
+      });
+    }
+    cursor = close + 1;
+  }
+  return out;
+};
+
+const mentionsBodyHidden = (rule: CssRule): boolean =>
+  rule.selector.includes(MENTION) || rule.body.includes(MENTION);
+
+const collapsedRules = (source: string): CssRule[] => collectRules(source).filter(mentionsBodyHidden);
+
+const PAIR: readonly CssRule[] = [
+  { selector: MENTION, body: 'display: none' },
+  { selector: HEAD_GAP_SELECTOR, body: 'margin-bottom: 0' },
+];
+
+interface PairReport {
+  count: number;
+  exact: boolean;
+  selectors: string[];
+}
+
+const pairReport = (source: string): PairReport => {
+  const found = collapsedRules(source);
+  return {
+    count: found.length,
+    exact: found.length === PAIR.length &&
+      PAIR.every((want, i) => found[i].selector === want.selector && found[i].body === want.body),
+    selectors: found.map((rule) => rule.selector),
+  };
+};
+
+const scopeOffences = (source: string): string[] =>
+  collapsedRules(source)
+    .filter((rule) => THEME_SCOPE.test(rule.selector) || rule.body.includes('!important'))
+    .map((rule) => rule.selector);
+
+const looseHeadGaps = (source: string): string[] =>
+  collectRules(source)
+    .filter((rule) => rule.selector.includes('.panel-section-head') &&
+      !rule.selector.includes(':has(') && !rule.selector.includes(MENTION) &&
+      /margin-bottom:\s*0/.test(rule.body))
+    .map((rule) => rule.selector);
+
+const conditionalGapFails = (source: string): boolean => {
+  const gap = collectRules(source).find((rule) => rule.selector === HEAD_GAP_SELECTOR);
+  return gap === undefined || looseHeadGaps(source).length > 0;
+};
+
 const sectionSource = tail(panel, 'export function section(title: string)');
 
 {
@@ -141,6 +225,71 @@ const sectionSource = tail(panel, 'export function section(title: string)');
   check('the assistant notice card is a head-without-body section, so the head keeps its own gap',
     noticeSource !== '' && headNoBody,
     `source=${JSON.stringify(noticeSource.replace(/\s+/g, ' ').slice(0, 200))}`);
+}
+
+{
+  const report = pairReport(css);
+  check('the collapsed contract is exactly two rules: the hidden display rule and the head-gap rule',
+    report.count === PAIR.length && report.exact,
+    `count=${report.count}, exact=${report.exact}, selectors=${JSON.stringify(report.selectors)}`);
+}
+
+{
+  const strippedDisplay = mutateRule(css, BODY_HIDDEN_RULE, '');
+  const strippedGap = mutateRule(css, HEAD_GAP_RULE, '');
+  const extraMention = pairReport(
+    `${css}\n:is(html[data-theme="dark"]) .panel-section-body[hidden] { display: flex; }\n`);
+  const noDisplay = pairReport(strippedDisplay);
+  const noGap = pairReport(strippedGap);
+  check('control: the pair guard fails for either missing rule and for a themed third mention',
+    noDisplay.count === 1 && noGap.count === 1 && extraMention.count === 3 &&
+    !noDisplay.exact && !noGap.exact && !extraMention.exact &&
+    strippedDisplay !== css && strippedGap !== css,
+    `noDisplay=${noDisplay.count}, noGap=${noGap.count}, extra=${extraMention.count}, ` +
+    `exact=${JSON.stringify([noDisplay.exact, noGap.exact, extraMention.exact])}`);
+}
+
+{
+  const offences = scopeOffences(css);
+  check('neither collapsed rule is theme-scoped or forced: no theme prefix and no !important',
+    collapsedRules(css).length === PAIR.length && offences.length === 0,
+    `rules=${collapsedRules(css).length}, offences=${JSON.stringify(offences)}`);
+}
+
+{
+  const themedDisplay = mutateRule(css, BODY_HIDDEN_RULE,
+    ':is(html[data-theme="dark"]) .panel-section-body[hidden] { display: none; }');
+  const themedGap = mutateRule(css, HEAD_GAP_RULE,
+    'html[data-theme="light"] .panel-section-head:has(+ .panel-section-body[hidden]) { margin-bottom: 0; }');
+  const forcedGap = mutateRule(css, HEAD_GAP_RULE,
+    '.panel-section-head:has(+ .panel-section-body[hidden]) { margin-bottom: 0 !important; }');
+  check('control: the scoping guard fails for a themed display rule, a themed gap rule and a forced gap',
+    scopeOffences(themedDisplay).length === 1 && scopeOffences(themedGap).length === 1 &&
+    scopeOffences(forcedGap).length === 1 && scopeOffences(css).length === 0 &&
+    themedDisplay !== css && themedGap !== css && forcedGap !== css,
+    `themedDisplay=${JSON.stringify(scopeOffences(themedDisplay))}, ` +
+    `themedGap=${JSON.stringify(scopeOffences(themedGap))}, ` +
+    `forcedGap=${JSON.stringify(scopeOffences(forcedGap))}`);
+}
+
+{
+  const gap = collectRules(css).find((rule) => rule.selector === HEAD_GAP_SELECTOR);
+  const loose = looseHeadGaps(css);
+  check('the head gap is dropped only through the hidden-sibling :has() guard, never unconditionally',
+    gap !== undefined && gap.selector.includes(':has(+ .panel-section-body[hidden])') && loose.length === 0,
+    `gapSelector=${JSON.stringify(gap ? gap.selector : '')}, loose=${JSON.stringify(loose)}`);
+}
+
+{
+  const unconditionalHead = `${css}\n.panel-section-head { margin-bottom: 0; }\n`;
+  const unguardedHas = mutateRule(css, HEAD_GAP_RULE,
+    '.panel-section-head:has(+ .panel-section-body) { margin-bottom: 0; }');
+  check('control: the conditional-gap guard fails for an unconditional zeroed head rule and an unguarded :has()',
+    conditionalGapFails(unconditionalHead) && conditionalGapFails(unguardedHas) &&
+    !conditionalGapFails(css) && unconditionalHead !== css && unguardedHas !== css,
+    `unconditionalHead=${conditionalGapFails(unconditionalHead)}, ` +
+    `unguardedHas=${conditionalGapFails(unguardedHas)}, ` +
+    `loose=${JSON.stringify(looseHeadGaps(unconditionalHead))}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
