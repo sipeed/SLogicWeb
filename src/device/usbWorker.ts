@@ -121,6 +121,16 @@ async function handle(message: QueuedCommand): Promise<void> {
       return;
     }
 
+    case 'updateTrigger': {
+      if (!device) throw new Error('updateTrigger before open');
+      // A retune is accepted while a one-shot matcher waits, and (continuous mode) after
+      // its first match until the stream is terminal. A false return cannot be delivered
+      // over the asynchronous worker port; the caller keeps the edit pending for the next
+      // acquisition, matching the pre-existing worker contract.
+      device.updateSoftwareTrigger?.(message.config);
+      return;
+    }
+
     case 'stop': {
       if (!device) throw new Error('stop before open');
       await device.stop();

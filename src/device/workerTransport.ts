@@ -178,6 +178,16 @@ export class WorkerSlogicDevice implements Device {
     }
   }
 
+  /**
+   * Retune the active matcher while it waits. Queued behind any in-flight command, so a
+   * start or stop never races it. A worker cannot answer synchronously; a retune that
+   * arrives after the match is refused there and the edit stays pending for the next run.
+   */
+  updateSoftwareTrigger(config: import('../data/softwareTrigger.js').SoftwareTriggerConfig): void {
+    if (this.stopped) return;
+    post(this.worker, { kind: 'updateTrigger', config });
+  }
+
   async stop(): Promise<void> {
     if (this.stopped) return;
     const stopped = this.waitFor('stopped', this.timeouts.stopTimeoutMs);

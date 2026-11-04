@@ -1682,3 +1682,33 @@ so its walk does not move. Three new offline checks pin this:
 
 The walk has not yet been run on a real 32U3. The hardware runs still to do are 50, 16 and 1400 MHz,
 including 1400 directly after an 800-base rate.
+
+## Addendum 2026-11-03 - the head is per model, and Emulation checks the whole stream
+
+HSync's `fix/slogic-capture` work established on hardware that the leading byte drop belongs
+to the model, not to the first transfer:
+
+| model | head bytes |
+|---|---|
+| SLogic16U3 | 4 |
+| SLogic32U3 (firmware S/N 202610120954+) | 0 |
+
+logicweb used to drop 4 bytes unconditionally. On a 32U3 that removed one whole sample (32ch),
+two samples (16ch) or four (8ch), so the Emulation counter started at 1, 2 or 4 instead of 0.
+That is the real explanation for the "intrinsic glitches near sample 14283" noted earlier in
+this file: the pattern is clean from counter 0 on both models. `headDropBytesForProductId`
+now picks the drop, and the self-test checks the pattern from counter 0 on both models.
+
+`src/device/emulationPattern.ts` turns the vendor's `build/bench/emulation.json` table into a
+full-stream checker (D0 first, counter = 16-bit, +1 per sample, the low three counter bits
+inverted; the 32U3 high half carries the plain and inverted low counter byte):
+
+- 4, 8, 16 ch: `~c0 ~c1 ~c2 c3 ...`
+- 32 ch (32U3 only): the same low half, plus `c0 ~c0 c1 ~c1 c2 ~c2 ~c3 c3 ~c4 c4 ~c5 c5 ~c6 c6 ~c7 c7`
+  on D16..D31. The 16U3 has no 32-channel rule; the checker says "not checked" there.
+
+The checker consumes **sink** bytes (after the head drop and `expandPacked`), carries a partial
+sample across chunk boundaries, and can pin the counter of the first sample. Pinning 0 is what
+makes a missing prefix detectable: without it, any suffix of the pattern is itself a valid
+pattern at a later counter, which is exactly the head bug. Self-test sections 2, 3, 4, 4b and
+4p now pin 0 (no trigger is armed) and verify every sample instead of only the head.

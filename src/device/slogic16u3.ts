@@ -24,7 +24,7 @@ import { TransportDeadError } from './types.js';
 import type { CaptureConfig, CaptureStartOptions, Device, DropoutSink, SampleSink } from './types.js';
 import { DiagnosticError } from '../diagnostics.js';
 import type { DiagnosticCode } from '../diagnostics.js';
-import { SoftwareTrigger } from '../data/softwareTrigger.js';
+import { SoftwareTrigger, type SoftwareTriggerConfig } from '../data/softwareTrigger.js';
 type SoftwareTriggerState = 'waiting' | 'triggered' | 'not-found';
 import { bytesPerSampleForChannels } from '../types.js';
 import {
@@ -61,8 +61,26 @@ import { LoopStallWatch, THREAD_STALL_THRESHOLD_MS, USB_FILTERS } from './usbCor
 
 export { LoopStallWatch, USB_FILTERS };
 
-/** Bytes of junk at the head of every acquisition (protocol.c:117). */
-const HEAD_DROP_BYTES = 4;
+/**
+ * Bytes of junk at the head of every acquisition, which the model decides.
+ *
+ * Sipeed's model tables (`slogic16u3.c` and `slogic32u3.c`, field `first_drop_bytes`) and
+ * `build/docs/slogic-protocol.md`: the 16U3 firmware still opens the gate mid-word, so its
+ * stream starts with 4 bytes that are not a sample; 32U3 firmware from S/N 202610120954
+ * gates on whole sample words and sends none. Dropping 4 unconditionally truncated the
+ * first 1, 2 or 4 real samples of every 32U3 capture - invisible in a waveform nobody
+ * counted, but the Emulation test pattern reports it as a counter that does not start at 0.
+ *
+ * The vendor requires 32U3 firmware S/N 202610150528 or newer (`README.md`), so there is no
+ * supported 32U3 firmware with a partial head to fall back to. WebUSB makes the serial
+ * opaque (`serialIsBrowserSupplied`), so this stays keyed on the product id.
+ */
+export const HEAD_DROP_BYTES_16U3 = 4;
+export const HEAD_DROP_BYTES_32U3 = 0;
+
+export function headDropBytesForProductId(productId: number): number {
+  return productId === PID_SLOGIC32_U3 ? HEAD_DROP_BYTES_32U3 : HEAD_DROP_BYTES_16U3;
+}
 
 /** SuperSpeed bulk max packet size; transfer lengths stay a multiple of this. */
 const PACKET_BYTES = 1024;
@@ -284,6 +302,15 @@ export interface Stats {
   threadStallMaxMs: number;
   /** Stalls over THREAD_STALL_THRESHOLD_MS, counted per acquisition. */
   threadStalls: number;
+  /**
+   * Host-side trigger counters. In continuous (Loop) mode all three continue to
+   * update after the first match: `triggerMatchCount` is every match seen, and
+   * `triggerLastSampleIndex` is the newest one in emitted-stream samples. `triggerScanStride`
+   * is the matcher's current continuous-scan stride (always 1 while waiting).
+   */
+  triggerMatchCount: number;
+  triggerLastSampleIndex: number | null;
+  triggerScanStride: number;
 }
 
 export interface StartOptions extends CaptureStartOptions {
@@ -457,7 +484,9 @@ export class Slogic16U3 implements Device {
   private stoppingSince = 0;
   private cfg: CaptureConfig | null = null;
   private tuning: StreamTuning | null = null;
-  private headRemaining = HEAD_DROP_BYTES;
+  private headRemaining = 0;
+  /** This model's partial-head length; see `headDropBytesForProductId`. */
+  private readonly headDrop: number;
   private sink: SampleSink | null = null;
   /** Samples handed to the sink since start(), for dropout positions. */
   private samplesDelivered = 0;
@@ -469,8 +498,11 @@ export class Slogic16U3 implements Device {
   private triggerState: ((
     state: SoftwareTriggerState | 'waiting', triggerSampleIndex?: number,
   ) => void) | null = null;
-  private triggerMatched = false;
   private triggerNotFound = false;
+  /** Last page-ack promise produced by the trigger's sink, returned as delivery
+   *  backpressure. Without it a triggered loop (whose stream is unbounded) could run the
+   *  transport ahead of the page indefinitely while its main thread stalls. */
+  private triggerSinkPending: void | Promise<void> = undefined;
   /** Reported once when the capture delivered everything it was ever going to. */
   private onCaptureEnd: (() => void) | null = null;
   private captureEnded = false;
@@ -509,6 +541,8 @@ export class Slogic16U3 implements Device {
   constructor(private readonly usb: USBDevice) {
     const is32 = usb.productId === PID_SLOGIC32_U3;
     this.maxChannels = is32 ? 32 : 16;
+    this.headDrop = headDropBytesForProductId(usb.productId);
+    this.headRemaining = this.headDrop;
     this.maxSamplerateHz = is32 ? MAX_SAMPLERATE_HZ_SLOGIC32_U3 : MAX_SAMPLERATE_HZ;
     this.name = usb.productName ?? (is32 ? 'SLogic32 U3' : 'SLogic16 U3');
     this.serial = usb.serialNumber ?? '';
@@ -539,6 +573,9 @@ export class Slogic16U3 implements Device {
       sinkMsP95: 0,
       threadStallMaxMs: 0,
       threadStalls: 0,
+      triggerMatchCount: 0,
+      triggerLastSampleIndex: null,
+      triggerScanStride: 1,
     };
   }
 
@@ -635,7 +672,7 @@ export class Slogic16U3 implements Device {
   /** Device samples consumed within the host budget, the dropped head included. */
   private receivedDeviceSamples(): number {
     const wire = this.wireBytesPerSample(this.cfg?.channels ?? 32);
-    const headReceived = this.discard ? 0 : HEAD_DROP_BYTES - this.headRemaining;
+    const headReceived = this.discard ? 0 : this.headDrop - this.headRemaining;
     return this.samplesDelivered + headReceived / wire;
   }
 
@@ -676,13 +713,13 @@ export class Slogic16U3 implements Device {
     });
   }
 
-  /** Device samples inside the HEAD_DROP_BYTES the transport throws away. */
+  /** Device samples inside the partial head the transport throws away. */
   private headDropSamples(channels: number): number {
     // Below 8 channels the firmware packs two samples per wire byte and
     // expandPacked splits them; at 8 and above one sample is ceil(channels/8)
-    // bytes, so the four dropped bytes are one sample at 32 channels.
+    // bytes. A 16U3 drops 4 bytes (one sample at 32 channels), a 32U3 none.
     const wireBytesPerSample = channels < 8 ? 0.5 : bytesPerSampleForChannels(channels);
-    return Math.ceil(HEAD_DROP_BYTES / wireBytesPerSample);
+    return Math.ceil(this.headDrop / wireBytesPerSample);
   }
 
   /** Cancel the no-data deadline, if one is armed. */
@@ -870,11 +907,10 @@ export class Slogic16U3 implements Device {
     this.threadLabel = opts.threadLabel ?? this.threadLabel;
     this.stats = Slogic16U3.zeroStats();
     this.samplesDelivered = 0;
-    this.headRemaining = HEAD_DROP_BYTES;
+    this.headRemaining = this.headDrop;
     this.loopError = null;
     this.stopping = false;
     this.sampleCarry = new Uint8Array(0);
-    this.triggerMatched = false;
     this.triggerNotFound = false;
     this.discard = opts.discard ?? false;
     this.loopMode = opts.loop ?? false;
@@ -922,8 +958,34 @@ export class Slogic16U3 implements Device {
           width: opts.softwareTrigger.channels, channels: cfg.channels,
         });
       }
+      if (opts.softwareTrigger.analog?.length) {
+        if (this.maxChannels < 32) {
+          throw new Error('analog triggers are only available on the SLogic32U3');
+        }
+        // The ADC module's sample clock must come from its 800 MHz PLL (HSync adc.rs).
+        if (800e6 % cfg.samplerate !== 0 || cfg.samplerate < 100e6) {
+          throw new Error('analog triggers require a samplerate divided from the ADC 800 MHz PLL');
+        }
+      }
+      const triggerConfig = opts.softwareTrigger.mode === 'continuous' &&
+          opts.softwareTrigger.scan?.nsPerStreamSample === undefined
+        ? {
+          ...opts.softwareTrigger,
+          scan: {
+            ...(opts.softwareTrigger.scan ?? {}),
+            // One stream sample's wall time at this rate. The matcher keeps continuous
+            // scanning inside its CPU fraction; callers may override the whole policy.
+            nsPerStreamSample: 1e9 / cfg.samplerate,
+          },
+        }
+        : opts.softwareTrigger;
       this.trigger = new SoftwareTrigger({
-        config: opts.softwareTrigger,
+        config: triggerConfig,
+        // Every match is a trigger event. The first is reported just after the trigger
+        // sample is handed to the sink (data, then event); later continuous matches are
+        // reported while scanning, before the block that carries them is emitted. In
+        // continuous mode the worker forwards each of these as its own `trigger` message.
+        onMatch: (match) => this.triggerState?.('triggered', match.index),
         // The sink owns whatever it is handed (types.ts) - the worker pump *transfers*
         // the chunk's ArrayBuffer to the page. The trigger, however, keeps reading the
         // transfer buffer it emitted a view of: after the trigger sample is emitted,
@@ -932,11 +994,15 @@ export class Slogic16U3 implements Device {
         // do), or the rest of the fragment is read from a detached buffer and every
         // sample after the trigger in that fragment is silently dropped.
         emit: (chunk) => {
-          void this.emitSamples(
+          // Keep the sink's promise: deliver() returns it so consume() waits for the page
+          // ack, the same backpressure the non-trigger path has. A triggered loop emits
+          // without a budget, and without this the worker could outrun a stalled page.
+          const pending = this.emitSamples(
             chunk.byteOffset === 0 && chunk.byteLength === chunk.buffer.byteLength
               ? chunk
               : chunk.slice(),
           );
+          if (pending) this.triggerSinkPending = pending;
         },
       });
       this.triggerState?.('waiting');
@@ -1454,18 +1520,22 @@ export class Slogic16U3 implements Device {
       out = bytes.subarray(0, whole);
     }
     if (this.trigger) {
-      const wasMatched = this.triggerMatched;
       this.trigger.feed(out);
       const stats = this.trigger.stats;
-      this.triggerMatched = stats.matched;
-      if (!wasMatched && this.triggerMatched) {
-        this.triggerState?.('triggered', stats.triggerSampleIndex ?? undefined);
-      }
+      // Report the matcher's counters whether or not this delivery produced a new match:
+      // getStats() is the UI's view of a continuous scan's stride and match count.
+      this.stats.triggerMatchCount = stats.matchCount;
+      this.stats.triggerLastSampleIndex = stats.lastTriggerSampleIndex;
+      this.stats.triggerScanStride = stats.scanStride;
       this.maybeFinishTrigger();
-      // The trigger owns delivery in this mode and feeds the sink synchronously, so
-      // there is no promise to hand back. Its stream is bounded by the capture length
-      // the caller asked for, which is what keeps that from being unbounded.
-      return;
+      // The trigger's emit callback is synchronous by contract, but it may have flushed
+      // sink blocks. Return the last page ack so consume() keeps the same backpressure it
+      // has on the non-trigger path - essential for a loop trigger, whose stream has no
+      // output budget to bound it. The sink is FIFO, so awaiting the last block also
+      // covers the earlier ones.
+      const pending = this.triggerSinkPending;
+      this.triggerSinkPending = undefined;
+      return pending;
     } else {
       return this.emitSamples(out);
     }
@@ -1559,6 +1629,51 @@ export class Slogic16U3 implements Device {
     }
   }
 
+  /**
+   * Retune the active host-side matcher. The stream, the pre-trigger ring and the
+   * inspected-sample budget stay in place; only the conditions (and edge continuity)
+   * change. In one-shot mode this works while the matcher waits and is refused after the
+   * match; in continuous (Loop) mode it also applies after the first match, so a running
+   * loop can be retuned live. An edit that only belongs to the next acquisition returns
+   * false.
+   */
+  updateSoftwareTrigger(config: SoftwareTriggerConfig): boolean {
+    const trigger = this.trigger;
+    if (!trigger || !this.running || this.stopping) return false;
+    // A live retune must obey the same ADC constraints as start(): the analog crossing
+    // reads the converter's byte at the capture's fixed rate. A loop started with a
+    // digital trigger can be running below the ADC minimum; arming an analog level then
+    // stays pending for the next acquisition instead of matching meaningless codes.
+    if (config.analog?.length) {
+      if (this.maxChannels < 32) return false;
+      const rate = this.cfg?.samplerate ?? 0;
+      if (rate < 100e6 || 800e6 % rate !== 0) return false;
+    }
+    let updated = config;
+    // A caller that sends a fresh scan policy without the rate-derived budget gets the
+    // same default as start(): adaptation stays enabled in continuous mode.
+    if (trigger.mode === 'continuous' && config.scan !== undefined &&
+        config.scan.nsPerStreamSample === undefined) {
+      const rate = this.cfg?.samplerate ?? 0;
+      if (rate > 0) {
+        updated = {
+          ...config,
+          scan: { ...config.scan, nsPerStreamSample: 1e9 / rate },
+        };
+      }
+    }
+    try {
+      if (updated === config) return trigger.reconfigure(config);
+      return trigger.reconfigure(updated);
+    } catch (error) {
+      this.trace({
+        dir: 'info',
+        note: `the live software trigger update was rejected: ${String(error)}`,
+      });
+      return false;
+    }
+  }
+
   async stop(): Promise<void> {
     const loopDone = this.loopDone;
     const generation = this.captureGeneration;
@@ -1572,8 +1687,7 @@ export class Slogic16U3 implements Device {
       }
       this.trigger = null;
       this.triggerState = null;
-      this.triggerMatched = false;
-      this.triggerNotFound = false;
+        this.triggerNotFound = false;
       this.loopMode = false;
       this.onCaptureEnd = null;
       this.sampleCarry = new Uint8Array(0);
@@ -1705,8 +1819,7 @@ export class Slogic16U3 implements Device {
       this.tuning = null;
       this.trigger = null;
       this.triggerState = null;
-      this.triggerMatched = false;
-      this.triggerNotFound = false;
+        this.triggerNotFound = false;
       this.onCaptureEnd = null;
       this.sampleCarry = new Uint8Array(0);
     }

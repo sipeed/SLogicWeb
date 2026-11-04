@@ -18,7 +18,10 @@ export {
   type SoftwareTriggerConfig,
   type SoftwareTriggerKind,
   type SoftwareTriggerLevel,
+  type SoftwareTriggerMatch,
+  type SoftwareTriggerMode,
   type SoftwareTriggerOptions,
+  type SoftwareTriggerScanOptions,
   type SoftwareTriggerStats,
 } from './softwareTrigger.js';
 export { runSoftwareTriggerSuite, type SoftwareTriggerTestResult } from './softwareTriggerSelftest.js';

@@ -93,8 +93,13 @@ export function emulationProbeWidths(model: SelftestModel): ChannelCount[] {
   return model === 'slogic32u3' ? [8, 4] : [];
 }
 
-export function emulationAnchor(model: SelftestModel): 'native' | 'shape' {
-  return model === 'slogic32u3' ? 'shape' : 'native';
+/**
+ * Both U3 models now have a known head: 4 bytes on the 16U3, none on the 32U3 (see
+ * `headDropBytesForProductId`). The exact Emulation-pattern head therefore checks both the
+ * pattern generator and the transport's head drop on either model.
+ */
+export function emulationAnchor(_model: SelftestModel): 'native' | 'shape' {
+  return 'native';
 }
 
 export function sawtoothOk(words: readonly number[], count: number): boolean {

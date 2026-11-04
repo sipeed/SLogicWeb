@@ -30,6 +30,7 @@ export interface DeviceFilter {
 export type ToWorker =
   | { kind: 'open'; filter: DeviceFilter }
   | { kind: 'start'; cfg: CaptureConfig; options: WorkerStartOptions }
+  | { kind: 'updateTrigger'; config: import('../data/softwareTrigger.js').SoftwareTriggerConfig }
   | { kind: 'stop' }
   | { kind: 'stats' }
   | { kind: 'console'; command: string }

@@ -48,9 +48,10 @@ export interface CaptureStartOptions {
 }
 
 /**
- * `chunk` is raw device bytes with the 4 junk head bytes already removed and
- * sub-8-channel packing already expanded. Samples are little-endian and occupy
- * ceil(channels / 8) bytes (2 at 16 channels, 4 at 32, up to 16 at 128).
+ * `chunk` is raw device bytes with the model's partial head already removed (4 bytes
+ * on the SLogic16U3, none on the SLogic32U3) and sub-8-channel packing already expanded.
+ * Samples are little-endian and occupy ceil(channels / 8) bytes (2 at 16 channels, 4 at
+ * 32, up to 16 at 128).
  *
  * The buffer handed to the sink is owned by the sink from that point on; the
  * device layer never writes to it again.
@@ -99,6 +100,15 @@ export interface Device {
     cfg: CaptureConfig, sink: SampleSink, onDropout?: DropoutSink,
     options?: CaptureStartOptions,
   ): Promise<void>;
+  /**
+   * Replace the active software trigger's conditions without restarting the stream. In
+   * one-shot mode this is accepted while the matcher is waiting; after its match, edits
+   * stay pending for the next acquisition. In continuous mode it is also accepted after
+   * the first match, until the stream completes or reports no trigger. A transport may
+   * queue the change (the worker does), so this reports nothing: an accepted/rejected
+   * result is not observable through this interface.
+   */
+  updateSoftwareTrigger?(config: import('../data/softwareTrigger.js').SoftwareTriggerConfig): void;
   stop(): Promise<void>;
   terminate(): void;
   /**

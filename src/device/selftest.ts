@@ -23,7 +23,6 @@ import {
 } from './protocol.js';
 import {
   deviceLabel,
-  emulationAnchor,
   emulationWidths,
   liveWidths,
   modelForMaxChannels,
@@ -52,6 +51,7 @@ import { USB_FILTERS } from './usbCore.js';
 import { WorkerSlogicDevice } from './workerTransport.js';
 import './usbWorkerSpawn.js';
 import type { CaptureConfig, Device } from './types.js';
+import { EmulationPatternCheck } from './emulationPattern.js';
 import { bytesPerSampleForChannels } from '../types.js';
 
 const RESULT_SINK = 'http://127.0.0.1:5177/result';
@@ -116,6 +116,7 @@ async function capture(
   cfg: CaptureConfig,
   ms: number,
   testMode: number,
+  onChunk?: (chunk: Uint8Array) => void,
 ): Promise<{ head: Uint8Array; stats: ReturnType<Slogic16U3['getStats']> }> {
   const keep = new Uint8Array(256);
   let kept = 0;
@@ -125,6 +126,7 @@ async function capture(
     cfg,
     (chunk) => {
       total += chunk.length;
+      onChunk?.(chunk);
       if (kept < keep.length) {
         const take = Math.min(keep.length - kept, chunk.length);
         keep.set(chunk.subarray(0, take), kept);
@@ -217,9 +219,10 @@ async function run(dev: Slogic16U3): Promise<void> {
     record(`${ch}ch@16MHz delivers ${expected} MB/s (+-3%)`, pass, {
       steadyMBps: stats.steadyMBps,
     });
+    const headDrop = model === 'slogic32u3' ? 0 : 4;
     record(
-      `${ch}ch drops exactly 4 head bytes across the whole acquisition`,
-      stats.rawBytes - stats.sinkBytes === 4,
+      `${ch}ch drops exactly ${headDrop} head bytes across the whole acquisition`,
+      stats.rawBytes - stats.sinkBytes === headDrop,
       { raw: stats.rawBytes, sink: stats.sinkBytes, diff: stats.rawBytes - stats.sinkBytes },
     );
     record(`${ch}ch sink data is a whole number of samples`, stats.sinkBytes % bytesPerSample === 0, {
@@ -231,44 +234,51 @@ async function run(dev: Slogic16U3): Promise<void> {
   head('2. emulation pattern - byte-exact control against sigrok-cli');
   {
     const cfg: CaptureConfig = { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 };
-    const { head: h, stats } = await capture(dev, cfg, 250, TEST_MODE_EMULATION);
+    // No trigger is armed, so the counter must start at 0; pinning it is what catches a
+    // missing prefix (a head drop makes any later counter a valid-looking stream).
+    const check = new EmulationPatternCheck(model, 16, 0);
+    const { head: h, stats } = await capture(
+      dev, cfg, 250, TEST_MODE_EMULATION, (chunk) => check.push(chunk),
+    );
     line(hexdump(h, 32), 'dim');
     // sigrok-cli -d sipeed-slogic-analyzer --config pattern=Emulation --samples 32
     // gives 0700 0600 0500 0400 0300 0200 0100 0000 0f00 0e00 ... deterministically.
     const want = [0x07, 0x00, 0x06, 0x00, 0x05, 0x00, 0x04, 0x00, 0x03, 0x00, 0x02, 0x00,
                   0x01, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x0e, 0x00];
-    if (emulationAnchor(model) === 'native') {
-      record('16ch emulation head matches the native driver byte for byte', bytesEqual(h, want), {
-        got: Array.from(h.subarray(0, 20)),
-        want,
+    record('16ch emulation head matches the native driver byte for byte', bytesEqual(h, want), {
+      got: Array.from(h.subarray(0, 20)),
+      want,
+    });
+    record('16ch emulation matches the pattern on every sample',
+      check.checkedSamples > 0 && check.wrong === 0, {
+        checkedSamples: check.checkedSamples,
+        wrong: check.wrong,
+        firstWrong: check.firstWrong,
+        bytes: stats.sinkBytes,
       });
-    } else {
-      const words: number[] = [];
-      for (let i = 0; i + 1 < h.length && words.length < 12; i += 2) {
-        words.push(h[i] | (h[i + 1] << 8));
-      }
-      report.emu16Sawtooth = sawtoothOk(words, 12);
-      record('16ch emulation delivers data at 16 MHz', stats.rawBytes > 1_000_000, {
-        rawBytes: stats.rawBytes,
-        transfers: stats.transfers,
-      });
-      record('16ch emulation sustains 32 MB/s (+-3%)',
-        stats.steadyMBps > 32 * 0.97 && stats.steadyMBps < 32 * 1.03,
-        { steadyMBps: stats.steadyMBps });
-      report.emu16Stats = stats;
-    }
+    report.emu16Check = check.verdict();
     report.emu16Hex = Array.from(h.subarray(0, 32));
   }
 
   if (emulationWidths(model).includes(8)) {
     head('3. emulation pattern at 8 channels (1 byte per sample on the wire)');
     const cfg: CaptureConfig = { channels: 8, samplerate: 16e6, thresholdVolts: 1.6 };
-    const { head: h, stats } = await capture(dev, cfg, 250, TEST_MODE_EMULATION);
+    const check = new EmulationPatternCheck(model, 8, 0);
+    const { head: h, stats } = await capture(
+      dev, cfg, 250, TEST_MODE_EMULATION, (chunk) => check.push(chunk),
+    );
     line(hexdump(h, 32), 'dim');
     const want = [7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8];
     record('8ch emulation head is the descending counter', bytesEqual(h, want), {
       got: Array.from(h.subarray(0, 16)),
     });
+    record('8ch emulation matches the pattern on every sample',
+      check.checkedSamples > 0 && check.wrong === 0, {
+        checkedSamples: check.checkedSamples,
+        wrong: check.wrong,
+        firstWrong: check.firstWrong,
+      });
+    report.emu8Check = check.verdict();
     // 8 channels at 16 MHz is half the wire rate of 16 channels.
     const pass = stats.steadyMBps > 15.5 && stats.steadyMBps < 16.5;
     record('8ch@16MHz delivers 16 MB/s', pass, { steadyMBps: stats.steadyMBps });
@@ -279,12 +289,22 @@ async function run(dev: Slogic16U3): Promise<void> {
   if (emulationWidths(model).includes(4)) {
     head('4. emulation pattern at 4 channels (2 samples per byte, expanded here)');
     const cfg: CaptureConfig = { channels: 4, samplerate: 16e6, thresholdVolts: 1.6 };
-    const { head: h, stats } = await capture(dev, cfg, 250, TEST_MODE_EMULATION);
+    const check = new EmulationPatternCheck(model, 4, 0);
+    const { head: h, stats } = await capture(
+      dev, cfg, 250, TEST_MODE_EMULATION, (chunk) => check.push(chunk),
+    );
     line(hexdump(h, 32), 'dim');
     const want = [7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8];
     record('4ch emulation head expands to the descending counter', bytesEqual(h, want), {
       got: Array.from(h.subarray(0, 16)),
     });
+    record('4ch emulation matches the pattern on every sample',
+      check.checkedSamples > 0 && check.wrong === 0, {
+        checkedSamples: check.checkedSamples,
+        wrong: check.wrong,
+        firstWrong: check.firstWrong,
+      });
+    report.emu4Check = check.verdict();
     // 4 channels at 16 MHz is 8 MB/s on the wire, 16 MB/s after expansion.
     const pass = stats.steadyMBps > 7.5 && stats.steadyMBps < 8.5;
     record('4ch@16MHz delivers 8 MB/s on the wire', pass, { steadyMBps: stats.steadyMBps });
@@ -299,13 +319,23 @@ async function run(dev: Slogic16U3): Promise<void> {
   for (const ch of emulationProbeWidths(model)) {
     head(`4p. emulation probe at ${ch} channels (measurement only)`);
     const cfg: CaptureConfig = { channels: ch, samplerate: 16e6, thresholdVolts: 1.6 };
-    const { head: h, stats } = await capture(dev, cfg, 250, TEST_MODE_EMULATION);
+    const check = new EmulationPatternCheck(model, ch, 0);
+    const { head: h, stats } = await capture(
+      dev, cfg, 250, TEST_MODE_EMULATION, (chunk) => check.push(chunk),
+    );
     line(hexdump(h, 32), 'dim');
     line(
       `  ${ch}ch emulation delivered ${stats.rawBytes.toLocaleString()} B in ` +
         `${stats.transfers} transfer(s), steady ${stats.steadyMBps.toFixed(1)} MB/s`,
       'warn',
     );
+    record(`${ch}ch emulation matches the pattern on every sample`,
+      check.checkedSamples > 0 && check.wrong === 0, {
+        checkedSamples: check.checkedSamples,
+        wrong: check.wrong,
+        firstWrong: check.firstWrong,
+      });
+    report[`emu${ch}Check`] = check.verdict();
     report[`emu${ch}Hex`] = Array.from(h.subarray(0, 32));
     report[`emu${ch}Stats`] = stats;
   }
@@ -313,13 +343,26 @@ async function run(dev: Slogic16U3): Promise<void> {
   if (emulationWidths(model).includes(32)) {
     head('4b. emulation pattern at 32 channels (4 bytes per sample on the wire)');
     const cfg: CaptureConfig = { channels: 32, samplerate: 16e6, thresholdVolts: 1.6 };
-    const { head: h, stats } = await capture(dev, cfg, 250, TEST_MODE_EMULATION);
+    const check = new EmulationPatternCheck(model, 32, 0);
+    const { head: h, stats } = await capture(
+      dev, cfg, 250, TEST_MODE_EMULATION, (chunk) => check.push(chunk),
+    );
     line(hexdump(h, 32), 'dim');
     const lows: number[] = [];
     for (let i = 0; i + 3 < h.length && lows.length < 8; i += 4) {
       lows.push(h[i] | (h[i + 1] << 8));
     }
     report.emu32Sawtooth = sawtoothOk(lows, 8);
+    // The high half (D16..D31) carries the plain and inverted counter byte; a rule
+    // error there is invisible to the low-half sawtooth check.
+    record('32ch emulation matches the pattern on every sample',
+      check.checkedSamples > 0 && check.wrong === 0, {
+        checkedSamples: check.checkedSamples,
+        wrong: check.wrong,
+        firstWrong: check.firstWrong,
+        bytes: stats.sinkBytes,
+      });
+    report.emu32Check = check.verdict();
     const pass = stats.steadyMBps > 62 && stats.steadyMBps < 66;
     record('32ch@16MHz delivers 64 MB/s', pass, { steadyMBps: stats.steadyMBps });
     record('32ch sink data is a whole number of samples', stats.sinkBytes % 4 === 0, {

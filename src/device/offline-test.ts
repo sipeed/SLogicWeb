@@ -37,7 +37,7 @@ import {
 } from './protocol.js';
 import {
   LoopStallWatch, Slogic16U3, deriveStreamTuning, expandPacked, getGrantedDevices,
-  requestDevice, type Stats,
+  headDropBytesForProductId, requestDevice, type Stats,
 } from './slogic16u3.js';
 import { WorkerSlogicDevice } from './workerTransport.js';
 import { getGrantedDevicesOnBestThread, requestDeviceOnBestThread } from './index.js';
@@ -1056,6 +1056,38 @@ async function main(): Promise<void> {
       flat.slice(4).join(',') === '16,17,18,19,20,21', chunks.map((c) => c.length).join('+'));
   }
   {
+    /*
+     * The 32U3 gates on whole sample words, so its stream starts with a real sample.
+     * Dropping four bytes there - as this transport did until the per-model head - ate
+     * the first two 16-channel samples of every capture. Under the Emulation pattern
+     * that is a counter that starts at 2 instead of 0, which is exactly what the
+     * hardware self test used to report.
+     */
+    check('the head drop is the model\'s, not a constant',
+      headDropBytesForProductId(0x3031) === 4 && headDropBytesForProductId(0x3032) === 0,
+      `16U3 ${headDropBytesForProductId(0x3031)}, 32U3 ${headDropBytesForProductId(0x3032)}`);
+
+    const fake = new FakeStreamDevice(recorded32(), [
+      { kind: 'data', bytes: [0xaa, 0xbb, 0xcc] },
+      { kind: 'data', bytes: [0xdd, 0x01, 0x02, 0x03, 0x04] },
+    ], 0x3032);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    const chunks: number[][] = [];
+    await dev.open();
+    await dev.start({ channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, (c) => {
+      chunks.push(Array.from(c));
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    await dev.stop();
+    const stats = dev.getStats();
+    check('a 32U3 stream keeps its first sample across a short transfer',
+      chunks.flat().join(',') === '170,187,204,221,1,2,3,4',
+      chunks.flat().join(','));
+    check('a 32U3 capture drops no head bytes',
+      stats.rawBytes - stats.sinkBytes === 0,
+      `raw ${stats.rawBytes} sink ${stats.sinkBytes}`);
+  }
+  {
     // Stopping replenishment while the producer is still running lets every
     // pending WebUSB read complete normally. Only then may CTRL_STOP be sent.
     const block = new Array<number>(1024).fill(0);
@@ -1092,15 +1124,15 @@ async function main(): Promise<void> {
       chunks.flat().join(',') === '7,0,6,0', chunks.flat().join(','));
   }
   {
-    // 32U3: after the common four-byte head, samples stay as four-byte little-endian
-    // words all the way into PlanarSampleStore's 32-channel transposer.
+    // 32U3: its stream has no partial head, so samples stay as four-byte little-endian
+    // words from the first byte all the way into PlanarSampleStore's 32-channel transposer.
     const payload = [
       0x01, 0x00, 0x00, 0x00, // D0
       0x00, 0x00, 0x00, 0x80, // D31
       0x78, 0x56, 0x34, 0x12,
     ];
     const fake = new FakeStreamDevice(recorded32(), [
-      { kind: 'data', bytes: [0xaa, 0xbb, 0xcc, 0xdd, ...payload] },
+      { kind: 'data', bytes: payload },
     ], 0x3032);
     fake.productName = 'SLogic32 U3';
     const dev = new Slogic16U3(fake as unknown as USBDevice);
@@ -1306,6 +1338,93 @@ async function main(): Promise<void> {
       `bytes=${chunks.length}, states=${states.join(',')}`);
     check('a loop trigger capture never reports end-of-capture',
       ended === 0, String(ended));
+  }
+  {
+    // Continuous (Loop) triggers: after the first match the same matcher keeps scanning
+    // the unbounded emitted stream and every later match is its own device event. The
+    // scan is pinned to stride 1 so the expected indices are independent of host speed.
+    const head = [0xaa, 0xbb, 0xcc, 0xdd];
+    const firstBlock = [...head, ...new Array<number>(1020).fill(0)];
+    const secondBlock: number[] = [];
+    for (let i = 0; i < 512; i++) {
+      secondBlock.push(i % 2 === 1 ? 1 : 0, 0); // channel 0 toggles every sample
+    }
+    const fake = new FakeStreamDevice(recorded(), [
+      { kind: 'data', bytes: firstBlock },
+      { kind: 'data', bytes: secondBlock },
+    ]);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    const chunks: number[] = [];
+    const states: string[] = [];
+    await dev.open();
+    await dev.start(
+      { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 },
+      (chunk) => { chunks.push(...chunk); }, undefined,
+      {
+        loop: true,
+        tuning: { depth: 4, transferBytes: 1024 },
+        softwareTrigger: {
+          channels: 16, conditions: [{ channel: 0, kind: 'rising' }],
+          mode: 'continuous', preTriggerSamples: 2,
+          maxSamples: Number.POSITIVE_INFINITY,
+          scan: { minStride: 1, maxStride: 1, initialStride: 1 },
+        },
+        onTriggerState: (state, index) =>
+          states.push(index === undefined ? state : `${state}@${index}`),
+      },
+    );
+    await new Promise((r) => setTimeout(r, 50));
+    const stats = dev.getStats();
+    await dev.stop();
+    // 510 zero samples, then the toggling block. The first rising edge is sample 1 of
+    // the second block; with two retained pre-trigger samples it is index 2. Every later
+    // rising edge (odd sample) is two emitted samples after the previous one, through
+    // index 512. The emitted stream is 2 prefix + 1 trigger + 510 later samples.
+    check('a continuous loop trigger reports every match from the device layer',
+      states.length === 257 && states[0] === 'waiting' &&
+      states[1] === 'triggered@2' && states[2] === 'triggered@4' &&
+      states[states.length - 1] === 'triggered@512' &&
+      chunks.length === 1026,
+      `events=${states.length}, first=${states.slice(0, 3).join(',')}, ` +
+      `last=${states[states.length - 1]}, bytes=${chunks.length}`);
+    check('continuous trigger counters and stride cross the device stats path',
+      stats.triggerMatchCount === 256 && stats.triggerLastSampleIndex === 512 &&
+      stats.triggerScanStride === 1,
+      `count=${stats.triggerMatchCount}, last=${stats.triggerLastSampleIndex}, ` +
+      `stride=${stats.triggerScanStride}`);
+  }
+  {
+    // A3 is byte 3 of each 32U3 sample. Split its rising sample across USB transfers:
+    // raw 0x50 -> code 10, raw 0x13 -> code 200 after the ADC bit reversal.
+    const low = [0, 0, 0, 0x50];
+    const fake = new FakeStreamDevice(recorded32(), [
+      { kind: 'data', bytes: [...low, ...low, ...low, 0, 0] },
+      { kind: 'data', bytes: [0, 0x13, 0, 0, 0, 0x13, 0, 0, 0, 0x13] },
+    ], 0x3032);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    const chunks: number[] = [];
+    const states: string[] = [];
+    await dev.open();
+    await dev.start(
+      { channels: 32, samplerate: 100e6, thresholdVolts: 1.6 },
+      (chunk) => { chunks.push(...chunk); }, undefined,
+      {
+        tuning: { depth: 4, transferBytes: 1024 },
+        softwareTrigger: {
+          channels: 32, analog: [{ start: 24, kind: 'rising', level: 100 }],
+          preTriggerSamples: 2, maxSamples: 5,
+        },
+        onTriggerState: (state, index) =>
+          states.push(index === undefined ? state : `${state}@${index}`),
+      },
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    await dev.stop();
+    const expected = [0x50, 0x50, 0x13, 0x13, 0x13]
+      .flatMap((a3) => [0, 0, 0, a3]).join(',');
+    check('32U3 analog trigger carries a split A3 sample and emits the bounded window',
+      chunks.join(',') === expected && states.join(',') === 'waiting,triggered@2',
+      `bytes=${chunks.join(',')}, states=${states.join(',')}`);
   }
   {
     // A finite capture flushes its coalesced tail and reports exactly one onEnd.
@@ -2079,12 +2198,13 @@ async function main(): Promise<void> {
     await brokenStart;
     exploding.emit({ kind: 'dropout', position: 10, missing: 4 });
     exploding.emit({ kind: 'trigger', state: 'triggered', index: 12 });
+    exploding.emit({ kind: 'trigger', state: 'triggered', index: 40 });
     exploding.emit({ kind: 'ended' });
     exploding.emit({ kind: 'error', message: 'bulk transfer failed' });
     exploding.chunk(21, 4);
     check('a dropout crosses the thread boundary', dropouts.join(',') === '10+4', dropouts.join(','));
-    check('a trigger transition crosses the thread boundary',
-      triggers.length === 1 && triggers[0] === 'triggered@12', triggers.join(','));
+    check('every continuous trigger event crosses the thread boundary',
+      triggers.join(',') === 'triggered@12,triggered@40', triggers.join(','));
     check('end-of-capture crosses the thread boundary',
       ends.join(',') === 'ended', ends.join(','));
     check('a transport error reaches the page as an error',
@@ -2854,7 +2974,7 @@ async function main(): Promise<void> {
       0x78, 0x56, 0x34, 0x12,
     ];
     const fake = new FakeStreamDevice(recorded32(), [
-      { kind: 'data', bytes: [0xaa, 0xbb, 0xcc, 0xdd, ...payload.slice(0, 6)] },
+      { kind: 'data', bytes: payload.slice(0, 6) },
       { kind: 'data', bytes: payload.slice(6) },
     ], 0x3032);
     const dev = new Slogic16U3(fake as unknown as USBDevice);
@@ -3032,7 +3152,10 @@ async function main(): Promise<void> {
       `at end=${bytesAtEnd}/${endedAtEnd}, after stop=${bytes}/${ended}, ` +
         `end=${endError || 'ok'}, stop=${stopError || 'ok'}`);
     check('the 4ch maximum free-run request retains fixed-size host-bounded reads',
-      fake.transferInLengths.length === 33 &&
+      // 2^31 samples at 4ch is 2^26 samples per 32 MiB request, so 32 requests carry
+      // the whole budget. The old 33rd request covered the eight samples of a 32U3
+      // partial head that this firmware does not send.
+      fake.transferInLengths.length === 32 &&
         fake.transferInLengths.every((length) => length === transferBytes),
       `${fake.transferInLengths.length} requests: ${fake.transferInLengths.join(',')}`);
     check('the 4ch maximum free-run request traces its alignment adjustment',
@@ -3444,14 +3567,14 @@ async function main(): Promise<void> {
   check('32 U3 emulation probes the sub-16 widths without verdicts, 16 U3 has no probes',
     JSON.stringify(emulationProbeWidths('slogic16u3')) === JSON.stringify([]) &&
     JSON.stringify(emulationProbeWidths('slogic32u3')) === JSON.stringify([8, 4]));
-  check('16 U3 emulation keeps the native anchor, 32 U3 checks the sawtooth shape',
-    emulationAnchor('slogic16u3') === 'native' && emulationAnchor('slogic32u3') === 'shape');
+  check('both U3 models anchor emulation at the native counter head',
+    emulationAnchor('slogic16u3') === 'native' && emulationAnchor('slogic32u3') === 'native');
 
-  check('sawtooth accepts the native-anchored 16 U3 sequence',
+  check('sawtooth accepts the native 16 U3 sequence',
     sawtoothOk([7, 6, 5, 4, 3, 2, 1, 0, 15, 14], 10));
-  check('sawtooth accepts the observed 32 U3 16ch head (starts mid-sequence)',
+  check('sawtooth accepts the pre-fix 32 U3 head that started mid-sequence',
     sawtoothOk([5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10], 12));
-  check('sawtooth accepts the observed 32 U3 32ch low half-words',
+  check('sawtooth accepts 32 U3 32ch low half-words',
     sawtoothOk([6, 5, 4, 3, 2, 1, 0, 15], 8));
   check('sawtooth wraps at an 8 boundary (8 -> 23)',
     sawtoothOk([8, 23, 22], 3));
