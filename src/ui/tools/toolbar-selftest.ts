@@ -509,6 +509,15 @@ check(
   `failures=${JSON.stringify(anatomyFailures)}, icons=${iconSignatures.size}, separators=${separatorCount}/${verticalSeparatorCount}`,
 );
 
+const fitMarkup = commandMarkup('btn-fit');
+const fitGlyphIsHorizontalSpan = fitMarkup.includes('M8 7l-5 5 5 5M16 7l5 5-5 5');
+const cornerBracketGlyphRetired = !toolbar.includes('M8 3H3v5');
+check(
+  'the fit command shows the horizontal-span glyph and no command keeps the corner-bracket glyph',
+  fitGlyphIsHorizontalSpan && cornerBracketGlyphRetired,
+  `fitGlyph=${fitGlyphIsHorizontalSpan}, cornerBracketRetired=${cornerBracketGlyphRetired}`,
+);
+
 const fitIndex = toolbar.indexOf('id="btn-fit"');
 const spacerIndex = toolbar.indexOf('class="spacer"');
 const settingsIndex = toolbar.indexOf('id="btn-settings"');
