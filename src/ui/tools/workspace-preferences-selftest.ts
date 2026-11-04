@@ -1301,8 +1301,9 @@ check('App keeps the explicit-rate marker outside CaptureSettings and marks only
 
 const deviceBody = app.split('private adoptDeviceChannels(')[1]?.split('private async startCapture(')[0] ?? '';
 check('a narrower device keeps the restored channel mask',
-  deviceBody.includes('const masks = this.channels.map((c) => c.enabled);') &&
-  deviceBody.includes('defaultChannels(max).map((c) => ({ ...c, enabled: masks[c.index] ?? true }))'),
+  deviceBody.includes('this.channels = carryChannelState(this.channels, max);') &&
+  !deviceBody.includes('defaultChannels(') &&
+  deviceBody.includes('this.store.length === 0 && max !== this.channels.length'),
   deviceBody.replace(/\s+/g, ' ').trim());
 
 const startBody = app.split('private async startCapture(')[1]

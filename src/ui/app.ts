@@ -2262,8 +2262,7 @@ export class App {
       this.storeRef.set(createSampleStore(max, samplerate));
     }
     if (this.store.length === 0 && max !== this.channels.length) {
-      const masks = this.channels.map((c) => c.enabled);
-      this.channels = defaultChannels(max).map((c) => ({ ...c, enabled: masks[c.index] ?? true }));
+      this.channels = carryChannelState(this.channels, max);
       this.order = this.channels.map((c) => c.index);
     }
     this.settings = clampSettings(
