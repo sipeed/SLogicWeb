@@ -21,7 +21,7 @@ import { cpuRaster } from './cpuRaster.js';
 import { planColumns } from './columns.js';
 import { computeLayout } from './layout.js';
 import { DARK_THEME, DEFAULT_ROW_HEIGHT_CSS_PX as ROWH, parseHexColor } from './theme.js';
-import { MIN_SAMPLES_ON_SCREEN, ViewTransform, WheelIntent, wheelSpanFactor } from './transform.js';
+import { MIN_SAMPLES_ON_SCREEN, ViewTransform, wheelSpanFactor } from './transform.js';
 import { computeTicks } from '../ui/timeAxis.js';
 
 export interface Check {
@@ -110,11 +110,11 @@ function testTransform(): void {
     `zero=${zero?.label}@${zero?.x}`,
   );
 
-  // Zooming out past the end is allowed and pins to sample 0.
+  // Zooming out stops at the whole capture: no blank half-screen past the data.
   const t4 = new ViewTransform(1000, 0, 1000);
   t4.set(-500, 1500);
   t4.clampTo(1000);
-  check('zoom-out-past-end-pins-to-0', t4.start === 0 && t4.span === 2000, `[${t4.start}, ${t4.end})`);
+  check('zoom-out-stops-at-the-whole-capture', t4.start === 0 && t4.span === 1000, `[${t4.start}, ${t4.end})`);
 
   // Follow mode must not let a 3 ms capture shrink a 1 s window.
   const t5 = new ViewTransform(1000, 0, 10_000_000);
@@ -128,14 +128,6 @@ function testTransform(): void {
   t6.set(0, 2_000);
   t6.clampTo(2_000, { minVisibleFraction: 0, minSpan: Math.min(MIN_SAMPLES_ON_SCREEN, 2_000) });
   check('follow-startup-shrinks-to-live-edge', t6.start === 0 && t6.end === 2_000, `[${t6.start}, ${t6.end})`);
-
-  // [SOURCE] wheel intent locks after 5 events in a 200 ms window.
-  const wi = new WheelIntent();
-  let intent: 'zoom' | 'pan' = 'pan';
-  for (let i = 0; i < 6; i++) intent = wi.classify(1, 10, 1000 + i * 10);
-  check('wheel-intent-locks-zoom', intent === 'zoom', intent);
-  for (let i = 0; i < 6; i++) intent = wi.classify(1, 10, 1060 + i * 10);
-  check('wheel-intent-stays-locked', intent === 'zoom', intent);
 }
 
 function testPlan(): void {

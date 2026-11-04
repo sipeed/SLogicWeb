@@ -59,10 +59,13 @@ function webgl2Available(): boolean {
 }
 
 export interface RowSpec {
-  kind: 'channel' | 'lane' | 'analog';
-  /** Capture channel index. A lane or analog row draws this channel and is then painted
-   *  over by the overlay. */
+  kind: 'channel' | 'lane' | 'analog' | 'blank';
+  /** Capture channel index. A lane, analog or blank row draws this channel and is then
+   *  painted over by the overlay. */
   channel: number;
+  /** For a blank row, the channel it stands for: one inside the selected capture width
+   *  but outside the capture on screen, so the renderer has nothing to draw for it. */
+  shows?: number;
   /** Whole CSS px. Non-integral heights would break the cross-canvas seam. */
   heightCss: number;
   /** For a lane, the index of the analyzer whose annotations go in it. */
@@ -195,8 +198,10 @@ export class WaveformStack {
     }
   }
 
-  /** Match the drawing buffers to the elements. Idempotent and cheap; called per frame. */
-  syncSize(): void {
+  /** Match the drawing buffers to the elements. Idempotent and cheap; called per frame.
+   *  Returns true when a plot-width change rescaled the sample range (the App re-places a
+   *  trigger-anchored viewport in that case). */
+  syncSize(): boolean {
     const dpr = globalThis.devicePixelRatio || 1;
     for (let i = 0; i < this.renderers.length; i++) {
       if (!this.groups[i]?.length) continue;
@@ -206,7 +211,7 @@ export class WaveformStack {
     }
     this.dpr = dpr;
     const w = this.widthDevicePx;
-    if (!(w > 0)) return;
+    if (!(w > 0)) return false;
     this.view.widthPx = w;
     // Keep the time scale when the plot changes width (sidebar opened, closed or dragged,
     // window resized): the same time per pixel, more or less of it on screen. Keeping the
@@ -220,7 +225,9 @@ export class WaveformStack {
       const span = (this.view.end - this.view.start) * (css / prev);
       if (this.followLatest) this.setViewport(this.view.end - span, this.view.end);
       else this.setViewport(this.view.start, this.view.start + span);
+      return true;
     }
+    return false;
   }
 
   get viewport(): { start: number; end: number } {

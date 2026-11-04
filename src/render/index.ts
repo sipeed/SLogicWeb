@@ -16,7 +16,7 @@ export type { WaveformRendererOptions, FrameStats } from './waveformRenderer.js'
 
 export { Canvas2dRenderer } from './canvas2dRenderer.js';
 
-export { ViewTransform, WheelIntent, wheelSpanFactor, MIN_SAMPLES_ON_SCREEN } from './transform.js';
+export { ViewTransform, wheelSpanFactor, MIN_SAMPLES_ON_SCREEN } from './transform.js';
 export type { ViewportRange, WheelZoomOptions } from './transform.js';
 
 export { computeLayout } from './layout.js';

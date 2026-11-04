@@ -91,29 +91,26 @@ export class ViewTransform {
   }
 
   /**
-   * Keep the view inside something sensible for a capture of `length` samples.
+   * Keep the view inside a capture of `length` samples.
    *
    * - span is clamped below at MIN_SAMPLES_ON_SCREEN.
-   * - span is clamped above so that at least `minVisibleFraction` of the screen can be
-   *   covered by data. Zooming out PAST the end of the capture is deliberately allowed:
-   *   the empty part renders as NO_DATA, which is the honest picture, and it is the
-   *   normal state of affairs during a live capture where the window is longer than the
-   *   data captured so far.
-   * - the view cannot be panned so far right that less than `minVisibleFraction` of the
-   *   screen has data, and cannot start before sample 0.
+   * - span is clamped above so that data covers the whole screen: the whole capture is
+   *   the furthest zoom-out, so a 10 ms capture cannot be zoomed to 20 ms with half the
+   *   screen blank (HSync clamps samplesPerPixel to extent/width for the same reason).
+   * - the view cannot pan past either end of the capture, and cannot start before 0.
    *
    * `minVisibleFraction: 0` disables both of those and leaves only the zoom-in clamp.
    * That is what follow-the-live-edge uses, because there the user's chosen time span
    * has to survive a capture that is currently 3 ms long.
    *
-   * [UNVERIFIED] How far past the end of a capture panning and zooming may go. The
-   * zoom-IN clamp is ten samples; its zoom-OUT limit is not in the spec.
+   * A live capture shorter than the requested window contracts to its data under the
+   * default clamp; only following deliberately keeps the larger span.
    */
   clampTo(
     length: number,
     opts: { minSpan?: number; maxSpan?: number; minVisibleFraction?: number } = {},
   ): void {
-    const minVisible = opts.minVisibleFraction ?? 0.5;
+    const minVisible = opts.minVisibleFraction ?? 1;
     const lo = opts.minSpan ?? MIN_SAMPLES_ON_SCREEN;
     const hi = opts.maxSpan ?? (minVisible > 0 ? Math.max(lo, length / minVisible) : Infinity);
 
@@ -162,50 +159,4 @@ export function wheelSpanFactor(deltaY: number, opts: WheelZoomOptions, invert =
   const k = opts.isPhysicalWheel ? 0.5 : 1;
   const exponent = (k * scale * (invert ? -deltaY : deltaY)) / 120;
   return Math.pow(2, exponent);
-}
-
-/**
- * [CHOSEN] A wheel gesture is classified as zoom or pan by comparing |deltaY| with
- * |deltaX| over a rolling history of 5..15 events inside a 200 ms window, so a diagonal
- * trackpad swipe resolves to a single intent instead of juddering between two.
- */
-export class WheelIntent {
-  private readonly hist: { t: number; dx: number; dy: number }[] = [];
-  private locked: 'zoom' | 'pan' | null = null;
-  private lastT = -Infinity;
-
-  constructor(
-    private readonly windowMs = 200,
-    private readonly minEvents = 5,
-    private readonly maxEvents = 15,
-  ) {}
-
-  /** Feed one wheel event; returns the intent to act on. */
-  classify(deltaX: number, deltaY: number, now: number): 'zoom' | 'pan' {
-    if (now - this.lastT > this.windowMs) {
-      this.hist.length = 0;
-      this.locked = null;
-    }
-    this.lastT = now;
-    this.hist.push({ t: now, dx: Math.abs(deltaX), dy: Math.abs(deltaY) });
-    while (this.hist.length > this.maxEvents) this.hist.shift();
-    while (this.hist.length > 1 && now - this.hist[0]!.t > this.windowMs) this.hist.shift();
-
-    if (this.locked !== null) return this.locked;
-    let sx = 0;
-    let sy = 0;
-    for (const h of this.hist) {
-      sx += h.dx;
-      sy += h.dy;
-    }
-    const intent: 'zoom' | 'pan' = sy >= sx ? 'zoom' : 'pan';
-    if (this.hist.length >= this.minEvents) this.locked = intent;
-    return intent;
-  }
-
-  reset(): void {
-    this.hist.length = 0;
-    this.locked = null;
-    this.lastT = -Infinity;
-  }
 }

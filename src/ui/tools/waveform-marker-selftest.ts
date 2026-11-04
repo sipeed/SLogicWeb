@@ -982,12 +982,21 @@ function between(source: string, start: string, end: string): string {
     `len=${releaseSource.length}, guard=${releaseSource.includes('if (cursor === null || id === null) return;')}, ` +
     `clear=${releaseSource.includes('pointers.clear()')}`);
 
-  const setIndices = [...appSource.matchAll(/this\.storeRef\.set\(/g)].map((m) => m.index!);
+  const allSets = [...appSource.matchAll(/this\.storeRef\.set\(/g)].map((m) => m.index!);
+  // `setDisplayStore` swaps the Repeat display layer inside one capture shape; the
+  // marker and its sample coordinates stay valid, so it deliberately does not release
+  // the pointer. Every actual capture replacement does.
+  const displaySwap = between(appSource, 'private setDisplayStore(', 'private applyTriggerViewAnchor');
+  const setIndices = allSets.filter((index) =>
+    !displaySwap.includes(appSource.slice(index, index + 40)));
   const guarded = setIndices.map((index) =>
     appSource.slice(Math.max(0, index - 120), index).includes('this.releaseMarkerPointer();'));
+  const displaySwapIsUnguarded = displaySwap.includes('this.storeRef.set(store);') &&
+    !displaySwap.includes('releaseMarkerPointer');
   check('every store replacement releases the marker pointer immediately before installation',
-    setIndices.length === 3 && guarded.every((g) => g),
-    `swaps=${setIndices.length}, guarded=${JSON.stringify(guarded)}`);
+    setIndices.length === 3 && guarded.every((g) => g) && displaySwapIsUnguarded,
+    `swaps=${setIndices.length}, guarded=${JSON.stringify(guarded)}, ` +
+    `display=${displaySwapIsUnguarded}`);
 
   const adoptSource = between(appSource, 'private adoptCapture(', 'private save()');
   const startSource = between(appSource, 'private async startCapture(', 'private async stopCapture(');
@@ -1058,16 +1067,18 @@ function between(source: string, start: string, end: string): string {
     rowAtSource.includes('cssY >= box.top && cssY < box.top + box.height') &&
     grabMarkerSource.includes('const row = this.rowAt(e.clientY - rect.top);') &&
     hoverSource.includes('const box = this.rowAt(cssY);') &&
-    hoverSource.includes("if (!box || box.spec.kind === 'lane')"),
+    hoverSource.includes("if (!box || box.spec.kind === 'lane' || box.spec.kind === 'blank')"),
     `rowAt=${rowAtSource.length}, grab=${grabMarkerSource.length}, hover=${hoverSource.length}`);
+  // A blank row (a channel outside the capture on screen) borrows channel 0 for the
+  // renderer, so it must not hand that channel to the marker as a snap target.
   check('the marker press accepts channel and lane rows while hover skips lane rows',
     grabMarkerSource.length > 0 && !grabMarkerSource.includes("kind === 'channel'") &&
-    grabMarkerSource.includes('channel: row?.spec.channel ?? null,') &&
+    grabMarkerSource.includes("channel: row && row.spec.kind !== 'blank' ? row.spec.channel : null,") &&
     grabMarkerSource.includes('captureLength: this.store.length,') &&
     markerSource.includes('request.channel !== null && !Number.isInteger(request.channel)') &&
     markerSource.includes('channel: number | null;'),
     `grabLen=${grabMarkerSource.length}, filter=${grabMarkerSource.includes("kind === 'channel'")}, ` +
-    `nullChannel=${grabMarkerSource.includes('channel: row?.spec.channel ?? null,')}, ` +
+    `nullChannel=${grabMarkerSource.includes("channel: row && row.spec.kind !== 'blank' ? row.spec.channel : null,")}, ` +
     `classGuard=${markerSource.includes('request.channel !== null && !Number.isInteger(request.channel)')}`);
 
   const overlaySource = fs.readFileSync('src/ui/overlay.ts', 'utf8');
