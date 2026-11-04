@@ -1317,13 +1317,34 @@ const edgeMethodsSource = slice(app,
 {
   check('the compact channel select has an explicit unset and enabled channels in App display order',
     edgeSection.includes("['', t('capturePanel.cursorEdgesUnset')],") &&
-    edgeSection.includes('...v.cursorEdgeChannels.map((channel): SelectOptionTuple => [String(channel.index), `D${channel.index}`]),') &&
+    edgeSection.includes('...v.cursorEdgeChannels.map((channel): SelectOptionTuple => [String(channel.index), channel.name]),') &&
     edgeSection.includes('`cursor.edge.channel.${row.id}`,') &&
     edgeSection.includes("t('capturePanel.cursorEdgesChannel', { row: row.row }),") &&
     edgeSection.includes("row.channel === null ? '' : String(row.channel),") &&
     !edgeSection.includes(['createElement(', "'select'", ')'].join('')),
     `unset=${edgeSection.includes('capturePanel.cursorEdgesUnset')}, ` +
     `channels=${edgeSection.includes('String(channel.index)')}`);
+
+  const optionLine = edgeSection.split('\n')
+    .find((line) => line.includes('v.cursorEdgeChannels.map(')) ?? '';
+  check('edge channel options are labelled with the channel name itself, untranslated and unprefixed',
+    optionLine.length > 0 &&
+    optionLine.includes('[String(channel.index), channel.name]') &&
+    !optionLine.includes('t(') &&
+    !edgeSection.includes('`D${') &&
+    edgeSection.includes("row.id, channel.value === '' ? null : Number(channel.value),"),
+    `option=${optionLine.trim().length} chars, ` +
+    `prefix=${edgeSection.includes('`D${')}, ` +
+    `absolute=${edgeSection.includes("channel.value === '' ? null : Number(channel.value)")}`);
+
+  const configure = slice(app, 'private configureChannel(', 'private relayout(): void {');
+  const nameWriteAt = configure.indexOf('this.channels[channel] = { ...current, name, color: config.color };');
+  const configureRenderAt = configure.indexOf('this.renderPanels();');
+  check('a rename normalizes and stores the channel name before the rebuild that relabels the picker',
+    configure.includes('const name = config.name.trim() || defaultChannelName(channel);') &&
+    nameWriteAt >= 0 && configureRenderAt > nameWriteAt,
+    `write=${nameWriteAt}, render=${configureRenderAt}, ` +
+    `fallback=${configure.includes('config.name.trim() || defaultChannelName(channel)')}`);
 
   check('channel changes commit an absolute channel or null through the row-scoped callback',
     edgeSection.includes("channel.el.classList.add('cursor-edge-channel');") &&

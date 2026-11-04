@@ -765,7 +765,7 @@ export class CapturePanel {
         at.textContent = '@';
         const channelOptions: SelectOptionTuple[] = [
           ['', t('capturePanel.cursorEdgesUnset')],
-          ...v.cursorEdgeChannels.map((channel): SelectOptionTuple => [String(channel.index), `D${channel.index}`]),
+          ...v.cursorEdgeChannels.map((channel): SelectOptionTuple => [String(channel.index), channel.name]),
         ];
         const channel = selectControl(
           `cursor.edge.channel.${row.id}`,
