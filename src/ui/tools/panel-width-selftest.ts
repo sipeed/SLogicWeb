@@ -727,7 +727,7 @@ function readIndexHtml(): string {
   const needles = [
     "must<HTMLDivElement>('panel-resizer')",
     'new PanelResizer(',
-    'setHidden(this.panel === null)',
+    'setHidden(!this.sidebar.visible)',
   ];
   const missing = needles.filter((needle) => !app.includes(needle));
   check('app.ts owns the handle element, constructs the resizer, and hides it with the same panel source of truth',

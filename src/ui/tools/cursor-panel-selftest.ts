@@ -409,12 +409,12 @@ const edgeMethodsSource = slice(app,
   const updateAt = consumed.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
   check('a consumed drag move refreshes the open cursor list in place, after the move',
     consumed.length > 0 && activateAt >= 0 && updateAt > activateAt &&
-    consumed.slice(0, updateAt).includes("if (this.panel === 'device')") &&
+    consumed.slice(0, updateAt).includes('if (this.capturePageShown())') &&
     !consumed.includes('renderPanels('),
     `consumed=${consumed.length} chars, activate=${activateAt}, update=${updateAt}`);
 
   const distanceAt = consumed.indexOf(
-    "if (this.panel === 'device') this.capturePanel.updateCursorDistances(this.cursorDistanceRows());");
+    'if (this.capturePageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());');
   check('a consumed drag move follows the same drag in the distance rows, after the cursor list',
     consumed.length > 0 && updateAt >= 0 && distanceAt > updateAt &&
     !consumed.slice(distanceAt).includes('renderPanels('),
@@ -470,7 +470,7 @@ const edgeMethodsSource = slice(app,
   const retention = slice(app, 'private enforceLoopRetention(store: SampleStore): void {',
     'private async stopCapture(');
   const shiftAt = retention.indexOf('if (cursor.marker.sample !== sample) shifted = true;');
-  const branchAt = retention.indexOf("} else if (shifted && this.panel === 'device') {");
+  const branchAt = retention.indexOf('} else if (shifted && this.capturePageShown()) {');
   const updateAt = retention.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
   const originAt = retention.indexOf('const next = this.triggerSampleIndex! - drop;');
   check('a retention shift with an intact cursor list refreshes the rows in place',
@@ -489,7 +489,7 @@ const edgeMethodsSource = slice(app,
     retention.indexOf('this.renderPanels();') < branchAt,
     `renders=${renders.length}, updates=${updates.length}, drop=${dropAt}, branch=${branchAt}`);
 
-  const shiftBranch = slice(retention, "} else if (shifted && this.panel === 'device') {",
+  const shiftBranch = slice(retention, '} else if (shifted && this.capturePageShown()) {',
     'this.hover = null;');
   const shiftListAt = shiftBranch.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
   const shiftDistanceAt = shiftBranch.indexOf(
@@ -1495,7 +1495,7 @@ const edgeMethodsSource = slice(app,
     retention.slice(prune, render).includes('new Set(this.cursors.map((cursor) => cursor.id)),'),
     `drop=${drop}, prune=${prune}, render=${render}`);
 
-  const shift = slice(retention, "} else if (shifted && this.panel === 'device') {", 'this.hover = null;');
+  const shift = slice(retention, '} else if (shifted && this.capturePageShown()) {', 'this.hover = null;');
   const cursorAt = shift.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
   const distanceAt = shift.indexOf('this.capturePanel.updateCursorDistances(this.cursorDistanceRows());');
   const edgeAt = shift.indexOf('this.capturePanel.updateCursorEdges(this.cursorEdgeRows());');

@@ -737,19 +737,27 @@ check(
 );
 
 const assistantMarkup = commandMarkup(assistantCommandId);
+const assistantShownStart = app.indexOf('private assistantShown(');
+const assistantShownEnd = assistantShownStart >= 0 ? app.indexOf('\n  }', assistantShownStart) : -1;
+const assistantShownBody = assistantShownStart >= 0 && assistantShownEnd > assistantShownStart
+  ? app.slice(assistantShownStart, assistantShownEnd)
+  : '';
+const assistantShownSource = assistantShownBody.includes('s.visible && s.assistant');
 const assistantWiring = [
   "this.el.assistant.addEventListener('click'",
   'this.toggleAssistant();',
-  "this.selectPanel('assistant');",
-  'this.selectPanel(this.panelBeforeAssistant);',
-  "this.el.assistant.setAttribute('aria-pressed', String(this.panel === 'assistant'))",
+  'this.applySidebar(nextAssistantState(this.sidebar));',
+  'if (this.sidebar.assistant) this.assistantPanel?.focusInput();',
+  "this.el.assistant.setAttribute('aria-pressed', String(this.assistantShown()))",
+  'const assistant = this.assistantShown();',
   "this.el.assistant.setAttribute('aria-label', t('toolbar.assistantTitle'))",
 ].filter((needle) => !app.includes(needle));
 check(
-  'the assistant button is a toggle: aria-pressed, translated title, and the shared selectPanel path',
+  'the assistant button is a toggle: aria-pressed and the visible flag come from one shown derivation',
   assistantMarkup.includes('aria-pressed="false"') && assistantMarkup.includes('aria-controls="side-panel"') &&
-    assistantMarkup.includes('data-i18n-title="toolbar.assistantTitle"') && assistantWiring.length === 0,
-  `missing=${JSON.stringify(assistantWiring)}`,
+    assistantMarkup.includes('data-i18n-title="toolbar.assistantTitle"') &&
+    assistantWiring.length === 0 && assistantShownSource,
+  `missing=${JSON.stringify(assistantWiring)}, shownSource=${assistantShownSource}`,
 );
 
 const disclosureNeedles = [
@@ -866,10 +874,10 @@ const sidebarChoiceNeedles = [
   "t('toolbar.sidebarAnalyzers')",
   "t('toolbar.sidebarAssistant')",
   "t('toolbar.sidebarNone')",
-  "checked: this.panel === 'device'",
-  "checked: this.panel === 'analyzers'",
-  "checked: this.panel === 'assistant'",
-  'checked: this.panel === null',
+  'checked: this.capturePageShown()',
+  'checked: this.decodersPageShown()',
+  'checked: this.assistantShown()',
+  'checked: !this.sidebar.visible',
   "this.selectPanel('device')",
   "this.selectPanel('analyzers')",
   "this.selectPanel('assistant')",
@@ -881,10 +889,16 @@ const selectPanelEnd = selectPanelStart >= 0 ? app.indexOf('\n  }', selectPanelS
 const selectPanelBody = selectPanelStart >= 0 && selectPanelEnd > selectPanelStart
   ? app.slice(selectPanelStart, selectPanelEnd)
   : '';
-const selectPanelShape = selectPanelBody.includes("this.sidebarMenu.close('outside')") &&
-  selectPanelBody.includes('this.panel = p;') &&
-  selectPanelBody.includes('this.renderPanels();') &&
-  selectPanelBody.includes('this.relayout();');
+const applySidebarStart = app.indexOf('private applySidebar(');
+const applySidebarEnd = applySidebarStart >= 0 ? app.indexOf('\n  }', applySidebarStart) : -1;
+const applySidebarBody = applySidebarStart >= 0 && applySidebarEnd > applySidebarStart
+  ? app.slice(applySidebarStart, applySidebarEnd)
+  : '';
+const selectPanelShape = selectPanelBody.includes('this.applySidebar(') &&
+  applySidebarBody.includes("this.sidebarMenu.close('outside')") &&
+  applySidebarBody.includes('this.sidebar = next;') &&
+  applySidebarBody.includes('this.renderPanels();') &&
+  applySidebarBody.includes('this.relayout();');
 const sidebarItemsStart = app.indexOf('private sidebarItems(');
 const sidebarItemsEnd = sidebarItemsStart >= 0 ? app.indexOf('\n  }', sidebarItemsStart) : -1;
 const sidebarItemsBody = sidebarItemsStart >= 0 && sidebarItemsEnd > sidebarItemsStart
@@ -901,6 +915,14 @@ check(
   'four checked direct choices drive the panel through one shared selection path',
   missingSidebarChoices.length === 0 && selectPanelShape && sharedPanelPath,
   `missing=${JSON.stringify(missingSidebarChoices)}, shape=${selectPanelShape}, shared=${sharedPanelPath}, delegations=${sidebarDelegations}`,
+);
+
+const retiredSelectionFields = ['panelBeforeAssistant', /\bthis\.panel\b/]
+  .filter((needle) => (typeof needle === 'string' ? app.includes(needle) : needle.test(app)));
+check(
+  'the retired panel-selection fields are gone from the app source',
+  retiredSelectionFields.length === 0,
+  `hits=${JSON.stringify(retiredSelectionFields.map(String))}`,
 );
 
 const sidebarRowCount = sidebarItemsBody.match(/onPick:/g)?.length ?? 0;

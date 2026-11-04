@@ -71,6 +71,10 @@ import {
 } from './workspacePreferences.js';
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
+import {
+  DEFAULT_SIDEBAR_STATE, hideSidebar, selectSidebarPage,
+  toggleAssistant as nextAssistantState, type SidebarState,
+} from './sidebar.js';
 import { shortcutIdFor } from './shortcuts.js';
 import { ShortcutsDialog } from './shortcutsDialog.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
@@ -349,9 +353,7 @@ export class App {
   private markerCursor: MarkerCursor = null;
 
   private dirty = true;
-  private panel: 'device' | 'analyzers' | 'assistant' | null = 'device';
-  /** What the toolbar's assistant button returns to when it closes the assistant. */
-  private panelBeforeAssistant: 'device' | 'analyzers' | null = 'device';
+  private sidebar: SidebarState = DEFAULT_SIDEBAR_STATE;
   private paintedTheme: ThemeId;
   private palette: CanvasPalette;
 
@@ -1169,7 +1171,7 @@ export class App {
       if (this.running) this.livePending = true;
       else this.dirty = true;
       const now = performance.now();
-      if (this.panel === 'analyzers' && (done || now - this.busPanelAt > 300)) {
+      if (this.decodersPageShown() && (done || now - this.busPanelAt > 300)) {
         this.busPanelAt = now;
         this.renderPanels();
       }
@@ -1790,7 +1792,7 @@ export class App {
     if (!highRateLoop) this.pumpBusBuilders();
     if (this.running && !this.repeatWaveHolding && now - this.runningPanelAt > 500) {
       this.runningPanelAt = now;
-      if (this.panel === 'device') {
+      if (this.capturePageShown()) {
         this.capturePanel.updateProgress(this.progressView());
         // A Repeat wave does not rebuild the panel; refresh the trigger state (waiting /
         // triggered / miss) as decided text instead of leaving the last wave's note up.
@@ -1799,6 +1801,9 @@ export class App {
         // text, never rebuild the panel (that would drop focus mid-edit).
         if (this.captureIsLoop) this.capturePanel.updateLoopMetrics(this.computeLoopMetrics());
       }
+      // A high-rate loop draws on the live cadence below, so the status line (which the
+      // draw pass does not own) still needs its own refresh here.
+      if (highRateLoop) this.renderStatus();
     }
     // Interactions (`dirty`) draw in the next frame. New samples (`livePending`) draw on
     // a fixed cadence, like HSync telling the interface of progress every 50 ms instead
@@ -2127,8 +2132,8 @@ export class App {
         });
         if (consumed) {
           if (cursor.marker.started) this.activeCursorId = cursor.id;
-          if (this.panel === 'device') this.capturePanel.updateCursors(this.cursorRows());
-          if (this.panel === 'device') this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
+          if (this.capturePageShown()) this.capturePanel.updateCursors(this.cursorRows());
+          if (this.capturePageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
           this.dirty = true; return;
         }
       }
@@ -2927,7 +2932,7 @@ export class App {
       );
       // A dropped cursor changes the row list; a pure shift only rewrites its cells.
       this.renderPanels();
-    } else if (this.panel === 'device') {
+    } else if (this.capturePageShown()) {
       this.capturePanel.updateCursors(this.cursorRows());
       this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
       this.capturePanel.updateCursorEdges(this.cursorEdgeRows());
@@ -3233,18 +3238,10 @@ export class App {
     }
   }
 
-  /**
-   * The toolbar shortcut to the assistant: open it, or put back the sidebar it replaced.
-   * Same selectPanel path as the sidebar menu, so the two can never disagree.
-   */
+  /** The toolbar shortcut to the assistant: open it, or close it and land on the page the user had. */
   private toggleAssistant(): void {
-    if (this.panel === 'assistant') {
-      this.selectPanel(this.panelBeforeAssistant);
-      return;
-    }
-    this.panelBeforeAssistant = this.panel;
-    this.selectPanel('assistant');
-    this.assistantPanel?.focusInput();
+    this.applySidebar(nextAssistantState(this.sidebar));
+    if (this.sidebar.assistant) this.assistantPanel?.focusInput();
   }
 
   private settingsItems(): SettingsMenuItem[] {
@@ -3344,32 +3341,59 @@ export class App {
     return [
       {
         label: t('toolbar.sidebarDevice'),
-        checked: this.panel === 'device',
+        checked: this.capturePageShown(),
         onPick: () => this.selectPanel('device'),
       },
       {
         label: t('toolbar.sidebarAnalyzers'),
-        checked: this.panel === 'analyzers',
+        checked: this.decodersPageShown(),
         onPick: () => this.selectPanel('analyzers'),
       },
       {
         label: t('toolbar.sidebarAssistant'),
-        checked: this.panel === 'assistant',
+        checked: this.assistantShown(),
         onPick: () => this.selectPanel('assistant'),
       },
       {
         label: t('toolbar.sidebarNone'),
-        checked: this.panel === null,
+        checked: !this.sidebar.visible,
         onPick: () => this.selectPanel(null),
       },
     ];
   }
 
-  private selectPanel(p: 'device' | 'analyzers' | 'assistant' | null): void {
+  private capturePageShown(): boolean {
+    const s = this.sidebar;
+    return s.visible && !s.assistant && s.page === 'capture';
+  }
+
+  private decodersPageShown(): boolean {
+    const s = this.sidebar;
+    return s.visible && !s.assistant && s.page === 'decoders';
+  }
+
+  private assistantShown(): boolean {
+    const s = this.sidebar;
+    return s.visible && s.assistant;
+  }
+
+  private applySidebar(next: SidebarState): void {
     this.sidebarMenu.close('outside');
-    this.panel = p;
+    this.sidebar = next;
     this.renderPanels();
     this.relayout();
+  }
+
+  private selectPanel(p: 'device' | 'analyzers' | 'assistant' | null): void {
+    if (p === 'assistant') {
+      if (!this.sidebar.assistant) this.applySidebar(nextAssistantState(this.sidebar));
+      return;
+    }
+    if (p === null) {
+      this.applySidebar(hideSidebar(this.sidebar));
+      return;
+    }
+    this.applySidebar(selectSidebarPage(this.sidebar, p === 'device' ? 'capture' : 'decoders'));
   }
 
   /** Re-render every string in the shell after a locale change. */
@@ -3490,32 +3514,38 @@ export class App {
   }
 
   private renderPanels(): void {
-    this.el.side.classList.toggle('hidden', this.panel === null);
-    this.resizer.setHidden(this.panel === null);
+    this.syncSidebar();
+    this.renderSidebarContent();
+  }
 
-    // Toolbar chrome is updated before the early return below, not after it. It used to be
-    // after, which meant that with no side panel open - the default - starting a capture
-    // left the button reading "Start" and the title reading "no capture".
+  private syncSidebar(): void {
+    const assistant = this.assistantShown();
+    this.el.side.classList.toggle('hidden', !this.sidebar.visible);
+    this.resizer.setHidden(!this.sidebar.visible);
     this.renderToolbarState();
-    if (this.panel === null) return;
-
-    // The assistant is mounted once and only shown or hidden: re-rendering it on every
-    // state change would drop a streaming answer, a pending approval and the draft.
-    const assistant = this.panel === 'assistant';
     this.el.side.classList.toggle('assistant-mode', assistant);
     this.panelHost.hidden = assistant;
-    this.busPanel.hidden = this.panel !== 'analyzers';
-    if (assistant && !this.assistantPanel) {
-      this.assistantPanel = new AssistantPanel(this.assistantHost());
-      this.el.side.appendChild(this.assistantPanel.el);
-      this.assistantPanel.render();
-    }
+    this.busPanel.hidden = !this.decodersPageShown();
     if (this.assistantPanel) this.assistantPanel.el.hidden = !assistant;
-    if (assistant) return;
+  }
+
+  private renderSidebarContent(): void {
+    if (!this.sidebar.visible) return;
+    if (this.sidebar.assistant) {
+      // The assistant is mounted once and only shown or hidden: re-rendering it on every
+      // state change would drop a streaming answer, a pending approval and the draft.
+      if (!this.assistantPanel) {
+        this.assistantPanel = new AssistantPanel(this.assistantHost());
+        this.assistantPanel.el.hidden = false;
+        this.el.side.appendChild(this.assistantPanel.el);
+        this.assistantPanel.render();
+      }
+      return;
+    }
 
     const host = this.panelHost;
     host.replaceChildren();
-    if (this.panel === 'device') {
+    if (this.sidebar.page === 'capture') {
       this.capturePanel.render({
         settings: this.settings,
         channels: this.channels.slice(0, this.displayChannelCount()),
@@ -3623,7 +3653,7 @@ export class App {
     this.el.theme.setAttribute('aria-label', t('toolbar.themeTitle'));
     this.el.sidebar.setAttribute('aria-label', t('toolbar.sidebarTitle'));
     this.el.assistant.setAttribute('aria-label', t('toolbar.assistantTitle'));
-    this.el.assistant.setAttribute('aria-pressed', String(this.panel === 'assistant'));
+    this.el.assistant.setAttribute('aria-pressed', String(this.assistantShown()));
 
     const btn = this.el.transport;
     btn.setAttribute('aria-label', this.stopping ? t('toolbar.stopping')
@@ -4140,7 +4170,7 @@ export class App {
       // describing the previous wave's completed capture and show the new interval.
       if (quietRepeat) {
         this.renderStatus();
-        if (this.panel === 'device') {
+        if (this.capturePageShown()) {
           this.capturePanel.updateTriggerStatus(this.triggerStatusView());
         }
       }
@@ -4405,7 +4435,7 @@ export class App {
           if (!this.repeatSession) {
             this.relayout();
             this.renderPanels();
-          } else if (this.panel === 'device') {
+          } else if (this.capturePageShown()) {
             // The panel stays put during a Repeat session; only the state notes change.
             this.capturePanel.updateTriggerStatus(this.triggerStatusView());
           }
@@ -4684,7 +4714,7 @@ export class App {
           this.triggerViewLost = true;
           // The data path does not redraw the panel; publish the state change now
           // without a full rebuild (the cursor branch below may do one anyway).
-          if (this.panel === 'device') {
+          if (this.capturePageShown()) {
             this.capturePanel.updateTriggerStatus(this.triggerStatusView());
           }
         }
@@ -4710,7 +4740,7 @@ export class App {
         if (resumeTriggerFollow(lock.resumeFollow, this.running)) this.setFollow(true);
         // The one-shot digital lock is now spent; refresh the released status and the
         // notes without waiting for an unrelated full render.
-        if (this.panel === 'device') {
+        if (this.capturePageShown()) {
           this.capturePanel.updateTriggerStatus(this.triggerStatusView());
         }
       }
@@ -4737,7 +4767,7 @@ export class App {
         this.edgeRows, new Set(this.cursors.map((cursor) => cursor.id)),
       );
       this.renderPanels();
-    } else if (shifted && this.panel === 'device') {
+    } else if (shifted && this.capturePageShown()) {
       this.capturePanel.updateCursors(this.cursorRows());
       this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
       this.capturePanel.updateCursorEdges(this.cursorEdgeRows());
@@ -4913,7 +4943,7 @@ export class App {
       // reports the miss and the next Interval retries.
       this.repeatWaveHolding = false;
       this.dirty = true;
-      if (this.panel === 'device') {
+      if (this.capturePageShown()) {
         // The wave stopped naturally; the text-only state note must not keep saying it
         // is still recording while the Interval runs.
         this.capturePanel.updateTriggerStatus(this.triggerStatusView());

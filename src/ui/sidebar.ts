@@ -29,6 +29,10 @@ export function toggleSidebarVisible(state: SidebarState): SidebarState {
   return { visible: !state.visible, page: state.page, assistant: state.assistant };
 }
 
+export function hideSidebar(state: SidebarState): SidebarState {
+  return { visible: false, page: state.page, assistant: false };
+}
+
 export function toggleAssistant(state: SidebarState): SidebarState {
   if (state.assistant) return { visible: state.visible, page: state.page, assistant: false };
   return { visible: true, page: state.page, assistant: true };

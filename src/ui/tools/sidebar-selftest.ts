@@ -1,5 +1,6 @@
 import {
   DEFAULT_SIDEBAR_STATE,
+  hideSidebar,
   parseSidebarPage,
   selectSidebarPage,
   SIDEBAR_PAGES,
@@ -89,6 +90,26 @@ const describe = (s: SidebarState): string =>
     closer.visible === false && closer.page === 'cursors' && closer.assistant === true &&
     reopened.visible === true && reopened.page === 'cursors' && reopened.assistant === true,
     `open=${describe(opener)}, close=${describe(closer)}, reopen=${describe(reopened)}`);
+}
+
+{
+  const failures: string[] = [];
+  let states = 0;
+  for (const page of SIDEBAR_PAGES) {
+    for (const visible of [true, false]) {
+      for (const assistant of [true, false]) {
+        const before = state(visible, page, assistant);
+        const after = hideSidebar(before);
+        states += 1;
+        const label = `${page}[${describe(before)}]`;
+        if (after.visible !== false || after.page !== page || after.assistant !== false) {
+          failures.push(`${label} => ${describe(after)}`);
+        }
+      }
+    }
+  }
+  check('closing the sidebar hides the dock, keeps the page, and clears the assistant from every state',
+    failures.length === 0, failures.length === 0 ? `${states} transitions matched` : `failed=${JSON.stringify(failures)}`);
 }
 
 {
@@ -201,11 +222,27 @@ const describe = (s: SidebarState): string =>
   const source = fs.readFileSync('src/ui/sidebar.ts', 'utf8');
   const forbidden = ['document', 'window', 'addEventListener', 'innerHTML', '//', '/*', ' t('];
   const hits = forbidden.filter((token) => source.includes(token));
-  const api = ['selectSidebarPage', 'toggleSidebarVisible', 'toggleAssistant', 'parseSidebarPage', 'sidebarTabs']
+  const api = ['selectSidebarPage', 'toggleSidebarVisible', 'hideSidebar', 'toggleAssistant',
+    'parseSidebarPage', 'sidebarTabs']
     .filter((name) => source.includes(`export function ${name}(`));
   check('the model is DOM-free, locale-free, comment-free, and exports the whole reducer surface',
-    hits.length === 0 && api.length === 5,
+    hits.length === 0 && api.length === 6,
     `hits=${JSON.stringify(hits)}, api=${JSON.stringify(api)}`);
+}
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const start = app.indexOf('private selectPanel(');
+  const end = start >= 0 ? app.indexOf('\n  }', start) : -1;
+  const body = start >= 0 && end > start ? app.slice(start, end) : '';
+  const routed = body.includes('hideSidebar(this.sidebar)');
+  const viaToggle = body.includes('toggleSidebarVisible');
+  const nullBranch = body.includes('p === null');
+  check('closing the sidebar routes through hideSidebar and never through the visibility toggle',
+    start >= 0 && nullBranch && routed && !viaToggle,
+    `body=${body.length} chars, nullBranch=${nullBranch}, routed=${routed}, viaToggle=${viaToggle}`);
 }
 
 const failed = results.filter((r) => !r.pass).length;
