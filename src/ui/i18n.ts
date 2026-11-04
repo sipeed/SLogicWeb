@@ -166,6 +166,32 @@ export function formatMessage(template: string, vars?: MessageVars): string {
     Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : literal);
 }
 
+function normalizeTag(tag: string): string {
+  return tag.trim().replace(/_/g, '-').toLowerCase();
+}
+
+function primarySubtag(tag: string): string {
+  return tag.split('-')[0];
+}
+
+/**
+ * Map one BCP-47 language tag to a supported locale: the exact tag form wins,
+ * otherwise the first LOCALES entry sharing the primary subtag.
+ */
+export function matchLocale(tag: string): Locale | null {
+  const normalized = normalizeTag(tag);
+  if (normalized === '') return null;
+  for (const locale of LOCALES) {
+    if (locale.toLowerCase() === normalized) return locale;
+  }
+  const primary = primarySubtag(normalized);
+  for (const locale of LOCALES) {
+    const lower = locale.toLowerCase();
+    if (lower === primary || primarySubtag(lower) === primary) return locale;
+  }
+  return null;
+}
+
 /** Validate a stored value against the known locales; anything else means 'en'. */
 export function pickLocale(stored: string | null): Locale {
   return (LOCALES as readonly string[]).includes(stored ?? '') ? stored as Locale : 'en';

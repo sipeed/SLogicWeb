@@ -15,6 +15,8 @@
  *   - formatMessage interpolates exactly, and leaves an unknown `{var}` literal in
  *     the output instead of swallowing it (the visible-failure contract);
  *   - pickLocale falls back to 'en' for absent and for unknown stored values;
+ *   - matchLocale maps a BCP-47 tag to a supported locale - exact form first, then
+ *     the primary subtag - and never prefix-matches ('e', 'english', 'zhx' stay null);
  *   - translate() falls back to the English string when a dict lacks the key - the
  *     incomplete dict is a Partial<Messages> cast, so the Messages type itself stays
  *     intact;
@@ -42,7 +44,7 @@ import { zhCN } from '../locales/zh-CN.js';
 import { ru } from '../locales/ru.js';
 import { fr } from '../locales/fr.js';
 import {
-  formatMessage, getLocale, loadCatalog, LOCALE_LABELS, LOCALES, onLocaleChange,
+  formatMessage, getLocale, loadCatalog, LOCALE_LABELS, LOCALES, matchLocale, onLocaleChange,
   pickLocale, setLocale, t, translate, type Locale,
 } from '../i18n.js';
 import {
@@ -112,6 +114,39 @@ function check(name: string, pass: boolean, detail: string): void {
   check('pickLocale falls back to en for absent/unknown, keeps known locales',
     absent === 'en' && unknown === 'en' && knownEn === 'en' && knownFr === 'fr',
     `null→${absent}, xx-YY→${unknown}, en→${knownEn}, fr→${knownFr}`);
+}
+
+// -------------------------------------------------------- language tag matching
+
+{
+  const table: [string, Locale | null][] = [
+    ['fr', 'fr'], ['FR', 'fr'], [' fr-FR ', 'fr'], ['fr_FR', 'fr'], ['fr-FR', 'fr'], ['ru-RU', 'ru'],
+  ];
+  const bad = table.find(([tag, want]) => matchLocale(tag) !== want);
+  check('matchLocale accepts the exact tag form regardless of case, padding and `_`',
+    bad === undefined,
+    bad ? `${JSON.stringify(bad[0])}→${matchLocale(bad[0])}, want ${bad[1]}`
+      : table.map(([tag, want]) => `${JSON.stringify(tag)}→${matchLocale(tag)}=${want}`).join(', '));
+}
+
+{
+  const table: [string, Locale | null][] = [
+    ['en-GB', 'en'], ['zh', 'zh-CN'], ['zh-Hans-CN', 'zh-CN'], ['zh-TW', 'zh-CN'], ['zh-cn', 'zh-CN'],
+  ];
+  const bad = table.find(([tag, want]) => matchLocale(tag) !== want);
+  check('matchLocale falls back to the primary subtag (region and script variants)',
+    bad === undefined,
+    bad ? `${JSON.stringify(bad[0])}→${matchLocale(bad[0])}, want ${bad[1]}`
+      : table.map(([tag, want]) => `${JSON.stringify(tag)}→${matchLocale(tag)}=${want}`).join(', '));
+}
+
+{
+  const table = ['de', 'de-DE', '', '  ', 'e', 'english', 'zhx', 'enx']; // loose-prefix traps included
+  const bad = table.find((tag) => matchLocale(tag) !== null);
+  check('matchLocale rejects unsupported tags instead of prefix-matching a locale',
+    bad === undefined,
+    bad ? `${JSON.stringify(bad)}→${matchLocale(bad)}, want null`
+      : table.map((tag) => `${JSON.stringify(tag)}→null`).join(', '));
 }
 
 // ------------------------------------------------------------------ translation
