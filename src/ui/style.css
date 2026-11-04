@@ -1035,6 +1035,7 @@ html.resizing { cursor: col-resize; user-select: none; }
 .panel-section-head span:first-child { flex: 1; }
 .panel-section-head > input[type="checkbox"] { margin-left: auto; width: 15px; height: 15px; accent-color: var(--accent); }
 .panel-section-body { display: flex; flex-direction: column; gap: 8px; }
+.panel-section-body[hidden] { display: none; }
 .panel-note { font-size: 10px; color: var(--text50); line-height: 1.5; white-space: pre-wrap; }
 .panel-note.error { color: var(--negative); }
 .panel-note.live { color: var(--text80); }
