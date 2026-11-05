@@ -7,6 +7,28 @@ import { USB_FILTERS } from './usbCore.js';
 import { workerTransport } from './workerTransport.js';
 
 export type { CaptureConfig, CaptureStartOptions, Device, SampleSink } from './types.js';
+export {
+  PROFILES,
+  SLOGIC16U3_PROFILE,
+  SLOGIC32U3_PROFILE,
+  capabilityReason,
+  maxSamplerateFor,
+  profileForVidPid,
+  sampleRatesFor,
+  validateProfile,
+} from './profile.js';
+export type {
+  AnalogGroup,
+  AnalogTriggerKind,
+  CalibrationRef,
+  DeviceProfile,
+  DigitalGroup,
+  LinkRate,
+  ProfileQuirk,
+  RateTier,
+  TestMode,
+  TriggerKind,
+} from './profileTypes.js';
 export { WorkerSlogicDevice, workerTransport } from './workerTransport.js';
 
 /**

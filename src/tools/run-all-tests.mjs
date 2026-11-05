@@ -28,6 +28,12 @@ const entries = [
   'src/data/bench/runtests.ts',
   'src/device/offline-test.ts',
   'src/device/emulationPatternTest.ts',
+  'src/platform/capabilitiesSelftest.ts',
+  'src/device/profileSelftest.ts',
+  'src/data/signalStoreSelftest.ts',
+  'src/dsp/triggerPlanSelftest.ts',
+  'src/dsp/acquisitionSelftest.ts',
+  'src/link/linkSessionSelftest.ts',
   ...spawnSync('sh', ['-c', `ls ${ROOT}src/ui/tools/*-selftest.ts`], { encoding: 'utf8' })
     .stdout.trim().split('\n')
     .filter(Boolean)

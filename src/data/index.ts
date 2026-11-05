@@ -8,6 +8,35 @@
 
 export type { SampleStore, ColumnView, MemoryReport, GapSpan } from './types.js';
 export { DROP_FRONT_QUANTUM, GAP_BIT } from './types.js';
+export {
+  COLUMN_GAP,
+  COLUMN_OK,
+  COLUMN_PENDING,
+  type AnalogSignalColumns,
+  type ColumnStatus,
+  type DigitalSignalColumns,
+  type GapReason,
+  type RecordController,
+  type RecordState,
+  type SamplePos,
+  type SignalColumns,
+  type SignalGroup,
+  type SignalId,
+  type SignalInfo,
+  type SignalKind,
+  type SignalStore,
+} from './signalTypes.js';
+export {
+  DigitalSignalStore,
+  SignalStoreError,
+  UnsupportedRecordController,
+  UnsupportedRecordError,
+  UnsupportedSignalGroupError,
+  createDigitalSignalStore,
+  type DigitalSignalGroupOptions,
+  type DigitalSignalStoreOptions,
+  type SignalStoreErrorCode,
+} from './signalStore.js';
 export { appendLostSamples, channelAcrossGaps } from './gaps.js';
 export { PlanarSampleStore, type PlanarStoreOptions } from './planarStore.js';
 export { InterleavedSampleStore } from './interleavedStore.js';
