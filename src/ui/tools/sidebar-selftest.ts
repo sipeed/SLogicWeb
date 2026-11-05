@@ -334,9 +334,9 @@ const describe = (s: SidebarState): string =>
 {
   const host = readSource('src/ui/sidebarHost.ts');
   const collapseAt = host.indexOf("this.collapseButton = iconButton('side-collapse', 'right')");
-  const segmentedAt = host.indexOf("this.tablist = div('segmented side-pages')");
+  const tablistClassAt = host.indexOf("this.tablist = div('side-tablist')");
   const tablistAt = host.indexOf("this.tablist.setAttribute('role', 'tablist')");
-  const tabAt = host.indexOf("const tab = button('seg', '')");
+  const tabAt = host.indexOf("const tab = button('side-tab', '')");
   const tabAppendAt = host.indexOf('this.tablist.appendChild(tab);');
   const stripAppendAt = host.indexOf('this.strip.append(this.collapseButton, this.tablist);');
   const tabAria = [
@@ -363,9 +363,9 @@ const describe = (s: SidebarState): string =>
     "this.tablist.setAttribute('aria-label', t('sidebar.pagesLabel'))",
   ].filter((needle) => !host.includes(needle));
   check('the host builds the strip collapse-first, then role=tab buttons with roving tabindex and data-page',
-    collapseAt >= 0 && segmentedAt > collapseAt && tablistAt > segmentedAt &&
+    collapseAt >= 0 && tablistClassAt > collapseAt && tablistAt > tablistClassAt &&
     tabAt > tablistAt && tabAppendAt > tabAt && stripAppendAt > tabAppendAt && tabAria.length === 0,
-    `collapse@${collapseAt}, segmented@${segmentedAt}, tablist@${tablistAt}, ` +
+    `collapse@${collapseAt}, tablist@${tablistClassAt}, role@${tablistAt}, ` +
     `tab@${tabAt}, tabAppend@${tabAppendAt}, stripAppend@${stripAppendAt}, missing=${JSON.stringify(tabAria)}`);
 
   const forbidden = ['document.addEventListener', 'window.addEventListener', 'innerHTML', ' as any'];
@@ -399,30 +399,63 @@ const describe = (s: SidebarState): string =>
 {
   const host = readSource('src/ui/sidebarHost.ts');
   const css = readSource('src/ui/style.css');
-  const reusesSegmented = host.includes("div('segmented side-pages')") &&
-    host.includes("button('seg', '')");
-  const sharedOn = host.includes("node.classList.toggle('on', tab.selected)") &&
-    css.includes('.seg.on { background: var(--text80); color: var(--bg00); }');
+  const rule = (selector: string): string =>
+    new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
+  const strip = rule('.side-tabs');
+  const tablist = rule('.side-tablist');
+  const tab = rule('.side-tab');
+  const collapse = rule('#side-panel .side-collapse');
+  const fullBleed = /\bdisplay: flex;/.test(strip) && /\balign-items: stretch;/.test(strip) &&
+    /\bposition: sticky;/.test(strip) && !/\bpadding:/.test(strip) && !/\bgap:/.test(strip) &&
+    /\bborder-bottom: 1px solid var\(--border-low\);/.test(strip) &&
+    /\bbackground: var\(--secondary\);/.test(strip);
+  const equalTabs = /\bflex: 1 1 0;/.test(tablist) && /\bmin-width: 0;/.test(tablist) &&
+    /\bflex: 1 1 0;/.test(tab) && /\bmin-width: 0;/.test(tab) &&
+    /\bbackground: transparent;/.test(tab) && /\bcolor: var\(--text50\);/.test(tab);
+  const collapseInRow = host.includes('this.strip.append(this.collapseButton, this.tablist);') &&
+    /\bwidth: 24px;/.test(collapse) && /\balign-self: stretch;/.test(collapse) &&
+    /\bborder: 0;/.test(collapse) && /\bbackground: transparent;/.test(collapse);
+  check('the strip is full-bleed: a sticky band with no padding or gap, a leading flush collapse control, and three equal-width tabs',
+    fullBleed && equalTabs && collapseInRow,
+    `fullBleed=${fullBleed}, equalTabs=${equalTabs}, collapseInRow=${collapseInRow}, strip=${JSON.stringify(strip)}`);
+
+  const active = rule('.side-tab.on');
+  const themedActive = /:is\(html\[data-theme="dark"\], html\[data-theme="light"\]\) \.side-tab\.on \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  const hover = rule('.side-tab:hover:not(.on)');
+  const pageGround = /\bbackground: var\(--bg20\);/.test(active) &&
+    /\bbackground: var\(--background\);/.test(themedActive);
+  const tabShape = /\bborder-color: var\(--border-low\);/.test(active) &&
+    /\bmargin-bottom: -1px;/.test(active) && /\bcolor: var\(--text\);/.test(active) &&
+    !/\bmargin-bottom:/.test(tab) &&
+    /\bborder-bottom: 0;/.test(tab) && /\bborder-radius: 6px 6px 0 0;/.test(tab);
+  const hoverSurface = /\bbackground: var\(--panel\);/.test(hover) && /\bcolor: var\(--text\);/.test(hover);
+  const retired = !host.includes('segmented side-pages') && !host.includes("button('seg'") &&
+    !/\.side-pages/.test(css) && !/\.side-tab[^{]*\{[^}]*background: var\(--text80\)/.test(css) &&
+    !/(^|[^-])\bheight:/.test(tab) && !/\.side-expand:hover/.test(css) &&
+    !/\[aria-selected="true"\]/.test(css);
+  const themedPanel =
+    /:is\(html\[data-theme="dark"\], html\[data-theme="light"\]\) #side-panel \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  const groundToken = (body: string): string => /\bbackground:\s*(var\(--[a-z0-9-]+\));/.exec(body)?.[1] ?? '';
+  const tabGround = groundToken(themedActive);
+  const panelGround = groundToken(themedPanel);
+  const sharedGround = tabGround === 'var(--background)' && tabGround === panelGround;
+  check('the active tab takes the page ground with top radii and no bottom border, breaks the strip hairline, and drops the segmented group',
+    pageGround && tabShape && hoverSurface && sharedGround && retired,
+    `pageGround=${pageGround}, tabShape=${tabShape}, hoverSurface=${hoverSurface}, ` +
+    `ground=${tabGround}/${panelGround}, retired=${retired}, ` +
+    `active=${JSON.stringify(active.trim())}, themed=${JSON.stringify(themedActive.trim())}`);
+
+  const expand = rule('.side-expand');
   const iconFamily = host.includes("iconButton('side-collapse', 'right')") &&
     host.includes("iconButton('side-expand', 'left')") &&
     host.includes("button(`analyzer-act ${className}`, '')");
-  const bespoke = [/[.]side-tab\b/, /[.]side-collapse/, /[.]side-expand:hover/, /\[aria-selected="true"\]/]
-    .filter((token) => token.test(css))
-    .map((token) => String(token));
-  const layoutOnly = /\.side-tabs \{[^}]*display: flex;[^}]*gap: 6px;[^}]*padding: 8px;/.test(css) &&
-    /\.side-pages \{ flex: 1; min-width: 0; \}/.test(css) &&
-    /\.side-expand \{[^}]*position: absolute;[^}]*top: 8px;[^}]*right: 0;/.test(css) &&
-    /\.side-expand\[hidden\] \{ display: none; \}/.test(css);
-  const stripRule = /\.side-pages \.seg \{([^}]*)\}/.exec(css)?.[1] ?? '';
-  const tabMetrics = /\bpadding: 2px 2px;/.test(stripRule) &&
-    /\bfont-size: 11px;/.test(stripRule) &&
-    /\bline-height: 16px;/.test(stripRule) &&
-    !/(^|[^-])\bheight:/.test(stripRule) &&
-    !/:is\(html\[data-theme="dark"\], html\[data-theme="light"\]\) \.side-pages/.test(css);
-  check('the strip reuses the shared segmented and icon-button vocabulary, adapts one untokened tab metric, and keeps no bespoke tab style',
-    reusesSegmented && sharedOn && iconFamily && bespoke.length === 0 && layoutOnly && tabMetrics,
-    `segmented=${reusesSegmented}, sharedOn=${sharedOn}, iconFamily=${iconFamily}, ` +
-    `bespoke=${JSON.stringify(bespoke)}, layoutOnly=${layoutOnly}, tabMetrics=${tabMetrics}`);
+  const floatingExpand = /\bposition: absolute;/.test(expand) && /\btop: 8px;/.test(expand) &&
+    /\bright: 0;/.test(expand) && /#main > \.side-expand\[hidden\] \{ display: none; \}/.test(css);
+  const onMirrorsAria = host.includes("node.classList.toggle('on', tab.selected)") &&
+    host.includes("node.setAttribute('aria-selected', String(tab.selected))");
+  check('collapse and expand keep the shared icon-button family, the collapsed expand stays floating, and the on class mirrors aria-selected',
+    iconFamily && floatingExpand && onMirrorsAria,
+    `iconFamily=${iconFamily}, floatingExpand=${floatingExpand}, onMirrorsAria=${onMirrorsAria}`);
 }
 
 {

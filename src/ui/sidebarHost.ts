@@ -70,10 +70,10 @@ export class SidebarHost {
     this.collapseButton.setAttribute('aria-expanded', 'true');
     this.collapseButton.addEventListener('click', () => this.cb.collapse());
 
-    this.tablist = div('segmented side-pages');
+    this.tablist = div('side-tablist');
     this.tablist.setAttribute('role', 'tablist');
     for (const page of SIDEBAR_PAGES) {
-      const tab = button('seg', '');
+      const tab = button('side-tab', '');
       tab.setAttribute('role', 'tab');
       tab.setAttribute('aria-controls', pageContainerId(page));
       tab.setAttribute('aria-selected', 'false');
