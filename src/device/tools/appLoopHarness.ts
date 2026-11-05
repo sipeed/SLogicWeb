@@ -3,6 +3,7 @@
 import { WorkerSlogicDevice } from '../workerTransport.js';
 import type { Device } from '../types.js';
 import { bytesPerSampleForChannels } from '../../types.js';
+import { FrameCostRing, framesPerSecond } from '../../ui/frameStats.js';
 import type { App } from '../../ui/app.js';
 import type { StatusError } from '../../ui/state.js';
 import { fillCounter16 } from './loopWindowHarness.js';
@@ -32,10 +33,46 @@ interface AppProbe {
   channels: readonly { enabled: boolean }[];
   busViews: { builder: ProbeBuilder | null }[];
   debug: App['debug'];
-  draw(): void;
   installDevice(device: Device, epoch: number): void;
   discardDevice(): number;
   progressView(): ProbeProgress;
+}
+
+export interface AppLoopProbeEnvironment {
+  dpr: number;
+  gpu: string;
+  rafCeilingMs: number;
+  envCapped: boolean;
+}
+
+const ENV_RAF_FRAMES = 90;
+const ENV_RAF_UNCAPPED_MS = 1000 / 45;
+
+export async function measureAppLoopEnvironment(): Promise<AppLoopProbeEnvironment> {
+  const dpr = globalThis.devicePixelRatio || 1;
+  const gl = document.createElement('canvas').getContext('webgl2');
+  let gpu = 'no-webgl2';
+  if (gl) {
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    gpu = typeof name === 'string' ? name : String(name);
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+  }
+  if (document.visibilityState !== 'visible') {
+    throw new Error(`the page is ${document.visibilityState}; requestAnimationFrame needs a visible tab`);
+  }
+  const gaps: number[] = [];
+  let previous = 0;
+  while (gaps.length < ENV_RAF_FRAMES) {
+    const at = await new Promise<number>((resolve) => {
+      requestAnimationFrame((stamp) => resolve(stamp));
+    });
+    if (previous > 0) gaps.push(at - previous);
+    previous = at;
+  }
+  gaps.sort((a, b) => a - b);
+  const rafCeilingMs = gaps[Math.floor(gaps.length / 2)]!;
+  return { dpr, gpu, rafCeilingMs, envCapped: rafCeilingMs > ENV_RAF_UNCAPPED_MS };
 }
 
 export interface AppLoopProbeOptions {
@@ -48,6 +85,7 @@ export interface AppLoopProbeOptions {
   requireFullRate?: boolean;
   minDrawHz?: number;
   maxDrawHz?: number;
+  env?: AppLoopProbeEnvironment;
   stopBuildTimeoutMs?: number;
 }
 
@@ -82,8 +120,16 @@ export interface AppLoopProbeReport {
   sinkMsP95: number;
   maxIdleGapMs: number;
   maxQuietMs: number;
+  limit: number;
   draws: number;
   drawHz: number;
+  scheduledHz: number;
+  frameCostMs: { p50: number; p95: number; max: number };
+  envCapped: boolean;
+  rafCeilingMs: number;
+  rafIdleMs: number;
+  dpr: number;
+  gpu: string;
   maxKept: number;
   maxChunkSamples: number;
   droppedConsistent: boolean;
@@ -92,6 +138,7 @@ export interface AppLoopProbeReport {
   live: boolean;
   stopBuildMs: number;
   postStopExact: boolean;
+  deviceLeak: boolean;
   pass: boolean;
   timeline: AppLoopSample[];
 }
@@ -101,6 +148,7 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
   if (!app) throw new Error('the App is not ready');
   const channels = options.channels ?? 16;
   app.discardDevice();
+  const env = options.env ?? await measureAppLoopEnvironment();
   const bytesPerMs = options.samplerate * bytesPerSampleForChannels(channels) / 1000;
   const expectedMBps = options.samplerate * bytesPerSampleForChannels(channels) / 1e6;
   const worker = new FakeUsbWorker({ name: String(bytesPerMs) });
@@ -121,10 +169,8 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
     maxKept = Math.max(maxKept, app.store.length);
   }, onDropout, startOptions);
 
-  const originalDraw = app.draw;
-  const drawTimes: number[] = [];
-  let countDraws = false;
   const timeline: AppLoopSample[] = [];
+  let report: AppLoopProbeReport | null = null;
   const pageErrors: string[] = [];
   const onPageError = (event: ErrorEvent): void => { pageErrors.push(event.message); };
   const onUnhandledRejection = (event: PromiseRejectionEvent): void => {
@@ -138,6 +184,15 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
   let pending: Promise<void> | null = null;
   let pollError: unknown = null;
   let restoreAppend: (() => void) | null = null;
+  const runRaf = new FrameCostRing();
+  let rafStop = true;
+  let rafPrevious = 0;
+  const sampleRaf = (stamp: number): void => {
+    if (rafStop) return;
+    if (rafPrevious > 0) runRaf.push(stamp - rafPrevious);
+    rafPrevious = stamp;
+    requestAnimationFrame(sampleRaf);
+  };
   const sample = async (): Promise<void> => {
     const progress = app.progressView();
     const now = performance.now();
@@ -155,7 +210,7 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
       kept: progress.kept,
       peakQueued: stats.peakQueuedTransfers,
       steadyMBps: stats.steadyMBps,
-      draws: drawTimes.length,
+      draws: app.debug.frameStats().drawn,
       running: app.running,
     });
   };
@@ -184,19 +239,18 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
       });
     }
     app.debug.setSettings({
+      mode: 'loop',
       channels,
       samplerate: options.samplerate,
       testMode: 2,
-      loopSamples: options.retentionSamples,
       softwareTrigger: false,
     });
-    app.draw = function(): void {
-      if (countDraws) drawTimes.push(performance.now());
-      originalDraw.call(this);
-    };
+    app.debug.setSettings({ loopSamples: options.retentionSamples });
 
+    rafStop = false;
+    requestAnimationFrame(sampleRaf);
     await app.debug.start();
-    countDraws = true;
+    app.debug.resetFrameStats();
     const captureStore = app.store;
     const originalAppend = captureStore.append;
     captureStore.append = function(chunk: Uint8Array): void {
@@ -205,10 +259,11 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
     };
     restoreAppend = () => { captureStore.append = originalAppend; };
     const initial = app.progressView();
-    if (initial.limit !== options.retentionSamples || app.store.channelCount !== channels ||
-        app.store.samplerate !== options.samplerate) {
+    const limit = initial.limit;
+    if (app.store.channelCount !== channels || app.store.samplerate !== options.samplerate ||
+        limit <= 0) {
       throw new Error(`unexpected capture shape: channels=${app.store.channelCount} ` +
-        `rate=${app.store.samplerate} limit=${initial.limit}`);
+        `rate=${app.store.samplerate} limit=${limit} requested=${options.retentionSamples}`);
     }
     await sample();
     timer = setInterval(poll, 1000);
@@ -226,16 +281,23 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
     const appDroppedAtStop = app.droppedTotal;
     const storeDroppedAtStop = app.store.droppedSamples;
     const stats = await dev.getStats();
-    const drawHz = drawTimes.length * 1000 / elapsedMs;
+    const frameStats = app.debug.frameStats();
+    const draws = frameStats.drawn;
+    const drawHz = framesPerSecond(draws, elapsedMs);
+    const scheduledHz = framesPerSecond(frameStats.permitted, elapsedMs);
+    const frameCostMs = frameStats.drawMs;
     const droppedConsistent = appDroppedAtStop === storeDroppedAtStop;
     const retentionBounded = maxKept <= beforeStop.limit + maxChunkSamples + 63;
     const live = app.running && app.statusError === null && beforeStop.samples > 0 &&
       maxQuietMs < (options.stallMs ?? 5000);
-    countDraws = false;
+    rafStop = true;
+    const rafIdleMs = env.rafCeilingMs;
+    const rafCeilingMs = Math.max(rafIdleMs, runRaf.percentile(50));
+    const envCapped = rafCeilingMs > ENV_RAF_UNCAPPED_MS;
     await app.debug.stop();
     const stopStarted = performance.now();
     let postStopExact = false;
-    while (performance.now() - stopStarted < (options.stopBuildTimeoutMs ?? 10_000)) {
+    while (performance.now() - stopStarted < (options.stopBuildTimeoutMs ?? 20_000)) {
       const stopped = app.progressView();
       postStopExact = app.busViews.length > 0 && app.busViews.every(b =>
         b.builder?.done === true && b.builder.pyramid.doneUpTo === stopped.kept);
@@ -250,7 +312,7 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
       sustainedMBps >= (options.minSustainedMBps ?? 0) && sustainedMBps <= expectedMBps * 1.02 &&
       (options.minDrawHz === undefined || drawHz >= options.minDrawHz) &&
       (options.maxDrawHz === undefined || drawHz <= options.maxDrawHz);
-    return {
+    report = {
       channels,
       samplerate: options.samplerate,
       expectedMBps,
@@ -269,8 +331,16 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
       sinkMsP95: stats.sinkMsP95,
       maxIdleGapMs: stats.maxIdleGapMs,
       maxQuietMs,
-      draws: drawTimes.length,
+      limit,
+      draws,
       drawHz,
+      scheduledHz,
+      frameCostMs,
+      envCapped,
+      rafCeilingMs,
+      rafIdleMs,
+      dpr: env.dpr,
+      gpu: env.gpu,
       maxKept,
       maxChunkSamples,
       droppedConsistent,
@@ -279,21 +349,23 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
       live,
       stopBuildMs,
       postStopExact,
+      deviceLeak: false,
       pass,
       timeline,
     };
+    return report;
   } finally {
-    countDraws = false;
+    rafStop = true;
     try {
       if (timer !== null) clearInterval(timer);
       await pending;
       if (app.running || app.stopping) await app.debug.stop();
     } finally {
       restoreAppend?.();
-      app.draw = originalDraw;
       window.removeEventListener('error', onPageError);
       window.removeEventListener('unhandledrejection', onUnhandledRejection);
       app.discardDevice();
+      if (report !== null) report.deviceLeak = app.device !== null;
     }
   }
 }

@@ -102,6 +102,10 @@ import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
 import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.js';
 import { capturePostTriggerSamples, carryCaptureDuration } from './capturePolicy.js';
 import { liveDrawDue } from './liveRefresh.js';
+import {
+  FRAME_LAYERS, FrameCostRing,
+  type FrameLayer, type FrameStatsSnapshot,
+} from './frameStats.js';
 import type { CaptureStartOrigin, CaptureStopReason } from './captureViewport.js';
 import {
   beginSweep, createSession, resolveSessionView, secondsRangeToSamples,
@@ -204,6 +208,17 @@ export class App {
   private livePending = false;
   /** When the screen was last drawn for any reason, in `performance.now()` terms. */
   private liveDrawAt = 0;
+  private readonly frameCost = new FrameCostRing();
+  private readonly ingestMsRing = new FrameCostRing();
+  private lastFrameCostMs = 0;
+  private liveFramesPermitted = 0;
+  private liveFramesDrawn = 0;
+  private liveFramesSkipped = 0;
+  private ingestBlocks = 0;
+  private readonly layerDraws: Record<FrameLayer, number> =
+    { wave: 0, axis: 0, overlay: 0, bus: 0, overview: 0 };
+  private readonly layerSkips: Record<FrameLayer, number> =
+    { wave: 0, axis: 0, overlay: 0, bus: 0, overview: 0 };
   private readonly menuStack = new MenuStack();
   private readonly settingsMenu: SettingsMenu;
   private readonly languageMenu: SettingsMenu;
@@ -1784,19 +1799,69 @@ export class App {
     // A Repeat wave that is still waiting for its trigger keeps the previous frame: its
     // pre-trigger samples are arriving, but there is nothing new to show yet. A user
     // gesture (`dirty`) still draws, using the held wave and its own T.
-    if (!this.dirty && (this.repeatWaveHolding ||
-        !liveDrawDue(now, this.liveDrawAt, this.livePending, this.running))) {
-      return;
-    }
+    const liveDue = !this.dirty && !this.repeatWaveHolding &&
+      liveDrawDue(now, this.liveDrawAt, this.livePending, this.running);
+    if (!this.dirty && !liveDue) return;
     this.dirty = false;
     this.livePending = false;
     this.liveDrawAt = now;
+    if (liveDue) this.liveFramesPermitted += 1;
+    const drawStartedAt = performance.now();
     try {
       this.draw();
     } catch (e) {
       this.fail('error.render', e);
+    } finally {
+      this.recordFrameCost(performance.now() - drawStartedAt, liveDue);
     }
   };
+
+  private recordFrameCost(ms: number, live: boolean): void {
+    this.lastFrameCostMs = ms;
+    this.frameCost.push(ms);
+    if (live) this.liveFramesDrawn += 1;
+  }
+
+  private frameStats(): FrameStatsSnapshot {
+    return {
+      permitted: this.liveFramesPermitted,
+      drawn: this.liveFramesDrawn,
+      skipped: this.liveFramesSkipped,
+      lastCostMs: this.lastFrameCostMs,
+      drawMs: {
+        p50: this.frameCost.percentile(50),
+        p95: this.frameCost.percentile(95),
+        max: this.frameCost.max,
+      },
+      layers: {
+        wave: { draws: this.layerDraws.wave, skips: this.layerSkips.wave },
+        axis: { draws: this.layerDraws.axis, skips: this.layerSkips.axis },
+        overlay: { draws: this.layerDraws.overlay, skips: this.layerSkips.overlay },
+        bus: { draws: this.layerDraws.bus, skips: this.layerSkips.bus },
+        overview: { draws: this.layerDraws.overview, skips: this.layerSkips.overview },
+      },
+      ingest: {
+        blocks: this.ingestBlocks,
+        p50Ms: this.ingestMsRing.percentile(50),
+        p95Ms: this.ingestMsRing.percentile(95),
+        maxMs: this.ingestMsRing.max,
+      },
+    };
+  }
+
+  private resetFrameStats(): void {
+    this.frameCost.reset();
+    this.ingestMsRing.reset();
+    this.lastFrameCostMs = 0;
+    this.liveFramesPermitted = 0;
+    this.liveFramesDrawn = 0;
+    this.liveFramesSkipped = 0;
+    this.ingestBlocks = 0;
+    for (const layer of FRAME_LAYERS) {
+      this.layerDraws[layer] = 0;
+      this.layerSkips[layer] = 0;
+    }
+  }
 
   private draw(): void {
     // A quiet Repeat wave keeps the previous frame until its first samples arrive; a
@@ -1828,6 +1893,7 @@ export class App {
     this.el.hint.style.display = this.store.length > 0 ? 'none' : 'flex';
 
     this.stack.render();
+    this.layerDraws.wave += 1;
     const view = this.stack.view;
     this.syncScopeBars();
     const sr = this.store.samplerate;
@@ -1839,8 +1905,10 @@ export class App {
     );
 
     this.drawAxisCanvas(ticks, wCss);
+    this.layerDraws.axis += 1;
 
     this.overlay.beginFrame();
+    this.layerDraws.overlay += 1;
     const boxes = this.stack.boxes();
     const repeatTints = this.repeatTintRegions();
     if (repeatTints) {
@@ -1862,6 +1930,7 @@ export class App {
     beginAnalogFrameBudget();
     try {
       this.drawBusRows(boxes, repeatTints);
+      this.layerDraws.bus += 1;
     } finally {
       endAnalogFrameBudget();
     }
@@ -1904,6 +1973,7 @@ export class App {
       }),
       palette: this.palette,
     });
+    this.layerDraws.overview += 1;
 
     this.renderStatus();
   }
@@ -5238,6 +5308,8 @@ export class App {
     setSettings: (s: Partial<CaptureSettings>) => {
       this.applySettings({ ...this.settings, ...s });
     },
+    frameStats: (): FrameStatsSnapshot => this.frameStats(),
+    resetFrameStats: (): void => this.resetFrameStats(),
     /** Add a parallel-bus view; missing fields take the panel's defaults. */
     addBus: (cfg: Partial<BusViewConfig> & { spec: BusViewConfig['spec'] }) =>
       this.addBus({ ...defaultBusConfig(this.displayChannelCount(), this.settings.testMode), ...cfg }),
