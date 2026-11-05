@@ -337,12 +337,12 @@ function check(name: string, pass: boolean, detail: string): void {
     'emptyHint.line1', 'emptyHint.line2',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortOpen', 'toolbar.shortSave',
     'toolbar.shortFit', 'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortAssistant', 'toolbar.shortLanguage',
-    'toolbar.shortTheme', 'toolbar.shortSidebar',
+    'toolbar.shortTheme',
   ];
   const expectedTitles = [
     'toolbar.startTitle', 'toolbar.openTitle', 'toolbar.saveTitle', 'toolbar.fitTitle',
     'toolbar.enterFullscreenTitle',
-    'toolbar.sidebarTitle', 'toolbar.themeTitle', 'toolbar.languageTitle', 'toolbar.assistantTitle',
+    'toolbar.themeTitle', 'toolbar.languageTitle', 'toolbar.assistantTitle',
     'settings.titleHint', 'panel.resizeTitle',
   ];
   const expectedAriaLabels = [
@@ -399,7 +399,6 @@ function check(name: string, pass: boolean, detail: string): void {
     ['btn-assistant', 'toolbar.assistantTitle'],
     ['btn-language', 'toolbar.languageTitle'],
     ['btn-theme', 'toolbar.themeTitle'],
-    ['btn-sidebar', 'toolbar.sidebarTitle'],
   ];
   const nameDrift = toolbarNameKeys.filter(([id, key]) => {
     const button = new RegExp(`<button[^>]*\\bid="${id}"[^>]*>`).exec(html)?.[0] ?? '';
@@ -900,14 +899,13 @@ const baseSettings: CaptureSettings = {
     'settings.detailedLabels', 'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortStop',
     'toolbar.shortStopping', 'toolbar.shortOpen', 'toolbar.shortSave',
     'toolbar.shortFit', 'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage', 'toolbar.shortTheme',
-    'toolbar.shortSidebar', 'toolbar.fullscreen', 'toolbar.enterFullscreenTitle',
+    'toolbar.fullscreen', 'toolbar.enterFullscreenTitle',
     'toolbar.exitFullscreenTitle', 'toolbar.fullscreenUnavailable',
     'trigger.anyEdge',
     'channels.settings', 'channels.name', 'channels.color', 'channels.customColor',
     'channels.colorField', 'channels.hue',
     'channels.resetName',
     'channels.triggerMode', 'channels.cancel',
-    'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',
     'sidebar.pageCapture', 'sidebar.pageCursors', 'sidebar.pageDecoders',
     'sidebar.pagesLabel',
     'sidebar.collapse', 'sidebar.expand',
@@ -983,7 +981,6 @@ const baseSettings: CaptureSettings = {
     ['toolbar.shortFullscreen', 'toolbar.fullscreen'],
     ['toolbar.shortSettings', 'settings.title'], ['toolbar.shortAssistant', 'toolbar.assistantTitle'],
     ['toolbar.shortLanguage', 'toolbar.languageTitle'], ['toolbar.shortTheme', 'toolbar.themeTitle'],
-    ['toolbar.shortSidebar', 'toolbar.sidebarTitle'],
   ];
   const catalogs: Record<Locale, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const bad: string[] = [];

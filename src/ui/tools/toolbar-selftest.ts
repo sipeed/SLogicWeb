@@ -37,6 +37,10 @@ const app = fs.readFileSync('src/ui/app.ts', 'utf8');
 const capturePanel = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
 const settingsMenuSrc = fs.readFileSync('src/ui/settingsMenu.ts', 'utf8');
 const css = fs.readFileSync('src/ui/style.css', 'utf8');
+const localeSources = ['en', 'zh-CN', 'fr', 'ru']
+  .map((locale) => ({ locale, source: fs.readFileSync(`src/ui/locales/${locale}.ts`, 'utf8') }));
+const menuIdConstructor = /constructor\([\s\S]*?menuId: string = 'settings-menu'/.test(settingsMenuSrc) &&
+  settingsMenuSrc.includes('menu.id = this.menuId;');
 const deviceTypes = fs.readFileSync('src/device/types.ts', 'utf8');
 const pageTransport = fs.readFileSync('src/device/slogic16u3.ts', 'utf8');
 const workerTransportSrc = fs.readFileSync('src/device/workerTransport.ts', 'utf8');
@@ -415,8 +419,7 @@ const leftCommandIds = ['btn-connect', 'transport', 'btn-open', 'btn-save', 'btn
 const assistantCommandId = 'btn-assistant';
 const languageCommandId = 'btn-language';
 const themeCommandId = 'btn-theme';
-const sidebarCommandId = 'btn-sidebar';
-const commandIds = [...leftCommandIds, assistantCommandId, languageCommandId, themeCommandId, sidebarCommandId];
+const commandIds = [...leftCommandIds, assistantCommandId, languageCommandId, themeCommandId];
 
 const toolbarGroupStarts = [...toolbar.matchAll(/<div class="toolbar-group"[^>]*>/g)]
   .map((match) => match.index ?? -1);
@@ -496,8 +499,9 @@ const languageItemsShape = languageItemsBody.includes('LOCALES.map') &&
   !languageItemsBody.includes('children') && !languageItemsBody.includes('hint');
 check(
   'the language disclosure reuses a distinct settings menu with four direct native-name choices',
-  languageDisclosure && missingLanguageWiring.length === 0 && languageItemsShape,
-  `disclosure=${languageDisclosure}, missing=${JSON.stringify(missingLanguageWiring)}, items=${languageItemsShape}`,
+  languageDisclosure && missingLanguageWiring.length === 0 && languageItemsShape && menuIdConstructor,
+  `disclosure=${languageDisclosure}, missing=${JSON.stringify(missingLanguageWiring)}, ` +
+  `items=${languageItemsShape}, menuId=${menuIdConstructor}`,
 );
 
 const menuRightCases = [
@@ -523,11 +527,10 @@ check(
   `failures=${JSON.stringify(menuRightFailures)}, wired=${menuPositioningWired}`,
 );
 
-const sidebarMarkup = commandMarkup(sidebarCommandId);
 const separatorCount = toolbar.match(/role="separator"/g)?.length ?? 0;
 const verticalSeparatorCount = toolbar.match(/aria-orientation="vertical"/g)?.length ?? 0;
 check(
-  'eleven commands expose shadcn anatomy, one media wrapper and decorative short label each, distinct icons, and separators',
+  'ten commands expose shadcn anatomy, one media wrapper and decorative short label each, distinct icons, and separators',
   anatomyFailures.length === 0 && iconSignatures.size === commandIds.length &&
     separatorCount === 2 && verticalSeparatorCount === 2,
   `failures=${JSON.stringify(anatomyFailures)}, icons=${iconSignatures.size}, separators=${separatorCount}/${verticalSeparatorCount}`,
@@ -692,7 +695,6 @@ const assistantDirectlyAfterSpacer = spacerToAssistant.length > 0 &&
   !spacerToAssistant.includes('<button') && !spacerToAssistant.includes('role="separator"');
 const switchGroup = toolbarGroupOf(languageCommandId);
 const switchGroupStart = switchGroup?.start ?? -1;
-const switchGroupEnd = switchGroup?.end ?? -1;
 const switchGroupMarkup = switchGroup?.markup ?? '';
 const languageIndex = switchGroupMarkup.indexOf(`id="${languageCommandId}"`);
 const themeIndex = switchGroupMarkup.indexOf(`id="${themeCommandId}"`);
@@ -707,22 +709,17 @@ const assistantToGroup = assistantButtonEnd > assistantButtonStart && switchGrou
 const groupDirectlyAfterAssistant = assistantDirectlyAfterSpacer && assistantToGroup.length > 0 &&
   !assistantToGroup.includes('<button') && !assistantToGroup.includes('role="separator"');
 
-const sidebarIndex = toolbar.indexOf(`id="${sidebarCommandId}"`);
-const sidebarButtonStart = sidebarIndex >= 0 ? toolbar.lastIndexOf('<button', sidebarIndex) : -1;
-const groupToSidebar = switchGroupEnd > switchGroupStart && sidebarButtonStart > switchGroupEnd
-  ? toolbar.slice(switchGroupEnd, sidebarButtonStart) : '';
-const sidebarDirectlyAfterGroup = groupToSidebar.length > 0 &&
-  !groupToSidebar.includes('<button') && !groupToSidebar.includes('role="separator"');
+const themeButtonIndex = toolbar.indexOf(`id="${themeCommandId}"`);
+const themeButtonStart = themeButtonIndex >= 0 ? toolbar.lastIndexOf('<button', themeButtonIndex) : -1;
 const lastButtonIndex = toolbar.lastIndexOf('<button');
-const sidebarIsFinalCommand = lastButtonIndex >= 0 && lastButtonIndex === sidebarButtonStart &&
-  toolbar.indexOf('role="separator"', sidebarIndex) === -1;
+const themeIsFinalCommand = lastButtonIndex >= 0 && lastButtonIndex === themeButtonStart &&
+  toolbar.indexOf('role="separator"', themeButtonIndex) === -1;
 check(
-  'assistant, the language/theme group and sidebar follow the spacer in that order, sidebar last',
-  switchGroupOrder && switchGroupAccessible && groupDirectlyAfterAssistant &&
-    sidebarDirectlyAfterGroup && sidebarIsFinalCommand,
-  `spacer@${spacerIndex}, assistant@${assistantIndex}, group@${switchGroupStart}, sidebar@${sidebarIndex}, ` +
+  'assistant and the language/theme group follow the spacer in that order, the theme command last',
+  switchGroupOrder && switchGroupAccessible && groupDirectlyAfterAssistant && themeIsFinalCommand,
+  `spacer@${spacerIndex}, assistant@${assistantIndex}, group@${switchGroupStart}, theme@${themeButtonIndex}, ` +
   `groupOrder=${switchGroupOrder}, accessible=${switchGroupAccessible}, afterAssistant=${groupDirectlyAfterAssistant}, ` +
-  `between=${sidebarDirectlyAfterGroup}, final=${sidebarIsFinalCommand}`,
+  `final=${themeIsFinalCommand}`,
 );
 
 const groupRule = /#toolbar \.toolbar-group \{([\s\S]*?)\}/.exec(css)?.[1] ?? '';
@@ -782,38 +779,17 @@ check(
   `sliceCatchesSpread=${!assistantToggleShape(assistantToggleSpread)}`,
 );
 
-const disclosureNeedles = [
-  'aria-controls="sidebar-menu"',
-  'aria-expanded="false"',
-  'data-i18n-title="toolbar.sidebarTitle"',
-];
-const missingDisclosure = disclosureNeedles.filter((needle) => !sidebarMarkup.includes(needle));
-const sidebarHasAccessibleName = /\saria-label="[^"]+"/.test(sidebarMarkup);
+const retiredSidebarMarkup = !html.includes('btn-sidebar') && !toolbar.includes('toolbar-sidebar');
+const retiredSidebarWiring = !app.includes('sidebar-menu') && !app.includes('sidebarItems(') &&
+  !app.includes('new SettingsMenu(this.el.sidebar') && !app.includes('this.el.sidebar');
+const cataloguesWithSidebarKeys = localeSources
+  .filter(({ source }) => /'toolbar\.(sidebar|shortSidebar)/.test(source))
+  .map(({ locale }) => locale);
 check(
-  'the sidebar selector is a disclosure with a translated tooltip and accessible name',
-  missingDisclosure.length === 0 && sidebarHasAccessibleName,
-  `missing=${JSON.stringify(missingDisclosure)}, ariaLabel=${sidebarHasAccessibleName}`,
-);
-
-const sidebarWiringNeedles = [
-  "new SettingsMenu(this.el.sidebar, 'sidebar-menu')",
-  'this.sidebarMenu.toggle(this.sidebarItems())',
-  "this.el.sidebar.addEventListener('click'",
-  "this.sidebarMenu.close('outside')",
-  "this.settingsMenu.close('outside')",
-  "this.sidebarMenu.close('retranslate')",
-  "this.settingsMenu.close('retranslate')",
-  "this.sidebarMenu.close('theme')",
-  "this.settingsMenu.close('theme')",
-  "this.el.sidebar.setAttribute('aria-label', t('toolbar.sidebarTitle'))",
-];
-const missingSidebarWiring = sidebarWiringNeedles.filter((needle) => !app.includes(needle));
-const menuIdConstructor = /constructor\([\s\S]*?menuId: string = 'settings-menu'/.test(settingsMenuSrc) &&
-  settingsMenuSrc.includes('menu.id = this.menuId;');
-check(
-  'the sidebar selector reuses the settings menu with a distinct id and mutual overlay closure',
-  missingSidebarWiring.length === 0 && menuIdConstructor,
-  `missing=${JSON.stringify(missingSidebarWiring)}, menuId=${menuIdConstructor}`,
+  'the toolbar sidebar selector, its menu and the toolbar.sidebar* catalog keys stay retired',
+  retiredSidebarMarkup && retiredSidebarWiring && cataloguesWithSidebarKeys.length === 0,
+  `markup=${retiredSidebarMarkup}, wiring=${retiredSidebarWiring}, ` +
+  `catalogues=${JSON.stringify(cataloguesWithSidebarKeys)}`,
 );
 
 const themeMarkup = commandMarkup(themeCommandId);
@@ -891,21 +867,6 @@ check(
   `missing=${JSON.stringify(missingThemeWiring)}, itemsShape=${themeItemsShape}`,
 );
 
-const sidebarChoiceNeedles = [
-  "t('toolbar.sidebarDevice')",
-  "t('toolbar.sidebarAnalyzers')",
-  "t('toolbar.sidebarAssistant')",
-  "t('toolbar.sidebarNone')",
-  'checked: this.capturePageShown()',
-  'checked: this.decodersPageShown()',
-  'checked: this.assistantShown()',
-  'checked: !this.sidebar.visible',
-  "this.selectPanel('device')",
-  "this.selectPanel('analyzers')",
-  "this.selectPanel('assistant')",
-  'this.selectPanel(null)',
-];
-const missingSidebarChoices = sidebarChoiceNeedles.filter((needle) => !app.includes(needle));
 const selectPanelStart = app.indexOf('private selectPanel(');
 const selectPanelEnd = selectPanelStart >= 0 ? app.indexOf('\n  }', selectPanelStart) : -1;
 const selectPanelBody = selectPanelStart >= 0 && selectPanelEnd > selectPanelStart
@@ -917,26 +878,19 @@ const applySidebarBody = applySidebarStart >= 0 && applySidebarEnd > applySideba
   ? app.slice(applySidebarStart, applySidebarEnd)
   : '';
 const selectPanelShape = selectPanelBody.includes('this.applySidebar(') &&
-  applySidebarBody.includes("this.sidebarMenu.close('outside')") &&
   applySidebarBody.includes('this.sidebar = next;') &&
   applySidebarBody.includes('this.renderPanels();') &&
   applySidebarBody.includes('this.relayout();');
-const sidebarItemsStart = app.indexOf('private sidebarItems(');
-const sidebarItemsEnd = sidebarItemsStart >= 0 ? app.indexOf('\n  }', sidebarItemsStart) : -1;
-const sidebarItemsBody = sidebarItemsStart >= 0 && sidebarItemsEnd > sidebarItemsStart
-  ? app.slice(sidebarItemsStart, sidebarItemsEnd)
-  : '';
 const setPanelStart = app.indexOf("setPanel: (p: 'device' | 'analyzers' | 'assistant' | null) => {");
 const setPanelEnd = setPanelStart >= 0 ? app.indexOf('\n    },', setPanelStart) : -1;
 const setPanelBody = setPanelStart >= 0 && setPanelEnd > setPanelStart
   ? app.slice(setPanelStart, setPanelEnd)
   : '';
-const sidebarDelegations = sidebarItemsBody.match(/this\.selectPanel\(/g)?.length ?? 0;
-const sharedPanelPath = sidebarDelegations === 4 && setPanelBody.includes('this.selectPanel(');
+const sharedPanelPath = setPanelBody.includes('this.selectPanel(');
 check(
-  'four checked direct choices drive the panel through one shared selection path',
-  missingSidebarChoices.length === 0 && selectPanelShape && sharedPanelPath,
-  `missing=${JSON.stringify(missingSidebarChoices)}, shape=${selectPanelShape}, shared=${sharedPanelPath}, delegations=${sidebarDelegations}`,
+  'the debug panel selector still drives the panel through the shared selection path',
+  selectPanelShape && sharedPanelPath,
+  `shape=${selectPanelShape}, shared=${sharedPanelPath}`,
 );
 
 const retiredSelectionFields = ['panelBeforeAssistant', /\bthis\.panel\b/]
@@ -947,32 +901,19 @@ check(
   `hits=${JSON.stringify(retiredSelectionFields.map(String))}`,
 );
 
-const sidebarRowCount = sidebarItemsBody.match(/onPick:/g)?.length ?? 0;
-const sidebarLeavesOnly = sidebarRowCount === 4 &&
-  !sidebarItemsBody.includes('children:') && !sidebarItemsBody.includes('hint:');
-const sidebarLabelsTranslated = ['sidebarDevice', 'sidebarAnalyzers', 'sidebarAssistant', 'sidebarNone']
-  .every((key) => sidebarItemsBody.includes(`t('toolbar.${key}')`));
-check(
-  'the selector menu offers four direct leaf choices built with translated labels',
-  sidebarLeavesOnly && sidebarLabelsTranslated,
-  `rows=${sidebarRowCount}, leaves=${sidebarLeavesOnly}, translated=${sidebarLabelsTranslated}`,
-);
-
 const toolbarHandler = (needle: string): string => {
   const start = app.indexOf(needle);
   const end = start >= 0 ? app.indexOf('\n    });', start) : -1;
   return start >= 0 && end > start ? app.slice(start, end) : '';
 };
 const settingsHandler = toolbarHandler("must<HTMLButtonElement>('btn-settings').addEventListener('click'");
-const sidebarHandler = toolbarHandler("this.el.sidebar.addEventListener('click'");
 const languageHandler = toolbarHandler("this.el.language.addEventListener('click'");
 const themeHandler = toolbarHandler("this.el.theme.addEventListener('click'");
 const assistantHandler = toolbarHandler("this.el.assistant.addEventListener('click'");
 const menuHandlerCases = [
-  { name: 'settings', body: settingsHandler, menu: 'settingsMenu', items: 'settingsItems', others: ['sidebarMenu', 'languageMenu', 'themeMenu'] },
-  { name: 'sidebar', body: sidebarHandler, menu: 'sidebarMenu', items: 'sidebarItems', others: ['settingsMenu', 'languageMenu', 'themeMenu'] },
-  { name: 'language', body: languageHandler, menu: 'languageMenu', items: 'languageItems', others: ['settingsMenu', 'sidebarMenu', 'themeMenu'] },
-  { name: 'theme', body: themeHandler, menu: 'themeMenu', items: 'themeItems', others: ['settingsMenu', 'sidebarMenu', 'languageMenu'] },
+  { name: 'settings', body: settingsHandler, menu: 'settingsMenu', items: 'settingsItems', others: ['languageMenu', 'themeMenu'] },
+  { name: 'language', body: languageHandler, menu: 'languageMenu', items: 'languageItems', others: ['settingsMenu', 'themeMenu'] },
+  { name: 'theme', body: themeHandler, menu: 'themeMenu', items: 'themeItems', others: ['settingsMenu', 'languageMenu'] },
 ];
 const menuHandlerFailures: string[] = [];
 for (const item of menuHandlerCases) {
@@ -984,7 +925,7 @@ for (const item of menuHandlerCases) {
     if (!item.body.includes(`this.${other}.close('outside')`)) menuHandlerFailures.push(`${item.name}:${other}`);
   }
 }
-const assistantClosesMenus = ['settingsMenu', 'sidebarMenu', 'languageMenu', 'themeMenu']
+const assistantClosesMenus = ['settingsMenu', 'languageMenu', 'themeMenu']
   .every((menu) => assistantHandler.includes(`this.${menu}.close('outside')`));
 const assistantOpensSharedPath = assistantHandler.includes('this.channelList.closeDialog()') &&
   assistantHandler.includes('this.toggleAssistant()');
@@ -997,12 +938,12 @@ check(
 const retranslateBody = methodBody('private retranslate(): void {');
 const themeChangeBody = themeHandlerAt >= 0 && themeHandlerEnd > themeHandlerAt
   ? app.slice(themeHandlerAt, themeHandlerEnd) : '';
-const lifecycleCloseFailures = ['settingsMenu', 'sidebarMenu', 'languageMenu', 'themeMenu'].flatMap((menu) => [
+const lifecycleCloseFailures = ['settingsMenu', 'languageMenu', 'themeMenu'].flatMap((menu) => [
   ...(!retranslateBody.includes(`this.${menu}.close('retranslate')`) ? [`retranslate:${menu}`] : []),
   ...(!themeChangeBody.includes(`this.${menu}.close('theme')`) ? [`theme:${menu}`] : []),
 ]);
 check(
-  'all four toolbar menus close for retranslation and theme changes',
+  'all three remaining toolbar menus close for retranslation and theme changes',
   lifecycleCloseFailures.length === 0,
   `missing=${JSON.stringify(lifecycleCloseFailures)}`,
 );
@@ -1095,7 +1036,6 @@ const dynamicNames = [
   "this.el.fit.setAttribute('aria-label', t('toolbar.fit'))",
   "this.el.settings.setAttribute('aria-label', t('settings.title'))",
   "this.el.language.setAttribute('aria-label', t('toolbar.languageTitle'))",
-  "this.el.sidebar.setAttribute('aria-label', t('toolbar.sidebarTitle'))",
 ];
 const missingDynamicNames = dynamicNames.filter((needle) => !app.includes(needle));
 const dynamicTransportName = app.includes("btn.setAttribute('aria-label', this.stopping ? t('toolbar.stopping')") &&
@@ -1191,11 +1131,10 @@ const presentationNeedles = [
   '#toolbar button.toolbar-item.danger {',
   'button:disabled { opacity: 0.45; cursor: default; }',
   '#toolbar .spacer { display: none; }',
-  '#toolbar .toolbar-sidebar { margin-left: auto; }',
 ];
 const missingPresentation = presentationNeedles.filter((needle) => !css.includes(needle));
 check(
-  'toolbar styles keep focus, connection, transport state, disabled, and mobile placement contracts',
+  'toolbar styles keep focus, connection, transport state, disabled, and compact placement contracts',
   missingPresentation.length === 0,
   `missing=${JSON.stringify(missingPresentation)}`,
 );
@@ -1229,11 +1168,13 @@ const mobileBlockEnd = mobileBlockStart >= 0 ? css.indexOf('\n}', mobileBlockSta
 const mobileBlock = mobileBlockStart >= 0 && mobileBlockEnd > mobileBlockStart
   ? css.slice(mobileBlockStart, mobileBlockEnd)
   : '';
-const sidebarMobileAutoMargin = mobileBlock.includes('#toolbar .toolbar-sidebar { margin-left: auto; }');
+const sidebarMobileOverrideAbsent = !css.includes('.toolbar-sidebar');
+const assistantMobileFlushRight = mobileBlock.includes('#toolbar .toolbar-assistant { margin-left: auto; }');
 check(
-  'the sidebar selector stays far-right at the mobile breakpoint where the spacer is hidden',
-  mobileBlock.includes('#toolbar .spacer { display: none; }') && sidebarMobileAutoMargin,
-  `mobileBlock=${mobileBlock.length}, autoMargin=${sidebarMobileAutoMargin}`,
+  'the retired sidebar selector hands its mobile flush-right placement to the assistant command',
+  mobileBlock.includes('#toolbar .spacer { display: none; }') &&
+    sidebarMobileOverrideAbsent && assistantMobileFlushRight,
+  `mobileBlock=${mobileBlock.length}, overrideAbsent=${sidebarMobileOverrideAbsent}, flushRight=${assistantMobileFlushRight}`,
 );
 
 function mediaBlockContaining(needle: string): string {

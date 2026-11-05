@@ -523,9 +523,12 @@ const describe = (s: SidebarState): string =>
 
 {
   const app = readSource('src/ui/app.ts');
+  const html = readSource('index.html');
   const retired = ['assistant-mode', 'panelHost', 'busHost', 'this.busPanel.hidden',
-    'this.el.side.appendChild(', 'renderCursorsPlaceholder', 'side-placeholder']
+    'this.el.side.appendChild(', 'renderCursorsPlaceholder', 'side-placeholder',
+    'btn-sidebar', 'sidebar-menu', 'sidebarItems(', 'this.sidebarMenu', 'this.el.sidebar']
     .filter((token) => app.includes(token));
+  const retiredToolbar = ['btn-sidebar', 'sidebar-menu'].filter((token) => html.includes(token));
   const wiring = [
     'new SidebarHost(this.el.side, {',
     "this.sidebarHost.containerFor('cursors');",
@@ -549,9 +552,10 @@ const describe = (s: SidebarState): string =>
     (mountBody.match(/new AnalyzerPanel\(/g) ?? []).length === 1 &&
     (mountBody.match(/new BusPanel\(/g) ?? []).length === 1 &&
     mountBody.includes("container.append(analyzerRoot, busRoot);");
-  check('App owns the host wiring, mounts one panel per page, and carries no retired host or assistant-mode flag',
-    retired.length === 0 && wiring.length === 0 && panels,
-    `retired=${JSON.stringify(retired)}, missing=${JSON.stringify(wiring)}, panels=${panels}`);
+  check('App owns the host wiring, mounts one panel per page, and carries no retired host, assistant-mode flag or toolbar sidebar selector',
+    retired.length === 0 && retiredToolbar.length === 0 && wiring.length === 0 && panels,
+    `retired=${JSON.stringify(retired)}, retiredToolbar=${JSON.stringify(retiredToolbar)}, ` +
+    `missing=${JSON.stringify(wiring)}, panels=${panels}`);
 }
 
 const failed = results.filter((r) => !r.pass).length;

@@ -351,7 +351,7 @@ function dialogConstructions(source: string): number {
   const end = start >= 0 ? appSource.indexOf('\n    });', start) : -1;
   const handler = start >= 0 && end > start ? appSource.slice(start, end) : '';
   const closes = handler.includes('this.channelList.closeDialog()') &&
-    ['sidebarMenu', 'languageMenu', 'themeMenu']
+    ['languageMenu', 'themeMenu']
       .every((menu) => handler.includes(`this.${menu}.close('outside')`));
   check('the settings handler keeps closing the channel dialog and the other menus before its own toggle',
     closes && handler.includes('this.settingsMenu.toggle(this.settingsItems())'),

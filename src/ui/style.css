@@ -324,7 +324,7 @@ html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dar
   #toolbar button.toolbar-item { width: 38px; height: 38px; padding: 4px; }
   #toolbar .toolbar-separator,
   #toolbar .spacer { display: none; }
-  #toolbar .toolbar-sidebar { margin-left: auto; }
+  #toolbar .toolbar-assistant { margin-left: auto; }
 }
 
 /* Ten 38 px commands need 428 px; the smallest common phones are 360 px wide. */
