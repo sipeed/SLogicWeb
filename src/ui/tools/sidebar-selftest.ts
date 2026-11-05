@@ -587,6 +587,93 @@ const describe = (s: SidebarState): string =>
     `page=${bootShape(forcedPage)}, visible=${bootShape(forcedVisible)}, reducers=${JSON.stringify(forced)}`);
 }
 
+{
+  const html = readSource('index.html');
+  const widthSource = readSource('src/ui/panelWidth.ts');
+
+  const prePaintScript = (source: string): string => {
+    const scripts = [...source.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    return scripts.find((s) => s.includes('--side-panel-w'))
+      ?? scripts.find((s) => s.includes('panelWidth'))
+      ?? '';
+  };
+  const numericConstant = (source: string, name: string): number | null => {
+    const match = new RegExp(`${name}\\s*=\\s*(\\d+);`).exec(source);
+    return match ? Number(match[1]) : null;
+  };
+  const functionBody = (source: string, name: string): string => {
+    const start = source.indexOf(`function ${name}(`);
+    const end = start >= 0 ? source.indexOf('\n}', start) : -1;
+    return start >= 0 && end > start ? source.slice(start, end) : '';
+  };
+  type PrePaintSlot = 'key' | 'min' | 'max' | 'guard' | 'target';
+  const contract = (page: string, source: string): Record<PrePaintSlot, boolean> => {
+    const script = prePaintScript(page);
+    const widthKey = /PANEL_WIDTH_STORAGE_KEY = '([^']+)';/.exec(source)?.[1] ?? null;
+    const min = numericConstant(source, 'PANEL_WIDTH_MIN');
+    const max = numericConstant(source, 'PANEL_WIDTH_MAX');
+    const property = /const WIDTH_PROPERTY = '([^']+)';/.exec(source)?.[1] ?? null;
+    const scriptKey = /localStorage\.getItem\('([^']+)'\)/.exec(script)?.[1] ?? null;
+    const bounds = /Math\.min\((\d+), Math\.max\((\d+), Math\.round\(n\)\)\)/.exec(script);
+    const sanitize = functionBody(source, 'sanitizePanelWidth');
+    const rounded = functionBody(source, 'clampWidth');
+    return {
+      key: widthKey !== null && widthKey === scriptKey,
+      min: min !== null && bounds !== null && Number(bounds[2]) === min,
+      max: max !== null && bounds !== null && Number(bounds[1]) === max,
+      guard: sanitize.includes('Number.isFinite(') && sanitize.includes('<= 0') &&
+        rounded.includes('Math.round(') &&
+        script.includes('Number.isFinite(n) && n > 0') && script.includes('Math.round(n)'),
+      target: property !== null && script.includes(`setProperty('${property}'`),
+    };
+  };
+
+  const verdict = contract(html, widthSource);
+  const slots: PrePaintSlot[] = ['key', 'min', 'max', 'guard', 'target'];
+  const disagreeing = slots.filter((slot) => !verdict[slot]);
+  const min = numericConstant(widthSource, 'PANEL_WIDTH_MIN');
+  const max = numericConstant(widthSource, 'PANEL_WIDTH_MAX');
+  const key = /PANEL_WIDTH_STORAGE_KEY = '([^']+)';/.exec(widthSource)?.[1] ?? '';
+  const detail = `key=${verdict.key}, min=${verdict.min}, max=${verdict.max}, ` +
+    `guard=${verdict.guard}, target=${verdict.target}, disagreeing=${JSON.stringify(disagreeing)}`;
+  check("index.html's pre-paint clamp and panelWidth.ts agree on the storage key, both bounds, the rounding and the positive-value guard",
+    disagreeing.length === 0 && min !== null && max !== null && key !== '',
+    `min=${min}, max=${max}, key=${JSON.stringify(key)}, ${detail}`);
+
+  const drifts: [string, string, string, PrePaintSlot[]][] = [
+    ['index.html minimum', html.replace(`Math.max(${min},`, `Math.max(${min! + 1},`), widthSource, ['min']],
+    ['index.html maximum', html.replace(`Math.min(${max},`, `Math.min(${max! + 1},`), widthSource, ['max']],
+    ['index.html storage key', html.replace(`localStorage.getItem('${key}')`,
+      `localStorage.getItem('${key}.v2')`), widthSource, ['key']],
+    ['index.html rounding', html.replace('Math.round(n)', 'Math.trunc(n)'), widthSource, ['min', 'max']],
+    ['index.html positive guard', html.replace('n > 0', 'n >= 0'), widthSource, ['guard']],
+    ['index.html property', html.replace('--side-panel-w', '--panel-w'), widthSource, ['target']],
+    ['panelWidth.ts minimum', html, widthSource.replace(`PANEL_WIDTH_MIN = ${min};`,
+      `PANEL_WIDTH_MIN = ${min! + 1};`), ['min']],
+    ['panelWidth.ts maximum', html, widthSource.replace(`PANEL_WIDTH_MAX = ${max};`,
+      `PANEL_WIDTH_MAX = ${max! + 1};`), ['max']],
+    ['panelWidth.ts storage key', html, widthSource.replace(`PANEL_WIDTH_STORAGE_KEY = '${key}';`,
+      `PANEL_WIDTH_STORAGE_KEY = '${key}.v2';`), ['key']],
+    ['panelWidth.ts rounding', html, widthSource.replace('Math.round(value)', 'Math.trunc(value)'), ['guard']],
+    ['panelWidth.ts positive guard', html, widthSource.replace('parsed <= 0', 'parsed < 0'), ['guard']],
+  ];
+  const untouched: string[] = [];
+  const undetected: string[] = [];
+  const unpinned: string[] = [];
+  for (const [label, page, source, targets] of drifts) {
+    if (page === html && source === widthSource) untouched.push(label);
+    const mutated = contract(page, source);
+    if (targets.some((slot) => mutated[slot])) undetected.push(label);
+    if (targets.some((slot) => !verdict[slot])) unpinned.push(label);
+  }
+  check('a drifted pre-paint clamp on either side turns the agreement check red',
+    drifts.length === 11 && untouched.length === 0 && undetected.length === 0 &&
+    unpinned.length === 0,
+    untouched.length === 0 && undetected.length === 0 && unpinned.length === 0
+      ? `${drifts.length} mutations detected`
+      : `undetected=${JSON.stringify(undetected)}, baselineBroken=${JSON.stringify(unpinned)}`);
+}
+
 const failed = results.filter((r) => !r.pass).length;
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 console.log(`\n${results.length - failed}/${results.length} passed`);
