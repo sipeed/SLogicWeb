@@ -7,6 +7,11 @@ interfaces only; never touches WebUSB or WebGL directly.
 
 Written as the work happened, not at the end.
 
+> Historical measurement and implementation evidence. The normative contracts are
+> `docs/DESIGN.md` (interface) and `docs/ARCHITECTURE.md` (system, state, persistence and
+> verification); where this file contradicts either, the owning document wins. Delete a
+> section that describes an interaction that no longer ships.
+
 ## Run it
 
 ```

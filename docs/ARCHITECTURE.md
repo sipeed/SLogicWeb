@@ -1,9 +1,19 @@
-# logicweb - module contracts
+# logicweb - system architecture and module contracts
 
 The point of this file is that several agents build in parallel without colliding. **Own
 your directory, import across boundaries only through the interfaces below, do not edit
 another module's files.** If you need a contract changed, say so in your report instead of
 changing it unilaterally.
+
+**Document map.** This file owns how the system is built and what the engine guarantees:
+module boundaries, wire/data contracts, trigger and session semantics, state ownership,
+the settings transaction, acquisition lifecycle and capability, the panel/view-model
+contract, persistence, and verification. `docs/DESIGN.md` owns what the user sees and
+does: layout, controls, interaction, user-visible lifecycle, visual tokens, copy,
+accessibility and the interface review gate. `src/ui/NOTES.md` is historical measurement
+and implementation evidence. A fact is normative in exactly one file; the other links to
+it. If they conflict, the owning file wins: engine and state facts here, interface facts
+in `DESIGN.md`.
 
 Stack: TypeScript, Vite, no UI framework unless a builder makes a case for one. Browser is
 Brave (Chromium) - the only WebUSB-capable browser installed on this machine.
@@ -95,10 +105,12 @@ one or more per-channel `level`, `rising`, `falling` or `edge` conditions; all c
 conditions must match the same complete sample (logical AND). While waiting, only the
 single shared rolling pre-trigger window is retained; a match emits that window and
 post-trigger samples to the sink. The `triggered` callback also reports the trigger
-sample's zero-based position in that emitted stream. The UI uses it as `T=0`, draws a
-vertical T marker, and labels every retained pre-trigger sample with negative time. The right
-panel owns the global pre-trigger percentage and `Enable Mask`; disabling that mask leaves all
-per-channel modes intact and merely bypasses the matcher. The UI's search allowance is
+sample's zero-based position in that emitted stream. The presentation of T and pre-trigger
+time is in `docs/DESIGN.md` §6.2.
+`preTriggerPercent` and the enable mask are acquisition settings; disabling the mask
+leaves all per-channel modes intact and merely bypasses the matcher. Their control
+placement and visible states are owned by `docs/DESIGN.md` §8; this section owns the
+matcher, its budgets and the emitted-stream semantics. The UI's search allowance is
 mode-specific: Repeat inspects one sweep's sample budget (output plus retained prefix) and
 then reports `not-found`, so a missed wave ends as completed and the next Interval retries
 (see B1 below); Single waits indefinitely for its one trigger, and Loop is unbounded. The
@@ -150,11 +162,13 @@ locked, it also retains the new data the next local step needs: one crossing gap
 the signal stops, the quiet-window tail (f*D). The post-enforce bound is therefore
 D + slack + max(f*D, one gap), plus at most one delivery block before the enforce pass; a
 hard cap below the 2^31-sample store ceiling disarms the trigger and trims to D instead
-of letting an append overflow (the panel says so; restart to re-arm). Follow-latest
+of letting an append overflow; the interface reports the release
+(`docs/DESIGN.md` §8.3) and a restart re-arms it. Follow-latest
 resumes on a release only if it was
 active at the lock. Digital loop triggers keep a one-shot lock: they never roll, so the
-front drops normally and the view releases to follow once T leaves the retained window
-(the status line says so). The lock and the crossing record are display state: no sample
+front drops normally and the view releases to follow once T leaves the retained window;
+the interface reports that release (`docs/DESIGN.md` §8.3). The lock and the crossing
+record are display state: no sample
 is copied and the trigger ring keeps its existing bounds. Single and Repeat captures and
 a trigger-disabled Loop keep their normal viewport rules.
 
@@ -162,8 +176,8 @@ A trigger-locked Loop keeps T on its trigger phase and D's span fixed. A viewpor
 moves only V: zoom changes V's span (bounded by D), pan moves V inside D, and the stored
 offsets from T are then applied unchanged on every local step. The waveform under V
 therefore does not scroll, and T may sit off-screen after a pan; the axis still puts 0 s
-at T. The overview strip maps the same fixed D window, and its gestures clamp V the same
-way.
+at T. The overview presents the same fixed D window and clamps V the same way
+(`docs/DESIGN.md` §6.1).
 
 Sessions and sweeps are modelled explicitly in `captureSession.ts`. A new session starts
 FollowLive; a user pan/zoom records a Fixed interval relative to the display origin (T when
@@ -188,7 +202,8 @@ change behind the frontier), and the bounded live/provisional envelope reads the
 directly with the frontier in its frame-cache key. The Loop display's
 local block plan (`displaySwap.ts`) is instrumentation for the matcher stride, anchor step,
 budget block and retained bytes; the auto-roll itself still advances one scanned crossing at
-a time.
+a time. The user-visible viewport policies and mode presentation are in
+`docs/DESIGN.md` §6.4 and §7.1; this section owns the session/sweep state behind them.
 
 The host matcher also has a `mode: 'continuous'` form for a device-side loop path
 (`SoftwareTriggerConfig.mode`). After its first match it re-arms on the same unbounded
@@ -214,13 +229,11 @@ lost. The App does not select this mode yet; until it does, Loop keeps the page-
 scanner and the one-shot digital lock described above, and Single/Repeat always use
 one-shot.
 
-The overview strip maps a fixed loop window while a loop runs (its true start `T - f*L`
-while locked, so the 64-sample front-drop residue cannot shift it; the newest window in
-free run), so its scale, ticks and viewport frame do not
-follow the retained length; the density inside it rolls. A manual pan/zoom does not pause
-the roll: the chosen viewport keeps its coordinates in that fixed window, and each
-period-aligned roll replaces the samples under it, so a sub-window such as 30+5 us stays
-at 30+5 us while its waveform updates in place. A new capture re-arms the trigger lock.
+The overview maps the fixed D window while a loop runs (its true start `T - f*L` while
+locked, so the 64-sample front-drop residue cannot shift it; the newest window in free
+run), so its scale and ticks do not follow the retained length. Its gestures and
+phase-stable presentation are in `docs/DESIGN.md` §6.1. A new capture re-arms the trigger
+lock.
 
 While the matcher is still waiting, its conditions can be retuned in place
 (`SoftwareTrigger.reconfigure`, reached through `Device.updateSoftwareTrigger`): the
@@ -295,7 +308,12 @@ nothing else. Exposes `setViewport(startSample, endSample)` and `render()`.
 
 Owns layout, channel enable/rename/reorder, timebase readout, cursors and measurements,
 trigger settings, capture controls. Calls into device/data/render; never touches WebUSB or
-WebGL directly.
+WebGL directly. The user-visible contract - layout, controls, interaction, visual tokens,
+copy and accessibility - is `docs/DESIGN.md`. The runtime contract - state ownership, the
+settings transaction, acquisition lifecycle, viewport/display ownership, the panel and
+view-model contract, persistence and verification - is `## UI runtime contract` below.
+`src/ui/NOTES.md` is historical measurement evidence; where it contradicts either
+contract, the owning document wins.
 
 ### `src/decode`
 
@@ -314,6 +332,169 @@ Three numbers, measured on this machine, reported with the method used:
 3. Decoder count, and annotations per second on a fixed capture.
 
 Each must be produced by a script that can be re-run, not by eyeballing devtools.
+
+## UI runtime contract
+
+`docs/DESIGN.md` owns what the user sees and how controls are laid out. This section owns
+the state and commit facts that every surface - the UI, the assistant, the debug/test
+surface and future automation - must share. Where visibility, labels or gestures are
+concerned, `DESIGN.md` is normative; where ownership, lifetime, ordering or persistence is
+concerned, this section is. These are the target contracts; the current code's known
+deviations are tracked in `docs/DESIGN.md` §16.
+
+### State ownership
+
+| State | Owner | Lifetime | Persistence |
+| --- | --- | --- | --- |
+| `CaptureSettings` (configuration; normally the next acquisition, with the live exceptions listed in `docs/DESIGN.md` §7.2) | App settings | across acquisitions | workspace |
+| Running acquisition (snapshot, trigger state, generation, sweep) | `CaptureSession` + App | one Capture→Stop | none |
+| Displayed samples | `StoreRef` / `SampleStore` | until replaced | capture file on Save |
+| Viewport policy (FollowLive/Fixed/TriggerLocked) | `CaptureSession` | session | session only |
+| Cursors/markers | App | capture | session only |
+| Bus views / analyzer attachments | App | across captures | workspace |
+| Panel tab, widths, theme, locale, labels | App / preferences | across sessions | preferences |
+| Uncommitted editor drafts | panel component | while the editor is open | none |
+
+Rules:
+
+- A panel receives a **view model** (plain data) and **callbacks**. It never imports
+  `App`, `Device`, `StoreRef` or the decode worker, and never mutates state directly.
+- App owns transitions; panels render. A panel may keep only UI-local state (open
+  section, draft text, chosen decoder) and must document it.
+- Derived state is computed, never stored beside its source: conditions from modes,
+  armed from mask + plan, viewport origin from T/start. In particular, one trigger
+  condition store is the target; `triggerConditions`, `triggerChannel/kind/level` and
+  the stale `softwareTrigger` boolean are migration debt.
+- All presentation time is relative to one `displayOriginSample()`: axis, status,
+  cursor panel, assistant readouts and debug output. No presentation code reads
+  `triggerSampleIndex` directly. During a held Repeat front the origin is the held
+  wave's T, not the running wave's.
+- A new `CaptureSettings` field must add a control-policy entry and a workspace
+  migration (or explicitly opt out of persistence).
+- Persistence goes through `workspacePreferences`; no component touches
+  `localStorage` directly. A schema change bumps the version and restores old data.
+
+### Settings transaction
+
+- `settings` is private to `commitSettings(next, reason)`, which always runs the ordered
+  pipeline: clamp → carry duration → trigger change detection/reset → sync → reconcile →
+  persist → relayout → render.
+- Every other module, including panels, sends a **field patch** (`onSettings(patch)`),
+  never a whole snapshot. Preview gestures write a separate draft, never the canonical
+  settings. `busViews` follows the same commit/draft split.
+- A test asserts that no other module assigns `settings`.
+
+### Acquisition lifecycle
+
+The lifecycle is one explicit state machine, not a set of independent booleans:
+
+| State | Meaning |
+| --- | --- |
+| `idle` | No capture; settings editable for the next start. |
+| `arming` | A start has been requested; the device/trigger is being set up. |
+| `waiting` | The matcher is waiting for its condition. |
+| `running` | Samples are arriving. |
+| `stopping` | A user stop is in flight. |
+| `restarting` | A named configuration restart is in flight (not a user stop). |
+| `retrying` | Between Repeat waves; the next wave is scheduled. |
+| `lost` | The device or transport died; no further samples will arrive. |
+
+- Commands are events (`start`, `stop`, `retune`, `restart`, `completed`, `lost`); each
+  returns the next state and a declared side-effect list in one pure module. Transient
+  booleans are derived from the state, not stored beside it.
+- `restart` is a first-class transition with its own visible phase. It must not reuse the
+  user-facing stop path, tear down the session as if the user stopped, or discard a
+  displayed capture silently.
+- `mayEdit(feature, state)` is the single capability table. Panels, the assistant and the
+  debug surface call it and receive the same typed reason; no component invents its own
+  `captureLocked`-style predicate. The user-visible badge/disabled rendering is
+  `docs/DESIGN.md` §7.2.
+
+### Viewport and display
+
+- The session owns one `ViewState { policy, anchor, offsets, follow }`; the Loop trigger
+  lock is a policy variant, not a parallel set of App fields. Gestures, Fit, overview
+  navigation, trigger match/release and session adoption emit one event into one
+  transition function; no other code writes viewport fields or calls
+  `restoreViewport`/`setFollowLatest` directly.
+- Which store is displayed (`wave`, `front`, `composite`, `showingFront`,
+  `heldTrigger`) is one `DisplayState` with named transitions. One
+  `endSessionDisplay(reason)` is used by stop, import/adopt, device loss, restart and
+  pending-repeat cancel.
+- Every transition gets a table-driven test, including held-Repeat, trigger-locked,
+  released and device-loss rows.
+
+### Panel and view-model contract
+
+- `PanelId` is declared once. Each panel owns exactly one host it may clear; the shell
+  never mounts two panels into one host and never hides a panel by clearing another. The
+  assistant is mounted once and hidden; the other panels may rebuild.
+- Every panel has `render(view)` and a `*Callbacks` interface. The view is immutable plain
+  data; no DOM objects in it. If incremental updates are required, the panel exposes
+  `update(view)` covering every field that can change without a rebuild, and a missing
+  node throws or reports instead of silently skipping. Cached element references are not
+  a second source of truth; a render test checks each dynamic field through both paths.
+- View models are presentation-ready: they contain derived values (capture phase, armed
+  summary, hidden inputs, pre-trigger cap, formatted times) from shared pure selectors.
+  Panels do not re-derive what App already derived, and raw runtime booleans do not sit
+  beside a derived `captureState`.
+- One `OverlayController` owns the stack of menus, popovers, flyouts and dialogs: opening
+  one closes its transient siblings, Escape closes the topmost, and focus returns to the
+  invoker by token. Buttons do not enumerate other surfaces by hand.
+
+### Persistence
+
+Every field belongs to exactly one tier, declared in a registry:
+
+| Tier | Contents | Restored |
+| --- | --- | --- |
+| Workspace | channels, order, capture settings, trigger configuration, bus views, analyzers | on reload |
+| Session / capture | cursors, viewport, active measure, trigger display lock; saved with a capture only if the format carries it | on open/reload only as declared |
+| Preferences | theme, locale, toolbar labels, panel width | on reload, through the preferences store, not the workspace schema |
+| Transient | running progress, hover, open overlays | never |
+
+The workspace schema is declared once as a field table (name, type, default, clamp,
+version, migration); restore, serialize and the pre-paint boot script are derived from
+it. `index.html` must not restate storage keys, schema versions or clamps; the pre-paint
+script consumes constants emitted from the same module at build time. A generated
+round-trip test covers every field.
+
+## Verification
+
+Review blockers:
+
+- A second assignment to `settings` outside `commitSettings`, or to `busViews` outside
+  its commit/draft path.
+- A derived value stored beside its source (a second armed flag, a second trigger
+  condition list, a second viewport model).
+- A panel that assigns state or reaches `App`/`Device`/`StoreRef` directly.
+- A behaviour test that asserts source text, statement spelling, append order or a token
+  count.
+- A failure that only reaches the console.
+- A persistence field that is not in the tier registry, or a pre-paint script that
+  restates a storage key/version/clamp.
+
+Verification rules:
+
+- New UI behaviour gets a behavioural test: render the panel into a DOM harness, drive
+  the event, assert the view/DOM and the callback. State machines get table-driven pure
+  tests.
+- Source-text tests (`readFileSync(...).includes(...)`) are not accepted for behaviour.
+  They are allowed only for static contracts that cannot be observed at runtime: storage
+  keys, catalog key presence, attribute names, and the exported control-capability table.
+  They must not assert function-body text, statement spelling, append order or a token
+  count. Declare every allowlisted static assertion next to its reason.
+- `npm test` includes one design-contract test that validates the ownership table and the
+  capability table, and forbids duplicated derivations (for example a second
+  `softwareTrigger` in `CaptureSettings`).
+- Tests are deterministic and offline. Hardware tests live in their own harness and are
+  not part of `npm test`.
+- `npm test` is the aggregate suite; a change to UI behaviour must keep it green, and a
+  new suite must be registered there.
+- `npx tsc --noEmit` and `npm run build` are part of the definition of done.
+- For UI changes, the interface definition of done (viewport widths, themes, locales,
+  reduced motion, keyboard path) is `docs/DESIGN.md` §15.4; this section owns the
+  engineering checks.
 
 ## Shipping it as a static site
 
@@ -360,3 +541,5 @@ Two limits worth knowing before choosing a host:
 - Check the reply of every device command before trusting what follows.
 - Fail loudly and early. No silent catch blocks.
 - Report what you measured, including misses. A tested wrong hypothesis is progress.
+- UI changes also follow `docs/DESIGN.md`; its feature-admission checklist is part of the
+  review.
