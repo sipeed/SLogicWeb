@@ -116,7 +116,7 @@ export async function runCursorChipsProbe(
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
-    const width = await settleWidth(set === 'narrow');
+    await settleWidth(set === 'narrow');
     app.debug.setViewportSeconds(0, 0.1);
     app.draw();
 
@@ -131,28 +131,82 @@ export async function runCursorChipsProbe(
       for (const offset of offsets) app.debug.addCursor(middle + samples(offset));
       app.draw();
     };
+    const originX = app.toPx(middle);
+    const sampleAt = (cssX: number): number => Math.round(middle + (cssX - originX) / perSample);
+    const placeAt = (positions: readonly number[]): void => {
+      app.debug.setMarker(null);
+      app.debug.setViewportSeconds(0, 0.1);
+      for (const cssX of positions) app.debug.addCursor(sampleAt(cssX));
+      app.draw();
+    };
+    const displaced = (chips: ReturnType<App['debug']['cursorChips']>): number =>
+      chips.filter((chip) => Math.abs(chip.boxX - chip.anchorX) > 0.5).length;
+    const allInside = (chips: ReturnType<App['debug']['cursorChips']>, plot: number): boolean =>
+      chips.every((chip) => chip.boxX - chip.width / 2 >= 2 - 1e-6 &&
+        chip.boxX + chip.width / 2 <= plot - 2 + 1e-6);
     const rowsOf = (chips: ReturnType<App['debug']['cursorChips']>): string =>
       chips.map((chip) => chip.row).join(',');
+    const overlaps = (chips: ReturnType<App['debug']['cursorChips']>): string => {
+      const rows: Array<Array<{ id: number; left: number; right: number }>> = [[], []];
+      for (const chip of chips) {
+        rows[chip.row].push({
+          id: chip.id, left: chip.boxX - chip.width / 2, right: chip.boxX + chip.width / 2,
+        });
+      }
+      const hits: string[] = [];
+      for (const row of rows) {
+        for (let index = 1; index < row.length; index++) {
+          const gap = row[index].left - row[index - 1].right;
+          if (gap < 2 - 1e-6) hits.push(`${row[index - 1].id}/${row[index].id}=${gap.toFixed(2)}`);
+        }
+      }
+      return hits.join(',');
+    };
 
     if (set === 'narrow') {
+      const at = (cssX: number): number => {
+        const origin = app.toPx(middle);
+        const scale = (app.toPx(middle + 1000) - origin) / 1000;
+        return Math.round(middle + (cssX - origin) / scale);
+      };
+      app.debug.setMarker(null);
+      app.debug.setViewportSeconds(0.02, 0.08);
+      app.debug.addCursor(at(300));
+      app.debug.addCursor(at(304));
+      app.draw();
+      const settled = await settleWidth(true);
+      const width = plotWidth();
+      const scale = (app.toPx(middle + 1000) - app.toPx(middle)) / 1000;
+      const chips = app.debug.cursorChips();
+      record('narrow', chips.length === 2 && rowsOf(chips) === '0,1' &&
+        allInside(chips, width) && overlaps(chips) === '' &&
+        width >= 300 && width <= 340 && app.statusError === null,
+        `plotWidth=${width} settled=${settled} windowWidth=${window.innerWidth} ` +
+        `scale=${scale.toFixed(4)} ` +
+        `anchors=${chips.map((chip) => chip.anchorX.toFixed(1)).join(',')} ` +
+        `chips=${describe(chips)} error=${app.statusError ? 'yes' : 'no'}`);
+
       app.debug.setMarker(null);
       app.debug.setViewportSeconds(0.02, 0.08);
       app.draw();
-      const scale = (app.toPx(middle + 1000) - app.toPx(middle)) / 1000;
-      const origin = app.toPx(middle);
-      const at = (cssX: number): number => Math.round(middle + (cssX - origin) / scale);
-      app.debug.addCursor(at(width - 3));
-      app.debug.addCursor(at(width + 1));
+      const denseBase = plotWidth();
+      for (let index = 0; index < 11; index++) {
+        app.debug.addCursor(at(denseBase / 2 - 50 + index * 10));
+      }
       app.draw();
-      const chips = app.debug.cursorChips();
-      const inside = chips.every((chip) =>
-        chip.boxX - chip.width / 2 >= 2 - 1e-6 && chip.boxX + chip.width / 2 <= width - 2 + 1e-6);
-      record('narrow', chips.length === 2 && rowsOf(chips) === '0,1' && inside &&
-        width >= 300 && width <= 340 && app.statusError === null,
-        `plotWidth=${width} scale=${scale.toFixed(4)} ` +
-        `anchors=${chips.map((chip) => chip.anchorX.toFixed(1)).join(',')} ` +
-        `chips=${describe(chips)} error=${app.statusError ? 'yes' : 'no'}`);
-      return { scenes, plotWidth: width, windowWidth: window.innerWidth };
+      await settleWidth(true);
+      const denseWidth = plotWidth();
+      const dense = app.debug.cursorChips();
+      const denseLabels = app.debug.cursors().map((cursor) => cursor.label);
+      record('narrow-two-digit', dense.length === 11 && allInside(dense, denseWidth) &&
+        overlaps(dense) === '' && denseLabels.includes('8') && denseLabels.includes('10') &&
+        denseWidth >= 300 && denseWidth <= 340 && app.statusError === null,
+        `plotWidth=${denseWidth} placedWith=${denseBase} windowWidth=${window.innerWidth} ` +
+        `chips=${dense.length} ` +
+        `left=${(dense[0]?.boxX - dense[0]?.width / 2).toFixed(1)} ` +
+        `right=${(dense[10]?.boxX + dense[10]?.width / 2).toFixed(1)} ` +
+        `labels=${denseLabels.slice(7).join(',')} error=${app.statusError ? 'yes' : 'no'}`);
+      return { scenes, plotWidth: denseWidth, windowWidth: window.innerWidth };
     }
 
     place([0, 200]);
@@ -163,7 +217,7 @@ export async function runCursorChipsProbe(
       farChips[0].boxX < farChips[1].boxX &&
       farChips[0].id === farIds[0] && farChips[1].id === farIds[1] &&
       app.statusError === null,
-      `plotWidth=${width} px=${perSample.toFixed(4)}/${steps(200)} chips=${describe(farChips)} ` +
+      `plotWidth=${plotWidth()} px=${perSample.toFixed(4)}/${steps(200)} chips=${describe(farChips)} ` +
       `ids=${farIds.join(',')} error=${app.statusError ? 'yes' : 'no'}`);
 
     place([0, 0.8]);
@@ -190,6 +244,60 @@ export async function runCursorChipsProbe(
       `px=${perSample.toFixed(4)}/${steps(18)} chips=${describe(singleRow)} ` +
       `error=${app.statusError ? 'yes' : 'no'}`);
 
+    place([-0.5, 0, 0.5]);
+    const triple = app.debug.cursorChips();
+    record('triple', triple.length === 3 && rowsOf(triple) === '0,0,0' &&
+      displaced(triple) >= 2 &&
+      triple[0].boxX < triple[1].boxX && triple[1].boxX < triple[2].boxX &&
+      app.statusError === null,
+      `px=${perSample.toFixed(4)}/${steps(0.5)} displaced=${displaced(triple)} ` +
+      `chips=${describe(triple)} error=${app.statusError ? 'yes' : 'no'}`);
+
+    place(Array.from({ length: 8 }, (_, index) => -10 + index * 2.8));
+    const crowd = app.debug.cursorChips();
+    const crowdGaps = crowd.slice(1).map((chip, index) =>
+      chip.boxX - chip.width / 2 - (crowd[index].boxX + crowd[index].width / 2));
+    record('crowd', crowd.length === 8 && rowsOf(crowd) === '0,0,0,0,0,0,0,0' &&
+      crowdGaps.every((gap) => gap >= -1e-6) && displaced(crowd) >= 1 &&
+      app.statusError === null,
+      `gaps=${crowdGaps.map((gap) => gap.toFixed(2)).join(',')} ` +
+      `displaced=${displaced(crowd)} chips=${describe(crowd)} ` +
+      `error=${app.statusError ? 'yes' : 'no'}`);
+
+    placeAt([3, 4, 5]);
+    const edge = app.debug.cursorChips();
+    record('edge', edge.length === 3 && rowsOf(edge) === '0,0,0' &&
+      edge[0].boxX - edge[0].width / 2 >= 2 - 1e-6 &&
+      edge.every((chip) => chip.anchorX < 6) &&
+      edge[0].boxX < edge[1].boxX && edge[1].boxX < edge[2].boxX &&
+      app.statusError === null,
+      `anchors=${edge.map((chip) => chip.anchorX.toFixed(1)).join(',')} ` +
+      `left=${(edge[0]?.boxX - edge[0]?.width / 2).toFixed(2)} chips=${describe(edge)} ` +
+      `error=${app.statusError ? 'yes' : 'no'}`);
+
+    placeAt([1, 2, 3, 30]);
+    const neighbour = app.debug.cursorChips();
+    record('neighbour', neighbour.length === 4 && overlaps(neighbour) === '' &&
+      allInside(neighbour, plotWidth()) &&
+      neighbour.every((chip) => chip.row === 0) &&
+      neighbour.map((chip) => chip.id).join(',') ===
+        app.debug.cursors().map((cursor) => cursor.id).join(',') &&
+      app.statusError === null,
+      `plotWidth=${plotWidth()} overlaps=${overlaps(neighbour) || 'none'} ` +
+      `chips=${describe(neighbour)} error=${app.statusError ? 'yes' : 'no'}`);
+
+    place(Array.from({ length: 11 }, (_, index) => -50 + index * 10));
+    const twoDigit = app.debug.cursorChips();
+    const twoDigitWidth = plotWidth();
+    const labels = app.debug.cursors().map((cursor) => cursor.label);
+    record('two-digit', twoDigit.length === 11 && allInside(twoDigit, twoDigitWidth) &&
+      overlaps(twoDigit) === '' &&
+      labels.includes('10') && labels.includes('11') && app.statusError === null,
+      `plotWidth=${twoDigitWidth} chips=${twoDigit.length} ` +
+      `left=${(twoDigit[0]?.boxX - twoDigit[0]?.width / 2).toFixed(1)} ` +
+      `right=${(twoDigit[10]?.boxX + twoDigit[10]?.width / 2).toFixed(1)} ` +
+      `labels=${labels.slice(-2).join(',')} error=${app.statusError ? 'yes' : 'no'}`);
+
     const axis = document.getElementById('axis') as HTMLCanvasElement | null;
     if (axis === null) throw new Error('the axis canvas is missing');
     app.debug.setMarker(null);
@@ -210,7 +318,7 @@ export async function runCursorChipsProbe(
       `anchor=${awayChips[0]?.anchorX.toFixed(1)} visibleAnchor=${visibleChips[0]?.anchorX.toFixed(1)} ` +
       `ink=${visibleInk}/${hiddenInk}/${restoredInk} error=${app.statusError ? 'yes' : 'no'}`);
 
-    return { scenes, plotWidth: width, windowWidth: window.innerWidth };
+    return { scenes, plotWidth: plotWidth(), windowWidth: window.innerWidth };
   } finally {
     app.debug.setMarker(null);
     if (app.running || app.stopping) await app.debug.stop();

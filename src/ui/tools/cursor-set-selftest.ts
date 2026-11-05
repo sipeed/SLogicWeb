@@ -35,6 +35,44 @@ const width20 = (): number => 20;
 const PLOT_WIDTH = 400;
 const ids = (chips: readonly PlacedCursorChip[]): string => chips.map((c) => String(c.id)).join(',');
 
+function sameRowOverlaps(
+  layout: readonly PlacedCursorChip[], widthOf: (label: string) => number, tag: string,
+): string[] {
+  const rows: PlacedCursorChip[][] = [[], []];
+  for (const placed of layout) rows[placed.row].push(placed);
+  const failures: string[] = [];
+  for (const row of rows) {
+    for (let index = 1; index < row.length; index++) {
+      const left = row[index].boxX - widthOf(row[index].label) / 2;
+      const right = row[index - 1].boxX + widthOf(row[index - 1].label) / 2;
+      if (left - right < 2 - 1e-9) {
+        failures.push(`${tag} ${row[index - 1].id}/${row[index].id} gap=${(left - right).toFixed(3)}`);
+      }
+    }
+  }
+  return failures;
+}
+
+function placementFailures(
+  layout: readonly PlacedCursorChip[], chips: readonly CursorChip[], tag: string,
+): string[] {
+  const failures: string[] = [];
+  const seen = new Set<number>();
+  for (const placed of layout) {
+    if (seen.has(placed.id)) failures.push(`${tag} duplicate ${placed.id}`);
+    seen.add(placed.id);
+    if (placed.row !== 0 && placed.row !== 1) failures.push(`${tag} row ${placed.row}`);
+    const source = chips.find((entry) => entry.id === placed.id);
+    if (!source || source.cssX !== placed.anchorX) failures.push(`${tag} anchor ${placed.id}`);
+    if (!Number.isFinite(placed.boxX)) failures.push(`${tag} box ${placed.id}`);
+  }
+  if (seen.size !== chips.length) failures.push(`${tag} dropped ${chips.length - seen.size}`);
+  if (layout.some((placed, index) => index > 0 && placed.boxX < layout[index - 1].boxX)) {
+    failures.push(`${tag} order`);
+  }
+  return failures;
+}
+
 {
   const slots = [0, 1, 2, 3].map((index) => cursorColor(index));
   check('positions 0..3 return the four palette literals in order',
@@ -266,10 +304,19 @@ const ids = (chips: readonly PlacedCursorChip[]): string => chips.map((c) => Str
     `placed=${four.map((c) => `${c.id}@${c.boxX}/r${c.row}`).join(',')}`);
 
   const three = layoutCursorChips([chip(1, 100), chip(2, 105), chip(3, 110)], width20, PLOT_WIDTH);
-  check('three chips two rows cannot hold fall back to the single-row drop, newest kept',
-    three.length === 1 && three[0].id === 3 && three[0].row === 0 &&
-    three[0].boxX === 110 && three[0].anchorX === 110,
-    `placed=${three.map((c) => `${c.id}@${c.boxX}/r${c.row}`).join(',')}`);
+  check('three 20 px chips 5 px apart cascade in row 0, rightmost anchored, all placed',
+    ids(three) === '1,2,3' && three.map((c) => c.row).join(',') === '0,0,0' &&
+    three.map((c) => c.boxX).join(',') === '66,88,110' &&
+    three.map((c) => c.anchorX).join(',') === '100,105,110',
+    `placed=${three.map((c) => `${c.id}@${c.boxX}/${c.anchorX}/r${c.row}`).join(',')}`);
+
+  const shift = three[2].boxX - three[1].boxX - (20 + 2);
+  check('the older chip of a 5 px pair moves exactly -(width + 2 - 5) while the newer keeps its anchor',
+    three[1].boxX - three[1].anchorX === -(20 + 2 - 5) &&
+    three[2].boxX === three[2].anchorX &&
+    three[2].anchorX - three[1].anchorX === 5 && shift === 0,
+    `older=${three[1].boxX - three[1].anchorX}, newer=${three[2].boxX - three[2].anchorX}, ` +
+    `separationResidual=${shift}`);
 }
 
 {
@@ -284,23 +331,104 @@ const ids = (chips: readonly PlacedCursorChip[]): string => chips.map((c) => Str
   check('a chip wider than the plot centres on the plot instead of crossing an edge',
     huge.length === 1 && huge[0].boxX === 160, `box=${huge[0]?.boxX}`);
 
-  const stillDrops = layoutCursorChips([chip(1, 1), chip(2, 5), chip(3, 9)], width20, 320);
-  check('the drop fallback leaves an untouched anchor and no clamp on the surviving chip',
-    stillDrops.length === 1 && stillDrops[0].id === 3 &&
-    stillDrops[0].boxX === 9 && stillDrops[0].anchorX === 9,
-    `placed=${stillDrops.map((c) => `${c.id}@${c.boxX}`).join(',')}`);
+  const mirrored = layoutCursorChips([chip(1, 3), chip(2, 8), chip(3, 13)], width20, 400);
+  check('a cascade that would cross the left edge mirrors: leftmost anchored, others pushed right',
+    ids(mirrored) === '1,2,3' && mirrored.map((c) => c.row).join(',') === '0,0,0' &&
+    mirrored.map((c) => c.boxX).join(',') === '12,34,56' &&
+    mirrored[0].boxX - 10 === CURSOR_CHIP_EDGE &&
+    mirrored.map((c) => c.anchorX).join(',') === '3,8,13',
+    `placed=${mirrored.map((c) => `${c.id}@${c.boxX}/${c.anchorX}`).join(',')} ` +
+    `left=${mirrored[0]?.boxX - 10}`);
 }
 
 {
-  const rightmost = layoutCursorChips(
-    [chip(1, 505), chip(2, 500), chip(3, 503)], width20, PLOT_WIDTH);
-  const leftmost = layoutCursorChips(
-    [chip(1, 503), chip(2, 505), chip(3, 500)], width20, PLOT_WIDTH);
-  check('the drop fallback keeps the newest chip of an over-dense cluster, not an edge one',
-    ids(rightmost) === '3' && rightmost[0].boxX === 503 &&
-    ids(leftmost) === '3' && leftmost[0].boxX === 500,
-    `rightmost=${rightmost.map((c) => `${c.id}@${c.boxX}`).join(',')}, ` +
-    `leftmost=${leftmost.map((c) => `${c.id}@${c.boxX}`).join(',')}`);
+  const shifted = layoutCursorChips(
+    Array.from({ length: 10 }, (_, index) => chip(index + 1, 30 + index)), width20, 230);
+  check('a mirrored cascade that would cross the right edge shifts the whole cluster left',
+    shifted.length === 10 && shifted.every((c) => c.row === 0) &&
+    shifted.map((c) => c.boxX).join(',') === '20,42,64,86,108,130,152,174,196,218' &&
+    shifted[0].boxX - 10 === 10 && shifted[9].boxX + 10 === 230 - CURSOR_CHIP_EDGE &&
+    shifted.map((c) => c.anchorX).join(',') === '30,31,32,33,34,35,36,37,38,39',
+    `placed=${shifted.length} xs=${shifted.map((c) => c.boxX).join(',')} ` +
+    `left=${shifted[0]?.boxX - 10} right=${shifted[9]?.boxX + 10}`);
+
+  const overWide = layoutCursorChips(
+    Array.from({ length: 8 }, (_, index) => chip(index + 1, 5 + index * 5)), width20, 120);
+  check('an over-wide cluster keeps every chip, compresses the gaps to 0 and accepts a right overflow',
+    overWide.length === 8 && overWide.every((c) => c.row === 0) &&
+    overWide.map((c) => c.boxX).join(',') === '12,32,52,72,92,112,132,152' &&
+    overWide[0].boxX - 10 === CURSOR_CHIP_EDGE &&
+    overWide.every((c, index) => index === 0 || c.boxX - 10 - (overWide[index - 1].boxX + 10) === 0) &&
+    overWide[7].boxX + 10 > 120 - CURSOR_CHIP_EDGE,
+    `placed=${overWide.length} xs=${overWide.map((c) => c.boxX).join(',')} ` +
+    `lastRight=${overWide[7]?.boxX + 10}`);
+}
+
+{
+  const chip136 = (): number => 13.6;
+  const shape = (anchors: readonly number[]): PlacedCursorChip[] =>
+    layoutCursorChips(anchors.map((x, index) => chip(index + 1, x)), chip136, 856);
+  const gaps = (layout: readonly PlacedCursorChip[]): number[] => layout.slice(1).map(
+    (placed, index) => placed.boxX - 6.8 - (layout[index].boxX + 6.8));
+
+  const leftEdge = shape([1, 2, 3, 30]);
+  check('F1 left-edge cascade merges with the lone chip 27 px right: one cluster, gaps exactly 2 px',
+    ids(leftEdge) === '1,2,3,4' && leftEdge.every((c) => c.row === 0) &&
+    Math.abs(leftEdge[0].boxX - 6.8 - CURSOR_CHIP_EDGE) <= 1e-9 &&
+    gaps(leftEdge).every((gap) => gap === 2) &&
+    sameRowOverlaps(leftEdge, chip136, 'leftEdge').length === 0 &&
+    leftEdge.map((c) => c.anchorX).join(',') === '1,2,3,30',
+    `boxes=${leftEdge.map((c) => c.boxX).join(',')} gaps=${gaps(leftEdge).join(',')} ` +
+    `anchors=${leftEdge.map((c) => c.anchorX).join(',')}`);
+
+  const middle = shape([366, 400, 402, 404]);
+  check('F1 mirrored cascade merges left into 366: four boxes in row 0, 2 px apart, rightmost anchored',
+    ids(middle) === '1,2,3,4' && middle.every((c) => c.row === 0) &&
+    middle[3].boxX === 404 && middle[0].boxX < 366 &&
+    gaps(middle).every((gap) => gap === 2) &&
+    sameRowOverlaps(middle, chip136, 'middle').length === 0,
+    `boxes=${middle.map((c) => c.boxX).join(',')} gaps=${gaps(middle).join(',')} ` +
+    `rightmost=${middle[3].boxX}/${middle[3].anchorX}`);
+
+  const chained = shape([18, 35, 42, 46, 80]);
+  check('F1 three-cluster chain needs two merges: the moved trio reaches the last lone chip',
+    ids(chained) === '1,2,3,4,5' && chained.every((c) => c.row === 0) &&
+    chained[0].boxX === 18 && chained[1].boxX === 35 &&
+    gaps(chained)[0] > 2 && gaps(chained).slice(1).every((gap) => gap === 2) &&
+    chained[4].boxX > 80 && chained[4].anchorX === 80 &&
+    sameRowOverlaps(chained, chip136, 'chained').length === 0,
+    `boxes=${chained.map((c) => c.boxX).join(',')} gaps=${gaps(chained).join(',')} ` +
+    `anchors=${chained.map((c) => c.anchorX).join(',')}`);
+
+  let lcg = 0x9e3779b9;
+  const next = (): number => {
+    lcg = (Math.imul(1664525, lcg) + 1013904223) >>> 0;
+    return lcg / 0x100000000;
+  };
+  const fuzzFailures: string[] = [];
+  for (let round = 0; round < 20_000; round++) {
+    const width = [320, 856, 1100][round % 3];
+    const chipPx = [13.6, 20][(round >> 1) % 2];
+    const count = 2 + Math.floor(next() * 7);
+    const chips = Array.from(
+      { length: count }, (_, index) => chip(index + 1, Math.round(next() * width * 100) / 100));
+    const widthOf = (): number => chipPx;
+    const layout = layoutCursorChips(chips, widthOf, width);
+    const tag = `round=${round} w=${width} chip=${chipPx}`;
+    fuzzFailures.push(...placementFailures(layout, chips, tag));
+    fuzzFailures.push(...sameRowOverlaps(layout, widthOf, tag));
+    if (layout.length === chips.length) {
+      for (const placed of layout) {
+        if (placed.boxX - chipPx / 2 < CURSOR_CHIP_EDGE - 1e-9 ||
+          placed.boxX + chipPx / 2 > width - CURSOR_CHIP_EDGE + 1e-9) {
+          fuzzFailures.push(`${tag} edge ${placed.id}@${placed.boxX}`);
+        }
+      }
+    }
+  }
+  check('a 20 000-case deterministic fuzz places every chip once with no same-row box closer than 2 px',
+    fuzzFailures.length === 0,
+    `failures=${fuzzFailures.slice(0, 6).join(';')} (${fuzzFailures.length})`);
 }
 
 {
@@ -318,7 +446,14 @@ const ids = (chips: readonly PlacedCursorChip[]): string => chips.map((c) => Str
           if (seen.has(placed.id)) failures.push(`duplicate ${placed.id}`);
           seen.add(placed.id);
           if (placed.anchorX !== chips[placed.id - 1].cssX) failures.push(`anchor ${placed.id}`);
+          if (placed.boxX - 10 < CURSOR_CHIP_EDGE - 1e-9 ||
+            placed.boxX + 10 > PLOT_WIDTH - CURSOR_CHIP_EDGE + 1e-9) {
+            failures.push(`edge base=${base} spacing=${spacing} count=${count} ${placed.boxX}`);
+          }
           rows[placed.row].push(placed);
+        }
+        if (seen.size !== chips.length) {
+          failures.push(`dropped base=${base} spacing=${spacing} count=${count}`);
         }
         for (const row of rows) {
           for (let index = 1; index < row.length; index++) {
@@ -331,10 +466,12 @@ const ids = (chips: readonly PlacedCursorChip[]): string => chips.map((c) => Str
         if (layout.some((placed, index) => index > 0 && placed.boxX < layout[index - 1].boxX)) {
           failures.push(`order base=${base} spacing=${spacing} count=${count}`);
         }
+        failures.push(...sameRowOverlaps(
+          layout, width20, `base=${base} spacing=${spacing} count=${count}`));
       }
     }
   }
-  check('a dense sweep never overlaps two boxes in one row and keeps anchors and order stable',
+  check('a dense fitting sweep places every chip inside the edges with no same-row overlap',
     failures.length === 0, `failures=${failures.slice(0, 6).join(';')} (${failures.length})`);
 
   const escaped: string[] = [];
@@ -355,8 +492,20 @@ const ids = (chips: readonly PlacedCursorChip[]): string => chips.map((c) => Str
         escaped.push(`pair ${x} -> ${placed.boxX}`);
       }
     }
+    escaped.push(...sameRowOverlaps(pair, width20, `pair ${x}`));
+    const triple = layoutCursorChips([chip(1, x), chip(2, x + 5), chip(3, x + 10)], width20, PLOT_WIDTH);
+    if (triple.length !== 3 || triple.map((c) => c.row).join(',') !== '0,0,0') {
+      escaped.push(`triple ${x} placed=${triple.length}`);
+    }
+    escaped.push(...sameRowOverlaps(triple, width20, `triple ${x}`));
+    for (const placed of triple) {
+      if (placed.boxX - 10 < CURSOR_CHIP_EDGE - 1e-9 ||
+        placed.boxX + 10 > PLOT_WIDTH - CURSOR_CHIP_EDGE + 1e-9) {
+        escaped.push(`triple ${x} -> ${placed.boxX}`);
+      }
+    }
   }
-  check('no row-placed box ever crosses the 2 px edge margin, at any anchor from -20 to width+20',
+  check('no placed box crosses the 2 px edge margin, at any anchor from -20 to width+20',
     escaped.length === 0, `failures=${escaped.slice(0, 6).join(';')} (${escaped.length})`);
 }
 

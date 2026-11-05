@@ -1414,3 +1414,19 @@ the budget block/refresh and the retained bytes. The crossing scanner's stride f
 sample rate (about 20 M reads/s); its reported crossings are spaced by the loop window/64,
 which is a whole number of signal periods, so the median interval is a phase-aligned block
 size rather than necessarily the signal period itself.
+
+## 27. Cursor labels in the time axis
+
+`layoutCursorChips` clusters the chips by x and tries two rows first, so a dense pair keeps
+both labels exactly above their own anchors with no sideways movement; `AXIS.markerChip` is
+13 px high with a 1 px row gap for that, and the 29 px axis height did not change. A cluster
+that two rows cannot hold cascades in one row - the rightmost anchor stays, the rest move
+left by the smallest amount that keeps a 2 px gap, the cluster mirrors at the left edge and
+shifts when the right edge would be crossed, and an over-wide cluster compresses the gaps to
+0 rather than dropping a label. The tick at the true sample x is the source of truth; a box
+that had to move draws a 1 px leader back to it. Placement is derived per frame, so nothing
+extra is stored. Clusters are placed independently, so a displaced box could land on a
+neighbouring cluster's box; when two boxes in the same row end up closer than the 2 px gap
+the two clusters are merged (by anchor x, then list order) and laid out again, repeating
+until no such conflict remains or one cluster holds everything - a merge retries the two
+rows first, so it can resolve with zero displacement.

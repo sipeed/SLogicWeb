@@ -70,6 +70,18 @@ interface LayoutEntry {
   order: number;
 }
 
+interface PlacedItem {
+  item: LayoutItem;
+  boxX: number;
+  row: 0 | 1;
+}
+
+interface RowEntry {
+  left: number;
+  right: number;
+  cluster: number;
+}
+
 function clampBoxX(x: number, boxWidth: number, width: number): number {
   const low = CURSOR_CHIP_EDGE + boxWidth / 2;
   const high = width - CURSOR_CHIP_EDGE - boxWidth / 2;
@@ -136,56 +148,132 @@ function placeRows(cluster: readonly LayoutItem[]): (0 | 1)[] | null {
   return rows;
 }
 
-function placeDropping(cluster: readonly LayoutItem[]): LayoutItem[] {
-  const kept: LayoutItem[] = [];
-  const newestFirst = [...cluster].sort((a, b) => b.order - a.order);
-  for (const item of newestFirst) {
-    const left = item.chip.cssX - item.width / 2 - CHIP_GAP;
-    const right = item.chip.cssX + item.width / 2 + CHIP_GAP;
-    if (kept.some((box) =>
-      left < box.chip.cssX + box.width / 2 + CHIP_GAP &&
-      box.chip.cssX - box.width / 2 - CHIP_GAP < right)) continue;
-    kept.push(item);
+function placeCascade(cluster: readonly LayoutItem[], separation: number): number[] {
+  const boxX = cluster.map((item) => item.boxX);
+  for (let index = cluster.length - 2; index >= 0; index--) {
+    const next = cluster[index + 1];
+    const item = cluster[index];
+    boxX[index] = Math.min(
+      boxX[index], boxX[index + 1] - next.width / 2 - separation - item.width / 2);
   }
-  return kept;
+  if (boxX[0] - cluster[0].width / 2 < CURSOR_CHIP_EDGE) {
+    for (let index = 0; index < cluster.length; index++) boxX[index] = cluster[index].boxX;
+    for (let index = 1; index < cluster.length; index++) {
+      const prev = cluster[index - 1];
+      const item = cluster[index];
+      boxX[index] = Math.max(
+        boxX[index], boxX[index - 1] + prev.width / 2 + separation + item.width / 2);
+    }
+  }
+  return boxX;
+}
+
+function placeCluster(cluster: readonly LayoutItem[], width: number): PlacedItem[] {
+  const rows = placeRows(cluster);
+  if (rows !== null) {
+    return cluster.map((item, index) => ({ item, boxX: item.boxX, row: rows[index] }));
+  }
+  const boxes = placeCascading(cluster, width);
+  return cluster.map((item, index) => ({ item, boxX: boxes[index], row: 0 }));
+}
+
+function findClusterConflict(placed: readonly PlacedItem[][]): [number, number] | null {
+  for (let row = 0; row < CURSOR_CHIP_ROWS; row++) {
+    const entries: RowEntry[] = [];
+    for (let cluster = 0; cluster < placed.length; cluster++) {
+      for (const entry of placed[cluster]) {
+        if (entry.row !== row) continue;
+        entries.push({
+          left: entry.boxX - entry.item.width / 2,
+          right: entry.boxX + entry.item.width / 2,
+          cluster,
+        });
+      }
+    }
+    if (entries.length < 2) continue;
+    entries.sort((a, b) => a.left - b.left || a.cluster - b.cluster);
+    let best: RowEntry | null = null;
+    let second: RowEntry | null = null;
+    for (const entry of entries) {
+      const other = best !== null && best.cluster !== entry.cluster ? best : second;
+      if (other !== null && other.cluster !== entry.cluster &&
+        entry.left - other.right < 2 * CHIP_GAP - 1e-9) {
+        return [Math.min(entry.cluster, other.cluster), Math.max(entry.cluster, other.cluster)];
+      }
+      if (best === null || entry.right > best.right) {
+        if (best !== null && best.cluster !== entry.cluster) second = best;
+        best = entry;
+      } else if (entry.cluster !== best.cluster &&
+        (second === null || entry.right > second.right)) {
+        second = entry;
+      }
+    }
+  }
+  return null;
+}
+
+function mergeClusters(
+  clusters: readonly LayoutItem[][], a: number, b: number,
+): LayoutItem[][] {
+  const merged = [...clusters[a], ...clusters[b]]
+    .sort((x, y) => x.chip.cssX - y.chip.cssX || x.order - y.order);
+  const next: LayoutItem[][] = [];
+  for (let index = 0; index < clusters.length; index++) {
+    if (index !== a && index !== b) next.push(clusters[index]);
+  }
+  next.push(merged);
+  next.sort((x, y) => x[0].chip.cssX - y[0].chip.cssX || x[0].order - y[0].order);
+  return next;
+}
+
+function placeCascading(cluster: readonly LayoutItem[], width: number): number[] {
+  const last = cluster.length - 1;
+  let boxX = placeCascade(cluster, 2 * CHIP_GAP);
+  const overflow = boxX[last] + cluster[last].width / 2 - (width - CURSOR_CHIP_EDGE);
+  if (overflow <= 0) return boxX;
+  const room = boxX[0] - cluster[0].width / 2 - CURSOR_CHIP_EDGE;
+  if (room >= overflow) return boxX.map((x) => x - overflow);
+  boxX = placeCascade(cluster, 0);
+  const left = CURSOR_CHIP_EDGE - (boxX[0] - cluster[0].width / 2);
+  if (left <= 0) return boxX;
+  boxX[0] += left;
+  for (let index = 1; index < cluster.length; index++) {
+    const prev = cluster[index - 1];
+    const item = cluster[index];
+    boxX[index] = Math.max(
+      boxX[index], boxX[index - 1] + prev.width / 2 + item.width / 2);
+  }
+  return boxX;
 }
 
 export function layoutCursorChips(
   chips: readonly CursorChip[], chipWidth: (label: string) => number, width: number,
 ): PlacedCursorChip[] {
   if (!Number.isFinite(width) || width <= 0) return [];
-  const placed: LayoutEntry[] = [];
-  for (const cluster of clusterize(measureItems(chips, chipWidth, width))) {
-    const rows = placeRows(cluster);
-    if (rows === null) {
-      for (const item of placeDropping(cluster)) {
-        placed.push({
-          chip: {
-            id: item.chip.id,
-            label: item.chip.label,
-            anchorX: item.chip.cssX,
-            boxX: item.chip.cssX,
-            row: 0,
-          },
-          order: item.order,
-        });
-      }
-      continue;
-    }
-    for (let index = 0; index < cluster.length; index++) {
-      const item = cluster[index];
-      placed.push({
+  let clusters = clusterize(measureItems(chips, chipWidth, width));
+  let placed = clusters.map((cluster) => placeCluster(cluster, width));
+  for (;;) {
+    if (clusters.length < 2) break;
+    const conflict = findClusterConflict(placed);
+    if (conflict === null) break;
+    clusters = mergeClusters(clusters, conflict[0], conflict[1]);
+    placed = clusters.map((cluster) => placeCluster(cluster, width));
+  }
+  const entries: LayoutEntry[] = [];
+  for (const cluster of placed) {
+    for (const item of cluster) {
+      entries.push({
         chip: {
-          id: item.chip.id,
-          label: item.chip.label,
-          anchorX: item.chip.cssX,
+          id: item.item.chip.id,
+          label: item.item.chip.label,
+          anchorX: item.item.chip.cssX,
           boxX: item.boxX,
-          row: rows[index],
+          row: item.row,
         },
-        order: item.order,
+        order: item.item.order,
       });
     }
   }
-  placed.sort((a, b) => a.chip.boxX - b.chip.boxX || a.order - b.order);
-  return placed.map((entry) => entry.chip);
+  entries.sort((a, b) => a.chip.boxX - b.chip.boxX || a.order - b.order);
+  return entries.map((entry) => entry.chip);
 }
