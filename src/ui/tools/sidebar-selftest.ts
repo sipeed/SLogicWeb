@@ -524,14 +524,16 @@ const describe = (s: SidebarState): string =>
 {
   const app = readSource('src/ui/app.ts');
   const retired = ['assistant-mode', 'panelHost', 'busHost', 'this.busPanel.hidden',
-    'this.el.side.appendChild(']
+    'this.el.side.appendChild(', 'renderCursorsPlaceholder', 'side-placeholder']
     .filter((token) => app.includes(token));
   const wiring = [
     'new SidebarHost(this.el.side, {',
+    "this.sidebarHost.containerFor('cursors');",
     "this.sidebarHost.containerFor('capture');",
     "this.sidebarHost.containerFor('decoders');",
     'mount: (page, container) => this.mountSidebarPage(page, container),',
-    "this.renderCursorsPlaceholder(this.sidebarHost.containerFor('cursors'));",
+    "cursors: this.sidebarHost.containerFor('cursors'),",
+    'this.capturePanel.render(this.capturePanelView());',
     'this.sidebarHost.assistantLayer().appendChild(this.assistantPanel.el);',
     'this.sidebarHost.show(this.sidebar);',
     'this.sidebarHost.focusAfterCollapse();',

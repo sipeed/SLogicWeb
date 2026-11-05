@@ -1158,7 +1158,6 @@ html[data-theme="light"] .grid-canvas { mix-blend-mode: darken; }
 .side-page { min-width: 0; }
 #side-panel > .side-page[hidden] { display: none; }
 .side-body { display: contents; }
-.side-placeholder { margin: 0; padding: 10px 12px; }
 
 .side-assistant {
   position: absolute;

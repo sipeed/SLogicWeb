@@ -48,10 +48,10 @@ const analyzerPanel = read('src/ui/analyzerPanel.ts');
 const app = read('src/ui/app.ts');
 const css = read('src/ui/style.css');
 
-const cursorSection = slice(panel, 'const cursorSec = section(', 'this.root.appendChild(cursorSec.el)');
+const cursorSection = slice(panel, 'const cursorSec = section(', 'cursorPage.appendChild(cursorSec.el)');
 const distanceSection = slice(panel,
   "const distanceSec = section(t('capturePanel.cursorDistance'));",
-  'this.root.appendChild(distanceSec.el)');
+  'cursorPage.appendChild(distanceSec.el)');
 const sideControlSource = slice(panel, 'function distanceSideControl(', 'function distanceAddButton(');
 const sideIdSource = slice(panel, 'export function cursorDistanceSideId(', 'function distanceSideControl(');
 const addControlSource = slice(panel, 'function distanceAddButton(', 'function distanceAddIcon(');
@@ -68,7 +68,7 @@ const distanceRowsSource = slice(app,
   'private edgeChannels(): number[] {');
 const edgeSection = slice(panel,
   "const edgeSec = section(t('capturePanel.cursorEdges'));",
-  'this.root.appendChild(edgeSec.el)');
+  'cursorPage.appendChild(edgeSec.el)');
 const edgeSideControlSource = slice(panel, 'function edgeSideControl(', 'function edgeAddButton(');
 const edgeSideIdSource = slice(panel, 'export function cursorEdgeSideId(', 'function edgeSideControl(');
 const edgeAddControlSource = slice(panel, 'function edgeAddButton(', 'function appendIconPath(');
@@ -80,28 +80,68 @@ const edgeMethodsSource = slice(app,
   'private cursorRows(): CursorRowView[] {');
 
 {
-  const triggerAppend = panel.indexOf('this.root.appendChild(triggerSec.el)');
-  const cursorAppend = panel.indexOf('this.root.appendChild(cursorSec.el)');
-  const advanced = panel.indexOf("const advanced = document.createElement('details')");
-  check('the Cursors section is appended after the software trigger and before Advanced',
-    triggerAppend >= 0 && cursorAppend > triggerAppend && advanced > cursorAppend &&
-    panel.includes("const cursorSec = section(t('capturePanel.cursors'))"),
-    `trigger=${triggerAppend}, cursors=${cursorAppend}, advanced=${advanced}`);
+  const owner = slice(panel, 'export interface CapturePanelHost {',
+    'export interface CapturePanelView {').trim();
+  check('the panel is constructed over the page-container pair and keeps no single root',
+    owner === 'export interface CapturePanelHost {\n  capture: HTMLElement;\n  cursors: HTMLElement;\n}' &&
+    panel.includes('private readonly host: CapturePanelHost,') &&
+    !panel.includes('readonly root:') && !panel.includes('this.root.'),
+    `host=${owner.length} chars, singleRoot=${panel.includes('this.root.')}`);
+
+  const walks = panel.split('for (const root of this.roots()) {').length - 1;
+  check('every in-place row updater walks both stored page containers',
+    walks === 3 && panel.split('private *roots()').length === 2 &&
+    panel.includes('yield this.host.capture;') && panel.includes('yield this.host.cursors;'),
+    `walks=${walks}`);
 }
 
 {
-  const ordered = [
-    'this.root.appendChild(chSec.el)',
-    'this.root.appendChild(modeSec.el)',
-    'this.root.appendChild(triggerSec.el)',
-    'this.root.appendChild(cursorSec.el)',
-    'this.root.appendChild(distanceSec.el)',
-    'this.root.appendChild(edgeSec.el)',
-    'this.root.appendChild(advanced)',
+  const captures = [
+    'capture.appendChild(chSec.el)',
+    'capture.appendChild(modeSec.el)',
+    'capture.appendChild(triggerSec.el)',
+    'capture.appendChild(advanced)',
   ].map((needle) => panel.indexOf(needle));
-  const ascending = ordered.every((index, i) => index >= 0 && (i === 0 || index > ordered[i - 1]!));
-  check('the device panel order is channels, capture, trigger, cursors, distance, edges, advanced',
-    ascending && ordered.length === 7, `indices=${ordered.join(',')}`);
+  const ascending = captures.every((index, i) =>
+    index >= 0 && (i === 0 || index > captures[i - 1]!));
+  check('the capture page order is channels, capture, trigger, advanced',
+    ascending && captures.length === 4 &&
+    panel.includes("const capture = this.host.capture;") &&
+    panel.includes('capture.replaceChildren();'),
+    `indices=${captures.join(',')}`);
+}
+
+{
+  const cursors = [
+    'cursorPage.appendChild(cursorSec.el)',
+    'cursorPage.appendChild(distanceSec.el)',
+    'cursorPage.appendChild(edgeSec.el)',
+  ].map((needle) => panel.indexOf(needle));
+  const ascending = cursors.every((index, i) =>
+    index >= 0 && (i === 0 || index > cursors[i - 1]!));
+  check('the cursors page order is cursors, distance, edges',
+    ascending && cursors.length === 3 &&
+    panel.includes("const cursorPage = this.host.cursors;") &&
+    panel.includes('cursorPage.replaceChildren();'),
+    `indices=${cursors.join(',')}`);
+}
+
+{
+  const count = (needle: string): number => panel.split(needle).length - 1;
+  const owner = (el: string): string => {
+    const onCapture = count(`capture.appendChild(${el})`);
+    const onCursors = count(`cursorPage.appendChild(${el})`);
+    if (onCapture === 1 && onCursors === 0) return 'capture';
+    if (onCursors === 1 && onCapture === 0) return 'cursors';
+    return 'none';
+  };
+  const owners = ['chSec.el', 'modeSec.el', 'triggerSec.el', 'advanced',
+    'cursorSec.el', 'distanceSec.el', 'edgeSec.el'].map(owner);
+  check('every section is appended to exactly one page, so neither page carries the other page\u2019s sections',
+    owners.join(',') === 'capture,capture,capture,capture,cursors,cursors,cursors' &&
+    count('capture.replaceChildren();') === 1 && count('cursorPage.replaceChildren();') === 1,
+    `owners=${owners.join(',')}, clears=${count('capture.replaceChildren();')}/` +
+    `${count('cursorPage.replaceChildren();')}`);
 }
 
 {
@@ -357,7 +397,7 @@ const edgeMethodsSource = slice(app,
 }
 
 {
-  const render = slice(app, 'this.capturePanel.render({', 'this.analyzerPanel.render({');
+  const render = slice(app, 'private capturePanelView(): CapturePanelView {', 'private primaryAction(): void {');
   check('the view hands the rows to the capture panel',
     render.includes('cursors: this.cursorRows(),') &&
     app.includes('onRemoveCursor: (id) => this.removeCursor(id),'),
@@ -409,12 +449,12 @@ const edgeMethodsSource = slice(app,
   const updateAt = consumed.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
   check('a consumed drag move refreshes the open cursor list in place, after the move',
     consumed.length > 0 && activateAt >= 0 && updateAt > activateAt &&
-    consumed.slice(0, updateAt).includes('if (this.capturePageShown())') &&
+    consumed.slice(0, updateAt).includes('if (this.cursorsPageShown())') &&
     !consumed.includes('renderPanels('),
     `consumed=${consumed.length} chars, activate=${activateAt}, update=${updateAt}`);
 
   const distanceAt = consumed.indexOf(
-    'if (this.capturePageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());');
+    'if (this.cursorsPageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());');
   check('a consumed drag move follows the same drag in the distance rows, after the cursor list',
     consumed.length > 0 && updateAt >= 0 && distanceAt > updateAt &&
     !consumed.slice(distanceAt).includes('renderPanels('),
@@ -429,6 +469,39 @@ const edgeMethodsSource = slice(app,
 }
 
 {
+  const body = slice(app, 'private renderSidebarContent(): void {',
+    'private capturePanelView(): CapturePanelView {');
+  const twoPage = "if (this.sidebar.page === 'capture' || this.sidebar.page === 'cursors') {";
+  const branchAt = body.indexOf(twoPage);
+  const panelAt = body.indexOf('this.capturePanel.render(this.capturePanelView());');
+  const analyzerAt = body.indexOf('this.analyzerPanel.render({');
+  const busAt = body.indexOf('this.busPanel.render({');
+  const returnAt = panelAt < 0 ? -1 : body.indexOf('return;', panelAt);
+  check('the sidebar content renders the capture panel for the capture page and the cursors page',
+    body.length > 0 && branchAt >= 0 && panelAt > branchAt && returnAt > panelAt &&
+    analyzerAt > returnAt && busAt > analyzerAt &&
+    !body.includes("if (this.sidebar.page === 'capture') {") &&
+    !body.includes("if (this.sidebar.page === 'cursors') {"),
+    `branch=${branchAt}, panel=${panelAt}, return=${returnAt}, analyzer=${analyzerAt}, ` +
+    `bus=${busAt}`);
+}
+
+{
+  const shown = slice(app, 'private cursorsPageShown(): boolean {',
+    'private decodersPageShown(): boolean {');
+  const captureShown = slice(app, 'private capturePageShown(): boolean {',
+    'private cursorsPageShown(): boolean {');
+  check('the cursors page predicate tests the cursors page only, so live drag refreshes keep running there',
+    shown.length > 0 &&
+    shown.includes("return s.visible && !s.assistant && s.page === 'cursors';") &&
+    !shown.includes('capture') &&
+    captureShown.includes("s.page === 'capture'") &&
+    !captureShown.includes("'cursors'"),
+    `shown=${shown.length} chars, capture=${shown.includes('capture')}, ` +
+    `predicate=${shown.includes("s.page === 'cursors'")}`);
+}
+
+{
   const update = slice(panel, 'updateCursors(rows: readonly CursorRowView[]): void {',
     "private fillProgress(progress: NonNullable<CapturePanelView['progress']>): void {");
   const writeAt = update.indexOf("const pos = item.querySelector<HTMLElement>('.cursor-pos');");
@@ -438,8 +511,8 @@ const edgeMethodsSource = slice(app,
   const structuralHits = structural.filter((needle) => update.includes(needle));
   check('the live row update walks the rendered rows and rewrites nothing but their text',
     update.length > 0 && write.includes('textContent') && structuralHits.length === 0 &&
-    update.indexOf('this.root.querySelectorAll') >= 0 &&
-    update.indexOf("this.root.querySelectorAll<HTMLElement>('.cursor-row')") >
+    update.indexOf('for (const root of this.roots()) {') >= 0 &&
+    update.indexOf("root.querySelectorAll<HTMLElement>('.cursor-row')") >
       update.indexOf('new Map<number, CursorRowView>()'),
     `update=${update.length} chars, write=${write.length} chars, hits=${JSON.stringify(structuralHits)}`);
 
@@ -463,14 +536,14 @@ const edgeMethodsSource = slice(app,
     update.length > 0 && !update.includes('cursorSec') &&
     !update.includes('replaceChildren') && update.includes("'.cursor-row'") &&
     !update.includes('this.cursorRows'),
-    `liveWalk=${update.includes("this.root.querySelectorAll<HTMLElement>('.cursor-row')")}`);
+    `liveWalk=${update.includes("root.querySelectorAll<HTMLElement>('.cursor-row')")}`);
 }
 
 {
   const retention = slice(app, 'private enforceLoopRetention(store: SampleStore): void {',
     'private async stopCapture(');
   const shiftAt = retention.indexOf('if (cursor.marker.sample !== sample) shifted = true;');
-  const branchAt = retention.indexOf('} else if (shifted && this.capturePageShown()) {');
+  const branchAt = retention.indexOf('} else if (shifted && this.cursorsPageShown()) {');
   const updateAt = retention.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
   const originAt = retention.indexOf('const next = this.triggerSampleIndex! - drop;');
   check('a retention shift with an intact cursor list refreshes the rows in place',
@@ -489,7 +562,7 @@ const edgeMethodsSource = slice(app,
     retention.indexOf('this.renderPanels();') < branchAt,
     `renders=${renders.length}, updates=${updates.length}, drop=${dropAt}, branch=${branchAt}`);
 
-  const shiftBranch = slice(retention, '} else if (shifted && this.capturePageShown()) {',
+  const shiftBranch = slice(retention, '} else if (shifted && this.cursorsPageShown()) {',
     'this.hover = null;');
   const shiftListAt = shiftBranch.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
   const shiftDistanceAt = shiftBranch.indexOf(
@@ -593,14 +666,13 @@ const edgeMethodsSource = slice(app,
 }
 
 {
-  const cursorsAppend = panel.indexOf('this.root.appendChild(cursorSec.el)');
-  const distanceAppend = panel.indexOf('this.root.appendChild(distanceSec.el)');
-  const advanced = panel.indexOf("const advanced = document.createElement('details')");
-  check('the Cursor distance section is appended after Cursors and before Advanced',
+  const cursorsAppend = panel.indexOf('cursorPage.appendChild(cursorSec.el)');
+  const distanceAppend = panel.indexOf('cursorPage.appendChild(distanceSec.el)');
+  check('the Cursor distance section follows Cursors on the cursors page and never reaches the capture page',
     distanceSection.length > 0 && cursorsAppend >= 0 && distanceAppend > cursorsAppend &&
-    advanced > distanceAppend &&
+    !panel.includes('capture.appendChild(distanceSec.el)') &&
     panel.includes("const distanceSec = section(t('capturePanel.cursorDistance'));"),
-    `cursors=${cursorsAppend}, distance=${distanceAppend}, advanced=${advanced}`);
+    `cursors=${cursorsAppend}, distance=${distanceAppend}`);
 }
 
 {
@@ -1074,7 +1146,7 @@ const edgeMethodsSource = slice(app,
     `finite=${distanceRowsSource.includes('Number.isFinite(sample)')}, ` +
     `coerced=${distanceRowsSource.includes('?? 0')}`);
 
-  const render = slice(app, 'this.capturePanel.render({', 'this.analyzerPanel.render({');
+  const render = slice(app, 'private capturePanelView(): CapturePanelView {', 'private primaryAction(): void {');
   check('the view carries the resolved distance rows to the capture panel',
     render.includes('cursorDistances: this.cursorDistanceRows(),') &&
     panel.includes('cursorDistances: readonly CursorDistanceRowView[];'),
@@ -1095,7 +1167,7 @@ const edgeMethodsSource = slice(app,
   const structuralHits = structural.filter((needle) => distanceUpdate.includes(needle));
   check('the live distance update walks the rendered rows and rebuilds nothing',
     distanceUpdate.length > 0 && structuralHits.length === 0 &&
-    distanceUpdate.includes("this.root.querySelectorAll<HTMLElement>('.cursor-dist-row')") &&
+    distanceUpdate.includes("root.querySelectorAll<HTMLElement>('.cursor-dist-row')") &&
     distanceUpdate.includes('byId.get(Number(item.dataset.distanceId))') &&
     distanceUpdate.includes('if (row === undefined) continue;') &&
     distanceUpdate.includes('if (delta === null) continue;') &&
@@ -1182,13 +1254,13 @@ const edgeMethodsSource = slice(app,
 }
 
 {
-  const cursorDistanceAppend = panel.indexOf('this.root.appendChild(distanceSec.el)');
-  const edgeAppend = panel.indexOf('this.root.appendChild(edgeSec.el)');
-  const advanced = panel.indexOf("const advanced = document.createElement('details')");
-  check('the Edges section immediately follows Cursor distance and precedes Advanced',
+  const cursorDistanceAppend = panel.indexOf('cursorPage.appendChild(distanceSec.el)');
+  const edgeAppend = panel.indexOf('cursorPage.appendChild(edgeSec.el)');
+  check('the Edges section immediately follows Cursor distance on the cursors page',
     edgeSection.length > 0 && cursorDistanceAppend >= 0 && edgeAppend > cursorDistanceAppend &&
-    advanced > edgeAppend && panel.includes("const edgeSec = section(t('capturePanel.cursorEdges'));"),
-    `distance=${cursorDistanceAppend}, edges=${edgeAppend}, advanced=${advanced}`);
+    !panel.includes('capture.appendChild(edgeSec.el)') &&
+    panel.includes("const edgeSec = section(t('capturePanel.cursorEdges'));"),
+    `distance=${cursorDistanceAppend}, edges=${edgeAppend}`);
 
   const headAppends = edgeSection.match(/edgeSec\.header\.appendChild\(/g) ?? [];
   check('the Edges head carries only its translated rising/falling/total legend',
@@ -1428,8 +1500,8 @@ const edgeMethodsSource = slice(app,
     CURSOR_EDGE_EMPTY_RESULT === '-/-/-',
     `empty=${CURSOR_EDGE_EMPTY_RESULT}, source=${edgeRowsSource.length} chars`);
 
-  const render = slice(app, 'this.capturePanel.render({', 'this.analyzerPanel.render({');
-  const edgeChannelView = slice(panel, 'export interface CursorEdgeChannelView {', 'export interface CapturePanelView {').trim();
+  const render = slice(app, 'private capturePanelView(): CapturePanelView {', 'private primaryAction(): void {');
+  const edgeChannelView = slice(panel, 'export interface CursorEdgeChannelView {', 'export interface CapturePanelHost {').trim();
   check('the capture view carries resolved edge rows and the named enabled available channels',
     render.includes('cursorEdges: this.cursorEdgeRows(),') &&
     render.includes('cursorEdgeChannels: this.edgeChannelOptions(),') &&
@@ -1495,7 +1567,7 @@ const edgeMethodsSource = slice(app,
     retention.slice(prune, render).includes('new Set(this.cursors.map((cursor) => cursor.id)),'),
     `drop=${drop}, prune=${prune}, render=${render}`);
 
-  const shift = slice(retention, '} else if (shifted && this.capturePageShown()) {', 'this.hover = null;');
+  const shift = slice(retention, '} else if (shifted && this.cursorsPageShown()) {', 'this.hover = null;');
   const cursorAt = shift.indexOf('this.capturePanel.updateCursors(this.cursorRows());');
   const distanceAt = shift.indexOf('this.capturePanel.updateCursorDistances(this.cursorDistanceRows());');
   const edgeAt = shift.indexOf('this.capturePanel.updateCursorEdges(this.cursorEdgeRows());');
@@ -1506,7 +1578,7 @@ const edgeMethodsSource = slice(app,
   const structural = ['replaceChildren', 'appendChild', 'insertBefore', 'remove(', 'innerHTML',
     'createElement'].filter((needle) => edgeUpdate.includes(needle));
   check('the retention edge updater resolves stable row ids and rewrites only result text',
-    edgeUpdate.includes("this.root.querySelectorAll<HTMLElement>('.cursor-edge-row')") &&
+    edgeUpdate.includes("root.querySelectorAll<HTMLElement>('.cursor-edge-row')") &&
     edgeUpdate.includes('byId.get(Number(item.dataset.edgeId))') &&
     edgeUpdate.includes("item.querySelector<HTMLElement>('.cursor-edge-result')") &&
     edgeUpdate.includes('result.textContent = row.result;') && structural.length === 0,

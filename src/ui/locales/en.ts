@@ -71,7 +71,6 @@ export const en = {
   'sidebar.pagesLabel': 'Sidebar pages',
   'sidebar.collapse': 'Collapse sidebar',
   'sidebar.expand': 'Expand sidebar',
-  'sidebar.cursorsPlaceholder': 'Cursor measurements move to this page next.',
   'panel.resizeLabel': 'Resize sidebar',
   'panel.resizeTitle': 'Drag to resize the sidebar',
 

@@ -478,6 +478,7 @@ export class App {
       collapse: () => this.handleCollapse(),
       expand: () => this.handleExpand(),
     });
+    this.sidebarHost.containerFor('cursors');
     this.sidebarHost.containerFor('capture');
     this.sidebarHost.containerFor('decoders');
 
@@ -2100,8 +2101,8 @@ export class App {
         });
         if (consumed) {
           if (cursor.marker.started) this.activeCursorId = cursor.id;
-          if (this.capturePageShown()) this.capturePanel.updateCursors(this.cursorRows());
-          if (this.capturePageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
+          if (this.cursorsPageShown()) this.capturePanel.updateCursors(this.cursorRows());
+          if (this.cursorsPageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
           this.dirty = true; return;
         }
       }
@@ -3338,6 +3339,11 @@ export class App {
     return s.visible && !s.assistant && s.page === 'capture';
   }
 
+  private cursorsPageShown(): boolean {
+    const s = this.sidebar;
+    return s.visible && !s.assistant && s.page === 'cursors';
+  }
+
   private decodersPageShown(): boolean {
     const s = this.sidebar;
     return s.visible && !s.assistant && s.page === 'decoders';
@@ -3387,7 +3393,10 @@ export class App {
 
   private mountSidebarPage(page: SidebarPage, container: HTMLElement): void {
     if (page === 'capture') {
-      this.capturePanel = new CapturePanel(container, {
+      this.capturePanel = new CapturePanel({
+        capture: container,
+        cursors: this.sidebarHost.containerFor('cursors'),
+      }, {
         onSettings: (s) => this.applySettings(s),
         onToggleChannel: (i, on) => this.setChannelEnabled(i, on),
         onToggleAnalog: (start) => this.toggleAnalog(start),
@@ -3424,16 +3433,7 @@ export class App {
         onUpdate: (id, cfg) => this.updateBus(id, cfg),
         onRemove: (id) => this.removeBus(id),
       });
-      return;
     }
-    this.renderCursorsPlaceholder(container);
-  }
-
-  private renderCursorsPlaceholder(container: HTMLElement): void {
-    const note = document.createElement('p');
-    note.className = 'panel-note side-placeholder';
-    note.textContent = t('sidebar.cursorsPlaceholder');
-    container.replaceChildren(note);
   }
 
   /** Re-render every string in the shell after a locale change. */
@@ -3578,48 +3578,8 @@ export class App {
       return;
     }
 
-    if (this.sidebar.page === 'cursors') {
-      this.renderCursorsPlaceholder(this.sidebarHost.containerFor('cursors'));
-      return;
-    }
-    if (this.sidebar.page === 'capture') {
-      this.capturePanel.render({
-        settings: this.settings,
-        channels: this.channels.slice(0, this.displayChannelCount()),
-        widthOptions: this.widthTiers(),
-        buses: this.busViews,
-        analogGroups: this.analogGroups(),
-        deviceName: this.device?.name ?? null,
-        running: this.running,
-        stopping: this.stopping,
-        repeatPending: this.repeatTimer.pending,
-        captureState: this.capturePanelState(),
-        result: this.captureStore.length > 0
-          ? {
-            samples: this.captureStore.length,
-            seconds: this.captureStore.length / this.captureStore.samplerate,
-          }
-          : null,
-        progress: this.running ? this.progressView() : null,
-        maxSamplerateHz: this.rateCeilings,
-        triggerState: this.triggerState,
-        cursors: this.cursorRows(),
-        cursorDistances: this.cursorDistanceRows(),
-        cursorEdges: this.cursorEdgeRows(),
-        cursorEdgeChannels: this.edgeChannelOptions(),
-        triggerViewLost: this.triggerViewLost,
-        triggerViewPending: this.triggerViewPending,
-        triggerLocked: this.triggerViewLock !== null,
-        triggerRetuneRejected: this.triggerRetuneRejected,
-        triggerAnalogRolling: this.analogScanner !== null,
-        triggerArmed: this.captureUsesSoftwareTrigger && this.running && !this.stopping,
-        triggerAutoDisarmed: this.triggerAutoDisarmed,
-        settingsArmed: this.triggerSettingsArmed(),
-        activeTriggerPreSamples: this.running && this.captureTriggerBase
-          ? this.captureTriggerBase.preTriggerSamples : undefined,
-        loopMetrics: this.running && this.captureIsLoop ? this.computeLoopMetrics() : null,
-        repeatMissed: this.repeatMissed,
-      });
+    if (this.sidebar.page === 'capture' || this.sidebar.page === 'cursors') {
+      this.capturePanel.render(this.capturePanelView());
       return;
     }
     this.analyzerPanel.render({
@@ -3636,6 +3596,47 @@ export class App {
       captureLocked: this.stopping,
     });
   }
+
+  private capturePanelView(): CapturePanelView {
+    return {
+      settings: this.settings,
+      channels: this.channels.slice(0, this.displayChannelCount()),
+      widthOptions: this.widthTiers(),
+      buses: this.busViews,
+      analogGroups: this.analogGroups(),
+      deviceName: this.device?.name ?? null,
+      running: this.running,
+      stopping: this.stopping,
+      repeatPending: this.repeatTimer.pending,
+      captureState: this.capturePanelState(),
+      result: this.captureStore.length > 0
+        ? {
+          samples: this.captureStore.length,
+          seconds: this.captureStore.length / this.captureStore.samplerate,
+        }
+        : null,
+      progress: this.running ? this.progressView() : null,
+      maxSamplerateHz: this.rateCeilings,
+      triggerState: this.triggerState,
+      cursors: this.cursorRows(),
+      cursorDistances: this.cursorDistanceRows(),
+      cursorEdges: this.cursorEdgeRows(),
+      cursorEdgeChannels: this.edgeChannelOptions(),
+      triggerViewLost: this.triggerViewLost,
+      triggerViewPending: this.triggerViewPending,
+      triggerLocked: this.triggerViewLock !== null,
+      triggerRetuneRejected: this.triggerRetuneRejected,
+      triggerAnalogRolling: this.analogScanner !== null,
+      triggerArmed: this.captureUsesSoftwareTrigger && this.running && !this.stopping,
+      triggerAutoDisarmed: this.triggerAutoDisarmed,
+      settingsArmed: this.triggerSettingsArmed(),
+      activeTriggerPreSamples: this.running && this.captureTriggerBase
+        ? this.captureTriggerBase.preTriggerSamples : undefined,
+      loopMetrics: this.running && this.captureIsLoop ? this.computeLoopMetrics() : null,
+      repeatMissed: this.repeatMissed,
+    };
+  }
+
 
   private primaryAction(): void {
     if (this.stopping) {
@@ -4804,7 +4805,7 @@ export class App {
         this.edgeRows, new Set(this.cursors.map((cursor) => cursor.id)),
       );
       this.renderPanels();
-    } else if (shifted && this.capturePageShown()) {
+    } else if (shifted && this.cursorsPageShown()) {
       this.capturePanel.updateCursors(this.cursorRows());
       this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
       this.capturePanel.updateCursorEdges(this.cursorEdgeRows());

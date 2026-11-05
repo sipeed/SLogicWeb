@@ -67,7 +67,6 @@ export const fr: Messages = {
   'sidebar.pagesLabel': 'Pages latérales',
   'sidebar.collapse': 'Réduire la barre latérale',
   'sidebar.expand': 'Déployer la barre latérale',
-  'sidebar.cursorsPlaceholder': 'Les mesures de curseurs arrivent sur cette page à l’étape suivante.',
   'panel.resizeLabel': 'Redimensionner la barre latérale',
   'panel.resizeTitle': 'Glisser pour redimensionner la barre latérale',
 

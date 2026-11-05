@@ -151,7 +151,7 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
 {
   const progress = app.split('private progressView()')[1]?.split('private capturePanelState()')[0] ?? '';
   const state = app.split('private capturePanelState()')[1]?.split('private renderPanels()')[0] ?? '';
-  const view = app.split('this.capturePanel.render({')[1]?.split('});')[0] ?? '';
+  const view = app.split('private capturePanelView(): CapturePanelView {')[1]?.split('};')[0] ?? '';
   const fill = panel.split('private fillProgress(')[1]?.split('private setStatusProgress(')[0] ?? '';
   const setter = panel.split('private setStatusProgress(')[1]?.split('render(v: CapturePanelView)')[0] ?? '';
   const status = panel.split('const badgeKeys =')[1]?.split('const maxSeconds =')[0] ?? '';

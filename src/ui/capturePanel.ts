@@ -100,6 +100,11 @@ export interface CursorEdgeChannelView {
   name: string;
 }
 
+export interface CapturePanelHost {
+  capture: HTMLElement;
+  cursors: HTMLElement;
+}
+
 export interface CapturePanelView {
   settings: CaptureSettings;
   channels: readonly ChannelState[];
@@ -193,9 +198,14 @@ export class CapturePanel {
   private loopSwapEl: HTMLElement | null = null;
 
   constructor(
-    private readonly root: HTMLElement,
+    private readonly host: CapturePanelHost,
     private readonly cb: CapturePanelCallbacks,
   ) {}
+
+  private *roots(): Generator<HTMLElement, void, undefined> {
+    yield this.host.capture;
+    yield this.host.cursors;
+  }
 
   updateProgress(progress: NonNullable<CapturePanelView['progress']>): void {
     if (!this.liveNote) return;
@@ -205,36 +215,42 @@ export class CapturePanel {
   updateCursorDistances(rows: readonly CursorDistanceRowView[]): void {
     const byId = new Map<number, CursorDistanceRowView>();
     for (const row of rows) byId.set(row.id, row);
-    for (const item of this.root.querySelectorAll<HTMLElement>('.cursor-dist-row')) {
-      const row = byId.get(Number(item.dataset.distanceId));
-      if (row === undefined) continue;
-      const delta = item.querySelector<HTMLElement>('.cursor-dist-delta');
-      if (delta === null) continue;
-      delta.textContent = row.delta;
+    for (const root of this.roots()) {
+      for (const item of root.querySelectorAll<HTMLElement>('.cursor-dist-row')) {
+        const row = byId.get(Number(item.dataset.distanceId));
+        if (row === undefined) continue;
+        const delta = item.querySelector<HTMLElement>('.cursor-dist-delta');
+        if (delta === null) continue;
+        delta.textContent = row.delta;
+      }
     }
   }
 
   updateCursorEdges(rows: readonly CursorEdgeRowView[]): void {
     const byId = new Map<number, CursorEdgeRowView>();
     for (const row of rows) byId.set(row.id, row);
-    for (const item of this.root.querySelectorAll<HTMLElement>('.cursor-edge-row')) {
-      const row = byId.get(Number(item.dataset.edgeId));
-      if (row === undefined) continue;
-      const result = item.querySelector<HTMLElement>('.cursor-edge-result');
-      if (result === null) continue;
-      result.textContent = row.result;
+    for (const root of this.roots()) {
+      for (const item of root.querySelectorAll<HTMLElement>('.cursor-edge-row')) {
+        const row = byId.get(Number(item.dataset.edgeId));
+        if (row === undefined) continue;
+        const result = item.querySelector<HTMLElement>('.cursor-edge-result');
+        if (result === null) continue;
+        result.textContent = row.result;
+      }
     }
   }
 
   updateCursors(rows: readonly CursorRowView[]): void {
     const byId = new Map<number, CursorRowView>();
     for (const row of rows) byId.set(row.id, row);
-    for (const item of this.root.querySelectorAll<HTMLElement>('.cursor-row')) {
-      const row = byId.get(Number(item.dataset.cursorId));
-      if (row === undefined) continue;
-      const pos = item.querySelector<HTMLElement>('.cursor-pos');
-      if (pos === null) continue;
-      pos.textContent = cursorCellText(row);
+    for (const root of this.roots()) {
+      for (const item of root.querySelectorAll<HTMLElement>('.cursor-row')) {
+        const row = byId.get(Number(item.dataset.cursorId));
+        if (row === undefined) continue;
+        const pos = item.querySelector<HTMLElement>('.cursor-pos');
+        if (pos === null) continue;
+        pos.textContent = cursorCellText(row);
+      }
     }
   }
 
@@ -432,7 +448,10 @@ export class CapturePanel {
 
   render(v: CapturePanelView): void {
     const s = v.settings;
-    this.root.replaceChildren();
+    const capture = this.host.capture;
+    const cursorPage = this.host.cursors;
+    capture.replaceChildren();
+    cursorPage.replaceChildren();
     this.statusDetail = null;
     this.progressEl = null;
     this.progressBar = null;
@@ -575,7 +594,7 @@ export class CapturePanel {
       rate: formatRate(ceiling),
     });
     chSec.body.appendChild(note);
-    this.root.appendChild(chSec.el);
+    capture.appendChild(chSec.el);
 
     // ---- mode
     const modeSec = section(t('capturePanel.capture'));
@@ -1046,8 +1065,8 @@ export class CapturePanel {
       this.lostNote = null;
       this.droppedNote = null;
     }
-    this.root.appendChild(modeSec.el);
-    this.root.appendChild(triggerSec.el);
+    capture.appendChild(modeSec.el);
+    capture.appendChild(triggerSec.el);
 
     const cursorSec = section(t('capturePanel.cursors'));
     if (v.cursors.length === 0) {
@@ -1086,7 +1105,7 @@ export class CapturePanel {
       }
       cursorSec.body.appendChild(list);
     }
-    this.root.appendChild(cursorSec.el);
+    cursorPage.appendChild(cursorSec.el);
 
     const distanceSec = section(t('capturePanel.cursorDistance'));
     distanceSec.header.classList.add('cursor-dist-head');
@@ -1133,7 +1152,7 @@ export class CapturePanel {
       () => this.cb.onAddCursorDistance(),
     ));
     distanceSec.body.appendChild(addRow);
-    this.root.appendChild(distanceSec.el);
+    cursorPage.appendChild(distanceSec.el);
 
     const edgeSec = section(t('capturePanel.cursorEdges'));
     edgeSec.header.classList.add('cursor-edge-head');
@@ -1198,7 +1217,7 @@ export class CapturePanel {
       () => this.cb.onAddCursorEdge(),
     ));
     edgeSec.body.appendChild(edgeAddRow);
-    this.root.appendChild(edgeSec.el);
+    cursorPage.appendChild(edgeSec.el);
 
     // ---- advanced test mode + raw USB console
     const advanced = document.createElement('details');
@@ -1284,7 +1303,7 @@ export class CapturePanel {
     help.textContent = t('capturePanel.usbHelp');
     body.appendChild(help);
     advanced.appendChild(body);
-    this.root.appendChild(advanced);
+    capture.appendChild(advanced);
   }
 }
 

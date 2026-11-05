@@ -67,7 +67,6 @@ export const ru: Messages = {
   'sidebar.pagesLabel': 'Страницы панели',
   'sidebar.collapse': 'Свернуть боковую панель',
   'sidebar.expand': 'Развернуть боковую панель',
-  'sidebar.cursorsPlaceholder': 'Измерения курсорами переедут на эту страницу на следующем шаге.',
   'panel.resizeLabel': 'Изменить ширину боковой панели',
   'panel.resizeTitle': 'Перетащите, чтобы изменить ширину боковой панели',
 

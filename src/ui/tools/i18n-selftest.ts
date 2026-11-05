@@ -910,7 +910,7 @@ const baseSettings: CaptureSettings = {
     'toolbar.sidebarTitle', 'toolbar.sidebarDevice', 'toolbar.sidebarAnalyzers', 'toolbar.sidebarNone',
     'sidebar.pageCapture', 'sidebar.pageCursors', 'sidebar.pageDecoders',
     'sidebar.pagesLabel',
-    'sidebar.collapse', 'sidebar.expand', 'sidebar.cursorsPlaceholder',
+    'sidebar.collapse', 'sidebar.expand',
     'analyzerPanel.decoderSearchLabel',
     'bus.defaultName',
     'capturePanel.channelWidth', 'capturePanel.analog', 'capturePanel.analogCell',
