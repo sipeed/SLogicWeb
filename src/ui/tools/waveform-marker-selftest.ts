@@ -1151,6 +1151,15 @@ function between(source: string, start: string, end: string): string {
     appSource.includes('cursorChips: (): Array<PlacedCursorChip & { width: number }> => {'),
     `len=${placementSite.length}, calls=${placementCalls}, ` +
     `layout=${(appSource.match(/layoutCursorChips\(/g) ?? []).length}`);
+  const debugChipsSite = between(
+    appSource, 'cursorChips: (): Array<PlacedCursorChip & { width: number }> => {', 'edges: (channel');
+  const debugMeasure = debugChipsSite.indexOf('ctx.font = AXIS.markerChip.font;');
+  const debugPad = debugChipsSite.indexOf('2 * AXIS.markerChip.padX');
+  check('the debug cursor-chip surface measures from the axis ctx with the chip font and padding',
+    debugChipsSite.length > 0 && debugMeasure >= 0 && debugPad > debugMeasure &&
+    debugChipsSite.includes('cursorChipPlacements(measure, this.el.plot.clientWidth)') &&
+    debugChipsSite.includes('width: measure(chip.label)'),
+    `len=${debugChipsSite.length}, font=${debugMeasure}, pad=${debugPad}`);
 
   const dblSource = between(
     appSource, "plot.addEventListener('dblclick'", '// Dragging the axis');
