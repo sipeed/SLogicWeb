@@ -3,6 +3,9 @@ import { MEASURE_COLORS } from './metrics.js';
 
 const CHIP_GAP = 1;
 
+export const CURSOR_CHIP_ROWS = 2;
+export const CURSOR_CHIP_EDGE = 2;
+
 export function cursorColor(index: number): string {
   const slot = Number.isFinite(index) && index >= 0 ? Math.floor(index) % 4 : 0;
   return MEASURE_COLORS[slot];
@@ -45,6 +48,14 @@ export interface CursorChip {
   cssX: number;
 }
 
+export interface PlacedCursorChip {
+  id: number;
+  label: string;
+  anchorX: number;
+  boxX: number;
+  row: 0 | 1;
+}
+
 interface PlacedChip {
   chip: CursorChip;
   left: number;
@@ -53,19 +64,26 @@ interface PlacedChip {
 }
 
 export function layoutCursorChips(
-  chips: readonly CursorChip[], chipWidth: (label: string) => number,
-): CursorChip[] {
+  chips: readonly CursorChip[], chipWidth: (label: string) => number, width: number,
+): PlacedCursorChip[] {
+  if (!Number.isFinite(width) || width <= 0) return [];
   const placed: PlacedChip[] = [];
   for (let order = chips.length - 1; order >= 0; order--) {
     const chip = chips[order];
     if (!Number.isFinite(chip.cssX)) continue;
-    const width = chipWidth(chip.label);
-    if (!Number.isFinite(width) || width <= 0) continue;
-    const left = chip.cssX - width / 2 - CHIP_GAP;
-    const right = chip.cssX + width / 2 + CHIP_GAP;
+    const boxWidth = chipWidth(chip.label);
+    if (!Number.isFinite(boxWidth) || boxWidth <= 0) continue;
+    const left = chip.cssX - boxWidth / 2 - CHIP_GAP;
+    const right = chip.cssX + boxWidth / 2 + CHIP_GAP;
     if (placed.some((box) => left < box.right && box.left < right)) continue;
     placed.push({ chip, left, right, order });
   }
   placed.sort((a, b) => a.chip.cssX - b.chip.cssX || a.order - b.order);
-  return placed.map((box) => box.chip);
+  return placed.map((box) => ({
+    id: box.chip.id,
+    label: box.chip.label,
+    anchorX: box.chip.cssX,
+    boxX: box.chip.cssX,
+    row: 0,
+  }));
 }

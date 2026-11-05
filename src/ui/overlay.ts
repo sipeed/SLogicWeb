@@ -821,28 +821,46 @@ function triangle(c: CanvasRenderingContext2D, x: number, y: number, dx: number,
   c.fill();
 }
 
+export interface MarkerChipPaint {
+  anchorX: number;
+  boxX: number;
+  row: 0 | 1;
+  label: string;
+  color: string;
+}
+
 export function paintMarkerChip(
-  ctx: CanvasRenderingContext2D, x: number, wCss: number, heightCss: number,
-  color: string, label: string, palette: CanvasPalette,
+  ctx: CanvasRenderingContext2D, chip: MarkerChipPaint,
+  widthCss: number, heightCss: number, palette: CanvasPalette,
 ): void {
-  if (heightCss <= 0 || x < -20 || x > wCss + 20) return;
+  if (heightCss <= 0 || chip.anchorX < -20 || chip.anchorX > widthCss + 20) return;
   const c = ctx;
-  const { top, height, radius, padX, font } = AXIS.markerChip;
+  const { top: rowTop, height, rowGap, radius, padX, font } = AXIS.markerChip;
+  const top = rowTop + chip.row * (height + rowGap);
+  const anchor = Math.round(chip.anchorX) + 0.5;
   c.save();
   c.font = font;
   c.textBaseline = 'top';
-  const w = c.measureText(label).width + 2 * padX;
-  c.strokeStyle = color;
+  const w = c.measureText(chip.label).width + 2 * padX;
+  c.strokeStyle = chip.color;
   c.lineWidth = 1;
-  c.beginPath();
-  c.moveTo(Math.round(x) + 0.5, top + height);
-  c.lineTo(Math.round(x) + 0.5, heightCss);
-  c.stroke();
-  c.fillStyle = color;
-  roundRect(c, x - w / 2, top, w, height, radius);
+  if (chip.row === 0) {
+    c.beginPath();
+    c.moveTo(anchor, top + height);
+    c.lineTo(anchor, heightCss);
+    c.stroke();
+  }
+  if (Math.abs(chip.boxX - chip.anchorX) > 0.5) {
+    c.beginPath();
+    c.moveTo(Math.round(chip.boxX) + 0.5, top + height);
+    c.lineTo(anchor, top + height);
+    c.stroke();
+  }
+  c.fillStyle = chip.color;
+  roundRect(c, chip.boxX - w / 2, top, w, height, radius);
   c.fill();
   c.fillStyle = palette.bg;
-  c.fillText(label, x - w / 2 + padX, top + 2);
+  c.fillText(chip.label, chip.boxX - w / 2 + padX, top + 2);
   c.restore();
 }
 

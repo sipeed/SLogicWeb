@@ -1093,7 +1093,7 @@ function between(source: string, start: string, end: string): string {
     overlaySource, 'drawCursor(x: number, color: string): void {', 'drawTrigger(');
   const chipPainter = overlaySource.includes(
     'export function paintMarkerChip(') &&
-    overlaySource.includes('roundRect(c, x - w / 2, top, w, height, radius);');
+    overlaySource.includes('roundRect(c, chip.boxX - w / 2, top, w, height, radius);');
   check('the overlay cursor paints its line only and the axis chip painter owns the box',
     sharedCursor && chipPainter && drawCursorSource.length > 0 &&
     !drawCursorSource.includes('roundRect(') &&
@@ -1103,9 +1103,12 @@ function between(source: string, start: string, end: string): string {
     `measure=${drawCursorSource.includes('measureText(label)')}`);
   const chipSource = between(
     overlaySource, 'export function paintMarkerChip(', '\nfunction roundRect(');
-  const connectorStroke = /strokeStyle\s*=\s*color/.test(chipSource) &&
-    /moveTo\(Math\.round\(x\) \+ 0\.5,\s*top \+ height\)/.test(chipSource) &&
-    /lineTo\(Math\.round\(x\) \+ 0\.5,\s*heightCss\)/.test(chipSource) &&
+  const connectorStroke = /strokeStyle\s*=\s*chip\.color/.test(chipSource) &&
+    chipSource.includes('if (chip.row === 0) {') &&
+    /moveTo\(anchor,\s*top \+ height\)/.test(chipSource) &&
+    /lineTo\(anchor,\s*heightCss\)/.test(chipSource) &&
+    chipSource.includes('Math.abs(chip.boxX - chip.anchorX) > 0.5') &&
+    chipSource.includes('const top = rowTop + chip.row * (height + rowGap);') &&
     !chipSource.includes('setLineDash');
   const connectorAt = chipSource.search(/\.stroke\(\)/);
   const chipFillAt = chipSource.indexOf('roundRect(');
@@ -1124,16 +1127,30 @@ function between(source: string, start: string, end: string): string {
     appSource, 'private drawAxisCanvas(', 'private drawLaneSurfaces(');
   const axisPaint = axisCanvasSource.indexOf(
     'drawAxis(ctx, ticks, wCss, hCss, this.palette);');
-  const layoutAt = axisCanvasSource.indexOf('layoutCursorChips(');
+  const fontAt = axisCanvasSource.indexOf('ctx.font = AXIS.markerChip.font;');
+  const layoutAt = axisCanvasSource.indexOf('const placed = this.cursorChipPlacements(');
   const chipPaint = axisCanvasSource.indexOf(
-    'paintMarkerChip(ctx, chip.cssX, wCss, hCss, cursor.marker.color, chip.label, this.palette);');
+    'ctx, { ...chip, color: cursor.marker.color }, wCss, hCss, this.palette,');
   check('the axis canvas lays out cursor chips after the axis background fill',
-    axisCanvasSource.length > 0 && axisPaint >= 0 && layoutAt > axisPaint && chipPaint > layoutAt &&
-    axisCanvasSource.includes('chips.push({ id: cursor.id, label: cursor.marker.label, cssX: this.toPx(sample) });') &&
-    axisCanvasSource.includes('(label) => ctx.measureText(label).width + 2 * AXIS.markerChip.padX') &&
+    axisCanvasSource.length > 0 && axisPaint >= 0 && fontAt > axisPaint &&
+    layoutAt > fontAt && chipPaint > layoutAt &&
+    axisCanvasSource.includes(
+      '(label) => ctx.measureText(label).width + 2 * AXIS.markerChip.padX, wCss,') &&
     axisCanvasSource.includes("if (cursor === null) continue;") &&
     !axisCanvasSource.includes('markerA'),
-    `len=${axisCanvasSource.length}, axis=${axisPaint}, layout=${layoutAt}, chip=${chipPaint}`);
+    `len=${axisCanvasSource.length}, axis=${axisPaint}, font=${fontAt}, ` +
+    `layout=${layoutAt}, chip=${chipPaint}`);
+  const placementSite = between(
+    appSource, 'private cursorChipPlacements(', 'private drawLaneSurfaces(');
+  const placementCalls = (appSource.match(/this\.cursorChipPlacements\(/g) ?? []).length;
+  check('one placement site feeds the axis painter and the debug cursor-chip surface',
+    placementSite.includes('layoutCursorChips(chips, measure, width)') &&
+    placementSite.includes('chips.push({ id: cursor.id, label: cursor.marker.label, cssX: this.toPx(sample) });') &&
+    (appSource.match(/layoutCursorChips\(/g) ?? []).length === 1 &&
+    placementCalls === 2 &&
+    appSource.includes('cursorChips: (): Array<PlacedCursorChip & { width: number }> => {'),
+    `len=${placementSite.length}, calls=${placementCalls}, ` +
+    `layout=${(appSource.match(/layoutCursorChips\(/g) ?? []).length}`);
 
   const dblSource = between(
     appSource, "plot.addEventListener('dblclick'", '// Dragging the axis');

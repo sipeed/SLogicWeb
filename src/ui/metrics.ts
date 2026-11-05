@@ -206,9 +206,11 @@ export const AXIS = {
   majorTickFraction: 0.5,
   /** [SOURCE] a 4x6 px left-pointing arrow marks a major tick pinned to x=0. */
   pinnedArrow: { w: 4, h: 6 },
+  /** [CHOSEN] row top = top + row * (height + rowGap): row 0 y 1..14, row 1 y 15..28 in the 29 px axis. */
   markerChip: {
     top: 1,
-    height: 14,
+    height: 13,
+    rowGap: 1,
     radius: 2,
     padX: 4,
     font: '10px -apple-system, BlinkMacSystemFont, sans-serif',

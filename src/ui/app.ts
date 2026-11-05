@@ -113,7 +113,7 @@ import {
 } from './markerGeometry.js';
 import {
   cursorColor, cursorLabels, layoutCursorChips, nearestCursorGrab,
-  type CursorChip, type CursorGrabCandidate,
+  type CursorChip, type CursorGrabCandidate, type PlacedCursorChip,
 } from './cursorSet.js';
 import {
   addDistanceRow as appendDistanceRow, assignDistanceCursor, clearDistancePairs, distanceCell,
@@ -1919,22 +1919,30 @@ export class App {
     if (!ctx) throw new DiagnosticError('ui.axisContext');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawAxis(ctx, ticks, wCss, hCss, this.palette);
+    ctx.font = AXIS.markerChip.font;
+    const placed = this.cursorChipPlacements(
+      (label) => ctx.measureText(label).width + 2 * AXIS.markerChip.padX, wCss,
+    );
+    for (const chip of placed) {
+      const cursor = this.cursorById(chip.id);
+      if (cursor === null) continue;
+      paintMarkerChip(
+        ctx, { ...chip, color: cursor.marker.color }, wCss, hCss, this.palette,
+      );
+    }
+  }
+
+  private cursorChipPlacements(
+    measure: (label: string) => number, width: number,
+  ): PlacedCursorChip[] {
     const chips: CursorChip[] = [];
     for (const cursor of this.cursors) {
       const sample = cursor.marker.sample;
       if (sample === null) continue;
       chips.push({ id: cursor.id, label: cursor.marker.label, cssX: this.toPx(sample) });
     }
-    if (chips.length === 0) return;
-    ctx.font = AXIS.markerChip.font;
-    const placed = layoutCursorChips(
-      chips, (label) => ctx.measureText(label).width + 2 * AXIS.markerChip.padX,
-    );
-    for (const chip of placed) {
-      const cursor = this.cursorById(chip.id);
-      if (cursor === null) continue;
-      paintMarkerChip(ctx, chip.cssX, wCss, hCss, cursor.marker.color, chip.label, this.palette);
-    }
+    if (chips.length === 0) return [];
+    return layoutCursorChips(chips, measure, width);
   }
 
   private drawLaneSurfaces(
@@ -5277,6 +5285,15 @@ export class App {
     })),
     addCursor: (sample: number) => this.addCursor(sample),
     removeCursor: (id: number) => this.removeCursor(id),
+    cursorChips: (): Array<PlacedCursorChip & { width: number }> => {
+      const ctx = this.el.axis.getContext('2d');
+      if (!ctx) return [];
+      ctx.font = AXIS.markerChip.font;
+      const measure = (label: string): number =>
+        ctx.measureText(label).width + 2 * AXIS.markerChip.padX;
+      return this.cursorChipPlacements(measure, this.el.plot.clientWidth)
+        .map((chip) => ({ ...chip, width: measure(chip.label) }));
+    },
     edges: (channel: number, lo: number, hi: number) => {
       const store = this.store;
       if (!Number.isInteger(channel) || channel < 0 || channel >= store.channelCount) return [];

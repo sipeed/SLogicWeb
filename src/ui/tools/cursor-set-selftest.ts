@@ -1,6 +1,6 @@
 import {
-  cursorColor, cursorLabels, layoutCursorChips, nearestCursorGrab,
-  type CursorChip,
+  CURSOR_CHIP_EDGE, CURSOR_CHIP_ROWS, cursorColor, cursorLabels, layoutCursorChips, nearestCursorGrab,
+  type CursorChip, type PlacedCursorChip,
 } from '../cursorSet.js';
 
 interface FsLike {
@@ -32,7 +32,8 @@ function check(name: string, pass: boolean, detail: string): void {
 
 const chip = (id: number, cssX: number, label = String(id)): CursorChip => ({ id, label, cssX });
 const width20 = (): number => 20;
-const ids = (chips: readonly CursorChip[]): string => chips.map((c) => String(c.id)).join(',');
+const PLOT_WIDTH = 400;
+const ids = (chips: readonly PlacedCursorChip[]): string => chips.map((c) => String(c.id)).join(',');
 
 {
   const slots = [0, 1, 2, 3].map((index) => cursorColor(index));
@@ -148,51 +149,71 @@ const ids = (chips: readonly CursorChip[]): string => chips.map((c) => String(c.
 }
 
 {
-  const empty = layoutCursorChips([], width20);
+  const empty = layoutCursorChips([], width20, PLOT_WIDTH);
   const single = chip(1, 50);
-  const singleLayout = layoutCursorChips([single], width20);
-  check('an empty input places nothing and a single chip is placed as-is',
+  const singleLayout = layoutCursorChips([single], width20, PLOT_WIDTH);
+  check('an empty input places nothing and a single chip keeps its id and label at its anchor',
     empty.length === 0 && singleLayout.length === 1 &&
-    singleLayout[0] === single && singleLayout[0].cssX === 50,
-    `empty=${empty.length}, single=${ids(singleLayout)}`);
+    singleLayout[0].id === 1 && singleLayout[0].label === '1' &&
+    singleLayout[0].anchorX === 50 && singleLayout[0].boxX === 50 && singleLayout[0].row === 0,
+    `empty=${empty.length}, single=${ids(singleLayout)}, ` +
+    `anchor=${singleLayout[0]?.anchorX}, box=${singleLayout[0]?.boxX}, row=${singleLayout[0]?.row}`);
 }
 
 {
-  const sameX = layoutCursorChips([chip(1, 50), chip(2, 50)], width20);
+  const mixed = layoutCursorChips(
+    [chip(2, 200), chip(1, 0), chip(3, 300)], width20, PLOT_WIDTH);
+  check('every placement carries its own anchor and box, and the untouched layout is row 0',
+    mixed.length === 3 && mixed.every((c) => c.boxX === c.anchorX && c.row === 0) &&
+    mixed.map((c) => c.anchorX).join(',') === '0,200,300' &&
+    mixed.map((c) => c.label).join(',') === '1,2,3' &&
+    CURSOR_CHIP_ROWS === 2 && CURSOR_CHIP_EDGE === 2,
+    `placed=${mixed.map((c) => `${c.id}:${c.anchorX}/${c.boxX}/${c.row}`).join(',')}, ` +
+    `rows=${CURSOR_CHIP_ROWS}, edge=${CURSOR_CHIP_EDGE}`);
+
+  const noPlot = layoutCursorChips([chip(1, 50)], width20, 0);
+  const badPlot = layoutCursorChips([chip(1, 50)], width20, Number.NaN);
+  check('a plot with no usable width places nothing',
+    noPlot.length === 0 && badPlot.length === 0,
+    `zero=${noPlot.length}, nan=${badPlot.length}`);
+}
+
+{
+  const sameX = layoutCursorChips([chip(1, 50), chip(2, 50)], width20, PLOT_WIDTH);
   check('two chips at the same x place only the later one',
     ids(sameX) === '2', `placed=${ids(sameX)}`);
 
-  const tenApart = layoutCursorChips([chip(1, 50), chip(2, 60)], width20);
+  const tenApart = layoutCursorChips([chip(1, 50), chip(2, 60)], width20, PLOT_WIDTH);
   check('two 20 px chips 10 px apart place only the later one',
     ids(tenApart) === '2', `placed=${ids(tenApart)}`);
 }
 
 {
-  const far = layoutCursorChips([chip(2, 200), chip(1, 0)], width20);
+  const far = layoutCursorChips([chip(2, 200), chip(1, 0)], width20, PLOT_WIDTH);
   check('distant chips all place in ascending cssX order even when input is right-to-left',
-    ids(far) === '1,2' && far[0].cssX === 0 && far[1].cssX === 200,
-    `placed=${ids(far)}, xs=${far.map((c) => c.cssX).join(',')}`);
+    ids(far) === '1,2' && far[0].boxX === 0 && far[1].boxX === 200,
+    `placed=${ids(far)}, xs=${far.map((c) => c.boxX).join(',')}`);
 
-  const forward = layoutCursorChips([chip(1, 0), chip(2, 200)], width20);
+  const forward = layoutCursorChips([chip(1, 0), chip(2, 200)], width20, PLOT_WIDTH);
   check('distant chips all place in ascending cssX order when input is left-to-right',
-    ids(forward) === '1,2' && forward[0].cssX === 0 && forward[1].cssX === 200,
-    `placed=${ids(forward)}, xs=${forward.map((c) => c.cssX).join(',')}`);
+    ids(forward) === '1,2' && forward[0].boxX === 0 && forward[1].boxX === 200,
+    `placed=${ids(forward)}, xs=${forward.map((c) => c.boxX).join(',')}`);
 }
 
 {
   const zeroWidth = (label: string): number => label === '2' ? 0 : 20;
-  const withZero = layoutCursorChips([chip(1, 0), chip(2, 100)], zeroWidth);
-  const onlyZero = layoutCursorChips([chip(2, 100)], zeroWidth);
+  const withZero = layoutCursorChips([chip(1, 0), chip(2, 100)], zeroWidth, PLOT_WIDTH);
+  const onlyZero = layoutCursorChips([chip(2, 100)], zeroWidth, PLOT_WIDTH);
   const nanWidth = (label: string): number => label === '1' ? Number.NaN : 20;
-  const withNaN = layoutCursorChips([chip(1, 0), chip(2, 100)], nanWidth);
+  const withNaN = layoutCursorChips([chip(1, 0), chip(2, 100)], nanWidth, PLOT_WIDTH);
   check('a zero or NaN chip width is skipped while a valid sibling still places',
     ids(withZero) === '1' && onlyZero.length === 0 && ids(withNaN) === '2',
     `withZero=${ids(withZero)}, onlyZero=${onlyZero.length}, withNaN=${ids(withNaN)}`);
 }
 
 {
-  const touching = layoutCursorChips([chip(1, 0), chip(2, 22)], width20);
-  const colliding = layoutCursorChips([chip(1, 0), chip(2, 21.999)], width20);
+  const touching = layoutCursorChips([chip(1, 0), chip(2, 22)], width20, PLOT_WIDTH);
+  const colliding = layoutCursorChips([chip(1, 0), chip(2, 21.999)], width20, PLOT_WIDTH);
   check('boxes separated by exactly 2 px keep their 1 px gap; 1.999 px collides',
     ids(touching) === '1,2' && ids(colliding) === '2',
     `touching=${ids(touching)}, colliding=${ids(colliding)}`);
@@ -200,7 +221,7 @@ const ids = (chips: readonly CursorChip[]): string => chips.map((c) => String(c.
 
 {
   const labelled = (label: string): number => label === '2' ? 100 : 20;
-  const wide = layoutCursorChips([chip(1, 0, '1'), chip(2, 40, '2')], labelled);
+  const wide = layoutCursorChips([chip(1, 0, '1'), chip(2, 40, '2')], labelled, PLOT_WIDTH);
   check('the caller-supplied width decides the box: a 100 px chip at 40 collides with a 20 px chip at 0',
     ids(wide) === '2', `placed=${ids(wide)}`);
 }
@@ -208,22 +229,22 @@ const ids = (chips: readonly CursorChip[]): string => chips.map((c) => String(c.
 {
   const labelWidth = (label: string): number => label === '2' ? 200 : 20;
   const newest = chip(1, 60, '1');
-  const placed = layoutCursorChips([chip(3, 0, '2'), newest], labelWidth);
+  const placed = layoutCursorChips([chip(3, 0, '2'), newest], labelWidth, PLOT_WIDTH);
   const alone = chip(3, 0, '2');
-  const single = layoutCursorChips([alone], labelWidth);
+  const single = layoutCursorChips([alone], labelWidth, PLOT_WIDTH);
   check('the width is keyed by the label, not the id: label 2 at 0 loses to label 1 at 60',
-    placed.length === 1 && placed[0] === newest &&
-    single.length === 1 && single[0] === alone,
+    placed.length === 1 && placed[0].id === newest.id &&
+    single.length === 1 && single[0].id === alone.id,
     `placed=${placed.map((c) => `${c.id}:${c.label}`).join(',')}, single=${single.length}`);
 }
 
 {
-  const priority = layoutCursorChips([chip(1, 0), chip(2, 5), chip(3, 40)], width20);
+  const priority = layoutCursorChips([chip(1, 0), chip(2, 5), chip(3, 40)], width20, PLOT_WIDTH);
   check('newest priority drops the oldest of a colliding pair, not the middle one',
     ids(priority) === '2,3', `placed=${ids(priority)}`);
 
   const withInvalid =
-    layoutCursorChips([chip(1, Number.NaN), chip(2, 0)], width20);
+    layoutCursorChips([chip(1, Number.NaN), chip(2, 0)], width20, PLOT_WIDTH);
   check('a chip with a non-finite cssX is skipped instead of placed',
     ids(withInvalid) === '2', `placed=${ids(withInvalid)}`);
 }
