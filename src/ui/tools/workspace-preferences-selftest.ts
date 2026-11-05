@@ -2,7 +2,7 @@ import {
   analyzerStatesFrom, MAX_PERSISTED_ANALYZERS, nextAnalyzerSequence, parseWorkspaceSnapshot,
   readWorkspaceSnapshot, serializeWorkspaceSnapshot,
   WORKSPACE_SCHEMA_VERSION, WORKSPACE_STORAGE_KEY, writeWorkspaceSnapshot,
-  type PersistedAnalyzer, type WorkspaceSnapshotV1,
+  type PersistedAnalyzer, type PersistedSidebar, type WorkspaceSnapshotV1,
 } from '../workspacePreferences.js';
 import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannelName, defaultChannels,
@@ -1027,6 +1027,133 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
 const app = fs.readFileSync('src/ui/app.ts', 'utf8');
 const preferences = fs.readFileSync('src/ui/workspacePreferences.ts', 'utf8');
 const stateSource = fs.readFileSync('src/ui/state.ts', 'utf8');
+
+{
+  const raw = (sidebar: unknown): string =>
+    JSON.stringify({ version: WORKSPACE_SCHEMA_VERSION, detailedLabels: true, sidebar });
+  const restorePage = (sidebar: unknown): string | undefined =>
+    parseWorkspaceSnapshot(raw(sidebar))?.sidebar?.page;
+  const pageRows: [string, string, string | undefined][] = [
+    ['capture', 'capture', 'capture'],
+    ['cursors', 'cursors', 'cursors'],
+    ['decoders', 'decoders', 'decoders'],
+    ['device', 'device', 'capture'],
+    ['analyzers', 'analyzers', 'decoders'],
+  ];
+  const pageMisses = pageRows.filter(([, page, want]) => restorePage({ page }) !== want);
+  check('every persisted page restores through the guard, canonicalized to the three page literals',
+    pageMisses.length === 0,
+    pageMisses.map(([label, page]) => `${label}=>${restorePage({ page })}`).join(', ') ||
+      `${pageRows.length} pages matched`);
+
+  const rejectedPages: [string, unknown][] = [
+    ['null', null], ['unknown', 'assistant'], ['empty', ''], ['blank', ' '],
+    ['upper case', 'Capture'], ['padded', ' capture '], ['number', 3],
+    ['object', { page: 'capture' }], ['array', ['cursors']], ['boolean', true],
+  ];
+  const leakedPages = rejectedPages
+    .filter(([, page]) => parseWorkspaceSnapshot(raw({ page }))?.sidebar !== undefined);
+  check('an absent, null or non-literal page restores no page at all',
+    leakedPages.length === 0,
+    leakedPages.map(([label]) => label).join(', ') || `${rejectedPages.length} rejected`);
+
+  const malformed: [string, unknown][] = [
+    ['array', []], ['string', 'cursors'], ['number', 3], ['boolean', true], ['null', null],
+    ['empty section', {}],
+  ];
+  const survived = malformed.map(([label, sidebar]) => {
+    const snapshot = parseWorkspaceSnapshot(raw(sidebar));
+    const kept = snapshot !== null && snapshot.sidebar === undefined &&
+      snapshot.detailedLabels === true && snapshot.channels?.length === 16 &&
+      snapshot.order?.length === 16 && snapshot.analyzers?.length === 0;
+    return { label, kept };
+  });
+  check('a malformed or defaulted sidebar section is ignored without discarding the rest of the snapshot',
+    survived.every((row) => row.kept),
+    survived.filter((row) => !row.kept).map((row) => row.label).join(', ') ||
+      `${survived.length} controls`);
+
+  const visibleRows: [string, unknown, boolean | undefined][] = [
+    ['literal false', { visible: false }, false],
+    ['literal true', { visible: true }, undefined],
+    ['zero', { visible: 0 }, undefined],
+    ['string', { visible: 'false' }, undefined],
+    ['null', { visible: null }, undefined],
+    ['object', { visible: {} }, undefined],
+    ['absent', {}, undefined],
+  ];
+  const visibleMisses = visibleRows.filter(([, sidebar, want]) =>
+    parseWorkspaceSnapshot(raw(sidebar))?.sidebar?.visible !== want);
+  check('the dock restores hidden only at literal false and visible for everything else',
+    visibleMisses.length === 0,
+    visibleMisses.map(([label]) => label).join(', ') || `${visibleRows.length} controls`);
+
+  const onlySidebar = parseWorkspaceSnapshot(JSON.stringify({
+    version: WORKSPACE_SCHEMA_VERSION, sidebar: { page: 'cursors', visible: false },
+  }));
+  check('a snapshot carrying only the sidebar section restores the page plus bounded defaults',
+    onlySidebar?.sidebar?.page === 'cursors' && onlySidebar.sidebar.visible === false &&
+    onlySidebar.detailedLabels === true && onlySidebar.channels?.length === 16 &&
+    onlySidebar.order?.length === 16 && onlySidebar.busViews?.length === 0 &&
+    onlySidebar.analyzers?.length === 0 &&
+    JSON.stringify(onlySidebar.capture) === JSON.stringify(parseWorkspaceSnapshot(
+      JSON.stringify({ version: WORKSPACE_SCHEMA_VERSION }))?.capture),
+    JSON.stringify(onlySidebar?.sidebar));
+
+  const baseSnapshot = (sidebar: PersistedSidebar): WorkspaceSnapshotV1 => ({
+    version: WORKSPACE_SCHEMA_VERSION, detailedLabels: true, sidebar,
+  });
+  const serializedSidebar = (sidebar: PersistedSidebar): unknown =>
+    JSON.parse(serializeWorkspaceSnapshot(baseSnapshot(sidebar))).sidebar;
+  const writeRows: [string, PersistedSidebar, unknown][] = [
+    ['default capture page', { page: 'capture', visible: true }, undefined],
+    ['empty section', {}, undefined],
+    ['cursors page', { page: 'cursors', visible: true }, { page: 'cursors' }],
+    ['decoders page', { page: 'decoders' }, { page: 'decoders' }],
+    ['hidden capture page', { page: 'capture', visible: false }, { page: 'capture', visible: false }],
+    ['hidden cursors page', { page: 'cursors', visible: false }, { page: 'cursors', visible: false }],
+    ['legacy alias', { page: 'device' } as unknown as PersistedSidebar, undefined],
+    ['assistant flag',
+      { page: 'cursors', assistant: true } as unknown as PersistedSidebar, { page: 'cursors' }],
+  ];
+  const writeMisses = writeRows.filter(([, sidebar, want]) =>
+    JSON.stringify(serializedSidebar(sidebar)) !== JSON.stringify(want));
+  check('the section is omitted at defaults and never writes an alias, a visible marker or the assistant flag',
+    writeMisses.length === 0,
+    writeMisses.map(([label, sidebar]) => `${label}=>${JSON.stringify(serializedSidebar(sidebar))}`)
+      .join(', ') || `${writeRows.length} sections canonicalized`);
+
+  const cursorsRoundTrip = parseWorkspaceSnapshot(
+    serializeWorkspaceSnapshot(baseSnapshot({ page: 'cursors', visible: false })));
+  const decodersDowngrade = parseWorkspaceSnapshot(serializeWorkspaceSnapshot(
+    baseSnapshot({ page: 'decoders' })).replace(',"sidebar":{"page":"decoders"}', ''));
+  check('a second build reads the page and visibility back and a build without the field still loads',
+    cursorsRoundTrip?.sidebar?.page === 'cursors' && cursorsRoundTrip.sidebar.visible === false &&
+    decodersDowngrade?.sidebar === undefined && decodersDowngrade?.channels?.length === 16 &&
+    decodersDowngrade?.capture !== undefined,
+    `roundTrip=${JSON.stringify(cursorsRoundTrip?.sidebar)}, ` +
+    `downgrade=${JSON.stringify(decodersDowngrade?.sidebar)}`);
+
+  const legacyDefault = serializeWorkspaceSnapshot({
+    version: WORKSPACE_SCHEMA_VERSION, detailedLabels: true,
+    channels: defaultChannels(16).map(({ name, color, enabled }) => ({ name, color, enabled })),
+    order: defaultChannels(16).map((channel) => channel.index),
+    capture: { ...defaultCaptureSettings(), triggerModes: {} },
+    busViews: [], bankBusDrafts: {},
+  });
+  const withSidebarSection = serializeWorkspaceSnapshot({
+    version: WORKSPACE_SCHEMA_VERSION, detailedLabels: true,
+    channels: defaultChannels(16).map(({ name, color, enabled }) => ({ name, color, enabled })),
+    order: defaultChannels(16).map((channel) => channel.index),
+    capture: { ...defaultCaptureSettings(), triggerModes: {} },
+    busViews: [], bankBusDrafts: {},
+    sidebar: { page: 'capture', visible: true },
+  });
+  check('a default user writes byte-identical JSON with or without the restored sidebar section',
+    legacyDefault === withSidebarSection && !withSidebarSection.includes('sidebar'),
+    `bytes=${withSidebarSection.length}, hasSection=${withSidebarSection.includes('sidebar')}`);
+}
+
 function appMethodBody(name: string): string {
   const syncStart = app.indexOf(`private ${name}(`);
   const start = syncStart >= 0 ? syncStart : app.indexOf(`private async ${name}(`);
@@ -1233,9 +1360,9 @@ const appMethodNames = [...app.matchAll(/^  private (?:async )?([A-Za-z0-9_]+)\(
 const persistWriters = [...new Set(appMethodNames
   .filter((name) => appMethodBody(name).includes('this.persistWorkspace();')))].sort();
 const expectedWriters = [
-  'adoptCapture', 'adoptDeviceChannels', 'afterChannelChange', 'applySettings', 'attachAnalyzer',
-  'configureBusScope', 'configureChannel', 'dragScopeTrigger', 'finishCapture', 'removeAnalyzer',
-  'reorder', 'settingsItems', 'startCapture',
+  'adoptCapture', 'adoptDeviceChannels', 'afterChannelChange', 'applySettings', 'applySidebar',
+  'attachAnalyzer', 'configureBusScope', 'configureChannel', 'dragScopeTrigger', 'finishCapture',
+  'removeAnalyzer', 'reorder', 'settingsItems', 'startCapture',
 ].sort();
 const quietMethods = ['runDecode', 'discardDecodeState', 'renderPanels', 'relayout', 'retranslate'];
 const quiet = quietMethods.map((name) => ({ name, body: appMethodBody(name) }));
@@ -1359,6 +1486,63 @@ check('restored views get fresh IDs/null runtime and all generic/bank mutations 
   busRestoreWiring && busMutationWiring &&
   app.includes('this.settings = this.clampSettings({ ...this.settings });'),
   `restore=${busRestoreWiring}, mutations=${busMutationWiring}`);
+
+{
+  const sidebarRestoreAt = constructorBody.indexOf('this.sidebar = {');
+  const sidebarRestoreEnd = sidebarRestoreAt >= 0 ? constructorBody.indexOf('};', sidebarRestoreAt) : -1;
+  const sidebarRestore = sidebarRestoreAt >= 0 && sidebarRestoreEnd > sidebarRestoreAt
+    ? constructorBody.slice(sidebarRestoreAt, sidebarRestoreEnd) : '';
+  const baselineAt = constructorBody.indexOf('this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(');
+  const bootShape = (body: string): boolean =>
+    body.includes('visible: workspace?.sidebar?.visible !== false,') &&
+    body.includes("page: workspace?.sidebar?.page ?? 'capture',") &&
+    body.includes('assistant: false,') && !body.includes('workspace?.assistant');
+  const forcedPage = sidebarRestore.replace(
+    "page: workspace?.sidebar?.page ?? 'capture',", "page: 'capture',");
+  const forcedVisible = sidebarRestore.replace(
+    'visible: workspace?.sidebar?.visible !== false,', 'visible: true,');
+  const restoredAssistant = sidebarRestore.replace('assistant: false,', 'assistant: true,');
+  check('boot restores the page and dock visibility before the baseline with the assistant always closed',
+    sidebarRestoreAt >= 0 && baselineAt > sidebarRestoreAt && bootShape(sidebarRestore) &&
+    !bootShape(forcedPage) && !bootShape(forcedVisible) && !bootShape(restoredAssistant) &&
+    !constructorBody.includes('selectSidebarPage(') &&
+    !constructorBody.includes('toggleSidebarVisible('),
+    `shape=${bootShape(sidebarRestore)}, at=${sidebarRestoreAt}/${baselineAt}`);
+}
+
+{
+  const projection = 'sidebar: { page: this.sidebar.page, visible: this.sidebar.visible },';
+  const leaked = 'sidebar: { page: this.sidebar.page, visible: true, assistant: this.sidebar.assistant },';
+  check('the snapshot projects only the page and dock visibility of the sidebar, never the assistant',
+    snapshotBody.includes(projection) && !snapshotBody.includes('assistant') &&
+    leaked.includes('assistant'),
+    `projection=${snapshotBody.includes(projection)}, assistant=${snapshotBody.includes('assistant')}`);
+}
+
+{
+  const sidebarPaths = ['selectPage', 'handleCollapse', 'handleExpand', 'toggleAssistant', 'selectPanel'];
+  const unrouted = sidebarPaths.filter((name) => !appMethodBody(name).includes('this.applySidebar('));
+  const applyBody = appMethodBody('applySidebar');
+  const writeOrder = [
+    'this.sidebar = next;', 'this.persistWorkspace();', 'this.renderPanels();', 'this.relayout();',
+  ].map((needle) => applyBody.indexOf(needle));
+  const writesOnce = applyBody.split('this.persistWorkspace();').length === 2;
+  const writesBeforeRender = (body: string): boolean => {
+    const assign = body.indexOf('this.sidebar = next;');
+    const write = body.indexOf('this.persistWorkspace();');
+    const render = body.indexOf('this.renderPanels();');
+    return assign >= 0 && write > assign && render > write;
+  };
+  const renderFirst = applyBody.replace(
+    'this.persistWorkspace();\n    this.renderPanels();',
+    'this.renderPanels();\n    this.persistWorkspace();');
+  const noWriter = applyBody.replace('this.persistWorkspace();', '');
+  check('page, collapse, expand, assistant and debug paths all commit through one persisting applySidebar',
+    unrouted.length === 0 && writesOnce &&
+    writeOrder.every((index, i) => index >= 0 && (i === 0 || index > writeOrder[i - 1])) &&
+    writesBeforeRender(applyBody) && !writesBeforeRender(renderFirst) && !writesBeforeRender(noWriter),
+    `unrouted=${JSON.stringify(unrouted)}, order=${JSON.stringify(writeOrder)}, once=${writesOnce}`);
+}
 
 const html = fs.readFileSync('index.html', 'utf8');
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);

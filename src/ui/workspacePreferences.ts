@@ -9,6 +9,7 @@ import {
   THRESHOLD_VOLT_OPTIONS,
   type AnalyzerState, type CaptureSettings, type TriggerMode,
 } from './state.js';
+import { parseSidebarPage, type SidebarPage } from './sidebar.js';
 
 export const WORKSPACE_STORAGE_KEY = 'logicweb.workspace';
 export const WORKSPACE_SCHEMA_VERSION = 1 as const;
@@ -55,6 +56,11 @@ export interface PersistedAnalyzer {
   laneChannel: number;
 }
 
+export interface PersistedSidebar {
+  page?: SidebarPage;
+  visible?: boolean;
+}
+
 export interface WorkspaceSnapshotV1 {
   version: typeof WORKSPACE_SCHEMA_VERSION;
   detailedLabels: boolean;
@@ -64,6 +70,7 @@ export interface WorkspaceSnapshotV1 {
   busViews?: BusViewConfig[];
   bankBusDrafts?: Record<string, BusViewConfig>;
   analyzers?: PersistedAnalyzer[];
+  sidebar?: PersistedSidebar;
 }
 
 function storage(): Storage | null {
@@ -76,6 +83,15 @@ function storage(): Storage | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function restoreSidebar(value: unknown): PersistedSidebar | null {
+  if (!isRecord(value)) return null;
+  const section: PersistedSidebar = {};
+  const page = parseSidebarPage(value.page);
+  if (page !== null) section.page = page;
+  if (value.visible === false) section.visible = false;
+  return section.page === undefined && section.visible === undefined ? null : section;
 }
 
 function restoreChannels(value: unknown, fallbackChannelCount: ChannelCount): PersistedChannel[] {
@@ -395,6 +411,7 @@ export function parseWorkspaceSnapshot(
     const bank = busChannelBank(bus.spec);
     if (bank !== null) bankBusDrafts[String(bank)] = cloneBusConfig(bus);
   }
+  const sidebar = restoreSidebar(parsed.sidebar);
   return {
     version: WORKSPACE_SCHEMA_VERSION,
     detailedLabels: typeof parsed.detailedLabels === 'boolean' ? parsed.detailedLabels : true,
@@ -404,6 +421,7 @@ export function parseWorkspaceSnapshot(
     busViews,
     bankBusDrafts,
     analyzers: restoreAnalyzers(parsed.analyzers, channels.length),
+    ...(sidebar ? { sidebar } : {}),
   };
 }
 
@@ -417,6 +435,13 @@ export function readWorkspaceSnapshot(fallbackChannelCount: ChannelCount = 16): 
 
 function serializeBusConfig(config: BusViewConfig): BusViewConfig {
   return cloneBusConfig(config);
+}
+
+function serializeSidebar(section: PersistedSidebar): PersistedSidebar | null {
+  const page = parseSidebarPage(section.page) ?? 'capture';
+  const hidden = section.visible === false;
+  if (page === 'capture' && !hidden) return null;
+  return { page, ...(hidden ? { visible: false } : {}) };
 }
 
 export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): string {
@@ -467,6 +492,8 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
     laneChannel: analyzer.laneChannel,
   }));
+  const sidebar = snapshot.sidebar ? serializeSidebar(snapshot.sidebar) : null;
+  if (sidebar) serialized.sidebar = sidebar;
   return JSON.stringify(serialized);
 }
 

@@ -434,6 +434,11 @@ export class App {
       .map((bus) => applyBusBitOrder(bus, this.settings.testMode));
     this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));
     this.syncBankChannels();
+    this.sidebar = {
+      visible: workspace?.sidebar?.visible !== false,
+      page: workspace?.sidebar?.page ?? 'capture',
+      assistant: false,
+    };
     this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(this.workspaceSnapshot());
     this.reflectDetailedLabels();
 
@@ -3274,6 +3279,7 @@ export class App {
         options: { ...a.options },
         laneChannel: a.laneChannel,
       })),
+      sidebar: { page: this.sidebar.page, visible: this.sidebar.visible },
     };
   }
 
@@ -3314,6 +3320,7 @@ export class App {
 
   private applySidebar(next: SidebarState): void {
     this.sidebar = next;
+    this.persistWorkspace();
     this.renderPanels();
     this.relayout();
   }

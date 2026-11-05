@@ -558,6 +558,35 @@ const describe = (s: SidebarState): string =>
     `missing=${JSON.stringify(wiring)}, panels=${panels}`);
 }
 
+{
+  const app = readSource('src/ui/app.ts');
+  const restoreAt = app.indexOf('this.sidebar = {');
+  const restoreEnd = restoreAt >= 0 ? app.indexOf('};', restoreAt) : -1;
+  const restore = restoreAt >= 0 && restoreEnd > restoreAt ? app.slice(restoreAt, restoreEnd) : '';
+  const bootShape = (body: string): boolean =>
+    body.includes('visible: workspace?.sidebar?.visible !== false,') &&
+    body.includes("page: workspace?.sidebar?.page ?? 'capture',") &&
+    body.includes('assistant: false,') && !body.includes('workspace?.sidebar?.assistant');
+  const withAssistant = restore.replace('assistant: false,',
+    'assistant: workspace?.sidebar?.assistant === true,');
+  const forcedPage = restore.replace(
+    "page: workspace?.sidebar?.page ?? 'capture',", "page: 'capture',");
+  const forcedVisible = restore.replace(
+    'visible: workspace?.sidebar?.visible !== false,', 'visible: true,');
+  const constructorStart = app.indexOf('constructor() {');
+  const constructorEnd = constructorStart >= 0
+    ? app.indexOf('\n  // ------------------------------------------------------------------ layout', constructorStart) : -1;
+  const constructor = constructorStart >= 0 && constructorEnd > constructorStart
+    ? app.slice(constructorStart, constructorEnd) : '';
+  const forced = ['selectSidebarPage(', 'toggleSidebarVisible(', 'showAssistant(', 'toggleAssistant(']
+    .filter((needle) => constructor.includes(needle));
+  check('a reloaded page restores with the assistant closed and a hidden dock keeps the stored page',
+    restore.length > 0 && bootShape(restore) && !bootShape(withAssistant) &&
+    !bootShape(forcedPage) && !bootShape(forcedVisible) && forced.length === 0,
+    `boot=${bootShape(restore)}, assistant=${bootShape(withAssistant)}, ` +
+    `page=${bootShape(forcedPage)}, visible=${bootShape(forcedVisible)}, reducers=${JSON.stringify(forced)}`);
+}
+
 const failed = results.filter((r) => !r.pass).length;
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 console.log(`\n${results.length - failed}/${results.length} passed`);
