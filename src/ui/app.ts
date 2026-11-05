@@ -71,6 +71,7 @@ import {
 } from './workspacePreferences.js';
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
+import { MenuStack } from './menuStack.js';
 import {
   DEFAULT_SIDEBAR_STATE, hideSidebar, selectSidebarPage, showAssistant,
   toggleAssistant as nextAssistantState, toggleSidebarVisible,
@@ -203,6 +204,7 @@ export class App {
   private livePending = false;
   /** When the screen was last drawn for any reason, in `performance.now()` terms. */
   private liveDrawAt = 0;
+  private readonly menuStack = new MenuStack();
   private readonly settingsMenu: SettingsMenu;
   private readonly languageMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
@@ -438,6 +440,9 @@ export class App {
     this.settingsMenu = new SettingsMenu(must<HTMLButtonElement>('btn-settings'));
     this.languageMenu = new SettingsMenu(this.el.language, 'language-menu');
     this.themeMenu = new SettingsMenu(this.el.theme, 'theme-menu');
+    this.menuStack.register(this.settingsMenu);
+    this.menuStack.register(this.languageMenu);
+    this.menuStack.register(this.themeMenu);
     this.shortcutsDialog = new ShortcutsDialog();
     this.el.theme.dataset.mode = getMode();
     this.resizer = new PanelResizer(this.el.resizer, this.el.side, this.el.main);
@@ -500,9 +505,7 @@ export class App {
         this.dirty = true;
       }
       this.el.theme.dataset.mode = getMode();
-      this.settingsMenu.close('theme');
-      this.languageMenu.close('theme');
-      this.themeMenu.close('theme');
+      this.menuStack.closeAll('theme');
     });
 
     // Observe the scroll viewport, not the plot: the plot's height is now an *output*
@@ -3159,27 +3162,22 @@ export class App {
     must<HTMLButtonElement>('btn-settings').addEventListener('click', () => {
       // Keep the channel dialog and this transient menu from competing for focus.
       this.channelList.closeDialog();
-      this.languageMenu.close('outside');
-      this.themeMenu.close('outside');
+      this.menuStack.closeOthers(this.settingsMenu, 'outside');
       this.settingsMenu.toggle(this.settingsItems());
     });
     this.el.language.addEventListener('click', () => {
       this.channelList.closeDialog();
-      this.settingsMenu.close('outside');
-      this.themeMenu.close('outside');
+      this.menuStack.closeOthers(this.languageMenu, 'outside');
       this.languageMenu.toggle(this.languageItems());
     });
     this.el.theme.addEventListener('click', () => {
       this.channelList.closeDialog();
-      this.settingsMenu.close('outside');
-      this.languageMenu.close('outside');
+      this.menuStack.closeOthers(this.themeMenu, 'outside');
       this.themeMenu.toggle(this.themeItems());
     });
     this.el.assistant.addEventListener('click', () => {
       this.channelList.closeDialog();
-      this.settingsMenu.close('outside');
-      this.languageMenu.close('outside');
-      this.themeMenu.close('outside');
+      this.menuStack.closeAll('outside');
       this.toggleAssistant();
     });
   }
@@ -3397,9 +3395,7 @@ export class App {
 
   /** Re-render every string in the shell after a locale change. */
   private retranslate(): void {
-    this.settingsMenu.close('retranslate');
-    this.languageMenu.close('retranslate');
-    this.themeMenu.close('retranslate');
+    this.menuStack.closeAll('retranslate');
     applyStaticI18n(document);
     if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings();
     this.relayout();       // channel cells rebuild; an open channel dialog closes here

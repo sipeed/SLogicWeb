@@ -57,6 +57,8 @@ export class SettingsMenu {
     private readonly menuId: string = 'settings-menu',
   ) {}
 
+  get id(): string { return this.menuId; }
+
   toggle(items: readonly SettingsMenuItem[]): void {
     if (this.menu) this.close('toggle');
     else this.open(items);

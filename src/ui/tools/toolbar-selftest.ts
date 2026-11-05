@@ -482,11 +482,10 @@ const languageDisclosure = languageMarkup.includes('aria-controls="language-menu
   /\saria-label="[^"]+"/.test(languageMarkup);
 const languageWiringNeedles = [
   "new SettingsMenu(this.el.language, 'language-menu')",
+  'this.menuStack.register(this.languageMenu)',
   'this.languageMenu.toggle(this.languageItems())',
   "this.el.language.addEventListener('click'",
-  "this.languageMenu.close('outside')",
-  "this.languageMenu.close('retranslate')",
-  "this.languageMenu.close('theme')",
+  "this.menuStack.closeOthers(this.languageMenu, 'outside')",
   "this.el.language.setAttribute('aria-label', t('toolbar.languageTitle'))",
 ];
 const missingLanguageWiring = languageWiringNeedles.filter((needle) => !app.includes(needle));
@@ -825,11 +824,10 @@ const themeModeRuleAt = css.indexOf('#toolbar .toolbar-theme[data-mode="light"] 
 const themeRuleOrder = themeFallbackAt >= 0 && themeModeRuleAt > themeFallbackAt;
 const themeWiringNeedles = [
   "new SettingsMenu(this.el.theme, 'theme-menu')",
+  'this.menuStack.register(this.themeMenu)',
   'this.themeMenu.toggle(this.themeItems())',
   "this.el.theme.addEventListener('click'",
-  "this.themeMenu.close('outside')",
-  "this.themeMenu.close('retranslate')",
-  "this.themeMenu.close('theme')",
+  "this.menuStack.closeOthers(this.themeMenu, 'outside')",
   "this.el.theme.setAttribute('aria-label', t('toolbar.themeTitle'))",
 ];
 const missingThemeWiring = themeWiringNeedles.filter((needle) => !app.includes(needle));
@@ -917,31 +915,44 @@ const menuHandlerCases = [
 ];
 const menuHandlerFailures: string[] = [];
 for (const item of menuHandlerCases) {
-  if (!item.body.includes('this.channelList.closeDialog()') ||
-      !item.body.includes(`this.${item.menu}.toggle(this.${item.items}())`)) {
+  const closeAt = item.body.indexOf(`this.menuStack.closeOthers(this.${item.menu}, 'outside')`);
+  const toggleAt = item.body.indexOf(`this.${item.menu}.toggle(this.${item.items}())`);
+  if (!item.body.includes('this.channelList.closeDialog()') || closeAt < 0 || toggleAt < 0 ||
+      closeAt > toggleAt) {
     menuHandlerFailures.push(`${item.name}:open`);
   }
   for (const other of item.others) {
-    if (!item.body.includes(`this.${other}.close('outside')`)) menuHandlerFailures.push(`${item.name}:${other}`);
+    if (item.body.includes(`this.${other}.close(`)) menuHandlerFailures.push(`${item.name}:${other}`);
   }
 }
-const assistantClosesMenus = ['settingsMenu', 'languageMenu', 'themeMenu']
-  .every((menu) => assistantHandler.includes(`this.${menu}.close('outside')`));
+const assistantClosesMenus = assistantHandler.includes("this.menuStack.closeAll('outside')") &&
+  ['settingsMenu', 'languageMenu', 'themeMenu']
+    .every((menu) => !assistantHandler.includes(`this.${menu}.close(`));
 const assistantOpensSharedPath = assistantHandler.includes('this.channelList.closeDialog()') &&
   assistantHandler.includes('this.toggleAssistant()');
+const stackRegistration = ['settingsMenu', 'languageMenu', 'themeMenu']
+  .every((menu) => methodBody('constructor() {').includes(`this.menuStack.register(this.${menu});`)) &&
+  methodBody('constructor() {').indexOf('this.menuStack.register(this.settingsMenu);') >
+    methodBody('constructor() {').indexOf('this.settingsMenu = new SettingsMenu(');
 check(
   'every toolbar menu and the assistant close competing overlays and the channel dialog',
-  menuHandlerFailures.length === 0 && assistantClosesMenus && assistantOpensSharedPath,
-  `failures=${JSON.stringify(menuHandlerFailures)}, assistant=${assistantClosesMenus && assistantOpensSharedPath}`,
+  menuHandlerFailures.length === 0 && assistantClosesMenus && assistantOpensSharedPath &&
+    stackRegistration,
+  `failures=${JSON.stringify(menuHandlerFailures)}, ` +
+  `assistant=${assistantClosesMenus && assistantOpensSharedPath}, stack=${stackRegistration}`,
 );
 
 const retranslateBody = methodBody('private retranslate(): void {');
 const themeChangeBody = themeHandlerAt >= 0 && themeHandlerEnd > themeHandlerAt
   ? app.slice(themeHandlerAt, themeHandlerEnd) : '';
-const lifecycleCloseFailures = ['settingsMenu', 'languageMenu', 'themeMenu'].flatMap((menu) => [
-  ...(!retranslateBody.includes(`this.${menu}.close('retranslate')`) ? [`retranslate:${menu}`] : []),
-  ...(!themeChangeBody.includes(`this.${menu}.close('theme')`) ? [`theme:${menu}`] : []),
-]);
+const lifecycleCloseFailures = [
+  ...(!retranslateBody.includes("this.menuStack.closeAll('retranslate')") ? ['retranslate:stack'] : []),
+  ...(!themeChangeBody.includes("this.menuStack.closeAll('theme')") ? ['theme:stack'] : []),
+  ...['settingsMenu', 'languageMenu', 'themeMenu'].flatMap((menu) => [
+    ...(retranslateBody.includes(`this.${menu}.close(`) ? [`retranslate:${menu}`] : []),
+    ...(themeChangeBody.includes(`this.${menu}.close(`) ? [`theme:${menu}`] : []),
+  ]),
+];
 check(
   'all three remaining toolbar menus close for retranslation and theme changes',
   lifecycleCloseFailures.length === 0,

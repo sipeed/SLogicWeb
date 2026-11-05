@@ -350,12 +350,14 @@ function dialogConstructions(source: string): number {
   const start = appSource.indexOf("must<HTMLButtonElement>('btn-settings').addEventListener('click'");
   const end = start >= 0 ? appSource.indexOf('\n    });', start) : -1;
   const handler = start >= 0 && end > start ? appSource.slice(start, end) : '';
+  const closeAt = handler.indexOf("this.menuStack.closeOthers(this.settingsMenu, 'outside')");
+  const toggleAt = handler.indexOf('this.settingsMenu.toggle(this.settingsItems())');
   const closes = handler.includes('this.channelList.closeDialog()') &&
-    ['languageMenu', 'themeMenu']
-      .every((menu) => handler.includes(`this.${menu}.close('outside')`));
+    closeAt >= 0 && toggleAt > closeAt &&
+    ['languageMenu', 'themeMenu'].every((menu) => !handler.includes(`this.${menu}.close(`));
   check('the settings handler keeps closing the channel dialog and the other menus before its own toggle',
-    closes && handler.includes('this.settingsMenu.toggle(this.settingsItems())'),
-    `closes=${closes}, length=${handler.length}`);
+    closes && toggleAt >= 0,
+    `closes=${closes}, closeAt=${closeAt}, toggleAt=${toggleAt}, length=${handler.length}`);
 }
 
 {
