@@ -1054,7 +1054,7 @@ a duration, and all three modes now call that control **Duration**.
 
 `carryCaptureDuration` (`capturePolicy.ts`) keeps one duration across the modes and the
 sample rate, as HSync does ("changing the rate, the channels or the mode keeps the capture
-about as long", DESIGN.md §4):
+about as long", HSync `DESIGN.md` §4):
 
 - Entering Loop converts the Single/Repeat duration to samples at the actual, clamped
   rate (unless the caller set a new window in the same edit).

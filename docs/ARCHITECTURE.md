@@ -1,545 +1,702 @@
-# logicweb - system architecture and module contracts
+# logicweb MSO - system architecture and module contracts
 
-The point of this file is that several agents build in parallel without colliding. **Own
-your directory, import across boundaries only through the interfaces below, do not edit
-another module's files.** If you need a contract changed, say so in your report instead of
-changing it unilaterally.
+**Status: v2 target.** This document specifies the engine and platform contracts for the
+MSO application (digital + analog + decode on one time axis). The current code implements
+the earlier LA-only architecture; the gap is tracked in `docs/DESIGN.md` §17. Engine and
+state facts are normative here; interface facts are normative in `docs/DESIGN.md`;
+`src/ui/NOTES.md` is historical measurement evidence. A fact lives in exactly one file.
 
-**Document map.** This file owns how the system is built and what the engine guarantees:
-module boundaries, wire/data contracts, trigger and session semantics, state ownership,
-the settings transaction, acquisition lifecycle and capability, the panel/view-model
-contract, persistence, and verification. `docs/DESIGN.md` owns what the user sees and
-does: layout, controls, interaction, user-visible lifecycle, visual tokens, copy,
-accessibility and the interface review gate. `src/ui/NOTES.md` is historical measurement
-and implementation evidence. A fact is normative in exactly one file; the other links to
-it. If they conflict, the owning file wins: engine and state facts here, interface facts
-in `DESIGN.md`.
+**Document map.** This file owns module boundaries, platform/WebUSB constraints, link and
+device profiles, the signal store and time base, trigger/acquisition/recording/view state,
+panel/view-model contracts, persistence, decoding runtime, security, verification and the
+roadmap. `docs/DESIGN.md` owns layout, controls, interaction, user-visible lifecycle,
+visual tokens, copy, accessibility and the interface review gate. C1 (security) is
+currently §9 here and C3 (migration) is §17 of `DESIGN.md`; split them into
+`docs/SECURITY.md` and `docs/MIGRATION.md` when either outgrows its section.
 
-Stack: TypeScript, Vite, no UI framework unless a builder makes a case for one. Browser is
-Brave (Chromium) - the only WebUSB-capable browser installed on this machine.
+## 1. Scope and platform
 
-## Layout
+### 1.1 Product scope
+
+**Do:** a buyer-facing, driverless, accountless, fully local MSO. Digital and analog
+signals share one time axis with protocol decoding, cursors, measurements, math/FFT,
+recording and offline replay. PC Chromium is the functional baseline; Android
+phone/tablet Chrome with USB OTG is a first-class touch target.
+
+**Do not:** scripting, macros, user decoder code or expressions; SCPI/REST/WebSocket
+remote control; scheduled or unattended capture; accounts, cloud sync, share links or
+collaboration; device-side deep storage (segmented or single deep captures); iOS/iPadOS;
+multiple devices at once; the Assistant in the baseline.
+
+**Grey areas:** Autoset and automatic measurements are in (instrument features); loop
+recording is in (a storage policy, not automation); mask/limit tests are P2 and run only
+on demand; threshold alarms are visual only, never audible or remote. Firmware flashing is
+out of scope; a version mismatch is a typed refusal with the required version and vendor
+instructions.
+
+### 1.2 Runtime environments
+
+| Environment | WebUSB | Status |
+| --- | --- | --- |
+| Chromium browsers on Windows/macOS/Linux/ChromeOS (Chrome, Edge, Brave) | yes | Functional baseline; minimum versions fixed by the M0 matrix |
+| Chrome on Android phone/tablet with USB OTG | yes | First-class touch target |
+| Firefox, Safari, iOS/iPadOS | no | Out of scope; file replay and Demo only |
+| Android WebView / in-app browsers | not guaranteed | Unsupported |
+
+### 1.3 Platform and WebUSB rules
+
+- **P1 Feature detection, never UA sniffing.** `src/platform` probes `navigator.usb`,
+  `isSecureContext`, `crossOriginIsolated`, `OffscreenCanvas`, WebGL2, OPFS (including
+  `FileSystemSyncAccessHandle`), `navigator.locks`, Wake Lock, `navigator.share`,
+  `showSaveFilePicker` and `navigator.storage.persist`. A missing capability becomes a
+  typed `unsupported-platform` reason or a named degradation; without WebUSB the link
+  state is `unsupported`.
+- **P2 Permission.** `requestDevice()` runs only from a user gesture, with fixed product
+  VID/PID filters. Permissions are per origin, so the deployment domain is fixed; a
+  granted device reconnects with `getDevices()` without a chooser.
+- **P3 Interface class.** The device exposes a vendor-specific interface (0xFF); HID,
+  mass storage and audio/video classes cannot be claimed from a page.
+- **P4 Windows driverless.** Firmware provides a BOS MS OS 2.0 descriptor and declares a
+  WinUSB-compatible ID; otherwise buyers must install a driver by hand.
+- **P5 Linux.** A udev rule is required; the app offers a copyable snippet and
+  instructions.
+- **P6 Serial number.** A missing or duplicated serial prevents reliable reconnect after
+  a port change or replug; the app warns and asks the user to reselect.
+- **P7 Exclusivity.** One interface has one owner at a time (another tab, desktop software,
+  or a system driver). The link reports `busy`; tabs within this origin coordinate with
+  Web Locks.
+- **P8 Link rate is invisible.** `USBDevice` does not expose FS/HS/SS; the firmware
+  reports it and the handshake corrects it with a link probe (§3.3).
+- **P9 Android.** OTG is required; phone-port power is limited, so the UI recommends a
+  powered Y-cable or hub. The system may add its own USB permission prompt. Backgrounding
+  or screen-off may suspend the page; the acquisition reports `suspended` (§5.2).
+- **P10 Export.** OPFS is not user-visible; export uses the save picker, the share sheet
+  or a download, chosen by feature detection.
+
+### 1.4 Hosting tiers
+
+| Tier | Example | Headers | Consequences |
+| --- | --- | --- | --- |
+| T0 headerless static | GitHub Pages | cannot set | No COOP/COEP, so no `SharedArrayBuffer`; decode cancellation kills and respawns the worker. CSP only through `<meta>`: no `frame-ancestors`, no Permissions-Policy, no control over http(s) workers; use a top-level frame check. |
+| T1 managed static | Netlify / Cloudflare Pages / own server | settable | Full CSP, COOP/COEP (`SharedArrayBuffer` for the pipeline ring and decode interruption), `Permissions-Policy`. Recommended. |
+| T2 local package | bundled static server on `localhost` | settable | Isolated-network PCs; `file://` is unusable ([MEASURED]); Android not applicable. |
+
+WebUSB requires https or `localhost` in all tiers. `src/platform` exposes capability bits
+such as `isolated`; the engine selects the ring-buffer and decode-cancellation strategy
+from them. Tier differences are invisible to the user.
+
+### 1.5 Key decisions
+
+| ID | Decision | Contract |
+| --- | --- | --- |
+| D1 | Engine + Profile: UI, state machine and pipeline generic; device differences only in `DeviceProfile`; no model branches. | §2, §3.2 |
+| D2 | One timeline: float64 sample positions, seconds for display, one `displayOrigin()`; multi-rate groups aligned by time. | §4.1 |
+| D3 | Retention and recording are orthogonal: retention is the RAM display window; recording is an OPFS archive; Loop may roll and record. | §4.3 |
+| D4 | Assistant is out of the baseline; its host interface remains only for debug/test. | §6, `DESIGN.md` §10 |
+| D5 | One `TriggerPlan`; P0 keeps the single family, P1 enables mixed digital+analog when the profile supports it. | §5.1 |
+| D6 | Composite state machine: connection × acquisition × recording × view; `suspended`; typed refusal reasons. | §5.2 |
+| D7 | Capture remains the only start/stop entry; compact layouts move it to the bottom action bar; Autoset is a Capture variant. | `DESIGN.md` §4 |
+| D8 | One view model, three presenters: Docked / Sheet / Dialog; touch tokens follow the pointer class. | §6, `DESIGN.md` §3.3 |
+| D9 | Decode runtime: first-party TS/WASM default; Pyodide optional and on demand. | §8 |
+| D10 | Local trust: same-origin CSP, no third-party runtime, no telemetry; the security boundary is documented. | §9 |
+
+## 2. Module layout and ownership
 
 ```
 src/
-  device/     WebUSB transport for SLogic U3 devices         (owner: device builder)
-  data/       sample storage + multiresolution query         (owner: data builder)
-  render/     WebGL2 waveform canvas                         (owner: render builder)
-  ui/         shell, channel rows, timebase, cursors         (owner: ui builder)
-  decode/     protocol decoders in a worker                  (owner: decode builder)
-bench/        the three measured numbers                     (owner: bench builder)
-fixtures/     .sr captures from our own hardware, for the suites
-docs/         specs, this file, progress                     (owner: lead)
+  platform/  capability probes, Wake Lock, share/export, visibility, storage estimate
+  link/      WebUSB session: pairing, open/claim, handshake, link probe, reconnect
+  device/    frame codecs + DeviceProfile table + SimDriver
+  data/      SignalStore (digital + analog), pyramids, gaps, RAM -> OPFS, files
+  dsp/       calibration, trigger matcher, measurements, FFT/math
+  render/    WebGL2 canvas (digital and analog), tiles, overlays
+  decode/    decode worker: first-party TS/WASM + optional Pyodide
+  ui/        shell, presenters, rows, input grammar, panels
+bench/       re-runnable measurement scripts
+fixtures/    captures from our hardware
+docs/        contracts, migration, NOTES
 ```
 
-## Contracts
+- **Cross the boundary only through the contracts below.** Own your directory; do not
+  edit another module's files. A contract change is a report to its owner, not a
+  unilateral edit.
+- **Dependency direction.** `ui → device/data/dsp/render/decode/platform`; `render`, `dsp`
+  and `decode → data`; `device → link → platform`; `data → platform` (OPFS and quotas).
+  No module imports `ui`; `ui` never touches WebUSB or WebGL.
+- **Workers.** USB, DSP, storage, render and decode communicate through typed,
+  serialisable messages declared in their module contracts. Hot paths use transferable
+  buffers; with `isolated`, use a `SharedArrayBuffer` ring (§5.5).
+- **Device differences live in a `DeviceProfile`.** Code has no model branches; a missing
+  capability is a typed refusal, not a model check.
+- **Platform contract.** `src/platform` owns feature probes, Wake Lock, visibility,
+  share/export and storage estimates. It exposes capabilities and typed degradations; it
+  never owns device or UI state.
+- **DSP contract.** `src/dsp` compiles `TriggerPlan`, runs the host matcher, and computes
+  measurements/math/FFT on complete samples. Pure and deterministic; no DOM, USB or
+  rendering.
+- **Render contract.** `src/render` consumes `SignalStore.query`/`edges` only; it owns the
+  canvas, the time/sample transform, tiles and overlay layers, and exposes
+  `setViewport(startSeconds, endSeconds)` and `render()`. It never mutates the store,
+  device or settings.
+- **Tests.** Contract tests live beside each module; hardware tests use a separate
+  harness and are not part of `npm test`.
+- **Stack.** TypeScript + Vite; no UI framework unless a builder argues for one. DSP and
+  decode hotspots may use Rust → WASM (SIMD).
+- **Builder rules.** Check every device reply; fail early and loudly; no silent catches;
+  report measured values including misses; capabilities come from Profile; the capture
+  path is never blocked by display or measurement; any network behaviour requires a
+  security-contract change (§9).
 
-### `src/device`
+## 3. Link and device contracts
 
-```ts
-export interface CaptureConfig {
-  channels: 4 | 8 | 16 | 32 | 64 | 128;
-  samplerate: number;        // Hz, from the table in PROTOCOL-SLOGIC16U3.md
-  thresholdVolts: number;    // mapped to the DAC code by the device layer
-}
+### 3.1 LinkSession
 
-export interface Device {
-  readonly name: string;
-  readonly serial: string;
-  start(cfg: CaptureConfig, sink: (chunk: Uint8Array) => void,
-        onDropout?: (samplePosition: number, missingSamples: number) => void,
-        options?: CaptureStartOptions): Promise<void>;
-  stop(): Promise<void>;
-}
-
-export function requestDevice(): Promise<Device>;   // triggers the WebUSB picker
-```
-
-`onDropout` is reserved for a controller-level loss signal. A successful WebUSB short packet
-is still delivered at its actual length and does not imply a gap; callers should not infer
-missing samples from `data.byteLength < requestedLength`. If a future transport reports a
-real loss, `samplePosition` and `missingSamples` identify the span for `SampleStore.noteGap`.
-Samples are little-endian and occupy `ceil(channels / 8)` bytes after sub-8-channel wire
-packing is expanded, so downstream code does not need a new representation at 32/64/128.
-
-`chunk` is raw device bytes with the 4 junk head bytes already removed and sub-8-channel
-packing already expanded. Samples are little-endian and occupy `ceil(channels / 8)` bytes
-(2 at 16 channels, 4 at 32 channels).
-
-### `src/data`
-
-```ts
-export interface SampleStore {
-  readonly channelCount: number;
-  readonly samplerate: number;
-  readonly length: number;                 // samples
-  /** Samples dropped from the front over this store's life - the loop window's left
-   *  edge. Absolute position = store-relative position + droppedSamples. 0 for stores
-   *  that never drop (RLE/imported captures). */
-  readonly droppedSamples: number;
-  append(chunk: Uint8Array): void;
-  /** Forget the oldest `samples` (a multiple of DROP_FRONT_QUANTUM): every position
-   *  shifts down and `length` shrinks, so a loop capture keeps only the newest
-   *  window. Callers needing absolute positions keep their own drop offset.
-   *  Imported captures cannot retain and throw; every live width (planar 4/64/128ch
-   *  and interleaved 8/16/32ch) implements it, against absolute-addressed pyramids. */
-  dropFront(samples: number): void;
-  /** Downsampled view for rendering: for each of `bins` pixel columns over
-   *  [startSample, endSample), the low bit, the high bit and whether the column
-   *  contains at least one edge. Must be O(bins), not O(samples). */
-  query(channel: number, startSample: number, endSample: number, bins: number): ColumnView;
-  /** Exact edge positions, for cursors, measurement and decoders. */
-  edges(channel: number, startSample: number, endSample: number): Int32Array;
-  /** Count-only edge preflight without materialising the result, when implemented. */
-  edgeCount?(channel: number, startSample: number, endSample: number): number;
-  /** Record that samples [startSample, endSample) are unknown (a transfer dropout).
-   *  Overlapping notes are merged. */
-  noteGap(startSample: number, endSample: number): void;
-  /** The unknown spans, sorted and non-overlapping; [] for a store without gaps. */
-  gaps(): GapSpan[];
-}
-```
-
-`CaptureStartOptions.softwareTrigger` enables a bounded host-side trigger. It accepts
-one or more per-channel `level`, `rising`, `falling` or `edge` conditions; all confirmed
-conditions must match the same complete sample (logical AND). While waiting, only the
-single shared rolling pre-trigger window is retained; a match emits that window and
-post-trigger samples to the sink. The `triggered` callback also reports the trigger
-sample's zero-based position in that emitted stream. The presentation of T and pre-trigger
-time is in `docs/DESIGN.md` §6.2.
-`preTriggerPercent` and the enable mask are acquisition settings; disabling the mask
-leaves all per-channel modes intact and merely bypasses the matcher. Their control
-placement and visible states are owned by `docs/DESIGN.md` §8; this section owns the
-matcher, its budgets and the emitted-stream semantics. The UI's search allowance is
-mode-specific: Repeat inspects one sweep's sample budget (output plus retained prefix) and
-then reports `not-found`, so a missed wave ends as completed and the next Interval retries
-(see B1 below); Single waits indefinitely for its one trigger, and Loop is unbounded. The
-allowance is what makes a trigger at the nominal budget boundary still produce its final
-post-trigger sample. If that
-allowance is exhausted or the user stops first, `onTriggerState('not-found')` is reported
-and the search prefix is discarded. Trigger-disabled captures keep the direct streaming path.
-The implementation is tested for 4/8/16/32/64/128-channel sample widths and carries
-partial wide samples across USB transfer boundaries.
-
-When a software trigger is enabled, a timer capture's duration starts at the trigger sample,
-not at `start()`: a Single matcher waits indefinitely while refreshing its bounded pre-trigger
-ring. The matcher arms immediately, so a condition that is already true can match before
-that ring fills. The emitted total remains the configured pre+post budget, which makes the
-post-trigger span longer than the requested post by the missing prefix; the session
-retained-range model still assumes the requested split, so a Fixed view that depends on the
-extended tail can fall back to follow. That early-match split is a known limitation. A
-manual stop before the match reports no trigger and discards the ring.
-
-In Loop mode a software trigger also owns the viewport after it fires. The reported index
-is in emitted-stream coordinates, so the App converts it to `reported - droppedSamples`
-before using it as `T=0`; the retained window may already have dropped front samples while
-the matcher was emitting. Two windows are kept apart: the data window D (Loop Duration L,
-with T at the configured pre-trigger fraction, 0% on D's 0 s left edge) and the user's
-ViewWindow V, stored as offsets from T. D's span is fixed and D never pans; V can be
-zoomed and panned anywhere inside D, and Fit resets V to all of D.
-
-An analog loop trigger advances D in local, phase-aligned steps. The page scans the ADC
-group byte of each chunk at a bounded stride (about twenty million reads per second) and
-records crossings. Only when samples exist beyond D's right edge does it plan a step: a
-local block budget (whole signal periods when known, at most L/4, never more than the
-fresh data) and the latest reported edge T' in `(T, T + budget]`, searched back from the
-budget's end. It drops the front of D by `T' - T` and appends exactly that many new
-samples at the tail; the rest of the new data waits for the next step. A strided scan
-reports a crossing at the scanned sample; the scanner re-checks the scanned interval at
-sample resolution, so the anchor is sample-exact except when a crossing straddles a chunk
-boundary. The step is edge-to-edge - an integer number of signal periods for a periodic
-input - so D keeps its phase and V updates in place. The store front drop is floored to
-the 64-sample quantum, but that residue changes only store-relative coordinates: V's
-offsets from T are unchanged, so it cannot shift the displayed waveform.
-
-The lock means "the current data and trigger configuration still produce edges". It is
-taken on the match, kept by every local step, and released only when no new edge has
-appeared for one whole D (the data/config no longer triggers). If edges return while a
-Loop runs free, the page locks again automatically. Fit, zoom and pan never release the
-lock. While waiting, the store may carry a bounded excess over D (at most one window;
-otherwise the larger of 50 ms and 65,536 samples, capped by 64 MiB of samples). While
-locked, it also retains the new data the next local step needs: one crossing gap and, if
-the signal stops, the quiet-window tail (f*D). The post-enforce bound is therefore
-D + slack + max(f*D, one gap), plus at most one delivery block before the enforce pass; a
-hard cap below the 2^31-sample store ceiling disarms the trigger and trims to D instead
-of letting an append overflow; the interface reports the release
-(`docs/DESIGN.md` §8.3) and a restart re-arms it. Follow-latest
-resumes on a release only if it was
-active at the lock. Digital loop triggers keep a one-shot lock: they never roll, so the
-front drops normally and the view releases to follow once T leaves the retained window;
-the interface reports that release (`docs/DESIGN.md` §8.3). The lock and the crossing
-record are display state: no sample
-is copied and the trigger ring keeps its existing bounds. Single and Repeat captures and
-a trigger-disabled Loop keep their normal viewport rules.
-
-A trigger-locked Loop keeps T on its trigger phase and D's span fixed. A viewport gesture
-moves only V: zoom changes V's span (bounded by D), pan moves V inside D, and the stored
-offsets from T are then applied unchanged on every local step. The waveform under V
-therefore does not scroll, and T may sit off-screen after a pan; the axis still puts 0 s
-at T. The overview presents the same fixed D window and clamps V the same way
-(`docs/DESIGN.md` §6.1).
-
-Sessions and sweeps are modelled explicitly in `captureSession.ts`. A new session starts
-FollowLive; a user pan/zoom records a Fixed interval relative to the display origin (T when
-the sweep has a trigger, else its start); Fixed survives Repeat waves while it fits the
-sweep's retained range and otherwise falls back to the mode default, never an automatic
-Fit. A Repeat sweep therefore never leaves a Fixed viewport empty: the previous completed
-wave is retained as a layer (`repeatDisplay.ts`), and while the running sweep waits for its
-trigger or has not reached the viewport, the old wave (with its own T) stays displayed. Once
-the new sweep has data, `RepeatCompositeStore` serves its samples up to the frontier and the
-old wave's samples beyond it in the same time frame; a mixed query merges every source bin
-into each overlapping composite column (a source bin crossing a column boundary may
-contribute to both - a bounded, conservative smear), while NO_DATA is decided from the
-display's exact gap spans so `query` and `gaps()` agree. `Overlay.drawRegionTint` distinguishes
-the old and current regions with two background surfaces (no vertical rule). FollowLive
-reads the running store directly. A Repeat sweep that finds no trigger inspects one sweep's
-sample budget, stops as completed with an empty store, reports the miss, and lets the next
-Interval retry. Stopping a session while the previous wave is held adopts that wave as the
-capture, so the plot, Save, measurement and the assistant all describe the same samples; a
-marker placed on the old layer is remapped by the same origin offset. While the composite
-is displayed the analog bus pyramid is suspended (its length is stable while its contents
-change behind the frontier), and the bounded live/provisional envelope reads the composite
-directly with the frontier in its frame-cache key. The Loop display's
-local block plan (`displaySwap.ts`) is instrumentation for the matcher stride, anchor step,
-budget block and retained bytes; the auto-roll itself still advances one scanned crossing at
-a time. The user-visible viewport policies and mode presentation are in
-`docs/DESIGN.md` §6.4 and §7.1; this section owns the session/sweep state behind them.
-
-The host matcher also has a `mode: 'continuous'` form for a device-side loop path
-(`SoftwareTriggerConfig.mode`). After its first match it re-arms on the same unbounded
-emitted stream and reports every later match at its absolute emitted-stream sample index;
-`matchCount` and `lastTriggerSampleIndex` are authoritative even when `reportGapSamples`
-throttles the callback, and `reconfigure()` remains live until the stream is terminal.
-A `level` condition matches every emitted sample that still holds it, so a continuous
-level trigger can produce one match per sample; use a rising/falling/edge condition (or
-`reportGapSamples`) for pulse-rate events. Continuous scanning may stride
-(`SoftwareTriggerConfig.scan`, default stride 1) to bound
-CPU; a strided candidate hit is refined at stride 1 so the reported index is exact, but
-candidates are `stride + 1` apart, so a pulse that lies entirely in the `stride` samples
-between two candidates can be missed - keep the stride below the narrowest pulse that must
-be caught. When a finite output budget ends between candidates, the remaining samples up to
-the budget are refined at stride 1, so a crossing in the final tail is still reported. The
-two scan buffers (history and refinement scratch) are capped at 64 MiB together, in
-addition to the pre-trigger ring's own 64 MiB prefix cap; one-shot matching allocates
-neither. Sample packing and whole-sample carry across USB transfers are unchanged. A live
-retune after the first match recompiles only what changed: a condition or scan-policy edit
-restarts edge continuity at the next sample, while a tuning-only edit (`reportGapSamples`
-or an identical scan policy) keeps the scan state so an edge straddling the edit is not
-lost. The App does not select this mode yet; until it does, Loop keeps the page-side analog
-scanner and the one-shot digital lock described above, and Single/Repeat always use
-one-shot.
-
-The overview maps the fixed D window while a loop runs (its true start `T - f*L` while
-locked, so the 64-sample front-drop residue cannot shift it; the newest window in free
-run), so its scale and ticks do not follow the retained length. Its gestures and
-phase-stable presentation are in `docs/DESIGN.md` §6.1. A new capture re-arms the trigger
-lock.
-
-While the matcher is still waiting, its conditions can be retuned in place
-(`SoftwareTrigger.reconfigure`, reached through `Device.updateSoftwareTrigger`): the
-condition set is recompiled, edge continuity restarts so no transition is invented across
-the edit, and the pre-trigger ring, emitted-stream accounting and inspected-sample budget
-are preserved. Digital modes, the source family, condition removal and the analog level can
-therefore be adjusted during the wait; removing every condition restarts the capture so it
-runs free. The capture width, retained-prefix size and output budget are fixed for a running
-capture and cannot be retuned. In one-shot mode, once the matcher has matched, the
-capture's trigger is frozen: later edits are pending for the next acquisition, except
-that a Loop's page-side analog detector is retuned in place and the lock survives only
-while the new condition keeps producing edges. Global trigger is an arming decision for
-the acquisition: turning it off while waiting restarts the capture free-running, turning
-it off after a match releases the view in place and tears the page detector down so it
-cannot re-lock, and turning it on in a capture that started free-running restarts the
-acquisition because the one-shot matcher cannot begin matching mid-stream. In continuous
-mode the matcher stays live after a match (see above) and accepts edits until it completes
-or reports no trigger.
-
-`query` being sublinear in sample count is the whole ballgame for the framerate metric.
-Build the mip pyramid on append. Two implementations satisfy the contract:
-
-- `PlanarSampleStore` - the live-capture store for 4/64/128-channel captures. One bit
-  per sample per channel plus a pyramid.
-- `InterleavedSampleStore` - the 8/16/32-channel live-capture store. It preserves
-  byte-aligned little-endian uint8/uint16/uint32 samples and uses the same two-plane
-  pyramid, avoiding synchronous sample rearrangement on the USB consumer path.
-  `createSampleStore()` selects this layout automatically for 8, 16 and 32 channels.
-- `RleSampleStore` - the import store, built from per-channel transition lists
-  (`createTransitionStore()` quantises transition times to sample positions with the same
-  rule the planar resample used: first sample at or after the transition, same-sample
-  toggles cancel pairwise; `createEdgeStore()` takes transitions already in sample space).
-  O(edges) to build and O(log edges-per-segment) per column to query; `append` throws -
-  it is immutable. Loads are flat with capture size because nothing expands to samples.
-
-`ColumnView` was left undefined here originally, which was a gap in this contract. The data
-builder defined it in `src/data/types.ts` and flagged it rather than assuming the renderer
-would agree. It is now the contract:
-
-```ts
-export interface ColumnView {
-  readonly channel: number;
-  readonly startSample: number;
-  readonly endSample: number;
-  readonly bins: number;
-  readonly low: Uint8Array;    // min sample value in the column
-  readonly high: Uint8Array;   // max sample value in the column
-  readonly edge: Uint8Array;   // 1 if a transition falls in [colStart-1, colEnd)
-  readonly packed: Uint8Array; // bit0=high, bit1=low, bit2=edge, bit3=gap
-}
-```
-
-`GAP_BIT` (bit3 of `packed`, value 8) is set on every column that overlaps a `noteGap`
-span. The renderer draws NO_DATA there and ignores the other bits; `edges()` never
-reports a transition inside a gap - unknown is not idle.
-
-Two properties the renderer must not undo. The `-1` in the edge span makes a transition
-landing exactly on a column boundary belong to the column it enters, so an edge can never
-fall in the gap between two columns and vanish. And `low != high` implies `edge`, but not
-the reverse: a column that is entirely 0 but was preceded by a 1 has a real falling edge at
-its left border and reports `edge=1, low=0, high=0`. Render from `edge`, not from
-`low != high`, or narrow pulses disappear at zoom-out.
-
-`packed` is laid out for direct upload as a WebGL2 R8UI texture.
-
-### `src/render`
-
-Consumes `SampleStore.query` only. Owns the canvas, the transform (samples <-> pixels), and
-nothing else. Exposes `setViewport(startSample, endSample)` and `render()`.
-
-### `src/ui`
-
-Owns layout, channel enable/rename/reorder, timebase readout, cursors and measurements,
-trigger settings, capture controls. Calls into device/data/render; never touches WebUSB or
-WebGL directly. The user-visible contract - layout, controls, interaction, visual tokens,
-copy and accessibility - is `docs/DESIGN.md`. The runtime contract - state ownership, the
-settings transaction, acquisition lifecycle, viewport/display ownership, the panel and
-view-model contract, persistence and verification - is `## UI runtime contract` below.
-`src/ui/NOTES.md` is historical measurement evidence; where it contradicts either
-contract, the owning document wins.
-
-### `src/decode`
-
-Runs in a Web Worker. Takes `edges()` output, produces annotation spans. Whether that is
-libsigrokdecode compiled with emscripten, or Pyodide running the stock `.py` decoders
-against a JS-side `sigrokdecode` shim, is the decode builder's call - **measure both before
-choosing, and report the numbers.** libsigrokdecode is not checked out on this machine;
-clone it from `git://sigrok.org/libsigrokdecode` if needed.
-
-### `bench/`
-
-Three numbers, measured on this machine, reported with the method used:
-
-1. Sustained pan/zoom framerate on a 100M-sample 16-channel capture.
-2. Seconds from opening a capture file to an interactive waveform.
-3. Decoder count, and annotations per second on a fixed capture.
-
-Each must be produced by a script that can be re-run, not by eyeballing devtools.
-
-## UI runtime contract
-
-`docs/DESIGN.md` owns what the user sees and how controls are laid out. This section owns
-the state and commit facts that every surface - the UI, the assistant, the debug/test
-surface and future automation - must share. Where visibility, labels or gestures are
-concerned, `DESIGN.md` is normative; where ownership, lifetime, ordering or persistence is
-concerned, this section is. These are the target contracts; the current code's known
-deviations are tracked in `docs/DESIGN.md` §16.
-
-### State ownership
-
-| State | Owner | Lifetime | Persistence |
-| --- | --- | --- | --- |
-| `CaptureSettings` (configuration; normally the next acquisition, with the live exceptions listed in `docs/DESIGN.md` §7.2) | App settings | across acquisitions | workspace |
-| Running acquisition (snapshot, trigger state, generation, sweep) | `CaptureSession` + App | one Capture→Stop | none |
-| Displayed samples | `StoreRef` / `SampleStore` | until replaced | capture file on Save |
-| Viewport policy (FollowLive/Fixed/TriggerLocked) | `CaptureSession` | session | session only |
-| Cursors/markers | App | capture | session only |
-| Bus views / analyzer attachments | App | across captures | workspace |
-| Panel tab, widths, theme, locale, labels | App / preferences | across sessions | preferences |
-| Uncommitted editor drafts | panel component | while the editor is open | none |
-
-Rules:
-
-- A panel receives a **view model** (plain data) and **callbacks**. It never imports
-  `App`, `Device`, `StoreRef` or the decode worker, and never mutates state directly.
-- App owns transitions; panels render. A panel may keep only UI-local state (open
-  section, draft text, chosen decoder) and must document it.
-- Derived state is computed, never stored beside its source: conditions from modes,
-  armed from mask + plan, viewport origin from T/start. In particular, one trigger
-  condition store is the target; `triggerConditions`, `triggerChannel/kind/level` and
-  the stale `softwareTrigger` boolean are migration debt.
-- All presentation time is relative to one `displayOriginSample()`: axis, status,
-  cursor panel, assistant readouts and debug output. No presentation code reads
-  `triggerSampleIndex` directly. During a held Repeat front the origin is the held
-  wave's T, not the running wave's.
-- A new `CaptureSettings` field must add a control-policy entry and a workspace
-  migration (or explicitly opt out of persistence).
-- Persistence goes through `workspacePreferences`; no component touches
-  `localStorage` directly. A schema change bumps the version and restores old data.
-
-### Settings transaction
-
-- `settings` is private to `commitSettings(next, reason)`, which always runs the ordered
-  pipeline: clamp → carry duration → trigger change detection/reset → sync → reconcile →
-  persist → relayout → render.
-- Every other module, including panels, sends a **field patch** (`onSettings(patch)`),
-  never a whole snapshot. Preview gestures write a separate draft, never the canonical
-  settings. `busViews` follows the same commit/draft split.
-- A test asserts that no other module assigns `settings`.
-
-### Acquisition lifecycle
-
-The lifecycle is one explicit state machine, not a set of independent booleans:
+One `LinkSession` owns the physical connection. States:
 
 | State | Meaning |
 | --- | --- |
-| `idle` | No capture; settings editable for the next start. |
-| `arming` | A start has been requested; the device/trigger is being set up. |
-| `waiting` | The matcher is waiting for its condition. |
-| `running` | Samples are arriving. |
-| `stopping` | A user stop is in flight. |
-| `restarting` | A named configuration restart is in flight (not a user stop). |
-| `retrying` | Between Repeat waves; the next wave is scheduled. |
-| `lost` | The device or transport died; no further samples will arrive. |
+| `unsupported` | WebUSB absent or the page is not a secure context. |
+| `idle` | No device selected; `requestDevice()` is available from a gesture. |
+| `selecting` | The browser chooser is open. |
+| `opening` | `device.open()` / interface claim in progress. |
+| `claiming` | Interface and endpoint claim in progress; Web Locks held. |
+| `handshaking` | Identity, firmware, capabilities and link probe. |
+| `ready` | Streaming commands are accepted. |
+| `busy` | Another owner holds the interface; a typed reason names the conflict. |
+| `suspended` | The page is hidden/backgrounded; the device may have paused. |
+| `lost` | The device vanished or the transfer failed; no more samples. |
+| `closed` | The user disconnected. |
 
-- Commands are events (`start`, `stop`, `retune`, `restart`, `completed`, `lost`); each
-  returns the next state and a declared side-effect list in one pure module. Transient
-  booleans are derived from the state, not stored beside it.
-- `restart` is a first-class transition with its own visible phase. It must not reuse the
-  user-facing stop path, tear down the session as if the user stopped, or discard a
-  displayed capture silently.
-- `mayEdit(feature, state)` is the single capability table. Panels, the assistant and the
-  debug surface call it and receive the same typed reason; no component invents its own
-  `captureLocked`-style predicate. The user-visible badge/disabled rendering is
-  `docs/DESIGN.md` §7.2.
+Rules:
 
-### Viewport and display
+- Pairing uses the fixed product VID/PID filters and a user gesture; reconnect uses
+  `getDevices()`. The origin/domain must not change without re-pairing.
+- Claim the vendor interface exclusively; hold a Web Lock for the origin. On failure,
+  report `busy` with the owner if known.
+- Handshake reads the protocol/firmware version, serial, channel/analog inventory, link
+  rate and the profile id. A profile mismatch is a typed refusal, never a fallback that
+  guesses.
+- The link probe measures sustained throughput and latency for one short transfer burst.
+  The result selects the streaming tile and record chunk sizes.
+- Reconnect is bounded: `connect`/`disconnect` events trigger at most one attempt per
+  event; a failed attempt surfaces `lost` and offers "Reconnect". No unbounded retry loop.
+- `visibilitychange`/`freeze` moves to `suspended`; on resume the session re-handshakes
+  and checks the device still holds the stream. If not, `lost`.
+- Every failure has a typed `LinkError` reason (`unsupported`, `denied`, `busy`,
+  `handshake`, `profile`, `transfer`, `lost`, `suspended`).
 
-- The session owns one `ViewState { policy, anchor, offsets, follow }`; the Loop trigger
-  lock is a policy variant, not a parallel set of App fields. Gestures, Fit, overview
-  navigation, trigger match/release and session adoption emit one event into one
-  transition function; no other code writes viewport fields or calls
-  `restoreViewport`/`setFollowLatest` directly.
-- Which store is displayed (`wave`, `front`, `composite`, `showingFront`,
-  `heldTrigger`) is one `DisplayState` with named transitions. One
-  `endSessionDisplay(reason)` is used by stop, import/adopt, device loss, restart and
-  pending-repeat cancel.
-- Every transition gets a table-driven test, including held-Repeat, trigger-locked,
-  released and device-loss rows.
+### 3.2 DeviceProfile
 
-### Panel and view-model contract
+A `DeviceProfile` is data, loaded from `src/device/profiles/`. It declares:
 
-- `PanelId` is declared once. Each panel owns exactly one host it may clear; the shell
-  never mounts two panels into one host and never hides a panel by clearing another. The
-  assistant is mounted once and hidden; the other panels may rebuild.
-- Every panel has `render(view)` and a `*Callbacks` interface. The view is immutable plain
-  data; no DOM objects in it. If incremental updates are required, the panel exposes
-  `update(view)` covering every field that can change without a rebuild, and a missing
-  node throws or reports instead of silently skipping. Cached element references are not
-  a second source of truth; a render test checks each dynamic field through both paths.
-- View models are presentation-ready: they contain derived values (capture phase, armed
-  summary, hidden inputs, pre-trigger cap, formatted times) from shared pure selectors.
-  Panels do not re-derive what App already derived, and raw runtime booleans do not sit
-  beside a derived `captureState`.
-- One `OverlayController` owns the stack of menus, popovers, flyouts and dialogs: opening
-  one closes its transient siblings, Escape closes the topmost, and focus returns to the
-  invoker by token. Buttons do not enumerate other surfaces by hand.
+```ts
+interface DeviceProfile {
+  id: string;                         // stable profile id, never a model check
+  name: string;
+  vid: number; pid: number;
+  serial?: { required: boolean };
+  link: {
+    interfaceClass: 0xff;
+    endpoints: { in: number; out: number };
+    maxTransferBytes: number;
+    rates: readonly LinkRate[];       // FS/HS/SS as reported/probed
+    probe: { bytes: number; bursts: number };
+  };
+  digital: {
+    maxChannels: 4 | 8 | 16 | 32 | 64 | 128;
+    groups: readonly DigitalGroup[];  // channel ranges that share a rate
+    widths: readonly ChannelCount[];
+    rates: readonly RateTier[];       // per width/group, per link rate
+    thresholdVolts: readonly number[] | null;
+    testModes: readonly TestMode[];
+  };
+  analog: {
+    groups: readonly AnalogGroup[];   // group start, channels, ranges, resolution, maxRate
+    calibration: CalibrationRef;
+  };
+  trigger: {
+    execution: 'device' | 'host';
+    digital: readonly TriggerKind[];
+    analog: readonly AnalogTriggerKind[];
+    mixed: boolean;                   // false in P0, true when the profile supports it
+    preTriggerMaxPercent: number;
+    preTriggerMaxBytes: number;
+  };
+  modes: { single: boolean; repeat: boolean; loop: boolean; record: boolean };
+  firmware: { min: string };
+  quirks?: readonly ProfileQuirk[];
+}
+```
 
-### Persistence
+Supporting types:
 
-Every field belongs to exactly one tier, declared in a registry:
+```ts
+type LinkRate = 'fs' | 'hs' | 'ss';
+type ChannelCount = 4 | 8 | 16 | 32 | 64 | 128;
+type TestMode = 0 | 1 | 2;
+type TriggerKind = 'level' | 'rising' | 'falling' | 'edge' | 'high' | 'low';
+type AnalogTriggerKind = 'rising' | 'falling';
+
+interface DigitalGroup {
+  start: number;
+  channels: number;
+}
+
+interface RateTier {
+  channels: ChannelCount;
+  hz: Readonly<Partial<Record<LinkRate, number>>>;
+}
+
+interface AnalogGroup {
+  start: number;
+  channels: number;
+  ranges: readonly number[];        // bipolar range in volts, e.g. 1, 5, 15 (±1 V, ±5 V, ±15 V)
+  resolutionBits: number;
+  maxHz: Readonly<Partial<Record<LinkRate, number>>>;
+}
+
+interface CalibrationRef { id: string; version: number }
+interface ProfileQuirk { id: string; note: string }
+```
+
+- The profile declares capability, not behaviour code. `src/device` implements the frame
+  codec and the commands; `src/link` implements USB; `src/dsp` compiles triggers. Profile
+  values (rates, channel counts, ranges) are copied from the protocol documents and
+  verified by the M0 device matrix; this contract defines the shape, not the numbers.
+- A capture request is validated against the profile before any device command. A
+  refusal carries a typed reason (`unsupported-channel-count`, `unsupported-rate`,
+  `no-analog`, `trigger-unsupported`, `record-unsupported`, ...).
+- Rate tiers may depend on the enabled channel count, analog groups and the negotiated
+  link rate. The UI reads the same profile and renders only offered values.
+- Analog groups are hardware-defined ranges (e.g. ±15 V); vertical scale and offset are
+  view state, not profile capability.
+
+### 3.3 Device commands and framing
+
+The device layer exposes commands (`open`, `configure`, `run`, `stop`, `updateTrigger`,
+`setTestMode`, `console`) and a sample sink. Every command checks its reply before the
+next step. A short USB packet is delivered at its actual length and never implies a gap;
+a real dropout is reported through the gap API.
+
+- Samples are little-endian, `ceil(channels/8)` bytes per digital sample (plus analog
+  group bytes when present). A sample carried across a transfer boundary is completed
+  before matching or storing.
+- The frame codec owns the run header/trailer, timestamps/counters and error flags.
+  Timestamps reconstruct absolute sample positions; a discontinuity becomes a `GapSpan`
+  with a reason, never a silent splice.
+- `DeviceProfile` test modes are diagnostic only; they are not a supported analog voltage
+  source unless the profile says so.
+
+### 3.4 SimDriver
+
+`SimDriver` implements the same commands and profile shape without USB. It must be
+deterministic for a seed and support fault injection: short packets, stalled transfers,
+dropouts, disconnects, malformed headers, slow handshakes and quota errors. Contract and
+UI tests use it; hardware tests remain separate.
+
+## 4. SignalStore and time base
+
+### 4.1 One timeline
+
+- A **signal** is a digital channel or an analog channel. Signals belong to **groups**;
+  each group has one sample rate and one position space.
+- A position is a **float64 sample index** at the group's rate. The canonical timeline is
+  seconds; `Timeline` maps `positionToSeconds(group, pos)` and
+  `secondsToPosition(group, s)`. Removing the 2^31-sample ceiling is deliberate; the
+  practical limit is memory/OPFS, and positions above 2^53 are unsupported.
+- There is exactly one display origin, `displayOrigin()` in seconds: T when the current
+  wave has a trigger, otherwise the sweep start, otherwise the held wave's T. Every
+  readout, axis, cursor, debug/test output and export uses it. No presentation code
+  reads a raw trigger index.
+- Multi-rate groups are aligned by time, not by index. Digital edges are preserved;
+  analog queries return min/max/mean for the covered interval.
+- A column has a status: `ok`, `pending` (data not yet delivered) or `gap` (unknown).
+  `pending` is not a gap; `gap` is not idle. Edges never cross a gap.
+
+### 4.2 SignalStore contract
+
+```ts
+interface SignalStore {
+  readonly groups: readonly SignalGroup[];
+  readonly signals: readonly SignalInfo[];
+  readonly retainedFrom: number;         // canonical seconds; the display window's left edge
+  readonly newest: Readonly<Record<string, SamplePos>>; // per group
+  append(groupId: string, chunk: Uint8Array, start: SamplePos): void;
+  dropBefore(seconds: number): void;
+  query(signal: SignalId, start: SamplePos, end: SamplePos, bins: number): SignalColumns;
+  sample(signal: SignalId, position: SamplePos): number | null; // digital 0/1, analog volts
+  edges(signal: SignalId, start: SamplePos, end: SamplePos): Float64Array;
+  noteGap(gap: GapSpan): void;
+  gaps(): readonly GapSpan[];
+  record: RecordController;
+}
+```
+
+Supporting types:
+
+```ts
+type SamplePos = number;              // float64 sample index at the group's rate
+type SignalId = string;               // stable, e.g. "d0" or "a1"
+type GapReason = 'dropout' | 'overrun' | 'suspend' | 'record-gap' | 'import-gap' | 'store-full';
+
+interface SignalGroup {
+  id: string;
+  kind: 'digital' | 'analog';
+  start: number;
+  channels: number;
+  rateHz: number;
+}
+
+interface SignalInfo {
+  id: SignalId;
+  group: string;
+  index: number;
+  kind: 'digital' | 'analog';
+  name: string;
+}
+
+interface SignalColumns {
+  signal: SignalId;
+  start: SamplePos;
+  end: SamplePos;
+  bins: number;
+  status: Uint8Array;                 // 0 ok, 1 pending, 2 gap
+  digital?: { low: Uint8Array; high: Uint8Array; edge: Uint8Array; packed: Uint8Array };
+  analog?: { min: Float32Array; max: Float32Array; mean: Float32Array };
+}
+
+interface GapSpan { group: string; signal?: SignalId; start: SamplePos; end: SamplePos; reason: GapReason }
+
+interface RecordController {
+  readonly state: 'off' | 'armed' | 'recording' | 'paused' | 'exporting' | 'error' | 'full';
+  readonly bytes: number;
+  arm(): void;
+  pause(): Promise<void>;
+  resume(): Promise<void>;
+  close(): Promise<void>;
+  export(): Promise<void>;
+}
+```
+
+- `query` is O(bins), never O(samples), for digital and analog. The pyramid is built on
+  append; a bounded provisional envelope may be used when a builder is behind. Analog
+  samples are stored as calibrated volts; the raw codes and calibration id stay in the
+  record manifest.
+- Digital columns carry low/high/edge/pending; analog columns carry min/max/mean and
+  status. `packed` is laid out for direct upload as a WebGL2 texture.
+- `GapSpan` carries `reason` (`dropout`, `overrun`, `suspend`, `record-gap`, `import-gap`,
+  `store-full`) and a range. Overlaps merge; `gaps()` and `query` agree.
+- `dropBefore` drops every group before a canonical time, so multi-rate groups stay
+  aligned; the record is never affected. The quantum is a store detail, not a time-base
+  change.
+
+### 4.3 Retention and recording are orthogonal
+
+- **Retention** is the display window in RAM: a finite capture length, or the rolling
+  Loop window. It is bounded by a per-profile budget and a hard store ceiling; exceeding
+  it yields a typed `store-full` state, not an unhandled append.
+- **Record** is an archive in OPFS: chunked, checksummed, crash-recoverable, independent
+  of the display window. A Loop can roll in RAM while recording every delivered sample.
+- Record states: `off`, `armed`, `recording`, `paused`, `exporting`, `error`, `full`.
+  A record manifest lists chunks, byte ranges, absolute time ranges, gaps, profile and
+  calibration; an interrupted record is recoverable.
+- Export writes `.lwcap` v2 (signals, rates, gaps, trigger metadata, profile id) through
+  the save picker/share/download. Raw CSV and VCD/FST are optional exporters; the format
+  header states which signals/rates/gaps it can represent.
+
+### 4.4 Memory and quota
+
+- RAM budget and OPFS quota are separate. The UI shows retention bytes, record bytes and
+  the remaining quota; a refusal is typed (`memory`, `quota`, `record-full`).
+- Eviction never changes absolute positions or the record. A forced trim is a visible
+  state and never silently changes the trigger lock.
+- OPFS writes are chunked and asynchronous; the acquisition/display path never waits on
+  storage. A storage failure marks the record `error` and keeps acquisition running.
+
+### 4.5 Import
+
+- Import parses in a worker with size/structure limits; untrusted files never execute.
+- `.sr`/`.lwcap` and waveform files map to signals and groups; missing rates are inferred
+  only when the file states them, otherwise the import asks or refuses.
+- Imported data is record-tier (immutable) and can be viewed/decoded but not appended to.
+
+## 5. Trigger, acquisition, recording and view
+
+### 5.1 TriggerPlan
+
+A single compiled plan drives device and host execution:
+
+```ts
+interface TriggerPlan {
+  source: 'digital' | 'analog' | 'mixed';
+  conditions: readonly TriggerCondition[]; // AND on one complete sample
+  execution: 'device' | 'host';
+  preTrigger: { percent: number; seconds: number; capBytes: number };
+  budget: TriggerBudget;
+  loop?: { seconds: number; anchor: 'trigger' | 'free' };
+  compiledAt: number;
+}
+```
+
+```ts
+// SignalId/SamplePos: §4.2; ChannelCount/LinkRate: §3.2.
+type TriggerCondition =
+  | { kind: 'digital'; signal: SignalId; mode: TriggerKind; level?: 0 | 1 }
+  | { kind: 'analog'; signal: SignalId; mode: AnalogTriggerKind; volts: number; hysteresis?: number };
+
+type TriggerBudget =
+  | { kind: 'samples'; value: number }
+  | { kind: 'time'; value: number }
+  | { kind: 'unlimited' };
+```
+
+- Digital conditions: level, rising, falling, edge, high, low. Analog conditions: rising
+  or falling crossing of a level, optional hysteresis, one or more analog groups when the
+  profile supports it. Conditions are ANDed. (P0/P1 here are trigger phases; platform
+  rules are P1–P10 in §1.3.)
+- **P0 keeps the single-family rule** (digital *or* analog) to preserve current
+  behaviour. **P1 allows mixed digital + analog** when `profile.trigger.mixed` is true.
+  The UI does not offer mixed conditions on a profile that cannot execute them.
+- `execution` comes from the profile. A host plan runs in `dsp` on complete samples; a
+  device plan is downloaded and its match is reported by the firmware. Both report T in
+  absolute emitted-stream coordinates and use the same pre-trigger/budget rules.
+- `budget.kind='samples'` is expressed on the reference digital group's rate; a
+  mixed/multi-rate plan uses `time` so every group shares one budget.
+- The pre-trigger ring is bounded by `preTrigger.capBytes`, which is also T's position in
+  the Loop window (0% on the left edge). The percentage applies to the requested
+  post-trigger budget for Single/Repeat and to the Loop window for Loop; it is not a
+  percentage of total retained bytes. An early match keeps the total budget; the post
+  trigger span may be longer than the requested split. The UI says "up to".
+- Retune: while waiting, a new plan is recompiled and sent; edge continuity restarts.
+  After a match, edits are pending for the next acquisition unless the profile supports a
+  live detector (analog Loop). A restart is a named transition with a typed reason; it
+  never reuses the user Stop path.
+- Loop: D is the fixed data window, V the user viewport. A digital Lock is one-shot and
+  releases when T leaves retention; an analog detector can re-lock when edges return. The
+  plan owns the anchor, not the UI.
+
+### 5.2 Composite state machine
+
+Four state zones are tracked independently; the UI renders their tuple:
+
+| Zone | States |
+| --- | --- |
+| Connection | `unsupported`, `idle`, `selecting`, `opening`, `claiming`, `handshaking`, `ready`, `busy`, `suspended`, `lost`, `closed` |
+| Acquisition | `idle`, `arming`, `waiting`, `running`, `stopping`, `restarting`, `retrying`, `suspended`, `lost` |
+| Recording | `off`, `armed`, `recording`, `paused`, `exporting`, `error`, `full` |
+| View | `follow`, `fixed`, `triggerLocked` |
+
+- Commands are events (`connect`, `disconnect`, `start`, `stop`, `retune`, `restart`,
+  `pause`, `resume`, `export`, `lost`, `completed`); each returns the next tuple and a
+  declared side-effect list in one pure module.
+- `suspended` freezes acquisition and recording; on resume the link re-handshakes. A
+  device that no longer holds the stream becomes `lost`, never a fake continuation.
+- `mayEdit(feature, context)` is the only capability decision. It returns `allow`,
+  `next`, `restart` or a typed refusal; the UI, host interface and debug surface use it. No local `captureLocked` predicates.
+- A restart is a first-class transition with its own visible phase. It must not tear down
+  the session as a user stop would, and it must not discard a displayed capture silently.
+
+Key transitions (the full table is generated in one pure module):
+
+| From | Event | To |
+| --- | --- | --- |
+| acquisition `idle` | `start` | `arming` |
+| `arming` | device ready, plan waits | `waiting` |
+| `arming` | device ready, free run | `running` |
+| `waiting` | match | `running` |
+| `waiting` / `running` | `stop` | `stopping` |
+| `stopping` | drained | `idle` |
+| `waiting` / `running` | `restart` | `restarting` |
+| `restarting` | re-armed | `arming` |
+| any | page hidden / device suspend | `suspended` |
+| any | device/transport loss | `lost` |
+| record `off` | `arm` | `armed` |
+| record `off` | user starts recording | `recording` |
+| record `armed` | acquisition starts | `recording` |
+| record `recording` | `pause` | `paused` |
+| record `paused` | `resume` | `recording` |
+| record `recording` | acquisition stops / user stops | `exporting` → `off` |
+| record any | quota/IO failure | `error` / `full` |
+| view `follow` | pan/zoom | `fixed` |
+| view `fixed` | Fit | `follow` |
+| view `follow` | trigger match (Loop) | `triggerLocked` |
+| view `fixed` | trigger match (Loop) | `fixed` (the user's view wins) |
+| view `triggerLocked` | lock release | prior policy |
+
+### 5.3 Settings transaction
+
+- `settings` is private to `commitSettings(next, reason)`. The pipeline:
+  clamp/validate against profile/capabilities → carry duration → apply live/pending
+  classification → device acknowledgement for device-side settings → trigger recompile →
+  persist → relayout → render.
+- Panels send field patches, never whole snapshots. A preview gesture writes a draft;
+  the canonical settings change only on commit.
+- A device-side setting is not committed until the device acknowledges it. A refusal
+  leaves the previous value, shows the typed reason and keeps the draft for correction.
+- Every setting has a `settingPolicy`: `live`, `next`, `view` or `preference`, plus a
+  profile capability key. A new field without a policy entry fails the design-contract
+  test.
+
+### 5.4 Session and sweep
+
+- An **acquisition** is one Capture→Stop run. A **sweep** is one device RUN→STOP: Single
+  has one, Repeat one per Interval, Loop one unbounded. Retention is the sweep's kept
+  data; recording is independent.
+- A new session starts FollowLive. A user pan/zoom stores a Fixed interval relative to
+  `displayOrigin`; Fixed survives Repeat waves while it fits retention and otherwise falls
+  back to the mode default, never an automatic Fit.
+- Repeat never shows a vacuum: while the next wave waits or has no data at the viewport,
+  the previous completed wave (with its own T) is displayed as a composite layer. A miss
+  ends the wave as completed and the next Interval retries.
+- One `DisplayState` (`wave`, `front`, `composite`, `showingFront`, `heldTrigger`) has
+  named transitions; one `endSessionDisplay(reason)` is used by stop, import, device
+  loss, restart and pending-repeat cancel.
+
+### 5.5 View state and workers
+
+- The session owns one `ViewState { policy, anchor, offsets, follow }`; the Loop lock is a
+  policy variant. Gestures, Fit, overview, trigger match/release and session adoption
+  emit one view event into one transition function.
+- With `crossOriginIsolated`, the pipeline ring and DSP/decode work use a
+  `SharedArrayBuffer`; without it, use transferable buffers and cancellation by worker
+  restart. The capability is exposed by `src/platform`, never sniffed.
+
+## 6. Panels and view models
+
+- `PanelId` is declared once: `device`, `acquire`, `trigger`, `measure`, `analyze`,
+  `record`, `settings`, `diagnostics`. Each panel owns exactly one host it may clear.
+- **One view model, three presenters.** The same immutable panel view model is rendered by
+  `Docked` (wide mouse/pen), `Sheet` (medium/compact touch) or `Dialog` (modal). The
+  presenter owns placement, dismissal, focus and back; the panel owns content and
+  callbacks.
+- A panel exposes `render(view)` and, if needed, `update(view)` over every field that can
+  change without a rebuild. Missing nodes throw; cached element references are not a
+  second source of truth. View models are presentation-ready; panels do not re-derive
+  armed/capability/formatting values.
+- One `OverlayController` owns the stack of menus, popovers, sheets and dialogs. Opening
+  one closes its transient siblings; Escape/back closes the topmost; focus returns to the
+  invoker by token.
+- The Assistant is not part of the baseline. The same host interface remains available to
+  the debug/test surface only; no toolbar/panel entry ships.
+
+## 7. Persistence and delivery
+
+### 7.1 Persistence tiers
 
 | Tier | Contents | Restored |
 | --- | --- | --- |
-| Workspace | channels, order, capture settings, trigger configuration, bus views, analyzers | on reload |
-| Session / capture | cursors, viewport, active measure, trigger display lock; saved with a capture only if the format carries it | on open/reload only as declared |
-| Preferences | theme, locale, toolbar labels, panel width | on reload, through the preferences store, not the workspace schema |
-| Transient | running progress, hover, open overlays | never |
+| Link/device | selected device, serial, profile id; permissions live in the browser | on reload with `getDevices()` |
+| Workspace | channel/analog layout, names, colors, trigger configuration, decode setup, panel layout | on reload |
+| Record | OPFS chunks, manifest, gaps, trigger metadata, calibration reference | on resume/import |
+| Preferences | theme, locale, density, unit system, touch layout | on reload, separate store |
+| Transient | progress, hover, open overlays, drafts | never |
 
-The workspace schema is declared once as a field table (name, type, default, clamp,
-version, migration); restore, serialize and the pre-paint boot script are derived from
-it. `index.html` must not restate storage keys, schema versions or clamps; the pre-paint
-script consumes constants emitted from the same module at build time. A generated
-round-trip test covers every field.
+- The workspace schema is one field table (name, type, default, clamp, version,
+  migration); restore, serialize and the pre-paint boot script derive from it. No pre-paint
+  script restates keys or clamps.
+- A record manifest is versioned; recovery validates chunk checksums and marks an
+  interrupted record as recoverable, never silently truncated.
+- A saved capture carries profile id, group rates, calibration reference, gaps and trigger
+  metadata so it replays without the device.
 
-## Verification
+### 7.2 Offline and delivery
 
-Review blockers:
+- PWA shell caches only first-party assets; versioned precache, explicit update prompt,
+  no background sync of user data. Offline replay works; acquisition requires the device.
+- T0/T1/T2 hosting per §1.4. T1 is recommended for COOP/COEP and full CSP; T0 ships with
+  the documented limitations; T2 serves isolated PCs from `localhost`.
+- Export uses the save picker/share/download; OPFS is never presented as a user folder.
+- Every runtime asset is staged into `dist/` before the build; the build fails if a
+  vendored Pyodide/decoder or reference capture is missing. A sub-directory deployment
+  builds with `--base`; `file://` is not usable ([MEASURED]). A T0 deployment without
+  COOP/COEP has no `SharedArrayBuffer`; decode cancellation respawns the worker.
 
-- A second assignment to `settings` outside `commitSettings`, or to `busViews` outside
-  its commit/draft path.
-- A derived value stored beside its source (a second armed flag, a second trigger
-  condition list, a second viewport model).
-- A panel that assigns state or reaches `App`/`Device`/`StoreRef` directly.
-- A behaviour test that asserts source text, statement spelling, append order or a token
-  count.
-- A failure that only reaches the console.
-- A persistence field that is not in the tier registry, or a pre-paint script that
-  restates a storage key/version/clamp.
+## 8. Decoding
 
-Verification rules:
+- Decode runs in a worker. The default runtime is first-party TS/WASM decoders; Pyodide
+  is an optional, on-demand extension for stock sigrok decoders. Pyodide's measured cold
+  start is ~870 ms (13–46 ms warm), which the phone default must not pay.
+- The worker receives edges/gaps and a decode request (decoder id, options, channel map),
+  returns typed annotations and progress, and can be cancelled. With `isolated`, cancel
+  interrupts; without it, the worker is killed and respawned.
+- Decoding is snapshot-based for a running Loop: the result states which window it
+  describes and does not pretend to track every roll. A decode failure is a typed error
+  in the panel, never a traceback.
+- Bus views are display constructs built from signals; they do not change capture
+  channels or trigger conditions. Decode never blocks acquisition.
+- Only shipped decoders run; user-supplied decoder code is out of scope. Licensing and
+  notices are part of the delivery artifact.
 
-- New UI behaviour gets a behavioural test: render the panel into a DOM harness, drive
-  the event, assert the view/DOM and the callback. State machines get table-driven pure
-  tests.
-- Source-text tests (`readFileSync(...).includes(...)`) are not accepted for behaviour.
-  They are allowed only for static contracts that cannot be observed at runtime: storage
-  keys, catalog key presence, attribute names, and the exported control-capability table.
-  They must not assert function-body text, statement spelling, append order or a token
-  count. Declare every allowlisted static assertion next to its reason.
-- `npm test` includes one design-contract test that validates the ownership table and the
-  capability table, and forbids duplicated derivations (for example a second
-  `softwareTrigger` in `CaptureSettings`).
-- Tests are deterministic and offline. Hardware tests live in their own harness and are
-  not part of `npm test`.
-- `npm test` is the aggregate suite; a change to UI behaviour must keep it green, and a
-  new suite must be registered there.
-- `npx tsc --noEmit` and `npm run build` are part of the definition of done.
-- For UI changes, the interface definition of done (viewport widths, themes, locales,
-  reduced motion, keyboard path) is `docs/DESIGN.md` §15.4; this section owns the
-  engineering checks.
+## 9. Security and local trust
 
-## Shipping it as a static site
+**Threat model:** malicious capture/import files, a malicious or compromised device,
+cross-site scripting through imported strings, a compromised dependency/CDN, another tab
+claiming the interface, and accidental data loss. The app is local-first; it does not
+protect a compromised OS or browser.
 
-There is no server-side anything. `npm run build` emits a self-contained `dist/` that any
-static host serves - GitHub Pages, Netlify, S3, `npx serve`, `python3 -m http.server`. The
-"Python" in this project is Pyodide, CPython compiled to WASM running **in the browser**
-for the sigrok decoders; it is vendored into `public/pyodide/` and nothing executes Python
-server-side.
+- **No third-party runtime, no network dependency.** All scripts, WASM and decoders are
+  first-party or vendored build assets; no CDN, analytics, telemetry or remote logging.
+- **CSP.** T1 uses `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' <hashes>;
+  style-src 'self'; style-src-attr 'unsafe-inline'; worker-src 'self' blob:;
+  img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none';
+  frame-ancestors 'none'`. T0 uses the same directives possible in a `<meta>` policy plus
+  a top-level frame check. Inline boot scripts are hashed or moved to files; no `eval` on
+  imported data. The inline-style allowance is limited to dynamic geometry/signal colour
+  values, never untrusted strings.
+- **USB.** Fixed VID/PID filters, user-gesture permission, exclusive claim, no
+  auto-claiming of unknown devices. Device strings are untrusted text and are sanitised
+  before display. A device that claims impossible capabilities is rejected by the
+  profile handshake.
+- **Files.** Imports are untrusted; parse in a worker with size/structure limits; never
+  execute file content; never write outside the chosen export target.
+- **OPFS.** Records stay in the origin's private storage; clearing site data deletes
+  them; the UI explains this. No record bytes leave the device unless the user exports.
+- **Supply chain.** Lockfile, vendored assets, build-time integrity check, license
+  notices; dependency changes follow the security review.
+- **Android.** USB permission is requested by the system; the app does not request
+  unrelated permissions. Background suspension is handled, not bypassed.
+- **Boundary.** Security is self-responsibility for the local machine/network; the app
+  documents what it does and does not protect.
 
-Two things the build has to get right, both of which were broken:
+## 10. Verification and benchmarks
 
-- **Every run-time asset must be in `dist/`.** `public/pyodide/` and `public/decoders/`
-  are gitignored and staged by `npm run vendor`; `reference/data/bin{,120}` live outside
-  `public/` and are copied by the `logicweb:reference-captures` plugin in
-  `vite.config.ts`. That plugin also *checks* all four at `buildStart` and fails the build
-  if any are missing, because the failure mode otherwise is a bundle that looks fine and
-  404s at run time - which is exactly how the Reference buttons shipped broken.
-- **Sub-directory hosting needs `--base`.** Four run-time paths are built from
-  `import.meta.env.BASE_URL` (`/pyodide/`, `/decoders/decoders.zip` in the decode worker,
-  and the two reference captures in `app.ts`). It defaults to `/`, so a domain root needs
-  nothing; for `example.com/logicweb/` build with `vite build --base=/logicweb/`.
-  [MEASURED] with the base set, the app loads, the reference capture opens and the decode
-  worker reaches Pyodide; without it, served from a sub-directory, the page cannot even
-  load its own bundle.
+- **Contract tests** for Profile validation, LinkSession transitions, SignalStore query
+  semantics (including `pending`/`gap` and multi-rate), TriggerPlan compilation, the
+  composite state machine, settings transaction, persistence round-trip and security
+  headers.
+- **SimDriver fault injection:** short packets, stalls, dropouts, malformed frames,
+  disconnects, suspend/resume, quota exhaustion. Fuzz the frame/import parsers.
+- **Behaviour tests** for panels/presenters; no source-text assertions for behaviour. A
+  design-contract test validates the ownership/capability tables, the profile schema and
+  the absence of model branches.
+- **Soak:** a multi-hour Loop with recording enabled, memory/OPFS watch, no unbounded
+  growth. **Device matrix:** confirmed profiles on Windows/Linux/macOS and Android OTG.
+- **Performance:** sustained pan/zoom framerate on a 100M-sample digital capture; open
+  time for a large `.lwcap`; decode annotations/s; link throughput and record throughput;
+  touch frame pacing on a mid-range Android device. Scripts are re-runnable.
+- **Security tests:** CSP violations, third-party request checks, imported-file fuzz,
+  frame-embedding check on T0, OPFS quota handling.
+- **Release gates:** M0 = link/profile/SignalStore digital/trigger/state/docs; M1 = analog
+  first-class, mixed trigger, multi-rate, touch shell, record; M2 = PWA/offline, decode
+  runtime, full matrix, security hardening.
 
-`base: './'` is deliberately **not** used: a relative base resolves against the decode
-worker's own URL (`/assets/`) rather than the document, pointing Pyodide at
-`/assets/pyodide/`.
+## 11. Roadmap
 
-Two limits worth knowing before choosing a host:
+| Milestone | Scope |
+| --- | --- |
+| M0 | Platform probes, LinkSession, DeviceProfile, SignalStore digital, TriggerPlan P0, composite state machine, settings transaction, docs split, SimDriver |
+| M1 | Analog groups as first-class signals, multi-rate timeline, mixed trigger P1, touch shell and presenters, recording/OPFS, measurements/math/FFT |
+| M2 | First-party decode runtime default, Pyodide optional, PWA/offline, security hardening, Android/device matrix, migration completion |
 
-- **`file://` does not work and cannot be made to.** [MEASURED] Chrome blocks ES module
-  scripts from `origin 'null'` even with correct relative paths, and the same applies to
-  the decode worker and Pyodide's `.wasm` fetches. (`file://` *is* a secure context and
-  does expose `navigator.usb` - that part is not the obstacle.)
-- **No COOP/COEP means no `SharedArrayBuffer`**, so decode cancellation kills and respawns
-  the worker instead of interrupting it, costing a Pyodide reload on the next decode
-  (~870 ms against 13-46 ms warm). That is already true in dev and is not a regression
-  from deploying - see `src/decode/NOTES.md`, where this was recorded backwards.
-  WebUSB needs `https` or `localhost` either way.
+The M0/M1/M2 gates are product decisions, not estimates. A feature that is not in the
+current milestone is not merged behind a hidden flag; it waits for its milestone.
 
-## Rules for every builder
+## 12. Rules for every builder
 
 - Check the reply of every device command before trusting what follows.
 - Fail loudly and early. No silent catch blocks.
-- Report what you measured, including misses. A tested wrong hypothesis is progress.
-- UI changes also follow `docs/DESIGN.md`; its feature-admission checklist is part of the
-  review.
+- Report what you measured, including misses.
+- Capabilities come from `DeviceProfile`; no model branches.
+- The capture path is never blocked by display, measurement or storage.
+- Any network behaviour requires a security-contract change (§9).
+- Interface changes follow `docs/DESIGN.md`; update both contracts in the same change.

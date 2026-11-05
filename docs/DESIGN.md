@@ -1,881 +1,655 @@
-# logicweb interface design
+# logicweb MSO - interface design
 
-This document is the interface contract for the browser application. Its shape follows
-HSync's `DESIGN.md`; the rules are logicweb's. It owns what the user sees and does:
-layout, controls, interaction, user-visible lifecycle, visual tokens, copy,
-accessibility and the interface review gate.
+**Status: v2 target.** This document specifies what the user sees and does: layout,
+controls, interaction, visible lifecycle, visual tokens, copy, accessibility and the
+interface review gate. The current code implements the earlier LA-only interface; §17 is
+the migration plan. Interface facts are normative here; engine and state facts are
+normative in `docs/ARCHITECTURE.md`. `src/ui/NOTES.md` is historical measurement
+evidence. A fact lives in exactly one file.
 
-**Document map.** `docs/ARCHITECTURE.md` owns how the system is built and what the engine
-guarantees: module boundaries, trigger/session semantics, state ownership, the settings
-transaction, acquisition lifecycle and capability, the panel/view-model contract,
-persistence and verification. `src/ui/NOTES.md` is historical measurement and
-implementation evidence. A fact is normative in exactly one file; this file links to
-`ARCHITECTURE.md` for engine and state facts, and `ARCHITECTURE.md` links here for
-interface facts. If they conflict, the owning file wins: engine/state in
-`ARCHITECTURE.md`, interface here. When the interface changes, update this file in the
-same change.
+**Document map.** `docs/ARCHITECTURE.md` owns module boundaries, platform/WebUSB
+constraints, LinkSession, DeviceProfile, SignalStore, TriggerPlan, the composite state
+machine, the settings transaction, panel/view-model contracts, persistence, decoding
+runtime, security (C1) and verification. This file owns the window/pointer model, shell,
+channel rows, plot, touch grammar, trigger and acquisition UI, presenters, status,
+visual system, copy and the UI review gate. C3 (migration) is §17 here; split it into
+`docs/MIGRATION.md` when it outgrows this document.
 
-The current code does not yet satisfy every rule in this file (see §16). The rules are
-the target; the deviation list is the migration queue.
+## 1. Principles and scope
 
-## 1. Principles
-
-- **One primary action.** The top bar's Capture/Stop button is the only control that
-  starts or stops an acquisition. Panels configure; they never acquire.
-- **One setting, one home.** A value has one editor. Elsewhere it may be shown read-only,
-  or changed by direct manipulation of the same value (dragging a trigger line), but a
-  second editor is a bug.
-- **Every control declares when it applies.** Each editable value is exactly one of
-  *live* (affects the running acquisition now), *next* (affects the next acquisition),
-  *view* (display only) or *workspace* (persisted preference). The UI must show which,
-  especially while a capture runs.
-- **Never silently reconfigure a running acquisition.** A change either applies live, is
-  staged for the next acquisition, or is a named restart that the interface announces.
-  No control may stop or restart a capture as an unexplained side effect.
+- **One instrument, one time axis.** Digital, analog and decoded signals share one
+  timeline and one origin. A second axis is a bug.
+- **Acquisition first.** Display, measurement, decoding and recording never block the
+  capture path. A busy UI must not cost samples.
+- **One primary action.** Capture/Stop is the only control that starts or stops an
+  acquisition. It has exactly one instance per layout: top bar on wide, bottom action bar
+  on compact.
+- **One setting, one home.** A value has one editor. Elsewhere it may be read-only or
+  directly manipulated; it never has a second editor.
+- **Every control declares when it applies.** Live / next acquisition / view / preference.
+  The UI shows which, especially while a capture or record runs.
+- **Never silently reconfigure.** A change applies live, is staged, or is a named restart
+  the interface announces. A running capture is never a hidden side effect.
 - **State, not prose.** A lifecycle state is a chip, a badge, a disabled control or a
-  short status line. A paragraph is not a state machine. Long explanations belong in
-  tooltips and documentation.
-- **One interaction mechanism per job.** Choose among direct manipulation, row slot,
-  popover, dialog, menu and panel; do not expose the same job through three of them.
-- **One source of truth.** Derived values are computed, never stored beside their
-  source. A view model is a snapshot; a panel never reads the device, store or App
-  directly.
-- **One time origin.** When a capture has a trigger, T is 0 s and pre-trigger time is
-  negative. Without a trigger, the origin is the sweep start. Every axis, cursor,
-  readout and annotation uses that origin.
-- **Colour has one job.** Channel colours identify channels. Primary violet marks
-  actions, focus and selection. Amber marks an armed trigger. Red marks errors and
-  Stop. No colour is decorative.
-- **Flat, tokenised, measured.** Surfaces are flat; hierarchy comes from fill, weight
-  and spacing. Components use tokens from §13, never raw colours or ad-hoc sizes.
-- **Failures are visible.** Every asynchronous action ends in a visible status or an
-  error in the status bar. No silent `catch`, no console-only failure.
-- **Tests describe behaviour.** UI tests assert rendered state, view models and
-  transitions. A test that greps a source file freezes today's structure and is not an
-  acceptable test of a UI behaviour.
-
-The state ownership, settings transaction, acquisition lifecycle, panel/view-model,
-persistence and verification rules behind these principles are normative in
-`docs/ARCHITECTURE.md` (`## UI runtime contract`, `## Verification`). This file owns how
-they look and how the user experiences them.
+  short status line. Long explanations belong in tooltips and documentation.
+- **One interaction mechanism per job.** Direct manipulation, row slot, popover, sheet,
+  dialog or panel; not three of them for the same job.
+- **Capability-driven.** Every offered value/action is validated against the
+  `DeviceProfile` and the current platform; an unsupported action is disabled with the
+  typed reason, never silently absent or failing later.
+- **Touch and mouse are peers.** Every action is reachable on a phone with one hand; every
+  gesture has a menu or keyboard equivalent. No hover-only information.
+- **One source of truth.** Derived values are computed; view models are presentation-ready
+  snapshots; panels do not reach App/Device/Store.
+- **One time origin.** `displayOrigin()` is T when the current wave has a trigger, else
+  the sweep start, else the held wave's T. All axes/readouts/measurements use it.
+- **Colour has one job.** Channel/analog colours identify signals. Primary marks actions,
+  focus and selection. Amber marks an armed/waiting trigger. Red marks errors and Stop.
+- **Flat, tokenised, measured.** Surfaces are flat; tokens from §14; no raw component
+  colours/sizes; no per-theme component override blocks.
+- **Failures are visible.** Every async action ends in a state or a typed error in the
+  status bar; nothing only reaches the console.
+- **Tests describe behaviour.** UI tests assert view models/DOM/transitions, not source
+  text.
 
 ## 2. Vocabulary
 
 | Term | Meaning |
 | --- | --- |
-| **Acquisition** | One Capture → Stop run. It owns a session, one or more sweeps and the view policy. |
-| **Sweep** | One device RUN → STOP. Single has one; Repeat has one per Interval; Loop has one unbounded sweep. |
-| **Retention** | The sample range a sweep keeps: the Duration, or the Loop window. |
-| **Viewport** | The visible sample range. Its policy is FollowLive, Fixed or TriggerLocked. |
-| **Cursor** | A user-placed time marker used for readouts and distance/edge measurements. |
-| **Bus** | A parallel view built from channel bits (including an ADC group). Not a device channel. |
-| **Analyzer** | A protocol decoder attached to channels. |
-| **Workspace** | Persisted user state in local storage (channels, settings, buses, analyzers); theme, locale and panel width are preferences in a separate tier. |
-| **Capture file** | A saved `.lwcap` or imported `.sr`; data plus its channel names, not the workspace. |
-| **T** | The trigger sample. T = 0 s when present; otherwise the sweep start is 0 s. |
+| **Acquisition** | One Capture→Stop run. It owns a session, sweeps, retention and display. |
+| **Sweep** | One device RUN→STOP. Single one; Repeat one per Interval; Loop unbounded. |
+| **Retention** | The display window kept in RAM: a finite duration or the Loop window. |
+| **Record** | An archive in OPFS, independent of retention; may run while Loop rolls. |
+| **Viewport** | The visible time range; policy FollowLive, Fixed or TriggerLocked. |
+| **Signal / channel** | A digital channel (D0…) or an analog channel (A0…). |
+| **Group** | Signals sharing one sample rate and position space. |
+| **Bus** | A display construct built from signal bits; not a device channel. |
+| **Analyzer / Decoder** | An attached protocol decoder instance / its protocol implementation. |
+| **Profile** | The `DeviceProfile` that declares a device's capabilities. |
+| **Link** | The USB session; its state is separate from acquisition/record/view. |
+| **T** | The trigger sample; 0 s. Without a trigger the sweep start is 0 s. |
+| **Pointer class** | Mouse, touch, pen or keyboard; the active input grammar. |
+| **Window class** | Wide, Medium or Compact; the layout grammar. |
 
-## 3. Layout
+## 3. Layout and window classes
 
 ```
-┌ top bar ─────────────────────────────────────────────────────────────────────┐
-│ [Device] [Capture/Stop] │ [Open] [Save] │ [Fit] [Fullscreen] │ [Panel] [Settings] │
-├───────────────────────────────────────────────┬──────────────────────────────┤
-│ overview strip (whole capture / loop window)  │ side panel                    │
-├ label column ┬ plot: ruler + rows ────────────┤ one of:                       │
-│ D0  ◇ trigger│ waveform / analog / bus / lanes│   Device                      │
-│ D1  ◇ trigger│ annotations / cursors / T       │   Analyzers                   │
-│ …            │                                 │   Assistant                   │
-├──────────────┴─────────────────────────────────┴──────────────────────────────┤
-│ status bar: state · samples · duration · view · cursor        error / progress │
-└───────────────────────────────────────────────────────────────────────────────┘
+┌ shell ───────────────────────────────────────────────────────────────────────┐
+│ [Device] [Capture ▾] │ [Open] [Save] │ [Fit] [Panel] [Settings]              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ overview strip (retention / record ranges, viewport frame)                    │
+├ label column ┬ plot: ruler + grouped rows ────────────────┬ presenter ───────┤
+│ D0  ◇ trigger│ digital / analog / math / bus / lanes      │ Docked           │
+│ A0  ◇ trigger│ annotations / cursors / T / record band   │ or Sheet/Dialog  │
+│ …            │                                           │                  │
+├──────────────┴───────────────────────────────────────────┴──────────────────┤
+│ status: link · capture · trigger · record · samples/time   timebase · notice │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-| Region | Owns | Must not |
+**Budgets (merge gates):** at most 8 top-bar commands; at most 4 sections per panel;
+at most 2 inline actions per row; exactly one Capture/Stop instance per layout; one
+presenter and one overlay open at a time. A new command/control must replace one, move
+into a menu/section, or wait for a milestone.
+
+### 3.1 Window classes
+
+| Class | Width | Layout |
 | --- | --- | --- |
-| Top bar | device connection, Capture/Stop, file I/O, view fit/fullscreen, panel and settings entry | acquisition settings, trigger conditions, measurements |
-| Label column | channel identity, trigger slot, row order/height, analyzer lanes, bus row entry | global settings |
-| Plot | overview, ruler, waveforms, analog scope, annotations, cursors, T marker, viewport gestures | acquisition configuration |
-| Side panel | the one active panel's settings and readouts | the primary Capture action |
-| Status bar | acquisition state, counts, active readout, errors, progress | controls that change acquisition settings |
+| Wide | ≥ 1000 px | Docked presenter column; toolbar icon + label; plot keeps ≥ 480 px |
+| Medium | 760–999 px | Docked presenter ≥ 280 px; toolbar icon + label; plot ≥ 480 px |
+| Compact | < 760 px | Presenter is a bottom sheet (or full-height sheet for complex panels); top bar compacts; a bottom action bar holds Capture; labels 104 px; plot keeps ≥ 240 px (rows scroll horizontally below that) |
 
-**Dimensions** (CSS px; chrome values are theme-independent, from `style.css` and
-`metrics.ts`): top bar 57 content height (auto if labels wrap); axis 30; overview 56;
-status 40; label column 128 (104 below 760 px); channel strip 5; side panel 296 default,
-240–560 by drag; resizer 6 hit width.
+- The page never scrolls horizontally. Rows may scroll horizontally only when their
+  minimum width cannot shrink further.
+- Compact is not a shrunken desktop: controls reflow, labels truncate, secondary actions
+  move into overflow menus, and the primary action moves to the bottom action bar.
+- Safe areas: `env(safe-area-inset-*)` on the shell, bottom bar and sheets. The bottom bar
+  sits above the system navigation area.
+- Orientation: portrait and landscape are both supported; the sheet height is capped at
+  `min(72dvh, viewport − 96px)` and can be dragged between peek and full.
+- A persisted pane width is clamped so the other pane keeps its minimum (§15).
 
-**Budgets.** These are merge gates, not suggestions:
+### 3.2 Pointer classes
 
-- Top bar: at most **8** top-level controls. A new command must replace one, move into a
-  menu, or live inside a panel.
-- Side panel: at most **4** sections per panel. Group or collapse before adding a fifth.
-- Channel row: at most **2** inline controls (the trigger slot and the row entry). Every
-  other per-channel action belongs in the editor popover.
-- One overlay open at a time (menu, popover, dialog or drawer).
-- One active side panel at a time.
+| Class | Grammar |
+| --- | --- |
+| Mouse | Hover readout, wheel scroll/zoom, drag pan, double-click cursor, right-click context |
+| Touch | Tap select, drag pan, two-finger pinch zoom, two-finger drag pan, long-press context, 48 px targets |
+| Pen | Hover readout, barrel-button context, drag pan, pinch only when a second touch is present |
+| Keyboard | Every action reachable by a shortcut or a focusable control; arrows/Enter/Esc |
 
-**Responsive.** Three breakpoints, each with a named rule:
+The active class is detected from the event (`pointerType`), not from the device; a
+hybrid laptop switches grammars per input. Touch layouts never require hover and never
+show a control smaller than 48×48 CSS px (24 px for an in-row trigger slot with a 48 px
+hit area).
 
-| Width | Panel | Label column | Toolbar |
-| --- | --- | --- | --- |
-| ≥ 1000 px | Docked column, 296 px default, 240–560 by drag; plot keeps at least 480 px | 128 px | Icon + label, one row |
-| 760–999 px | Docked column, at least 240 px; persisted width clamped so the plot keeps 480 px | 128 px | Icon + label, one row |
-| < 760 px | Full-height drawer over the plot, with a scrim and an explicit Close; no resizer; width min(296, viewport − 48) | 104 px | Icon only, one row at 360 px |
+### 3.3 Presenters
 
-The page never scrolls horizontally. Toolbar labels are a workspace preference; below
-400 px only icons remain, and the compact rules must win by construction, not by a
-specificity accident. A persisted width may never exceed viewport minus the minimum for
-the other pane.
+One panel view model is rendered by one of three presenters:
 
-**Global state stays visible.** Acquisition and trigger state are not owned by a panel.
-With the side panel closed, the top bar's capture summary and the status bar still show
-whether a capture runs, its mode/duration and the trigger state. A panel mode must never
-be the only place a user can see that a trigger is armed or waiting.
+| Presenter | When | Behaviour |
+| --- | --- | --- |
+| Docked | Wide/Medium with mouse or pen | Column beside the plot, resizable; close button; panel switcher in the toolbar. |
+| Sheet | Compact, or Medium touch | Bottom sheet over the plot, scrim, drag handle, Close and back; one sheet at a time; height persists per panel. |
+| Dialog | A destructive/complex confirmation, or a panel that must block the plot | Centred modal; focus trap; Esc/back/Close; no nested dialogs. |
 
-## 4. Top bar
+- The presenter owns placement, dismissal and focus; the panel owns content and callbacks.
+  The same panel view model is used by all three.
+- A sheet never opens a second sheet; it opens a dialog or a one-level menu.
+- Android back closes the topmost overlay, then the sheet; if none is open it is left to
+  the browser (never trapped).
+- The panel switcher is the only way to change panels. It has one entry per layout:
+  toolbar on wide/medium, a "Panels" control in the bottom bar on compact.
 
-Target control order (left to right):
+## 4. Shell and primary action
+
+Target top bar, left to right (≤ 8 commands):
 
 | Control | Appearance | Behaviour |
 | --- | --- | --- |
-| Device | Icon + short label; a dot/state tint when connected | Shows the connected device name and opens the device menu: connect/reconnect, permission state, disconnect. Disabled when WebUSB is unavailable. |
-| Capture / Stop | Primary split button: Capture/Stop plus a chevron; the label or adjacent summary names the mode and duration (`Single · 10 ms`, `Loop · 1.0 s`) | The only start/stop action. The chevron chooses Single / Repeat / Loop; the panel keeps the mode's duration/interval/window details and shows the chosen mode read-only. While stopping the button is disabled, except that a pending automatic arm may be cancelled. It is disabled with the same `canRun` guard for click, Space, assistant and debug; connect never happens through it. |
-| Open | Icon + label | Opens `.sr`/`.lwcap`; stops a running acquisition first, after confirmation if data would be lost. |
-| Save | Icon + label | Saves the displayed capture as `.lwcap`. Disabled without samples. |
-| Fit | Icon + label | Fits the viewport to the current retention window; `F` does the same. Double-clicking the plot adds a cursor, not a fit. |
-| Fullscreen | Toggle icon | View-only. `aria-pressed` reflects the state. |
-| Panel | Toggle icon; opens the last active tab | Shows or hides the side panel. It does not choose a tab by itself. |
-| Settings | Icon | Opens the settings menu/page: language, theme, toolbar labels, shortcuts, diagnostics. |
+| Device | Icon + short label; connected tint | Opens the Link panel: connect/reconnect, serial, profile, link rate, busy/lost state. Disabled when WebUSB is unsupported. |
+| Capture / Stop | Primary split button; label/summary names mode and retention (`Single · 10 ms`, `Loop · 1.0 s`, `Record`) | The only start/stop action. Chevron: Single, Repeat, Loop, Autoset. Disabled with the same `canRun` guard for click, keyboard, host interface and debug. |
+| Open | Icon + label | Imports a capture; stops a running acquisition after confirmation if data would be lost. |
+| Save / Export | Icon + label | Saves the displayed capture or exports the record; opens the export sheet. Disabled without data. |
+| Fit | Icon + label | Fits the viewport to retention; `F`. |
+| Panel | Icon + label | Shows/hides the presenter and opens the panel switcher. |
+| Settings | Icon | App preferences: theme, locale, density, units, shortcuts, about/diagnostics. |
+| — | — | No Assistant, Language, Theme or fullscreen as top-level commands; they live in Settings or the compact overflow. |
 
-Rules:
+Fullscreen, language, theme, density and shortcuts live in Settings or the compact
+overflow; they never take a top-bar slot.
 
-- The transport has exactly two actions, **Capture** and **Stop**, plus a non-interactive
-  Stopping state. Every activation path (click, `Space`, assistant, debug) goes through
-  the same `canRun` guard, so the input method never changes the effect. Connect is the
-  Device control's job only.
-- The primary action must name what it will run. Hiding the side panel must not hide the
-  mode or duration; the split button's summary and the Start tooltip carry them.
-- A preference (language, theme, toolbar density, shortcuts) is **not** a top-level
-  command. It lives in Settings. A top-level toggle is allowed only for a view action
-  with an on/off state (fullscreen, panel).
-- The Assistant is a side-panel tab, not a second toolbar button. The panel switcher is
-  the only way to choose a tab.
-- The top bar may show read-only summaries in button labels (device name, capture mode,
-  trigger summary) but never becomes an acquisition-settings editor.
-- Disabled commands keep their place and explain themselves in a tooltip; they do not
-  disappear. The control that is unavailable on a phone (fullscreen) is disabled, not
-  hidden.
-- A control titled "Toggle" must toggle. A three-way or list choice is a menu and says
-  so (chevron, checked items).
+**Compact bottom action bar:** one Capture/Stop split button, a Panels control and an
+overflow menu (Open/Save/Fit/Settings). It has no duplicate Capture; the top bar on compact
+shows Device and status only. The bar respects safe areas and stays reachable one-handed.
 
-Current deviation: the bar has 11 commands (Assistant, Language and Theme are top-level;
-the sidebar menu duplicates the assistant entry). See §16.
+**Capture split menu:**
 
-## 5. Label column and channel rows
+- Single: one sweep; duration or Unlimited; retention only.
+- Repeat: one sweep per Interval; retention per wave; the previous wave is held when the
+  next is waiting.
+- Loop: one unbounded sweep; retention window L; recording may run independently.
+- Autoset: a Capture variant that chooses a valid timebase and analog range for the
+  current signals, then captures once. It never changes decoder/trigger configuration
+  silently; the applied values are shown before start.
 
-A digital row, top to bottom, is:
+**Autoset and recording:**
 
-1. A 5 px channel-colour strip.
-2. The channel tag (`D0`), the editable name, and the trigger slot at the right.
-3. Zero or more analyzer lanes, each named after its analyzer.
-4. Bus rows and ADC rows as separate rows above the digital channels, with the same
-   label structure and their own entry control.
+- Recording is a toggle in the Capture menu and a control in the Record panel; both
+  dispatch the same command, not two states. It is disabled with a typed reason when the
+  profile or OPFS cannot record.
+- A record can start/stop independently of the acquisition; stopping the acquisition
+  pauses the record and offers "Finish record".
+- No control starts two acquisitions. A second Capture click while running is Stop, never
+  "start another".
 
-Interactions:
+## 5. Channel rows and analog signals
 
-| Gesture | Result |
-| --- | --- |
-| Click the trigger slot | Opens the condition menu for that channel: None, Rising, Falling, Any edge, High, Low. The current mode is checked. |
-| Double-click the name | Opens the name editor for that channel: the name field and a reset-to-default action. Enter commits; Esc or an outside click discards the draft. |
-| Drag the row's bottom edge | Sets that row's height in whole pixels, bounded. Double-click the edge restores the default. |
-| Drag a row by its label | Reorders display rows; capture channel indices do not change. |
-| Click a bus row's entry | Opens the bus editor. An ADC row is configured by its Analog button in Device; its scope controls are on the row. |
-| Click an analyzer lane's remove button | Detaches that analyzer. |
+Rows are grouped: digital groups, analog groups, math/FFT, buses, then decoder lanes.
+Every row is one horizontal band aligned with the plot; the label and plot halves share
+one anatomy (band or inset card, one separator token).
 
-Rules:
+### 5.1 Digital rows
 
-- The **trigger slot is the only editor for a digital condition**. The Global trigger
-  panel may list and remove conditions; it must not offer a second mode editor.
-- The ADC row's trigger button is the only editor for an analog condition (slope and
-  level). The draggable trigger line on the plot edits the same value; it is an
-  alternate input, not a second home.
-- Configured conditions are neutral; the selected, enabled source is the only bright
-  one. Switching source never makes the other family look armed.
-- Name and colour are channel identity. Colour is not editable in the row; a custom
-  colour picker, if restored, belongs in the channel editor as an explicit identity
-  action.
-- A row's inline controls never include destructive actions. Destructive actions live
-  in the editor with a labelled button.
-- **One row anatomy across the label/plot seam.** A row is either a full-bleed band with
-  one separator token, or a card inset on both sides; it is never a card on the label
-  side and a band on the plot side. Row hover, selection, trigger-armed state and channel
-  colour are painted from the same state on both halves. Separator thickness/colour and
-  row pitch come from one shared token read by CSS and canvas.
+- 5 px signal-colour strip; `D0` tag; editable name; trigger slot at the right; decoder
+  lanes below; row height handle.
+- Interactions: click trigger slot → condition menu; double-click name → name editor;
+  drag label → reorder; drag bottom edge (mouse/pen) or row menu (touch) → height; tap
+  decoder lane remove.
+- A row's inline controls: trigger slot and row entry (settings/gear), at most two.
+- Touch: the whole row is 48 px minimum; the trigger slot has a 48 px hit area even when
+  its glyph is 24 px.
 
-## 6. Plot, overview and time
+### 5.2 Analog rows (first-class)
 
-### 6.1 Overview strip
+Analog channels are not bus rows. Each analog signal has a row with:
 
-- Shows the whole capture, or the fixed Loop data window D while a Loop runs. It never
-  follows the retained length in Loop; its scale, ticks and viewport frame are stable.
-- While locked, its true start is T − f·L, so the 64-sample front-drop residue cannot
-  shift it; in free run it shows the newest window. The density rolls inside it.
-- A manual pan/zoom does not pause the roll: the chosen viewport keeps its coordinates in
-  D, and each period-aligned roll replaces the samples under it, so a sub-window such as
-  30+5 µs stays at 30+5 µs while its waveform updates in place.
-- Click centres the viewport; drag pans; wheel zooms. A gesture sets the view policy to
-  Fixed (except under a trigger lock, where it moves only V inside D).
-- The viewport is drawn as a 1.5 px frame; the trigger origin and the current view are
-  legible without colour alone.
+- Signal colour strip; `A0` tag; editable name; probe/range chip; `V/div`; zero marker;
+  overload badge; trigger slot. The range/V-div/zero/overload are readouts; the only row
+  actions are the trigger slot and the row entry (editor). Dragging the ruler is direct
+  manipulation of the same values, not a third action.
+- **Range is hardware, scale is view.** Range (e.g. ±1 V, ±15 V) and coupling/attenuation
+  are probe settings in the channel editor and require a profile capability. `V/div` and
+  zero position are view state and can be changed without affecting the device.
+- The row's right ruler carries the graticule, `V/div` and the trigger level. Dragging
+  the trigger line edits the same analog condition as the editor; it is not a second
+  trigger.
+- An overload badge (amber/red, with text) appears when the ADC clips; it never auto-ranges
+  silently. Autoset may choose a new range once, with the change shown.
+- The analog trace uses the channel colour; the grid is a shared graticule token; 0 V is
+  a solid line, other divisions dashed.
+- No analog row exists without a profile analog group; the panel says why the control is
+  disabled.
 
-### 6.2 Ruler and time
+### 5.3 Buses, math and decoder lanes
 
-- The ruler is sticky. Major ticks carry values; minor ticks do not. The time unit is
-  shown once, at the origin or the last tick.
-- With a trigger, the origin is T and the label says so; pre-trigger time is negative.
-- Without a trigger, the origin is the sweep start.
-- During a held Repeat front, the origin is the held wave's T, not the running wave's
-  trigger. All readouts use the same origin; the single accessor and its held-front test
-  are specified in `docs/ARCHITECTURE.md` (`UI runtime contract` → State ownership).
-- The trigger line is dashed and labelled with its time; T is a distinct marker. They
-  are not the same object and must not be confused.
-- Zoom is bounded by the retention window; panning cannot leave the retention window.
-  A Fixed viewport that no longer fits falls back to the mode default, never to a
-  silent Fit.
+- A bus row is a display construct built from signal bits; its editor owns wiring, clock,
+  encoding, style, height and hide-sources. The row shows status and one edit entry.
+- Math/FFT rows are derived signals (A+B, A−B, ×, FFT magnitude/phase, etc.). Their
+  sources are signals, not device channels; they have no trigger slot. Math/FFT runs on
+  the visible retention window (or a selected window), never on an unbounded capture.
+- Decoder lanes sit under the signal that carries them; the analyzer label, status and
+  remove action are in the row. Decoding follows the retention window and states whether
+  it is a snapshot.
+- A bus/decoder never changes capture channels or trigger conditions.
 
-### 6.3 Pointer grammar
+### 5.4 Row height and groups
 
-The plot, the time axis and the overview strip share one grammar; only the object under
-the pointer changes what a gesture acts on.
+- Wide: digital rows 26–34 px, analog 80–240 px, lane rows 18–26 px; compact touch:
+  digital 48 px, analog 96–240 px, lanes 32 px.
+- Row height is per-channel view/workspace state; double-click/row menu restores the
+  default. Group headers are 32 px (compact 40 px) and collapse their rows.
+- Group headers show the group's rate and channel range; an analog group shows its
+  hardware range and resolution.
+- Reordering never changes signal identity or capture indices.
 
-| Input | Plot | Time axis | Overview | Keyboard twin |
+## 6. Time, plot, overview and measurements
+
+### 6.1 One timeline
+
+- The ruler is sticky and shows time relative to `displayOrigin()`. T is labelled; time
+  before T is negative. The unit appears once per axis.
+- Multi-rate groups share the time axis; group headers show rates. A digital edge is drawn
+  at its exact position; an analog group is resampled by time for the viewport, never by
+  raw index.
+- The trigger marker and T marker are distinct: the trigger marker is the configured
+  condition; T is the matched sample. Both can be shown, never conflated.
+- The viewport is bounded by retention; panning cannot leave it. A Fixed viewport that no
+  longer fits falls back to the mode default, never a silent Fit.
+
+### 6.2 Overview strip
+
+- Shows the whole retention window, or the fixed Loop D window while locked; in Loop it
+  never follows the retained length. Its scale and ticks are stable.
+- The viewport is a 1.5 px frame; the record range is a separate band when recording.
+- Click/tap centres; drag pans; pinch/wheel zooms. A gesture sets Fixed (except under a
+  trigger lock, where it moves only V inside D).
+- While locked, the true start is `T − f·L`; the 64-sample front-drop residue cannot
+  shift it. A manual pan/zoom keeps coordinates in D, so a sub-window stays put while
+  the waveform updates in place.
+- The record band shows recorded ranges and gaps; it is not the same as the viewport.
+
+### 6.3 Cursors and measurements
+
+- The Measure panel has an explicit **Add cursor**; plot double-click/double-tap is an
+  accelerator only. One command has one implementation: the button, double-click,
+  double-tap and the long-press menu all dispatch "add cursor here"; none is a separate
+  editor. A cursor is dragged by its handle (48 px touch target); per-row
+  delete; no global destructive Esc.
+- Cursors are session state and say "Session only"; they are not restored on reload. A
+  new acquisition clears them with a visible notice; a Repeat wave inside the same
+  session remaps them by the display-origin delta and keeps them.
+- Measurement rows reference named cursors; missing references are empty selects.
+- Automatic measurements (Vpp, mean, RMS, frequency, period, duty, rise/fall, overshoot)
+  update when the visible window or signal set changes; they show their window and never
+  run in the background.
+- Math/FFT rows are measurements too: they state their sources, window function, bins and
+  units; they never silently change the acquisition.
+
+### 6.4 Plot painting
+
+- Digital: 1 px traces, channel-colour wash below high; dense transitions become byte
+  blocks; a busy line omits the wash.
+- Analog: 1.5 px trace with a min/max envelope when zoomed out; dots when samples are far
+  apart; clipping at row edges; overload badge.
+- Gaps: a hatched neutral pattern with a text/tooltip reason; pending data: a dotted
+  neutral pattern. Neither is drawn as a level.
+- Decode blocks use role colours (framing, address, command, control, data, check,
+  handshake, line, error) and never guess protocol meaning. Errors are red and shaped,
+  not colour alone.
+- Cursors, T, trigger line and record band are overlay layers; the waveform moves under
+  them in the same frame.
+
+### 6.5 Decoded results
+
+- The Analyze panel lists the events of the selected decoder: time, kind and fields, one
+  row per event; the list states its window (retention or record) and whether it is a
+  snapshot.
+- Selecting a row highlights the matching block and pans it into view; selecting a block
+  selects the row. A search/filter uses the same field model.
+- Copy/export writes the listed fields; the range control offers the visible window or
+  the whole decoded window.
+- Decoder errors are rows with the error role, not a traceback; unsupported fields are
+  shown as text, never silently dropped.
+- A running Loop's decode result does not claim to track every roll; it says "snapshot at
+  …" and can be refreshed.
+
+## 7. Input grammar
+
+The plot, axis and overview share one grammar; the target under the pointer selects the
+object. Every gesture has a visible equivalent.
+
+| Input | Plot | Axis / ruler | Overview | Keyboard |
 | --- | --- | --- | --- | --- |
-| Drag | Pan the viewport; an edge drag starts a measurement (future) | Pan | Pan the viewport frame; a click centres | Arrow keys pan |
-| Plain wheel | Scroll the channel rows when they overflow; no view change otherwise | Scroll rows | No view change | — |
-| Ctrl/⌘ + wheel, pinch | Zoom around the pointer | Zoom around the pointer | Zoom around the pointer | `+` / `-` |
-| Shift + wheel | Pan | Pan | Pan | Arrow keys |
-| Double-click | Add a cursor | Reset the analog scope when over a ruler/handle | No action | — |
-| Esc | Cancel the active gesture | Cancel the active gesture | Cancel the active gesture | Esc |
+| Mouse drag | Pan; drag a cursor/trigger handle | Pan | Pan frame | Arrows pan |
+| Mouse wheel | Scroll rows when overflow | Scroll rows | No view change | — |
+| Ctrl/⌘ wheel, pinch | Zoom at pointer | Zoom at pointer | Zoom at pointer | `+` / `-` |
+| Shift wheel | Pan | Pan | Pan | Arrows |
+| Mouse double-click | Add cursor | Reset analog scale over a ruler | No action; use Fit | — |
+| Touch double-tap | Add cursor | Reset analog scale over a ruler | No action; use Fit | — |
+| Right-click | Context menu | Context menu | Context menu | Context-menu key / long-press |
+| Touch tap | Select row/nearest edge; tap a trace shows the readout | Select/centre | Centre | Enter |
+| Touch drag | Pan | Pan | Pan frame | Arrows |
+| Two-finger pinch | Zoom at midpoint | Zoom | Zoom | `+` / `-` |
+| Two-finger drag | Pan | Pan | Pan | Arrows |
+| Long-press | Context menu (Add cursor, Measure, Fit, Trigger level) | Context menu | Context menu | Context-menu key |
+| Pen hover | Readout; barrel button context | Readout | Readout | Focus readout |
+| Pen double-tap | Add cursor | Reset analog scale | No action | — |
 
 Rules:
 
-- The same gesture means the same thing on all three surfaces, or the target visibly
-  explains why not. A plain wheel that does nothing must not silently scroll the page.
-- Every pointer gesture has a keyboard twin where the action is not inherently spatial
-  (zoom, pan, fit, add cursor). The Shortcuts dialog is generated from the same table
-  that dispatches the keys.
-- Double-click has exactly one meaning per object, stated in that object's tooltip:
-  plot = add cursor; analog ruler/trigger handle = reset the scope scale. It never means
-  Fit.
-- Gestures never start, stop or reconfigure an acquisition.
+- One active gesture at a time. A drag that moves more than 3 px is not a tap. A pinch
+  cancels a pan; a second finger never starts a second action.
+- Touch targets: 48×48 CSS px; in-row trigger slots 24 px visually but 48 px hit area.
+  Row height handles have a 24 px visible band and a 48 px touch band.
+- No hover-only information: every hover readout is available by tap/long-press/focus.
+- Browser gestures that would reload/scroll the page are suppressed only on the plot and
+  only when the gesture is ours; text inputs, accessibility gestures and system back
+  still work. `touch-action` and `overscroll-behavior` are scoped.
+- Android back: close the topmost overlay, then the sheet; never trap it. A destructive
+  dialog requires an explicit choice; back cancels it.
+- The magnifier (touch/pen) shows the sample under the finger at 2× while dragging a
+  cursor or trigger level; it never changes the data.
+- Micro-adjust: after a tap selects a cursor/trigger, +/− buttons or arrow keys step one
+  sample/one ADC code; a long drag is coarse.
 
-### 6.4 Viewport policies
+## 8. Trigger UI
 
-| Policy | When | Behaviour |
-| --- | --- | --- |
-| FollowLive | Default at session start; no user gesture | The right edge follows the newest sample. |
-| Fixed | After a pan/zoom | The interval is stored relative to the display origin and survives Repeat waves while it fits the retention. |
-| TriggerLocked | Loop with an armed trigger after a match | D is fixed; V is stored as offsets from T; Fit resets V to D. Zoom/pan move V only. A digital Loop lock is one-shot and releases when T leaves retention; an analog Loop detector can re-lock when edges return. |
+- **Conditions are owned by rows.** A digital row's trigger slot opens the six modes;
+  an analog row's trigger slot opens rising/falling + level + hysteresis (profile-
+  dependent). The Trigger panel previews, removes and explains; it is not a second
+  editor.
+- **Trigger panel:** enable, source/summary, condition list, pre-trigger, execution owner
+  (read-only), state chip. For a profile with `mixed: false`, a Digital/Analog family
+  choice is shown; switching retains the other family's stored conditions but they are
+  not armed. For `mixed: true`, both families' conditions are ANDed and no family switch
+  is shown.
+- **States:** configured (neutral), armed (warning), waiting, triggered, released,
+  pending (Next badge), not-found. Only one family/state is bright; the other family is
+  neutral, never falsely armed.
+- **Enable:** turning it off leaves conditions stored and neutral. Configuring a
+  condition never flips the enable mask; an optional "Arm" action is explicit.
+- **Pre-trigger:** percentage/time, with the profile cap and the resulting "up to"
+  history; per-group sample counts are read-only. The panel never promises more history
+  than the ring can hold.
+- **Retune/restart:** while waiting, edits retune and say "Retuned"; after a match they
+  are pending for the next acquisition. A restart is a named "Restart to apply" action
+  and never a hidden side effect. A Loop analog display detector may retune live; the
+  chip says "Live detector".
+- **Loop:** D/V are visible in the panel and overview; a digital one-shot lock says
+  "Released" and how to re-arm; an analog detector says "Live". The UI never implies a
+  released digital lock can re-lock.
+- **Execution:** device vs host is a read-only fact in the panel; the user edits the plan,
+  not the execution path.
 
-Rules:
+## 9. Acquisition, retention and recording UI
 
-- The engine owns one viewport state; a gesture never writes a second viewport model.
-  The ownership and transition tests are in `docs/ARCHITECTURE.md` (`UI runtime contract`
-  → Viewport and display).
-- A view gesture never starts, stops or reconfigures an acquisition.
-- A trigger lock never turns a viewport gesture into a re-arm or a data change.
-- Fit is explicit: toolbar, `F`, or the mode's documented default. No automatic Fit
-  except on a new capture/file, and the status says so.
-- The held-Repeat, trigger-locked and released cases are visible to the user as separate
-  states; their transition rows and tests are architectural, their appearance is here.
+- **Modes:** Single/Repeat/Loop in the Capture split menu; the Acquire panel shows the
+  mode read-only plus duration/interval/window and retention.
+- **Lifecycle:** every editable control displays Live/Next/View/Preference according to
+  `ARCHITECTURE.md` §5.3. While running, the panel lists "Pending for next capture" when
+  any Next edit exists. A restart action is explicit.
+- **Retention:** the panel shows kept bytes/time, the limit and the loop window; when the
+  limit binds, a warning names the consequence. It never silently trims the trigger lock.
+- **Record:** a separate state (`off/armed/recording/paused/exporting/error/full`), with
+  bytes, duration, OPFS quota and a "Recover unfinished record" action. Recording is
+  independent of the capture mode; a Loop may record while rolling.
+- **Suspended/lost:** a backgrounded page shows `Suspended` with a resume action; a lost
+  device shows `Lost` with reconnect, never a fake running state. A record in progress is
+  marked paused/recoverable.
+- **Progress:** one progress line per active operation (capture, record, export, import);
+  cancel is offered unless the operation cannot be interrupted (then it says so).
+- **Autoset:** a Capture variant; it shows the chosen timebase/range in a review line
+  before starting. It does not change trigger/decoder configuration silently.
 
-### 6.5 Cursors and measurements
+## 10. Panels and presenters
 
-- The Measurements section has an explicit **Add cursor** control. Double-clicking the
-  plot is an accelerator for the same command, never the only way to create one.
-- Dragging a cursor moves it; the panel lists cursors and their times; removal is a
-  per-row action. There is no global "clear all" on `Esc`.
-- A cursor has a label and a colour; the active cursor is the one whose readout appears
-  in the status bar. Only one cursor is active.
-- Distance and edge rows reference named cursors. Missing references are shown as empty
-  selects, not silently dropped.
-- Measurements are display/session state. They are cleared by a new capture only with a
-  visible notice, or kept when the capture is replaced by one that still makes sense;
-  the chosen rule is stated in the panel and the spec. `Esc` cancels the active gesture
-  or clears the selection; it never deletes measurements.
-- Cursors are session state and are not restored on reload; the section header says
-  "Session only". If a capture format later carries measurements, the persistence tiers
-  in `docs/ARCHITECTURE.md` change first.
+Target panels (each with at most four sections):
 
-### 6.6 Analog scope rows
-
-- ADC rows share one vertical coordinate system across trace, graticule, voltage ruler,
-  0 V line and trigger line.
-- V/div and zero position are view settings; they persist with the workspace or bus
-  view, not with the capture file unless the file format says so.
-- Dragging the trigger line edits the analog trigger level through the same value as
-  the ADC editor; it does not create a second trigger.
-- Analog test-mode patterns are not a supported voltage source; the UI says so where
-  the test mode is selected.
-
-## 7. Acquisition settings
-
-### 7.1 Modes
-
-| Mode | Sweeps | Retention | Default viewport | Trigger |
-| --- | --- | --- | --- | --- |
-| Single | One | Duration, or Unlimited until Stop | FollowLive, then fixed at the end | One-shot; a waiting matcher may wait indefinitely. |
-| Repeat | One per Interval | One Duration per wave | FollowLive per wave; Fixed survives waves while it fits | One sweep's budget per wave; a miss reports and the next Interval retries. |
-| Loop | One unbounded | Loop window L (sample count), rolling | FollowLive; TriggerLocked when armed and matched | One-shot digital lock, or live analog local roll. |
-
-The sweep, retention, budget and loop-window semantics behind this table are normative in
-`docs/ARCHITECTURE.md` (`src/device` → software trigger and session semantics). This file
-owns how each mode is presented and which controls remain available.
-
-### 7.2 Lifecycle of every setting
-
-The following table is the interface policy: which controls look and behave live, next,
-view or workspace. The underlying `mayEdit(feature, state)` table is normative in
-`docs/ARCHITECTURE.md` (`UI runtime contract` → Acquisition lifecycle). Keep the two in
-step; the capability table decides, this table presents.
-
-| Setting | While idle | While running |
-| --- | --- | --- |
-| Capture mode | Editable, next | Locked |
-| Channel width | Editable, next | Editable, **next** (running store keeps its width) |
-| Enabled channels | Editable, next | Editable, **next** |
-| Sample rate | Editable, next | Editable, **next** |
-| Threshold | Editable, next | Editable, **next** |
-| Duration / Unlimited | Editable, next | **Live** in Loop; next in Single/Repeat |
-| Repeat interval | Editable | Editable, next wave |
-| Loop window | Editable | **Live** (re-clamps V) |
-| Test mode | Editable | Locked; diagnostic only |
-| Trigger enable mask | Editable | Live retune while waiting; off after match = release in place; on in a free-run capture = named restart |
-| Trigger source | Editable | Live retune while waiting; pending after match |
-| Digital conditions | Editable | Live retune while waiting; pending after match |
-| Analog condition | Editable | Live retune while waiting; Loop display detector live after match |
-| Pre-trigger % | Editable | Locked (sizes the ring) |
-| Cursors / measurements | Editable | Editable, display only |
-| Bus views / analog scale | Editable | Editable, display only |
-| Panel, theme, language, labels | Editable | Editable, no acquisition effect |
-
-Rules:
-
-- A control marked **next** must show a persistent "Next capture" badge while a capture
-  runs. The section header may carry the badge instead of every control, but the
-  control's tooltip must state it.
-- A control marked **live** must show a "Live" badge only while running; it must not
-  silently change the displayed data's meaning without a status line.
-- A control that cannot apply to the current run and has no useful next-run meaning is
-  disabled, with a tooltip. Controls are not hidden.
-- A mode change while running is Locked. Do not offer "will apply after stop" for a
-  setting whose next use is ambiguous.
-- An automatic restart is allowed only as a named transition: the trigger section and
-  the status bar must say "Restarting to arm the matcher" (or equivalent), and the
-  displayed capture must not be discarded silently. A restart from an unrelated control
-  is forbidden.
-- Duration edits in Loop apply to the retention window on the next frame; rate and
-  width edits never reinterpret an existing store. If the panel cannot express that in
-  one chip, it must disable the edit until the capture stops.
-
-### 7.3 State presentation
-
-The acquisition states (`idle`, `arming`, `waiting`, `running`, `stopping`, `restarting`,
-`retrying`, `lost`) and the single `mayEdit(feature, state)` capability table are
-normative in `docs/ARCHITECTURE.md` (`UI runtime contract` → Acquisition lifecycle). The
-interface does not invent its own predicates or booleans; it renders the resulting state
-as:
-
-- a state chip in the Device panel and the status bar;
-- a Live or Next badge on the affected control (or its section header);
-- a disabled control with the typed reason in its tooltip when the capability table
-  refuses the edit;
-- a named "Restarting…" state when a configuration restart is in flight.
-
-A refused edit shows the same reason everywhere, including the assistant and the
-debug/test surface. The UI never restarts a capture as an unmentioned side effect.
-
-### 7.4 Progress and empty states
-
-- Without a capture, the plot shows one short empty-state line: open a file or connect
-  a device. The side panel may show the last settings and the device state.
-- While running, the top bar says Stop, the panel shows a state chip and a progress
-  line, and the status bar shows the live counts. The same state is not repeated as a
-  paragraph in three places.
-- On completion, the status bar reports samples, duration and trigger state once. The
-  panel's status chip is the short form.
-
-## 8. Trigger
-
-The matcher, budgets, pre-trigger ring and Loop data-window semantics are normative in
-`docs/ARCHITECTURE.md` (`src/device`). This section owns the editor model, the visible
-states and the copy.
-
-### 8.1 Model
-
-```
-per-channel conditions (digital) ─┐
-                                  ├─ AND ─> matcher (one sample, all conditions) ─> T
-one ADC crossing (analog) ────────┘
-enable mask ──────────────────────┘   (off = free run, conditions retained but neutral)
-pre-trigger % ───────────────────────> ring size / T's position in D
-```
-
-- Digital conditions are per-channel modes from the trigger slot. All configured
-  conditions are ANDed; the exact matcher semantics are normative in
-  `docs/ARCHITECTURE.md` (`src/device`). Missing mode = don't care.
-- Analog uses exactly one ADC group crossing (rising or falling, with a level). It is
-  exclusive with digital conditions: the level must fix one time base. Choosing an
-  analog trigger switches the source to Analog; choosing a digital condition switches it
-  back.
-- The enable mask is an arming decision, not a condition. Off leaves every condition
-  stored and shows them neutral. On arms the selected source if it has at least one
-  effective condition. Configuring or removing a condition never changes the mask; if
-  the UI wants to help the user arm, it offers an explicit "Arm" action, it does not
-  flip the switch behind their back.
-- Pre-trigger is the percentage of the retention window before T. It sizes the ring in
-  Single/Repeat and fixes T's position in D in Loop. It is locked while a capture runs.
-- **One owner per property.** A channel row owns that channel's digital condition; an
-  ADC row owns its slope and level; the Global trigger section owns the mask, source,
-  pre-trigger and a read-only summary. The plot's drag, the assistant and the debug
-  surface dispatch the same command to the owner; they never write a parallel model.
-
-### 8.2 Condition glyphs and states
-
-| Mode | Glyph | Meaning |
-| --- | --- | --- |
-| don't care | short dash | no condition |
-| rising | rising edge | previous 0, current 1 |
-| falling | falling edge | previous 1, current 0 |
-| edge | both edges | any transition |
-| high | high level | current 1 |
-| low | low level | current 0 |
-
-States:
-
-- **Configured** (mask off or source inactive): neutral ink, visible.
-- **Armed** (mask on, source selected): warning colour, one family only.
-- **Pending** (matched, edit staged for next acquisition): neutral + "Next" badge.
-- **Live-retuned** (waiting, edit applied): a brief "Retuned" note, not a restart.
-
-### 8.3 Lifecycle
-
-| State | Editing a condition | Turning the mask off | Turning it on |
-| --- | --- | --- | --- |
-| Idle / completed | Next acquisition | Disarms | Arms next start |
-| Running, waiting | Live retune; no restart | Live: restarts free-running (named) | Already armed |
-| Running, matched (one-shot) | Pending for next acquisition | Release in place, tear down detector | Named restart to arm |
-| Loop, analog locked | Live retune of the page detector; lock survives while edges remain | Release; detector torn down | Named restart |
-| Loop, released | Pending / next acquisition | Free run | Named restart to re-arm |
-| Stopping | Locked | Locked | Locked |
-
-Additional rules:
-
-- The Loop data-window (D), viewport (V), pre-trigger cap and early-match accounting are
-  engine semantics owned by `docs/ARCHITECTURE.md` (`src/device`); the rules below are
-  their visible consequences.
-- A Loop's two windows are distinct: **D** is the data window (fixed span L, T at the
-  pre-trigger fraction); **V** is the user's viewport (offsets from T). The panel and
-  the overview must use D's scale while locked. A gesture moves V only.
-- The digital Loop lock is one-shot. The UI must not imply it can re-lock; the status
-  says "released" and how to re-arm.
-- The analog Loop display detector is live after the match. Its edits are not "pending";
-  the chip says "live detector".
-- The pre-trigger buffer cap is a hard constraint: the panel says "up to" and never
-  promises more history than the ring can hold.
-- Early match: the total budget is preserved and the post-trigger span may be longer
-  than the requested split. The note says "up to" rather than hiding the case.
-
-### 8.4 Trigger UI
-
-- The Global trigger section header carries the enable toggle and a state chip
-  (`Off`, `Armed · waiting`, `Triggered`, `Released`, `Not found`).
-- The source control is a two-option segmented control (Digital / Analog), disabled when
-  the device has no analog groups. The condition list is a read-only preview with a
-  remove shortcut; clicking a row focuses the owning channel/ADC row.
-- The pre-trigger control shows a percentage and the resulting time; the cap note is a
-  tooltip plus a one-line warning only when the cap binds.
-- The panel never prints a paragraph explaining a state that the chip already carries.
-
-## 9. Side panel
-
-One panel is visible at a time. Target tabs: **Device**, **Analyzers**, **Assistant**.
-The panel switcher (top bar or tab strip) is the only way to change tabs. The panel is
-resizable by its left edge; width is persisted; clicking the active tab's toggle closes
-the panel.
-
-**Panel contract.** `PanelId`, one host per panel, the `render(view)`/`update(view)`
-contract and the overlay stack are normative in `docs/ARCHITECTURE.md`
-(`UI runtime contract` → Panel and view-model contract). This section owns the tabs,
-labels, section order, collapse defaults and appearance. Adding a panel means adding one
-registry entry there and one panel module here, not editing every toolbar handler.
-
-### 9.1 Device
-
-Section order (target; at most four sections):
-
-1. **Acquisition** — the current mode as a read-only summary (the Capture split menu is
-   its editor), channel width and enable chips, sample rate, threshold, duration /
-   interval / loop window, plus the one-line consequence note.
-2. **Trigger** — enable, source, condition preview, pre-trigger, state chip.
-3. **Measurements** — cursors, distance rows, edge rows. Collapsed by default when there
-   are no measurements.
-4. **Advanced** — test mode, USB console, loop instrumentation. Collapsed by default;
-   not part of the normal workflow.
-
-Rules: sections are collapsible and remember their state; the panel opens with
-Acquisition and Trigger expanded and Measurements/Advanced collapsed; a section with an
-active error or pending state may open itself once, with a visible reason.
-
-### 9.2 Analyzers
-
-- Attached analyzers with status, re-decode and remove.
-- Add an analyzer: decoder picker, channels, options, validation errors in place.
-- Bus views: attached buses, edit/remove, add. A bus is a display construct; it does
-  not change capture channels or trigger conditions (except an ADC group's analog
-  marker).
-- **One bus editor.** `BusPanel` owns every bus property: wiring, clock, encoding,
-  style, height, hide-sources. The left row shows status and at most one
-  direct-manipulation mirror (the analog height or trigger level) that commits through
-  the same update path. Creating an analog bus funnels through the Device panel's Analog
-  control; the bus editor does not create a second one.
-- Opening the bus editor selects the Analyzers panel explicitly; it never switches the
-  panel as a hidden side effect of clicking a row. If switching is necessary, the UI
-  says so (the tab changes, and the editor has focus).
-- Decoder/bus operations are analysis-only: they never start/stop a capture and never
-  change retention.
-
-### 9.3 Assistant
-
-- The assistant is a tab with its own scroll and input. It is mounted once and is not
-  re-rendered by capture updates.
-- It can read the app state through the documented host interface; it must not mutate
-  state except through the same commands a user has (set settings, start/stop, etc.).
-- One entry point. Remove the duplicate toolbar button when the tab lands.
-
-### 9.4 Panel rules
-
-- Each panel has exactly one header that names its scope (`Device, capture and trigger`,
-  `Analyzers`, `Assistant`). A panel never renders two headers or another panel's
-  header.
-- No primary Capture action in the panel.
-- No second editor for a value whose home is a row or the plot.
-- No nested scrolling regions unless the section itself is the scroll container.
-- Long notes are one sentence; details go to tooltips or the docs.
-- Error text is red and actionable; it does not replace the status bar's error.
-- A panel mode's title and contents agree. If a panel holds measurement or developer
-  tools, its name says so; if those tools are production features, they do not appear
-  only in one sidebar mode.
-
-## 10. Menus, popovers and dialogs
-
-| Surface | Use | Rules |
-| --- | --- | --- |
-| Menu | Choose one of a short list (device, panel, settings, language, theme) | Anchored to its button; one level; Esc/outside closes; focus returns to the anchor on Esc/pick. |
-| Popover | Small anchored editor for one row (channel trigger/name, ADC trigger) | No backdrop; one at a time; Enter commits, Esc cancels, outside commits or closes per the field's rule; focus returns to the row. |
-| Dialog | Complex or destructive edits (shortcuts, confirmations, future channel/colour editor) | Backdrop; focus trap; Esc/backdrop closes; title names the object; primary action is explicit. |
-| Inline section | A value that belongs to a panel and applies immediately or next | No overlay; must obey the lifecycle badge rules. |
-
-Global rules:
-
-- One overlay at a time. The overlay stack, mutual exclusion and focus-return token are
-  owned by `docs/ARCHITECTURE.md` (`UI runtime contract` → Panel and view-model
-  contract); the interface rules below are what the user experiences.
-- No nested popovers. A popover that needs a second chooser opens a dialog or a
-  one-level menu inside itself.
-- A menu item that opens another surface ends in a chevron; a checkmark means a choice,
-  not navigation.
-- Focus never gets lost when an overlay closes. Destructive actions name their object
-  and their consequence.
-- Tooltips are one sentence; they never carry the only copy of a critical instruction.
-- When an interaction is replaced, its old markup, CSS, test selectors, docs and comments
-  are deleted in the same change. A dead selector must fail the suite, not be required
-  by it.
-
-**One primitive per job.** Use one menu/popover primitive with `role="menu"`, roving
-tabindex, Arrow/Escape/Enter, and `menuitemradio` + `aria-checked` for exclusive choices.
-Use one selection contract: `aria-pressed` for toggles, `aria-checked` for exclusive
-choices, never a visual-only `.on`/`.selected` class. Use one commit model:
-
-| Surface | Commit |
+| Panel | Sections |
 | --- | --- |
-| Command and single-value choice | Apply immediately; the control shows the new value. |
-| Multi-field editor (bus, future channel settings) | Explicit Apply and Cancel; Cancel restores the opening draft. |
-| Text field in a popover | Enter commits; Esc/outside discards (or the field documents "commits on blur"). |
+| Device | Link, Profile, Notes |
+| Acquire | Acquisition, Retention, Notes |
+| Trigger | Enable/source, Conditions preview, Pre-trigger, State |
+| Measure | Cursors, Automatic measurements, Math/FFT |
+| Analyze | Analyzers, Buses, Results, Status |
+| Record | State, Capacity, Export, Recovery |
+| Settings | Appearance, Behaviour, Shortcuts, About |
+| Diagnostics | Test mode, USB console, Loop/decoder metrics |
 
-`aria-haspopup` matches the real surface. Focus returns on close. Escape closes only the
-topmost layer. The keyboard map is documented in this file and in the Shortcuts dialog.
+On a platform without WebUSB, the Device panel states the typed reason and offers file
+replay/Demo; Capture is disabled. The rest of the interface still works on imported data.
 
-## 11. Status bar, errors and progress
+Settings › About shows the app version, PWA/update state, licenses and the storage
+clear-data action; an update is an explicit prompt, never a silent reload.
 
-The bar has three fixed zones and never wraps; a long value truncates with a tooltip and
-its full text in the title. Its height is a frozen token (`--status-h`) that relayout
-reads.
+- One panel at a time; one presenter. The panel switcher opens it; the same control closes
+  it.
+- Each panel has exactly one header naming its scope; a panel never renders another
+  panel's header or two headers.
+- Panels never contain the primary Capture action or a second editor for a row-owned
+  value.
+- A panel's view model is presentation-ready; the presenter does not re-derive values.
+- On compact, the panel switcher is in the bottom bar and the sheet is the presenter; on
+  wide, the switcher is in the top bar and the presenter is docked.
+- The Assistant has no entry in the baseline; the host interface is debug/test only.
+
+## 11. Status, errors and progress
+
+The status bar has three fixed zones, never wraps, and keeps its height token:
 
 | Zone | Contents |
 | --- | --- |
-| Left | Acquisition state, trigger state, sample count, duration, view span, active cursor time. Each value appears once; do not repeat what the capture label already says. |
-| Centre | Viewport controls: zoom out, time/div (fixed width, tabular), zoom in, fit. Until they land, the zone is reserved; the status bar never fills it with duplicated statistics. |
-| Right | A fixed-width notice/error slot, save/import progress, or the too-slow-port warning. It does not grow the bar. |
+| Left | Link, acquisition, trigger and record state; sample/time counts; suspended/lost notice. Each value once. |
+| Centre | Viewport: zoom out, time/div (fixed width, tabular), zoom in, Fit. |
+| Right | Typed error/notice, progress or quota warning; fixed width, truncates with a tooltip. |
 
-- The status bar is the single place where a fatal error is guaranteed to appear. A
-  panel may add context; it must not be the only surface.
-- Every asynchronous action has a busy state and a terminal state. A progress bar is
-  cancellable unless the operation cannot be interrupted; if it cannot, say so.
-- Errors name the operation and keep the diagnostic code in the console prefix; the
-  user-facing text is localised. No silent catch blocks.
-- The status bar never grows into a log. Long diagnostics go to the Advanced console or
-  the docs.
+- A fatal error appears here; a panel may add context but is never the only surface.
+- Errors are typed (`unsupported-platform`, `permission`, `busy`, `handshake`,
+  `profile`, `transfer`, `lost`, `suspended`, `memory`, `quota`, `record-full`, ...) and
+  actionable; the diagnostic code stays in the console prefix.
+- Every async operation has a busy and terminal state; no silent catch.
+- The bar never becomes a log; diagnostics go to the Diagnostics panel.
 
-## 12. Keyboard and accessibility
+## 12. Menus, popovers, sheets and dialogs
 
-- Every action reachable by pointer is reachable by keyboard, except direct-manipulation
-  gestures that have an explicit alternative (Fit, cursor add/remove, trigger level
-  fields).
-- Icon buttons have `aria-label`; toggles have `aria-pressed`; menus have
-  `aria-expanded`/`aria-controls`; dialogs trap focus and restore it; the panel resizer
+| Surface | Use | Rules |
+| --- | --- | --- |
+| Menu | Choose one of a short list (device, capture mode, panel, export) | Anchored; one level; Esc/back/outside closes; focus returns. |
+| Popover | Small anchored editor for one row (trigger, name, probe) | No scrim; one at a time; Enter commits, Esc/back discards; focus returns. |
+| Sheet | A panel on medium/compact touch | Scrim, handle, Close/back; one sheet; height persisted. |
+| Dialog | Complex/destructive edits or confirmations | Focus trap; Esc/back/Close; title names the object; primary action explicit. |
+| Inline section | A panel value that applies immediately or next | No overlay; lifecycle badge rules apply. |
+
+- One `OverlayController` (ARCHITECTURE §6) owns the stack: opening a transient surface
+  closes its siblings; Escape/back closes the topmost; focus returns by token.
+- No nested popovers or sheets. A second chooser is a dialog or a one-level menu.
+- A menu item that opens another surface ends in a chevron; a checkmark is a choice.
+- Destructive actions name the object and consequence; they are never adjacent to a
+  primary action without confirmation.
+- A control titled "Toggle" toggles; a three-way choice is a menu with a chevron/checked
+  items.
+- Replacing an interaction deletes its old markup, CSS, test selectors and docs in the
+  same change.
+
+## 13. Accessibility and keyboard
+
+- Every icon button has `aria-label`; toggles `aria-pressed`; menus
+  `aria-expanded`/`aria-controls`; sheets/dialogs trap focus and restore it; the resizer
   is a separator with keyboard steps.
-- Focus ring: 2 px `--ring`, offset 2 px. Never remove it without a replacement.
-- Current global shortcuts: `Space` starts/stops the capture, `F` fits the viewport, and
-  `Esc` closes the topmost overlay or, with none open, clears the cursor selection.
-  Shortcuts never fire while a text field, the assistant composer, or a dialog is
-  focused.
-- Shortcut suppression is one semantic `isEditableTarget(event)` helper
-  (`input, select, textarea, [contenteditable]`, open dialogs, and overlay roots
-  registered in the overlay stack), not a growing DOM-class denylist. A new overlay
-  registers once; it does not require editing the keyboard handler.
-- Arrow keys move within a menu/segmented control; Home/End go to the ends; Enter picks.
-- Reduced motion: transitions collapse to 1 ms; no viewport glide.
-- Hit targets: at least 20×16 for a row slot, 24×24 for an icon button, 32×32 for a
-  toolbar control. If a visual is smaller, its hit area is larger.
+- Focus ring 2 px `--ring`, offset 2 px; never removed without a replacement.
+- Keyboard: `Space` Capture/Stop, `F` Fit, `Esc` close/cancel, `+`/`-` zoom, arrows pan,
+  `Tab` moves focus, `Enter` activates. Shortcuts never fire in a text field, the
+  debug/test composer or a dialog.
+- Touch: 48 px targets, visible labels, no gesture-only action; TalkBack labels for rows,
+  trigger slots, cursors and charts; back closes the top layer.
+- Screen reader: charts expose a summary and the focused cursor/measurement; the decoded
+  list is a table/list with headings; errors are live regions.
+- Reduced motion collapses transitions to 1 ms; no viewport glide.
+- Contrast: text ≥ 4.5:1, graphical marks ≥ 3:1; colour is never the only encoding for
+  gap/pending/error/armed.
+- Orientation change preserves the viewport and focus where possible; sheets reflow.
 
-## 13. Visual system
+## 14. Visual system
 
-### 13.1 Surfaces and text
-
-Canonical semantic tokens (dark / light come from `style.css`):
+### 14.1 Surfaces and text
 
 | Token | Use |
 | --- | --- |
-| `--background` | app ground, canvas surround |
-| `--card` | side-panel sections, raised groups |
-| `--popover` | menus and popovers |
-| `--secondary` | inset controls, secondary buttons |
-| `--muted` | hover/quiet fill |
-| `--muted-foreground` | secondary text |
-| `--foreground` | primary text |
-| `--border` / `--input` | dividers and control borders |
-| `--primary` | primary action, focus, selected option |
-| `--warning` | armed trigger, waiting state |
-| `--destructive` | Stop, errors, disconnect |
-| `--ring` | focus ring |
-| `--radius` | control radius |
+| `--canvas` | plot background and waveform field |
+| `--chrome` | shell, label column, status bar |
+| `--raise` | dialogs and sheets |
+| `--menu` | menus/popovers |
+| `--control` / `--control-hover` | inputs and buttons |
+| `--line` / `--line-2` | dividers and rules |
+| `--ink` / `--ink-2` / `--ink-3` | primary/secondary/caption text |
+| `--primary` | actions, focus, selection |
+| `--warning` | armed/waiting trigger; overload warning |
+| `--alert` / `--alert-wash` | errors, Stop, destructive |
+| `--grid` / `--veil` | graticule and segment/record bands |
+| `--analog` | analog signal accent, distinct from primary/warning |
 
-Chrome metrics are theme-independent: `--toolbar-h`, `--axis-h`, `--overview-h`,
-`--status-h`, `--labels-w`, `--strip-w`, `--panel-w`. Legacy names (`--bg00`…`--text50`)
-remain aliases for the canvas and older rules; new code uses the semantic names. Do not
-add a third naming layer.
+- One semantic token contract; no per-theme component override blocks; theme switching
+  changes values only. The canvas reads the same palette source as CSS.
+- Light and dark are selected pairs, not an automatic flip; each meets contrast.
+- Chrome metrics (`--toolbar-h`, `--axis-h`, `--overview-h`, `--status-h`, `--labels-w`,
+  `--panel-w`) are shared by CSS and canvas layout.
 
-Rules:
+### 14.2 Signal and role colours
 
-- One token contract, one source per value. The theme switch changes token values only;
-  component rules do not have per-theme override blocks. A component that needs a
-  different surface uses a semantic token, not a `:is(html[data-theme=…])` copy.
-- The canvas reads the same token source as CSS (a generated TS module or a single
-  exported palette), not a hand-copied hex table. A test asserts the copies agree.
-- A raw colour, radius, font size or spacing value in a component rule is a review
-  blocker; dynamic geometry/colour from data may use inline styles.
-- `--labels-w` and the canvas's row geometry come from one shared metric; a TS constant
-  and a CSS value that disagree is a bug, not a tuning knob.
-- Theme modes are exactly `light`, `dark`, `system`; `system` is the default. The
-  pre-paint inline script and the runtime resolver share one implementation or are
-  generated from it, and a test asserts first paint equals the resolved theme.
+- Digital channels cycle through eight probe-wire colours; the cycle is by channel index,
+  not by display order. Analog channels have their own cycle/accent (`--analog` family).
+- Channel 0's red is a data colour, never the error red. Errors, Stop and destructive
+  actions use `--alert`.
+- Decode roles: framing (neutral), address (blue), command (violet), control (green),
+  data (teal), check (magenta), handshake (olive), line (ink/pattern), error (red).
+  Roles are protocol-independent; a block's lane names its decoder.
+- Gaps use a neutral hatch; pending uses a dotted neutral; neither uses a channel colour.
+- Armed/waiting uses amber; a configured but inactive condition is neutral.
 
-### 13.2 Colour roles
-
-| Role | Colour | Never |
-| --- | --- | --- |
-| Channel identity | `CHANNEL_COLORS` cycle, one per channel, with per-theme trace/wash/label variants | status or error |
-| Action / focus / selection | `--primary` violet only | data, channel identity, or "armed" |
-| Armed trigger / waiting | `--warning` amber, reserved | generic highlights |
-| Stop / error / disconnect | `--destructive` red, reserved | channel identity |
-| Analog group | a dedicated `--analog` blue token | digital trigger state |
-
-- Channel 0's red is a data colour, not the error red; they must be visibly distinct and
-  never share a token.
-- A triggered or waiting state is not "primary"; it uses the warning token or a neutral
-  state chip. Primary is for actions and selection only.
-- Disabled is opacity, not a new grey, and never hides the control.
-
-The channel palette has one source of truth. Today it is duplicated between
-`src/ui/metrics.ts`, `src/render/theme.ts` and CSS variables; new code must consume one
-exported palette, and a test must assert the copies agree until they are merged.
-
-### 13.3 Type and density
-
-Five type roles only:
+### 14.3 Type and density
 
 | Role | Size / weight | Use |
 | --- | --- | --- |
-| Page title | 16 / 600 | panel or dialog title |
-| Section title | 13 / 600 | section header |
-| Body | 12 / 400 | labels, controls, values |
-| Metadata | 11 / 500 | secondary text, ticks, captions |
-| Eyebrow | 10 / 600, uppercase | group labels and badges |
+| Page title | 18 / 600 | sheet/dialog/panel title |
+| Section | 14 / 600 | section header |
+| Body | 13 / 400 | controls, labels |
+| Metadata | 11 / 500 | ticks, captions, chips |
+| Eyebrow | 10 / 600 uppercase | group labels |
 
-- Nothing below 10 px. Numeric readouts use tabular figures. A control's label never
-  changes size or weight by location.
-- Line height 1.35–1.5. Text never overlaps a waveform; labels that would collide are
-  omitted, not shrunk.
-- Control heights: **24 compact, 28 default, 32 prominent**. Top-bar buttons keep their
-  44/38/34 px responsive sizes.
-- Radii: **4 px for controls, 8 px for containers**; pills and avatars may be 999 px.
-- Spacing: 4 px scale (4/8/12/16/24). Adjacent controls in a row share height and radius.
-- Exactly one implementation per control class: one input, one select, one segmented
-  control, one checkbox. The selected state is one rule in both themes, not inverted.
-- Density is a token, not a per-component choice; the toolbar labels toggle is the only
-  user-facing density preference today.
+- Touch density: body 14 px, controls 48 px high, minimum 16 px gutters; desktop density:
+  body 12–13 px, controls 28–32 px. Density is a token, not a per-component choice.
+- Numbers use tabular figures; no text below 10 px; labels that would collide are omitted.
+- Radii: 4 px controls, 8 px containers, 999 px pills. Spacing 4 px scale.
+- Exactly one implementation per control class: input, select, segmented control,
+  checkbox, toggle, menu, chip.
 
-### 13.4 Motion
+### 14.4 Motion
 
-- `--motion-fast: 120ms`, ease. Menus/popovers fade/pop; dialogs fade the backdrop;
-  panels may slide; nothing else animates.
-- No motion for viewport gestures, waveform redraws, hover readouts, or while the
-  renderer is busy. Motion never competes with the canvas for the main thread.
-- Reduced motion sets duration to 1 ms and removes the glide.
+- 120 ms enter, 100 ms exit, ease; sheets slide, menus/popovers pop/fade, dialogs fade the
+  backdrop. No motion for viewport gestures, waveform draw, hover readout or while the
+  canvas is busy.
+- Reduced motion sets durations to 1 ms and removes glides.
+- The waveform, annotations, ruler and overlays move together in every frame; a panel
+  opening does not stretch the old canvas.
 
-## 14. Copy, numbers and i18n
+## 15. Copy, numbers and i18n
 
-- Locales: `en`, `zh-CN`, `fr`, `ru` (plus decoder catalogs). Default follows the browser
-  language; the stored choice wins.
-- Every user-visible string goes through the catalog. Sentences are whole messages with
-  parameters; never concatenate fragments. A new key must be added to every locale.
-- Terms are fixed: **Capture** (not Start), **Stop**, **Interval**, **Duration**,
-  **Window** (Loop), **Global trigger**, **Trigger condition**, **Cursor**,
-  **Analyzer / Decoder** (one concept; use "Analyzer" for the attached instance and
-  "Decoder" for the protocol), **Bus**, **Device**. Do not introduce a second word for
-  the same concept.
-- A control's label states its scope. "Display preferences" for a menu that also holds
-  shortcuts is wrong; "Settings" for a menu that holds only labels and a read-only
-  shortcut list is also wrong. Read-only lists are labelled "View …", not "Edit …".
-- No copy promises behaviour the code does not implement. The empty-trigger note must
-  not tell the user to double-click a channel name to set a trigger if that gesture
-  opens the name editor.
-- Units: ns/µs/ms/s, Hz/kHz/MHz, MS/s, V, CH. One space between value and unit; numbers
-  use the locale's grouping. Times at the trigger origin are negative before T.
-- Decoder-produced names/fields pass through untranslated; the surrounding labels are
-  localised.
-- A tooltip or note is not a substitute for a localised label.
+- Locales: `en`, `zh-CN`, `fr`, `ru`; default follows the browser, stored choice wins.
+- Every user-visible string, including accessible names/titles, comes from the catalog at
+  render time; static HTML carries only a bootstrap fallback with the same key. No
+  concatenation; whole sentences with parameters.
+- Terms: Capture (not Start), Stop, Interval, Duration, Window, Retention, Record,
+  Trigger condition, Cursor, Measurement, Analyzer/Decoder, Bus, Signal, Profile, Link.
+- Units: ns/µs/ms/s, Hz/kHz/MHz/GHz, MS/s, V, A, dB, CH. One space between value/unit;
+  locale grouping; times at the origin are negative before T.
+- Touch copy says "Tap", mouse copy says "Click"; shared copy avoids both. A hint never
+  relies on hover alone.
+- Decoder-produced names/fields pass through untranslated; surrounding labels localise.
+- Errors name the operation and keep the diagnostic code in the console prefix.
 
-## 15. Interface review gate
+## 16. Interface review gate
 
-### 15.1 Interface anti-patterns
+### 16.1 Anti-patterns
 
-The following are review blockers, not style preferences:
+Review blockers:
 
-- A second Capture/Stop button, or a panel control that starts an acquisition.
-- A setting that silently stops, restarts or reconfigures a running acquisition.
-- A lifecycle state explained only by a paragraph while the control looks unchanged.
-- A new top-level toolbar command without removing one.
-- A new always-open panel section without a group or collapse.
-- A second editor for a value whose home is a channel row or the plot.
-- A raw colour, font size or spacing value in a component rule; a per-theme component
-  override block instead of a token value.
-- Dead markup, CSS, test selectors or docs for an interaction that no longer ships.
-- A status bar that repeats a value already shown in the capture label, or wraps.
+- A second Capture/Stop, or a panel control that starts an acquisition.
+- A setting that silently restarts/reconfigures a running acquisition or record.
+- A lifecycle state explained only by prose while the control looks unchanged.
+- A new top-level command without removing one; a new always-open section without a
+  group/collapse; a second editor for a row/plot value.
+- A raw colour/size in a component rule; a per-theme component override block.
+- A touch action that requires hover, or a target below 48 px.
+- Dead markup/CSS/tests/docs for a replaced interaction.
+- A status bar that duplicates a value or wraps.
 - A label that promises behaviour the code does not implement.
-- A panel with two headers, or a mode that hides global acquisition/trigger state.
-- An icon-only control without an `aria-label`, or an overlay that loses focus.
+- A panel with two headers, or a mode that hides link/capture/trigger state.
+- A console-only failure.
 
-State, commit, persistence and test anti-patterns (a second settings assignment, a
-duplicated derived value, a source-text behaviour test, a console-only failure) are
-review blockers in `docs/ARCHITECTURE.md` (`## Verification`).
+State/commit/persistence/test anti-patterns are in `ARCHITECTURE.md` §10.
 
-### 15.2 Implementation references
+### 16.2 Feature admission checklist
 
-Do not restate these here; they are normative in `docs/ARCHITECTURE.md`:
+1. **Home** — which window class/presenter/panel owns it? Which existing control moves or
+   goes away to stay within the budgets?
+2. **Profile** — which capability key gates it? What is the disabled reason when absent?
+3. **Source of truth** — which field stores it? What is derived? (`ARCHITECTURE.md` §4-5)
+4. **Lifecycle** — live/next/view/preference? What does the badge say while running,
+   waiting, matched, recording, suspended, lost?
+5. **Running state** — restart/retune/stage? Is the restart named? Does it discard data?
+6. **Trigger/record** — arm/disarm/retune, record start/pause, Single/Repeat/Loop.
+7. **Persistence** — workspace, record, preferences, session only, or none? Migration?
+8. **View model/presenter** — which view field/callback? Does the panel stay unable to
+   reach App/Device/Store? Does it work in Docked, Sheet and Dialog?
+9. **Input parity** — mouse, touch, pen, keyboard; 48 px targets; no hover-only.
+10. **Accessibility** — label, role, focus return, back behaviour, screen reader.
+11. **Copy** — all locales, whole sentences, terms match §2/§15.
+12. **Security/platform** — any new network/file/USB behaviour updates the security
+    contract (`ARCHITECTURE.md` §9).
+13. **Tests** — behaviour/view-model tests, SimDriver where relevant; typecheck/build.
+14. **Docs** — this file and `ARCHITECTURE.md` updated as owners require.
 
-| Topic | Where |
-| --- | --- |
-| State ownership, lifetimes, persistence tiers | `UI runtime contract` → State ownership; Persistence |
-| Single settings transaction and field patches | `UI runtime contract` → Settings transaction |
-| Acquisition state machine and `mayEdit` | `UI runtime contract` → Acquisition lifecycle |
-| Viewport/display ownership and transitions | `UI runtime contract` → Viewport and display |
-| Panel registry, render/update and view-model shape | `UI runtime contract` → Panel and view-model contract |
-| Overlay stack and focus return | `UI runtime contract` → Panel and view-model contract |
-| Testing, design-contract test, typecheck/build | `## Verification` |
+### 16.3 Definition of done
 
-### 15.3 Feature admission checklist
+- Interface rules satisfied; engineering checks (`ARCHITECTURE.md` §10) pass.
+- Checked at 1400 px (mouse), 900 px (pen/mouse) and 360 px (touch), portrait and
+  landscape, dark/light, `en`/`zh-CN`, reduced motion.
+- Touch path tested on Android with OTG (or SimDriver until hardware exists); back
+  behaviour verified.
+- Keyboard and screen reader path exercised; focus returns.
+- No new console error/unhandled rejection; CSP has no new violations.
+- This document matches the shipped interface.
 
-A UI change is not mergeable until every answer is in the PR/commit description:
+## 17. Migration (C3)
 
-1. **Home** — which region and panel owns it? Which existing control moves or goes away
-   to stay within the budgets?
-2. **Source of truth** — which field stores it? What is derived? (Ownership:
-   `ARCHITECTURE.md` → State ownership.)
-3. **Lifecycle** — live / next / view / workspace? What does the badge say while
-   running, waiting, matched, stopping? (Capability: `ARCHITECTURE.md` → Acquisition
-   lifecycle.)
-4. **Running state** — does it restart, retune, or stage? Is the restart named? Does it
-   discard data?
-5. **Trigger** — does it arm, disarm, retune or freeze the matcher? What happens in
-   Single, Repeat and Loop? (Engine: `ARCHITECTURE.md` → `src/device`.)
-6. **Persistence** — workspace, capture file, session only, or none? What is the
-   migration? (Tiers: `ARCHITECTURE.md` → Persistence.)
-7. **View model** — which panel view field and callback? Does the panel stay unable to
-   reach App/Device/Store? (Contract: `ARCHITECTURE.md` → Panel and view-model contract.)
-8. **Accessibility** — label, role, keyboard path, focus return, hit target.
-9. **Copy** — keys in all locales, whole sentences, no concatenation; terms match §2/§14.
-10. **Tests** — behavioural tests named, not source greps; `npm test`, typecheck and
-    build pass. (Policy: `ARCHITECTURE.md` → Verification.)
-11. **Docs** — this file updated; `NOTES.md` updated if a measurement or assumption
-    changed.
+The current code is the pre-v2 LA interface. Migration is staged; each stage keeps the app
+runnable and updates the owning contract first.
 
-### 15.4 Definition of done
+| Stage | Work | Owner document |
+| --- | --- | --- |
+| 0 | Docs split and cross-links; v2 contracts accepted | ARCHITECTURE/DESIGN |
+| 1 | `platform/` probes, `LinkSession`, `DeviceProfile`, SimDriver; no model branches | ARCHITECTURE §1-3 |
+| 2 | `SignalStore` digital + gaps + float64 positions; old `SampleStore` adapter | ARCHITECTURE §4 |
+| 3 | `TriggerPlan` single source; composite state machine; `mayEdit`; one settings transaction | ARCHITECTURE §5 |
+| 4 | Shell/presenters: Docked/Sheet/Dialog; bottom action bar; panel registry | DESIGN §3-4, §10 |
+| 5 | Analog signals as first-class rows; range vs scale; overload; multi-rate timeline | DESIGN §5-6; ARCHITECTURE §4 |
+| 6 | Mixed TriggerPlan P1; analog trigger UI; Loop D/V under the new model | ARCHITECTURE §5.1; DESIGN §8 |
+| 7 | Recording/OPFS; export/recovery; retention vs record UI | ARCHITECTURE §4.3, §7; DESIGN §9 |
+| 8 | Touch grammar, magnifier, long-press/back, 48 px audit | DESIGN §3, §7, §13 |
+| 9 | First-party decode default, Pyodide optional; worker protocol | ARCHITECTURE §8 |
+| 10 | PWA/offline, CSP/security, T0/T1/T2, Android/device matrix | ARCHITECTURE §9-10 |
+| 11 | Remove Assistant entry; keep host interface debug/test only | ARCHITECTURE §6; DESIGN §10 |
+| 12 | Delete replaced generations (CSS, selectors, docs, tests) and finish the migration | both |
 
-A UI change is done only when:
+The 23-item current-interface debt list is superseded by this table; keep the item-level
+detail in `src/ui/NOTES.md` and the issue tracker, not in this contract. A stage is done
+only when its contract tests and the UI/migration checklist pass.
 
-- the interface rules above are satisfied;
-- the engineering definition of done is met (`ARCHITECTURE.md` → `## Verification`);
-- the change was checked at 1400 px and 360 px wide, in the dark and light themes, in
-  `en` and `zh-CN`, with reduced motion on;
-- the keyboard path was exercised, including focus return from any overlay;
-- no new console error or unhandled rejection appears during the change;
-- this document matches the shipped behaviour.
-
-## 16. Current deviations and migration order
-
-These are the places where the current code does not follow the contract. The order is
-chosen so the foundational rules land before the visible changes that depend on them.
-Where an item is a state, commit, persistence or test rule, its normative contract is in
-`docs/ARCHITECTURE.md`; this table is the migration plan, not a second specification.
-
-| # | Deviation | Fix | Visible |
-| --- | --- | --- | --- |
-| 1 | **Trigger state is stored six ways** (`triggerModes`, `triggerConditions`, `triggerChannel/kind/level`, `softwareTrigger`, analog map, enable mask) and synced by hand (`state.ts:80-89`, `app.ts:5375-5465`). | Keep `triggerModes` as the only condition source; derive a `TriggerPlan`; migrate and delete the legacy fields. | no |
-| 2 | **No single acquisition state machine or capability table.** The lifecycle is seven booleans plus a manual generation counter; `restart` reuses the user-facing stop path (`stopCapture('manual')` then `startCapture`); `captureLocked` is `stopping`; the assistant refuses edits the panel allows; BusPanel/addBus disagree (`app.ts:302-315,775-806,921-957,3565`, `busPanel.ts:27`, `assistant/tools.ts:612`). | Add `AcquisitionState` (idle/arming/waiting/running/stopping/restarting/retrying/lost) and pure `mayEdit(feature, state)`; make restart a first-class transition; route UI, assistant and debug through it. | no |
-| 3 | **Nine paths assign `settings`; only `applySettings` runs the full pipeline.** `configureChannel`, `afterChannelChange`, the analog drag preview, `adoptCapture`, `adoptDeviceChannels`, `finishCapture` and the constructor each apply a different subset; `busViews` is pushed/filtered outside any commit. | One `commitSettings(next, reason)` pipeline; panels send field patches; previews use a separate draft; `busViews` gets the same commit/draft split. | no |
-| 4 | **Lifecycle rules live in comments and prose.** Rate/threshold have no disabled state; duration stays live; trigger edits retune; pre-trigger locks; only Advanced has a note (`capturePanel.ts:543-560,582-735,762-1032`). | Add the `settingPolicy` registry (§7.2) and render Live/Next badges from it. | yes |
-| 5 | **Transport has five meanings.** It is disabled without a device but `Space` starts/opens the chooser; its disabled title says Connect; a pending automatic restart is a hidden third click (`app.ts:3573-3642,4028-4036`, `shortcuts.ts:13`). | Two actions, one `canRun` guard for every input path, connect only on Device, restart as a visible state. | yes |
-| 6 | **No overlay owner.** Every toolbar button hand-closes four menus plus the channel editor; ShortcutsDialog is outside the scheme; a stale comment still describes a removed native dialog (`app.ts:3189-3225`, `settingsMenu.ts:23-25`). | `OverlayController` stack; focus returns by token. | partly |
-| 7 | **Device panel is an unbounded stack with no page header.** Seven always-open sections in implementation order; analyzers mode renders two headers; the panel title does not match its contents. | Group to Acquisition / Trigger / Measurements / Advanced; one header per panel; collapsible with stable defaults. | yes |
-| 8 | **Panels render through two pipelines.** A full `host.replaceChildren()` rebuild (46 call sites) plus a 500 ms frame path patching text through twelve cached refs; a missing ref silently skips, so a field can be stale. `CapturePanelView` mixes raw flags, derived state, sixteen trigger booleans and cursor tables, and the panel re-derives armed/hidden inputs/caps. | One `render(view)` contract plus a complete `update(view)` if needed; view models are presentation-ready; missing nodes throw; panels stop re-deriving shared selectors. | no |
-| 9 | **Eleven top-level commands** and three duplicate entry points (Assistant button + sidebar row; Language/Theme as top-level preferences; panel menu). | Remove the Assistant button; move Language/Theme into Settings; one panel switcher; target 8 commands. | yes |
-| 10 | **Cursors are undiscoverable and destructive.** Only a plot double-click adds one; the panel has no Add control; `Esc` clears them; a new capture silently drops them; they are not persisted (`app.ts:2200-2205,2253-2257,3786`, `capturePanel.ts:1052-1089`). | Explicit Add; per-row delete; non-destructive Esc; declare the persistence tier. | yes |
-| 11 | **Viewport gestures are implemented per surface.** Plot, axis and overview do not share a grammar; keyboard has no zoom/pan; double-click means different things (`app.ts:2039-2231`, `overviewStrip.ts:339-385`). | Publish §6.3 and route all surfaces through it; generate the shortcut table. | yes |
-| 12 | **Two viewport owners and two display owners.** `captureSession.ts` has a pure ViewPolicy but Loop skips it and uses App fields; which store is displayed is spread across `storeRef`, `waveStore`, `repeatFront`, `repeatComposite`, `repeatShowingFront`, `repeatHeldTrigger`, and session teardown is copied in three paths that already diverge (`captureSession.ts:81-112,247-262`, `app.ts:232-265,2820-2852,3745-3760,3846-3858,4792-4806`). | One `ViewState` in the session (Loop lock is a policy variant) and one `DisplayState`; one `applyViewEvent` and one `endSessionDisplay(reason)`; table-driven tests for every transition. | no |
-| 13 | **Bus ownership is split across four homes.** Left cell (gear, trigger, height), BusPanel, Device Analog button, assistant; opening the editor silently switches the panel (`channelList.ts:400-540`, `app.ts:1007-1015`, `busPanel.ts:327-389`). | One bus editor; one creation path; explicit navigation. | yes |
-| 14 | **Status bar duplicates statistics and carries no state.** The capture label already renders samples/rate/duration, then `renderStatus` appends them again; no trigger state; no zoom/timebase; a long error can wrap the bar (`app.ts:3645-3694`, `style.css:1699-1713`). | Three fixed zones per §11; each value once; no wrap; trigger state always visible even with the panel closed. | yes |
-| 15 | **Responsive rules never take effect.** The labelled-toolbar selector outranks the 760/400 px rules, so phones keep 48×58 px buttons and wrap; the panel overlays without a scrim or Close; a persisted 560 px width ignores the remaining plot (`style.css:321-356,1141-1161`, `panelWidth.ts:3-7`). | Breakpoints, drawer with scrim/Close, clamped persisted width, compact rules that win by construction, one row at 360 px. | yes |
-| 16 | **Three token layers, nine type sizes and ad-hoc geometry.** `--bg00`…`--text50` and shadcn names coexist; 104 per-theme component override blocks; the ADC blue `#4C9AFF` is literal; heights range 18–58 px and radii 1–999 px; `--labels-w` is 128 in CSS and 170 in `CHROME` (`style.css:13-172,590-631`, `metrics.ts:94-137`). | One semantic token layer, five type roles, 24/28/32 px controls, 4/8 px radii, one palette source, no per-theme component blocks. | yes |
-| 17 | **Label and plot use different row grammars.** The label side is an inset rounded card in themed mode; the plot paints a full-bleed band; hover/selection/armed/colour exist only on the label side (`style.css:590-631`, `render/theme.ts:86-99`). | One row anatomy across the seam; paint row state on both halves from one token. | yes |
-| 18 | **Copy is inconsistent and sometimes false.** The sidebar calls the panel "Device and capture settings" while it holds measurements and developer tools; "Analyzers" and "decoders" name one concept; the empty-trigger note tells users to double-click a channel name, which opens the name editor (`locales/en.ts:62,433`, `channelList.ts:620-629`). | Vocabulary and scope rules in §14; every label reviewed with the UI and all locales. | yes |
-| 19 | **i18n and time readouts have two implementations.** Static `data-i18n` attributes and imperative toolbar assignments both set the same titles; numbers mix a hardcoded `en-US` formatter with `toLocaleString()`; cursor rows use `triggerSampleIndex` while the status uses the held Repeat origin, so they disagree on screen (`index.html:50-164`, `format.ts:142-145`, `app.ts:2459-2474,2966-2974,3645-3694`). | All strings and accessible names at render time from the catalog; one number formatter; all presentation time through `displayOriginSample()`; a held-front test. | yes |
-| 20 | **Source-text tests freeze the structure.** ~239 `readFileSync` calls across the UI tool suites; 25 of 49 UI selftests read `app.ts`; `cursor-panel-selftest.ts` has 534 `.includes(` calls and asserts append order by `indexOf`; `runtime-settings-selftest.ts` asserts statement spelling. | Replace with view-model/DOM tests per `ARCHITECTURE.md` → Verification; keep an allowlist for static contracts only; add the design-contract test. | no |
-| 21 | **A replaced interaction generation still ships in tests/docs.** The native channel-settings dialog's CSS and motion self-test remain, and NOTES describes it as current (`style.css:635-860`, `tools/motion-selftest.ts:85-134`, `NOTES.md:667,712`). | Delete dead markup/CSS/tests/docs in the same change that replaces an interaction. | no |
-| 22 | **`app.ts` is the growth point.** 5,490 lines mix composition, rendering, capture state, trigger state and panel policy. | Move panel markup and pure decisions into modules; app keeps composition and transitions. | no |
-| 23 | **Persistence has no registry and its schema is hand-copied.** The workspace schema is maintained in four places; the pre-paint script restates keys, version and clamps; workspace has no cursors/viewport; theme and panel width use separate keys (`workspacePreferences.ts:29-46,129-199,380-451`, `app.ts:3291-3326`, `index.html:14-44`, `panelWidth.ts:1-7,49-77`). | Declare one field table with tiers; derive restore/serialize/boot from it; route all persistence through one store; show "session only" where true. | partly |
-
-Done criteria: one capture action, one panel switcher, ≤8 top-bar controls, ≤4 Device
-sections, one trigger condition store, a visible Live/Next badge on every running-state
-edit, one overlay controller, one bus editor, a declared persistence tier for every
-field, and a behavioural test for each panel transition.
+M0 also carries the current-interface debt that the new contracts expose: one trigger
+condition store; one `commitSettings`; `AcquisitionState` + `mayEdit`; explicit cursor
+add and session-only label; one viewport owner; one panel render/update path; one bus
+editor; one semantic token layer; behavioural tests instead of source-text suites; delete
+the replaced channel-dialog generation; move panel logic out of `app.ts`; one persistence
+registry. These are prerequisites for stages 3–4, not separate product features.
