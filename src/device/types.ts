@@ -94,6 +94,12 @@ export interface Device {
   /** Capability envelope exposed to the UI; absent for third-party devices. */
   readonly maxChannels?: number;
   readonly maxSamplerateHz?: Readonly<Record<number, number>>;
+  /**
+   * Per-width default rate where the profile has measured the ceiling as offered but not
+   * sustained (`RateTier.recommendedHz`, for the link WebUSB cannot name); a width with
+   * no entry defaults to the caller's choice.
+   */
+  readonly recommendedSamplerateHz?: Readonly<Record<number, number>>;
   /** Advanced, idle-only USB/register console. */
   usbControl?(command: string): Promise<string>;
   start(

@@ -443,6 +443,8 @@ export const ru: Messages = {
   'capturePanel.sampleRate': 'Частота выборки',
   'capturePanel.threshold': 'Порог',
   'capturePanel.dacNote': 'Код DAC {code} = фактически {volts} В. Ширина захвата: {channels} CH (потолок {rate}).',
+  'capturePanel.dacNoteAdvised':
+    'Код DAC {code} = фактически {volts} В. Ширина захвата: {channels} CH (устойчиво {advised}; потолок {rate} может перегрузить USB-канал).',
   'capturePanel.capture': 'Захват',
   'capturePanel.modeSingle': 'Одиночный',
   'capturePanel.modeRepeat': 'Повтор',

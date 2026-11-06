@@ -100,6 +100,7 @@ export class WorkerSlogicDevice implements Device {
     readonly serial: string,
     readonly maxChannels: number,
     readonly maxSamplerateHz: Readonly<Record<number, number>>,
+    readonly recommendedSamplerateHz: Readonly<Record<number, number>>,
     private readonly timeouts: Required<Omit<WorkerTransportOptions, 'spawn'>>,
   ) {
     worker.onmessage = (event: MessageEvent<FromWorker>) => this.onMessage(event.data);
@@ -138,7 +139,7 @@ export class WorkerSlogicDevice implements Device {
       if (message.kind !== 'opened') throw new DiagnosticError('device.workerNoDevice');
       return new WorkerSlogicDevice(
         worker, message.name, message.serial, message.maxChannels, message.maxSamplerateHz,
-        timeouts,
+        message.recommendedSamplerateHz ?? {}, timeouts,
       );
     } catch (error) {
       worker.terminate();

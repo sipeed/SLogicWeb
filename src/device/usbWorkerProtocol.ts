@@ -66,6 +66,7 @@ export type FromWorker =
       serial: string;
       maxChannels: number;
       maxSamplerateHz: Readonly<Record<number, number>>;
+      recommendedSamplerateHz?: Readonly<Record<number, number>>;
     }
   | ChunkMessage
   | { kind: 'dropout'; position: number; missing: number }

@@ -25,6 +25,7 @@ import {
   capabilityReason,
   maxSamplerateFor,
   profileForVidPid,
+  recommendedSamplerateHzFor,
   sampleRatesFor,
   validateProfile,
 } from './profile.js';
@@ -664,6 +665,61 @@ check(
   `mixed=${capabilityReason(SLOGIC32U3_PROFILE, 'mixed-trigger')}; ` +
     `serial=${capabilityReason(SLOGIC32U3_PROFILE, 'serial')}; ` +
     `16U3@32ch=${capabilityReason(SLOGIC16U3_PROFILE, 'digital', { channels: 32 })}`,
+);
+
+// ---- recommended defaults ----------------------------------------------
+
+{
+  // The ss5-32ch-payload-edge quirk as data: 32ch/100M is offered on ss5 but underran.
+  const unknown32 = recommendedSamplerateHzFor(SLOGIC32U3_PROFILE, null);
+  const ss5 = recommendedSamplerateHzFor(SLOGIC32U3_PROFILE, 'ss5');
+  const ss10 = recommendedSamplerateHzFor(SLOGIC32U3_PROFILE, 'ss10');
+  const none16 = recommendedSamplerateHzFor(SLOGIC16U3_PROFILE, null);
+  check(
+    'the 32U3 recommends 50 MHz at 32ch on ss5 and on an unknown link, nothing on ss10',
+    JSON.stringify(unknown32) === JSON.stringify({ 32: 50e6 }) &&
+      JSON.stringify(ss5) === JSON.stringify({ 32: 50e6 }) &&
+      JSON.stringify(ss10) === '{}' && JSON.stringify(none16) === '{}',
+    `unknown=${JSON.stringify(unknown32)} ss5=${JSON.stringify(ss5)} ` +
+      `ss10=${JSON.stringify(ss10)} 16U3=${JSON.stringify(none16)}`,
+  );
+  check(
+    'every shipped recommendation is an offered rate at or below its link ceiling',
+    PROFILES.every((profile) => profile.digital.rates.every((tier) =>
+      Object.entries(tier.recommendedHz ?? {}).every(([link, hz]) =>
+        sampleRatesFor(profile, tier.channels, link as LinkRate).includes(hz as number)))),
+    PROFILES.map((profile) => `${profile.id}: ${JSON.stringify(
+      profile.digital.rates.map((tier) => tier.recommendedHz ?? null))}`).join('; '),
+  );
+  // Snapping: a recommendation between two offered rates lands on the lower one.
+  const between = variant(SLOGIC32U3_PROFILE, (p) => {
+    p.digital = { ...p.digital, rates: p.digital.rates.map((tier) => tier.channels === 32
+      ? { ...tier, recommendedHz: { ss5: 55e6, ss10: 150e6 } } : tier) };
+  });
+  check(
+    'an unknown link takes the lowest declared recommendation, snapped to an offered rate',
+    validateProfile(between).ok &&
+      recommendedSamplerateHzFor(between, null)[32] === 50e6 &&
+      recommendedSamplerateHzFor(between, 'ss10')[32] === 100e6,
+    `null=${recommendedSamplerateHzFor(between, null)[32]} ` +
+      `ss10=${recommendedSamplerateHzFor(between, 'ss10')[32]}`,
+  );
+}
+expectInvalid(
+  'a recommendation above its link ceiling',
+  variant(SLOGIC32U3_PROFILE, (p) => {
+    p.digital = { ...p.digital, rates: p.digital.rates.map((tier) => tier.channels === 32
+      ? { ...tier, recommendedHz: { ss5: 200e6 } } : tier) };
+  }),
+  'digital.rates[32ch].recommendedHz.ceiling',
+);
+expectInvalid(
+  'a recommendation for an undeclared link',
+  variant(SLOGIC16U3_PROFILE, (p) => {
+    p.digital = { ...p.digital, rates: p.digital.rates.map((tier) => tier.channels === 16
+      ? { ...tier, recommendedHz: { ss10: 50e6 } } : tier) };
+  }),
+  'digital.rates[16ch].recommendedHz.undeclared',
 );
 
 // ---- profiles stay plain data ------------------------------------------

@@ -32,6 +32,12 @@ export interface DigitalGroup {
 export interface RateTier {
   channels: ChannelCount;
   hz: Readonly<Partial<Record<LinkRate, number>>>;
+  /**
+   * The rate a capture should default to on a link, when a measurement shows the
+   * ceiling in `hz` is offered but not sustained. Each value is at or below that
+   * link's ceiling; an absent link means "no reason to default below the ceiling".
+   */
+  recommendedHz?: Readonly<Partial<Record<LinkRate, number>>>;
 }
 
 export interface AnalogGroup {

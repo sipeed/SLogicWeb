@@ -1117,6 +1117,11 @@ async function main(): Promise<void> {
       JSON.stringify(dev32.maxSamplerateHz) === JSON.stringify(MAX_SAMPLERATE_HZ_SLOGIC32_U3),
       `16U3 ${JSON.stringify(dev16.maxSamplerateHz)}, ` +
       `32U3 ${JSON.stringify(dev32.maxSamplerateHz)}`);
+    check('the instance default rates are the profile\'s unknown-link recommendation',
+      JSON.stringify(dev16.recommendedSamplerateHz) === '{}' &&
+        JSON.stringify(dev32.recommendedSamplerateHz) === JSON.stringify({ 32: 50e6 }),
+      `16U3 ${JSON.stringify(dev16.recommendedSamplerateHz)}, ` +
+      `32U3 ${JSON.stringify(dev32.recommendedSamplerateHz)}`);
     const unnamed = new FakeStreamDevice(recorded32(), [], 0x3032);
     delete (unnamed as unknown as { productName?: string }).productName;
     const devUnnamed = new Slogic16U3(unnamed as unknown as USBDevice);

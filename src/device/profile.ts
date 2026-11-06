@@ -351,6 +351,22 @@ export function validateProfile(p: DeviceProfile): ProfileValidation {
       declaredRates,
     );
     if (problem) return problem;
+    if (tier.recommendedHz !== undefined) {
+      const owner = `digital.rates[${String(channels)}ch].recommendedHz`;
+      const advice = checkLinkRateMap(owner, tier.recommendedHz, declaredRates);
+      if (advice) return advice;
+      const hz = tier.hz as Record<string, unknown>;
+      for (const [link, value] of Object.entries(tier.recommendedHz as Record<string, number>)) {
+        const ceiling = hz[link];
+        if (typeof ceiling !== 'number' || value > ceiling) {
+          return fail(
+            `${owner}.ceiling`,
+            `${owner}[${JSON.stringify(link)}] is ${value} Hz, above the ${link} ceiling of ` +
+              `${String(ceiling)} Hz`,
+          );
+        }
+      }
+    }
     tierMaps.push({ channels: channels as ChannelCount, hz: tier.hz as Record<string, unknown> });
   }
   for (const width of widthSet) {
@@ -658,6 +674,37 @@ export function maxSamplerateFor(
 ): number {
   const rates = sampleRatesFor(profile, channels, linkRate);
   return rates.length === 0 ? 0 : rates[rates.length - 1]!;
+}
+
+/**
+ * The rate a capture of this width should default to, per width, or no entry when the
+ * profile has no measured reason to default below the ceiling. A known link reads its
+ * own recommendation; `null` is a link class WebUSB did not name (it never reports
+ * FS/HS/SS), and then the lowest recommendation any link declares is the answer -
+ * defaulting to a rate the slower link cannot sustain is the failure this field exists
+ * to avoid. Links without a recommendation (HS, whose ceiling is far lower) are not
+ * consulted: with no class known the ceiling table is the native one, and the
+ * recommendation is only ever a default the user may raise. Each value is an offered
+ * rate.
+ */
+export function recommendedSamplerateHzFor(
+  profile: DeviceProfile,
+  linkRate: LinkRate | null,
+): Readonly<Record<number, number>> {
+  const table = profile.digital.sampleratesHz ?? SAMPLERATES_HZ;
+  const out: Record<number, number> = {};
+  for (const tier of profile.digital.rates) {
+    const advice = tier.recommendedHz;
+    if (!advice) continue;
+    const values = linkRate === null
+      ? Object.values(advice).filter((hz): hz is number => typeof hz === 'number')
+      : typeof advice[linkRate] === 'number' ? [advice[linkRate]] : [];
+    if (values.length === 0) continue;
+    const target = Math.min(...values);
+    const offered = table.filter((hz) => hz <= target);
+    if (offered.length > 0) out[tier.channels] = offered[offered.length - 1]!;
+  }
+  return out;
 }
 
 /** Capability families a caller can ask about before offering a control. */

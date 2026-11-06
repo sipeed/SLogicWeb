@@ -453,6 +453,8 @@ export const en = {
   'capturePanel.sampleRate': 'Sample rate',
   'capturePanel.threshold': 'Threshold',
   'capturePanel.dacNote': 'DAC code {code} = {volts} V actual. Capture width {channels} CH (ceiling {rate}).',
+  'capturePanel.dacNoteAdvised':
+    'DAC code {code} = {volts} V actual. Capture width {channels} CH (sustained {advised}; the {rate} ceiling may overrun the USB link).',
   'capturePanel.capture': 'Capture',
   'capturePanel.modeSingle': 'Single',
   'capturePanel.modeRepeat': 'Repeat',

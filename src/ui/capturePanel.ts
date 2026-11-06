@@ -125,6 +125,8 @@ export interface CapturePanelView {
     /** Finite sample target; null for Unlimited and Loop captures. */
     targetSamples: number | null } | null;
   maxSamplerateHz: Readonly<Record<number, number>>;
+  /** Per-width rate the board sustains below that ceiling (`Device.recommendedSamplerateHz`). */
+  recommendedSamplerateHz?: Readonly<Record<number, number>>;
   triggerState: 'off' | 'waiting' | 'triggered' | 'not-found';
   cursors: readonly CursorRowView[];
   cursorDistances: readonly CursorDistanceRowView[];
@@ -600,12 +602,23 @@ export class CapturePanel {
 
     const code = vrefCode(s.thresholdVolts);
     const note = div('panel-note');
-    note.textContent = t('capturePanel.dacNote', {
-      code,
-      volts: vrefVolts(code).toFixed(3),
-      channels: s.channels,
-      rate: formatRate(ceiling),
-    });
+    // The ceiling is what the board accepts, not what the USB link sustains: where the
+    // profile measured a lower sustainable rate, the note leads with that figure.
+    const advised = v.recommendedSamplerateHz?.[s.channels];
+    note.textContent = advised !== undefined && advised < ceiling
+      ? t('capturePanel.dacNoteAdvised', {
+        code,
+        volts: vrefVolts(code).toFixed(3),
+        channels: s.channels,
+        advised: formatRate(advised),
+        rate: formatRate(ceiling),
+      })
+      : t('capturePanel.dacNote', {
+        code,
+        volts: vrefVolts(code).toFixed(3),
+        channels: s.channels,
+        rate: formatRate(ceiling),
+      });
     chSec.body.appendChild(note);
     capture.appendChild(chSec.el);
 

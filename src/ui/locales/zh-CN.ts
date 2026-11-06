@@ -400,6 +400,8 @@ export const zhCN: Messages = {
   'capturePanel.sampleRate': '采样率',
   'capturePanel.threshold': '阈值',
   'capturePanel.dacNote': 'DAC 码 {code} = 实际 {volts} V。采集宽度 {channels} CH（上限 {rate}）。',
+  'capturePanel.dacNoteAdvised':
+    'DAC 码 {code} = 实际 {volts} V。采集宽度 {channels} CH（稳定 {advised}；上限 {rate} 可能超出 USB 链路带宽）。',
   'capturePanel.capture': '采集',
   'capturePanel.modeSingle': '单次',
   'capturePanel.modeRepeat': '重复',

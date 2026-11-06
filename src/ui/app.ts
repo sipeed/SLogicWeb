@@ -364,6 +364,8 @@ export class App {
   private lastCaptureRate = 0;
   private lastCaptureTestMode = 0;
   private rateCeilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ;
+  /** The board's per-width default rates (`Device.recommendedSamplerateHz`). */
+  private rateRecommendations: Readonly<Record<number, number>> = {};
   private running = false;
   /** True while WebUSB transfers from the previous run are being cancelled and drained. */
   private stopping = false;
@@ -4040,6 +4042,7 @@ export class App {
         : null,
       progress: this.running ? this.progressView() : null,
       maxSamplerateHz: this.rateCeilings,
+      recommendedSamplerateHz: this.rateRecommendations,
       triggerState: this.triggerState,
       cursors: this.cursorRows(),
       cursorDistances: this.cursorDistanceRows(),
@@ -4650,6 +4653,7 @@ export class App {
   /** Grow the channel model when a wider SLogic board is connected. */
   private adoptDeviceChannels(device: Device): void {
     this.rateCeilings = device.maxSamplerateHz ?? MAX_SAMPLERATE_HZ;
+    this.rateRecommendations = device.recommendedSamplerateHz ?? {};
     const max = device.maxChannels ?? this.channels.length;
     if (!isChannelCount(max)) {
       throw new DiagnosticError('device.unknownWidth', { channels: max });
@@ -4660,6 +4664,7 @@ export class App {
       explicit: this.samplerateExplicit,
       channels: width,
       ceilings: this.rateCeilings,
+      recommended: this.rateRecommendations,
     });
     if (this.store.length === 0 && max !== this.store.channelCount) {
       // The empty store is still rendered before Start is pressed. Grow it together with

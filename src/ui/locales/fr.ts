@@ -452,6 +452,8 @@ export const fr: Messages = {
   'capturePanel.sampleRate': 'Fréquence d’échantillonnage',
   'capturePanel.threshold': 'Seuil',
   'capturePanel.dacNote': 'Code DAC {code} = {volts} V réel. Largeur de capture : {channels} CH (plafond {rate}).',
+  'capturePanel.dacNoteAdvised':
+    'Code DAC {code} = {volts} V réel. Largeur de capture : {channels} CH (soutenu {advised} ; le plafond {rate} peut saturer le lien USB).',
   'capturePanel.capture': 'Capture',
   'capturePanel.modeSingle': 'Unique',
   'capturePanel.modeRepeat': 'Répéter',

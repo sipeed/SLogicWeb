@@ -262,6 +262,7 @@ interface DigitalGroup {
 interface RateTier {
   channels: ChannelCount;
   hz: Readonly<Partial<Record<LinkRate, number>>>;
+  recommendedHz?: Readonly<Partial<Record<LinkRate, number>>>; // measured sustainable default, <= hz
 }
 
 interface AnalogGroup {

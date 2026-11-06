@@ -76,6 +76,14 @@ const SLOGIC16U3_LINK_RATES = ['fs', 'hs', 'ss5'] as const;
 /** Links the SuperSpeedPlus-capable 32U3 negotiates. */
 const SLOGIC32U3_LINK_RATES = ['fs', 'hs', 'ss5', 'ss10'] as const;
 
+/**
+ * The 32-channel default on a 5 Gbit/s link (quirk `ss5-32ch-payload-edge`): 100 MHz
+ * (400 MB/s) is exactly the link ceiling and underran on hardware, 80 MHz also underran
+ * and 50 MHz (200 MB/s) was clean. Real-device review: 320 MB/s held, 400 MB/s aborted
+ * after ~110 ms with a host overload.
+ */
+const SS5_32CH_RECOMMENDED_HZ = 50e6;
+
 /** Pre-trigger history the host matcher may retain (`SoftwareTrigger` cap). */
 const PRE_TRIGGER_MAX_PERCENT = 75;
 const PRE_TRIGGER_MAX_BYTES = 64 * 1024 * 1024;
@@ -259,7 +267,11 @@ export const SLOGIC32U3_PROFILE: DeviceProfile = {
       rateTier(4, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 4), SLOGIC32U3_LINK_RATES),
       rateTier(8, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 8), SLOGIC32U3_LINK_RATES),
       rateTier(16, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 16), SLOGIC32U3_LINK_RATES),
-      rateTier(32, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 32), SLOGIC32U3_LINK_RATES),
+      {
+        ...rateTier(32, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 32), SLOGIC32U3_LINK_RATES),
+        // The `ss5-32ch-payload-edge` quirk: 100 MHz is offered, 50 MHz is what ran clean.
+        recommendedHz: { ss5: SS5_32CH_RECOMMENDED_HZ },
+      },
     ],
     sampleratesHz: SAMPLERATES_HZ,
     thresholdVolts: THRESHOLD_VOLTS,
@@ -309,8 +321,8 @@ export const SLOGIC32U3_PROFILE: DeviceProfile = {
         '(32 x 100 MHz / 8 = 400 MB/s) and triggered an underrun in headless ' +
         'acceptance; a later 80 MHz run also underran, while 50 MHz was clean. ' +
         '100 MHz stays in the capability table because libsigrok declares it. ' +
-        'Until a sustained run is clean, the UI should use a conservative 50 MHz ' +
-        'default on ss5 when 32 channels are enabled.',
+        'Until a sustained run is clean, the 32-channel tier recommends 50 MHz on ss5 ' +
+        '(`recommendedHz`), which the UI uses as its connect default.',
     },
   ],
 };

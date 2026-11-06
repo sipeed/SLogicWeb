@@ -55,7 +55,7 @@ import {
   type TraceEntry,
   withControlTimeout,
 } from './protocol.js';
-import { profileForVidPid, SLOGIC16U3_PROFILE } from './profile.js';
+import { profileForVidPid, recommendedSamplerateHzFor, SLOGIC16U3_PROFILE } from './profile.js';
 import type { DeviceProfile } from './profileTypes.js';
 import { LoopStallWatch, THREAD_STALL_THRESHOLD_MS, USB_FILTERS } from './usbCore.js';
 
@@ -507,6 +507,7 @@ export class Slogic16U3 implements Device {
   readonly serial: string;
   readonly maxChannels: number;
   readonly maxSamplerateHz: Readonly<Record<number, number>>;
+  readonly recommendedSamplerateHz: Readonly<Record<number, number>>;
   /** Capability data for the model this handle was opened on. */
   private readonly profile: DeviceProfile;
   /** A profile executes analog conditions only with converters and trigger kinds. */
@@ -596,6 +597,8 @@ export class Slogic16U3 implements Device {
     this.headDrop = headDropBytesForProductId(usb.productId);
     this.headRemaining = this.headDrop;
     this.maxSamplerateHz = maxSamplerateHzForProfile(profile);
+    // WebUSB does not report the negotiated link class, so the advice is the unknown-link one.
+    this.recommendedSamplerateHz = recommendedSamplerateHzFor(profile, null);
     this.name = usb.productName ?? profile.name;
     this.serial = usb.serialNumber ?? '';
     this.analogTriggersSupported = profile.analog.groups.length > 0 &&

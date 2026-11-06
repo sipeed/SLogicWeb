@@ -90,6 +90,7 @@ async function handle(message: QueuedCommand): Promise<void> {
         serial: instance.serial,
         maxChannels: instance.maxChannels,
         maxSamplerateHz: instance.maxSamplerateHz,
+        recommendedSamplerateHz: instance.recommendedSamplerateHz,
       });
       return;
     }

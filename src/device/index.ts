@@ -14,6 +14,7 @@ export {
   capabilityReason,
   maxSamplerateFor,
   profileForVidPid,
+  recommendedSamplerateHzFor,
   sampleRatesFor,
   validateProfile,
 } from './profile.js';
