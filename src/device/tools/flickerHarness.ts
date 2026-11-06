@@ -8,8 +8,10 @@ import {
   blankCanvasFrames, type BlankCanvasHit, type CanvasSample,
 } from '../../ui/frameFlicker.js';
 import type { App } from '../../ui/app.js';
+import type { CaptureSettings } from '../../ui/state.js';
 import { WorkerSlogicDevice } from '../workerTransport.js';
 import type { Device } from '../types.js';
+import { getGrantedDevicesOnBestThread } from '../index.js';
 import { fillCounter16 } from './loopWindowHarness.js';
 import FakeUsbWorker from './fakeUsbWorker.js?worker&inline';
 
@@ -58,6 +60,8 @@ export interface FlickerProbeReport {
   mode: 'single' | 'loop';
   channels: ChannelCount;
   samplerate: number;
+  loopWindowSamples: number;
+  startDisplayedSamples: number;
   seconds: number;
   primeSeconds: number;
   elapsedMs: number;
@@ -78,6 +82,8 @@ export interface FlickerProbeReport {
   paintedCanvases: string[];
   noDataRenders: number;
   noDataRendersAfterStart: number;
+  noDataEmptyRenders: number;
+  noDataEmptyRendersAfterStart: number;
   hintToggles: number;
   hintVisibleMs: number;
   canvasNames: string[];
@@ -85,6 +91,8 @@ export interface FlickerProbeReport {
   renders: FlickerRenderRecord[];
   pageErrors: string[];
   deviceLeak: boolean;
+  deviceRestored: boolean;
+  previousDeviceSerial: string | null;
 }
 
 export interface CompositeFrameReading {
@@ -112,7 +120,8 @@ interface FlickerAppProbe {
   store: { channelCount: number; samplerate: number; length: number };
   channels: readonly { enabled: boolean }[];
   debug: App['debug'];
-  installDevice(device: Device, epoch: number): void;
+  settings: CaptureSettings;
+  installDevice(device: Device, epoch: number): boolean;
   discardDevice(): number;
   progressView(): { samples: number; dropped: number; kept: number; limit: number };
 }
@@ -186,6 +195,23 @@ function canvasGrabber(scale: number): (canvas: HTMLCanvasElement) => CanvasSamp
   };
 }
 
+async function restorePreviousDevice(
+  app: FlickerAppProbe, serial: string,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const devices = await getGrantedDevicesOnBestThread();
+      const match = devices.find((device) => device.serial === serial) ?? null;
+      for (const device of devices) if (device !== match) device.terminate();
+      if (match !== null) return app.installDevice(match, app.deviceEpoch);
+    } catch {
+      console.warn('[flicker] the previous device could not be re-opened yet');
+    }
+    await wait(300);
+  }
+  return false;
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => { setTimeout(resolve, ms); });
 }
@@ -223,9 +249,14 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
   const seconds = options.seconds;
   const primeSeconds = Math.max(0, options.primeSeconds ?? 0);
   if (!(seconds > 0)) throw new Error('the flicker probe needs a positive --seconds');
+  const wantedLoopSamples = options.loopSamples ?? 2_000_000;
   const maxFrames = options.maxFrames ?? Math.ceil((seconds + primeSeconds + 2) * 120);
   const hint = document.getElementById('empty-hint');
 
+  const previousDevice = app.device;
+  const previousSerial = previousDevice === null ? null : previousDevice.serial;
+  const previousSettings: CaptureSettings = { ...app.settings };
+  const previousEnabled = app.channels.map((channel) => channel.enabled);
   app.discardDevice();
   const bytesPerMs = samplerate * bytesPerSampleForChannels(channels) / 1000;
   const worker = new FakeUsbWorker({ name: String(bytesPerMs) });
@@ -259,6 +290,7 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
   let hintToggles = 0;
   let hintVisibleMs = 0;
   let report: FlickerProbeReport | null = null;
+  let deviceRestored = false;
 
   try {
     app.installDevice(dev, app.deviceEpoch);
@@ -272,8 +304,11 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
       testMode: 2,
       softwareTrigger: false,
       ...(mode === 'single' ? { singleUnlimited: true } : {}),
-      ...(mode === 'loop' ? { loopSamples: options.loopSamples ?? 2_000_000 } : {}),
+      ...(mode === 'loop' ? { loopSamples: wantedLoopSamples } : {}),
     });
+    if (mode === 'loop' && app.settings.loopSamples !== wantedLoopSamples) {
+      app.debug.setSettings({ loopSamples: wantedLoopSamples });
+    }
 
     if (primeSeconds > 0) {
       await withTimeout(app.debug.start(), START_TIMEOUT_MS, 'the prime capture did not start');
@@ -324,6 +359,7 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
 
     app.debug.resetFrameStats();
     const frameStatsBefore = app.debug.frameStats();
+    const startDisplayedSamples = app.store.length;
     captureStartedAtMs = Date.now() - startedAt;
     await withTimeout(app.debug.start(), START_TIMEOUT_MS, 'the measured capture did not start');
     await wait(seconds * 1000);
@@ -339,10 +375,14 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
     const elapsedMs = captureStoppedAtMs - captureStartedAtMs;
     const blank = blankCanvasFrames(canvasFrames);
     const noData = renders.filter((record) => record.dataBins === 0);
+    const noDataEmpty = noData.filter((record) => record.storeLength === 0);
+    const loopWindowSamples = app.settings.loopSamples;
     report = {
       mode,
       channels,
       samplerate,
+      loopWindowSamples,
+      startDisplayedSamples,
       seconds,
       primeSeconds,
       elapsedMs,
@@ -365,6 +405,9 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
       noDataRenders: noData.length,
       noDataRendersAfterStart:
         noData.filter((record) => record.atMs >= captureStartedAtMs).length,
+      noDataEmptyRenders: noDataEmpty.length,
+      noDataEmptyRendersAfterStart:
+        noDataEmpty.filter((record) => record.atMs >= captureStartedAtMs).length,
       hintToggles,
       hintVisibleMs,
       canvasNames: names,
@@ -372,6 +415,8 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
       renders,
       pageErrors,
       deviceLeak: false,
+      deviceRestored: false,
+      previousDeviceSerial: previousSerial,
     };
     return report;
   } finally {
@@ -386,6 +431,17 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
       window.removeEventListener('unhandledrejection', onUnhandledRejection);
       app.discardDevice();
       if (report !== null) report.deviceLeak = app.device !== null;
+      app.debug.setSettings(previousSettings);
+      const enabled = app.channels.map((channel) => channel.enabled);
+      for (let index = 0; index < enabled.length; index++) {
+        if (enabled[index] !== previousEnabled[index]) {
+          app.debug.toggleChannel(index, previousEnabled[index] === true);
+        }
+      }
+      deviceRestored = previousSerial === null
+        ? false
+        : await restorePreviousDevice(app, previousSerial);
+      if (report !== null) report.deviceRestored = deviceRestored;
     }
   }
 }

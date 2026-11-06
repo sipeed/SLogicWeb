@@ -218,12 +218,16 @@ gate('blankFrames', report.blankFrames, '= 0', report.blankFrames === 0);
 gate('live', report.live, true, report.live === true);
 gate('pageErrors', report.pageErrors.length, 0, report.pageErrors.length === 0);
 gate('deviceLeak', report.deviceLeak, false, report.deviceLeak === false);
-gate('samples', report.samples, '> 0', report.samples > 0);
-if (report.primeSeconds > 0) {
-  gate('noDataRendersAfterStart', report.noDataRendersAfterStart, '= 0',
-    report.noDataRendersAfterStart === 0);
+if (report.previousDeviceSerial !== null) {
+  gate('deviceRestored', report.deviceRestored, true, report.deviceRestored === true);
 }
-if (startFlashFrames !== null) {
+gate('samples', report.samples, '> 0', report.samples > 0);
+const startKeptPrevious = report.startDisplayedSamples > 0;
+if (startKeptPrevious) {
+  gate('noDataEmptyRendersAfterStart', report.noDataEmptyRendersAfterStart, '= 0',
+    report.noDataEmptyRendersAfterStart === 0);
+}
+if (startFlashFrames !== null && startKeptPrevious) {
   gate('startFlashFrames', startFlashFrames,
     `= 0 within ${START_FLASH_WINDOW_MS} ms`, startFlashFrames === 0);
 }
@@ -238,6 +242,7 @@ if (minDrawnHz > 0) {
 }
 
 const head = `${report.channels}ch/${(report.samplerate / 1e6).toFixed(0)} MHz ${report.mode} ` +
+  `${report.mode === 'loop' ? `win ${report.loopWindowSamples} ` : ''}` +
   `${(report.elapsedMs / 1000).toFixed(2)} s${report.primeSeconds > 0 ? ` after ${report.primeSeconds} s prime` : ''}`;
 const summary = `${head} drawn ${report.drawn} (${report.drawnHz.toFixed(1)} Hz) ` +
   `skipped ${report.skipped} ` +
@@ -249,6 +254,7 @@ const summary = `${head} drawn ${report.drawn} (${report.drawnHz.toFixed(1)} Hz)
   `frames ${report.canvasFrames.length} ` +
   `blank ${report.blankFrames} ` +
   `noData ${report.noDataRenders}/${report.noDataRendersAfterStart} ` +
+  `noDataEmpty ${report.noDataEmptyRenders}/${report.noDataEmptyRendersAfterStart} ` +
   `hint ${report.hintToggles}/${report.hintVisibleMs} ms ` +
   `${compositeReport
     ? `flash ${compositeReport.startFlashFrames}/${compositeReport.startWindowFrames}` +
@@ -262,6 +268,8 @@ console.log(JSON.stringify({
   mode: report.mode,
   channels: report.channels,
   samplerate: report.samplerate,
+  loopWindowSamples: report.loopWindowSamples,
+  startDisplayedSamples: report.startDisplayedSamples,
   seconds: report.seconds,
   primeSeconds: report.primeSeconds,
   elapsedMs: report.elapsedMs,
@@ -277,6 +285,8 @@ console.log(JSON.stringify({
   paintedCanvases: report.paintedCanvases,
   noDataRenders: report.noDataRenders,
   noDataRendersAfterStart: report.noDataRendersAfterStart,
+  noDataEmptyRenders: report.noDataEmptyRenders,
+  noDataEmptyRendersAfterStart: report.noDataEmptyRendersAfterStart,
   hintToggles: report.hintToggles,
   hintVisibleMs: report.hintVisibleMs,
   canvasNames: report.canvasNames,
@@ -285,6 +295,8 @@ console.log(JSON.stringify({
   frameCostMs: report.frameStatsAfter.drawMs,
   pageErrors: report.pageErrors,
   deviceLeak: report.deviceLeak,
+  deviceRestored: report.deviceRestored,
+  previousDeviceSerial: report.previousDeviceSerial,
   composite: compositeReport,
   gates,
 }, null, 2));

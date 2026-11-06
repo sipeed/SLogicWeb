@@ -101,6 +101,9 @@ import { stopFailureIsSilent } from './stopFailure.js';
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
 import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.js';
 import { capturePostTriggerSamples, carryCaptureDuration } from './capturePolicy.js';
+import {
+  captureStartHoldDue, emptyHintVisible, planCaptureStartDisplay,
+} from './captureStart.js';
 import { liveDrawDue, liveWindowHasNewData, type LiveWindow } from './liveRefresh.js';
 import {
   fingerprintOf, planLayers, storeSignature, type FrameFingerprint,
@@ -272,6 +275,7 @@ export class App {
   private repeatComposite: RepeatCompositeStore | null = null;
   /** The previous wave is on screen while the current one waits for its trigger. */
   private repeatShowingFront = false;
+  private pendingCaptureStore: SampleStore | null = null;
   /** The old wave's T while its frame is held, in that store's coordinates. */
   private repeatHeldTrigger: number | null = null;
   /** A Repeat wave missed its trigger; keep the note up until the next successful one. */
@@ -1520,18 +1524,19 @@ export class App {
       next.samplerate === this.settings.samplerate &&
       next.channels === this.settings.channels;
     if (liveLoopWindow) {
-      const storeChannels = isChannelCount(this.store.channelCount)
-        ? this.store.channelCount : next.channels;
+      const capture = this.captureStore;
+      const storeChannels = isChannelCount(capture.channelCount)
+        ? capture.channelCount : next.channels;
       this.loopRetentionLen = clampLoopSamples(next.loopSamples, storeChannels);
       // The carried slack is derived from the window; keep the two in step.
       this.loopTriggerSlackSamples = this.analogScanner
-        ? triggerSlackSamples(this.loopRetentionLen, this.store.samplerate,
+        ? triggerSlackSamples(this.loopRetentionLen, capture.samplerate,
           bytesPerSampleForChannels(storeChannels))
         : 0;
       // The DurationWindow changed size: re-clamp the user's ViewWindow into it. The
       // trigger lock, T and the local roll are untouched.
       if (this.triggerViewLock) this.clampLockView();
-      this.enforceLoopRetention(this.storeRef);
+      this.enforceLoopRetention(capture);
       this.resetBusBuilds();
     }
     this.settings = next;
@@ -1806,6 +1811,12 @@ export class App {
     // pre-trigger samples are arriving, but there is nothing new to show yet. A user
     // gesture (`dirty`) still draws, using the held wave and its own T.
     let liveDue = false;
+    const pending = this.pendingCaptureStore;
+    if (pending !== null && captureStartHoldDue(pending.length)) {
+      this.pendingCaptureStore = null;
+      this.setDisplayStore(pending);
+      this.dirty = true;
+    }
     if (!this.dirty && !this.repeatWaveHolding) {
       liveDue = liveDrawDue(
         now, this.liveDrawAt, this.lastFrameCostMs, this.livePending, this.running);
@@ -1937,7 +1948,11 @@ export class App {
     const wCss = this.el.plot.clientWidth;
     const hCss = this.el.plot.clientHeight;
     this.overlay.syncSize(wCss, hCss);
-    this.el.hint.style.display = this.store.length > 0 ? 'none' : 'flex';
+    this.el.hint.style.display = emptyHintVisible({
+      displayedSamples: this.store.length,
+      running: this.running,
+      holdPending: this.pendingCaptureStore !== null,
+    }) ? 'flex' : 'none';
 
     const boxes = this.stack.boxes();
     const repeatTints = this.repeatTintRegions();
@@ -3068,6 +3083,7 @@ export class App {
   private updateRepeatDisplay(): void {
     if (!this.repeatSession || this.settings.mode !== 'repeat' || !this.waveStore) return;
     if (this.repeatShowingFront) return;
+    if (this.pendingCaptureStore !== null) return;
     const back = this.waveStore;
     const front = this.repeatFront;
     const fixed = this.session?.policy.kind === 'fixed';
@@ -3250,6 +3266,13 @@ export class App {
       this.edgeRows, new Set(this.cursors.map((cursor) => cursor.id)),
     );
     this.renderPanels();
+  }
+
+  private settleHeldCaptureStart(): void {
+    const pending = this.pendingCaptureStore;
+    if (pending === null) return;
+    this.pendingCaptureStore = null;
+    this.setDisplayStore(pending);
   }
 
   /**
@@ -4018,6 +4041,7 @@ export class App {
 
   private adoptCapture(store: SampleStore, names: string[], label: CaptureLabel): void {
     this.repeatTimer.cancel();
+    this.settleHeldCaptureStart();
     this.discardDecodeState();
     this.releaseMarkerPointer();
     this.storeRef.set(store);
@@ -4084,6 +4108,7 @@ export class App {
 
   private discardDevice(): number {
     this.repeatTimer.cancel();
+    this.settleHeldCaptureStart();
     const device = this.device;
     this.deviceEpoch += 1;
     if (device) {
@@ -4285,6 +4310,7 @@ export class App {
   private async startCapture(origin: CaptureStartOrigin = 'manual'): Promise<void> {
     if (this.running || this.stopping || this.repeatTimer.pending) return;
     this.settledHeldCapture = false;
+    this.pendingCaptureStore = null;
     if (!this.device) {
       // Start with no board opens the chooser: the click is the user gesture WebUSB
       // requires, and cancelling simply leaves the app idle. There is no demo fallback.
@@ -4389,8 +4415,15 @@ export class App {
         this.repeatShowingFront = true;
         this.repeatHeldTrigger = front.hasTrigger ? front.origin : null;
       } else {
+        const hold = planCaptureStartDisplay({
+          displayedSamples: this.store.length,
+          displayedChannels: this.store.channelCount,
+          captureChannels: cfg.channels,
+          quietRepeat,
+        }) === 'hold-previous';
         this.releaseMarkerPointer();
-        this.storeRef.set(store);
+        if (hold) this.pendingCaptureStore = store;
+        else this.storeRef.set(store);
       }
       this.captureLabel = { kind: 'capturing', channels: cfg.channels, rate: cfg.samplerate };
       // A quiet wave does not rebuild the panel or plot, but the status line must stop
@@ -4533,7 +4566,7 @@ export class App {
           }
           this.captureBytes += chunk.length;
           store.append(chunk);
-          this.enforceLoopRetention(this.storeRef);
+          this.enforceLoopRetention(store);
           this.livePending = true;
           return;
         }
@@ -4580,7 +4613,7 @@ export class App {
         this.livePending = true;
         // A crossing across the gap is unknowable; restart the scan from the next chunk.
         this.analogScanner?.resetContinuity();
-        if (isLoop) { this.enforceLoopRetention(this.storeRef); return; }
+        if (isLoop) { this.enforceLoopRetention(store); return; }
         if (store.length >= this.captureLimitSamples) void this.stopCapture('completed');
       }, softwareTrigger ? {
         // A loop capture windows the triggered stream downstream of the trigger: the
@@ -4722,6 +4755,7 @@ export class App {
         const armed = this.startMutatedCapture;
       if (armed && this.device === device) this.deviceLost(e, false);
       this.running = false;
+      this.settleHeldCaptureStart();
       if (this.startMutatedCapture) {
         this.startMutatedCapture = false;
         this.triggerState = 'off';
@@ -5111,6 +5145,7 @@ export class App {
   }
 
   private finishCapture(reason: CaptureStopReason = 'manual'): void {
+    this.settleHeldCaptureStart();
     // No more data will be scanned; the locked frame itself stays on screen.
     this.analogScanner = null;
     this.analogCrossings = [];
