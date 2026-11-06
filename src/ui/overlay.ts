@@ -20,6 +20,7 @@
 import type { Bubble } from './annotationLayout.js';
 import type { AnalogFrame } from './busView.js';
 import { canvasPalette, type CanvasPalette } from './canvasPalette.js';
+import type { ClearedCanvases } from './frameLayers.js';
 import { AXIS, BUBBLE, GRID, ROWS } from './metrics.js';
 import {
   SCOPE_DIVISIONS, SCOPE_PAD_CSS, formatScopeVolts, scopeGeometry, scopeTickIndices,
@@ -216,9 +217,9 @@ export class Overlay {
     return { overlay: grid || top, bus: top };
   }
 
-  beginFrame(): void {
-    this.gridCtx.clearRect(0, 0, this.wCss, this.hCss);
-    this.ctx.clearRect(0, 0, this.wCss, this.hCss);
+  beginFrame(clear: ClearedCanvases): void {
+    if (clear.grid) this.gridCtx.clearRect(0, 0, this.wCss, this.hCss);
+    if (clear.top) this.ctx.clearRect(0, 0, this.wCss, this.hCss);
   }
 
   /**
@@ -239,7 +240,7 @@ export class Overlay {
    * the top of the plot. Each region is an x span with its own surface colour; no
    * vertical line is drawn. Ordering in the frame:
    *
-   *   overlay.beginFrame();
+   *   overlay.beginFrame(clearedCanvases(plan));
    *   overlay.drawRegionTint(regions, boxes);
    *   overlay.drawGrid(ticks);
    *

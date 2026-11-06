@@ -181,14 +181,14 @@ const css = fs.readFileSync('src/ui/style.css', 'utf8');
 }
 
 {
-  const begin = overlaySrc.indexOf('beginFrame()');
+  const begin = overlaySrc.indexOf('beginFrame(clear: ClearedCanvases)');
   const tint = overlaySrc.indexOf('drawRegionTint(regions: readonly');
   const grid = overlaySrc.indexOf('drawGrid(ticks: TickSet');
   const order = begin >= 0 && begin < tint && tint < grid;
-  const documented = overlaySrc.includes('overlay.beginFrame();') &&
+  const documented = overlaySrc.includes('overlay.beginFrame(clearedCanvases(plan));') &&
     overlaySrc.includes('overlay.drawRegionTint(regions, boxes);') &&
     overlaySrc.includes('overlay.drawGrid(ticks);') &&
-    overlaySrc.indexOf('overlay.beginFrame();') <
+    overlaySrc.indexOf('overlay.beginFrame(clearedCanvases(plan));') <
       overlaySrc.indexOf('overlay.drawRegionTint(regions, boxes);') &&
     overlaySrc.indexOf('overlay.drawRegionTint(regions, boxes);') <
       overlaySrc.indexOf('overlay.drawGrid(ticks);');

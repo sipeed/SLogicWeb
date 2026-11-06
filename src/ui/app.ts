@@ -106,7 +106,8 @@ import {
 } from './captureStart.js';
 import { liveDrawDue, liveWindowHasNewData, type LiveWindow } from './liveRefresh.js';
 import {
-  fingerprintOf, planLayers, storeSignature, type FrameFingerprint, type LayerInvalidation,
+  clearedCanvases, fingerprintOf, planLayers, storeSignature,
+  type FrameFingerprint, type LayerInvalidation,
 } from './frameLayers.js';
 import {
   FRAME_LAYERS, FrameCostRing,
@@ -1992,8 +1993,9 @@ export class App {
       this.layerSkips.axis += 1;
     }
 
+    this.overlay.beginFrame(clearedCanvases(plan));
+
     if (plan.overlay) {
-      this.overlay.beginFrame();
       this.layerDraws.overlay += 1;
       if (repeatTints) {
         // On the grid canvas, before its gridlines: the tint is the layer "behind" the

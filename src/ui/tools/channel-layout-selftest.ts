@@ -342,7 +342,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const drawSource = drawStart >= 0 && drawEnd > drawStart
     ? app.slice(drawStart, drawEnd) : '';
   const paintOrder = [
-    'this.overlay.beginFrame();',
+    'this.overlay.beginFrame(clearedCanvases(plan));',
     'this.overlay.drawGrid(ticks);',
     'this.drawLaneSurfaces(boxes, repeatTints);',
     'this.overlay.drawLevels(',

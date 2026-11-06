@@ -31,7 +31,15 @@ export interface LayerInvalidation {
   bus: boolean;
 }
 
+export interface ClearedCanvases {
+  grid: boolean;
+  top: boolean;
+}
+
 const DRAW_ALL: FrameLayerPlan = { wave: true, axis: true, overlay: true, bus: true };
+
+const CLEAR_NOTHING: ClearedCanvases = Object.freeze({ grid: false, top: false });
+const CLEAR_BOTH_CANVASES: ClearedCanvases = Object.freeze({ grid: true, top: true });
 
 export const NO_INVALIDATION: LayerInvalidation = Object.freeze({
   wave: false, axis: false, overlay: false, bus: false,
@@ -65,6 +73,10 @@ export function fingerprintOf(
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return hash >>> 0;
+}
+
+export function clearedCanvases(plan: FrameLayerPlan): ClearedCanvases {
+  return plan.overlay ? CLEAR_BOTH_CANVASES : CLEAR_NOTHING;
 }
 
 export function planLayers(

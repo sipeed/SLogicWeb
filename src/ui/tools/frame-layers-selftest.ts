@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  NO_INVALIDATION, fingerprintOf, planLayers, storeSignature,
-  type FrameFingerprint, type FrameLayerPlan, type LayerInvalidation,
+  clearedCanvases, NO_INVALIDATION, fingerprintOf, planLayers, storeSignature,
+  type ClearedCanvases, type FrameFingerprint, type FrameLayerPlan, type LayerInvalidation,
 } from '../frameLayers.js';
 
 const nodeProcess = (() => {
@@ -104,6 +104,58 @@ const base: FrameFingerprint = {
 }
 
 {
+  const plans: FrameLayerPlan[] = [];
+  for (let bits = 0; bits < 16; bits++) {
+    plans.push({
+      wave: (bits & 1) !== 0, axis: (bits & 2) !== 0,
+      overlay: (bits & 4) !== 0, bus: (bits & 8) !== 0,
+    });
+  }
+  const gridOnlyWithOverlay = plans.every((p) => !clearedCanvases(p).grid || p.overlay);
+  const topOnlyWithOverlay = plans.every((p) => !clearedCanvases(p).top || p.overlay);
+  const matchesOverviewPass = plans.every((p) => {
+    const clear = clearedCanvases(p);
+    return clear.grid === p.overlay && clear.top === p.overlay;
+  });
+  check('only the canvases the frame repaints are cleared, across all 16 layer plans',
+    plans.length === 16 && gridOnlyWithOverlay && topOnlyWithOverlay && matchesOverviewPass,
+    `plans=${plans.length}, grid=>overlay=${gridOnlyWithOverlay}, ` +
+      `top=>overlay=${topOnlyWithOverlay}, exact=${matchesOverviewPass}`);
+
+  const busOnly = plans.filter((p) => p.bus && !p.overlay);
+  const busOnlyKeepsBoth = busOnly.length === 4 && busOnly.every((p) => {
+    const clear = clearedCanvases(p);
+    return !clear.grid && !clear.top;
+  });
+  const quiet = plans.filter((p) => !p.wave && !p.axis && !p.overlay && !p.bus);
+  const quietClearsBoth = quiet.length === 1 && quiet.every((p) => {
+    const clear = clearedCanvases(p);
+    return !clear.grid && !clear.top;
+  });
+  check('a bus-only frame does not clear the annotation canvas it only partly repaints',
+    busOnlyKeepsBoth && quietClearsBoth,
+    `busOnly=${busOnly.length}, busOnlyKeepsBoth=${busOnlyKeepsBoth}, ` +
+      `quiet=${quiet.length}, quietClearsBoth=${quietClearsBoth}`);
+
+  const candidates: [string, (plan: FrameLayerPlan) => ClearedCanvases][] = [
+    ['clear both unconditionally', () => ({ grid: true, top: true })],
+    ['gate the annotation canvas on overlay || bus',
+      (p) => ({ grid: p.overlay, top: p.overlay || p.bus })],
+    ['gate the grid canvas on wave || overlay',
+      (p) => ({ grid: p.wave || p.overlay, top: p.overlay })],
+  ];
+  const satisfies = (rule: (plan: FrameLayerPlan) => ClearedCanvases): boolean =>
+    plans.every((p) => {
+      const clear = rule(p);
+      return (!clear.grid || p.overlay) && (!clear.top || p.overlay);
+    });
+  const rejected = candidates.filter(([, rule]) => !satisfies(rule)).map(([name]) => name);
+  check('the clear rule is falsifiable: every wrong predicate clears what it will not repaint',
+    rejected.length === candidates.length && satisfies(clearedCanvases),
+    `rejected=${rejected.join(' | ')}, implemented=${satisfies(clearedCanvases)}`);
+}
+
+{
   const equal = fingerprintOf(['a', 1, true, null]) === fingerprintOf(['a', 1, true, null]);
   const changed = fingerprintOf(['a', 1]) !== fingerprintOf(['a', 2]);
   const separated = fingerprintOf(['a', 'b']) !== fingerprintOf(['ab']);
@@ -134,8 +186,8 @@ const base: FrameFingerprint = {
     'this.layerDraws.overlay += 1;', 'this.layerSkips.overlay += 1;',
     'this.layerDraws.bus += 1;', 'this.layerSkips.bus += 1;',
   ].every((needle) => draw.includes(needle));
-  const overlayClearsOnce = (draw.match(/this\.overlay\.beginFrame\(\)/g) ?? []).length === 1 &&
-    draw.includes('if (plan.overlay) {\n      this.overlay.beginFrame();');
+  const overlayClearsOnce = (draw.match(/this\.overlay\.beginFrame\(clearedCanvases\(plan\)\);/g) ?? []).length === 1 &&
+    !draw.includes('if (plan.overlay) {\n      this.overlay.beginFrame');
   check('draw() plans every layer, counts each decision, and clears the overlay once',
     consulted && counted && overlayClearsOnce,
     `consulted=${consulted}, counted=${counted}, beginFrame=${overlayClearsOnce}`);
@@ -166,7 +218,7 @@ const base: FrameFingerprint = {
 
   const overlaySrc = fs.readFileSync('src/ui/overlay.ts', 'utf8');
   const syncStart = overlaySrc.indexOf('syncSize(wCss: number, hCss: number): void {');
-  const syncEnd = syncStart >= 0 ? overlaySrc.indexOf('beginFrame()', syncStart) : -1;
+  const syncEnd = syncStart >= 0 ? overlaySrc.indexOf('beginFrame(clear', syncStart) : -1;
   const syncBody = syncEnd > syncStart ? overlaySrc.slice(syncStart, syncEnd) : '';
   const deviceRounded = syncBody.includes('const w = Math.max(1, Math.round(wCss * dpr));') &&
     syncBody.includes('const h = Math.max(1, Math.round(hCss * dpr));') &&
@@ -179,6 +231,16 @@ const base: FrameFingerprint = {
     overlaySrc.includes('return { overlay: grid || top, bus: top };');
   check('the overlay reallocates on device size and reports the buffers it cleared',
     deviceRounded && reports, `rounded=${deviceRounded}, reports=${reports}`);
+
+  const beginStart = overlaySrc.indexOf('beginFrame(clear: ClearedCanvases): void {');
+  const beginEnd = beginStart >= 0 ? overlaySrc.indexOf('\n  }', beginStart) : -1;
+  const beginBody = beginEnd > beginStart ? overlaySrc.slice(beginStart, beginEnd) : '';
+  const clearCalls = (beginBody.match(/clearRect\(/g) ?? []).length;
+  const gatedByPlan = clearCalls === 2 &&
+    /if \(clear\.grid\) this\.gridCtx\.clearRect\(/.test(beginBody) &&
+    /if \(clear\.top\) this\.ctx\.clearRect\(/.test(beginBody);
+  check('beginFrame clears a canvas only when the frame asks for that canvas',
+    gatedByPlan, `clearCalls=${clearCalls}, gated=${gatedByPlan}`);
 
   const stackSrc = fs.readFileSync('src/ui/waveformStack.ts', 'utf8');
   const stackConsumes = stackSrc.includes('syncSize(): { rescaled: boolean }') &&
