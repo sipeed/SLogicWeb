@@ -33,13 +33,24 @@ export class LoopStallWatch {
   private lastTick = 0;
   count = 0;
   maxMs = 0;
+  /** `performance.now()` of the worst stall, on this watch's own thread. */
   maxAtMs = 0;
   readonly samples: number[] = [];
-  /** Called for every stall over the threshold, with its offset from start(). */
+  /** Called for every stall over the threshold, with its `performance.now()` time. */
   onStall: ((ms: number, atMs: number) => void) | null = null;
 
+  /**
+   * Begin one acquisition's measurement. The counters restart here: a watch is reused
+   * for every capture of a connection, and a worst stall carried over from an earlier
+   * capture would be reported against this one's start - an "N ms into the capture"
+   * that is negative by however long ago that capture ran.
+   */
   start(): void {
     this.stop();
+    this.count = 0;
+    this.maxMs = 0;
+    this.maxAtMs = 0;
+    this.samples.length = 0;
     this.lastTick = performance.now();
     this.timer = setInterval(() => {
       const now = performance.now();

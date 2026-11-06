@@ -2047,6 +2047,18 @@ async function main(): Promise<void> {
     quick.stop();
     check('an idle thread is not reported as blocked', quick.count === 0,
       `count=${quick.count} max=${quick.maxMs.toFixed(1)}ms`);
+
+    // The transport reuses one watch for every capture of a connection, and the overload
+    // message reports `maxAtMs - started`: a stall carried over from an earlier capture
+    // printed "-113258 ms into the capture".
+    const restarted = performance.now();
+    watch.start();
+    await new Promise((r) => setTimeout(r, THREAD_PROBE_WAIT_MS));
+    watch.stop();
+    check('a restarted stall probe forgets the previous capture\'s stalls',
+      watch.count === 0 && watch.maxMs === 0 && watch.samples.length === 0 &&
+        (watch.maxAtMs === 0 || watch.maxAtMs >= restarted),
+      `count=${watch.count} max=${watch.maxMs.toFixed(1)}ms at=${watch.maxAtMs} start=${restarted}`);
   }
 
   console.log('\nworker transport, page side');
