@@ -60,7 +60,9 @@ import {
   type ChannelLaneLabel,
 } from './channelList.js';
 import { decoderRowName } from './decoderI18n.js';
-import { computeChannelRowHeight } from './channelLayout.js';
+import {
+  columnHasEdge, computeChannelRowHeight, filterIdleRows, type IdleFilterResult,
+} from './channelLayout.js';
 import {
   MAX_SAMPLES, levelAt, loadFiles, loadLwcap, planLwcap, saveLwcap, writeLwcap,
   type LwcapPlan,
@@ -124,6 +126,7 @@ import { cornerView, cornerViewEqual, type CornerView } from './cornerCell.js';
 import { ShortcutsDialog } from './shortcutsDialog.js';
 import { AboutDialog } from './aboutDialog.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
+import { TOUCH_TARGET_PX } from './presenters.js';
 import {
   Overlay, paintMarkerChip, type HoverMeasurement, type RegionTint,
 } from './overlay.js';
@@ -173,8 +176,8 @@ import {
   markerEdgeWindow, markerPointerCursor, markerSnapRadii, nearestMarkerEdge, type MarkerCursor,
 } from './markerGeometry.js';
 import {
-  cursorColor, cursorLabels, defaultCursorPair, layoutCursorChips, nearestCursorGrab,
-  type CursorChip, type CursorGrabCandidate, type PlacedCursorChip,
+  cursorColor, cursorLabels, defaultCursorPair, hitCursorChip, layoutCursorChips,
+  nearestCursorGrab, type CursorChip, type MeasuredCursorChip, type CursorGrabCandidate, type PlacedCursorChip,
 } from './cursorSet.js';
 import {
   addDistanceRow as appendDistanceRow, assignDistanceCursor, clearDistancePairs, distanceCell,
@@ -348,6 +351,14 @@ export class App {
   private detailedLabels = true;
   /** "Wheel zooms without Ctrl" (PulseView habit); persisted with the workspace. */
   private wheelZooms = false;
+  /** "Compact rows" (DESIGN §5.4): the digital row floor drops to 24 px; default off. */
+  private compactRows = false;
+  /** "Hide idle channels" (DESIGN §5.4): rows with no edge in the capture hide; default off. */
+  private hideIdleChannels = false;
+  /** The idle-channel scan of one store at one length (`idleChannelSet`). */
+  private idleCache: { store: SampleStore; length: number; idle: ReadonlySet<number> } | null = null;
+  /** Pointer x minus the grabbed cursor's line during an axis-chip drag. */
+  private axisChipOffset = 0;
   /** Shows the raw USB register console in Capture > Advanced; persisted, off by default. */
   private developerTools = false;
   private lastWorkspaceSnapshot: string | null = null;
@@ -616,6 +627,8 @@ export class App {
     if (workspace) {
       this.detailedLabels = workspace.detailedLabels;
       this.wheelZooms = workspace.wheelZooms === true;
+      this.compactRows = workspace.compactRows === true;
+      this.hideIdleChannels = workspace.hideIdleChannels === true;
       this.developerTools = workspace.developerTools === true;
       this.channels = (workspace.channels ?? defaultChannels(16)).map((channel, index) => ({ ...channel, index }));
       this.order = workspace.order ?? this.channels.map((channel) => channel.index);
@@ -786,11 +799,55 @@ export class App {
    * capture already taken stays as it is rather than being thrown away.
    */
   private rowChannels(): ChannelState[] {
+    return this.idleFilteredRows().shown;
+  }
+
+  /**
+   * The row channels before and after "Hide idle channels" (DESIGN §5.4). The filter only
+   * applies to a capture at rest: while an acquisition runs or stops every row shows, so
+   * a channel that becomes active mid-capture is never hidden by a stale scan. Channels
+   * carrying a decoder lane are kept (`filterIdleRows`).
+   */
+  private idleFilteredRows(): IdleFilterResult<ChannelState> {
     const hidden = new Set(this.busViews.filter((b) => b.hideSources).flatMap((b) => b.spec.bits));
     const width = this.renderChannelCount();
-    return this.order.map((i) => this.channels[i]!).filter((c) =>
+    const rows = this.order.map((i) => this.channels[i]!).filter((c) =>
       c.enabled && !hidden.has(c.index) && c.index < width &&
       (this.channelAvailable(c.index) || c.index >= this.store.channelCount));
+    if (!this.hideIdleChannels || this.running || this.stopping || this.store.length === 0) {
+      return { shown: rows, hidden: 0 };
+    }
+    const keep = new Set(this.analyzers.map((a) => a.laneChannel));
+    return filterIdleRows(rows, this.idleChannelSet(), keep);
+  }
+
+  /**
+   * Channels of the store on screen with no edge anywhere in it: one whole-capture column
+   * per channel (`ColumnView` low/high from the store's summary levels), cached per store
+   * and length so a relayout does not rescan.
+   */
+  private idleChannelSet(): ReadonlySet<number> {
+    const store = this.store;
+    const cached = this.idleCache;
+    if (cached !== null && cached.store === store && cached.length === store.length) return cached.idle;
+    const idle = new Set<number>();
+    if (store.length > 0) {
+      for (let channel = 0; channel < store.channelCount; channel++) {
+        const view = store.query(channel, 0, store.length, 1);
+        if (!columnHasEdge(view.low[0] ?? 0, view.high[0] ?? 0)) idle.add(channel);
+      }
+    }
+    this.idleCache = { store, length: store.length, idle };
+    return idle;
+  }
+
+  /** The idle note's click: turn "Hide idle channels" off and show every row again. */
+  private showIdleChannels(): void {
+    if (!this.hideIdleChannels) return;
+    this.hideIdleChannels = false;
+    this.persistWorkspace();
+    this.relayout();
+    this.renderPanels();
   }
 
   private captured(index: number): boolean {
@@ -2030,7 +2087,9 @@ export class App {
     const enabled = this.visibleChannels();
     this.lanes = this.computeLanes(enabled);
     const channelColors = this.channels.map((channel) => channel.color);
-    const shown = this.rowChannels();
+    const filtered = this.idleFilteredRows();
+    const shown = filtered.shown;
+    this.channelList.renderIdleNote(filtered.hidden, () => this.showIdleChannels());
 
     if (shown.length === 0) {
       this.stack.setRows(analogRows, channelColors);
@@ -2041,7 +2100,7 @@ export class App {
       return;
     }
 
-    const base = computeChannelRowHeight(plotH, shown.length, this.lanes.length);
+    const base = computeChannelRowHeight(plotH, shown.length, this.lanes.length, this.compactRows);
 
     const rows: RowSpec[] = [...analogRows];
     const cells: ChannelCell[] = [];
@@ -2763,6 +2822,9 @@ export class App {
       cursor.marker.cancelDrag();
       pointers.delete(id);
       if (plot.hasPointerCapture(id)) plot.releasePointerCapture(id);
+      // An axis-chip drag holds the ruler's capture instead.
+      if (this.el.axis.hasPointerCapture(id)) this.el.axis.releasePointerCapture(id);
+      this.syncAxisCursor(null);
     };
     plot.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -2881,15 +2943,49 @@ export class App {
       this.placeCursorAt(raw, e.clientY - rect.top);
     });
 
-    // Dragging the axis pans, which is what a time ruler is for.
+    // Dragging the axis pans, which is what a time ruler is for - except on a cursor's
+    // numbered chip, which drags that cursor (DESIGN §6.3). The chip hit-test runs first
+    // so a chip always wins over the pan; everywhere else the ruler pans as before.
     let axisDrag = false;
     let axisLast = 0;
     this.el.axis.addEventListener('pointerdown', (e) => {
-      axisDrag = true; axisLast = e.clientX;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
       this.el.axis.setPointerCapture(e.pointerId);
+      if (this.draggingCursor() === null && this.tryGrabAxisChip(e)) {
+        this.hover = null;
+        this.syncAxisCursor(e);
+        this.dirty = true;
+        return;
+      }
+      axisDrag = true; axisLast = e.clientX;
     });
     this.el.axis.addEventListener('pointermove', (e) => {
-      if (!axisDrag) return;
+      const cursor = this.draggingCursor();
+      if (cursor !== null && cursor.marker.pointerId === e.pointerId) {
+        this.stack.syncSize();
+        const plotRect = this.el.plot.getBoundingClientRect();
+        const sample = this.toSample(e.clientX - plotRect.left - this.axisChipOffset);
+        // Over the axis there is no row to snap to; dragged down over a channel row,
+        // the cursor snaps to that row's edges exactly like a plot drag.
+        const row = e.clientY >= plotRect.top ? this.rowAt(e.clientY - plotRect.top) : null;
+        const channel = row && row.spec.kind !== 'blank' ? row.spec.channel : null;
+        const consumed = cursor.marker.move({
+          pointerId: e.pointerId,
+          clientX: e.clientX,
+          clientY: e.clientY,
+          sample,
+          captureLength: this.store.length,
+          snap: this.snapContext(channel, sample),
+        });
+        if (consumed) {
+          if (cursor.marker.started) this.activeCursorId = cursor.id;
+          if (this.cursorsPageShown()) this.capturePanel.updateCursors(this.cursorRows());
+          if (this.cursorsPageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
+          this.dirty = true;
+        }
+        return;
+      }
+      if (!axisDrag) { this.syncAxisCursor(e); return; }
       const dpr = globalThis.devicePixelRatio || 1;
       this.stack.panPixels(-(e.clientX - axisLast) * dpr);
       axisLast = e.clientX;
@@ -2898,14 +2994,30 @@ export class App {
     });
     const axisEnd = (e: PointerEvent) => {
       axisDrag = false;
+      let markerEnded = false;
+      for (const cursor of this.cursors) {
+        if (cursor.marker.endDrag(e.pointerId)) markerEnded = true;
+      }
       if (this.el.axis.hasPointerCapture(e.pointerId)) {
         this.el.axis.releasePointerCapture(e.pointerId);
       }
+      this.syncAxisCursor(e.type === 'pointercancel' ? null : e);
+      if (markerEnded) { this.renderPanels(); this.dirty = true; }
     };
     this.el.axis.addEventListener('pointerup', axisEnd);
     // Without this, a cancelled drag (tab switch, system gesture) leaves axisDrag
     // stuck on and every later hover over the ruler pans with no button held.
     this.el.axis.addEventListener('pointercancel', axisEnd);
+    this.el.axis.addEventListener('lostpointercapture', (e) => {
+      const cursor = this.cursors.find((c) => c.marker.pointerId === e.pointerId);
+      if (cursor === undefined) return;
+      cursor.marker.cancelDrag();
+      this.syncAxisCursor(null);
+      this.dirty = true;
+    });
+    this.el.axis.addEventListener('pointerleave', () => {
+      if (this.draggingCursor() === null) this.syncAxisCursor(null);
+    });
 
     window.addEventListener('keydown', (e) => {
       // Shortcuts belong to the plot. Typing anywhere else - a text field, the chat box,
@@ -2976,6 +3088,66 @@ export class App {
       captureLength: this.store.length,
     });
     return grabbed;
+  }
+
+  /** The measured chips as the axis painter places them (`drawAxisCanvas`). */
+  private measuredAxisChips(): MeasuredCursorChip[] {
+    const ctx = this.el.axis.getContext('2d');
+    if (!ctx) return [];
+    ctx.font = AXIS.markerChip.font;
+    const measure = (label: string): number =>
+      ctx.measureText(label).width + 2 * AXIS.markerChip.padX;
+    return this.cursorChipPlacements(measure, this.el.plot.clientWidth)
+      .map((chip) => ({ ...chip, width: measure(chip.label) }));
+  }
+
+  /**
+   * The axis chip under a pointer event (`hitCursorChip`). The box is the painted one
+   * (`paintMarkerChip`: `AXIS.markerChip` top/height/rowGap, centred on `boxX`); touch
+   * grows each box to the 48 px target (DESIGN §3.2), and where grown boxes overlap the
+   * nearest box centre wins. Outside every box this is null and the ruler pans.
+   */
+  private axisChipAt(e: PointerEvent): MeasuredCursorChip | null {
+    const rect = this.el.axis.getBoundingClientRect();
+    return hitCursorChip(
+      this.measuredAxisChips(), e.clientX - rect.left, e.clientY - rect.top,
+      e.pointerType === 'touch' ? TOUCH_TARGET_PX : null,
+    );
+  }
+
+  /**
+   * Grab the cursor whose axis chip is under the pointer, through the same
+   * `WaveformMarker.tryGrab` path as a plot grab. The grab is on the chip, not on the
+   * line, so it is requested at the line itself; the move keeps the pointer's offset
+   * (`axisChipOffset`) so the cursor does not jump to the pointer.
+   */
+  private tryGrabAxisChip(e: PointerEvent): boolean {
+    if (this.store.length === 0) return false;
+    const chip = this.axisChipAt(e);
+    if (chip === null) return false;
+    const cursor = this.cursorById(chip.id);
+    if (cursor === null) return false;
+    const pointerCssX = e.clientX - this.el.plot.getBoundingClientRect().left;
+    const grabbed = cursor.marker.tryGrab({
+      pointerId: e.pointerId,
+      clientX: e.clientX,
+      clientY: e.clientY,
+      pointerCssX: chip.anchorX,
+      markerCssX: chip.anchorX,
+      channel: null,
+      captureLength: this.store.length,
+    });
+    if (grabbed) this.axisChipOffset = pointerCssX - chip.anchorX;
+    return grabbed;
+  }
+
+  /** The ruler's pointer: grab over a chip, grabbing while one drags, else ew-resize. */
+  private syncAxisCursor(e: PointerEvent | null): void {
+    const dragging = e !== null && this.draggingCursor()?.marker.pointerId === e.pointerId;
+    const over = !dragging && e !== null && e.pointerType !== 'touch' && this.store.length > 0 &&
+      this.axisChipAt(e) !== null;
+    this.el.axis.classList.toggle('marker-grabbing', dragging);
+    this.el.axis.classList.toggle('marker-grab', over);
   }
 
   private snapContext(channel: number | null, center: number): MarkerSnapContext | null {
@@ -4021,6 +4193,25 @@ export class App {
         },
       },
       {
+        label: t('settings.compactRows'),
+        checked: this.compactRows,
+        onPick: () => {
+          this.compactRows = !this.compactRows;
+          this.persistWorkspace();
+          this.relayout();
+        },
+      },
+      {
+        label: t('settings.hideIdle'),
+        checked: this.hideIdleChannels,
+        onPick: () => {
+          this.hideIdleChannels = !this.hideIdleChannels;
+          this.persistWorkspace();
+          this.relayout();
+          this.renderPanels();
+        },
+      },
+      {
         label: t('settings.developerTools'),
         checked: this.developerTools,
         onPick: () => {
@@ -4121,6 +4312,8 @@ export class App {
       detailedLabels: this.detailedLabels,
       wheelZooms: this.wheelZooms,
       developerTools: this.developerTools,
+      compactRows: this.compactRows,
+      hideIdleChannels: this.hideIdleChannels,
       channels: this.channels.map(({ name, color, enabled }) => ({ name, color, enabled })),
       order: [...this.order],
       capture: {
@@ -6719,15 +6912,7 @@ export class App {
     })),
     addCursor: (sample: number) => this.addCursor(sample),
     removeCursor: (id: number) => this.removeCursor(id),
-    cursorChips: (): Array<PlacedCursorChip & { width: number }> => {
-      const ctx = this.el.axis.getContext('2d');
-      if (!ctx) return [];
-      ctx.font = AXIS.markerChip.font;
-      const measure = (label: string): number =>
-        ctx.measureText(label).width + 2 * AXIS.markerChip.padX;
-      return this.cursorChipPlacements(measure, this.el.plot.clientWidth)
-        .map((chip) => ({ ...chip, width: measure(chip.label) }));
-    },
+    cursorChips: (): Array<PlacedCursorChip & { width: number }> => this.measuredAxisChips(),
     edges: (channel: number, lo: number, hi: number) => {
       const store = this.store;
       if (!Number.isInteger(channel) || channel < 0 || channel >= store.channelCount) return [];

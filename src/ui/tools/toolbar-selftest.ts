@@ -933,8 +933,8 @@ const shortcutsRowOpensDialog = shortcutsRowBody.includes("hint: '▸'") &&
   !shortcutsRowBody.includes('checked:');
 const settingsRowsScoped = !settingsItemsBody.includes("t('settings.language')") &&
   !settingsItemsBody.includes('LOCALES.map') && !settingsItemsBody.includes('children:') &&
-  // Detailed labels, wheel zooms, developer tools, the shortcuts reference, then About.
-  (settingsItemsBody.match(/onPick:/g)?.length ?? 0) === 5 &&
+  // Detailed labels, wheel zooms, compact rows, hide idle, developer tools, shortcuts, About.
+  (settingsItemsBody.match(/onPick:/g)?.length ?? 0) === 7 &&
   settingsItemsBody.indexOf("t('settings.about')") > shortcutsRowAt &&
   settingsItemsBody.includes('checked: this.wheelZooms') &&
   settingsItemsBody.includes('checked: this.developerTools') &&

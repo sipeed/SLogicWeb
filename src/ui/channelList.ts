@@ -28,6 +28,7 @@ import {
 } from './channelBanks.js';
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
+import { isCompactRow } from './channelLayout.js';
 import { defaultChannelName,
   type AnalyzerState, type ChannelState, type TriggerMode } from './state.js';
 
@@ -582,6 +583,8 @@ export class ChannelList {
       el.draggable = true;
       el.dataset['pos'] = String(pos);
       if (!cell.channel.enabled) el.classList.add('disabled');
+      // "Compact rows": a band below the full card's floor shows the head line only.
+      if (isCompactRow(cell.heightCss - cell.laneCss)) el.classList.add('compact');
       /* Per-instance lane offset, set inline (house rule). A custom property, not
          inline padding: a property is inert until a rule reads it, so the default
          theme - where .ch-card is display:contents - stays pixel-identical. */
@@ -732,6 +735,34 @@ export class ChannelList {
   /** Close before the toolbar opens its separate transient overlay. */
   closeDialog(): void {
     this.closeEditor();
+  }
+
+  private idleNote: HTMLButtonElement | null = null;
+
+  /**
+   * "Hide idle channels" (DESIGN §5.4): one note row after the channel cells saying how
+   * many rows the filter removed; clicking it shows them again (`onShow`). It sits after
+   * the last row, so no channel label moves relative to its trace, and is sticky to the
+   * bottom of the scroll view so a long stack still shows it. `count` 0 removes it.
+   */
+  renderIdleNote(count: number, onShow: () => void): void {
+    if (count <= 0) {
+      this.idleNote?.remove();
+      this.idleNote = null;
+      return;
+    }
+    if (this.idleNote === null) {
+      this.idleNote = document.createElement('button');
+      this.idleNote.type = 'button';
+      this.idleNote.className = 'ch-idle-note';
+      this.idleNote.setAttribute('translate', 'yes');
+    }
+    const note = this.idleNote;
+    note.onclick = () => onShow();
+    note.textContent = t('channels.idleHidden', { count });
+    note.title = t('channels.idleHiddenTip');
+    note.setAttribute('aria-label', `${note.textContent}. ${note.title}`);
+    if (note.previousElementSibling !== this.root) this.root.after(note);
   }
 }
 

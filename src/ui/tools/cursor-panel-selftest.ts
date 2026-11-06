@@ -464,7 +464,7 @@ const edgeMethodsSource = slice(app,
   const rowSites = (app.match(/updateCursorDistances\(this\.cursorDistanceRows\(\)\)/g) ?? []).length;
   const compositions = (app.match(/private cursorDistanceRows\(\): CursorDistanceRowView\[\] \{/g) ?? []).length;
   check('every distance refresh reads the one view-row composition, never an ad-hoc map',
-    callSites === 3 && rowSites === 3 && compositions === 1,
+    callSites === 4 && rowSites === 4 && compositions === 1,
     `calls=${callSites}, rows=${rowSites}, compositions=${compositions}`);
 }
 

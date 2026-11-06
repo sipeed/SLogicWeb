@@ -319,6 +319,30 @@ Analog channels are not bus rows. Each analog signal has a row with:
 - Group headers show the group's rate and channel range; an analog group shows its
   hardware range and resolution.
 - Reordering never changes signal identity or capture indices.
+- **Row density.** Digital rows auto-fit the plot between a 48 px floor and 72 px; when
+  that floor does not fit, the stack scrolls. Settings → **Compact rows** (persisted
+  workspace preference, default off) lowers the digital floor to 24 px: the cell keeps
+  only its head line (name, original id, trigger slot) and drops the reserved decoder
+  strip — an attached decoder keeps its own 20 px lane — so 32 channels fit a 768 px
+  plot. Analog rows and lanes keep their sizes. It is an opt-in mouse density: it gives
+  up the 48 px touch row (§5.1), which is why it is off by default.
+- **Hide idle channels.** Settings → **Hide idle channels (no edges in the capture)**
+  (persisted, default off) hides rows whose channel has no edge anywhere in the capture
+  on screen (one whole-capture summary column per channel, `low ≠ high`). A note row
+  after the last row, pinned to the bottom of the stack, says how many are hidden
+  ("12 idle channels hidden (no edges) · Show"); clicking it turns the setting off.
+  Unsupported/assumed: the filter applies only to a capture at rest — while an
+  acquisition runs or stops every row shows; a channel carrying a decoder lane is never
+  hidden; a capture with no edges anywhere hides nothing; rows the capture does not have
+  (a widened width) are not idle, they are blank.
+- **Capture-panel channel chips show/hide rows; they never change what is acquired**
+  (the channel width does). Each chip's tooltip and accessible name say so
+  ("D3: click to show/hide (does not affect capture)"); a hidden chip has a dashed
+  outline in its channel colour and a muted, struck-through label.
+- **The ruler, overview and corner stay pinned while rows scroll.** The label and plot
+  columns grow to the row stack's height (`#scroll-area` `align-items: flex-start`, both
+  columns `min-height: 100%`): a sticky box only pins inside its containing block, and a
+  column capped at the viewport height let them scroll away past the first screen.
 
 ## 6. Time, plot, overview and measurements
 
@@ -359,6 +383,12 @@ Analog channels are not bus rows. Each analog signal has a row with:
   double-tap and the long-press menu all dispatch "add cursor here"; none is a separate
   editor. A cursor is dragged by its handle (48 px touch target); per-row
   delete; no global destructive Esc.
+- A cursor's numbered chip on the ruler is a handle too: a press on a chip (its painted
+  box; 48 px target on touch, nearest chip wins where targets overlap) drags that cursor
+  instead of panning, through the same grab/move path as the plot — the drag keeps the
+  press offset (no jump), and snaps to edges of the row under the pointer once it is
+  dragged down over the plot. Over a chip the ruler shows a grab pointer; elsewhere a
+  ruler drag still pans.
 - Cursors are session state and say "Session only"; they are not restored on reload. A
   new acquisition clears them with a visible notice; a Repeat wave inside the same
   session remaps them by the display-origin delta and keeps them.
@@ -416,7 +446,7 @@ object. Every gesture has a visible equivalent.
 
 | Input | Plot | Axis / ruler | Overview | Keyboard |
 | --- | --- | --- | --- | --- |
-| Mouse drag | Pan; drag a cursor/trigger handle | Pan | Pan frame | Arrows pan |
+| Mouse drag | Pan; drag a cursor/trigger handle | Pan; drag a cursor's chip moves that cursor | Pan frame | Arrows pan |
 | Mouse wheel | Scroll rows when they overflow; zoom when every row fits | Same | Same | — |
 | Ctrl/⌘ wheel, pinch | Zoom at pointer | Zoom at pointer | Zoom at pointer | `+` / `=` / `-` |
 | Shift wheel | Pan | Pan | Pan | `←` / `→` (Shift: half a screen) |
@@ -604,7 +634,7 @@ polite live region, so assistive technology reads the area and hints when they c
 | Area | Hints |
 | --- | --- |
 | Waveform | wheel per §7 (scroll rows, or zoom when rows fit / "wheel zooms" on); the other of Ctrl+wheel; Shift+wheel pans time; drag pans; double-click adds a cursor |
-| Time axis | wheel per §7; Shift+wheel pans; drag pans |
+| Time axis | wheel per §7; Shift+wheel pans; drag pans; dragging a cursor's numbered chip moves that cursor |
 | Overview | wheel per §7; Shift+wheel pans the timeline; click or drag centers the view |
 | Channel labels | wheel scrolls rows; double-click a name renames it; the trigger icon opens the trigger editor |
 | Side panel | wheel scrolls the panel |

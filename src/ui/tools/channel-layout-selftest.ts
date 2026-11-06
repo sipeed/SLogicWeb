@@ -13,7 +13,9 @@
  * implementation.
  */
 
-import { computeChannelRowHeight } from '../channelLayout.js';
+import {
+  columnHasEdge, computeChannelRowHeight, filterIdleRows, isCompactRow,
+} from '../channelLayout.js';
 import { ROWS } from '../metrics.js';
 import { analogFrame, type BusViewState } from '../busView.js';
 import { BusBuilder, PlanarSampleStore, type BusSpec } from '../../data/index.js';
@@ -85,6 +87,59 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     stackTotal === 1596 && stackTotal - laneTotal === 1536 && stackTotal > 200;
   check('lane heights add to the minimum 32-channel trace stack',
     pass, `base=${base}, lanes=${laneTotal}, total=${stackTotal}, viewport=200`);
+}
+
+// "Compact rows" (DESIGN §5.4): only the floor moves; fit and the upper clamp do not.
+{
+  const compact32 = computeChannelRowHeight(400, 32, 0, true);
+  const compactFloor = computeChannelRowHeight(120, 32, 0, true);
+  const compactLanes = computeChannelRowHeight(200, 32, 3, true);
+  const fitSame = computeChannelRowHeight(600, 10, 0, true) === computeChannelRowHeight(600, 10, 0);
+  const capSame = computeChannelRowHeight(1000, 1, 0, true) === 72;
+  const offDefault = computeChannelRowHeight(400, 32, 0) === 48 &&
+    computeChannelRowHeight(400, 32, 0, false) === 48;
+  check('compact rows drop the 32-channel floor to 24px and leave fit, cap and the default alone',
+    ROWS.compactMinRowHeight === 24 && compact32 === 24 && compactFloor === 24 &&
+      compactLanes === 24 && fitSame && capSame && offDefault,
+    `compact32=${compact32}, floor=${compactFloor}, lanes=${compactLanes}, fit=${fitSame}, ` +
+    `cap=${capSame}, off=${offDefault}`);
+  // 32 rows at 24 px = 768 px: a 1080p window's plot fits every channel without scrolling.
+  const fits = computeChannelRowHeight(32 * 24, 32, 0, true);
+  check('32 compact rows fit a 768px plot exactly, and 26 px when there is room',
+    fits === 24 && computeChannelRowHeight(32 * 26, 32, 0, true) === 26 &&
+      isCompactRow(24) && isCompactRow(47) && !isCompactRow(48),
+    `fits=${fits}`);
+}
+
+// "Hide idle channels": a whole-capture column per channel decides idle exactly.
+{
+  const store = new PlanarSampleStore({ channelCount: 8, samplerate: 1e6 });
+  const n = 4096;
+  const chunk = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    // D0 toggles every sample, D1 has one edge at 3000, D2 is stuck high, the rest low.
+    chunk[i] = (i & 1) | (i >= 3000 ? 2 : 0) | 4;
+  }
+  store.append(chunk);
+  const idle: number[] = [];
+  for (let channel = 0; channel < 8; channel++) {
+    const view = store.query(channel, 0, store.length, 1);
+    if (!columnHasEdge(view.low[0]!, view.high[0]!)) idle.push(channel);
+  }
+  check('a whole-capture column finds every channel with no edge (stuck high or low) and only those',
+    idle.join(',') === '2,3,4,5,6,7', `idle=${idle.join(',')}`);
+}
+
+{
+  const rows = [0, 1, 2, 3, 4].map((index) => ({ index }));
+  const some = filterIdleRows(rows, new Set([1, 3, 4]), new Set([4]));
+  const none = filterIdleRows(rows, new Set(), new Set());
+  const all = filterIdleRows(rows, new Set([0, 1, 2, 3, 4]), new Set());
+  check('the idle filter hides idle rows in order, keeps decoder-lane channels, and never empties the plot',
+    some.shown.map((r) => r.index).join(',') === '0,2,4' && some.hidden === 2 &&
+      none.hidden === 0 && none.shown.length === 5 &&
+      all.hidden === 0 && all.shown.length === 5,
+    `some=${some.shown.map((r) => r.index).join(',')}/${some.hidden}, all=${all.hidden}`);
 }
 
 {
@@ -174,9 +229,9 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
   if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
-  const importsPolicy = app.includes("import { computeChannelRowHeight } from './channelLayout.js';");
+  const importsPolicy = /import {[^}]*\bcomputeChannelRowHeight\b[^}]*} from '.\/channelLayout.js';/.test(app);
   const delegates = app.includes(
-    'const base = computeChannelRowHeight(plotH, shown.length, this.lanes.length);',
+    'const base = computeChannelRowHeight(plotH, shown.length, this.lanes.length, this.compactRows);',
   );
   const duplicateClamp = app.includes('Math.max(ROWS.minRowHeight');
   check('App.relayout delegates to the tested policy without a duplicate clamp',

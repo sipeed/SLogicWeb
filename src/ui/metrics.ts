@@ -160,6 +160,13 @@ export const ROWS = {
    * Keep 2 px of slack rather than letting dense captures clip the controls.
    */
   minRowHeight: 48,
+  /**
+   * [CHOSEN] The "Compact rows" floor (DESIGN §5.4): a digital row's card shows only its
+   * 18 px head (name + trigger slot) inside 2+2 px insets and its 2 px border, and drops
+   * the reserved decoder strip - an attached decoder still has its own 20 px lane. Analog
+   * rows and lanes keep their sizes.
+   */
+  compactMinRowHeight: 24,
   /** [CHOICE] Upper auto-fit clamp, so a 1-channel capture is not one 800 px row. */
   maxRowHeight: 72,
   /** [MEASURED] src/render/theme.ts, 4 device px of #57575E at every row boundary. */

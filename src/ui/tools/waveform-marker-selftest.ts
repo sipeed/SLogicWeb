@@ -959,8 +959,14 @@ function between(source: string, start: string, end: string): string {
 
   const lost = appSource.match(/addEventListener\('lostpointercapture'/g) ?? [];
   const lostSource = between(appSource, "plot.addEventListener('lostpointercapture'", "plot.addEventListener('pointerleave'");
-  check('exactly one lost-capture path exists and it cancels only the cursor that owns the pointer',
-    lost.length === 1 &&
+  // Two owners can hold a marker drag's capture: the plot, and the axis (a cursor dragged
+  // by its numbered chip). Each cancels only the cursor that owns the lost pointer.
+  const axisLostSource = between(appSource, "axis.addEventListener('lostpointercapture'", "axis.addEventListener('pointerleave'");
+  check('one lost-capture path per drag owner (plot, axis chip), each cancels only the owning cursor',
+    lost.length === 2 &&
+    axisLostSource.includes('const cursor = this.cursors.find((c) => c.marker.pointerId === e.pointerId);') &&
+    axisLostSource.includes('if (cursor === undefined) return;') &&
+    axisLostSource.includes('cursor.marker.cancelDrag();') &&
     lostSource.includes('const cursor = this.cursors.find((c) => c.marker.pointerId === e.pointerId);') &&
     lostSource.includes('if (cursor === undefined) return;') &&
     lostSource.includes('pointers.delete(e.pointerId);') &&
@@ -1061,7 +1067,7 @@ function between(source: string, start: string, end: string): string {
     `floorLo=${debugEdges.includes('Math.floor(lo)')}, ceilHi=${debugEdges.includes('Math.ceil(hi)')}`);
 
   const rowAtSource = between(appSource, 'private rowAt(cssY: number)', 'private tryGrabMarker(');
-  const grabMarkerSource = between(appSource, 'private tryGrabMarker(', 'private snapContext(');
+  const grabMarkerSource = between(appSource, 'private tryGrabMarker(', 'private measuredAxisChips(');
   const hoverSource = between(appSource, 'private updateHover(', 'private setFollow(');
   check('the hover and marker press paths share one row hit-test',
     rowAtSource.includes('cssY >= box.top && cssY < box.top + box.height') &&
@@ -1148,11 +1154,12 @@ function between(source: string, start: string, end: string): string {
     placementSite.includes('chips.push({ id: cursor.id, label: cursor.marker.label, cssX: this.toPx(sample) });') &&
     (appSource.match(/layoutCursorChips\(/g) ?? []).length === 1 &&
     placementCalls === 2 &&
-    appSource.includes('cursorChips: (): Array<PlacedCursorChip & { width: number }> => {'),
+    appSource.includes('cursorChips: (): Array<PlacedCursorChip & { width: number }> => this.measuredAxisChips(),'),
     `len=${placementSite.length}, calls=${placementCalls}, ` +
     `layout=${(appSource.match(/layoutCursorChips\(/g) ?? []).length}`);
+  // The debug surface and the axis chip hit-test share one measured placement.
   const debugChipsSite = between(
-    appSource, 'cursorChips: (): Array<PlacedCursorChip & { width: number }> => {', 'edges: (channel');
+    appSource, 'private measuredAxisChips(): MeasuredCursorChip[] {', 'private axisChipAt(');
   const debugMeasure = debugChipsSite.indexOf('ctx.font = AXIS.markerChip.font;');
   const debugPad = debugChipsSite.indexOf('2 * AXIS.markerChip.padX');
   check('the debug cursor-chip surface measures from the axis ctx with the chip font and padding',
@@ -1188,10 +1195,12 @@ function between(source: string, start: string, end: string): string {
     !placementSource.includes('store.edges('),
     `len=${placementSource.length}, row=${placementSource.includes('this.rowAt(cssY)')}, ` +
     `literals=${placementSource.includes('MARKER_SNAP_RADIUS_CSS')}`);
-  check('placement and dragging derive their snap context from the same helper',
+  const axisMoveSource = between(appSource, "axis.addEventListener('pointermove', (e) => {", "axis.addEventListener('pointerup'");
+  check('placement and dragging (plot and axis chip) derive their snap context from the same helper',
     placementSource.includes('this.snapContext(') &&
     markerBranch.includes('snap: this.snapContext(cursor.marker.channel, sample),') &&
-    (appSource.match(/this\.snapContext\(/g) ?? []).length === 2,
+    axisMoveSource.includes('snap: this.snapContext(channel, sample),') &&
+    (appSource.match(/this\.snapContext\(/g) ?? []).length === 3,
     `contexts=${(appSource.match(/this\.snapContext\(/g) ?? []).length}`);
 
   check('the press grabs the nearest cursor in band and calls tryGrab on that cursor only',

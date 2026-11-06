@@ -104,6 +104,21 @@ check('literal false and true survive parsing without coercion',
 }
 
 {
+  // "Compact rows" and "Hide idle channels" (DESIGN §5.4): opt-in, omitted when off.
+  const base = { version: WORKSPACE_SCHEMA_VERSION, detailedLabels: true } as const;
+  const on = parseWorkspaceSnapshot(serializeWorkspaceSnapshot({ ...base, compactRows: true, hideIdleChannels: true }));
+  const offRaw = serializeWorkspaceSnapshot({ ...base, compactRows: false, hideIdleChannels: false });
+  const legacy = parseWorkspaceSnapshot(JSON.stringify(base));
+  const junk = parseWorkspaceSnapshot(JSON.stringify({ ...base, compactRows: 'yes', hideIdleChannels: 1 }));
+  check('the row-density preferences round-trip and default off for old, false or invalid snapshots',
+    on?.compactRows === true && on?.hideIdleChannels === true &&
+      !offRaw.includes('compactRows') && !offRaw.includes('hideIdleChannels') &&
+      legacy?.compactRows === undefined && legacy?.hideIdleChannels === undefined &&
+      junk?.compactRows === undefined && junk?.hideIdleChannels === undefined,
+    `on=${on?.compactRows}/${on?.hideIdleChannels}, off=${offRaw}, junk=${junk?.compactRows}/${junk?.hideIdleChannels}`);
+}
+
+{
   defineStorage({
     getItem: () => { throw new Error('blocked read'); },
     setItem: () => { throw new Error('blocked write'); },
@@ -1407,7 +1422,7 @@ const expectedWriters = [
   'adoptCapture', 'adoptDeviceChannels', 'afterChannelChange', 'applySettings', 'applySidebar',
   'attachAnalyzer', 'configureAnalogGain', 'configureBusScope', 'configureChannel', 'dragScopeTrigger',
   'finishCapture',
-  'removeAnalyzer', 'reorder', 'settingsItems', 'startCapture', 'updateAnalyzer',
+  'removeAnalyzer', 'reorder', 'settingsItems', 'showIdleChannels', 'startCapture', 'updateAnalyzer',
 ].sort();
 const quietMethods = ['runDecode', 'discardDecodeState', 'renderPanels', 'relayout', 'retranslate'];
 const quiet = quietMethods.map((name) => ({ name, body: appMethodBody(name) }));

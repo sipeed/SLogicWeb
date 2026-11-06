@@ -78,6 +78,10 @@ export interface WorkspaceSnapshotV1 {
   wheelZooms?: boolean;
   /** Developer tools (raw USB register console); absent means off. */
   developerTools?: boolean;
+  /** "Compact rows": digital rows may shrink to 24 px (DESIGN §5.4); absent means off. */
+  compactRows?: boolean;
+  /** "Hide idle channels": rows with no edge in the capture are hidden; absent means off. */
+  hideIdleChannels?: boolean;
   channels?: PersistedChannel[];
   order?: number[];
   capture?: PersistedCaptureSettings;
@@ -449,6 +453,8 @@ export function parseWorkspaceSnapshot(
     detailedLabels: typeof parsed.detailedLabels === 'boolean' ? parsed.detailedLabels : true,
     ...(parsed.wheelZooms === true ? { wheelZooms: true } : {}),
     ...(parsed.developerTools === true ? { developerTools: true } : {}),
+    ...(parsed.compactRows === true ? { compactRows: true } : {}),
+    ...(parsed.hideIdleChannels === true ? { hideIdleChannels: true } : {}),
     channels,
     order: restoreOrder(parsed.order, channels.length),
     capture: restoreCapture(parsed.capture, channels.length),
@@ -485,6 +491,8 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
   };
   if (snapshot.wheelZooms === true) serialized.wheelZooms = true;
   if (snapshot.developerTools === true) serialized.developerTools = true;
+  if (snapshot.compactRows === true) serialized.compactRows = true;
+  if (snapshot.hideIdleChannels === true) serialized.hideIdleChannels = true;
   if (snapshot.channels) {
     serialized.channels = snapshot.channels.map(({ name, color, enabled }) => ({ name, color, enabled }));
   }

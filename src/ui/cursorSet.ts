@@ -1,5 +1,5 @@
 import { MARKER_GRAB_RADIUS_CSS } from './markerGeometry.js';
-import { MEASURE_COLORS } from './metrics.js';
+import { AXIS, MEASURE_COLORS } from './metrics.js';
 
 const CHIP_GAP = 1;
 
@@ -49,6 +49,36 @@ export function nearestCursorGrab(
     if (distance > MARKER_GRAB_RADIUS_CSS) continue;
     if (distance <= bestDistance) {
       best = candidate;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
+export interface MeasuredCursorChip extends PlacedCursorChip {
+  width: number;
+}
+
+export function hitCursorChip<T extends MeasuredCursorChip>(
+  chips: readonly T[], cssX: number, cssY: number, minTargetPx: number | null = null,
+): T | null {
+  if (!Number.isFinite(cssX) || !Number.isFinite(cssY)) return null;
+  const { top, height, rowGap } = AXIS.markerChip;
+  const floor = minTargetPx !== null && Number.isFinite(minTargetPx) && minTargetPx > 0
+    ? minTargetPx : 0;
+  let best: T | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const chip of chips) {
+    if (!Number.isFinite(chip.boxX) || !Number.isFinite(chip.width) || chip.width <= 0) continue;
+    const centreY = top + chip.row * (height + rowGap) + height / 2;
+    const halfW = Math.max(chip.width, floor) / 2;
+    const halfH = Math.max(height, floor) / 2;
+    const dx = Math.abs(cssX - chip.boxX);
+    const dy = Math.abs(cssY - centreY);
+    if (dx > halfW || dy > halfH) continue;
+    const distance = Math.hypot(dx, dy);
+    if (distance < bestDistance) {
+      best = chip;
       bestDistance = distance;
     }
   }

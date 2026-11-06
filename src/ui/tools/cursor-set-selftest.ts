@@ -532,7 +532,7 @@ function placementFailures(
   check('the model imports the shared grab radius and palette instead of restating them',
     imports.length === 2 &&
     source.includes("import { MARKER_GRAB_RADIUS_CSS } from './markerGeometry.js';") &&
-    source.includes("import { MEASURE_COLORS } from './metrics.js';") &&
+    source.includes("import { AXIS, MEASURE_COLORS } from './metrics.js';") &&
     !source.includes('MARKER_GRAB_RADIUS_CSS =') && !paletteLeaked,
     `imports=${imports.length}, radiusConst=${source.includes('MARKER_GRAB_RADIUS_CSS =')}, ` +
     `palette=${paletteLeaked}`);

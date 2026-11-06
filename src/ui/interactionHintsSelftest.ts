@@ -66,7 +66,7 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
       'left:hints.plot.dragPan|left:hints.plot.addCursor'],
     ['axis',
       'wheel:hints.axis.scroll|Ctrl+wheel:hints.axis.zoom|Shift+wheel:hints.axis.pan|' +
-      'left:hints.axis.dragPan'],
+      'left:hints.axis.dragPan|left:hints.axis.dragCursor'],
     ['overview',
       'wheel:hints.overview.scroll|Ctrl+wheel:hints.overview.zoom|' +
       'Shift+wheel:hints.overview.pan|left:hints.overview.center'],
@@ -89,7 +89,7 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
 {
   const forbidden = [
     'hints.plot.zoom', 'hints.plot.pan', 'hints.plot.addCursor',
-    'hints.axis.zoom', 'hints.axis.pan', 'hints.axis.dragPan',
+    'hints.axis.zoom', 'hints.axis.pan', 'hints.axis.dragPan', 'hints.axis.dragCursor',
     'hints.overview.zoom', 'hints.overview.pan', 'hints.overview.center',
     'hints.corner.fit', 'hints.corner.zoom', 'hints.corner.pan',
   ];
@@ -146,9 +146,9 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
     ['plot', true, false,
       'wheel:hints.plot.zoom|Ctrl+wheel:hints.wheel.scrollRows|Shift+wheel:hints.plot.pan|' +
       'left:hints.plot.dragPan|left:hints.plot.addCursor'],
-    ['axis', false, false, 'wheel:hints.axis.zoom|Shift+wheel:hints.axis.pan|left:hints.axis.dragPan'],
+    ['axis', false, false, 'wheel:hints.axis.zoom|Shift+wheel:hints.axis.pan|left:hints.axis.dragPan|left:hints.axis.dragCursor'],
     ['axis', true, true,
-      'wheel:hints.axis.zoom|Ctrl+wheel:hints.wheel.scrollRows|Shift+wheel:hints.axis.pan|left:hints.axis.dragPan'],
+      'wheel:hints.axis.zoom|Ctrl+wheel:hints.wheel.scrollRows|Shift+wheel:hints.axis.pan|left:hints.axis.dragPan|left:hints.axis.dragCursor'],
     ['overview', false, false,
       'wheel:hints.overview.zoom|Shift+wheel:hints.overview.pan|left:hints.overview.center'],
     ['overview', true, true,

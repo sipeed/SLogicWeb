@@ -35,7 +35,7 @@ import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
 import type { CaptureSettings, ChannelState } from './state.js';
 import {
-  clampLoopSamples, LOOP_WINDOW_QUANTUM, maxCaptureSamples, maxLoopSamples,
+  clampLoopSamples, defaultChannelName, LOOP_WINDOW_QUANTUM, maxCaptureSamples, maxLoopSamples,
   THRESHOLD_VOLT_OPTIONS,
 } from './state.js';
 import {
@@ -646,7 +646,10 @@ export class CapturePanel {
           const chip = document.createElement('button');
           chip.className = 'chip' + (c.enabled ? ' on' : '');
           chip.textContent = `D${c.index}`;
-          chip.title = c.name;
+          // The chip shows/hides the row only; what is acquired is the channel width.
+          const id = c.name === defaultChannelName(c.index) ? `D${c.index}` : `D${c.index} ${c.name}`;
+          chip.title = t('capturePanel.chipToggle', { id });
+          chip.setAttribute('aria-label', chip.title);
           chip.dataset.channel = String(c.index);
           chip.setAttribute('aria-pressed', String(c.enabled));
           if (c.enabled) {

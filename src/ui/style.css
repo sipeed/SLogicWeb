@@ -398,12 +398,21 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
 
 /* The labels and the plot scroll together vertically when the channel rows do not fit
    the viewport (phones, or many channels); the axis and the corner above the labels
-   stay pinned. Desktop with everything fitting never actually scrolls. */
+   stay pinned. Desktop with everything fitting never actually scrolls.
+   A sticky box only stays pinned while its containing block is on screen, so both
+   columns must be as tall as the row stack, not the viewport: align-items:flex-start
+   lets them grow to their content (the default stretch caps them at the scroll box's
+   height, so the ruler/overview/corner scrolled away past the first screen of rows),
+   and min-height:100% still fills the viewport when the rows are shorter. */
 #scroll-area {
   flex: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
+  align-items: flex-start;
+  /* The plot's ground: where the label column is taller than the plot column (the
+     idle-channel note after the last row) the strip below the plot reads as plot. */
+  background: var(--bg10);
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
@@ -412,6 +421,7 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
 #labels-col {
   width: var(--labels-w);
   min-width: var(--labels-w);
+  min-height: 100%;
   background: var(--bg10);
   border-right: 1px solid var(--border-high);
   display: flex;
@@ -545,6 +555,28 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
 .ch-cell.dragging { opacity: 0.4; }
 .ch-cell.drop-target { outline: 1px solid var(--accent); outline-offset: -1px; }
 .ch-cell.disabled { opacity: 0.4; }
+
+/* "Compact rows" (DESIGN §5.4): below the 48 px card floor a cell keeps only its head
+   line (name + trigger slot); the reserved decoder strip goes - an attached decoder
+   still has its own lane row above the trace. */
+.ch-cell.compact .ch-body { padding-top: 0; padding-bottom: 0; gap: 0; }
+.ch-cell.compact .ch-analyzers { display: none; }
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-cell.compact { padding-top: 1px; padding-bottom: 1px; }
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-cell.compact .ch-analyzers { display: none; }
+
+/* "Hide idle channels": the count of hidden rows, after the last row and pinned to the
+   bottom of the scroll view; a click shows them again. */
+.ch-idle-note {
+  position: sticky; bottom: 0; z-index: 2;
+  display: block; width: 100%; min-height: 24px; padding: 4px 8px;
+  font: inherit; font-size: 11px; line-height: 16px; text-align: left;
+  color: var(--text80); background: var(--bg20);
+  border: 0; border-top: 1px solid var(--border-low);
+  cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ch-idle-note:hover { color: var(--text); background: var(--bg30); }
+.ch-idle-note:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .ch-strip { width: var(--strip-w); min-width: var(--strip-w); }
 
@@ -1162,7 +1194,7 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
 
 /* ---------------------------------------------------------------- plot */
 
-#plot-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#plot-col { flex: 1; min-width: 0; min-height: 100%; display: flex; flex-direction: column; }
 
 /*
  * The prominent error banner. It is a flex row between the toolbar and #main, so it
@@ -1304,6 +1336,9 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
   background: var(--bg10);
   touch-action: none;    /* dragging the ruler pans; the page must not consume it */
 }
+/* Over a cursor's numbered chip the ruler drags that cursor instead of panning. */
+#axis.marker-grab { cursor: grab; }
+#axis.marker-grabbing { cursor: grabbing; }
 
 #plot {
   position: relative;
@@ -1657,6 +1692,11 @@ html.resizing { cursor: col-resize; user-select: none; }
 .chip-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
 .channel-bank-grid { flex: 1 1 auto; position: relative; min-width: 0; }
 .channel-bank-grid .chip { min-width: 0; padding: 0; font-size: 10px; }
+/* A hidden row's chip: dashed outline in the channel colour (inline), muted struck-through
+   label - hidden from the plot, still acquired (the chip's tooltip says so). */
+.channel-bank-grid .chip:not(.on) {
+  border-style: dashed; color: var(--text50); text-decoration: line-through;
+}
 .chip {
   height: 22px; border-radius: 3px; border: 1px solid var(--border-low);
   background: var(--bg10); font: 11px/1 inherit; cursor: pointer;

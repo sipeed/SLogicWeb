@@ -12,7 +12,8 @@
  *
  *   - #plot       wheel per `wheelAction` (see below); Shift+wheel pans time; left drag
  *                 pans; left double-click adds a cursor.
- *   - #axis       wheel per `wheelAction`; Shift+wheel pans time; left drag pans.
+ *   - #axis       wheel per `wheelAction`; Shift+wheel pans time; left drag pans; left
+ *                 drag on a cursor's numbered chip moves that cursor (the chip wins).
  *   - #overview   wheel per `wheelAction`; Shift+wheel pans the timeline; left click or
  *                 drag centers the viewport.
  *   - #labels-spacer (the corner cell, DESIGN §3.4) click Fit fits the view; the wheel
@@ -167,7 +168,7 @@ const WHEEL_KEYS: Readonly<Record<WheelArea, { scroll: MessageKey; zoom: Message
 
 const POINTER_HINTS: Readonly<Record<WheelArea, readonly HintSpec[]>> = {
   plot: [hint('hints.plot.dragPan', 'left'), hint('hints.plot.addCursor', 'left')],
-  axis: [hint('hints.axis.dragPan', 'left')],
+  axis: [hint('hints.axis.dragPan', 'left'), hint('hints.axis.dragCursor', 'left')],
   overview: [hint('hints.overview.center', 'left')],
 };
 
