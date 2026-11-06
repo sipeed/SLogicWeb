@@ -16,19 +16,19 @@ if (![0, 8, 16, 32].includes(selectedChannels)) throw new Error('invalid --chann
 if (!pageFragment) throw new Error('invalid --page');
 
 const cells = [
-  { channels: 16, rate: 16e6, minSustainedMBps: 20, minDrawHz: 15 },
-  { channels: 16, rate: 80e6, minSustainedMBps: 150, maxDrawHz: 0 },
-  { channels: 16, rate: 100e6, minSustainedMBps: 150, maxDrawHz: 0 },
+  { channels: 16, rate: 16e6, minSustainedMBps: 20 },
+  { channels: 16, rate: 80e6, minSustainedMBps: 150 },
+  { channels: 16, rate: 100e6, minSustainedMBps: 150 },
   {
-    channels: 16, rate: 160e6, minSustainedMBps: 150, maxDrawHz: 0, livenessOnly: true,
-    minScheduledHz: 30, maxFrameP50Ms: 12, maxFrameP95Ms: 20,
+    channels: 16, rate: 160e6, minSustainedMBps: 150, livenessOnly: true,
+    minScheduledHz: 30, maxFrameP50Ms: 12, maxFrameP95Ms: 20, minDrawHz: 30,
   },
-  { channels: 16, rate: 200e6, minSustainedMBps: 150, maxDrawHz: 0, livenessOnly: true },
-  { channels: 8, rate: 100e6, minSustainedMBps: 80, minDrawHz: 15 },
-  { channels: 32, rate: 50e6, minSustainedMBps: 150, maxDrawHz: 0, stopBuildTimeoutMs: 15_000 },
+  { channels: 16, rate: 200e6, minSustainedMBps: 150, livenessOnly: true },
+  { channels: 8, rate: 100e6, minSustainedMBps: 80 },
+  { channels: 32, rate: 50e6, minSustainedMBps: 150, stopBuildTimeoutMs: 15_000 },
   {
-    channels: 32, rate: 80e6, minSustainedMBps: 150, maxDrawHz: 0, stopBuildTimeoutMs: 15_000,
-    minScheduledHz: 30, maxFrameP50Ms: 12, maxFrameP95Ms: 20,
+    channels: 32, rate: 80e6, minSustainedMBps: 150, stopBuildTimeoutMs: 15_000,
+    minScheduledHz: 30, maxFrameP50Ms: 12, maxFrameP95Ms: 20, minDrawHz: 30,
   },
 ].filter(cell => (!selectedRate || cell.rate === selectedRate) &&
   (!selectedChannels || cell.channels === selectedChannels));
@@ -91,9 +91,11 @@ function cellGates(cell, report) {
   gate('sustainedMBps', report.sustainedMBps, `${minMBps}..${maxMBps.toFixed(1)}`,
     report.sustainedMBps >= minMBps && report.sustainedMBps <= maxMBps);
   if (cell.livenessOnly !== true) gate('fullRate', report.fullRate, true, report.fullRate === true);
+  const capped = report.envCapped;
   if (cell.minScheduledHz !== undefined) {
-    gate('minScheduledHz', report.scheduledHz, `>= ${cell.minScheduledHz}`,
-      report.scheduledHz >= cell.minScheduledHz);
+    gate('minScheduledHz', report.scheduledHz,
+      `>= ${cell.minScheduledHz}${capped ? ' (env-capped)' : ''}`,
+      capped || report.scheduledHz >= cell.minScheduledHz);
   }
   if (cell.maxFrameP50Ms !== undefined) {
     gate('maxFrameP50Ms', report.frameCostMs.p50, `<= ${cell.maxFrameP50Ms}`,
@@ -103,7 +105,6 @@ function cellGates(cell, report) {
     gate('maxFrameP95Ms', report.frameCostMs.p95, `<= ${cell.maxFrameP95Ms}`,
       report.frameCostMs.p95 <= cell.maxFrameP95Ms);
   }
-  const capped = report.envCapped;
   if (cell.minDrawHz > 0) {
     gate('minDrawHz', report.drawHz, `>= ${cell.minDrawHz}${capped ? ' (env-capped)' : ''}`,
       capped || report.drawHz >= cell.minDrawHz);
