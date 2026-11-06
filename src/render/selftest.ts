@@ -85,10 +85,10 @@ function testTransform(): void {
   // At maximum zoom, the time grid follows the sampling period rather than rounding
   // non-decimal periods up to a power of ten.
   const sampleTickCases = [
-    [100e6, 10_000, '+10 ns'],
-    [200e6, 5_000, '+5 ns'],
-    [400e6, 2_500, '+2.5 ns'],
-    [1_200e6, 1e12 / 1_200e6, '+833 ps'],
+    [100e6, 10_000, '10 ns'],
+    [200e6, 5_000, '5 ns'],
+    [400e6, 2_500, '2.5 ns'],
+    [1_200e6, 1e12 / 1_200e6, '0.833 ns'],
   ] as const;
   for (const [rate, periodPs, label] of sampleTickCases) {
     const ticks = computeTicks(0, MIN_SAMPLES_ON_SCREEN * periodPs, 1000, rate);
@@ -106,7 +106,7 @@ function testTransform(): void {
   check(
     'trigger-axis-negative-prefix-and-zero-origin',
     triggeredTicks.ticks.some((tick) => tick.ps < 0 && tick.label.startsWith('-')) &&
-      zero?.major === true && zero.label === '0 s' && near(zero.x, 500, 1e-9),
+      zero?.major === true && zero.label === '0 ms' && near(zero.x, 500, 1e-9),
     `zero=${zero?.label}@${zero?.x}`,
   );
 

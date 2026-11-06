@@ -375,12 +375,12 @@ check('the row cap is the DSView Max_Measure_Limits literal',
 
   const ladder: readonly (readonly [number, string])[] = [
     [1, '+10 ns'],
-    [250, '+2.50 us'],
+    [250, '+2.50 µs'],
     [250000, '+2.500 ms'],
     [999999, '+10.000 ms'],
     [100000000, '+1.000 s'],
     [-1, '-10 ns'],
-    [-250, '-2.50 us'],
+    [-250, '-2.50 µs'],
   ];
   check('the delta time reuses the cursor unit ladder verbatim',
     ladder.every(([samples, text]) => cursorDistance(samples, 0, period).time === text),

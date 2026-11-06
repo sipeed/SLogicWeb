@@ -114,7 +114,9 @@ import {
   type CaptureLabel, type StatusError,
 } from './state.js';
 import { stopFailureIsSilent } from './stopFailure.js';
-import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
+import {
+  canvasLabelMeasure, computeTicks, drawAxis, type TickLabelMetrics, type TickSet,
+} from './timeAxis.js';
 import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.js';
 import { capturePostTriggerSamples, carryCaptureDuration } from './capturePolicy.js';
 import {
@@ -440,6 +442,11 @@ export class App {
   private sidebar: SidebarState = DEFAULT_SIDEBAR_STATE;
   private paintedTheme: ThemeId;
   private palette: CanvasPalette;
+  /** Measured tick-label widths, so the axis can drop labels that would overlap. */
+  private readonly axisLabelMetrics: TickLabelMetrics = {
+    measure: canvasLabelMeasure(() => this.el.axis.getContext('2d'), AXIS.tickFont),
+    offset: 1,
+  };
 
   // DOM
   private readonly el: {
@@ -2065,7 +2072,7 @@ export class App {
     const ticks = computeTicks(
       ((view.start - timeOrigin) / sr) * 1e12,
       ((view.end - timeOrigin) / sr) * 1e12,
-      wCss, sr,
+      wCss, sr, AXIS.minTickSpacing, this.axisLabelMetrics,
     );
     const fingerprint = this.frameFingerprint(
       view.start, view.end, boxes, repeatTints, hCss, this.tickSignature(ticks, wCss));

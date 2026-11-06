@@ -17,7 +17,9 @@ import {
   unitValueText, type ScaleUnit,
 } from './timeScale.js';
 
-const SCALE_UNIT_OPTIONS: SelectOptionTuple[] = [['us', 'us'], ['ms', 'ms'], ['s', 's'], ['min', 'min']];
+// The value stays the ASCII unit id ('us'); the label is the written unit, µs (search: "us").
+const SCALE_UNIT_OPTIONS: SelectOptionTuple[] = [['us', '\u00b5s', 'us'], ['ms', 'ms'], ['s', 's'], ['min', 'min']];
+const unitLabel = (unit: ScaleUnit): string => (unit === 'us' ? '\u00b5s' : unit);
 
 export interface AcquisitionTimeUnlimited {
   active: boolean;
@@ -143,7 +145,7 @@ export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): 
     const value = timeAtPosition(scale, positionForSeconds(scale, seconds)?.position ?? 0);
     if (value) setUnit(value.unit);
     if (updateNumber) number.value = unitValueText(seconds, unit);
-    range.setAttribute('aria-valuetext', `${unitValueText(seconds, unit)} ${unit}`);
+    range.setAttribute('aria-valuetext', `${unitValueText(seconds, unit)} ${unitLabel(unit)}`);
   };
   const syncFromPosition = (position: number): void => {
     setFill(position);
@@ -169,7 +171,7 @@ export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): 
   setUnit(unit);
   if (initial) {
     number.value = unitValueText(initialSeconds, unit);
-    range.setAttribute('aria-valuetext', `${unitValueText(initialSeconds, unit)} ${unit}`);
+    range.setAttribute('aria-valuetext', `${unitValueText(initialSeconds, unit)} ${unitLabel(unit)}`);
   }
   if (unlimitedDraft) {
     number.hidden = true;
@@ -209,7 +211,7 @@ export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): 
     if (placed) {
       range.value = String(placed.position);
       setFill(placed.position);
-      range.setAttribute('aria-valuetext', `${unitValueText(seconds, unit)} ${unit}`);
+      range.setAttribute('aria-valuetext', `${unitValueText(seconds, unit)} ${unitLabel(unit)}`);
     }
   });
   number.addEventListener('change', () => {

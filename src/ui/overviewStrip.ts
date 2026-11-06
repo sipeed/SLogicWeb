@@ -21,7 +21,11 @@
 
 import { GAP_BIT, type SampleStore } from '../data/index.js';
 import { wheelSpanFactor } from '../render/index.js';
-import { computeTicks } from './timeAxis.js';
+import { canvasLabelMeasure, computeTicks, type TickLabelMetrics } from './timeAxis.js';
+
+const OVERVIEW_TICK_FONT = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+/** Labels start this far right of their tick, CSS px. */
+const OVERVIEW_LABEL_OFFSET = 3;
 import type { CanvasPalette } from './canvasPalette.js';
 
 export interface OverviewState {
@@ -200,6 +204,10 @@ export function overviewDue(
 
 export class OverviewStrip {
   private readonly ctx: CanvasRenderingContext2D;
+  private readonly labelMetrics: TickLabelMetrics = {
+    measure: canvasLabelMeasure(() => this.ctx, OVERVIEW_TICK_FONT),
+    offset: OVERVIEW_LABEL_OFFSET,
+  };
   private state: OverviewState | null = null;
   private cached: CachedDensity | null = null;
   private widthCss = 0;
@@ -319,33 +327,32 @@ export class OverviewStrip {
 
     // The fixed scale: major ticks of the whole capture, trigger-relative like the axis.
     // 12 px minor spacing puts major labels about 120 px apart, the overview's reading
-    // granularity; the axis below carries the finer time grid.
+    // granularity; the axis below carries the finer time grid. Labels are measured in
+    // this strip's font; a label the layout dropped (it would collide, or run past the
+    // right edge) stays blank.
     const samplerate = state.store.samplerate;
     if (samplerate > 0) {
       const origin = state.triggerSample ?? 0;
       const ticks = computeTicks(
         (windowStart - origin) / samplerate * 1e12,
         (windowEnd - origin) / samplerate * 1e12,
-        width, samplerate, 12,
+        width, samplerate, 12, this.labelMetrics,
       );
-      ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      ctx.font = OVERVIEW_TICK_FONT;
       ctx.textBaseline = 'alphabetic';
+      ctx.textAlign = 'left';
       const labelY = height - 3;
       const drawTick = (x: number, label: string, origin = false): void => {
         const px = Math.round(x);
         ctx.fillStyle = state.palette.axisTickMajor;
         ctx.fillRect(px, densityBottom + 1, 1, 3);
         ctx.fillStyle = origin ? state.palette.text : state.palette.text50;
-        const right = px > width - 44;
-        ctx.textAlign = right ? 'right' : 'left';
-        ctx.fillText(label, right ? Math.max(2, px - 3) : Math.min(width - 2, px + 3), labelY);
+        ctx.fillText(label, px + OVERVIEW_LABEL_OFFSET, labelY);
       };
-      if (ticks.pinned) {
-        const origin = Math.abs(ticks.pinned.ps) < 1e-6;
-        drawTick(0, origin ? state.originLabel : ticks.pinned.label, origin);
-      }
+      // A base time (only far from the origin): the major labels are offsets from it.
+      if (ticks.pinned) drawTick(0, ticks.pinned.label);
       for (const tick of ticks.ticks) {
-        if (!tick.major || tick.x < 2 || tick.x > width - 1) continue;
+        if (!tick.major || tick.label === '' || tick.x > width - 1) continue;
         const origin = Math.abs(tick.ps) < 1e-6;
         drawTick(tick.x, origin ? state.originLabel : tick.label, origin);
       }

@@ -29,7 +29,7 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 const SCALES: Readonly<Record<string, number>> = {
-  s: 1, ms: 1e-3, us: 1e-6, ns: 1e-9, ps: 1e-12,
+  s: 1, ms: 1e-3, 'µs': 1e-6, ns: 1e-9, ps: 1e-12,
 };
 
 const at = (sample: number, rate: number): CursorTime => ({ sample, seconds: sample / rate });
@@ -114,7 +114,7 @@ const periodCap = (period: number, seconds: number): number =>
   check('the period cap outranks the four-figure width convention at the period scale',
     capped.length === 9 &&
     same(cappedTexts, ['1 ps', '100 ps', '1 ns', '10 ns', '50 ns', '100 ns', '500 ns',
-      '1.00 us', '5.00 us']),
+      '1.00 µs', '5.00 µs']),
     `capped=${JSON.stringify(cappedTexts)}`);
 }
 
@@ -147,7 +147,7 @@ const periodCap = (period: number, seconds: number): number =>
   for (const rate of rates) {
     for (const sample of samples) {
       const text = format([sample], rate)[0] ?? '';
-      const match = /^(-?\d+)(?:\.(\d+))? (ps|ns|us|ms|s)$/.exec(text);
+      const match = /^(-?\d+)(?:\.(\d+))? (ps|ns|µs|ms|s)$/.exec(text);
       if (match === null) {
         violations.push(`${rate}/${sample}:${text}`);
         continue;
@@ -165,11 +165,11 @@ const periodCap = (period: number, seconds: number): number =>
 {
   const cases = [
     { rate: 1.2e6, samples: [1], expected: ['833 ns'] },
-    { rate: 1.2e6, samples: [2], expected: ['1.7 us'] },
-    { rate: 1.2e6, samples: [1, 2], expected: ['833 ns', '1.7 us'] },
+    { rate: 1.2e6, samples: [2], expected: ['1.7 µs'] },
+    { rate: 1.2e6, samples: [1, 2], expected: ['833 ns', '1.7 µs'] },
     { rate: 3.3e6, samples: [1], expected: ['303 ns'] },
     { rate: 3.3e6, samples: [2], expected: ['606 ns'] },
-    { rate: 3.3e6, samples: [4], expected: ['1.2 us'] },
+    { rate: 3.3e6, samples: [4], expected: ['1.2 µs'] },
   ];
   const mismatches = cases
     .map((row) => ({ row, texts: format(row.samples, row.rate) }))
@@ -263,7 +263,7 @@ const periodCap = (period: number, seconds: number): number =>
   const period = 1e-8;
   const cases = [
     { seconds: 10e-9, expected: '+10 ns' },
-    { seconds: 2.5e-6, expected: '+2.50 us' },
+    { seconds: 2.5e-6, expected: '+2.50 µs' },
     { seconds: 2.5e-3, expected: '+2.500 ms' },
     { seconds: 1.266e-3, expected: '+1.266 ms' },
     { seconds: 999.99999e-3, expected: '+1000.0 ms' },
@@ -305,7 +305,7 @@ const periodCap = (period: number, seconds: number): number =>
   const periods = [0, Number.NaN, Number.POSITIVE_INFINITY, -1];
   const texts = periods.map((period) => formatCursorSpan(2.5e-6, period));
   check('an unusable sample period saturates the decimal cap instead of leaking NaN digits',
-    texts.every((text) => text === '+2.500 us'),
+    texts.every((text) => text === '+2.500 µs'),
     `texts=${JSON.stringify(texts)}`);
 }
 

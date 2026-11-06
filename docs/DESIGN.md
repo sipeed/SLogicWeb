@@ -250,6 +250,12 @@ Analog channels are not bus rows. Each analog signal has a row with:
 
 - The ruler is sticky and shows time relative to `displayOrigin()`. T is labelled; time
   before T is negative. The unit appears once per axis.
+- Tick labels are absolute, signed times ("-100 ms", "0 ms", "1.4 ms"), all in one unit
+  with one decimal count derived from the labelled step; no label is relative to another
+  tick. A unit is promoted before a label needs four integer digits. Only a fine step far
+  from T (e.g. 100 µs at 4.97 s) shows a single base at the left ("4.972 s") with signed
+  offsets ("+0.4 ms"). Labels are placed by measured width and dropped, never
+  overprinted, when they would collide (`axisLabels.ts`, `timeAxis.ts`).
 - Multi-rate groups share the time axis; group headers show rates. A digital edge is drawn
   at its exact position; an analog group is resampled by time for the viewport, never by
   raw index.

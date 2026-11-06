@@ -1,7 +1,7 @@
 const UNITS = [
   { scale: 1, unit: 's' },
   { scale: 1e-3, unit: 'ms' },
-  { scale: 1e-6, unit: 'us' },
+  { scale: 1e-6, unit: '\u00b5s' },
   { scale: 1e-9, unit: 'ns' },
   { scale: 1e-12, unit: 'ps' },
 ] as const;
