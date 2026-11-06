@@ -20,17 +20,27 @@ import type { SampleStore } from '../data/types.js';
 export interface UnsavedCaptureInput {
   /** `captureLabel.kind`: `loaded` means the data came from a file. */
   labelKind: string;
-  store: SampleStore;
+  /** Samples the displayed capture holds. */
+  length: number;
   running: boolean;
-  /** The store and length the last successful save wrote, or null. */
-  saved: { store: SampleStore; length: number } | null;
+  /** The length a successful save wrote for this very store, if any. */
+  savedLength: number | undefined;
 }
 
 export function captureUnsaved(input: UnsavedCaptureInput): boolean {
-  if (input.labelKind === 'loaded' || input.store.length === 0) return false;
+  if (input.labelKind === 'loaded' || input.length === 0) return false;
   if (input.running) return true;
-  const saved = input.saved;
-  return saved === null || saved.store !== input.store || saved.length !== input.store.length;
+  return input.savedLength !== input.length;
+}
+
+/**
+ * What each store's last successful save wrote. Weakly keyed: remembering a save must
+ * not keep a discarded multi-GiB capture (an earlier Repeat wave) alive.
+ */
+export class SavedCaptures {
+  private readonly lengths = new WeakMap<SampleStore, number>();
+  mark(store: SampleStore, length: number): void { this.lengths.set(store, length); }
+  lengthOf(store: SampleStore): number | undefined { return this.lengths.get(store); }
 }
 
 /** Whether a drag carries files (not text or a link dragged out of the page). */

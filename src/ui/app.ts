@@ -74,7 +74,8 @@ import {
   captureFileName, formatForFileName, localDateParts, saveFilePickerTypes, type CaptureFileFormat,
 } from './captureFileName.js';
 import { saveSr, srExportParts, type SrProbe } from './srSave.js';
-import { FileDragDepth } from './fileGuards.js';
+import { FileDragDepth, SavedCaptures, captureUnsaved } from './fileGuards.js';
+import { ConfirmDialog } from './confirmDialog.js';
 import { connectSamplerate } from './connectDefaults.js';
 import {
   analogRateAfterClamp, analogRateBeforeClamp, analogRateUserEdit,
@@ -355,6 +356,11 @@ export class App {
   private platformNoticeDismissed = false;
   /** Nested dragenter/dragleave depth of a file drag; drives the plot's drop overlay. */
   private readonly fileDrag = new FileDragDepth();
+  /** What the last successful save of each capture store wrote (fileGuards.ts). */
+  private readonly savedCaptures = new SavedCaptures();
+  private readonly confirmDialog = new ConfirmDialog();
+  /** The installed `beforeunload` guard, present only while a capture is unsaved. */
+  private unloadGuard: ((event: BeforeUnloadEvent) => void) | null = null;
   /** Info about the file just opened (e.g. probes an old .sr could not carry); null when none. */
   private fileNotice: { key: MessageKey; vars?: MessageVars } | null = null;
   private readonly shortcutsDialog: ShortcutsDialog;
@@ -4142,7 +4148,8 @@ export class App {
     this.el.hintExample.addEventListener('click', () => void this.openExample());
     this.el.fileInput.addEventListener('change', () => {
       const files = [...(this.el.fileInput.files ?? [])];
-      if (files.length) void this.openFiles(files);
+      // Already confirmed (or nothing to lose) before the chooser opened.
+      if (files.length) void this.openFiles(files, true);
     });
     must<HTMLButtonElement>('btn-save').addEventListener('click', () => {
       this.channelList.closeDialog();
@@ -4812,6 +4819,8 @@ export class App {
    * vanished mid-run.
    */
   private renderToolbarState(): void {
+    // Start/stop, open and save all re-render the toolbar: the unload guard follows them.
+    this.syncUnloadGuard();
     const repeatPending = this.repeatTimer.pending;
     const showStop = this.running || repeatPending;
     this.renderDeviceCommand();
@@ -5183,7 +5192,63 @@ export class App {
 
   // ------------------------------------------------------------------ captures
 
-  private async openFiles(files: File[]): Promise<void> {
+  /**
+   * Open: ask before the chooser when the capture is unsaved. Clicking the dialog's
+   * confirm button is itself a user activation, so the file input may open after it.
+   */
+  private async pickFiles(): Promise<void> {
+    if (!(await this.confirmDiscardCapture())) return;
+    this.el.fileInput.value = '';
+    this.el.fileInput.click();
+  }
+
+  /** True when there is nothing unsaved to lose, or the user agreed to discard it. */
+  private async confirmDiscardCapture(): Promise<boolean> {
+    if (!this.hasUnsavedCapture()) return true;
+    this.menuStack.closeAll('outside');
+    this.channelList.closeDialog();
+    return this.confirmDialog.ask({
+      title: t('unsaved.title'),
+      body: t('unsaved.openBody'),
+      confirm: t('unsaved.discard'),
+      cancel: t('unsaved.cancel'),
+    }, this.el.open);
+  }
+
+  /** The unsaved-capture rule (fileGuards.ts) for the displayed capture. */
+  private hasUnsavedCapture(): boolean {
+    const store = this.captureStore;
+    return captureUnsaved({
+      labelKind: this.captureLabel.kind,
+      length: store.length,
+      running: this.running || this.stopping,
+      savedLength: this.savedCaptures.lengthOf(store),
+    });
+  }
+
+  /**
+   * Keep `beforeunload` registered exactly while there is something to lose: a page
+   * with the listener is excluded from the back/forward cache, so it is not left on.
+   */
+  private syncUnloadGuard(): void {
+    const want = this.running || this.stopping || this.hasUnsavedCapture();
+    if (want && this.unloadGuard === null) {
+      this.unloadGuard = (event) => {
+        if (!this.hasUnsavedCapture()) return;
+        event.preventDefault();
+        // Older Chromium/Safari still need returnValue set to show the prompt.
+        event.returnValue = '';
+      };
+      window.addEventListener('beforeunload', this.unloadGuard);
+    } else if (!want && this.unloadGuard !== null) {
+      window.removeEventListener('beforeunload', this.unloadGuard);
+      this.unloadGuard = null;
+    }
+  }
+
+  /** `confirmed`: the caller already asked (Open button) before the chooser opened. */
+  private async openFiles(files: File[], confirmed = false): Promise<void> {
+    if (!confirmed && !(await this.confirmDiscardCapture())) return;
     try {
       this.statusError = null;
       this.renderErrorBanner();
@@ -5301,15 +5366,10 @@ export class App {
   }
 
   /** The file chooser for Open (a menu pick is still a user gesture). */
-  private chooseFiles(): void {
-    this.el.fileInput.value = '';
-    this.el.fileInput.click();
-  }
-
   /** One Open entry point: a file from disk first, then the bundled example capture. */
   private openItems(): SettingsMenuItem[] {
     return [
-      { label: t('open.file'), hint: t('open.fileHint'), onPick: () => this.chooseFiles() },
+      { label: t('open.file'), hint: t('open.fileHint'), onPick: () => void this.pickFiles() },
       { label: t('open.example'), hint: t('open.exampleHint'), onPick: () => void this.openExample() },
     ];
   }
@@ -5375,6 +5435,7 @@ export class App {
         }
         const chosen = formatForFileName(handle.name, format);
         // Snapshot before the first await on the file: a live capture keeps appending.
+        const savedLength = store.length;
         const parts = chosen === 'sr' ? srExportParts(store, probes, { modified }) : null;
         const lwcap = chosen === 'lwcap' ? planLwcap(store, names) : null;
         const writable = await handle.createWritable();
@@ -5387,9 +5448,11 @@ export class App {
           await writable.abort().catch(() => undefined);
           throw e;
         }
+        this.noteCaptureSaved(store, savedLength);
         return;
       }
 
+      const savedLength = store.length;
       let blob: Blob;
       if (format === 'sr') {
         blob = await saveSr(store, probes, { modified });
@@ -5406,6 +5469,8 @@ export class App {
       a.download = nameFor(format);
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+      // A download cannot report failure back; handing the file over is the save.
+      this.noteCaptureSaved(store, savedLength);
     } catch (e) {
       // "Array buffer allocation failed" is not something to show raw: say the save ran
       // out of memory and what to do, with the diagnostic collapsed under it.
@@ -5440,6 +5505,12 @@ export class App {
   private setSaveProgress(percent: number | null): void {
     this.savePercent = percent;
     if (this.capturePageShown()) this.capturePanel.updateSaveProgress(percent);
+  }
+
+  /** A save in any format wrote `length` samples of `store`: it is no longer unsaved. */
+  private noteCaptureSaved(store: SampleStore, length: number): void {
+    this.savedCaptures.mark(store, length);
+    this.syncUnloadGuard();
   }
 
   // ------------------------------------------------------------------ device
@@ -6613,6 +6684,7 @@ export class App {
       // not decoded (the next wave would cancel it); the session's last wave is.
       this.scheduleAutoDecode();
     }
+    this.syncUnloadGuard();
     const waiters = this.captureWaiters;
     this.captureWaiters = [];
     for (const w of waiters) w();

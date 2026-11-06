@@ -4,12 +4,18 @@
  *
  *   - the drag-and-drop overlay: FileDragDepth's nested enter/leave counting, the
  *     overlay element and its locale key, the empty hint's "or drag it here" in every
- *     locale and variant, and the window listeners that toggle `#plot.drop-active`.
+ *     locale and variant, and the window listeners that toggle `#plot.drop-active`;
+ *   - the unsaved-capture guard: the captureUnsaved truth table, the weakly keyed save
+ *     record, the destructive ConfirmDialog (fake DOM), its locale keys, and the App
+ *     wiring for Open (button before the chooser, drag-drop), saves and beforeunload.
  *
  *   npm test -- --filter file-guards
  */
 
-import { FileDragDepth, dragHasFiles } from '../fileGuards.js';
+import { FileDragDepth, SavedCaptures, captureUnsaved, dragHasFiles } from '../fileGuards.js';
+import { ConfirmDialog } from '../confirmDialog.js';
+import type { SampleStore } from '../../data/types.js';
+import { byText, fakeEvent, installFakeDom, type FakeElement } from './fakeDom.js';
 import { en, type Messages } from '../locales/en.js';
 import { fr } from '../locales/fr.js';
 import { ru } from '../locales/ru.js';
@@ -101,6 +107,103 @@ const css = fs.readFileSync('src/ui/style.css', 'utf8');
     listeners && dropClears && toggle && style,
     `listeners=${listeners}, drop=${dropClears}, toggle=${toggle}, style=${style}`);
 }
+
+// ---------------------------------------------------------------- unsaved rule
+{
+  const base = { labelKind: 'live', length: 100, running: false, savedLength: undefined };
+  const cases: Array<[string, Parameters<typeof captureUnsaved>[0], boolean]> = [
+    ['a completed device capture', base, true],
+    ['an empty capture', { ...base, length: 0 }, false],
+    ['an opened file', { ...base, labelKind: 'loaded' }, false],
+    ['saved at this length', { ...base, savedLength: 100 }, false],
+    ['saved, then grown', { ...base, savedLength: 60 }, true],
+    ['saved but still running', { ...base, running: true, savedLength: 100 }, true],
+    ['a stopped-without-trigger capture with data', { ...base, labelKind: 'stoppedNoTrigger' }, true],
+    ['a running capture with no data yet', { ...base, running: true, length: 0 }, false],
+  ];
+  const wrong = cases.filter(([, input, want]) => captureUnsaved(input) !== want).map(([n]) => n);
+  check('captureUnsaved: device data until saved; files, empty and saved captures are not',
+    wrong.length === 0, wrong.join(', '));
+
+  const saved = new SavedCaptures();
+  const a = { length: 10 } as SampleStore;
+  const b = { length: 10 } as SampleStore;
+  saved.mark(a, 10);
+  check('a save is remembered per store (a new wave of equal length is unsaved)',
+    saved.lengthOf(a) === 10 && saved.lengthOf(b) === undefined);
+}
+
+// ---------------------------------------------------------------- confirm dialog
+async function confirmDialogChecks(): Promise<void> {
+  const doc = installFakeDom();
+  const invoker = doc.createElement('button');
+  doc.body.appendChild(invoker);
+  const text = { title: 'T?', body: 'B.', confirm: 'Discard', cancel: 'Keep' };
+  const dialog = new ConfirmDialog();
+  const host = (): FakeElement => doc.body.querySelector('dialog')!;
+
+  const yes = dialog.ask(text, invoker as unknown as HTMLElement);
+  const opened = host().open && byText(host(), 'T?').some((el) => el.localName === 'h2') &&
+    byText(host(), 'B.').some((el) => el.localName === 'p');
+  const safeFocus = doc.activeElement === byText(host(), 'Keep')[0];
+  byText(host(), 'Discard')[0]!.click();
+  const yesAnswer = await yes;
+  check('confirm opens a modal with the text, focuses Cancel, and resolves true on confirm',
+    opened && safeFocus && yesAnswer && !host().open && doc.activeElement === invoker,
+    `opened=${opened}, focus=${safeFocus}, answer=${yesAnswer}, open=${host().open}`);
+
+  const no = dialog.ask(text, invoker as unknown as HTMLElement);
+  byText(host(), 'Keep')[0]!.click();
+  const escape = dialog.ask(text, invoker as unknown as HTMLElement);
+  const cancelEvent = fakeEvent('cancel');
+  host().dispatchEvent(cancelEvent);
+  const first = dialog.ask(text, invoker as unknown as HTMLElement);
+  const second = dialog.ask(text, invoker as unknown as HTMLElement);
+  byText(host(), 'Discard')[0]!.click();
+  const answers = [await no, await escape, cancelEvent.defaultPrevented, await first, await second];
+  check('Cancel, Esc (cancel event) and a superseded request all resolve false',
+    answers.join(',') === 'false,false,true,false,true' &&
+    doc.body.querySelectorAll('dialog').length === 1,
+    answers.join(','));
+}
+
+// ---------------------------------------------------------------- unsaved wiring
+{
+  const keys = ['unsaved.title', 'unsaved.openBody', 'unsaved.discard', 'unsaved.cancel'] as const;
+  const untranslated = ([['zh-CN', zhCN], ['fr', fr], ['ru', ru]] as Array<[string, Messages]>)
+    .flatMap(([name, m]) => keys.filter((k) => m[k] === en[k]).map((k) => `${name}:${k}`));
+  check('the discard confirmation is translated, and zh-CN asks the reviewed sentence',
+    untranslated.length === 0 && zhCN['unsaved.openBody'] === '当前采集尚未保存，打开文件将丢弃它？',
+    untranslated.join(', '));
+
+  const openBody = app.split('private async openFiles(files: File[], confirmed = false): Promise<void> {')[1]
+    ?.split('\n  }\n')[0] ?? '';
+  const openGuard = openBody.trimStart().startsWith(
+    'if (!confirmed && !(await this.confirmDiscardCapture())) return;');
+  const button = app.includes("must<HTMLButtonElement>('btn-open').addEventListener('click', () => void this.pickFiles());") &&
+    app.includes('if (files.length) void this.openFiles(files, true);');
+  const pickBody = app.split('private async pickFiles(): Promise<void> {')[1]?.split('\n  }\n')[0] ?? '';
+  const pick = pickBody.indexOf('this.confirmDiscardCapture()') >= 0 &&
+    pickBody.indexOf('this.confirmDiscardCapture()') < pickBody.indexOf('this.el.fileInput.click();');
+  const dropOpens = (app.split("window.addEventListener('drop', (e) => {")[1] ?? '')
+    .includes('if (files.length) void this.openFiles(files);');
+  check('Open (button before the chooser) and drag-drop both ask before replacing the capture',
+    openGuard && button && pick && dropOpens,
+    `open=${openGuard}, button=${button}, pick=${pick}, drop=${dropOpens}`);
+
+  const saveBody = app.split('private async save(format: CaptureFileFormat): Promise<void> {')[1]
+    ?.split('\n  }\n')[0] ?? '';
+  const savedMarks = saveBody.split('this.noteCaptureSaved(store, savedLength);').length - 1;
+  const guard = app.includes("window.addEventListener('beforeunload', this.unloadGuard);") &&
+    app.includes("window.removeEventListener('beforeunload', this.unloadGuard);") &&
+    app.includes('event.preventDefault();\n        // Older Chromium/Safari still need returnValue set to show the prompt.\n        event.returnValue = \'\';');
+  const synced = app.includes('    this.syncUnloadGuard();\n    const repeatPending = this.repeatTimer.pending;') &&
+    app.includes('    this.syncUnloadGuard();\n    const waiters = this.captureWaiters;');
+  check('both save paths mark the capture saved; beforeunload is registered only while needed',
+    savedMarks === 2 && guard && synced, `marks=${savedMarks}, guard=${guard}, synced=${synced}`);
+}
+
+await confirmDialogChecks();
 
 console.log(`\n${passed}/${passed + failures.length} passed`);
 nodeProcess.exit(failures.length === 0 ? 0 : 1);

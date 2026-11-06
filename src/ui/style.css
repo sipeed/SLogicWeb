@@ -1097,6 +1097,17 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
 .about-links { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
 .about-links a { color: var(--primary); }
 
+/* Destructive confirmation (confirmDialog.ts): the shortcuts anatomy, one sentence and a
+   destructive confirm next to Cancel. */
+.confirm-dialog-body { margin: -8px 0 0; font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.confirm-dialog-confirm {
+  background: var(--destructive); border-color: var(--destructive); color: var(--destructive-foreground);
+}
+.confirm-dialog-confirm:hover {
+  background: var(--destructive); border-color: var(--destructive); color: var(--destructive-foreground);
+  filter: brightness(1.1);
+}
+
 .select-popover, .settings-menu, .settings-flyout {
   background: var(--popover); color: var(--popover-foreground);
   border: 1px solid var(--border); border-radius: var(--radius);
