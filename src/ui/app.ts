@@ -97,6 +97,7 @@ import {
 } from './sidebar.js';
 import { SidebarHost } from './sidebarHost.js';
 import { shortcutIdFor } from './shortcuts.js';
+import { wheelAction, wheelDeltaPixels, type WheelAction, type WheelModifiers } from './wheelGesture.js';
 import { ShortcutsDialog } from './shortcutsDialog.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
 import {
@@ -147,7 +148,7 @@ import {
   markerEdgeWindow, markerPointerCursor, markerSnapRadii, nearestMarkerEdge, type MarkerCursor,
 } from './markerGeometry.js';
 import {
-  cursorColor, cursorLabels, layoutCursorChips, nearestCursorGrab,
+  cursorColor, cursorLabels, defaultCursorPair, layoutCursorChips, nearestCursorGrab,
   type CursorChip, type CursorGrabCandidate, type PlacedCursorChip,
 } from './cursorSet.js';
 import {
@@ -304,6 +305,10 @@ export class App {
   private platformNoticeDismissed = false;
   private readonly shortcutsDialog: ShortcutsDialog;
   private detailedLabels = true;
+  /** "Wheel zooms without Ctrl" (PulseView habit); persisted with the workspace. */
+  private wheelZooms = false;
+  /** Shows the raw USB register console in Capture > Advanced; persisted, off by default. */
+  private developerTools = false;
   private lastWorkspaceSnapshot: string | null = null;
   private pendingToolbarViewport: { start: number; end: number; follow: boolean } | null = null;
   private readonly resizer: PanelResizer;
@@ -444,6 +449,7 @@ export class App {
   /** Last area/capture state drawn, so pointer moves do not rebuild the bar. */
   private renderedInteractionArea: InteractionArea | null = null;
   private renderedInteractionHasCapture: boolean | null = null;
+  private renderedInteractionOverflow: boolean | null = null;
   private decodeBusy = false;
   private decodeWarm = false;
   private reacquiring = false;
@@ -543,6 +549,8 @@ export class App {
     const workspace = readWorkspaceSnapshot();
     if (workspace) {
       this.detailedLabels = workspace.detailedLabels;
+      this.wheelZooms = workspace.wheelZooms === true;
+      this.developerTools = workspace.developerTools === true;
       this.channels = (workspace.channels ?? defaultChannels(16)).map((channel, index) => ({ ...channel, index }));
       this.order = workspace.order ?? this.channels.map((channel) => channel.index);
       this.busViews = (workspace.busViews ?? []).map((config, id) => ({
@@ -610,6 +618,8 @@ export class App {
       onCenter: (sample) => this.centerOverview(sample),
       onPan: (samples) => this.panOverview(samples),
       onZoom: (anchor, factor) => this.zoomOverview(anchor, factor),
+      wheelAction: (event) => this.wheelActionFor(event),
+      onScrollRows: (event) => this.scrollRowsBy(event),
     });
     this.stack.setBaseTheme(baseTheme(this.paintedTheme));
     this.channelList = new ChannelList(this.el.channelList, {
@@ -2383,18 +2393,24 @@ export class App {
   private wirePlot(): void {
     const plot = this.el.plot;
 
-    // Wheel without a modifier scrolls the channel stack vertically, as it does anywhere
-    // else in the page. Ctrl zooms the time axis; Shift pans it horizontally. This is the
-    // interaction users know from HSync and DSView; treating every wheel as zoom made the
-    // unmodified wheel unable to reach channels below the fold.
+    // The wheel decision is `wheelAction` (wheelGesture.ts), shared with the overview strip
+    // and the hint bar. By default a plain wheel scrolls the channel stack while it
+    // overflows (HSync/DSView habit), Ctrl zooms time and Shift pans it; with every row on
+    // screen, or with the "wheel zooms" preference (PulseView habit), a plain wheel zooms.
     const wheelNavigate = (e: WheelEvent, left: number): void => {
+      const action = this.wheelActionFor(e);
+      if (action === 'native') return;
       // The browser's own Ctrl+wheel page zoom must be stopped even before any capture
       // exists; only after that is it safe to treat an empty store as a no-op.
-      if (!e.ctrlKey && !e.shiftKey) return;
       e.preventDefault();
+      if (action === 'block') return;
+      if (action === 'scroll-rows') {
+        this.scrollRowsBy(e);
+        return;
+      }
       if (this.store.length === 0) return;
       const dpr = globalThis.devicePixelRatio || 1;
-      if (e.ctrlKey) {
+      if (action === 'zoom') {
         if (e.deltaY === 0) return;
         // [SOURCE] one 120-unit notch is exactly sqrt(2).
         // [UNVERIFIED] telling a physical wheel from a trackpad: a large, quantised
@@ -2410,12 +2426,9 @@ export class App {
       this.dirty = true;
     };
     plot.addEventListener('wheel', (e) => {
-      if (!e.ctrlKey && !e.shiftKey) return;
-      e.preventDefault();
-      if (this.store.length === 0) return;
       const left = plot.getBoundingClientRect().left;
       wheelNavigate(e, left);
-      this.syncMarkerCursor(e.clientX - left);
+      if (e.defaultPrevented && this.store.length > 0) this.syncMarkerCursor(e.clientX - left);
     }, { passive: false });
     this.el.axis.addEventListener('wheel', (e) => {
       const left = this.el.axis.getBoundingClientRect().left;
@@ -2607,6 +2620,13 @@ export class App {
         this.clearCursors();
         this.renderPanels();
         this.dirty = true;
+      } else if (shortcut !== null && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Ctrl/⌘/Alt with +/-/arrows stay the browser's (page zoom, history).
+        e.preventDefault();
+        if (shortcut === 'view.zoomIn') this.keyZoom(1);
+        else if (shortcut === 'view.zoomOut') this.keyZoom(-1);
+        else if (shortcut === 'view.panLeft') this.keyPan(-1, e.shiftKey);
+        else this.keyPan(1, e.shiftKey);
       }
     });
 
@@ -2717,7 +2737,7 @@ export class App {
     this.activeCursorId = id;
     if (this.cursors.length === 2) {
       const seeded = seedDistanceRow(
-        this.distanceRows, this.nextDistanceRowId, this.cursors.map((cursor) => cursor.id),
+        this.distanceRows, this.nextDistanceRowId, this.defaultCursorPair() ?? [],
       );
       if (seeded !== null) {
         this.distanceRows = seeded;
@@ -2728,8 +2748,13 @@ export class App {
     this.dirty = true;
   }
 
+  /** A new measurement row starts on the two latest cursors, earlier first (B - A > 0). */
+  private defaultCursorPair(): [number, number] | null {
+    return defaultCursorPair(this.cursors.map((cursor) => ({ id: cursor.id, sample: cursor.marker.sample })));
+  }
+
   private addDistanceRow(): void {
-    const rows = appendDistanceRow(this.distanceRows, this.nextDistanceRowId);
+    const rows = appendDistanceRow(this.distanceRows, this.nextDistanceRowId, this.defaultCursorPair());
     if (rows === this.distanceRows) return;
     this.distanceRows = rows;
     this.nextDistanceRowId++;
@@ -2783,7 +2808,8 @@ export class App {
   }
 
   private addEdgeRow(): void {
-    const rows = appendEdgeRow(this.edgeRows, this.nextEdgeRowId, this.edgeChannels()[0] ?? null);
+    const rows = appendEdgeRow(
+      this.edgeRows, this.nextEdgeRowId, this.edgeChannels()[0] ?? null, this.defaultCursorPair());
     if (rows === this.edgeRows) return;
     this.edgeRows = rows;
     this.nextEdgeRowId++;
@@ -3003,6 +3029,43 @@ export class App {
   }
 
   /** Bookkeeping shared by every viewport gesture. */
+  /** The shared wheel decision for the plot, axis and overview strip right now. */
+  private wheelActionFor(e: WheelModifiers): WheelAction {
+    return wheelAction(e, {
+      wheelZooms: this.wheelZooms,
+      rowsOverflow: this.rowsOverflow(),
+      hasCapture: this.store.length > 0,
+    });
+  }
+
+  /** Whether the channel stack is taller than the scroll area (a plain wheel can scroll). */
+  private rowsOverflow(): boolean {
+    const scroll = this.el.scroll;
+    return scroll.scrollHeight > scroll.clientHeight + 1;
+  }
+
+  /** Scroll the channel stack by one wheel event (Ctrl+wheel when "wheel zooms" is on). */
+  private scrollRowsBy(e: WheelEvent): void {
+    const scroll = this.el.scroll;
+    scroll.scrollTop += wheelDeltaPixels(e.deltaY, e.deltaMode, scroll.clientHeight);
+  }
+
+  /** `+`/`-`: zoom one wheel notch around the centre of the plot. */
+  private keyZoom(direction: 1 | -1): void {
+    if (this.store.length === 0) return;
+    this.stack.zoomAt(this.stack.widthDevicePx / 2, direction > 0 ? Math.SQRT1_2 : Math.SQRT2);
+    this.noteViewportIntent();
+    this.dirty = true;
+  }
+
+  /** Arrows: pan a tenth of the visible span; with Shift, half of it. */
+  private keyPan(direction: 1 | -1, big: boolean): void {
+    if (this.store.length === 0) return;
+    this.stack.panPixels(direction * this.stack.widthDevicePx * (big ? 0.5 : 0.1));
+    this.noteViewportIntent();
+    this.dirty = true;
+  }
+
   private beginViewportGesture(): void {
     if (this.session) this.viewIntent = true;
     this.setFollow(false);
@@ -3636,11 +3699,30 @@ export class App {
         },
       },
       {
+        label: t('settings.wheelZooms'),
+        checked: this.wheelZooms,
+        onPick: () => {
+          this.wheelZooms = !this.wheelZooms;
+          this.persistWorkspace();
+          this.renderInteractionBar(true);
+          if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings(this.wheelZooms);
+        },
+      },
+      {
+        label: t('settings.developerTools'),
+        checked: this.developerTools,
+        onPick: () => {
+          this.developerTools = !this.developerTools;
+          this.persistWorkspace();
+          this.renderPanels();
+        },
+      },
+      {
         label: t('settings.shortcuts'),
         hint: '▸',
         onPick: () => {
           this.channelList.closeDialog();
-          this.shortcutsDialog.open(this.el.settings);
+          this.shortcutsDialog.open(this.el.settings, this.wheelZooms);
         },
       },
     ];
@@ -3717,6 +3799,8 @@ export class App {
     return {
       version: WORKSPACE_SCHEMA_VERSION,
       detailedLabels: this.detailedLabels,
+      wheelZooms: this.wheelZooms,
+      developerTools: this.developerTools,
       channels: this.channels.map(({ name, color, enabled }) => ({ name, color, enabled })),
       order: [...this.order],
       capture: {
@@ -3873,7 +3957,7 @@ export class App {
   private retranslate(): void {
     this.menuStack.closeAll('retranslate');
     applyStaticI18n(document);
-    if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings();
+    if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings(this.wheelZooms);
     this.relayout();       // channel cells rebuild; an open channel dialog closes here
     this.renderPanels();   // side panels + toolbar chrome
     this.renderInteractionBar(true);  // hint text follows the locale
@@ -4051,6 +4135,7 @@ export class App {
       buses: this.busViews,
       analogGroups: this.analogGroups(),
       deviceName: this.device?.name ?? null,
+      developerTools: this.developerTools,
       running: this.running,
       stopping: this.stopping,
       repeatPending: this.repeatTimer.pending,
@@ -4162,12 +4247,18 @@ export class App {
     this.statusRenders += 1;
     const area = this.hoveredInteractionArea;
     const hasCapture = this.store.length > 0;
+    // Only the wheel areas depend on the overflow; reading layout elsewhere is wasted.
+    const wheelArea = area === 'plot' || area === 'axis' || area === 'overview';
+    const rowsOverflow = wheelArea ? this.rowsOverflow() : true;
+    const wheelZooms = this.wheelZooms;
     if (!force && area === this.renderedInteractionArea &&
-        hasCapture === this.renderedInteractionHasCapture) return;
+        hasCapture === this.renderedInteractionHasCapture &&
+        rowsOverflow === this.renderedInteractionOverflow) return;
     this.renderedInteractionArea = area;
     this.renderedInteractionHasCapture = hasCapture;
+    this.renderedInteractionOverflow = rowsOverflow;
     this.el.interactionArea.textContent = t(interactionAreaLabelKey(area));
-    const hints = interactionHints(area, { hasCapture, running: this.running });
+    const hints = interactionHints(area, { hasCapture, running: this.running, wheelZooms, rowsOverflow });
     this.el.interactionHints.replaceChildren(
       ...hints.map((spec) => this.interactionHintItem(spec)));
   }

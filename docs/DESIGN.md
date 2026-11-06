@@ -358,9 +358,9 @@ object. Every gesture has a visible equivalent.
 | Input | Plot | Axis / ruler | Overview | Keyboard |
 | --- | --- | --- | --- | --- |
 | Mouse drag | Pan; drag a cursor/trigger handle | Pan | Pan frame | Arrows pan |
-| Mouse wheel | Scroll rows when overflow | Scroll rows | No view change | — |
-| Ctrl/⌘ wheel, pinch | Zoom at pointer | Zoom at pointer | Zoom at pointer | `+` / `-` |
-| Shift wheel | Pan | Pan | Pan | Arrows |
+| Mouse wheel | Scroll rows when they overflow; zoom when every row fits | Same | Same | — |
+| Ctrl/⌘ wheel, pinch | Zoom at pointer | Zoom at pointer | Zoom at pointer | `+` / `=` / `-` |
+| Shift wheel | Pan | Pan | Pan | `←` / `→` (Shift: half a screen) |
 | Mouse double-click | Add cursor | Reset analog scale over a ruler | No action; use Fit | — |
 | Touch double-tap | Add cursor | Reset analog scale over a ruler | No action; use Fit | — |
 | Right-click | Context menu | Context menu | Context menu | Context-menu key / long-press |
@@ -371,6 +371,18 @@ object. Every gesture has a visible equivalent.
 | Long-press | Context menu (Add cursor, Measure, Fit, Trigger level) | Context menu | Context menu | Context-menu key |
 | Pen hover | Readout; barrel button context | Readout | Readout | Focus readout |
 | Pen double-tap | Add cursor | Reset analog scale | No action | — |
+
+Wheel rules (one decision, `wheelGesture.ts` `wheelAction`, shared by the plot, axis,
+overview and the hint bar):
+
+- Default: a plain wheel scrolls the rows while they overflow; when every row already
+  fits there is nothing to scroll, so a plain wheel zooms instead. Ctrl/⌘+wheel always
+  zooms, Shift+wheel always pans.
+- Settings > "Wheel zooms (no Ctrl needed)" (PulseView habit, persisted in the
+  workspace, off by default): a plain wheel always zooms and Ctrl/⌘+wheel scrolls rows.
+- Ctrl/⌘+wheel is always swallowed over these areas, so the page itself never zooms.
+- Keyboard `+`/`=`/`-` zoom one wheel notch about the view centre; `←`/`→` pan a tenth of
+  the view, Shift half of it. Ctrl/⌘/Alt chords stay the browser's.
 
 Rules:
 
@@ -453,7 +465,7 @@ Target panels (each with at most four sections):
 | Analyze | Analyzers, Buses, Results, Status |
 | Record | State, Capacity, Export, Recovery |
 | Settings | Appearance, Behaviour, Shortcuts, About |
-| Diagnostics | Test mode, USB console, Loop/decoder metrics |
+| Diagnostics | Test mode, USB register console (only with Settings > Developer tools on; persisted, off by default), Loop/decoder metrics |
 
 On a platform without WebUSB, the Device panel states the typed reason and offers file
 replay/Demo; Capture is disabled. The rest of the interface still works on imported data.
@@ -488,10 +500,10 @@ polite live region, so assistive technology reads the area and hints when they c
 
 | Area | Hints |
 | --- | --- |
-| Waveform | wheel scrolls rows; Ctrl+wheel zooms time; Shift+wheel pans time; drag pans; double-click adds a cursor |
-| Time axis | wheel scrolls rows; Ctrl+wheel zooms; Shift+wheel pans; drag pans |
-| Overview | wheel scrolls rows; Ctrl+wheel zooms the timeline; Shift+wheel pans it; click or drag centers the view |
-| Channel labels | wheel scrolls rows; double-click a name renames it; the trigger slot opens the trigger editor |
+| Waveform | wheel per §7 (scroll rows, or zoom when rows fit / "wheel zooms" on); the other of Ctrl+wheel; Shift+wheel pans time; drag pans; double-click adds a cursor |
+| Time axis | wheel per §7; Shift+wheel pans; drag pans |
+| Overview | wheel per §7; Shift+wheel pans the timeline; click or drag centers the view |
+| Channel labels | wheel scrolls rows; double-click a name renames it; the trigger icon opens the trigger editor |
 | Side panel | wheel scrolls the panel |
 | Toolbar | click activates the command |
 
@@ -548,7 +560,8 @@ polite live region, so assistive technology reads the area and hints when they c
   `aria-expanded`/`aria-controls`; sheets/dialogs trap focus and restore it; the resizer
   is a separator with keyboard steps.
 - Focus ring 2 px `--ring`, offset 2 px; never removed without a replacement.
-- Keyboard: `Space` Capture/Stop, `F` Fit, `Esc` close/cancel, `+`/`-` zoom, arrows pan,
+- Keyboard: `Space` Capture/Stop, `F` Fit, `Esc` close/cancel, `+`/`=`/`-` zoom, `←`/`→`
+  pan (Shift: half a screen),
   `Tab` moves focus, `Enter` activates. Shortcuts never fire in a text field, the
   debug/test composer or a dialog.
 - Touch: 48 px targets, visible labels, no gesture-only action; TalkBack labels for rows,
@@ -639,6 +652,16 @@ polite live region, so assistive technology reads the area and hints when they c
 - `<html lang>` and the tab title (`app.title`) follow the active locale. The label column,
   the plot (waveforms, annotations, scales) and numeric readouts carry `translate="no"` so
   browser page translation never rewrites data; the empty hint opts back in.
+- Every key switch (channel width, Analog, trigger enable/source, capture mode, test mode)
+  carries one plain sentence: what it does, when to use it, its effect. Longer detail goes
+  in a "?" help tip (`.help-tip`, tooltip on hover/focus/tap), never a panel paragraph.
+  No implementation terms ("matcher", "local step", "wave"): say "trigger", "capture",
+  "previous capture". Test mode 2 is a "test pattern", never "simulator" (confusable with
+  Analog).
+- Threshold choices name the logic family they suit (`thresholdOptions.ts`), e.g.
+  "1.65 V (3.3 V logic)"; the plain voltage is still what the device receives.
+- The Shortcuts dialog lists the keyboard keys and the mouse/touch gestures, following the
+  "wheel zooms" setting; the hint bar and the dialog never disagree with the handlers.
 - Errors name the operation and keep the diagnostic code in the console prefix.
 
 ## 16. Interface review gate

@@ -23,9 +23,10 @@ import {
   formatBytes, formatCount, formatDuration, formatRate, formatStatusDetail, statusDetailOf,
 } from './format.js';
 import {
-  CHANNEL_BANK_SIZE, analogSamplerates, analogTriggerVolts, channelBankIndices, channelBankRange, channelBankStarts,
-  lockedChannelBanks,
+  ADC_FULL_SCALE_V, ADC_RESOLUTION_BITS, CHANNEL_BANK_SIZE, analogSamplerates, analogTriggerVolts, channelBankIndices, channelBankRange,
+  channelBankStarts, lockedChannelBanks,
 } from './channelBanks.js';
+import { thresholdOptionLabel } from './thresholdOptions.js';
 import { t } from './i18n.js';
 import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
@@ -116,6 +117,8 @@ export interface CapturePanelView {
   /** Analog groups (A0–A3) the current device and width expose; 0 disables the buttons. */
   analogGroups: number;
   deviceName: string | null;
+  /** Settings > Developer tools: shows the raw USB register console. Absent = off. */
+  developerTools?: boolean;
   running: boolean;
   stopping: boolean;
   repeatPending: boolean;
@@ -498,6 +501,12 @@ export class CapturePanel {
         if (b.disabled) {
           b.title = t('capturePanel.channelWidthBusy');
           b.setAttribute('aria-label', b.title);
+        } else {
+          // One plain sentence per width: the width/max-rate trade-off is the reason to
+          // pick fewer channels.
+          b.title = t('capturePanel.channelWidthTip', {
+            channels: n, rate: formatRate(v.maxSamplerateHz[n] ?? 200e6),
+          });
         }
         b.addEventListener('click', () => this.cb.onChannelWidth(n));
         widths.appendChild(b);
@@ -523,7 +532,7 @@ export class CapturePanel {
         const cell = div('analog-cell');
         cell.dataset.analogCell = String(start);
         cell.textContent = t('capturePanel.analogCell', { name });
-        cell.title = t('capturePanel.analogEnable', { range, name });
+        cell.title = analogInputHint(start, v.channels.length);
         bank.appendChild(cell);
       } else {
         const grid = div('chip-grid channel-bank-grid');
@@ -560,7 +569,7 @@ export class CapturePanel {
           : !usable
             ? t(indices.length !== CHANNEL_BANK_SIZE ? 'capturePanel.analogNeedsEight'
               : 'capturePanel.analogUnsupported')
-            : t('capturePanel.analogEnable', { range, name });
+            : analogInputHint(start, v.channels.length);
       bank.appendChild(analogButton(start, active, usable && !analogBusy, hint,
         () => this.cb.onToggleAnalog(start)));
       banks.appendChild(bank);
@@ -587,7 +596,8 @@ export class CapturePanel {
       this.cb.onSettings({ ...s, samplerate: Number(rate.value) }));
     rowRT.appendChild(rate.el);
 
-    const thresholdOptions: SelectOptionTuple[] = THRESHOLD_VOLT_OPTIONS.map((t) => [String(t), `${t} V`]);
+    const thresholdOptions: SelectOptionTuple[] = THRESHOLD_VOLT_OPTIONS
+      .map((volts) => [String(volts), thresholdOptionLabel(volts)]);
     const th = selectControl(
       'capture.threshold',
       t('capturePanel.threshold'),
@@ -640,6 +650,8 @@ export class CapturePanel {
       b.className = 'seg' + (s.mode === id ? ' on' : '');
       b.textContent = text;
       b.dataset.captureMode = id;
+      b.title = t(id === 'single' ? 'capturePanel.modeSingleTip'
+        : id === 'repeat' ? 'capturePanel.modeRepeatTip' : 'capturePanel.modeLoopTip');
       b.disabled = modeLocked;
       b.addEventListener('click', () => this.cb.onSettings({ ...s, mode: id }));
       seg.appendChild(b);
@@ -825,12 +837,13 @@ export class CapturePanel {
     mask.setAttribute('aria-label', mask.title);
     triggerSec.header.appendChild(mask);
     mask.addEventListener('change', () => this.cb.onSettings({ ...s, triggerEnableMask: mask.checked }));
-    // Always visible, even while the section body is collapsed: this is the note that
-    // tells a first-time user what the checkbox does, why conditions can be stored
-    // without being armed, and why configuring a condition turns it on by itself.
-    const enableHelp = div('panel-note');
+    // Always visible, even while the section body is collapsed: one sentence on what the
+    // checkbox does, including that "on" with no condition is a free run. Why conditions
+    // can be stored unarmed, and why adding one turns this on, live behind the "?".
+    const enableHelp = div('panel-note help-note');
     enableHelp.textContent = t('capturePanel.triggerEnableHelp');
     enableHelp.style.marginTop = '8px';
+    enableHelp.appendChild(helpTip(t('capturePanel.triggerEnableDetail')));
     triggerSec.el.appendChild(enableHelp);
     triggerSec.body.hidden = !s.triggerEnableMask;
     if (s.triggerEnableMask) {
@@ -872,10 +885,7 @@ export class CapturePanel {
         if (analogUnavailable) {
           // There is no ADC group to arm, so say how to make one (or why there cannot be).
           button.title = v.analogGroups > 0
-            ? t('capturePanel.analogEnable', {
-              range: channelBankRange(0, v.channels.length),
-              name: 'A0',
-            })
+            ? analogInputHint(0, v.channels.length)
             : t(v.channels.length < CHANNEL_BANK_SIZE
               ? 'capturePanel.analogNeedsEight'
               : 'capturePanel.analogUnsupported');
@@ -895,12 +905,11 @@ export class CapturePanel {
         });
         sourceSeg.appendChild(button);
       }
-      triggerSec.body.appendChild(sourceSeg);
-      // What the source choice means and how Single/Repeat differ from Loop; the enable
-      // note above stays visible while this body is collapsed.
-      const sourceHelp = div('panel-note');
-      sourceHelp.textContent = t('capturePanel.triggerSourceHelp');
-      triggerSec.body.appendChild(sourceHelp);
+      // What the source choice means and how Single/Repeat differ from Loop is a "?"
+      // detail beside the buttons, not a paragraph in the panel.
+      const sourceRow = div('help-row');
+      sourceRow.append(sourceSeg, helpTip(t('capturePanel.triggerSourceHelp')));
+      triggerSec.body.appendChild(sourceRow);
       this.triggerNotesEl = div('trigger-notes');
       this.triggerArmedEl = null;
       triggerSec.body.appendChild(this.triggerNotesEl);
@@ -1020,7 +1029,9 @@ export class CapturePanel {
       );
       pre.disabled = v.running || v.stopping;
       pre.addEventListener('change', () => this.cb.onSettings({ ...s, preTriggerPercent: Number(pre.value) }));
-      triggerSec.body.appendChild(pre.el);
+      const preRow = div('help-row');
+      preRow.appendChild(pre.el);
+      triggerSec.body.appendChild(preRow);
       if (s.mode === 'loop' && s.triggerEnableMask) {
         // In a loop the percentage is the trigger's horizontal position, not only how
         // much history is kept. The analog note describes the local roll; the digital
@@ -1030,10 +1041,8 @@ export class CapturePanel {
         const analogConfigured = s.triggerSource === 'analog' &&
           analogBanks.some((start) => s.analogTriggers?.[start] !== undefined);
         const analog = v.triggerAnalogRolling || analogConfigured;
-        const loopNote = div('panel-note');
-        loopNote.textContent = t(analog
-          ? 'capturePanel.loopTriggerNote' : 'capturePanel.loopTriggerNoteDigital');
-        triggerSec.body.appendChild(loopNote);
+        preRow.appendChild(helpTip(t(analog
+          ? 'capturePanel.loopTriggerNote' : 'capturePanel.loopTriggerNoteDigital')));
       }
 
       // The one mistake this section invites: enabling the trigger and never picking a
@@ -1179,7 +1188,8 @@ export class CapturePanel {
         const mark = document.createElement('span');
         mark.className = 'cursor-dist-mark';
         mark.setAttribute('aria-hidden', 'true');
-        mark.textContent = '−';
+        // Start -> end: the reading is end minus start, so the arrow says which way it runs.
+        mark.textContent = '→';
         const b = distanceSideControl(row, 'b', v.cursors,
           (cursorId) => this.cb.onPickCursorDistance(row.id, 'b', cursorId));
         const delta = document.createElement('span');
@@ -1295,17 +1305,25 @@ export class CapturePanel {
     source.disabled = v.running;
     source.addEventListener('change', () =>
       this.cb.onSettings({ ...s, testMode: Number(source.value) as 0 | 1 | 2 }));
-    body.appendChild(source.el);
     // What the test modes are for (and are not) before the user selects one.
-    const testModeHelp = div('panel-note');
-    testModeHelp.textContent = t('capturePanel.testModeHelp');
-    body.appendChild(testModeHelp);
+    const sourceRow = div('help-row');
+    sourceRow.append(source.el, helpTip(t('capturePanel.testModeHelp')));
+    body.appendChild(sourceRow);
     if (s.testMode !== 0) {
       const analogNote = div('panel-note');
       analogNote.textContent = t('capturePanel.testModeAnalog');
       body.appendChild(analogNote);
     }
 
+    // The raw register console can write device registers, so it is a developer tool:
+    // hidden unless Settings > Developer tools is on (persisted, off by default).
+    if (v.developerTools === true) this.renderUsbConsole(body, v);
+    advanced.appendChild(body);
+    capture.appendChild(advanced);
+  }
+
+  /** The raw USB register console (developer tools only). */
+  private renderUsbConsole(body: HTMLElement, v: CapturePanelView): void {
     const consoleLabel = document.createElement('label');
     consoleLabel.className = 'advanced-console-label';
     consoleLabel.textContent = t('capturePanel.usbConsole');
@@ -1358,10 +1376,36 @@ export class CapturePanel {
     body.append(consoleLabel, output, commandRow);
     const help = div('panel-note');
     help.textContent = t('capturePanel.usbHelp');
-    body.appendChild(help);
-    advanced.appendChild(body);
-    capture.appendChild(advanced);
+    const warning = div('panel-note error');
+    warning.textContent = t('capturePanel.usbWarning');
+    body.append(help, warning);
   }
+}
+
+/**
+ * What one analog group's button does, and which physical input it reads. Derived from
+ * the bank geometry and the ADC constants (`channelBanks.ts`), never from a model name:
+ * the group's eight D inputs carry the ADC module's output codes, so the signal itself
+ * goes to the module's input, not to those pins.
+ */
+export function analogInputHint(start: number, total: number): string {
+  return t('capturePanel.analogEnable', {
+    name: `A${start / CHANNEL_BANK_SIZE}`,
+    range: channelBankRange(start, total),
+    span: `±${ADC_FULL_SCALE_V / 2} V`,
+    bits: ADC_RESOLUTION_BITS,
+  });
+}
+
+/** A "?" button whose tooltip (hover, focus or tap) carries a longer explanation. */
+function helpTip(text: string): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'help-tip';
+  b.textContent = '?';
+  b.title = text;
+  b.setAttribute('aria-label', `${t('capturePanel.moreInfo')}: ${text}`);
+  return b;
 }
 
 function analogButton(

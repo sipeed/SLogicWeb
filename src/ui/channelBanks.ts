@@ -21,6 +21,8 @@ export const ADC_CLOCK_HZ = 800e6;
 export const ADC_MIN_SAMPLERATE_HZ = 100e6;
 export const ADC_OFFSET_V = -15;
 export const ADC_FULL_SCALE_V = 30;
+/** Bits per converter code: the group's eight inputs, one bit each. */
+export const ADC_RESOLUTION_BITS = CHANNEL_BANK_SIZE;
 
 /** The converter code a voltage selects, clamped to the module's 0..255 range. */
 export function analogCodeFromVolts(volts: number): number {

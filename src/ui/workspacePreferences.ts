@@ -64,6 +64,10 @@ export interface PersistedSidebar {
 export interface WorkspaceSnapshotV1 {
   version: typeof WORKSPACE_SCHEMA_VERSION;
   detailedLabels: boolean;
+  /** "Wheel zooms without Ctrl"; absent means off (the HSync/DSView default). */
+  wheelZooms?: boolean;
+  /** Developer tools (raw USB register console); absent means off. */
+  developerTools?: boolean;
   channels?: PersistedChannel[];
   order?: number[];
   capture?: PersistedCaptureSettings;
@@ -415,6 +419,8 @@ export function parseWorkspaceSnapshot(
   return {
     version: WORKSPACE_SCHEMA_VERSION,
     detailedLabels: typeof parsed.detailedLabels === 'boolean' ? parsed.detailedLabels : true,
+    ...(parsed.wheelZooms === true ? { wheelZooms: true } : {}),
+    ...(parsed.developerTools === true ? { developerTools: true } : {}),
     channels,
     order: restoreOrder(parsed.order, channels.length),
     capture: restoreCapture(parsed.capture, channels.length),
@@ -449,6 +455,8 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
     version: WORKSPACE_SCHEMA_VERSION,
     detailedLabels: snapshot.detailedLabels,
   };
+  if (snapshot.wheelZooms === true) serialized.wheelZooms = true;
+  if (snapshot.developerTools === true) serialized.developerTools = true;
   if (snapshot.channels) {
     serialized.channels = snapshot.channels.map(({ name, color, enabled }) => ({ name, color, enabled }));
   }

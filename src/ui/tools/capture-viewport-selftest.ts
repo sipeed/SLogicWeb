@@ -170,7 +170,10 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
   const fitBody = between(app, 'private fitViewport()', 'private centerOverview');
   check('each explicit viewport action is recorded as user intent',
     app.includes('private noteViewportIntent(): void') &&
-    intentCalls === 5 && explicitCalls === 3 && fitCalls === 1 && gestures &&
+    // wheel, pinch, drag, axis drag, cursor focus, and the +/- and arrow-key steps.
+    intentCalls === 7 && explicitCalls === 3 && fitCalls === 1 && gestures &&
+    between(app, 'private keyZoom(', 'private keyPan(').includes('this.noteViewportIntent();') &&
+    between(app, 'private keyPan(', 'private beginViewportGesture(').includes('this.noteViewportIntent();') &&
     overviewIntent &&
     fitSites[0]!.includes('this.fitLockedViewport()') &&
     fitSites[0]!.includes('this.stack.zoomToFit();') &&
@@ -200,19 +203,29 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
   const plotWheel = between(app, "plot.addEventListener('wheel'", "this.el.axis.addEventListener('wheel'");
   const axisWheel = between(app, "this.el.axis.addEventListener('wheel'", '// One pointer');
   const stripWheel = between(overview, 'private wheelEvent(event: WheelEvent)', '\n  }\n}');
+  const navNative = navigate.indexOf("if (action === 'native') return;");
   const navPrevent = navigate.indexOf('e.preventDefault();');
+  const navBlock = navigate.indexOf("if (action === 'block') return;");
   const navStore = navigate.indexOf('if (this.store.length === 0) return;');
-  const plotPrevent = plotWheel.indexOf('e.preventDefault();');
-  const plotStore = plotWheel.indexOf('if (this.store.length === 0) return;');
-  check('unmodified wheel scrolls channels; Ctrl zooms time; Shift pans horizontally',
-    navPrevent >= 0 && navStore > navPrevent && plotPrevent >= 0 && plotStore > plotPrevent &&
-    navigate.includes('if (!e.ctrlKey && !e.shiftKey) return;') &&
+  const stripNative = stripWheel.indexOf("if (action === 'native') return;");
+  const stripPrevent = stripWheel.indexOf('event.preventDefault();');
+  // The decision itself is wheelAction (wheel-gesture-selftest pins its table); here the
+  // three handlers must all ask it, let `native` through untouched, and swallow
+  // everything else - including Ctrl+wheel before any capture exists.
+  check('plot, axis and overview wheels all route through wheelAction before touching the view',
+    navNative >= 0 && navPrevent > navNative && navBlock > navPrevent && navStore > navBlock &&
+    navigate.includes('const action = this.wheelActionFor(e);') &&
+    navigate.includes('this.scrollRowsBy(e);') &&
     navigate.includes('this.stack.zoomAt(') && navigate.includes('this.stack.panPixels(') &&
     navigate.includes("wheelSpanFactor(e.deltaY, { isPhysicalWheel: physical, shift: false })") &&
-    plotWheel.includes('if (!e.ctrlKey && !e.shiftKey) return;') &&
+    !navigate.includes('if (!e.ctrlKey && !e.shiftKey) return;') &&
     plotWheel.includes('wheelNavigate(e, left)') &&
     axisWheel.includes('wheelNavigate(e, left)') &&
-    stripWheel.includes('if (!event.ctrlKey && !event.shiftKey) return;') &&
+    app.includes('wheelAction: (event) => this.wheelActionFor(event),') &&
+    app.includes('onScrollRows: (event) => this.scrollRowsBy(event),') &&
+    stripNative >= 0 && stripPrevent > stripNative &&
+    stripWheel.includes('this.cb.wheelAction?.(event)') &&
+    stripWheel.includes('this.cb.onScrollRows?.(event)') &&
     stripWheel.includes('this.cb.onZoom(') && stripWheel.includes('this.cb.onPan(') &&
     !app.includes('wheelIntent') && !overview.includes('WheelIntent'),
     `navigate=${navigate.length}, plot=${plotWheel.length}, axis=${axisWheel.length}, strip=${stripWheel.length}`);

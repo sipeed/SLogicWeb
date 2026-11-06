@@ -177,7 +177,8 @@ check('bank start uses the absolute channel index',
     panel.indexOf('bank.appendChild(grid);') < panel.indexOf('bank.appendChild(analogButton(');
   const analogCell = panel.includes("const cell = div('analog-cell');") &&
     panel.includes("cell.textContent = t('capturePanel.analogCell', { name });") &&
-    panel.includes("cell.title = t('capturePanel.analogEnable', { range, name });");
+    panel.includes('cell.title = analogInputHint(start, v.channels.length);') &&
+    panel.includes("return t('capturePanel.analogEnable', {");
   const button = panel.includes("b.textContent = t('capturePanel.analog');") &&
     panel.includes("b.disabled = !enabled;") &&
     panel.includes("b.setAttribute('aria-pressed', String(active));") &&

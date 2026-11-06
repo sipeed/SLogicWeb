@@ -10,20 +10,22 @@
  * The mapping is evidence-based: it is derived from the real handlers, not from what a
  * mouse could theoretically do.
  *
- *   - #plot       wheel scrolls the row stack (browser default); Ctrl+wheel zooms time;
- *                 Shift+wheel pans time; left drag pans; left double-click adds a cursor.
- *   - #axis       wheel scrolls the row stack; Ctrl+wheel zooms time; Shift+wheel pans
- *                 time; left drag pans.
- *   - #overview   wheel scrolls the row stack; Ctrl+wheel zooms the timeline; Shift+wheel
- *                 pans it; left click or drag centers the viewport.
+ *   - #plot       wheel per `wheelAction` (see below); Shift+wheel pans time; left drag
+ *                 pans; left double-click adds a cursor.
+ *   - #axis       wheel per `wheelAction`; Shift+wheel pans time; left drag pans.
+ *   - #overview   wheel per `wheelAction`; Shift+wheel pans the timeline; left click or
+ *                 drag centers the viewport.
  *   - #labels-col wheel scrolls the row stack; double-clicking a name renames it; the
  *                 trigger slot opens the trigger editor.
  *   - #side-panel wheel scrolls the panel.
  *   - #toolbar    a click activates the command.
  *
- * The axis and overview strip require Ctrl for zoom and Shift for pan for the same reason
- * the plot does: an unmodified wheel keeps scrolling channels, which is the gesture users
- * expect over any part of the row stack.
+ * The wheel over the plot, axis and overview is decided by `wheelAction` (wheelGesture.ts),
+ * which the handlers call too, so the three wheel variants below are the only ones:
+ *
+ *   - rows overflow, "wheel zooms" off: wheel scrolls rows, Ctrl+wheel zooms;
+ *   - rows all fit,  "wheel zooms" off: wheel zooms (nothing to scroll);
+ *   - "wheel zooms" on:                 wheel zooms, Ctrl+wheel scrolls rows.
  *
  * Assumptions and unsupported combinations:
  *
@@ -37,6 +39,7 @@
  */
 
 import type { MessageKey } from './i18n.js';
+import { wheelAction } from './wheelGesture.js';
 
 export const INTERACTION_AREAS = [
   'none', 'toolbar', 'labels', 'plot', 'axis', 'overview', 'side-panel',
@@ -54,6 +57,10 @@ export interface InteractionContext {
   readonly hasCapture: boolean;
   /** Accepted for callers that want state-dependent hints later; currently unused. */
   readonly running?: boolean;
+  /** The "wheel zooms without Ctrl" preference; default off. */
+  readonly wheelZooms?: boolean;
+  /** Whether the row stack overflows vertically; default true (a plain wheel scrolls). */
+  readonly rowsOverflow?: boolean;
 }
 
 export interface HintSpec {
@@ -127,24 +134,9 @@ function hint(
 
 const NO_CAPTURE = hint('hints.noCapture', 'none');
 
-const PLOT_CAPTURE = Object.freeze([
-  hint('hints.plot.scroll', 'wheel'),
-  hint('hints.plot.zoom', 'wheel', 'Ctrl'),
-  hint('hints.plot.pan', 'wheel', 'Shift'),
-  hint('hints.plot.dragPan', 'left'),
-  hint('hints.plot.addCursor', 'left'),
-]);
-
 const PLOT_NO_CAPTURE = Object.freeze([
   NO_CAPTURE,
   hint('hints.plot.scroll', 'wheel'),
-]);
-
-const AXIS_CAPTURE = Object.freeze([
-  hint('hints.axis.scroll', 'wheel'),
-  hint('hints.axis.zoom', 'wheel', 'Ctrl'),
-  hint('hints.axis.pan', 'wheel', 'Shift'),
-  hint('hints.axis.dragPan', 'left'),
 ]);
 
 const AXIS_NO_CAPTURE = Object.freeze([
@@ -152,17 +144,60 @@ const AXIS_NO_CAPTURE = Object.freeze([
   hint('hints.axis.scroll', 'wheel'),
 ]);
 
-const OVERVIEW_CAPTURE = Object.freeze([
-  hint('hints.overview.scroll', 'wheel'),
-  hint('hints.overview.zoom', 'wheel', 'Ctrl'),
-  hint('hints.overview.pan', 'wheel', 'Shift'),
-  hint('hints.overview.center', 'left'),
-]);
-
 const OVERVIEW_NO_CAPTURE = Object.freeze([
   NO_CAPTURE,
   hint('hints.overview.scroll', 'wheel'),
 ]);
+
+type WheelArea = 'plot' | 'axis' | 'overview';
+type WheelVariant = 'scroll' | 'fit' | 'wheelZooms';
+
+const WHEEL_KEYS: Readonly<Record<WheelArea, { scroll: MessageKey; zoom: MessageKey; pan: MessageKey }>> = {
+  plot: { scroll: 'hints.plot.scroll', zoom: 'hints.plot.zoom', pan: 'hints.plot.pan' },
+  axis: { scroll: 'hints.axis.scroll', zoom: 'hints.axis.zoom', pan: 'hints.axis.pan' },
+  overview: { scroll: 'hints.overview.scroll', zoom: 'hints.overview.zoom', pan: 'hints.overview.pan' },
+};
+
+const POINTER_HINTS: Readonly<Record<WheelArea, readonly HintSpec[]>> = {
+  plot: [hint('hints.plot.dragPan', 'left'), hint('hints.plot.addCursor', 'left')],
+  axis: [hint('hints.axis.dragPan', 'left')],
+  overview: [hint('hints.overview.center', 'left')],
+};
+
+/** The wheel hints for one area and variant, read off `wheelAction` itself. */
+function wheelHints(area: WheelArea, variant: WheelVariant): readonly HintSpec[] {
+  const ctx = {
+    hasCapture: true, wheelZooms: variant === 'wheelZooms', rowsOverflow: variant !== 'fit',
+  };
+  const keys = WHEEL_KEYS[area];
+  const out: HintSpec[] = [];
+  const plain = wheelAction({ ctrlKey: false, shiftKey: false }, ctx);
+  const ctrl = wheelAction({ ctrlKey: true, shiftKey: false }, ctx);
+  if (plain === 'zoom') out.push(hint(keys.zoom, 'wheel'));
+  else out.push(hint(keys.scroll, 'wheel'));
+  // A Ctrl variant that repeats the plain wheel is not worth a second hint.
+  if (ctrl === 'scroll-rows') out.push(hint('hints.wheel.scrollRows', 'wheel', 'Ctrl'));
+  else if (ctrl === 'zoom' && plain !== 'zoom') out.push(hint(keys.zoom, 'wheel', 'Ctrl'));
+  if (wheelAction({ ctrlKey: false, shiftKey: true }, ctx) === 'pan') {
+    out.push(hint(keys.pan, 'wheel', 'Shift'));
+  }
+  return Object.freeze([...out, ...POINTER_HINTS[area]]);
+}
+
+const WHEEL_CAPTURE: Readonly<Record<WheelArea, Readonly<Record<WheelVariant, readonly HintSpec[]>>>> =
+  Object.freeze(Object.fromEntries((['plot', 'axis', 'overview'] as const).map((area) => [
+    area,
+    Object.freeze({
+      scroll: wheelHints(area, 'scroll'),
+      fit: wheelHints(area, 'fit'),
+      wheelZooms: wheelHints(area, 'wheelZooms'),
+    }),
+  ])) as Record<WheelArea, Record<WheelVariant, readonly HintSpec[]>>);
+
+function wheelVariant(context: InteractionContext): WheelVariant {
+  if (context.wheelZooms === true) return 'wheelZooms';
+  return context.rowsOverflow === false ? 'fit' : 'scroll';
+}
 
 const LABELS_CAPTURE = Object.freeze([
   hint('hints.labels.scroll', 'wheel'),
@@ -193,9 +228,12 @@ export function interactionHints(
   area: InteractionArea, context: InteractionContext,
 ): readonly HintSpec[] {
   switch (area) {
-    case 'plot': return context.hasCapture ? PLOT_CAPTURE : PLOT_NO_CAPTURE;
-    case 'axis': return context.hasCapture ? AXIS_CAPTURE : AXIS_NO_CAPTURE;
-    case 'overview': return context.hasCapture ? OVERVIEW_CAPTURE : OVERVIEW_NO_CAPTURE;
+    case 'plot':
+      return context.hasCapture ? WHEEL_CAPTURE.plot[wheelVariant(context)] : PLOT_NO_CAPTURE;
+    case 'axis':
+      return context.hasCapture ? WHEEL_CAPTURE.axis[wheelVariant(context)] : AXIS_NO_CAPTURE;
+    case 'overview':
+      return context.hasCapture ? WHEEL_CAPTURE.overview[wheelVariant(context)] : OVERVIEW_NO_CAPTURE;
     case 'labels': return context.hasCapture ? LABELS_CAPTURE : LABELS_NO_CAPTURE;
     case 'side-panel': return SIDE_PANEL_HINTS;
     case 'toolbar': return TOOLBAR_HINTS;

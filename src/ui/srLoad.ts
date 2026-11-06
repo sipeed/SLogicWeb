@@ -24,6 +24,7 @@ import type { SampleStore } from '../data/types.js';
 import { DiagnosticError } from '../diagnostics.js';
 import { MAX_SAMPLES, channelWidthForProbes } from '../types.js';
 import type { LoadedCapture } from './captureIO.js';
+import { formatRate } from './format.js';
 
 const EOCD_SIG = 0x06054b50;
 const CENTRAL_SIG = 0x02014b50;
@@ -357,6 +358,8 @@ export async function parseSr(buf: ArrayBuffer, source: string): Promise<LoadedC
     store,
     channelNames: names,
     duration: length / dev.samplerate,
-    sourceDescription: `${source} @ ${dev.samplerate / 1e6} MSa/s, ${dev.probes} probes`,
+    // Language-neutral notation (DESIGN §15 units: MS/s, CH), so the title never mixes
+    // English words into a translated sentence.
+    sourceDescription: `${source} @ ${formatRate(dev.samplerate)}, ${dev.probes} CH`,
   };
 }

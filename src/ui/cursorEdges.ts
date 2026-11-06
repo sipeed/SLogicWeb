@@ -35,10 +35,11 @@ function withSide(
 
 export function addEdgeRow(
   rows: readonly CursorEdgeRow[], id: number, channel: number | null,
+  pair: readonly [number, number] | null = null,
 ): readonly CursorEdgeRow[] {
   if (rows.length >= MAX_CURSOR_EDGE_ROWS) return rows;
   if (rows.some((row) => row.id === id)) return rows;
-  return [...rows, { id, a: null, b: null, channel }];
+  return [...rows, { id, a: pair === null ? null : pair[0], b: pair === null ? null : pair[1], channel }];
 }
 
 export function removeEdgeRow(

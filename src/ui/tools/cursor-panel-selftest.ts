@@ -813,7 +813,7 @@ const edgeMethodsSource = slice(app,
     tailAt > removeAt && tailAppendAt > tailAt && appendAt > tailAppendAt &&
     !distanceSection.includes('item.append(a.el, mark, b.el, remove, delta, a.popover, b.popover);') &&
     !distanceSection.includes('item.append(a.el, mark, b.el, delta, remove, a.popover, b.popover);') &&
-    distanceSection.includes("mark.textContent = '−';") &&
+    distanceSection.includes("mark.textContent = '→';") &&
     distanceSection.includes("mark.setAttribute('aria-hidden', 'true');"),
     `a=${aAt}, mark=${markAt}, b=${bAt}, delta=${deltaAt}, remove=${removeAt}, ` +
     `tail=${tailAt}, tailAppend=${tailAppendAt}, append=${appendAt}`);
@@ -1055,7 +1055,7 @@ const edgeMethodsSource = slice(app,
     seed.includes('if (this.cursors.length === 2) {') &&
     seed.includes('const seeded = seedDistanceRow(') &&
     seed.indexOf('const seeded = seedDistanceRow(') > seed.indexOf('if (this.cursors.length === 2) {') &&
-    seed.includes('this.distanceRows, this.nextDistanceRowId, this.cursors.map((cursor) => cursor.id),') &&
+    seed.includes('this.distanceRows, this.nextDistanceRowId, this.defaultCursorPair() ?? [],') &&
     seed.includes('if (seeded !== null) {') &&
     seed.includes('this.nextDistanceRowId++;') &&
     !seed.includes('this.distanceRows.push'),
@@ -1080,8 +1080,8 @@ const edgeMethodsSource = slice(app,
 
   const add = slice(app, 'private addDistanceRow(): void {',
     'private removeDistanceRow(rowId: number): void {');
-  check('the add control appends one empty row under a fresh id and re-renders',
-    add.includes('const rows = appendDistanceRow(this.distanceRows, this.nextDistanceRowId);') &&
+  check('the add control appends one row, pre-filled with the latest cursor pair, and re-renders',
+    add.includes('const rows = appendDistanceRow(this.distanceRows, this.nextDistanceRowId, this.defaultCursorPair());') &&
     add.includes('if (rows === this.distanceRows) return;') &&
     add.includes('this.nextDistanceRowId++;') && add.includes('this.renderPanels();'),
     `call=${add.includes('appendDistanceRow(this.distanceRows, this.nextDistanceRowId)')}`);
@@ -1204,7 +1204,7 @@ const edgeMethodsSource = slice(app,
 
   const english: Record<string, string> = {
     'capturePanel.cursorDistance': 'Cursor distance',
-    'capturePanel.cursorDistanceFormat': 'Δtime/Δsamples',
+    'capturePanel.cursorDistanceFormat': 'Δtime/Δsamples · 1/Δt',
     'capturePanel.cursorDistanceEmpty':
       'Place two cursors on the waveform to read the distance between them.',
     'capturePanel.cursorDistanceNoRows': 'Add a row to compare two cursors.',
@@ -1458,7 +1458,7 @@ const edgeMethodsSource = slice(app,
 
   check('a new edge row defaults to the first enabled available channel and respects the pure cap',
     edgeMethodsSource.includes(
-      'appendEdgeRow(this.edgeRows, this.nextEdgeRowId, this.edgeChannels()[0] ?? null)') &&
+      'this.edgeRows, this.nextEdgeRowId, this.edgeChannels()[0] ?? null, this.defaultCursorPair());') &&
     edgeMethodsSource.includes('return this.enabledChannels().map((channel) => channel.index);') &&
     edgeMethodsSource.includes('if (rows === this.edgeRows) return;') &&
     edgeMethodsSource.indexOf('this.nextEdgeRowId++;') >

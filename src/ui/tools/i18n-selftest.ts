@@ -438,11 +438,11 @@ function check(name: string, pass: boolean, detail: string): void {
   const cases: [CaptureLabel, string][] = [
     [{ kind: 'none' }, 'no capture'],
     [{ kind: 'capturing', channels: 8, rate: 100e6 }, 'capturing 8 ch @ 100 MS/s'],
-    [{ kind: 'loaded', source: 'uart.sr @ 16 MSa/s, 16 probes', ms: 12 },
-      'uart.sr @ 16 MSa/s, 16 probes · loaded in 12 ms'],
+    [{ kind: 'loaded', source: 'uart.sr @ 16 MS/s, 16 CH', ms: 12 },
+      'uart.sr @ 16 MS/s, 16 CH · loaded in 12 ms'],
     [{ kind: 'stoppedNoTrigger', samples: 12345 }, 'no trigger · 12,345 samples retained'],
     [{ kind: 'live', samples: 12345, rate: 100e6, seconds: 0.5 },
-      'live capture · 12,345 samples @ 100 MS/s · 500.0 ms'],
+      'device capture · 12,345 samples @ 100 MS/s · 500.0 ms'],
   ];
   const bad = cases.filter(([label, want]) => formatCaptureLabel(label) !== want);
   check('formatCaptureLabel renders all five variants byte-identical to before',
@@ -640,12 +640,12 @@ function check(name: string, pass: boolean, detail: string): void {
 {
   const dicts: [string, Messages][] = [['en', en], ['zh-CN', zhCN], ['ru', ru], ['fr', fr]];
   const bad = dicts.filter(([, dict]) => (
-    !dict['diagnostic.decode.tooLong'].includes('200 MSa/s') ||
-    !dict['diagnostic.decode.tooLongLoop'].includes('200 MSa/s')
+    !dict['diagnostic.decode.tooLong'].includes('200 MS/s') ||
+    !dict['diagnostic.decode.tooLongLoop'].includes('200 MS/s')
   )).map(([locale]) => locale);
   check('the decode-limit duration parenthetical keeps its rate notation in every locale',
     bad.length === 0,
-    bad.length === 0 ? `${dicts.length} locales carry 200 MSa/s` : bad.join(', '));
+    bad.length === 0 ? `${dicts.length} locales carry 200 MS/s` : bad.join(', '));
 }
 
 {

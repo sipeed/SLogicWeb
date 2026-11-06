@@ -19,6 +19,19 @@ export function cursorLabels(count: number): string[] {
   return labels;
 }
 
+export interface PlacedCursor {
+  readonly id: number;
+  readonly sample: number | null;
+}
+
+export function defaultCursorPair(cursors: readonly PlacedCursor[]): [number, number] | null {
+  const placed = cursors.filter((cursor) => cursor.sample !== null && Number.isFinite(cursor.sample));
+  if (placed.length < 2) return null;
+  const first = placed[placed.length - 2]!;
+  const second = placed[placed.length - 1]!;
+  return second.sample! < first.sample! ? [second.id, first.id] : [first.id, second.id];
+}
+
 export interface CursorGrabCandidate {
   id: number;
   cssX: number;

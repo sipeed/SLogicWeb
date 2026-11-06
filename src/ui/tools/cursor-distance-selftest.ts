@@ -58,6 +58,11 @@ check('the row cap is the DSView Max_Measure_Limits literal',
     added[0].a === null && added[0].b === null && empty.length === 0,
     `added=${sides(added)}, inputLength=${empty.length}`);
 
+  const filled = addDistanceRow(empty, 8, [3, 5]);
+  check('a row added with a default pair is filled with it, start first',
+    filled.length === 1 && filled[0].id === 8 && filled[0].a === 3 && filled[0].b === 5,
+    `filled=${sides(filled)}`);
+
   const base = makeRows([[1, 2, 3], [4, 5, 6]]);
   const full = addDistanceRow(base, 2);
   check('adding keeps the existing rows by reference and appends last',
@@ -276,8 +281,13 @@ check('the row cap is the DSView Max_Measure_Limits literal',
   const samples = new Map<number, number>([[1, 250000], [2, 0], [3, 1000000]]);
   const pair: CursorDistanceRow = { id: 1, a: 1, b: 2 };
   const reading = distanceCell(pair, samples, 1e-8);
-  check('control: a complete pair with known samples produces the signed cell',
-    reading === '+2.500 ms/250,000', `cell=${JSON.stringify(reading)}`);
+  // A row reads end minus start (B - A), so 1 -> 2 with 2 to the right is positive, and
+  // it carries the 1/|dt| frequency the period would have.
+  check('control: a complete pair reads B minus A with its 1/|dt| frequency',
+    reading === '-2.500 ms/-250,000 · 400 Hz' &&
+    distanceCell({ id: 1, a: 2, b: 1 }, samples, 1e-8) === '+2.500 ms/250,000 · 400 Hz' &&
+    distanceCell({ id: 1, a: 2, b: 2 }, samples, 1e-8) === '0 s/0',
+    `cell=${JSON.stringify(reading)}`);
 
   check('an unset side produces an empty cell, never a fabricated zero',
     distanceCell({ id: 1, a: null, b: 2 }, samples, 1e-8) === '' &&
@@ -308,10 +318,11 @@ check('the row cap is the DSView Max_Measure_Limits literal',
   const zeroIdSamples = new Map<number, number>([[0, 250000], [1, 0]]);
   const zeroIdCell = distanceCell({ id: 1, a: 0, b: 1 }, zeroIdSamples, 1e-8);
   check('cursor id 0 resolves through the sample map like any other id',
-    zeroIdCell === '+2.500 ms/250,000', `cell=${JSON.stringify(zeroIdCell)}`);
+    zeroIdCell === '-2.500 ms/-250,000 · 400 Hz', `cell=${JSON.stringify(zeroIdCell)}`);
 
   check('the cell matches the composer it delegates to',
-    distanceCell(pair, samples, 1e-8) === cursorDistance(250000, 0, 1e-8).cell,
+    distanceCell(pair, samples, 1e-8) ===
+      `${cursorDistance(0, 250000, 1e-8).cell} · ${cursorDistance(0, 250000, 1e-8).frequency}`,
     `cell=${JSON.stringify(distanceCell(pair, samples, 1e-8))}`);
 }
 
@@ -330,6 +341,12 @@ check('the row cap is the DSView Max_Measure_Limits literal',
     negative.time === '-2.500 ms' && negative.count === '-250,000' &&
     negative.cell === '-2.500 ms/-250,000',
     `samples=${negative.samples}, cell=${negative.cell}`);
+
+  check('the composer derives the frequency from |dt| in both directions',
+    positive.frequency === '400 Hz' && cursorDistance(0, 250000, period).frequency === '400 Hz' &&
+    cursorDistance(1234, 1234, period).frequency === '' &&
+    cursorDistance(100, 0, period).frequency === '1.00 MHz',
+    `positive=${positive.frequency}`);
 
   const zero = cursorDistance(1234, 1234, period);
   check('a zero delta reads 0 s/0 with no sign',
@@ -405,7 +422,7 @@ check('the row cap is the DSView Max_Measure_Limits literal',
   check('the model composes from the shared time and count formatters',
     imports.length === 2 &&
     source.includes("import { formatCursorSpan } from './cursorTime.js';") &&
-    source.includes("import { formatCount } from './format.js';") &&
+    source.includes("import { formatCount, formatFreq } from './format.js';") &&
     !source.includes('UNITS') && !source.includes('toLocaleString'),
     `imports=${imports.length}, ownLadder=${source.includes('UNITS')}, ` +
     `ownSeparator=${source.includes('toLocaleString')}`);

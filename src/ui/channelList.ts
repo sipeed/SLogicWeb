@@ -223,7 +223,7 @@ export class ChannelList {
         item.disabled = cell.trigger.disabled;
         const icon = document.createElement('span');
         icon.className = 'ch-trigger-item-icon';
-        icon.appendChild(triggerIcon(mode));
+        icon.appendChild(triggerIcon(mode, 'menu'));
         const label = document.createElement('span');
         label.className = 'ch-trigger-item-label';
         label.textContent = triggerModeName(mode);
@@ -332,7 +332,7 @@ export class ChannelList {
       item.setAttribute('aria-checked', String(kind === selected));
       const icon = document.createElement('span');
       icon.className = 'ch-trigger-item-icon';
-      icon.appendChild(triggerIcon(kind ?? 'dont-care'));
+      icon.appendChild(triggerIcon(kind ?? 'dont-care', 'menu'));
       const text = document.createElement('span');
       text.className = 'ch-trigger-item-label';
       text.textContent = label;
@@ -708,23 +708,35 @@ function triggerModeName(mode: TriggerMode): string {
           : mode === 'low' ? t('channels.triggerLow') : t('trigger.none');
 }
 
-function triggerIcon(mode: TriggerMode): SVGSVGElement {
+/**
+ * The trigger glyph. In a row's trigger slot an unset trigger is a faint dashed rising
+ * edge - recognisably "the trigger control" - rather than a bare dash, which read as
+ * collapse/delete (UX review L3). Inside the mode menu the "none" item keeps the flat
+ * dash, where its label explains it.
+ */
+function triggerIcon(mode: TriggerMode, place: 'slot' | 'menu' = 'slot'): SVGSVGElement {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 16');
   svg.setAttribute('aria-hidden', 'true');
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  const unsetSlot = mode === 'dont-care' && place === 'slot';
   const d = mode === 'falling' ? 'M1 4H8V12H23'
     : mode === 'rising' ? 'M1 12H8V4H23'
       : mode === 'edge' ? 'M1 4H6L18 12H23M1 12H6L18 4H23'
         : mode === 'high' ? 'M1 4H23'
           : mode === 'low' ? 'M1 12H23'
-            : 'M6 8H18';
+            : unsetSlot ? 'M2 12H9V4H22'
+              : 'M6 8H18';
   path.setAttribute('d', d);
   path.setAttribute('fill', 'none');
   path.setAttribute('stroke', 'currentColor');
   path.setAttribute('stroke-width', '2');
   path.setAttribute('stroke-linecap', 'round');
   path.setAttribute('stroke-linejoin', 'round');
+  if (unsetSlot) {
+    path.setAttribute('stroke-dasharray', '2 3');
+    svg.dataset['triggerIcon'] = 'unset';
+  }
   svg.appendChild(path);
   return svg;
 }

@@ -1,5 +1,5 @@
 import { formatCursorSpan } from './cursorTime.js';
-import { formatCount } from './format.js';
+import { formatCount, formatFreq } from './format.js';
 
 export type DistanceSide = 'a' | 'b';
 
@@ -17,6 +17,7 @@ export interface CursorDistance {
   readonly seconds: number;
   readonly time: string;
   readonly count: string;
+  readonly frequency: string;
   readonly cell: string;
 }
 
@@ -30,10 +31,11 @@ function withSide(
 
 export function addDistanceRow(
   rows: readonly CursorDistanceRow[], id: number,
+  pair: readonly [number, number] | null = null,
 ): readonly CursorDistanceRow[] {
   if (rows.length >= MAX_CURSOR_DISTANCE_ROWS) return rows;
   if (rows.some((row) => row.id === id)) return rows;
-  return [...rows, { id, a: null, b: null }];
+  return [...rows, { id, a: pair === null ? null : pair[0], b: pair === null ? null : pair[1] }];
 }
 
 export function removeDistanceRow(
@@ -95,12 +97,13 @@ export function cursorDistance(
 ): CursorDistance {
   const samples = aSample - bSample;
   if (!Number.isFinite(samples)) {
-    return { samples, seconds: Number.NaN, time: '-', count: '', cell: '' };
+    return { samples, seconds: Number.NaN, time: '-', count: '', frequency: '', cell: '' };
   }
   const seconds = samples * samplePeriod;
   const time = formatCursorSpan(seconds, samplePeriod);
   const count = signedCount(samples);
-  return { samples, seconds, time, count, cell: `${time}/${count}` };
+  const frequency = seconds === 0 ? '' : formatFreq(1 / Math.abs(seconds));
+  return { samples, seconds, time, count, frequency, cell: `${time}/${count}` };
 }
 
 export function distanceCell(
@@ -114,5 +117,6 @@ export function distanceCell(
   const bSample = samples.get(row.b);
   if (aSample === undefined || bSample === undefined) return '';
   if (!Number.isFinite(aSample) || !Number.isFinite(bSample)) return '';
-  return cursorDistance(aSample, bSample, samplePeriod).cell;
+  const distance = cursorDistance(bSample, aSample, samplePeriod);
+  return distance.frequency === '' ? distance.cell : `${distance.cell} · ${distance.frequency}`;
 }

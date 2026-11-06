@@ -184,12 +184,16 @@ function check(name: string, pass: boolean, detail: string): void {
   const wheelStart = strip.indexOf('private wheelEvent(event: WheelEvent): void {');
   const wheelBody = wheelStart >= 0 ? strip.slice(wheelStart, strip.indexOf('\n  }', wheelStart)) : '';
   const preventAt = wheelBody.indexOf('event.preventDefault();');
-  const stateAt = wheelBody.indexOf('const state = this.state;');
-  const wheel = strip.includes('if (!event.ctrlKey && !event.shiftKey) return;') &&
-    preventAt >= 0 && stateAt > preventAt &&
-    strip.includes('if (event.ctrlKey)') && strip.includes('this.cb.onZoom(') &&
+  const nativeAt = wheelBody.indexOf("if (action === 'native') return;");
+  const blockAt = wheelBody.indexOf("if (action === 'block') return;");
+  const dataAt = wheelBody.indexOf('if (!state || state.store.length <= 0) return;');
+  // Page zoom is stopped before the data check; the default (no app callback) is the
+  // overflowing-rows grammar: plain wheel native, Ctrl zooms, Shift pans.
+  const wheel = nativeAt >= 0 && preventAt > nativeAt && blockAt > preventAt && dataAt > blockAt &&
+    wheelBody.includes('wheelZooms: false, rowsOverflow: true') &&
+    wheelBody.includes("if (action === 'zoom')") && strip.includes('this.cb.onZoom(') &&
     strip.includes('this.cb.onPan(');
-  check('the strip carries a fixed trigger-relative time scale and the Ctrl/Shift wheel contract',
+  check('the strip carries a fixed trigger-relative time scale and the shared wheel contract',
     scale && wheel, `scale=${scale}, wheel=${wheel}`);
 }
 

@@ -716,8 +716,8 @@ check(
   const appendedRoots = [
     'rowRT.appendChild(rate.el)',
     'rowRT.appendChild(th.el)',
-    'triggerSec.body.appendChild(pre.el)',
-    'body.appendChild(source.el)',
+    'preRow.appendChild(pre.el)',
+    'sourceRow.append(source.el, helpTip(',
   ].filter((needle) => capture.includes(needle));
   check(
     'each migrated control appends its own .field.select-field root instead of labelled()',

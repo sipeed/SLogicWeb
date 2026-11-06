@@ -926,13 +926,16 @@ const shortcutsRowBody = shortcutsRowAt >= 0 ? settingsItemsBody.slice(shortcuts
 const detailedLabelsRowAt = settingsItemsBody.indexOf("label: t('settings.detailedLabels')");
 const shortcutsRowOpensDialog = shortcutsRowBody.includes("hint: '▸'") &&
   shortcutsRowBody.includes('this.channelList.closeDialog();') &&
-  shortcutsRowBody.includes('this.shortcutsDialog.open(this.el.settings);') &&
+  shortcutsRowBody.includes('this.shortcutsDialog.open(this.el.settings, this.wheelZooms);') &&
   shortcutsRowBody.indexOf('this.channelList.closeDialog();') <
-    shortcutsRowBody.indexOf('this.shortcutsDialog.open(this.el.settings);') &&
+    shortcutsRowBody.indexOf('this.shortcutsDialog.open(this.el.settings, this.wheelZooms);') &&
   !shortcutsRowBody.includes('checked:');
 const settingsRowsScoped = !settingsItemsBody.includes("t('settings.language')") &&
   !settingsItemsBody.includes('LOCALES.map') && !settingsItemsBody.includes('children:') &&
-  (settingsItemsBody.match(/onPick:/g)?.length ?? 0) === 2 &&
+  // Detailed labels, wheel zooms, developer tools, then the shortcuts reference.
+  (settingsItemsBody.match(/onPick:/g)?.length ?? 0) === 4 &&
+  settingsItemsBody.includes('checked: this.wheelZooms') &&
+  settingsItemsBody.includes('checked: this.developerTools') &&
   detailedLabelsRowAt >= 0 && shortcutsRowAt > detailedLabelsRowAt;
 const constructorBody = methodBody('constructor() {');
 const detailedLabelsReflection = app.includes("document.documentElement.removeAttribute('data-toolbar-labels')") &&

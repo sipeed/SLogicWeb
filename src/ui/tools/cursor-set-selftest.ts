@@ -1,5 +1,5 @@
 import {
-  CURSOR_CHIP_EDGE, CURSOR_CHIP_ROWS, cursorColor, cursorLabels, layoutCursorChips, nearestCursorGrab,
+  CURSOR_CHIP_EDGE, CURSOR_CHIP_ROWS, cursorColor, cursorLabels, defaultCursorPair, layoutCursorChips, nearestCursorGrab,
   type CursorChip, type PlacedCursorChip,
 } from '../cursorSet.js';
 
@@ -507,6 +507,21 @@ function placementFailures(
   }
   check('no placed box crosses the 2 px edge margin, at any anchor from -20 to width+20',
     escaped.length === 0, `failures=${escaped.slice(0, 6).join(';')} (${escaped.length})`);
+}
+
+{
+  // A new distance/edge row starts on the two most recently placed cursors, the earlier
+  // position first, so its B - A reading is positive by default.
+  const inOrder = defaultCursorPair([{ id: 1, sample: 10 }, { id: 2, sample: 50 }]);
+  const reversed = defaultCursorPair([{ id: 1, sample: 50 }, { id: 2, sample: 10 }]);
+  const latest = defaultCursorPair([{ id: 1, sample: 5 }, { id: 2, sample: 90 }, { id: 3, sample: 40 }]);
+  const unplaced = defaultCursorPair([{ id: 1, sample: 5 }, { id: 2, sample: null }]);
+  const tie = defaultCursorPair([{ id: 4, sample: 7 }, { id: 5, sample: 7 }]);
+  check('defaultCursorPair picks the latest two placed cursors, earlier first',
+    JSON.stringify(inOrder) === '[1,2]' && JSON.stringify(reversed) === '[2,1]' &&
+    JSON.stringify(latest) === '[3,2]' && unplaced === null && defaultCursorPair([]) === null &&
+    JSON.stringify(tie) === '[4,5]',
+    `inOrder=${JSON.stringify(inOrder)}, reversed=${JSON.stringify(reversed)}, latest=${JSON.stringify(latest)}`);
 }
 
 {

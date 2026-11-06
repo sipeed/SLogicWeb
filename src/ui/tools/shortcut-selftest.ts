@@ -1,5 +1,5 @@
-import { SHORTCUTS, shortcutIdFor, type ShortcutEntry, type ShortcutId } from '../shortcuts.js';
-import { shortcutActionText } from '../shortcutsDialog.js';
+import { SHORTCUTS, referenceGestures, shortcutIdFor, type ShortcutEntry, type ShortcutId } from '../shortcuts.js';
+import { gestureNotation, shortcutActionText } from '../shortcutsDialog.js';
 import { t, type MessageKey } from '../i18n.js';
 import { en } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
@@ -34,6 +34,13 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 const RETIRED_KEY_LITERALS = ["e.key === 'f'", "e.key === ' '", "e.key === 'Escape'"];
+
+function between(source: string, from: string, to: string): string {
+  const start = source.indexOf(from);
+  if (start < 0) return '';
+  const end = source.indexOf(to, start + from.length);
+  return end < 0 ? source.slice(start) : source.slice(start, end);
+}
 
 function keydownBody(source: string): string {
   const start = source.indexOf("window.addEventListener('keydown'");
@@ -74,9 +81,10 @@ const body = keydownBody(appSource);
 
 {
   const rows = SHORTCUTS.map((entry) => `${entry.id}|${entry.key}|${entry.notation}`).join(',');
-  check('the catalogue is exactly three rows in dispatch order with pinned keys and notation',
-    SHORTCUTS.length === 3 &&
-    rows === "capture.toggle| |Space,view.fit|f|F,cursors.clear|Escape|Esc",
+  check('the catalogue is exactly seven rows in dispatch order with pinned keys and notation',
+    SHORTCUTS.length === 7 &&
+    rows === "capture.toggle| |Space,view.fit|f|F,cursors.clear|Escape|Esc," +
+      'view.zoomIn|+|+ / =,view.zoomOut|-|-,view.panLeft|ArrowLeft|←,view.panRight|ArrowRight|→',
     `rows=${rows}`);
 }
 
@@ -84,7 +92,9 @@ const body = keydownBody(appSource);
   const ids = SHORTCUTS.map((entry) => entry.id);
   const keys = SHORTCUTS.map((entry) => entry.key);
   check('ids and KeyboardEvent.key values are both unique',
-    entriesAreUnique(SHORTCUTS) && SHORTCUTS.length === 3,
+    entriesAreUnique(SHORTCUTS) && SHORTCUTS.length === 7 &&
+    new Set(SHORTCUTS.flatMap((entry) => [entry.key, ...(entry.aliases ?? [])])).size ===
+      SHORTCUTS.reduce((n, entry) => n + 1 + (entry.aliases?.length ?? 0), 0),
     `ids=${ids.join(',')}, keys=${JSON.stringify(keys)}`);
 }
 
@@ -109,15 +119,22 @@ const body = keydownBody(appSource);
     [' ', shortcutIdFor(' ')],
     ['f', shortcutIdFor('f')],
     ['Escape', shortcutIdFor('Escape')],
+    ['+', shortcutIdFor('+')],
+    ['=', shortcutIdFor('=')],
+    ['-', shortcutIdFor('-')],
+    ['_', shortcutIdFor('_')],
+    ['ArrowLeft', shortcutIdFor('ArrowLeft')],
+    ['ArrowRight', shortcutIdFor('ArrowRight')],
   ];
-  check('shortcutIdFor maps the three live keys to their ids',
-    mapped[0][1] === 'capture.toggle' && mapped[1][1] === 'view.fit' &&
-    mapped[2][1] === 'cursors.clear',
+  const want = ['capture.toggle', 'view.fit', 'cursors.clear', 'view.zoomIn', 'view.zoomIn',
+    'view.zoomOut', 'view.zoomOut', 'view.panLeft', 'view.panRight'];
+  check('shortcutIdFor maps every live key and alias to its id',
+    mapped.every(([, id], index) => id === want[index]),
     `mapped=${mapped.map(([key, id]) => `${JSON.stringify(key)}:${String(id)}`).join(',')}`);
 }
 
 {
-  const misses = ['', 'F', 'Enter', 'Return', 'f '];
+  const misses = ['', 'F', 'Enter', 'Return', 'f ', 'ArrowUp', 'ArrowDown', 'Add'];
   const answers = misses.map((key) => shortcutIdFor(key));
   check('shortcutIdFor answers null for unmatched keys, including Shift+f and a trailing space',
     answers.every((answer) => answer === null),
@@ -194,13 +211,53 @@ const body = keydownBody(appSource);
   const rows = SHORTCUTS.map((entry) => `${entry.id}|${entry.labels.join(',')}`).join(';');
   check('every row names its command through catalog keys, in dispatch order',
     rows === 'capture.toggle|toolbar.start,toolbar.stop;view.fit|toolbar.fit;' +
-      'cursors.clear|shortcuts.clearCursors',
+      'cursors.clear|shortcuts.clearCursors;view.zoomIn|shortcuts.zoomIn;' +
+      'view.zoomOut|shortcuts.zoomOut;view.panLeft|shortcuts.panLeft;view.panRight|shortcuts.panRight',
     `rows=${rows}`);
 }
 
+{
+  // The mouse half of the reference follows the "wheel zooms" setting the same way the
+  // wheel handlers do, and every row names catalog keys present in all four locales.
+  const describe = (zooms: boolean): string => referenceGestures(zooms)
+    .map((entry) => `${entry.modifiers.join('+')}${entry.modifiers.length > 0 ? '+' : ''}${entry.input}=` +
+      entry.labels.join(','))
+    .join(';');
+  const off = describe(false);
+  const on = describe(true);
+  const keys = [false, true].flatMap((zooms) => referenceGestures(zooms)
+    .flatMap((entry) => [entry.input, ...entry.labels]));
+  const missing = keys.filter((key) => [en, zhCN, ru, fr].some((dict) => !dict[key]));
+  check('the mouse reference lists the wheel, Shift+wheel, Shift+arrows, drag, double-click and pinch',
+    off.startsWith('shortcuts.input.wheel=shortcuts.scrollRowsOrZoom;Ctrl+shortcuts.input.wheel=shortcuts.zoomTime;') &&
+    on.startsWith('shortcuts.input.wheel=shortcuts.zoomTime;Ctrl+shortcuts.input.wheel=shortcuts.scrollRows;') &&
+    off.endsWith('Shift+shortcuts.input.wheel=shortcuts.panTime;Shift+shortcuts.input.arrows=shortcuts.panPage;' +
+      'shortcuts.input.drag=shortcuts.panTime;shortcuts.input.doubleClick=shortcuts.addCursor;' +
+      'shortcuts.input.pinch=shortcuts.zoomTime') &&
+    gestureNotation(referenceGestures(false)[1]!) === 'Ctrl + Wheel' && missing.length === 0,
+    `off=${off}; on=${on}; missing=${missing.join(',')}`);
+}
+
+{
+  // The new view keys share the Space/F/Esc guard, leave Ctrl/Cmd/Alt chords to the
+  // browser (Ctrl+= / Ctrl+- are page zoom), and step from the view centre.
+  const branch = between(appSource, "} else if (shortcut !== null && !e.ctrlKey && !e.metaKey && !e.altKey) {", '\n      }');
+  check('the zoom and pan keys skip modifier chords and dispatch to keyZoom/keyPan',
+    branch.includes('e.preventDefault();') &&
+    branch.includes("if (shortcut === 'view.zoomIn') this.keyZoom(1);") &&
+    branch.includes("else if (shortcut === 'view.zoomOut') this.keyZoom(-1);") &&
+    branch.includes("else if (shortcut === 'view.panLeft') this.keyPan(-1, e.shiftKey);") &&
+    branch.includes('else this.keyPan(1, e.shiftKey);') &&
+    appSource.includes('this.stack.zoomAt(this.stack.widthDevicePx / 2, direction > 0 ? Math.SQRT1_2 : Math.SQRT2);') &&
+    appSource.includes('this.stack.panPixels(direction * this.stack.widthDevicePx * (big ? 0.5 : 0.1));'),
+    `branch=${branch.length}`);
+}
+
 const SHORTCUT_KEY_VALUES: ReadonlyArray<readonly [MessageKey, readonly [string, string, string, string]]> = [
-  ['settings.shortcuts', ['Keyboard shortcuts', '键盘快捷键', 'Горячие клавиши', 'Raccourcis clavier']],
-  ['shortcuts.title', ['Keyboard shortcuts', '键盘快捷键', 'Горячие клавиши', 'Raccourcis clavier']],
+  ['settings.shortcuts', ['Shortcuts and gestures', '快捷键与鼠标操作', 'Клавиши и жесты', 'Raccourcis et gestes']],
+  ['shortcuts.title', ['Shortcuts and gestures', '快捷键与鼠标操作', 'Клавиши и жесты', 'Raccourcis et gestes']],
+  ['settings.wheelZooms', ['Wheel zooms (no Ctrl needed)', '滚轮直接缩放', 'Колесо масштабирует (без Ctrl)',
+    'La molette zoome (sans Ctrl)']],
   ['shortcuts.close', ['Close', '关闭', 'Закрыть', 'Fermer']],
   ['shortcuts.clearCursors', ['Clear cursors', '清除光标', 'Сбросить курсоры', 'Effacer les curseurs']],
 ];
@@ -231,7 +288,8 @@ const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = 
 {
   const texts = SHORTCUTS.map((entry) => shortcutActionText(entry));
   check('the dialog action text joins the labeled catalog keys with the two-label separator',
-    texts.join(' | ') === 'Capture / Stop | Fit | Clear cursors' &&
+    texts.join(' | ') === 'Capture / Stop | Fit | Clear cursors | Zoom in | Zoom out | ' +
+      'Pan left (earlier) | Pan right (later)' &&
     SHORTCUTS[0]!.labels.length === 2 && t('toolbar.start') === 'Capture',
     `texts=${texts.join(' | ')}`);
 }
@@ -338,9 +396,9 @@ function dialogConstructions(source: string): number {
   const rowAt = items.indexOf("t('settings.shortcuts')");
   const row = rowAt >= 0 ? items.slice(rowAt) : '';
   const closeAt = row.indexOf('this.channelList.closeDialog();');
-  const openAt = row.indexOf('this.shortcutsDialog.open(this.el.settings);');
-  const displayToggle = displayAt >= 0 && items.includes('checked: this.detailedLabels');
+  const openAt = row.indexOf('this.shortcutsDialog.open(this.el.settings, this.wheelZooms);');
   const shortcutsRow = row.includes("hint: '▸'") && closeAt >= 0 && openAt >= 0 && closeAt < openAt;
+  const displayToggle = displayAt >= 0 && items.includes('checked: this.detailedLabels');
   check('the settings menu keeps the display toggle and adds the shortcuts row that opens the dialog',
     displayToggle && shortcutsRow && rowAt > displayAt,
     `displayToggle=${displayToggle}, shortcutsRow=${shortcutsRow}, order=${displayAt}:${rowAt}`);
@@ -362,7 +420,7 @@ function dialogConstructions(source: string): number {
 
 {
   const body = methodBody(appSource, 'private retranslate(): void {');
-  const guard = 'if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings();';
+  const guard = 'if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings(this.wheelZooms);';
   const renderBody = methodBody(appSource, 'private renderPanels(');
   check('retranslate refreshes the reference strings only while the dialog is open',
     body.includes(guard) && !body.includes('this.shortcutsDialog.open(') &&

@@ -21,6 +21,7 @@
 
 import { GAP_BIT, type SampleStore } from '../data/index.js';
 import { wheelSpanFactor } from '../render/index.js';
+import { wheelAction, type WheelAction } from './wheelGesture.js';
 import { canvasLabelMeasure, computeTicks, type TickLabelMetrics } from './timeAxis.js';
 
 const OVERVIEW_TICK_FONT = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
@@ -65,6 +66,13 @@ export interface OverviewCallbacks {
   onPan(samples: number): void;
   /** Multiply the visible span by `factor`, keeping `anchor` at its place. */
   onZoom(anchor: number, factor: number): void;
+  /**
+   * The shared wheel decision (wheelGesture.ts). Omitted: the default grammar with rows
+   * overflowing - plain wheel scrolls, Ctrl zooms, Shift pans.
+   */
+  wheelAction?(event: WheelEvent): WheelAction;
+  /** Scroll the channel stack by this wheel event (Ctrl+wheel with "wheel zooms" on). */
+  onScrollRows?(event: WheelEvent): void;
 }
 
 export interface OverviewViewportBox {
@@ -420,14 +428,23 @@ export class OverviewStrip {
   }
 
   private wheelEvent(event: WheelEvent): void {
-    // Unmodified: let the page scroll the channel stack. Ctrl zooms time, Shift pans it.
-    // Stop the browser's page zoom before checking for data: with no capture loaded the
-    // strip is still under the pointer, and letting Ctrl+wheel through zooms the page.
-    if (!event.ctrlKey && !event.shiftKey) return;
-    event.preventDefault();
+    // The plot's grammar: by default an unmodified wheel lets the page scroll the channel
+    // stack, Ctrl zooms time and Shift pans it. Stop the browser's page zoom before
+    // checking for data: with no capture loaded the strip is still under the pointer, and
+    // letting Ctrl+wheel through zooms the page.
     const state = this.state;
+    const action = this.cb.wheelAction?.(event) ?? wheelAction(event, {
+      wheelZooms: false, rowsOverflow: true, hasCapture: !!state && state.store.length > 0,
+    });
+    if (action === 'native') return;
+    event.preventDefault();
+    if (action === 'block') return;
+    if (action === 'scroll-rows') {
+      this.cb.onScrollRows?.(event);
+      return;
+    }
     if (!state || state.store.length <= 0) return;
-    if (event.ctrlKey) {
+    if (action === 'zoom') {
       if (event.deltaY === 0) return;
       const physical = event.deltaX === 0 && Math.abs(event.deltaY) >= 100 &&
         Number.isInteger(event.deltaY);
