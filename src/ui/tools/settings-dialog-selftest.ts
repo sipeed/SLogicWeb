@@ -3,6 +3,11 @@ import {
   SETTINGS_DIALOG_ID,
   SETTINGS_DIALOG_WIDTH,
   SETTINGS_NAV_WIDTH,
+  SETTINGS_PANE_GAP,
+  SETTINGS_ROW_GAP,
+  SETTINGS_ROW_HEIGHT,
+  SETTINGS_ROW_LABEL_MIN,
+  SETTINGS_ROW_PADDING_Y,
   SETTINGS_SECTIONS,
   settingsSectionAfter,
 } from '../settingsDialog.js';
@@ -58,9 +63,8 @@ const DIALOG_NEEDLES: readonly string[] = [
   '[data-settings-key]',
   "focus({ preventScroll: true })",
   'this.body.replaceChildren(',
-  "'settings-item'",
-  "t('settings.detailedLabels')",
-  "t('settings.shortcuts')",
+  "this.rowLabel('settings.detailedLabels', input.id)",
+  "this.rowLabel('settings.shortcuts')",
   "this.closeButton.setAttribute('aria-label', t('settings.close'));",
   'this.host.setDetailedLabels(',
   'this.host.openShortcuts(row)',
@@ -70,6 +74,12 @@ const DIALOG_FORBIDDEN: readonly string[] = [
   'document.addEventListener',
   'window.addEventListener',
   'innerHTML',
+  'settings-item',
+  'settings-check',
+  'settings-hint',
+  'localStorage',
+  'persistWorkspace',
+  'reflectDetailedLabels',
 ];
 
 function missingDialogNeedles(source: string): string[] {
@@ -121,6 +131,16 @@ function focusRestoreByKey(source: string): boolean {
 {
   const mutated = `${dialogSource}\ndocument.addEventListener('keydown', () => {});\n`;
   check('control: a document-level listener is detected by the same negative predicate',
+    mutated !== dialogSource && forbiddenDialogTokens(mutated).length === 1 &&
+    forbiddenDialogTokens(dialogSource).length === 0,
+    `mutated=${forbiddenDialogTokens(mutated).length}, real=${forbiddenDialogTokens(dialogSource).length}`);
+}
+
+{
+  const mutated = dialogSource.replace(
+    "    row.className = 'settings-row';\n",
+    "    row.className = 'settings-row settings-item';\n");
+  check('control: reusing the retired menu-row class is detected by the same forbidden-token predicate',
     mutated !== dialogSource && forbiddenDialogTokens(mutated).length === 1 &&
     forbiddenDialogTokens(dialogSource).length === 0,
     `mutated=${forbiddenDialogTokens(mutated).length}, real=${forbiddenDialogTokens(dialogSource).length}`);
@@ -338,6 +358,161 @@ const NAV_NEEDLES: readonly string[] = [
     `mutated=${focusRestoreByKey(mutated)}, real=${focusRestoreByKey(dialogSource)}`);
 }
 
+const TOGGLE_NEEDLES: readonly string[] = [
+  "row.className = 'settings-row';",
+  "input.id = 'settings-detailed-labels';",
+  "const label = this.rowLabel('settings.detailedLabels', input.id);",
+  "label.id = 'settings-row-detailed-labels';",
+  "toggle.className = 'settings-toggle';",
+  "input.type = 'checkbox';",
+  "input.dataset.settingsKey = 'detailedLabels';",
+  "input.setAttribute('aria-labelledby', label.id);",
+  'input.checked = this.host.detailedLabels();',
+  "input.addEventListener('change', () => this.host.setDetailedLabels(input.checked));",
+  'toggle.appendChild(input);',
+];
+
+const ACTION_ROW_NEEDLES: readonly string[] = [
+  "row.className = 'settings-row settings-row--action';",
+  "row.dataset.settingsKey = 'shortcuts';",
+  "hint.className = 'settings-row-hint';",
+  "hint.setAttribute('aria-hidden', 'true');",
+  "hint.textContent = '▸';",
+  "row.append(this.rowLabel('settings.shortcuts'), hint);",
+  'this.host.openShortcuts(row)',
+];
+
+function paneComposition(source: string): boolean {
+  const body = methodBody(source, 'private paneContent(section: SettingsSectionId): HTMLElement[] {');
+  return body.includes("return section === 'appearance' ? [this.labelsRow(), this.shortcutsRow()] : [];") &&
+    !body.includes('settings-item') && !body.includes('new SettingsMenu');
+}
+
+{
+  check('the appearance pane is exactly the display toggle row and the shortcuts row',
+    paneComposition(dialogSource),
+    `ok=${paneComposition(dialogSource)}, ` +
+    `body=${JSON.stringify(methodBody(dialogSource, 'private paneContent(section: SettingsSectionId): HTMLElement[] {').replace(/\s+/g, ' '))}`);
+}
+
+{
+  const mutated = dialogSource.replace(
+    "return section === 'appearance' ? [this.labelsRow(), this.shortcutsRow()] : [];",
+    "return section === 'appearance' ? [this.shortcutsRow()] : [];");
+  check('control: dropping a row from the appearance pane is detected by the same composition predicate',
+    mutated !== dialogSource && !paneComposition(mutated) && paneComposition(dialogSource),
+    `mutated=${paneComposition(mutated)}, real=${paneComposition(dialogSource)}`);
+}
+
+{
+  const missing = TOGGLE_NEEDLES.filter((needle) => !dialogSource.includes(needle));
+  check('the display toggle is a row-level checkbox labelled by its row label and writing only through the host',
+    missing.length === 0,
+    `missing=${JSON.stringify(missing)}`);
+}
+
+function rowLabelBody(source: string): string {
+  return methodBody(source, 'private rowLabel(key: MessageKey, controlId?: string): HTMLElement {');
+}
+
+function rowLabelBindsControl(source: string): boolean {
+  const body = rowLabelBody(source);
+  const labelAt = body.indexOf("const label = document.createElement('label');");
+  const forAt = body.indexOf('label.htmlFor = controlId;');
+  const rowBody = methodBody(source, 'private labelsRow(): HTMLDivElement {');
+  const idAt = rowBody.indexOf("input.id = 'settings-detailed-labels';");
+  const callAt = rowBody.indexOf("const label = this.rowLabel('settings.detailedLabels', input.id);");
+  return labelAt >= 0 && forAt > labelAt &&
+    body.includes("const span = document.createElement('span');") &&
+    !body.includes('instanceof HTMLLabelElement') &&
+    !body.includes('if (controlId !== undefined') &&
+    idAt >= 0 && callAt > idAt;
+}
+
+{
+  check('the row label is a real label bound to the checkbox, so the row text is part of the toggle target',
+    rowLabelBindsControl(dialogSource),
+    `body=${JSON.stringify(rowLabelBody(dialogSource).replace(/\s+/g, ' '))}`);
+}
+
+{
+  const spanLabel = dialogSource.replace(
+    "    const label = document.createElement('label');\n",
+    "    const label = document.createElement('span');\n");
+  const noFor = dialogSource.replace('    label.htmlFor = controlId;\n', '');
+  const guardedFor = dialogSource.replace(
+    '    label.htmlFor = controlId;\n',
+    '    if (controlId !== undefined) label.htmlFor = controlId;\n');
+  const unkeyed = dialogSource.replace(
+    "    const label = this.rowLabel('settings.detailedLabels', input.id);\n",
+    "    const label = this.rowLabel('settings.detailedLabels');\n");
+  const lateId = dialogSource.replace(
+    "    input.id = 'settings-detailed-labels';\n    input.dataset.settingsKey = 'detailedLabels';\n    const label = this.rowLabel('settings.detailedLabels', input.id);\n",
+    "    input.dataset.settingsKey = 'detailedLabels';\n    const label = this.rowLabel('settings.detailedLabels', input.id);\n    input.id = 'settings-detailed-labels';\n");
+  check('control: reverting the row label to a plain span, dropping the for binding, guarding it behind a conditional, not handing over the control id or assigning that id after the binding fails the same predicate',
+    spanLabel !== dialogSource && !rowLabelBindsControl(spanLabel) &&
+    noFor !== dialogSource && !rowLabelBindsControl(noFor) &&
+    guardedFor !== dialogSource && !rowLabelBindsControl(guardedFor) &&
+    unkeyed !== dialogSource && !rowLabelBindsControl(unkeyed) &&
+    lateId !== dialogSource && !rowLabelBindsControl(lateId) &&
+    rowLabelBindsControl(dialogSource),
+    `span=${rowLabelBindsControl(spanLabel)}, noFor=${rowLabelBindsControl(noFor)}, ` +
+    `guarded=${rowLabelBindsControl(guardedFor)}, unkeyed=${rowLabelBindsControl(unkeyed)}, ` +
+    `lateId=${rowLabelBindsControl(lateId)}, real=${rowLabelBindsControl(dialogSource)}`);
+}
+
+{
+  const noState = dialogSource.replace('    input.checked = this.host.detailedLabels();\n', '');
+  const noName = dialogSource.replace("    input.setAttribute('aria-labelledby', label.id);\n", '');
+  const noLabel = dialogSource.replace(
+    "    const label = this.rowLabel('settings.detailedLabels', input.id);\n",
+    "    const label = this.rowLabel('settings.detailedLabels');\n");
+  const noWrap = dialogSource.replace('    toggle.appendChild(input);\n', '    row.append(input);\n');
+  check('control: a cached toggle state, an unnamed checkbox, an unbound row label or an unlabelled row is detected by the same predicate',
+    noState !== dialogSource && !TOGGLE_NEEDLES.every((needle) => noState.includes(needle)) &&
+    noName !== dialogSource && !TOGGLE_NEEDLES.every((needle) => noName.includes(needle)) &&
+    noLabel !== dialogSource && !TOGGLE_NEEDLES.every((needle) => noLabel.includes(needle)) &&
+    noWrap !== dialogSource && !TOGGLE_NEEDLES.every((needle) => noWrap.includes(needle)) &&
+    TOGGLE_NEEDLES.every((needle) => dialogSource.includes(needle)),
+    `noState=${TOGGLE_NEEDLES.filter((n) => !noState.includes(n)).length}, ` +
+    `noName=${TOGGLE_NEEDLES.filter((n) => !noName.includes(n)).length}, ` +
+    `noLabel=${TOGGLE_NEEDLES.filter((n) => !noLabel.includes(n)).length}, ` +
+    `noWrap=${TOGGLE_NEEDLES.filter((n) => !noWrap.includes(n)).length}, ` +
+    `real=${TOGGLE_NEEDLES.filter((n) => !dialogSource.includes(n)).length}`);
+}
+
+{
+  const missing = ACTION_ROW_NEEDLES.filter((needle) => !dialogSource.includes(needle));
+  check('the shortcuts row is a row-level button that hands its own frame to the host bridge',
+    missing.length === 0,
+    `missing=${JSON.stringify(missing)}`);
+}
+
+{
+  const plainButton = dialogSource.replace(
+    "    row.className = 'settings-row settings-row--action';\n",
+    "    row.className = 'settings-row';\n");
+  const foreignInvoker = dialogSource.replace('this.host.openShortcuts(row)', 'this.host.openShortcuts(this.closeButton)');
+  const namedHint = dialogSource.replace("    hint.setAttribute('aria-hidden', 'true');\n", '');
+  check('control: a shortcuts row without the action variant, a foreign frame, or a hint inside the accessible name is detected by the same predicate',
+    plainButton !== dialogSource && !ACTION_ROW_NEEDLES.every((needle) => plainButton.includes(needle)) &&
+    foreignInvoker !== dialogSource && !ACTION_ROW_NEEDLES.every((needle) => foreignInvoker.includes(needle)) &&
+    namedHint !== dialogSource && !ACTION_ROW_NEEDLES.every((needle) => namedHint.includes(needle)) &&
+    ACTION_ROW_NEEDLES.every((needle) => dialogSource.includes(needle)),
+    `plain=${ACTION_ROW_NEEDLES.filter((n) => !plainButton.includes(n)).length}, ` +
+    `foreign=${ACTION_ROW_NEEDLES.filter((n) => !foreignInvoker.includes(n)).length}, ` +
+    `namedHint=${ACTION_ROW_NEEDLES.filter((n) => !namedHint.includes(n)).length}, ` +
+    `real=${ACTION_ROW_NEEDLES.filter((n) => !dialogSource.includes(n)).length}`);
+}
+
+{
+  const leftovers = ['settings-item', 'settings-check', 'settings-hint']
+    .filter((needle) => dialogSource.includes(needle));
+  check('the temporary menu-row markup is gone from the window',
+    leftovers.length === 0,
+    `leftovers=${JSON.stringify(leftovers)}`);
+}
+
 {
   const constructions = appSource.match(/new SettingsDialog\(/g)?.length ?? 0;
   check('App constructs exactly one settings dialog and keeps it in one field',
@@ -457,10 +632,7 @@ function shortcutsOpenOrder(body: string): boolean {
     `mutated=${shortcutsOpenOrder(mutated)}, real=${shortcutsOpenOrder(body)}`);
 }
 
-{
-  const start = appSource.indexOf('  private setDetailedLabels(on: boolean): void {');
-  const end = start >= 0 ? appSource.indexOf('\n  }', start) : -1;
-  const body = start >= 0 && end > start ? appSource.slice(start, end) : '';
+function toggleSequenceHolds(body: string): boolean {
   const order = [
     'const { start, end } = this.stack.view;',
     'const follow = this.stack.followLatest;',
@@ -470,23 +642,65 @@ function shortcutsOpenOrder(body: string): boolean {
     'this.persistWorkspace();',
     'this.relayout();',
   ].map((needle) => body.indexOf(needle));
-  const writingSites = appSource.match(/this\.detailedLabels = /g)?.length ?? 0;
-  check('the display toggle keeps the viewport-preserving flip, persist and relayout sequence in one place',
-    order.every((index) => index >= 0) &&
-    order.every((index, i) => i === 0 || index > order[i - 1]!) &&
-    writingSites === 2 &&
-    appSource.includes('private detailedLabels = true;'),
-    `order=${JSON.stringify(order)}, writes=${writingSites}, body=${body.length}`);
+  return order.every((index) => index >= 0) &&
+    order.every((index, i) => i === 0 || index > order[i - 1]!);
 }
 
 {
-  const start = appSource.indexOf('  private setDetailedLabels(on: boolean): void {');
-  const end = start >= 0 ? appSource.indexOf('\n  }', start) : -1;
-  const body = start >= 0 && end > start ? appSource.slice(start, end) : '';
+  const body = methodBody(appSource, 'private setDetailedLabels(on: boolean): void {');
+  const writingSites = appSource.match(/this\.detailedLabels = /g)?.length ?? 0;
+  check('the display toggle keeps the viewport-preserving flip, persist and relayout sequence in one place',
+    toggleSequenceHolds(body) &&
+    writingSites === 2 &&
+    appSource.includes('private detailedLabels = true;'),
+    `writes=${writingSites}, body=${body.length}`);
+}
+
+{
+  const body = methodBody(appSource, 'private setDetailedLabels(on: boolean): void {');
   const mutated = body.replace('    this.persistWorkspace();\n', '');
   check('control: dropping the workspace write is detected by the same order predicate',
-    mutated !== body && !mutated.includes('this.persistWorkspace();'),
-    `mutated=${mutated.includes('this.persistWorkspace();')}`);
+    mutated !== body && !mutated.includes('this.persistWorkspace();') &&
+    !toggleSequenceHolds(mutated) && toggleSequenceHolds(body),
+    `kept=${mutated.includes('this.persistWorkspace();')}, ` +
+    `mutated=${toggleSequenceHolds(mutated)}, real=${toggleSequenceHolds(body)}`);
+}
+
+function detailWriter(source: string): string {
+  return methodBody(source, 'private setDetailedLabels(on: boolean): void {');
+}
+
+function reflectThenPersist(source: string): boolean {
+  const body = detailWriter(source);
+  return body.includes('    this.reflectDetailedLabels();\n    this.persistWorkspace();\n') &&
+    !body.includes('localStorage') && !body.includes('data-toolbar-labels');
+}
+
+{
+  const bridge = 'setDetailedLabels: (on) => this.setDetailedLabels(on),';
+  const callSites = appSource.match(/this\.setDetailedLabels\(/g)?.length ?? 0;
+  check('the display toggle keeps one writer whose reflect step sits immediately before the workspace write',
+    reflectThenPersist(appSource) && appSource.includes(bridge) && callSites === 1 &&
+    (appSource.match(/data-toolbar-labels/g)?.length ?? 0) === 2,
+    `adjacent=${reflectThenPersist(appSource)}, bridge=${appSource.includes(bridge)}, ` +
+    `callSites=${callSites}, ` +
+    `attributeWrites=${appSource.match(/data-toolbar-labels/g)?.length ?? 0}`);
+}
+
+{
+  const swapped = appSource.replace(
+    '    this.reflectDetailedLabels();\n    this.persistWorkspace();\n',
+    '    this.persistWorkspace();\n    this.reflectDetailedLabels();\n');
+  const writesIn = (source: string): number => source.match(/this\.detailedLabels = /g)?.length ?? 0;
+  const bypass = appSource.replace(
+    'setDetailedLabels: (on) => this.setDetailedLabels(on),',
+    'setDetailedLabels: (on) => { this.detailedLabels = on; },');
+  check('control: a persist before the reflect, or a host that writes the field directly, is detected by the same predicate',
+    swapped !== appSource && !reflectThenPersist(swapped) &&
+    bypass !== appSource && writesIn(bypass) === writesIn(appSource) + 1 &&
+    reflectThenPersist(appSource) && writesIn(appSource) === 2,
+    `swapped=${reflectThenPersist(swapped)}, writes=${writesIn(appSource)}/${writesIn(bypass)}, ` +
+    `real=${reflectThenPersist(appSource)}`);
 }
 
 {
@@ -596,6 +810,22 @@ function ruleBlock(block: string, selector: string): string {
   return start >= 0 && end > start ? block.slice(start, end) : '';
 }
 
+function effectiveGaps(rule: string): { row: number | null; column: number | null } {
+  const gaps: { row: number | null; column: number | null } = { row: null, column: null };
+  const lengths = (value: string): number[] => (value.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+  for (const declaration of rule.matchAll(/(?:^|[\n;{])\s*(row-gap|column-gap|gap)\s*:\s*([^;]+);/g)) {
+    const values = lengths(declaration[2]);
+    const [first = null, second = null] = values;
+    if (declaration[1] === 'row-gap') gaps.row = first;
+    else if (declaration[1] === 'column-gap') gaps.column = first;
+    else {
+      gaps.row = first;
+      gaps.column = values.length > 1 ? second : first;
+    }
+  }
+  return gaps;
+}
+
 function paneScrollsNotWindow(block: string): boolean {
   const dialogRule = ruleBlock(block, '.settings-dialog {');
   const paneRule = ruleBlock(block, '.settings-pane {');
@@ -611,7 +841,7 @@ const NAV_CSS_NEEDLES: readonly string[] = [
   '.settings-dialog[open] { display: flex; flex-direction: column; }',
   '.settings-nav {',
   '.settings-nav-item {',
-  'height: 28px;',
+  `height: ${SETTINGS_ROW_HEIGHT}px;`,
   'background: var(--background);',
   'border-right: 1px solid var(--border);',
   'border-radius: calc(var(--radius) - 2px);',
@@ -889,6 +1119,219 @@ const UNSCOPED_RING = '.settings-nav-item:focus-visible';
     mutated !== dialogCss && SETTINGS_NAV_WIDTH === 152 &&
     !navWidthMirrored(mutated) && navWidthMirrored(dialogCss),
     `constant=${SETTINGS_NAV_WIDTH}, mutated=${navWidthMirrored(mutated)}, real=${navWidthMirrored(dialogCss)}`);
+}
+
+const ROW_COLUMNS = `minmax(${SETTINGS_ROW_LABEL_MIN}px, max-content) minmax(0, 1fr)`;
+const ROW_TRANSITION =
+  'transition: background-color var(--motion-fast) var(--motion-ease), ' +
+  'color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);';
+const ROW_ACTION_RING = '.settings-dialog .settings-row--action:focus-visible';
+const UNSCOPED_ROW_ACTION_RING = '.settings-row--action:focus-visible';
+
+const ROW_CSS_NEEDLES: readonly string[] = [
+  `grid-template-columns: ${ROW_COLUMNS};`,
+  `gap: ${SETTINGS_ROW_GAP}px;`,
+  'align-items: center;',
+  `min-height: ${SETTINGS_ROW_HEIGHT}px;`,
+  `padding: ${SETTINGS_ROW_PADDING_Y}px 8px;`,
+  'border-radius: calc(var(--radius) - 2px);',
+  'width: 100%;',
+  'font: inherit;',
+  'text-align: left;',
+  'background: var(--muted); color: var(--foreground);',
+  '.settings-row--action:hover { background: var(--muted); color: var(--foreground); }',
+  `${ROW_ACTION_RING} { outline: 2px solid var(--ring); outline-offset: -2px; }`,
+  '.settings-row-hint { justify-self: end; color: var(--muted-foreground); }',
+  'justify-self: start;',
+  '.settings-toggle input { margin: 0; accent-color: var(--primary); }',
+];
+
+function rowGridMirrors(block: string): boolean {
+  const rule = ruleBlock(block, '.settings-row {');
+  return rule.includes(`grid-template-columns: ${ROW_COLUMNS};`) &&
+    effectiveGaps(rule).column === SETTINGS_ROW_GAP &&
+    rule.includes('align-items: center;');
+}
+
+function actionRowRule(block: string): string {
+  return ruleBlock(block, '.settings-row--action {');
+}
+
+const ROW_LABEL_RULE = '.settings-row-label {';
+
+function declarationsIn(rule: string): Map<string, string> {
+  const declarations = new Map<string, string>();
+  const open = rule.indexOf('{');
+  const close = rule.lastIndexOf('}');
+  const body = open >= 0 ? rule.slice(open + 1, close > open ? close : undefined) : '';
+  for (const part of body.split(';')) {
+    const colon = part.indexOf(':');
+    if (colon < 0) continue;
+    declarations.set(part.slice(0, colon).trim(), part.slice(colon + 1).trim());
+  }
+  return declarations;
+}
+
+function labelRuleWith(block: string, from: string, to: string): string {
+  const rule = ruleBlock(block, ROW_LABEL_RULE);
+  return rule.length > 0 ? block.replace(rule, rule.replace(from, to)) : block;
+}
+
+function labelAffordsRowClick(block: string): boolean {
+  const label = declarationsIn(ruleBlock(block, ROW_LABEL_RULE));
+  const row = declarationsIn(ruleBlock(block, '.settings-row {'));
+  return label.get('align-self') === 'stretch' &&
+    label.get('cursor') === 'pointer' &&
+    label.get('display') === 'flex' &&
+    label.get('align-items') === 'center' &&
+    label.get('min-width') === '0' &&
+    !row.has('height');
+}
+
+{
+  check('the row label stretches over the whole 28 px row as a pointer target, and the row box stays min-height-owned',
+    labelAffordsRowClick(dialogCss),
+    `label=${JSON.stringify([...declarationsIn(ruleBlock(dialogCss, ROW_LABEL_RULE))])}, ` +
+    `rowHeight=${declarationsIn(ruleBlock(dialogCss, '.settings-row {')).has('height')}`);
+}
+
+{
+  const noCursor = labelRuleWith(dialogCss, '  cursor: pointer;', '');
+  const noStretch = labelRuleWith(dialogCss, '  align-self: stretch;', '  align-self: start;');
+  const fixedRow = dialogCss.replace(
+    `  min-height: ${SETTINGS_ROW_HEIGHT}px;`,
+    `  height: ${SETTINGS_ROW_HEIGHT}px;\n  min-height: ${SETTINGS_ROW_HEIGHT}px;`);
+  check('control: a row label without the pointer cursor or the row stretch, or a row box pinned by height, fails the same predicate',
+    noCursor !== dialogCss && !labelAffordsRowClick(noCursor) &&
+    noStretch !== dialogCss && !labelAffordsRowClick(noStretch) &&
+    fixedRow !== dialogCss && !labelAffordsRowClick(fixedRow) &&
+    labelAffordsRowClick(dialogCss),
+    `cursor=${labelAffordsRowClick(noCursor)}, stretch=${labelAffordsRowClick(noStretch)}, ` +
+    `fixed=${labelAffordsRowClick(fixedRow)}, real=${labelAffordsRowClick(dialogCss)}`);
+}
+
+function rowActionRingWins(sheet: string): boolean {
+  return sheet.includes(`${ROW_ACTION_RING} { outline: 2px solid var(--ring); outline-offset: -2px; }`) &&
+    specificityAtLeast(selectorSpecificity(ROW_ACTION_RING), selectorSpecificity(GENERIC_FOCUS_RING)) &&
+    !specificityAtLeast(selectorSpecificity(UNSCOPED_ROW_ACTION_RING), selectorSpecificity(GENERIC_FOCUS_RING));
+}
+
+{
+  const missing = ROW_CSS_NEEDLES.filter((needle) => !dialogCss.includes(needle));
+  check('the sheet lays out the appearance rows with the mirrored grid, toggle and action chrome',
+    dialogCss.length > 0 && missing.length === 0 &&
+    actionRowRule(dialogCss).includes(ROW_TRANSITION),
+    `missing=${JSON.stringify(missing)}, transition=${actionRowRule(dialogCss).includes(ROW_TRANSITION)}, ` +
+    `block=${dialogCss.length}`);
+}
+
+{
+  const shipped = SETTINGS_ROW_LABEL_MIN === 104 && SETTINGS_ROW_GAP === 12;
+  check('the row grid is mirrored from the exported label-column and gap constants',
+    shipped && rowGridMirrors(dialogCss),
+    `labelMin=${SETTINGS_ROW_LABEL_MIN}, gap=${SETTINGS_ROW_GAP}, ` +
+    `rule=${JSON.stringify(ruleBlock(dialogCss, '.settings-row {'))}`);
+}
+
+{
+  const driftedColumns = dialogCss.replace(ROW_COLUMNS, 'minmax(96px, max-content) minmax(0, 1fr)');
+  const driftedGap = dialogCss.replace(
+    `  gap: ${SETTINGS_ROW_GAP}px;\n  min-height: ${SETTINGS_ROW_HEIGHT}px;`,
+    `  gap: 10px;\n  min-height: ${SETTINGS_ROW_HEIGHT}px;`);
+  const columnGapOverride = dialogCss.replace(
+    `  gap: ${SETTINGS_ROW_GAP}px;\n  min-height: ${SETTINGS_ROW_HEIGHT}px;`,
+    `  gap: ${SETTINGS_ROW_GAP}px;\n  column-gap: 4px;\n  min-height: ${SETTINGS_ROW_HEIGHT}px;`);
+  check('control: a row track list or gap the constants do not mirror, or a later column-gap override, fails the same predicate',
+    driftedColumns !== dialogCss && !rowGridMirrors(driftedColumns) &&
+    driftedGap !== dialogCss && !rowGridMirrors(driftedGap) &&
+    columnGapOverride !== dialogCss && !rowGridMirrors(columnGapOverride) &&
+    rowGridMirrors(dialogCss),
+    `columns=${rowGridMirrors(driftedColumns)}, gap=${rowGridMirrors(driftedGap)}, ` +
+    `columnGap=${rowGridMirrors(columnGapOverride)}, real=${rowGridMirrors(dialogCss)}`);
+}
+
+function paneBlock(block: string): string {
+  return ruleBlock(block, '.settings-pane {');
+}
+
+function paneGapRebased(block: string, gap: number): string {
+  const pane = paneBlock(block);
+  return pane.length > 0 ? block.replace(pane, pane.replace(`gap: ${SETTINGS_PANE_GAP}px;`, `gap: ${gap}px;`)) : block;
+}
+
+function paneMatchesRowRhythm(block: string): boolean {
+  const pane = paneBlock(block);
+  const row = ruleBlock(block, '.settings-row {');
+  return effectiveGaps(pane).row === SETTINGS_PANE_GAP &&
+    row.includes(`min-height: ${SETTINGS_ROW_HEIGHT}px;`) &&
+    row.includes(`padding: ${SETTINGS_ROW_PADDING_Y}px 8px;`);
+}
+
+{
+  const shipped = SETTINGS_PANE_GAP === 4 && SETTINGS_ROW_HEIGHT === 28 && SETTINGS_ROW_PADDING_Y === 3;
+  check('the pane gap keeps its shipped value and the sheet holds it beside the row rhythm it separates',
+    shipped && paneMatchesRowRhythm(dialogCss),
+    `paneGap=${SETTINGS_PANE_GAP}, rowHeight=${SETTINGS_ROW_HEIGHT}, ` +
+    `rowPaddingY=${SETTINGS_ROW_PADDING_Y}, matches=${paneMatchesRowRhythm(dialogCss)}, ` +
+    `pane=${JSON.stringify(paneBlock(dialogCss))}`);
+}
+
+{
+  const tighter = paneGapRebased(dialogCss, 1);
+  const wider = paneGapRebased(dialogCss, 8);
+  const driftedRhythm = dialogCss.replace(
+    `  padding: ${SETTINGS_ROW_PADDING_Y}px 8px;`,
+    `  padding: ${SETTINGS_ROW_PADDING_Y + 2}px 8px;`);
+  const rowGapOverride = dialogCss.replace(
+    paneBlock(dialogCss),
+    paneBlock(dialogCss).replace(
+      `  gap: ${SETTINGS_PANE_GAP}px;`,
+      `  gap: ${SETTINGS_PANE_GAP}px;\n  row-gap: 1px;`));
+  const shorthandThenOverride = dialogCss.replace(
+    paneBlock(dialogCss),
+    paneBlock(dialogCss).replace(
+      `  gap: ${SETTINGS_PANE_GAP}px;`,
+      `  gap: ${SETTINGS_PANE_GAP}px 0;\n  row-gap: ${SETTINGS_PANE_GAP}px;`));
+  check('control: a pane gap moved away from the row rhythm, overridden by a later row-gap, or a row whose padding moved under it, fails the same predicate',
+    tighter !== dialogCss && !paneMatchesRowRhythm(tighter) &&
+    wider !== dialogCss && !paneMatchesRowRhythm(wider) &&
+    driftedRhythm !== dialogCss && !paneMatchesRowRhythm(driftedRhythm) &&
+    rowGapOverride !== dialogCss && !paneMatchesRowRhythm(rowGapOverride) &&
+    shorthandThenOverride !== dialogCss && paneMatchesRowRhythm(shorthandThenOverride) &&
+    paneMatchesRowRhythm(dialogCss),
+    `tighter=${paneMatchesRowRhythm(tighter)}, wider=${paneMatchesRowRhythm(wider)}, ` +
+    `rhythm=${paneMatchesRowRhythm(driftedRhythm)}, override=${paneMatchesRowRhythm(rowGapOverride)}, ` +
+    `shorthandThenOverride=${paneMatchesRowRhythm(shorthandThenOverride)}, real=${paneMatchesRowRhythm(dialogCss)}`);
+}
+
+{
+  const noAccent = dialogCss.replace(
+    '.settings-toggle input { margin: 0; accent-color: var(--primary); }', '.settings-toggle input { margin: 0; }');
+  const actionRule = actionRowRule(dialogCss);
+  const noTransition = dialogCss.replace(actionRule, actionRule.replace(ROW_TRANSITION, ''));
+  check('control: a checkbox without the brand accent, or an action row without the motion pair, is detected by the same predicate',
+    noAccent !== dialogCss && !ROW_CSS_NEEDLES.every((needle) => noAccent.includes(needle)) &&
+    noTransition !== dialogCss && !actionRowRule(noTransition).includes(ROW_TRANSITION) &&
+    ROW_CSS_NEEDLES.every((needle) => dialogCss.includes(needle)) &&
+    actionRowRule(dialogCss).includes(ROW_TRANSITION),
+    `accent=${ROW_CSS_NEEDLES.filter((n) => !noAccent.includes(n)).length}, ` +
+    `transition=${actionRowRule(noTransition).includes(ROW_TRANSITION)}, ` +
+    `real=${ROW_CSS_NEEDLES.filter((n) => !dialogCss.includes(n)).length}`);
+}
+
+{
+  check('the row action ring is inset and outranks the generic themed button ring',
+    rowActionRingWins(css),
+    `ring=${selectorSpecificity(ROW_ACTION_RING).join(',')}, ` +
+    `generic=${selectorSpecificity(GENERIC_FOCUS_RING).join(',')}, ` +
+    `unscoped=${selectorSpecificity(UNSCOPED_ROW_ACTION_RING).join(',')}`);
+}
+
+{
+  const mutated = css.replaceAll(ROW_ACTION_RING, UNSCOPED_ROW_ACTION_RING);
+  check('control: the unscoped row-action ring loses the cascade, so the dialog scope is load-bearing',
+    mutated !== css && !rowActionRingWins(mutated) && rowActionRingWins(css),
+    `mutated=${rowActionRingWins(mutated)}, real=${rowActionRingWins(css)}`);
 }
 
 const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string, Record<string, string>]> = [

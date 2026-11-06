@@ -5,6 +5,11 @@ export const SETTINGS_DIALOG_ID = 'settings-dialog';
 export const SETTINGS_DIALOG_WIDTH = 560;
 export const SETTINGS_DIALOG_HEIGHT = 360;
 export const SETTINGS_NAV_WIDTH = 152;
+export const SETTINGS_ROW_LABEL_MIN = 104;
+export const SETTINGS_ROW_GAP = 12;
+export const SETTINGS_ROW_HEIGHT = 28;
+export const SETTINGS_ROW_PADDING_Y = 3;
+export const SETTINGS_PANE_GAP = 4;
 
 export const SETTINGS_SECTIONS = ['appearance'] as const;
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number];
@@ -194,44 +199,50 @@ export class SettingsDialog {
     return this.body.querySelector<HTMLElement>(`#settings-tab-${this.section}`);
   }
 
-  private labelsRow(): HTMLButtonElement {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'settings-item';
-    row.dataset.settingsKey = 'detailedLabels';
-    const check = document.createElement('span');
-    check.className = 'settings-check';
-    check.setAttribute('aria-hidden', 'true');
-    const label = document.createElement('span');
-    label.textContent = t('settings.detailedLabels');
-    row.append(check, label);
-    const paint = (): void => {
-      const on = this.host.detailedLabels();
-      check.textContent = on ? '✓' : '';
-      row.setAttribute('aria-pressed', String(on));
-    };
-    paint();
-    row.addEventListener('click', () => {
-      this.host.setDetailedLabels(!this.host.detailedLabels());
-      paint();
-    });
+  private rowLabel(key: MessageKey, controlId?: string): HTMLElement {
+    const text = t(key);
+    if (controlId === undefined) {
+      const span = document.createElement('span');
+      span.className = 'settings-row-label';
+      span.textContent = text;
+      return span;
+    }
+    const label = document.createElement('label');
+    label.className = 'settings-row-label';
+    label.textContent = text;
+    label.htmlFor = controlId;
+    return label;
+  }
+
+  private labelsRow(): HTMLDivElement {
+    const row = document.createElement('div');
+    row.className = 'settings-row';
+    const toggle = document.createElement('label');
+    toggle.className = 'settings-toggle';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = 'settings-detailed-labels';
+    input.dataset.settingsKey = 'detailedLabels';
+    const label = this.rowLabel('settings.detailedLabels', input.id);
+    label.id = 'settings-row-detailed-labels';
+    input.setAttribute('aria-labelledby', label.id);
+    input.checked = this.host.detailedLabels();
+    input.addEventListener('change', () => this.host.setDetailedLabels(input.checked));
+    toggle.appendChild(input);
+    row.append(label, toggle);
     return row;
   }
 
   private shortcutsRow(): HTMLButtonElement {
     const row = document.createElement('button');
     row.type = 'button';
-    row.className = 'settings-item';
+    row.className = 'settings-row settings-row--action';
     row.dataset.settingsKey = 'shortcuts';
-    const check = document.createElement('span');
-    check.className = 'settings-check';
-    check.setAttribute('aria-hidden', 'true');
-    const label = document.createElement('span');
-    label.textContent = t('settings.shortcuts');
     const hint = document.createElement('span');
-    hint.className = 'settings-hint';
+    hint.className = 'settings-row-hint';
+    hint.setAttribute('aria-hidden', 'true');
     hint.textContent = '▸';
-    row.append(check, label, hint);
+    row.append(this.rowLabel('settings.shortcuts'), hint);
     row.addEventListener('click', () => this.host.openShortcuts(row));
     return row;
   }

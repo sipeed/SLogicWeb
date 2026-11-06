@@ -91,6 +91,7 @@ const MOTION_CONSUMERS: readonly string[] = [
   '.select-item',
   '.settings-item',
   '.settings-nav-item',
+  '.settings-row--action',
   '#panel-resizer::after',
   ':is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area::-webkit-scrollbar-thumb, :is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar-thumb',
   '.select-popover::-webkit-scrollbar-thumb',
@@ -137,6 +138,7 @@ const BUTTON_CONSUMERS: readonly string[] = [
   '.select-trigger',
   '.settings-item',
   '.settings-nav-item',
+  '.settings-row--action',
 ];
 
 const NON_BUTTON_CONSUMERS: readonly string[] = [

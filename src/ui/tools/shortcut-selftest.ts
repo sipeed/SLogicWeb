@@ -393,12 +393,12 @@ function dialogConstructions(source: string): number {
 {
   const settingsDialogSource = fs.readFileSync('src/ui/settingsDialog.ts', 'utf8');
   const rows = settingsDialogSource.indexOf('this.labelsRow(), this.shortcutsRow()');
-  const labelsRow = methodBody(settingsDialogSource, 'private labelsRow(): HTMLButtonElement {');
+  const labelsRow = methodBody(settingsDialogSource, 'private labelsRow(): HTMLDivElement {');
   const shortcutsRow = methodBody(settingsDialogSource, 'private shortcutsRow(): HTMLButtonElement {');
-  const displayToggle = labelsRow.includes("t('settings.detailedLabels')") &&
+  const displayToggle = labelsRow.includes("this.rowLabel('settings.detailedLabels', input.id)") &&
     labelsRow.includes('this.host.setDetailedLabels(') &&
     labelsRow.includes('this.host.detailedLabels()');
-  const shortcutsEntry = shortcutsRow.includes("t('settings.shortcuts')") &&
+  const shortcutsEntry = shortcutsRow.includes("this.rowLabel('settings.shortcuts')") &&
     shortcutsRow.includes("hint.textContent = '▸';") &&
     shortcutsRow.includes('this.host.openShortcuts(row)');
   check('the settings window keeps the display toggle and hands the shortcuts row to the dialog through the host',

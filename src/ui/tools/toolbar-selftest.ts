@@ -942,7 +942,7 @@ const detailedLabelsToggle = setDetailedLabelsBody.includes('this.detailedLabels
   setDetailedLabelsBody.includes('this.pendingToolbarViewport = { start, end, follow };') &&
   setDetailedLabelsBody.includes('this.reflectDetailedLabels();');
 const detailedLabelsDefault = app.includes('private detailedLabels = true;');
-const detailedLabelsRowAt = settingsDialogSrc.indexOf("row.dataset.settingsKey = 'detailedLabels';");
+const detailedLabelsRowAt = settingsDialogSrc.indexOf("input.dataset.settingsKey = 'detailedLabels';");
 const shortcutsRowAt = settingsDialogSrc.indexOf("row.dataset.settingsKey = 'shortcuts';");
 const shortcutsRowBody = shortcutsRowAt >= 0 ? settingsDialogSrc.slice(shortcutsRowAt) : '';
 const shortcutsRowOpensDialog = shortcutsRowBody.includes("hint.textContent = '▸';") &&
