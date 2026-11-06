@@ -1052,13 +1052,25 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
   gap: 2px;
 }
 .error-banner-text {
+  display: block;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 /* The typed failure's remedy, on its own line under the diagnostic. */
 .error-banner-guidance { overflow-wrap: anywhere; font-weight: 600; }
-.error-banner-guidance[hidden], .error-banner-retry[hidden] { display: none; }
-.error-banner-retry {
+.error-banner-guidance[hidden], .error-banner-retry[hidden],
+.error-banner-action[hidden], .error-banner-details[hidden] { display: none; }
+.error-banner-details summary {
+  cursor: pointer;
+  opacity: 0.85;
+}
+.error-banner-details > span {
+  display: block;
+  margin-top: 2px;
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+.error-banner-retry, .error-banner-action {
   flex: none;
   align-self: center;
   min-height: 24px;
@@ -1070,8 +1082,8 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
   font: inherit;
   cursor: pointer;
 }
-.error-banner-retry:hover { background: rgb(0 0 0 / 18%); }
-.error-banner-retry:focus-visible {
+.error-banner-retry:hover, .error-banner-action:hover { background: rgb(0 0 0 / 18%); }
+.error-banner-retry:focus-visible, .error-banner-action:focus-visible {
   outline: 2px solid var(--destructive-foreground);
   outline-offset: 1px;
 }
@@ -1373,6 +1385,8 @@ html.resizing { cursor: col-resize; user-select: none; }
 .capture-badge.waiting::before { background: var(--warning); }
 .capture-badge.stopping { background: color-mix(in oklab, var(--destructive) 16%, var(--card)); }
 .capture-badge.stopping::before { background: var(--destructive); }
+.capture-badge.aborted { background: color-mix(in oklab, var(--destructive) 16%, var(--card)); }
+.capture-badge.aborted::before { background: var(--destructive); }
 .capture-status {
   display: flex; flex-direction: column; gap: 5px; padding: 6px 8px;
   background: var(--background); border: 1px solid var(--border); border-radius: var(--radius);

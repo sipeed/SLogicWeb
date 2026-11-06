@@ -62,6 +62,7 @@ import { saveSr, srExportParts, type SrProbe } from './srSave.js';
 import { connectSamplerate } from './connectDefaults.js';
 import { formatCursorTimes } from './cursorTime.js';
 import { sameUsbDevice } from './deviceIdentity.js';
+import { captureAbortCause, lowerSamplerate, type CaptureAbort } from './captureAbort.js';
 import {
   classifyConnectFailure, connectFailureRetryable, connectGuidanceKey, refineWithPeerTabs,
 } from './connectFailure.js';
@@ -71,7 +72,7 @@ import {
 } from './deviceChrome.js';
 import { DeviceTabPresence } from './deviceTabPresence.js';
 import { detectCapabilities, type PlatformNavigatorLike } from '../platform/capabilities.js';
-import { formatCount, formatDuration, formatFreq,
+import { formatCount, formatDuration, formatFreq, formatRate,
   formatAnalyzerNote, formatCaptureLabel, formatStatusError,
   formatStatusErrorDebug, statusDetailOf } from './format.js';
 import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, setLocale, t,
@@ -378,6 +379,10 @@ export class App {
   private captureIsLoop = false;
   private startMutatedCapture = false;
   private captureLimitSamples = 0;
+  /** The running capture's requested duration; null for Unlimited and Loop. */
+  private captureRequestedSeconds: number | null = null;
+  /** Why the last capture ended early; null once a capture starts or one is opened. */
+  private captureAbort: CaptureAbort | null = null;
   private triggerState: 'off' | 'waiting' | 'triggered' | 'not-found' = 'off';
   /** Trigger sample position in SampleStore; the time axis labels this sample T=0. */
   private triggerSampleIndex: number | null = null;
@@ -483,6 +488,8 @@ export class App {
     errorGuidance: HTMLSpanElement; errorRetry: HTMLButtonElement;
     platformNotice: HTMLDivElement; platformNoticeText: HTMLSpanElement;
     platformNoticeDismiss: HTMLButtonElement; hintDetail: HTMLSpanElement;
+    errorDetails: HTMLDetailsElement; errorDetailText: HTMLSpanElement;
+    errorAction: HTMLButtonElement;
     fileInput: HTMLInputElement;
   };
 
@@ -519,6 +526,9 @@ export class App {
       platformNoticeText: must<HTMLSpanElement>('platform-notice-text'),
       platformNoticeDismiss: must<HTMLButtonElement>('platform-notice-dismiss'),
       hintDetail: must<HTMLSpanElement>('empty-hint-detail'),
+      errorDetails: must<HTMLDetailsElement>('error-banner-details'),
+      errorDetailText: must<HTMLSpanElement>('error-banner-detail-text'),
+      errorAction: must<HTMLButtonElement>('error-banner-action'),
       fileInput: must<HTMLInputElement>('file-input'),
     };
 
@@ -3590,6 +3600,16 @@ export class App {
       this.renderPlatformNotice();
       this.relayout();
     });
+    this.el.errorAction.addEventListener('click', () => {
+      const action = this.statusError?.action;
+      if (!action || this.stopping) return;
+      // The remedy edits the next capture's rate through the one settings path; the user
+      // starts that capture with Capture/Stop, as always.
+      this.applySettings({ ...this.settings, samplerate: action.samplerate });
+      this.statusError = null;
+      this.renderErrorBanner();
+      this.relayout();
+    });
   }
 
   private async toggleFullscreen(): Promise<void> {
@@ -3978,6 +3998,7 @@ export class App {
     if (this.stopping) return 'stopping';
     if (this.repeatTimer.pending) return this.repeatSession ? 'capturing' : 'waiting';
     if (this.running) return 'capturing';
+    if (this.captureAbort) return 'aborted';
     return this.captureStore.length > 0 ? 'completed' : 'ready';
   }
 
@@ -4034,6 +4055,10 @@ export class App {
       stopping: this.stopping,
       repeatPending: this.repeatTimer.pending,
       captureState: this.capturePanelState(),
+      abort: this.running || !this.captureAbort ? null : {
+        cause: this.captureAbort.cause,
+        requestedSeconds: this.captureAbort.requestedSeconds,
+      },
       result: this.captureStore.length > 0
         ? {
           samples: this.captureStore.length,
@@ -4247,11 +4272,21 @@ export class App {
     const err = this.statusError;
     // Fill the alert before revealing it, so a screen reader announces the message
     // rather than an empty live region.
-    this.el.errorBannerText.textContent = err === null ? '' : formatStatusError(err);
+    const notice = err?.notice;
+    this.el.errorBannerText.textContent = err === null ? ''
+      : notice ? t(notice.key, notice.vars) : formatStatusError(err);
+    // With a plain conclusion on top, the diagnostic stays one click away.
+    this.el.errorDetails.hidden = !notice;
+    if (!notice) this.el.errorDetails.open = false;
+    this.el.errorDetailText.textContent = err !== null && notice ? formatStatusError(err) : '';
     const guidance = err?.guidance;
     this.el.errorGuidance.textContent = guidance === undefined ? '' : t(guidance);
     this.el.errorGuidance.hidden = guidance === undefined;
     this.el.errorRetry.hidden = err?.retry !== true;
+    const action = err?.action;
+    this.el.errorAction.hidden = !action;
+    this.el.errorAction.textContent = action
+      ? t('error.lowerRate', { rate: formatRate(action.samplerate) }) : '';
     this.el.errorBanner.hidden = err === null;
   }
 
@@ -4281,8 +4316,11 @@ export class App {
     });
   }
 
-  private fail(what: MessageKey, e: unknown, vars?: MessageVars): void {
-    this.statusError = { what, ...(vars ? { vars } : {}), detail: statusDetailOf(e) };
+  private fail(
+    what: MessageKey, e: unknown, vars?: MessageVars,
+    extra?: Pick<StatusError, 'notice' | 'action'>,
+  ): void {
+    this.statusError = { what, ...(vars ? { vars } : {}), detail: statusDetailOf(e), ...extra };
     // The console prefix is the stable message KEY, not the translated text -
     // greppable in every locale.
     console.error(`[ui] ${what}`, e);
@@ -4300,8 +4338,32 @@ export class App {
    * the user reads is the read loop's, not a teardown artefact.
    */
   private deviceFailed(e: unknown): void {
-    if (this.stopping || this.device === null) { this.fail('error.device', e); return; }
-    this.deviceLost(e);
+    // A capture the failure ended is reported as aborted, not completed (`captureAbort`).
+    const extra = this.running && !this.stopping ? this.noteCaptureAbort(e) : undefined;
+    if (this.stopping || this.device === null) { this.fail('error.device', e, undefined, extra); return; }
+    this.deviceLost(e, true, extra);
+  }
+
+  /** Record why the running capture ended, and the banner's conclusion and remedy. */
+  private noteCaptureAbort(e: unknown): Pick<StatusError, 'notice' | 'action'> | undefined {
+    const abort: CaptureAbort = {
+      cause: captureAbortCause(e),
+      requestedSeconds: this.captureRequestedSeconds,
+      channels: this.lastCaptureChannels,
+      samplerate: this.lastCaptureRate,
+    };
+    this.captureAbort = abort;
+    if (abort.cause !== 'hostOverload') return undefined;
+    const ceiling = this.rateCeilings[abort.channels] ?? abort.samplerate;
+    const lower = lowerSamplerate(abort, SAMPLERATES_HZ.filter((hz) => hz <= ceiling),
+      this.rateRecommendations[abort.channels]);
+    return {
+      notice: {
+        key: 'error.hostOverloadNotice',
+        vars: { channels: abort.channels, rate: formatRate(abort.samplerate) },
+      },
+      ...(lower !== null ? { action: { kind: 'lowerRate' as const, samplerate: lower } } : {}),
+    };
   }
 
   // ------------------------------------------------------------------ captures
@@ -4399,6 +4461,7 @@ export class App {
     this.captureTriggerBase = null;
     this.droppedTotal = 0;
     this.captureIsLoop = false;
+    this.captureAbort = null;
     this.captureLabel = label;
     this.widthExplicit = false;
     this.settings = carryCaptureDuration(this.settings, this.clampSettings(
@@ -4554,14 +4617,18 @@ export class App {
   private usbDisconnected(usb: USBDevice): void {
     const device = this.device;
     if (!device || !sameUsbDevice(device.serial, usb)) return;
-    this.deviceLost(new DiagnosticError('device.disconnected', { device: device.name }));
+    const error = new DiagnosticError('device.disconnected', { device: device.name });
+    if (this.running && !this.stopping) this.noteCaptureAbort(error);
+    this.deviceLost(error);
   }
 
-  private deviceLost(error: unknown, report = true): void {
+  private deviceLost(
+    error: unknown, report = true, extra?: Pick<StatusError, 'notice' | 'action'>,
+  ): void {
     if (this.device === null) return;
     this.lostSerial = this.device.serial;
     this.awaitingReconnect = true;
-    if (report) this.fail('error.device', error);
+    if (report) this.fail('error.device', error, undefined, extra);
     this.detachDevice();
     this.renderPanels();
     void this.recoverDevice();
@@ -4781,6 +4848,9 @@ export class App {
       this.captureStart = softwareTrigger ? 0 : performance.now();
       const postTriggerSamples = capturePostTriggerSamples(this.settings);
       this.captureLimitSamples = isLoop ? MAX_SAMPLES - 1 : postTriggerSamples;
+      this.captureRequestedSeconds = isLoop || (mode === 'single' && this.settings.singleUnlimited)
+        ? null : postTriggerSamples / cfg.samplerate;
+      this.captureAbort = null;
       this.startMutatedCapture = true;
       this.triggerState = softwareTrigger ? 'waiting' : 'off';
       // A Repeat wave with a trigger waits for its match; meanwhile the previous completed

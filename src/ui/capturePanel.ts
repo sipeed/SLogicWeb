@@ -37,6 +37,7 @@ import {
 import {
   maxCaptureSeconds, MIN_CAPTURE_SECONDS, REPEAT_INTERVAL_SECONDS,
 } from './captureTime.js';
+import { captureAbortDetail, type CaptureAbortCause } from './captureAbort.js';
 import { capturePostTriggerSamples } from './capturePolicy.js';
 import { MAX_CURSOR_DISTANCE_ROWS, type DistanceSide } from './cursorDistance.js';
 import { MAX_CURSOR_EDGE_ROWS } from './cursorEdges.js';
@@ -61,7 +62,9 @@ export interface CapturePanelCallbacks {
   onPickCursorEdgeChannel(rowId: number, channel: number | null): void;
 }
 
-export type CapturePanelState = 'ready' | 'capturing' | 'stopping' | 'waiting' | 'completed';
+/** `aborted`: the last capture was ended by a device/link failure (`CapturePanelView.abort`). */
+export type CapturePanelState =
+  'ready' | 'capturing' | 'stopping' | 'waiting' | 'completed' | 'aborted';
 
 export interface CursorRowView {
   id: number;
@@ -118,6 +121,8 @@ export interface CapturePanelView {
   repeatPending: boolean;
   captureState: CapturePanelState;
   result: { samples: number; seconds: number } | null;
+  /** Why the last capture ended early; set exactly when `captureState` is 'aborted'. */
+  abort?: { cause: CaptureAbortCause; requestedSeconds: number | null } | null;
   /** Non-null while a capture is streaming. */
   progress: { seconds: number; samples: number; bytes: number; lost: number; dropped: number;
     /** Retained length (`store.length`) and the loop limit; the limit is 0 outside loop mode. */
@@ -666,12 +671,14 @@ export class CapturePanel {
       stopping: 'capturePanel.statusStopping',
       waiting: 'capturePanel.statusWaiting',
       completed: 'capturePanel.statusCompleted',
+      aborted: 'capturePanel.statusAborted',
     } as const;
     const badge = document.createElement('span');
     badge.className = 'capture-badge'
       + (v.captureState === 'capturing' ? ' live' : '')
       + (v.captureState === 'waiting' ? ' waiting' : '')
-      + (v.captureState === 'stopping' ? ' stopping' : '');
+      + (v.captureState === 'stopping' ? ' stopping' : '')
+      + (v.captureState === 'aborted' ? ' aborted' : '');
     badge.textContent = t(badgeKeys[v.captureState]);
     modeSec.header.appendChild(badge);
 
@@ -715,6 +722,9 @@ export class CapturePanel {
               samples: (v.result?.samples ?? 0).toLocaleString(),
               duration: formatDuration(v.result?.seconds ?? 0),
             })
+            : v.captureState === 'aborted'
+              ? captureAbortDetail(v.abort ?? { cause: 'device', requestedSeconds: null },
+                v.result ?? { samples: 0, seconds: 0 })
             : v.progress && v.progress.targetSamples === null
               ? v.progress.limit > 0
                 ? t('capturePanel.statusLoopDetail')

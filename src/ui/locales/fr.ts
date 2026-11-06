@@ -150,6 +150,10 @@ export const fr: Messages = {
   'error.decodeWorkerWarmup': 'préchauffage du worker de décodage',
   'error.decode': 'décodage {id}',
   'error.localeLoad': 'Impossible de charger le catalogue de langue',
+  'error.hostOverloadNotice':
+    'Capture interrompue : le lien USB n’a pas suivi {channels} CH @ {rate}. Réduisez la fréquence d’échantillonnage ou le nombre de voies, puis relancez la capture.',
+  'error.details': 'Détails techniques',
+  'error.lowerRate': 'Passer à {rate}',
 
   // ---------------------------- connect failure guidance (error banner)
   'connectHelp.busy': 'L’appareil est utilisé par un autre onglet ou programme (PulseView/DSView, sigrok-cli ou l’outil de mise à jour). Fermez-le, puis réessayez.',
@@ -470,6 +474,14 @@ export const fr: Messages = {
   'capturePanel.statusStoppingDetail': 'Arrêt en cours ; la vue actuelle est conservée',
   'capturePanel.statusWaitingDetail': 'Nouvelle acquisition dans {interval}. Arrêtez pour annuler ; la vue est conservée.',
   'capturePanel.statusCompletedDetail': '{samples} échantillons · {duration}',
+  'capturePanel.statusAborted': 'Interrompue',
+  'capturePanel.statusAbortedDetail':
+    '{reason} · demandé {requested} / réel {actual} · {samples} échantillons',
+  'capturePanel.statusAbortedOpenDetail':
+    '{reason} · réel {actual} · {samples} échantillons',
+  'capturePanel.abortHostOverload': 'Hôte surchargé',
+  'capturePanel.abortDisconnected': 'Appareil déconnecté',
+  'capturePanel.abortDevice': 'Erreur de l’appareil',
   'capturePanel.progress': 'Progression de l’acquisition',
   'capturePanel.unlimited': 'Illimité',
   'capturePanel.duration': 'Durée',

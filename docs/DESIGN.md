@@ -503,6 +503,12 @@ polite live region, so assistive technology reads the area and hints when they c
 - A fatal error appears only in the prominent top alert banner; the bottom bar does
   not summarize errors. The banner has a dismiss action and uses the destructive
   token pair in both themes.
+- A capture ended by a device or link failure is reported as Aborted with its cause
+  and requested vs actual duration, never as Completed. For a failure with a known
+  remedy the banner leads with the plain conclusion and what to do, keeps the
+  diagnostic under a collapsed "Technical details", and may offer one remedy button
+  that only changes settings (e.g. lower the rate); Capture/Stop still starts the next
+  capture.
 - Errors are typed (`unsupported-platform`, `permission`, `busy`, `handshake`,
   `profile`, `transfer`, `lost`, `suspended`, `memory`, `quota`, `record-full`, ...) and
   actionable; the diagnostic code stays in the console prefix.

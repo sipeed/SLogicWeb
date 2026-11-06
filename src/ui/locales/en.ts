@@ -154,6 +154,10 @@ export const en = {
   'error.decodeWorkerWarmup': 'decode worker warmup',
   'error.decode': 'decode {id}',
   'error.localeLoad': 'Could not load the language catalog',
+  'error.hostOverloadNotice':
+    'Capture aborted: the USB link could not keep up with {channels} CH @ {rate}. Lower the sample rate or the channel count, then capture again.',
+  'error.details': 'Technical details',
+  'error.lowerRate': 'Lower to {rate}',
 
   // ---------------------------- connect failure guidance (error banner)
   'connectHelp.busy': 'The device is in use by another tab or program (such as PulseView/DSView, sigrok-cli or the firmware updater). Close it, then retry.',
@@ -471,6 +475,14 @@ export const en = {
   'capturePanel.statusStoppingDetail': 'Stopping; the current view is kept',
   'capturePanel.statusWaitingDetail': 'Next capture after {interval}. Stop to cancel; the view is kept.',
   'capturePanel.statusCompletedDetail': '{samples} samples · {duration}',
+  'capturePanel.statusAborted': 'Aborted',
+  'capturePanel.statusAbortedDetail':
+    '{reason} · requested {requested} / actual {actual} · {samples} samples',
+  'capturePanel.statusAbortedOpenDetail':
+    '{reason} · actual {actual} · {samples} samples',
+  'capturePanel.abortHostOverload': 'Host overload',
+  'capturePanel.abortDisconnected': 'Device disconnected',
+  'capturePanel.abortDevice': 'Device error',
   'capturePanel.progress': 'Capture progress',
   'capturePanel.unlimited': 'Unlimited',
   'capturePanel.duration': 'Duration',

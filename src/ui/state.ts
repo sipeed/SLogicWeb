@@ -251,6 +251,13 @@ export interface StatusError {
   guidance?: MessageKey;
   /** The banner offers Retry (re-acquire the device). */
   retry?: boolean;
+  /**
+   * A plain conclusion and what to do, shown in place of the diagnostic; the diagnostic
+   * (`formatStatusError`) is then collapsed under "Technical details".
+   */
+  notice?: { key: MessageKey; vars?: MessageVars };
+  /** The banner's one remedy: lower the next capture's rate. It changes settings only. */
+  action?: { kind: 'lowerRate'; samplerate: number };
 }
 
 export function defaultChannelName(index: number): string {

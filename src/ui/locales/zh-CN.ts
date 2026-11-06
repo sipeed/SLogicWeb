@@ -148,6 +148,9 @@ export const zhCN: Messages = {
   'error.decodeWorkerWarmup': '解码工作线程预热',
   'error.decode': '解码 {id}',
   'error.localeLoad': '无法加载语言包',
+  'error.hostOverloadNotice': '采集已中止：USB 链路跟不上 {channels} CH @ {rate}。请降低采样率或通道数后重新采集。',
+  'error.details': '技术细节',
+  'error.lowerRate': '降低采样率到 {rate}',
 
   // ---------------------------- connect failure guidance (error banner)
   'connectHelp.busy': '设备正被其他标签页或程序（如 PulseView/DSView、sigrok-cli 或固件更新页面）占用，请关闭后重试。',
@@ -418,6 +421,13 @@ export const zhCN: Messages = {
   'capturePanel.statusStoppingDetail': '正在停止；保留当前视图',
   'capturePanel.statusWaitingDetail': '将在 {interval} 后再次采集。停止可取消；保留当前视图。',
   'capturePanel.statusCompletedDetail': '{samples} 个样本 · {duration}',
+  'capturePanel.statusAborted': '已中止',
+  'capturePanel.statusAbortedDetail':
+    '{reason} · 请求 {requested} / 实际 {actual} · {samples} 个样本',
+  'capturePanel.statusAbortedOpenDetail': '{reason} · 实际 {actual} · {samples} 个样本',
+  'capturePanel.abortHostOverload': '主机过载',
+  'capturePanel.abortDisconnected': '设备已断开',
+  'capturePanel.abortDevice': '设备错误',
   'capturePanel.progress': '采集进度',
   'capturePanel.unlimited': '无限',
   'capturePanel.duration': '采集时长',

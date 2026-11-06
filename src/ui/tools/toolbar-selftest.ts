@@ -318,11 +318,13 @@ const c6ConstructorBody = methodBody('constructor() {');
 const disconnectWiring =
   "navigator.usb?.addEventListener('disconnect', (e) => this.usbDisconnected(e.device));";
 const usbDisconnectedBody = methodBody('private usbDisconnected(usb: USBDevice): void {');
-const deviceLostBody = methodBody('private deviceLost(error: unknown, report = true): void {');
+const deviceLostBody = methodBody('private deviceLost(\n    error: unknown, report = true,');
 const disconnectGuard = usbDisconnectedBody.includes(
   'if (!device || !sameUsbDevice(device.serial, usb)) return;') &&
-  usbDisconnectedBody.includes("this.deviceLost(new DiagnosticError('device.disconnected'");
-const lostFailAt = deviceLostBody.indexOf("this.fail('error.device', error)");
+  usbDisconnectedBody.includes("const error = new DiagnosticError('device.disconnected'") &&
+  usbDisconnectedBody.includes('if (this.running && !this.stopping) this.noteCaptureAbort(error);') &&
+  usbDisconnectedBody.includes('this.deviceLost(error);');
+const lostFailAt = deviceLostBody.indexOf("this.fail('error.device', error, undefined, extra)");
 const lostDetachAt = deviceLostBody.indexOf('this.detachDevice();');
 const lostRenderAt = deviceLostBody.indexOf('this.renderPanels();');
 const lostRecoverAt = deviceLostBody.indexOf('void this.recoverDevice();');
@@ -359,7 +361,7 @@ const plugRecovers = usbConnectedBody.includes('!this.awaitingReconnect') &&
 const installClearsWait = installBody.includes('this.awaitingReconnect = false;') &&
   installBody.includes("this.lostSerial = '';");
 const failedRoutes = deviceFailedBody.includes('this.stopping || this.device === null') &&
-  deviceFailedBody.includes('this.deviceLost(e);');
+  deviceFailedBody.includes('this.deviceLost(e, true, extra);');
 check(
   'a lost device reconnects silently before any picker and resumes on replug',
   connectListenerCount === 1 && c6ConstructorBody.includes(connectWiring) &&
@@ -1079,9 +1081,17 @@ const bannerMethodStart = app.indexOf('private renderErrorBanner(): void {');
 const bannerMethodEnd = bannerMethodStart >= 0 ? app.indexOf('\n  }', bannerMethodStart) : -1;
 const bannerMethodBody = bannerMethodStart >= 0 && bannerMethodEnd > bannerMethodStart
   ? app.slice(bannerMethodStart, bannerMethodEnd) : '';
+// A notice (plain conclusion) replaces the diagnostic on top and collapses it under
+// "Technical details"; without one the banner text is the diagnostic, as before.
 const bannerShape = bannerMethodBody.includes('this.el.errorBanner.hidden = err === null;') &&
   bannerMethodBody.includes(
-    "this.el.errorBannerText.textContent = err === null ? '' : formatStatusError(err);");
+    "this.el.errorBannerText.textContent = err === null ? ''\n" +
+    '      : notice ? t(notice.key, notice.vars) : formatStatusError(err);') &&
+  bannerMethodBody.includes('this.el.errorDetails.hidden = !notice;') &&
+  bannerMethodBody.includes(
+    "this.el.errorDetailText.textContent = err !== null && notice ? formatStatusError(err) : '';") &&
+  bannerMethodBody.includes('this.el.errorAction.hidden = !action;') &&
+  html.includes('id="error-banner-details"') && html.includes('id="error-banner-action"');
 const dismissHandler = toolbarHandler("this.el.errorDismiss.addEventListener('click'");
 const bannerClears = dismissHandler.includes('this.statusError = null;') &&
   dismissHandler.includes('this.renderErrorBanner();') &&

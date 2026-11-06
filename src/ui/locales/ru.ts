@@ -150,6 +150,10 @@ export const ru: Messages = {
   'error.decodeWorkerWarmup': 'прогрев воркера декодера',
   'error.decode': 'декодирование {id}',
   'error.localeLoad': 'Не удалось загрузить языковой каталог',
+  'error.hostOverloadNotice':
+    'Захват прерван: USB-канал не успевает за {channels} CH @ {rate}. Снизьте частоту дискретизации или число каналов и запустите захват снова.',
+  'error.details': 'Технические подробности',
+  'error.lowerRate': 'Снизить до {rate}',
 
   // ---------------------------- connect failure guidance (error banner)
   'connectHelp.busy': 'Устройство занято другой вкладкой или программой (PulseView/DSView, sigrok-cli или страницей обновления прошивки). Закройте её и повторите попытку.',
@@ -461,6 +465,14 @@ export const ru: Messages = {
   'capturePanel.statusStoppingDetail': 'Остановка; текущий вид сохраняется',
   'capturePanel.statusWaitingDetail': 'Следующий захват через {interval}. Остановите для отмены; вид сохраняется.',
   'capturePanel.statusCompletedDetail': '{samples} образцов · {duration}',
+  'capturePanel.statusAborted': 'Прервано',
+  'capturePanel.statusAbortedDetail':
+    '{reason} · запрошено {requested} / фактически {actual} · {samples} отсчётов',
+  'capturePanel.statusAbortedOpenDetail':
+    '{reason} · фактически {actual} · {samples} отсчётов',
+  'capturePanel.abortHostOverload': 'Перегрузка хоста',
+  'capturePanel.abortDisconnected': 'Устройство отключено',
+  'capturePanel.abortDevice': 'Ошибка устройства',
   'capturePanel.progress': 'Ход захвата',
   'capturePanel.unlimited': 'Без ограничений',
   'capturePanel.duration': 'Длительность',
