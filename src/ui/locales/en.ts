@@ -17,13 +17,18 @@
  */
 
 export const en = {
+  // ------------------------------------------------------------ document
+  'app.title': 'SLogic Logic Analyzer',
+
   // ------------------------------------------------------------- toolbar
   'toolbar.device': 'Device',
   'toolbar.connect': 'Connect device',
-  'toolbar.reconnect': 'Reconnect',
+  'toolbar.deviceConnected': 'Connected',
+  'toolbar.deviceMenuTitle': '{device} is connected. Click for device details, Disconnect or Connect another device.',
   'toolbar.webusbUnavailable': 'WebUSB unavailable',
   'toolbar.connectHint': 'Click Connect and pick an SLogic16/32 U3. The grant is remembered for this origin.',
-  'toolbar.noWebusb': 'WebUSB is unavailable in this browser. Use Brave or Chrome over http://127.0.0.1.',
+  'toolbar.noWebusb': 'This browser cannot connect devices (no WebUSB). Use Chrome or Edge.',
+  'toolbar.noWebusbInsecure': 'Connecting a device needs a secure page (HTTPS or localhost). Open this page over HTTPS in Chrome or Edge.',
   'toolbar.start': 'Capture',
   'toolbar.stop': 'Stop',
   'toolbar.stopping': 'Stopping…',
@@ -117,6 +122,23 @@ export const en = {
   // -------------------------------------------------------- empty hint
   'emptyHint.line1': 'No capture loaded.',
   'emptyHint.line2': 'Open a .sr or .lwcap file, or connect an SLogic16/32 U3.',
+  'emptyHint.line2Connected': 'Press Capture to record from {device}, or open a .sr or .lwcap file.',
+  'emptyHint.line2NoUsb': 'Open a .sr or .lwcap file to view and decode it.',
+
+  // ---------------------------------------------------- browser notice
+  'notice.noUsb': 'This browser can only view and decode files. To connect a device, use Chrome or Edge.',
+  'notice.noUsbInsecure': 'This page is not a secure context, so it can only view and decode files. To connect a device, open it over HTTPS (or localhost) in Chrome or Edge.',
+  'notice.dismiss': 'Dismiss',
+
+  // ------------------------------------------------------- device menu
+  'deviceMenu.model': 'Model',
+  'deviceMenu.serial': 'Serial number',
+  'deviceMenu.unknown': 'unknown',
+  'deviceMenu.link': 'USB link',
+  'deviceMenu.linkUnknown': 'unknown (not reported by WebUSB)',
+  'deviceMenu.disconnect': 'Disconnect',
+  'deviceMenu.connectAnother': 'Connect another device',
+  'deviceMenu.firmware': 'Firmware update',
 
   // ------------------------------------- error prefixes (App.fail sites)
   'error.render': 'render',
@@ -132,6 +154,14 @@ export const en = {
   'error.decodeWorkerWarmup': 'decode worker warmup',
   'error.decode': 'decode {id}',
   'error.localeLoad': 'Could not load the language catalog',
+
+  // ---------------------------- connect failure guidance (error banner)
+  'connectHelp.busy': 'The device is in use by another tab or program (such as PulseView/DSView, sigrok-cli or the firmware updater). Close it, then retry.',
+  'connectHelp.busyTab': 'The device is in use by another logicweb tab. Disconnect it there or close that tab, then retry.',
+  'connectHelp.permission': 'The system denied access to the device. On Linux, install the SLogic udev rule and replug the board; on Windows, close any program holding it. Then retry.',
+  'connectHelp.lost': 'The device was disconnected. Check the USB cable, plug the board back in, then retry.',
+  'connectHelp.unsupported': 'This browser cannot connect devices. Use Chrome or Edge.',
+  'connectHelp.retry': 'Retry',
 
   // ---------------------------------------- status error detail codes
   'diagnostic.ui.localeLoad': '"{locale}" failed to load',

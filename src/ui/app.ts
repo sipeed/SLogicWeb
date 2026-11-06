@@ -57,10 +57,18 @@ import {
   captureFileName, formatForFileName, localDateParts, saveFilePickerTypes, type CaptureFileFormat,
 } from './captureFileName.js';
 import { saveSr, srExportParts, type SrProbe } from './srSave.js';
-import { detectCapabilities } from '../platform/capabilities.js';
 import { connectSamplerate } from './connectDefaults.js';
 import { formatCursorTimes } from './cursorTime.js';
 import { sameUsbDevice } from './deviceIdentity.js';
+import {
+  classifyConnectFailure, connectFailureRetryable, connectGuidanceKey, refineWithPeerTabs,
+} from './connectFailure.js';
+import {
+  FIRMWARE_UPDATE_URL, deviceMenuItems, deviceSupport, deviceToolbarView, emptyHintKey,
+  platformNoticeKey, type DeviceSupport,
+} from './deviceChrome.js';
+import { DeviceTabPresence } from './deviceTabPresence.js';
+import { detectCapabilities, type PlatformNavigatorLike } from '../platform/capabilities.js';
 import { formatCount, formatDuration, formatFreq,
   formatAnalyzerNote, formatCaptureLabel, formatStatusError,
   formatStatusErrorDebug, statusDetailOf } from './format.js';
@@ -184,6 +192,8 @@ const LOOP_STORE_HARD_SAMPLES = 0x7fffffff - 0x1000000;
 const LOOP_BUILD_SUSPEND_BYTES_PER_SEC = 160e6;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+/** sessionStorage flag: this tab's user dismissed the browser-support notice. */
+const PLATFORM_NOTICE_DISMISSED_KEY = 'logicweb.platformNoticeDismissed';
 
 /** Create one SVG node with constant attributes; the hint glyph has no other DOM needs. */
 function svgNode(tag: string, attrs: Readonly<Record<string, string>>): SVGElement {
@@ -259,6 +269,19 @@ export class App {
   private readonly languageMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
   private readonly saveMenu: SettingsMenu;
+  /** The connected-device menu; the Device command opens the chooser instead when idle. */
+  private readonly deviceMenu: SettingsMenu;
+  /** Answers/asks "which logicweb tab holds a device" for the busy-failure guidance. */
+  private readonly tabPresence = new DeviceTabPresence(() => this.device?.name ?? null);
+  /**
+   * Whether this browser can connect devices at all (probed once; it cannot change). Only
+   * the navigator and secure-context bits are handed to the probe, so it never spends a
+   * WebGL context on a question about USB.
+   */
+  private readonly deviceSupport: DeviceSupport = deviceSupport(detectCapabilities({
+    window: { navigator: navigator as PlatformNavigatorLike, isSecureContext: window.isSecureContext },
+  }));
+  private platformNoticeDismissed = false;
   private readonly shortcutsDialog: ShortcutsDialog;
   private detailedLabels = true;
   private lastWorkspaceSnapshot: string | null = null;
@@ -431,6 +454,9 @@ export class App {
     fit: HTMLButtonElement; fullscreen: HTMLButtonElement; settings: HTMLButtonElement;
     language: HTMLButtonElement; theme: HTMLButtonElement;
     errorBanner: HTMLDivElement; errorBannerText: HTMLSpanElement; errorDismiss: HTMLButtonElement;
+    errorGuidance: HTMLSpanElement; errorRetry: HTMLButtonElement;
+    platformNotice: HTMLDivElement; platformNoticeText: HTMLSpanElement;
+    platformNoticeDismiss: HTMLButtonElement; hintDetail: HTMLSpanElement;
     fileInput: HTMLInputElement;
   };
 
@@ -461,6 +487,12 @@ export class App {
       errorBanner: must<HTMLDivElement>('error-banner'),
       errorBannerText: must<HTMLSpanElement>('error-banner-text'),
       errorDismiss: must<HTMLButtonElement>('error-banner-dismiss'),
+      errorGuidance: must<HTMLSpanElement>('error-banner-guidance'),
+      errorRetry: must<HTMLButtonElement>('error-banner-retry'),
+      platformNotice: must<HTMLDivElement>('platform-notice'),
+      platformNoticeText: must<HTMLSpanElement>('platform-notice-text'),
+      platformNoticeDismiss: must<HTMLButtonElement>('platform-notice-dismiss'),
+      hintDetail: must<HTMLSpanElement>('empty-hint-detail'),
       fileInput: must<HTMLInputElement>('file-input'),
     };
 
@@ -468,6 +500,10 @@ export class App {
     // and <html lang> follows the stored locale - both before the first paint.
     document.documentElement.lang = getLocale();
     applyStaticI18n(document);
+    try {
+      this.platformNoticeDismissed = sessionStorage.getItem(PLATFORM_NOTICE_DISMISSED_KEY) === '1';
+    } catch { /* storage blocked: the notice simply shows */ }
+    this.renderPlatformNotice();
     const workspace = readWorkspaceSnapshot();
     if (workspace) {
       this.detailedLabels = workspace.detailedLabels;
@@ -511,6 +547,8 @@ export class App {
     this.settingsMenu = new SettingsMenu(must<HTMLButtonElement>('btn-settings'));
     this.languageMenu = new SettingsMenu(this.el.language, 'language-menu');
     this.themeMenu = new SettingsMenu(this.el.theme, 'theme-menu');
+    this.deviceMenu = new SettingsMenu(this.el.connect, 'device-menu');
+    this.menuStack.register(this.deviceMenu);
     this.menuStack.register(this.settingsMenu);
     this.menuStack.register(this.languageMenu);
     this.menuStack.register(this.themeMenu);
@@ -3472,7 +3510,13 @@ export class App {
   }
 
   private wireToolbar(): void {
-    this.el.connect.addEventListener('click', () => void this.connect());
+    this.el.connect.addEventListener('click', () => {
+      // Connected: a device-info menu, not a second chooser. Idle: the WebUSB chooser.
+      if (!this.device) { void this.connect(); return; }
+      this.channelList.closeDialog();
+      this.menuStack.closeOthers(this.deviceMenu, 'outside');
+      this.deviceMenu.toggle(this.deviceMenuItems());
+    });
     this.el.transport.addEventListener('click', () => this.primaryAction());
     must<HTMLButtonElement>('btn-open').addEventListener('click', () => {
       this.el.fileInput.value = '';
@@ -3513,6 +3557,13 @@ export class App {
       this.renderErrorBanner();
       this.relayout();
     });
+    this.el.errorRetry.addEventListener('click', () => void this.retryAcquire());
+    this.el.platformNoticeDismiss.addEventListener('click', () => {
+      this.platformNoticeDismissed = true;
+      try { sessionStorage.setItem(PLATFORM_NOTICE_DISMISSED_KEY, '1'); } catch { /* per-tab convenience only */ }
+      this.renderPlatformNotice();
+      this.relayout();
+    });
   }
 
   private async toggleFullscreen(): Promise<void> {
@@ -3547,6 +3598,58 @@ export class App {
         },
       },
     ];
+  }
+
+  private deviceMenuItems(): SettingsMenuItem[] {
+    const device = this.device;
+    if (!device) return [];
+    return deviceMenuItems({ name: device.name, serial: device.serial }, {
+      disconnect: () => void this.disconnectDevice(),
+      connectAnother: () => void this.connect(),
+      firmwareUpdate: () => {
+        // The updater needs the board for itself: release it here first, and open the
+        // page from this click so the popup is not blocked.
+        window.open(FIRMWARE_UPDATE_URL, '_blank', 'noopener');
+        void this.disconnectDevice();
+      },
+    });
+  }
+
+  /**
+   * The user's Disconnect: stop a running capture the normal way, then release the
+   * board. The grant is kept, so the next page load still reconnects silently; a replug
+   * in this session does not, because nothing is awaiting a reconnect.
+   */
+  private async disconnectDevice(): Promise<void> {
+    try {
+      if (this.running) await this.stopCapture('manual');
+      if (this.stopPending) await this.stopPending;
+      this.endPendingRepeatSession();
+    } catch (e) {
+      this.fail('error.stopCapture', e);
+    }
+    if (!this.device) return;
+    this.awaitingReconnect = false;
+    this.lostSerial = '';
+    this.detachDevice();
+    this.renderPanels();
+  }
+
+  /** The banner's Retry: the granted device first, then the chooser (this is a click). */
+  private async retryAcquire(): Promise<void> {
+    const hadDevice = this.device !== null;
+    this.statusError = null;
+    this.renderErrorBanner();
+    this.relayout();
+    if (!hadDevice) await this.reconnectGranted();
+    if (this.statusError === null && (hadDevice || this.device === null)) await this.connect();
+  }
+
+  private renderPlatformNotice(): void {
+    const key = platformNoticeKey(this.deviceSupport);
+    const show = key !== null && !this.platformNoticeDismissed;
+    this.el.platformNoticeText.textContent = show ? t(key) : '';
+    this.el.platformNotice.hidden = !show;
   }
 
   private languageItems(): SettingsMenuItem[] {
@@ -3715,6 +3818,7 @@ export class App {
     this.renderPanels();   // side panels + toolbar chrome
     this.renderInteractionBar(true);  // hint text follows the locale
     this.renderErrorBanner();
+    this.renderPlatformNotice();
     this.dirty = true;     // canvas labels (the overview origin, tick units) re-render
   }
 
@@ -3940,14 +4044,7 @@ export class App {
   private renderToolbarState(): void {
     const repeatPending = this.repeatTimer.pending;
     const showStop = this.running || repeatPending;
-    const webusbAvailable = typeof navigator !== 'undefined' && !!navigator.usb;
-    const deviceName = this.device?.name ?? null;
-    this.el.connect.setAttribute('aria-label',
-      deviceName ? `${t('toolbar.device')}: ${deviceName}` : t('toolbar.device'));
-    this.el.connect.disabled = !webusbAvailable;
-    this.el.connect.title = !webusbAvailable ? t('toolbar.noWebusb')
-      : deviceName ? t('toolbar.reconnect') : t('toolbar.connectHint');
-    this.el.connect.classList.toggle('connected', deviceName !== null);
+    this.renderDeviceCommand();
     this.el.open.setAttribute('aria-label', t('toolbar.open'));
     this.el.save.setAttribute('aria-label', t('toolbar.save'));
     this.el.fit.setAttribute('aria-label', t('toolbar.fit'));
@@ -4056,6 +4153,42 @@ export class App {
   }
 
   /**
+   * The Device command, the device menu's lifetime and the empty-state line that depends
+   * on the connection (deviceChrome.ts holds the per-state copy).
+   */
+  private renderDeviceCommand(): void {
+    const view = deviceToolbarView(this.device?.name ?? null, this.deviceSupport);
+    const button = this.el.connect;
+    if (!view.connected) {
+      this.deviceMenu.close('outside');
+      button.removeAttribute('aria-expanded');
+      button.removeAttribute('aria-haspopup');
+    } else {
+      button.setAttribute('aria-haspopup', 'true');
+    }
+    button.setAttribute('aria-label', view.ariaLabel);
+    button.disabled = view.disabled;
+    button.title = view.title;
+    button.classList.toggle('connected', view.connected);
+    const label = button.querySelector<HTMLElement>('.toolbar-item-label');
+    const text = view.state === null ? view.label : `${view.label} · ${view.state}`;
+    if (label && label.textContent !== text) {
+      const model = document.createElement('span');
+      model.textContent = view.label;
+      if (view.state === null) {
+        label.replaceChildren(model);
+      } else {
+        const state = document.createElement('span');
+        state.className = 'toolbar-device-state';
+        state.textContent = ` · ${view.state}`;
+        label.replaceChildren(model, state);
+      }
+    }
+    const detail = t(emptyHintKey(view.connected, this.deviceSupport), { device: view.label });
+    if (this.el.hintDetail.textContent !== detail) this.el.hintDetail.textContent = detail;
+  }
+
+  /**
    * The only rendering of `statusError`, in the full-width banner above the main row.
    * The bottom bar is interaction hints, not a status summary; dismissing the banner
    * clears the same state the debug snapshot reports.
@@ -4065,7 +4198,37 @@ export class App {
     // Fill the alert before revealing it, so a screen reader announces the message
     // rather than an empty live region.
     this.el.errorBannerText.textContent = err === null ? '' : formatStatusError(err);
+    const guidance = err?.guidance;
+    this.el.errorGuidance.textContent = guidance === undefined ? '' : t(guidance);
+    this.el.errorGuidance.hidden = guidance === undefined;
+    this.el.errorRetry.hidden = err?.retry !== true;
     this.el.errorBanner.hidden = err === null;
+  }
+
+  /**
+   * A failed device acquisition: the ordinary banner error plus the typed remedy
+   * (connectFailure.ts) and Retry. A busy interface is then narrowed to "another
+   * logicweb tab" if one answers the presence probe while the banner still shows it.
+   */
+  private failAcquire(what: MessageKey, e: unknown): void {
+    this.fail(what, e);
+    const err = this.statusError;
+    if (err === null) return;
+    const kind = classifyConnectFailure(e);
+    const typed: StatusError = {
+      ...err,
+      ...(kind === null ? {} : { guidance: connectGuidanceKey(kind) }),
+      ...(connectFailureRetryable(kind) ? { retry: true } : {}),
+    };
+    this.statusError = typed;
+    this.renderErrorBanner();
+    if (kind !== 'busy') return;
+    void this.tabPresence.probe().then((peers) => {
+      const refined = refineWithPeerTabs(kind, peers.length > 0);
+      if (this.statusError !== typed || refined === null || refined === kind) return;
+      this.statusError = { ...typed, guidance: connectGuidanceKey(refined) };
+      this.renderErrorBanner();
+    });
   }
 
   private fail(what: MessageKey, e: unknown, vars?: MessageVars): void {
@@ -4375,7 +4538,7 @@ export class App {
       if (d) this.installDevice(d, epoch);
     } catch (e) {
       // Not fatal: the device may be claimed by sigrok-cli, or unplugged.
-      this.fail('error.reconnect', e);
+      this.failAcquire('error.reconnect', e);
     }
   }
 
@@ -4400,7 +4563,7 @@ export class App {
       }
       return this.installDevice(d, epoch) ? 'connected' : 'failed';
     } catch (e) {
-      this.fail('error.connect', e);
+      this.failAcquire('error.connect', e);
       return 'failed';
     }
   }

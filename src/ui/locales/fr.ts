@@ -13,13 +13,18 @@
 import type { Messages } from './en.js';
 
 export const fr: Messages = {
+  // ------------------------------------------------------------ document
+  'app.title': 'Analyseur logique SLogic',
+
   // ------------------------------------------------------------- toolbar
   'toolbar.device': 'Appareil',
   'toolbar.connect': 'Connecter l’appareil',
-  'toolbar.reconnect': 'Reconnecter',
+  'toolbar.deviceConnected': 'Connecté',
+  'toolbar.deviceMenuTitle': '{device} est connecté. Cliquez pour les détails de l’appareil, Déconnecter ou Connecter un autre appareil.',
   'toolbar.webusbUnavailable': 'WebUSB indisponible',
   'toolbar.connectHint': 'Cliquez sur « Connecter l’appareil » et choisissez un SLogic16/32 U3. L’autorisation est mémorisée pour cette origine.',
-  'toolbar.noWebusb': 'WebUSB est indisponible dans ce navigateur. Utilisez Brave ou Chrome via http://127.0.0.1.',
+  'toolbar.noWebusb': 'Ce navigateur ne peut pas connecter d’appareil (pas de WebUSB). Utilisez Chrome ou Edge.',
+  'toolbar.noWebusbInsecure': 'La connexion d’un appareil exige une page sécurisée (HTTPS ou localhost). Ouvrez cette page en HTTPS dans Chrome ou Edge.',
   'toolbar.start': 'Capturer',
   'toolbar.stop': 'Arrêter',
   'toolbar.stopping': 'Arrêt…',
@@ -113,6 +118,23 @@ export const fr: Messages = {
   // -------------------------------------------------------- empty hint
   'emptyHint.line1': 'Aucune capture chargée.',
   'emptyHint.line2': 'Ouvrez un fichier .sr ou .lwcap, ou connectez un SLogic16/32 U3.',
+  'emptyHint.line2Connected': 'Appuyez sur Capturer pour enregistrer depuis {device}, ou ouvrez un fichier .sr ou .lwcap.',
+  'emptyHint.line2NoUsb': 'Ouvrez un fichier .sr ou .lwcap pour l’afficher et le décoder.',
+
+  // ---------------------------------------------------- browser notice
+  'notice.noUsb': 'Ce navigateur permet seulement d’afficher et de décoder des fichiers. Pour connecter un appareil, utilisez Chrome ou Edge.',
+  'notice.noUsbInsecure': 'Cette page n’est pas un contexte sécurisé : elle permet seulement d’afficher et de décoder des fichiers. Pour connecter un appareil, ouvrez-la en HTTPS (ou localhost) dans Chrome ou Edge.',
+  'notice.dismiss': 'Fermer',
+
+  // ------------------------------------------------------- device menu
+  'deviceMenu.model': 'Modèle',
+  'deviceMenu.serial': 'Numéro de série',
+  'deviceMenu.unknown': 'inconnu',
+  'deviceMenu.link': 'Liaison USB',
+  'deviceMenu.linkUnknown': 'inconnue (non fournie par WebUSB)',
+  'deviceMenu.disconnect': 'Déconnecter',
+  'deviceMenu.connectAnother': 'Connecter un autre appareil',
+  'deviceMenu.firmware': 'Mise à jour du micrologiciel',
 
   // ------------------------------------- error prefixes (App.fail sites)
   'error.render': 'rendu',
@@ -128,6 +150,14 @@ export const fr: Messages = {
   'error.decodeWorkerWarmup': 'préchauffage du worker de décodage',
   'error.decode': 'décodage {id}',
   'error.localeLoad': 'Impossible de charger le catalogue de langue',
+
+  // ---------------------------- connect failure guidance (error banner)
+  'connectHelp.busy': 'L’appareil est utilisé par un autre onglet ou programme (PulseView/DSView, sigrok-cli ou l’outil de mise à jour). Fermez-le, puis réessayez.',
+  'connectHelp.busyTab': 'L’appareil est utilisé par un autre onglet logicweb. Déconnectez-le dans cet onglet ou fermez-le, puis réessayez.',
+  'connectHelp.permission': 'Le système a refusé l’accès à l’appareil. Sous Linux, installez la règle udev SLogic et rebranchez la carte ; sous Windows, fermez le programme qui l’utilise. Puis réessayez.',
+  'connectHelp.lost': 'L’appareil a été déconnecté. Vérifiez le câble USB, rebranchez la carte, puis réessayez.',
+  'connectHelp.unsupported': 'Ce navigateur ne peut pas connecter d’appareil. Utilisez Chrome ou Edge.',
+  'connectHelp.retry': 'Réessayer',
 
   // ---------------------------------------- status error detail codes
   'diagnostic.ui.localeLoad': '« {locale} » n’a pas pu être chargé',

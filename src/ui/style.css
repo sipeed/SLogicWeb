@@ -299,6 +299,9 @@ html[data-theme="light"] button:active { box-shadow: inset 0 0 0 999px rgb(0 0 0
 #toolbar .primary .toolbar-item-media,
 #toolbar .danger .toolbar-item-media { background: transparent; color: inherit; }
 #toolbar .toolbar-device.connected .toolbar-item-media { color: var(--primary); }
+/* Connected: "SLogic32 U3 · Connected". The state word is the first thing to go on a
+   compact toolbar; the model and the primary-tinted icon still say it is connected. */
+#toolbar .toolbar-device-state { color: var(--primary); }
 #toolbar .toolbar-separator {
   align-self: center; flex: none; width: 1px; height: 28px; margin: 0 2px; background: var(--border);
 }
@@ -325,6 +328,7 @@ html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dar
   #toolbar .spacer { display: none; }
   /* The spacer is gone, so the last group keeps itself at the right edge. */
   #toolbar .toolbar-group:last-of-type { margin-left: auto; }
+  #toolbar .toolbar-device-state { display: none; }
 }
 
 /* Nine 38 px commands need 386 px; the smallest common phones are 360 px wide. */
@@ -971,6 +975,12 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
 .settings-item:hover, .settings-item.open { background: var(--popover-hover); }
 .settings-check { width: 14px; flex: none; color: var(--primary); }
 .settings-hint { margin-left: auto; padding-left: 12px; color: var(--muted-foreground); }
+/* Read-only identity rows (device menu): no hover, and a rule before the first action. */
+.settings-info { cursor: default; }
+.settings-info:hover { background: none; }
+.settings-info + .settings-item:not(.settings-info) {
+  margin-top: 3px; border-top: 1px solid var(--border); border-radius: 0;
+}
 
 :is(html[data-theme="dark"], html[data-theme="light"]) .select-popover,
 :is(html[data-theme="dark"], html[data-theme="light"]) .settings-menu,
@@ -1034,11 +1044,56 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
   height: 16px;
   margin-top: 1px;
 }
-.error-banner-text {
+.error-banner-body {
   flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.error-banner-text {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+/* The typed failure's remedy, on its own line under the diagnostic. */
+.error-banner-guidance { overflow-wrap: anywhere; font-weight: 600; }
+.error-banner-guidance[hidden], .error-banner-retry[hidden] { display: none; }
+.error-banner-retry {
+  flex: none;
+  align-self: center;
+  min-height: 24px;
+  padding: 2px 10px;
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: calc(var(--radius) / 2);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.error-banner-retry:hover { background: rgb(0 0 0 / 18%); }
+.error-banner-retry:focus-visible {
+  outline: 2px solid var(--destructive-foreground);
+  outline-offset: 1px;
+}
+
+/* Browser-support notice: neutral surface, warning-tinted icon - information about
+   what this browser can do, not a failure, so it never uses the destructive pair. */
+.platform-notice {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--muted);
+  border-bottom: 1px solid var(--border);
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.platform-notice[hidden] { display: none; }
+.platform-notice-icon { flex: none; width: 16px; height: 16px; margin-top: 1px; color: var(--warning); }
+.platform-notice-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.platform-notice-dismiss:focus-visible { outline-color: var(--ring); }
 .error-banner-dismiss {
   flex: none;
   display: inline-flex;
@@ -1062,7 +1117,7 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
 .error-banner-dismiss svg { width: 14px; height: 14px; }
 
 @media (max-width: 760px) {
-  .error-banner { padding: 7px 8px; font-size: 11px; }
+  .error-banner, .platform-notice { padding: 7px 8px; font-size: 11px; }
 }
 
 #overview {

@@ -11,13 +11,18 @@
 import type { Messages } from './en.js';
 
 export const zhCN: Messages = {
+  // ------------------------------------------------------------ document
+  'app.title': 'SLogic 逻辑分析仪',
+
   // ------------------------------------------------------------- toolbar
   'toolbar.device': '设备',
   'toolbar.connect': '连接设备',
-  'toolbar.reconnect': '重新连接',
+  'toolbar.deviceConnected': '已连接',
+  'toolbar.deviceMenuTitle': '{device} 已连接。点击查看设备信息、断开连接或连接其他设备。',
   'toolbar.webusbUnavailable': 'WebUSB 不可用',
   'toolbar.connectHint': '点击"连接设备"并选择 SLogic16/32 U3。浏览器会记住此站点的授权。',
-  'toolbar.noWebusb': '此浏览器不支持 WebUSB。请通过 http://127.0.0.1 使用 Brave 或 Chrome。',
+  'toolbar.noWebusb': '此浏览器无法连接设备（不支持 WebUSB）。请使用 Chrome 或 Edge。',
+  'toolbar.noWebusbInsecure': '连接设备需要安全页面（HTTPS 或 localhost）。请在 Chrome 或 Edge 中通过 HTTPS 打开本页。',
   'toolbar.start': '采集',
   'toolbar.stop': '停止',
   'toolbar.stopping': '正在停止…',
@@ -111,6 +116,23 @@ export const zhCN: Messages = {
   // -------------------------------------------------------- empty hint
   'emptyHint.line1': '尚未加载采集数据。',
   'emptyHint.line2': '打开 .sr 或 .lwcap 文件，或连接 SLogic16/32 U3。',
+  'emptyHint.line2Connected': '按“采集”从 {device} 记录数据，或打开 .sr 或 .lwcap 文件。',
+  'emptyHint.line2NoUsb': '打开 .sr 或 .lwcap 文件即可查看和解码。',
+
+  // ---------------------------------------------------- browser notice
+  'notice.noUsb': '当前浏览器只能查看和解码文件，连接设备请使用 Chrome 或 Edge。',
+  'notice.noUsbInsecure': '当前页面不是安全上下文，只能查看和解码文件。连接设备请在 Chrome 或 Edge 中通过 HTTPS（或 localhost）打开本页。',
+  'notice.dismiss': '关闭',
+
+  // ------------------------------------------------------- device menu
+  'deviceMenu.model': '型号',
+  'deviceMenu.serial': '序列号',
+  'deviceMenu.unknown': '未知',
+  'deviceMenu.link': 'USB 链路',
+  'deviceMenu.linkUnknown': '未知（WebUSB 不提供）',
+  'deviceMenu.disconnect': '断开连接',
+  'deviceMenu.connectAnother': '连接其他设备',
+  'deviceMenu.firmware': '固件更新',
 
   // ------------------------------------- error prefixes (App.fail sites)
   'error.render': '渲染',
@@ -126,6 +148,14 @@ export const zhCN: Messages = {
   'error.decodeWorkerWarmup': '解码工作线程预热',
   'error.decode': '解码 {id}',
   'error.localeLoad': '无法加载语言包',
+
+  // ---------------------------- connect failure guidance (error banner)
+  'connectHelp.busy': '设备正被其他标签页或程序（如 PulseView/DSView、sigrok-cli 或固件更新页面）占用，请关闭后重试。',
+  'connectHelp.busyTab': '设备正被另一个 logicweb 标签页占用，请在该标签页断开连接或关闭它后重试。',
+  'connectHelp.permission': '系统拒绝访问设备。Linux 请安装 SLogic 的 udev 规则并重新插拔设备；Windows 请关闭占用设备的程序。然后重试。',
+  'connectHelp.lost': '设备已断开。请检查 USB 线缆，重新插入设备后重试。',
+  'connectHelp.unsupported': '此浏览器无法连接设备。请使用 Chrome 或 Edge。',
+  'connectHelp.retry': '重试',
 
   // ---------------------------------------- status error detail codes
   'diagnostic.ui.localeLoad': '“{locale}”加载失败',

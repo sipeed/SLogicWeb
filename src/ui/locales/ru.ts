@@ -13,13 +13,18 @@
 import type { Messages } from './en.js';
 
 export const ru: Messages = {
+  // ------------------------------------------------------------ document
+  'app.title': 'Логический анализатор SLogic',
+
   // ------------------------------------------------------------- toolbar
   'toolbar.device': 'Устройство',
   'toolbar.connect': 'Подключить устройство',
-  'toolbar.reconnect': 'Переподключить',
+  'toolbar.deviceConnected': 'Подключено',
+  'toolbar.deviceMenuTitle': '{device} подключено. Нажмите, чтобы открыть сведения об устройстве, отключить его или подключить другое.',
   'toolbar.webusbUnavailable': 'WebUSB недоступен',
   'toolbar.connectHint': 'Нажмите «Подключить устройство» и выберите SLogic16/32 U3. Разрешение запоминается для этого источника.',
-  'toolbar.noWebusb': 'WebUSB недоступен в этом браузере. Используйте Brave или Chrome через http://127.0.0.1.',
+  'toolbar.noWebusb': 'Этот браузер не может подключать устройства (нет WebUSB). Используйте Chrome или Edge.',
+  'toolbar.noWebusbInsecure': 'Для подключения устройства нужна защищённая страница (HTTPS или localhost). Откройте эту страницу по HTTPS в Chrome или Edge.',
   'toolbar.start': 'Захват',
   'toolbar.stop': 'Стоп',
   'toolbar.stopping': 'Остановка…',
@@ -113,6 +118,23 @@ export const ru: Messages = {
   // -------------------------------------------------------- empty hint
   'emptyHint.line1': 'Захват не загружен.',
   'emptyHint.line2': 'Откройте файл .sr или .lwcap или подключите SLogic16/32 U3.',
+  'emptyHint.line2Connected': 'Нажмите «Захват», чтобы записать данные с {device}, или откройте файл .sr или .lwcap.',
+  'emptyHint.line2NoUsb': 'Откройте файл .sr или .lwcap, чтобы просмотреть и декодировать его.',
+
+  // ---------------------------------------------------- browser notice
+  'notice.noUsb': 'В этом браузере можно только просматривать и декодировать файлы. Для подключения устройства используйте Chrome или Edge.',
+  'notice.noUsbInsecure': 'Эта страница открыта не в защищённом контексте, поэтому можно только просматривать и декодировать файлы. Для подключения устройства откройте её по HTTPS (или через localhost) в Chrome или Edge.',
+  'notice.dismiss': 'Закрыть',
+
+  // ------------------------------------------------------- device menu
+  'deviceMenu.model': 'Модель',
+  'deviceMenu.serial': 'Серийный номер',
+  'deviceMenu.unknown': 'неизвестно',
+  'deviceMenu.link': 'USB-канал',
+  'deviceMenu.linkUnknown': 'неизвестно (WebUSB не сообщает)',
+  'deviceMenu.disconnect': 'Отключить',
+  'deviceMenu.connectAnother': 'Подключить другое устройство',
+  'deviceMenu.firmware': 'Обновление прошивки',
 
   // ------------------------------------- error prefixes (App.fail sites)
   'error.render': 'отрисовка',
@@ -128,6 +150,14 @@ export const ru: Messages = {
   'error.decodeWorkerWarmup': 'прогрев воркера декодера',
   'error.decode': 'декодирование {id}',
   'error.localeLoad': 'Не удалось загрузить языковой каталог',
+
+  // ---------------------------- connect failure guidance (error banner)
+  'connectHelp.busy': 'Устройство занято другой вкладкой или программой (PulseView/DSView, sigrok-cli или страницей обновления прошивки). Закройте её и повторите попытку.',
+  'connectHelp.busyTab': 'Устройство занято другой вкладкой logicweb. Отключите его там или закройте ту вкладку и повторите попытку.',
+  'connectHelp.permission': 'Система запретила доступ к устройству. В Linux установите правило udev для SLogic и переподключите плату; в Windows закройте программу, которая его использует. Затем повторите попытку.',
+  'connectHelp.lost': 'Устройство отключено. Проверьте USB-кабель, снова подключите плату и повторите попытку.',
+  'connectHelp.unsupported': 'Этот браузер не может подключать устройства. Используйте Chrome или Edge.',
+  'connectHelp.retry': 'Повторить',
 
   // ---------------------------------------- status error detail codes
   'diagnostic.ui.localeLoad': '«{locale}» не загружен',

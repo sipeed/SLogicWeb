@@ -247,6 +247,10 @@ export interface StatusError {
   what: MessageKey;
   vars?: MessageVars;
   detail: StatusDetail;
+  /** A typed device-acquisition failure's remedy, shown under the diagnostic. */
+  guidance?: MessageKey;
+  /** The banner offers Retry (re-acquire the device). */
+  retry?: boolean;
 }
 
 export function defaultChannelName(index: number): string {

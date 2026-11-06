@@ -334,6 +334,7 @@ function check(name: string, pass: boolean, detail: string): void {
   }
 
   const expectedText = [
+    'app.title', 'connectHelp.retry',
     'emptyHint.line1', 'emptyHint.line2',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortOpen', 'toolbar.shortSave',
     'toolbar.shortFit', 'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage',
@@ -347,7 +348,7 @@ function check(name: string, pass: boolean, detail: string): void {
   ];
   const expectedAriaLabels = [
     'panel.resizeLabel', 'toolbar.switchGroup', 'toolbar.viewGroup', 'shortcuts.close',
-    'hints.barLabel',
+    'hints.barLabel', 'notice.dismiss',
   ];
 
   const missingTextKeys = expectedText.filter((k) => !textFound.has(k));

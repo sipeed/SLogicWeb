@@ -2110,7 +2110,10 @@ export class Slogic16U3 implements Device {
 
 function usbRejection(code: DiagnosticCode, cause: unknown): unknown {
   if (!(cause instanceof DOMException)) return cause;
-  return new DiagnosticError(code, undefined, cause.message || undefined);
+  // The DOMException name (SecurityError, NetworkError, NotFoundError...) is what lets the
+  // UI tell a permission refusal from a busy interface (ui/connectFailure.ts).
+  return new DiagnosticError(code, cause.name ? { dom: cause.name } : undefined,
+    cause.message || undefined);
 }
 
 function parseConsoleNumber(token: string): number {

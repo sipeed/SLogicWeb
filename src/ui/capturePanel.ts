@@ -670,6 +670,7 @@ export class CapturePanel {
     statusDetail.dataset.captureStatusDetail = '';
     const statusValue = document.createElement('strong');
     statusValue.className = 'capture-status-value';
+    statusValue.translate = false;
     const progress = div('capture-progress');
     progress.setAttribute('role', 'progressbar');
     progress.setAttribute('aria-label', t('capturePanel.progress'));
@@ -1122,6 +1123,7 @@ export class CapturePanel {
         });
         const pos = document.createElement('span');
         pos.className = 'cursor-pos';
+        pos.translate = false;
         pos.textContent = cursorCellText(row);
         const remove = cursorRemoveButton(t('capturePanel.removeCursor', { label: row.label }),
           () => this.cb.onRemoveCursor(row.id));
@@ -1159,6 +1161,7 @@ export class CapturePanel {
           (cursorId) => this.cb.onPickCursorDistance(row.id, 'b', cursorId));
         const delta = document.createElement('span');
         delta.className = 'cursor-dist-delta';
+        delta.translate = false;
         delta.textContent = row.delta;
         const remove = cursorRemoveButton(
           t('capturePanel.cursorDistanceRemove', { row: row.row }),
@@ -1224,6 +1227,7 @@ export class CapturePanel {
         ));
         const result = document.createElement('span');
         result.className = 'cursor-edge-result';
+        result.translate = false;
         result.textContent = row.result;
         const remove = cursorRemoveButton(
           t('capturePanel.cursorEdgesRemove', { row: row.row }),
@@ -1284,6 +1288,7 @@ export class CapturePanel {
     consoleLabel.textContent = t('capturePanel.usbConsole');
     const output = document.createElement('pre');
     output.className = 'usb-console-output';
+    output.translate = false;
     const renderOutput = (): void => {
       output.textContent = this.consoleLines.join('\n');
       output.scrollTop = output.scrollHeight;
@@ -1438,6 +1443,7 @@ function distanceSideControl(
       chip.style.color = chipForeground(cursor.color);
       const pos = document.createElement('span');
       pos.className = 'cursor-pos';
+      pos.translate = false;
       pos.textContent = cursorCellText(cursor);
       choice.append(mark, chip, pos);
       choice.addEventListener('click', () => onPick(cursor.id));
@@ -1534,6 +1540,7 @@ function edgeSideControl(
       chip.style.color = chipForeground(cursor.color);
       const pos = document.createElement('span');
       pos.className = 'cursor-pos';
+      pos.translate = false;
       pos.textContent = cursorCellText(cursor);
       choice.append(mark, chip, pos);
       choice.addEventListener('click', () => onPick(cursor.id));

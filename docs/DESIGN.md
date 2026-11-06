@@ -148,7 +148,7 @@ Target top bar, left to right (≤ 8 commands):
 
 | Control | Appearance | Behaviour |
 | --- | --- | --- |
-| Device | Icon + short label; connected tint | Opens the Link panel: connect/reconnect, serial, profile, link rate, busy/lost state. Disabled when WebUSB is unsupported. |
+| Device | Icon + short label; connected tint; connected label is the model and `· Connected` (the state word drops on compact) | Idle: opens the WebUSB chooser. Connected: opens the device menu (model, serial, USB link — `unknown`, WebUSB reports no speed and throughput is not evidence; Disconnect, Connect another device, Firmware update ↗ which releases the board and opens the public updater). Target: the Link panel. Disabled, with a reason tooltip, when WebUSB is unsupported. |
 | Capture / Stop | Primary split button; label/summary names mode and retention (`Single · 10 ms`, `Loop · 1.0 s`, `Record`) | The only start/stop action. Chevron: Single, Repeat, Loop, Autoset. Disabled with the same `canRun` guard for click, keyboard, host interface and debug. |
 | Open | Icon + label | Imports a capture; stops a running acquisition after confirmation if data would be lost. |
 | Save / Export | Icon + label | Saves the displayed capture or exports the record; opens the export sheet. Disabled without data. Today it opens a two-row format menu: `.lwcap` (first; lossless, keeps gaps) and `.sr` (sigrok session for PulseView; digital channels only). With the File System Access picker both types are offered and the picked extension decides the format; otherwise the file downloads. Default name: `<model>_<N>ch_<rate>_<local YYYYMMDD-HHMMSS>` (model = the device's reported name without spaces, `capture` without one), or the opened file's base name. |
@@ -422,6 +422,11 @@ Target panels (each with at most four sections):
 
 On a platform without WebUSB, the Device panel states the typed reason and offers file
 replay/Demo; Capture is disabled. The rest of the interface still works on imported data.
+Until that panel exists, a dismissible browser-support notice (neutral surface, warning
+icon, `role=status`, below the error banner) says the browser can only view and decode
+files and names Chrome/Edge; it mentions HTTPS/localhost only when the cause is an
+insecure context. The empty-state hint then offers files only; with a device connected it
+prompts Capture instead of inviting a connection.
 
 Settings › About shows the app version, PWA/update state, licenses and the storage
 clear-data action; an update is an explicit prompt, never a silent reload.
@@ -466,6 +471,12 @@ polite live region, so assistive technology reads the area and hints when they c
 - Errors are typed (`unsupported-platform`, `permission`, `busy`, `handshake`,
   `profile`, `transfer`, `lost`, `suspended`, `memory`, `quota`, `record-full`, ...) and
   actionable; the diagnostic code stays in the console prefix.
+- A failed device acquisition (Connect, the silent re-acquire, Retry) is classified as
+  busy (another tab or program such as PulseView/DSView holds the interface; narrowed to
+  "another logicweb tab" when one answers a same-origin presence probe), permission
+  (udev rule / exclusive holder), lost or unsupported. The banner shows the diagnostic,
+  then the remedy on its own line, and a Retry action (granted device first, then the
+  chooser) for every kind except unsupported. There is no forced takeover.
 - Every async operation has a busy and terminal state; no silent catch.
 - The bar never becomes a log; diagnostics go to the Diagnostics panel.
 
@@ -584,6 +595,9 @@ polite live region, so assistive technology reads the area and hints when they c
 - Touch copy says "Tap", mouse copy says "Click"; shared copy avoids both. A hint never
   relies on hover alone.
 - Decoder-produced names/fields pass through untranslated; surrounding labels localise.
+- `<html lang>` and the tab title (`app.title`) follow the active locale. The label column,
+  the plot (waveforms, annotations, scales) and numeric readouts carry `translate="no"` so
+  browser page translation never rewrites data; the empty hint opts back in.
 - Errors name the operation and keep the diagnostic code in the console prefix.
 
 ## 16. Interface review gate

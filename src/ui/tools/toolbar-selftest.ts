@@ -65,8 +65,10 @@ check(
   `toolbar=${toolbar.length}, connectCount=${connectCount}, connect@${connectIndex}, transport@${transportIndex}, first=${firstCommand}`,
 );
 
-const callbackPattern = /this\.el\.connect\.addEventListener\('click',\s*\(\)\s*=>\s*void this\.connect\(\)\)/;
-const callback = callbackPattern.test(app);
+// Idle: the click is the WebUSB chooser. Connected: the device menu (deviceChrome.ts).
+const callbackPattern = /this\.el\.connect\.addEventListener\('click',\s*\(\)\s*=>\s*\{\s*[^}]*if \(!this\.device\) \{ void this\.connect\(\); return; \}[\s\S]*?this\.deviceMenu\.toggle\(this\.deviceMenuItems\(\)\);/;
+const callback = callbackPattern.test(app) &&
+  (app.match(/this\.el\.connect\.addEventListener\('click'/g) ?? []).length === 1;
 const element = app.includes("connect: must<HTMLButtonElement>('btn-connect')");
 check(
   'toolbar connection binds the existing App.connect path once',
@@ -85,11 +87,10 @@ check(
 );
 
 const stateNeedles = [
-  "deviceName ? `${t('toolbar.device')}: ${deviceName}` : t('toolbar.device')",
-  'this.el.connect.disabled = !webusbAvailable',
-  'this.el.connect.title =',
-  "t('toolbar.noWebusb')",
-  "t('toolbar.reconnect')",
+  'const view = deviceToolbarView(this.device?.name ?? null, this.deviceSupport);',
+  'button.disabled = view.disabled;',
+  'button.title = view.title;',
+  "button.classList.toggle('connected', view.connected);",
 ];
 const missingState = stateNeedles.filter((needle) => !app.includes(needle));
 check(
@@ -994,7 +995,7 @@ check(
 
 const directButtonTranslations = commandIds.filter((id) => /<button\b[^>]*\sdata-i18n\s*=/.test(commandMarkup(id)));
 const dynamicNames = [
-  "deviceName ? `${t('toolbar.device')}: ${deviceName}` : t('toolbar.device')",
+  "button.setAttribute('aria-label', view.ariaLabel);",
   "this.el.open.setAttribute('aria-label', t('toolbar.open'))",
   "this.el.save.setAttribute('aria-label', t('toolbar.save'))",
   "this.el.fit.setAttribute('aria-label', t('toolbar.fit'))",

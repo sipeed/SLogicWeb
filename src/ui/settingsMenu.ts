@@ -44,6 +44,8 @@ export interface SettingsMenuItem {
   onPick?: () => void;
   /** Non-leaf rows: flyout content. */
   children?: SettingsMenuItem[];
+  /** Read-only label/value row (the device menu's identity rows): not a button. */
+  info?: boolean;
 }
 
 /** Why the menu closed - decides whether focus returns to the anchor. */
@@ -69,7 +71,7 @@ export class SettingsMenu {
     const menu = document.createElement('div');
     menu.className = 'settings-menu';
     menu.id = this.menuId;
-    for (const item of items) menu.appendChild(this.buildRow(item));
+    for (const item of items) menu.appendChild(item.info ? this.buildInfoRow(item) : this.buildRow(item));
     document.body.appendChild(menu);
 
     // Right-align to the anchor's right edge; width stays content-driven.
@@ -84,7 +86,7 @@ export class SettingsMenu {
     document.addEventListener('keydown', this.onKeyDown, true);
     window.addEventListener('resize', this.onResize);
     // Keyboard users landing here via Enter need focus inside, not a Tab walk past it.
-    (menu.firstElementChild as HTMLElement | null)?.focus();
+    menu.querySelector<HTMLElement>('button')?.focus();
   }
 
   close(reason: CloseReason): void {
@@ -99,6 +101,23 @@ export class SettingsMenu {
     // Focus dies with the node unless we hand it back - but an outside click has its
     // own target, and resize/retranslate are system events; neither is ours to steal.
     if (reason === 'escape' || reason === 'pick') this.anchor.focus();
+  }
+
+  private buildInfoRow(item: SettingsMenuItem): HTMLDivElement {
+    const row = document.createElement('div');
+    row.className = 'settings-item settings-info';
+    const check = document.createElement('span');
+    check.className = 'settings-check';
+    check.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.textContent = item.label;
+    const value = document.createElement('span');
+    value.className = 'settings-hint';
+    // Identity values are data (model, serial): never machine-translated.
+    value.translate = false;
+    value.textContent = item.hint ?? '';
+    row.append(check, label, value);
+    return row;
   }
 
   private buildRow(item: SettingsMenuItem): HTMLButtonElement {
