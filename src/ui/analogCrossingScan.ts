@@ -13,9 +13,9 @@
  * does. The scan is strided so its cost is bounded by the sample rate rather than by the
  * data volume; a strided scan can miss a pulse shorter than the stride, which is the price
  * of keeping this off the ingest path. Every crossing it does report is a real one, and a
- * reported crossing is refined at sample resolution inside the scanned interval (except
- * across a chunk boundary), so a display anchor does not inherit the stride. That is all
- * the display anchor needs.
+ * reported crossing is refined at sample resolution inside the scanned interval - also
+ * across a chunk boundary, from a short tail of the previous chunk's codes - so a display
+ * anchor does not inherit the stride. That is all the display anchor needs.
  */
 
 import { reverseAdcByte } from '../data/softwareTrigger.js';
@@ -49,6 +49,16 @@ export class AnalogCrossingScanner {
    *  period divides the stride lands on the same phase at every scanned sample and is
    *  never seen as a crossing; shifting the grid guarantees every phase is sampled. */
   private phase = 0;
+  /** Absolute index of the sample `previous` was read from. */
+  private previousAbs = -1;
+  /**
+   * The newest codes before the current chunk (contiguous, ending at `tailEndAbs`), so a
+   * crossing between the previous chunk's last scanned sample and this chunk's first one
+   * is refined at sample resolution too. Bounded: at most `2 * stride + 2` codes.
+   */
+  private readonly tail: Uint8Array;
+  private tailCount = 0;
+  private tailEndAbs = -1;
 
   constructor(opts: AnalogCrossingScannerOptions) {
     if (!Number.isInteger(opts.stride) || opts.stride < 1) {
@@ -57,6 +67,7 @@ export class AnalogCrossingScanner {
     this.channels = opts.channels;
     this.bytesPerSample = bytesPerSampleForChannels(opts.channels);
     this.stride = opts.stride;
+    this.tail = new Uint8Array(2 * opts.stride + 2);
     this.condition = { ...opts.condition };
     this.assertCondition(this.condition);
   }
@@ -67,12 +78,14 @@ export class AnalogCrossingScanner {
     this.condition = { ...condition };
     this.previous = -1;
     this.lastReported = Number.NEGATIVE_INFINITY;
+    this.tailCount = 0;
   }
 
   /** A transport gap invalidates a crossing across it. */
   resetContinuity(): void {
     this.previous = -1;
     this.lastReported = Number.NEGATIVE_INFINITY;
+    this.tailCount = 0;
   }
 
   get current(): AnalogCrossingCondition {
@@ -110,13 +123,26 @@ export class AnalogCrossingScanner {
           // A strided scan only says a crossing happened somewhere in (previousOff, off].
           // Refine it at sample resolution inside that interval so a re-anchor is
           // phase-exact even at stride > 1. The interval is at most one stride long.
-          if (step > bps && previousOff >= 0) {
-            for (let o = previousOff + bps; o <= off; o += bps) {
+          if (step > bps) {
+            let found = false;
+            // The interval starts in the previous chunk when this is its first scanned
+            // sample: walk the kept tail first (only the part after `previous`).
+            if (previousOff < 0 && this.tailEndAbs === baseAbs) {
+              const tailStart = this.tailEndAbs - this.tailCount;
+              for (let k = Math.max(0, this.previousAbs + 1 - tailStart); k < this.tailCount; k++) {
+                const c = this.tail[k]!;
+                if (rising ? c >= level : c <= level) {
+                  at = tailStart + k;
+                  found = true;
+                  break;
+                }
+              }
+            }
+            for (let o = previousOff >= 0 ? previousOff + bps : 0; !found && o <= off; o += bps) {
               const c = reverseAdcByte(bytes[o + byte]!);
-              const hit = rising ? c >= level : c <= level;
-              if (hit) {
+              if (rising ? c >= level : c <= level) {
                 at = baseAbs + o / bps;
-                break;
+                found = true;
               }
             }
           }
@@ -127,9 +153,28 @@ export class AnalogCrossingScanner {
         }
       }
       this.previous = code;
+      this.previousAbs = baseAbs + off / bps;
       previousOff = off;
     }
+    this.keepTail(bytes, whole, baseAbs, byte);
     this.phase = (this.phase + 1) % this.stride;
+  }
+
+  /** Keep the newest codes up to this chunk's end (contiguous with the old tail or not). */
+  private keepTail(bytes: Uint8Array, whole: number, baseAbs: number, byte: number): void {
+    if (this.stride === 1) return;
+    const bps = this.bytesPerSample;
+    const samples = whole / bps;
+    const cap = this.tail.length;
+    if (this.tailEndAbs !== baseAbs) this.tailCount = 0;
+    const take = Math.min(samples, cap);
+    const keepOld = Math.min(this.tailCount, cap - take);
+    this.tail.copyWithin(0, this.tailCount - keepOld, this.tailCount);
+    for (let i = 0; i < take; i++) {
+      this.tail[keepOld + i] = reverseAdcByte(bytes[(samples - take + i) * bps + byte]!);
+    }
+    this.tailCount = keepOld + take;
+    this.tailEndAbs = baseAbs + samples;
   }
 
   /** Collecting form of `scan`, for tests and small callers. */

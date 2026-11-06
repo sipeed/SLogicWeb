@@ -194,6 +194,44 @@ const adc = (code: number): number => adcWord(0, code);
     wide(64, 24) && wide(128, 120), `wide=${wide(64, 24)}/${wide(128, 120)}`);
 }
 
+// A crossing whose strided interval spans a chunk boundary is refined from the kept tail
+// of the previous chunk too. Unrefined, it was reported up to a stride late - on a fast
+// signal past the peak, so a Rising level drew T on the falling slope.
+{
+  const n = 120_000;
+  const level = 160;
+  for (const kind of ['rising', 'falling'] as const) {
+    let bad = '';
+    let total = 0;
+    for (const stride of [4, 16, 64]) {
+      for (const period of [37, 100, 1000]) {
+        const codes = new Uint8Array(n);
+        for (let i = 0; i < n; i++) codes[i] = Math.round(128 + 100 * Math.sin((2 * Math.PI * i) / period));
+        const bytes = new Uint8Array(n * 2);
+        for (let i = 0; i < n; i++) bytes[2 * i] = reverseAdcByte(codes[i]!);
+        const scanner = new AnalogCrossingScanner({ channels: 16, condition: { start: 0, kind, level }, stride });
+        let pos = 0;
+        let chunk = 997;
+        while (pos < n && !bad) {
+          const len = Math.min(n - pos, chunk);
+          chunk = 500 + ((chunk * 7919) % 4000);
+          for (const at of scanner.feed(bytes.subarray(pos * 2, (pos + len) * 2), pos)) {
+            total++;
+            const before = codes[at - 1];
+            const here = codes[at]!;
+            const real = before !== undefined && (kind === 'rising'
+              ? before < level && here >= level : before > level && here <= level);
+            if (!real) bad = `stride ${stride} period ${period}: sample ${at} (${before} -> ${here})`;
+          }
+          pos += len;
+        }
+      }
+    }
+    check(`every ${kind} crossing is exact across chunk boundaries at strides 4-64`,
+      bad === '' && total > 0, bad || `${total} crossings`);
+  }
+}
+
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
