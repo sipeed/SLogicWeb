@@ -359,6 +359,13 @@ export class App {
   /** What the last successful save of each capture store wrote (fileGuards.ts). */
   private readonly savedCaptures = new SavedCaptures();
   private readonly confirmDialog = new ConfirmDialog();
+  /**
+   * The device's channel layout (names, colours, enabled flags, order) while an opened
+   * file is displayed. A file shows its own rows, but those are the viewed capture, not
+   * the next capture's setup: the workspace keeps persisting this layout, and the next
+   * Start restores it (ARCHITECTURE §5.3, applied vs next). Null when no file is shown.
+   */
+  private deviceLayout: { channels: ChannelState[]; order: number[] } | null = null;
   /** The installed `beforeunload` guard, present only while a capture is unsaved. */
   private unloadGuard: ((event: BeforeUnloadEvent) => void) | null = null;
   /** Info about the file just opened (e.g. probes an old .sr could not carry); null when none. */
@@ -882,10 +889,15 @@ export class App {
     return this.captureLabel.kind === 'loaded';
   }
 
+  /**
+   * The next capture's width choices. While a file is displayed its rows are not the
+   * capture model (startCapture grows the model to the device width), so the tiers follow
+   * the device alone and stay visible: they edit the next capture, not the file.
+   */
   private widthTiers(): number[] {
-    const capacity = this.channels.length;
     const deviceMax = this.device?.maxChannels ?? null;
-    return captureWidthTiers(deviceMax === null ? null : Math.min(deviceMax, capacity), this.loadedCapture());
+    const capacity = this.loadedCapture() ? deviceMax : this.channels.length;
+    return captureWidthTiers(deviceMax === null || capacity === null ? null : Math.min(deviceMax, capacity));
   }
 
   private displayChannelCount(): number {
@@ -2232,10 +2244,12 @@ export class App {
     // acquisition keeps the width (and therefore the rows) it started with.
     if (this.stopping) return;
     if (!this.widthTiers().includes(channels)) return;
-    if (!isChannelCount(channels) || channels > this.channels.length) return;
+    if (!isChannelCount(channels)) return;
+    if (!this.loadedCapture() && channels > this.channels.length) return;
     // A running capture keeps its rows; the width change is pending and the out-of-width
-    // views are removed when the capture ends (finishCapture).
-    if (!this.running) {
+    // views are removed when the capture ends (finishCapture). A displayed file keeps its
+    // rows too: the views address the file's channels, not the next capture's width.
+    if (!this.running && !this.loadedCapture()) {
       this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, channels));
     }
     if (channels !== this.settings.channels) this.widthExplicit = true;
@@ -4367,8 +4381,10 @@ export class App {
       developerTools: this.developerTools,
       compactRows: this.compactRows,
       hideIdleChannels: this.hideIdleChannels,
-      channels: this.channels.map(({ name, color, enabled }) => ({ name, color, enabled })),
-      order: [...this.order],
+      // An opened file's rows are the viewed capture; the device layout is what persists.
+      channels: (this.deviceLayout?.channels ?? this.channels)
+        .map(({ name, color, enabled }) => ({ name, color, enabled })),
+      order: [...(this.deviceLayout?.order ?? this.order)],
       capture: {
         channels: this.settings.channels,
         widthExplicit: this.widthExplicit,
@@ -5311,6 +5327,9 @@ export class App {
     this.repeatMissed = false;
     this.settledHeldCapture = false;
     this.clearRepeatLayers();
+    // The first file over device data sets the device layout aside; a second file keeps
+    // the one already set aside, never the previous file's rows.
+    if (!this.loadedCapture()) this.deviceLayout = { channels: this.channels, order: this.order };
     this.channels = defaultChannels(store.channelCount);
     for (let i = 0; i < this.channels.length; i++) {
       // Keep real names ("SDA"); drop auto-generated ones that would just repeat the
@@ -5351,10 +5370,9 @@ export class App {
     this.captureIsLoop = false;
     this.captureAbort = null;
     this.captureLabel = label;
-    this.widthExplicit = false;
-    this.settings = carryCaptureDuration(this.settings, this.clampSettings(
-      { ...this.settings, channels: channelWidthForProbes(store.channelCount) },
-    ));
+    // The file is the viewed capture only: the next capture's settings (width, rate,
+    // trigger, widthExplicit) are not clamped to it or persisted from it. The rows shown
+    // follow the file through displayChannelCount() while the label is `loaded`.
     this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));
     this.reconcileEdgeChannels();
     this.persistWorkspace();
@@ -5505,6 +5523,15 @@ export class App {
   private setSaveProgress(percent: number | null): void {
     this.savePercent = percent;
     if (this.capturePageShown()) this.capturePanel.updateSaveProgress(percent);
+  }
+
+  /** Bring back the device layout an opened file set aside (no-op when none was). */
+  private restoreDeviceLayout(): void {
+    const layout = this.deviceLayout;
+    if (layout === null) return;
+    this.deviceLayout = null;
+    this.channels = layout.channels;
+    this.order = layout.order;
   }
 
   /** A save in any format wrote `length` samples of `store`: it is no longer unsaved. */
@@ -5775,6 +5802,8 @@ export class App {
       this.discardDecodeState();
       this.releaseMarkerPointer();
       this.resetBusBuilds();
+      // The capture replaces a displayed file: its rows give way to the device layout.
+      this.restoreDeviceLayout();
       if (!quietRepeat) {
         const model = Math.max(cfg.channels, this.device?.maxChannels ?? this.channels.length);
         this.channels = carryChannelState(this.channels, model);

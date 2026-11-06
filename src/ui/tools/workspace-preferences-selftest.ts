@@ -1327,7 +1327,8 @@ const snapshotBody = snapshotStart >= 0 && persistStart > snapshotStart
 check('the App snapshot boundary serializes canonical labels/channels/order and caches only successful writes',
   snapshotBody.includes('version: WORKSPACE_SCHEMA_VERSION') &&
   snapshotBody.includes('detailedLabels: this.detailedLabels') &&
-  snapshotBody.includes('channels: this.channels.map') && snapshotBody.includes('order: [...this.order]') &&
+  snapshotBody.includes('channels: (this.deviceLayout?.channels ?? this.channels)\n        .map(') &&
+  snapshotBody.includes('order: [...(this.deviceLayout?.order ?? this.order)]') &&
   persistBody.includes('serializeWorkspaceSnapshot(snapshot)') &&
   persistBody.includes('if (serialized === this.lastWorkspaceSnapshot) return;') &&
   persistBody.includes('if (writeWorkspaceSnapshot(snapshot)) this.lastWorkspaceSnapshot = serialized;') &&
@@ -1518,8 +1519,10 @@ const widthSetterBody = app.split('private setChannelWidth(channels: number): vo
   ?.split('private afterChannelChange(')[0] ?? '';
 const afterMaskBody = app.split('private afterChannelChange(): void {')[1]?.split('\n  }')[0] ?? '';
 const adoptBody = app.split('private adoptCapture(')[1]?.split('private save(')[0] ?? '';
+const adoptOnly = adoptBody.split('private saveItems(')[0] ?? '';
 const widthWiring = app.includes('private widthExplicit = false;') &&
-  adoptBody.includes('this.widthExplicit = false;') &&
+  // Opening a file is the viewed capture: it never rewrites the next capture's width.
+  !adoptOnly.includes('this.widthExplicit') && !adoptOnly.includes('this.settings = ') &&
   constructorBody.includes('this.widthExplicit = workspace?.capture?.widthExplicit === true;') &&
   constructorBody.includes('const initialWidth = workspace?.capture?.channels ?? channelWidthForProbes(this.channels.length);') &&
   widthSetterBody.includes('if (channels !== this.settings.channels) this.widthExplicit = true;') &&

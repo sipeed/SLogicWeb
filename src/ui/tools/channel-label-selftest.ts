@@ -128,6 +128,8 @@ const fixture: ChannelState[] = defaultChannels(8).map((c) => ({
     'this.channels = defaultChannels(store.channelCount);',
     'this.channels = carryChannelState(this.channels, max);',
     'this.channels = carryChannelState(this.channels, model);',
+    // An opened file set the device layout aside; the next Start restores it.
+    'this.channels = layout.channels;',
   ];
   const missing = sanctioned.filter((site) => !occursOnce(site));
   const siteCount = app.split('this.channels = ').length - 1;
@@ -153,7 +155,7 @@ const fixture: ChannelState[] = defaultChannels(8).map((c) => ({
     !startBody.includes('defaultChannels(');
 
   check('every App channel-model rebuild is sanctioned and rebuilds the order after the carry',
-    siteCount === 4 && missing.length === 0 && defaultCount === 3 && strayDefaults.length === 0 &&
+    siteCount === 5 && missing.length === 0 && defaultCount === 3 && strayDefaults.length === 0 &&
     noDefaultsInResize && deviceOrder && startOrder && identityOrder,
     `sites=${siteCount}, missing=${missing.length === 0 ? 'none' : missing.join(' | ')}, ` +
     `defaultChannels=${defaultCount}, strayDefaults=${strayDefaults.length}, ` +

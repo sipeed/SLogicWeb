@@ -300,8 +300,8 @@ export function channelWidthOptions(channelCount: number): number[] {
   return CHANNEL_WIDTH_OPTIONS.filter((n) => n <= max);
 }
 
-export function captureWidthTiers(deviceChannels: number | null, loadedCapture: boolean): number[] {
-  if (deviceChannels === null || loadedCapture) return [];
+export function captureWidthTiers(deviceChannels: number | null): number[] {
+  if (deviceChannels === null) return [];
   return channelWidthOptions(deviceChannels);
 }
 

@@ -672,6 +672,17 @@ Key transitions (the full table is generated in one pure module):
   `activePlan` from `applied` and `nextPlan` from `next`; a pending edit never retunes or
   recompiles the active plan. `recompile-trigger` is emitted only when the active plan
   changed, and `disarm-trigger` when an active mask is turned off.
+- **Viewed capture vs next capture.** `settings` (and `widthExplicit`) are always the
+  *next* capture's setup: width, rate, trigger, mode. An opened `.sr`/`.lwcap` is only
+  the *viewed* capture: `adoptCapture` swaps in the file's store and rows and never
+  commits, clamps or persists settings from it. While the label is `loaded`,
+  `displayChannelCount()` follows the file's rows, the width tiers still follow the
+  device (and edit the next capture), and the device channel layout (names, colours,
+  enabled, order) is set aside in `deviceLayout`; the workspace keeps persisting that
+  layout, and the next Start restores it before growing the model to the device width.
+  A device reconnect while a file is shown leaves both untouched. Not carried across a
+  file: bus/analog views and decoders that address channels the file lacks are still
+  dropped (and an analog trigger level with its view) - they belong to the rows shown.
 - Recording is an acquisition command, not a `CaptureConfig` setting: the Capture menu and
   the Record panel dispatch the same record command, so there is one owner of record state.
 - Panels send field patches, never whole snapshots. A preview gesture writes a draft;

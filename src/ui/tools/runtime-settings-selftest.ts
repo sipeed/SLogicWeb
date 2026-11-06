@@ -68,9 +68,9 @@ const zh = fs.readFileSync('src/ui/locales/zh-CN.ts', 'utf8');
   const analog = between(app, 'private toggleAnalog(start: number): void {', 'private analogGroups');
   check('width and analog view changes are accepted while running and blocked only while stopping',
     width.includes('if (this.stopping) return;') && !width.includes('if (this.running || this.stopping) return;') &&
-    width.includes('if (!this.running) {') &&
+    width.includes('if (!this.running && !this.loadedCapture()) {') &&
     analog.includes('if (this.stopping) return;') && !analog.includes('if (this.running || this.stopping) return;'),
-    `width=${width.includes('if (this.stopping) return;')}, filter=${width.includes('if (!this.running) {')}, ` +
+    `width=${width.includes('if (this.stopping) return;')}, filter=${width.includes('if (!this.running && !this.loadedCapture()) {')}, ` +
     `analog=${analog.includes('if (this.stopping) return;')}`);
 }
 

@@ -287,13 +287,19 @@ check('bank start uses the absolute channel index',
     `3=${channelWidthOptions(3)}, 7=${channelWidthOptions(7)}, 17=${channelWidthOptions(17)}`);
 
   const tierValues = [
-    captureWidthTiers(null, false), captureWidthTiers(16, false), captureWidthTiers(32, false),
-    captureWidthTiers(8, false), captureWidthTiers(32, true), captureWidthTiers(16, true),
+    captureWidthTiers(null), captureWidthTiers(16), captureWidthTiers(32), captureWidthTiers(8),
   ].map((list) => list.join(','));
-  check('width tiers need a connected device and a capture that does not fix the width',
-    tierValues.join('|') === '|4,8,16|4,8,16,32|4,8||',
-    ['null,false', '16,false', '32,false', '8,false', '32,true', '16,true']
-      .map((t, i) => `${t}=[${tierValues[i]}]`).join(', '));
+  check('width tiers need a connected device and follow its width',
+    tierValues.join('|') === '|4,8,16|4,8,16,32|4,8',
+    ['null', '16', '32', '8'].map((t, i) => `${t}=[${tierValues[i]}]`).join(', '));
+  // An opened file is the viewed capture, not the next one: its rows never hide or clamp
+  // the next capture's width tiers (ARCHITECTURE §5.3 applied vs next).
+  const appText = (nodeProcess.getBuiltinModule?.('fs') as { readFileSync(p: string, e: string): string })
+    .readFileSync('src/ui/app.ts', 'utf8');
+  const tiersBody = appText.split('private widthTiers(): number[] {')[1]?.split('\n  }')[0] ?? '';
+  check('a displayed file keeps the device width tiers (the next capture setup survives)',
+    tiersBody.includes('const capacity = this.loadedCapture() ? deviceMax : this.channels.length;') &&
+    !tiersBody.includes('this.loadedCapture())'), tiersBody.replace(/\s+/g, ' '));
 
   const clock20 = busOutOfWidth(spec([0, 1, 2, 3, 4, 5, 6, 7], 20), 16);
   const clock20Wide = busOutOfWidth(spec([0, 1, 2, 3, 4, 5, 6, 7], 20), 32);
