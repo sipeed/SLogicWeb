@@ -69,6 +69,36 @@ function waveSeries(count: number, wobble = 3): FlickerFrame[] {
     hit.canvas === 'wave[1]' && hit.from === 156 && hit.to === 0.6;
   check('a canvas that is painted and then cleared is a blank frame',
     exact, `hits=${JSON.stringify(report.hits)}`);
+
+  const stale = waveSeries(60);
+  for (let index = 30; index < 40; index++) {
+    stale[index] = {
+      canvases: {
+        'wave[0]': { ...sample(0), stale: true },
+        'wave[1]': sample(156),
+        'grid[0]': { ...sample(0, 0.06), stale: true },
+      },
+    };
+  }
+  const staleReport = blankCanvasFrames(stale);
+  check('a sample the owning layer did not redraw cannot be called a blank frame',
+    staleReport.hits.length === 0 && staleReport.painted.join(',') === 'wave[0],wave[1]',
+    `hits=${JSON.stringify(staleReport.hits)}, painted=[${staleReport.painted.join(',')}]`);
+
+  const staleThenCleared = waveSeries(60);
+  staleThenCleared[30] = {
+    canvases: {
+      'wave[0]': { ...sample(0), stale: true },
+      'wave[1]': sample(1),
+      'grid[0]': sample(0.4, 0.06),
+    },
+  };
+  const staleThenClearedReport = blankCanvasFrames(staleThenCleared);
+  check('a redrawn canvas that collapses in the same frame is still a blank frame',
+    staleThenClearedReport.hits.length === 1 &&
+      staleThenClearedReport.hits[0]!.canvas === 'wave[1]' &&
+      staleThenClearedReport.hits[0]!.frame === 30,
+    `hits=${JSON.stringify(staleThenClearedReport.hits)}`);
 }
 
 {

@@ -16,7 +16,7 @@
 import { PlanarSampleStore } from '../data/planarStore.js';
 import { generateCapture } from '../data/generator.js';
 import type { SampleStore } from '../data/types.js';
-import { WaveformRenderer } from './waveformRenderer.js';
+import { WAVE_CONTEXT_ATTRS, WaveformRenderer } from './waveformRenderer.js';
 import { cpuRaster } from './cpuRaster.js';
 import { planColumns } from './columns.js';
 import { computeLayout } from './layout.js';
@@ -258,6 +258,59 @@ function testLayout(): void {
     `pitches ${JSON.stringify(pitches)}, tall band ${tall.bandHeight}, ` +
       `loOffset ${tall.yLoTop - tall.top}, gapless ${gapless}`,
   );
+}
+
+// --------------------------------------------------------------- context attributes
+
+function testContextAttributes(): void {
+  const declared: Array<{ name: string; expected: boolean | string; actual: boolean | string }> = [
+    { name: 'alpha', expected: false, actual: WAVE_CONTEXT_ATTRS.alpha },
+    { name: 'antialias', expected: false, actual: WAVE_CONTEXT_ATTRS.antialias },
+    { name: 'depth', expected: false, actual: WAVE_CONTEXT_ATTRS.depth },
+    { name: 'stencil', expected: false, actual: WAVE_CONTEXT_ATTRS.stencil },
+    { name: 'desynchronized', expected: false, actual: WAVE_CONTEXT_ATTRS.desynchronized },
+    { name: 'powerPreference', expected: 'high-performance', actual: WAVE_CONTEXT_ATTRS.powerPreference },
+  ];
+  const mismatched = declared
+    .filter((row) => row.actual !== row.expected)
+    .map((row) => `${row.name}=${row.actual}`);
+  check('context-attrs-declared', mismatched.length === 0, mismatched.join(',') || 'as declared');
+  check('context-attrs-frozen', Object.isFrozen(WAVE_CONTEXT_ATTRS));
+
+  const store = new PlanarSampleStore({ channelCount: 4, samplerate: 1_000_000 });
+  const canvas = makeCanvas(160, 4 * ROWH);
+  const r = new WaveformRenderer({
+    canvas, store, devicePixelRatio: 1, preserveDrawingBuffer: true,
+  });
+  const live = r.gl.getContextAttributes();
+  check(
+    'context-live-desynchronized-off',
+    live !== null && live.desynchronized !== true,
+    `desynchronized=${String(live?.desynchronized)}`,
+  );
+  check(
+    'context-live-opaque-synchronous',
+    live !== null && live.alpha === false && live.antialias === false &&
+      live.depth === false && live.stencil === false && live.preserveDrawingBuffer === true,
+    JSON.stringify(live),
+  );
+  r.dispose();
+  r.gl.getExtension('WEBGL_lose_context')?.loseContext();
+  canvas.remove();
+
+  const plainCanvas = makeCanvas(160, 4 * ROWH);
+  const plain = new WaveformRenderer({ canvas: plainCanvas, store, devicePixelRatio: 1 });
+  const plainLive = plain.gl.getContextAttributes();
+  check(
+    'context-preserve-drawing-buffer-default-off',
+    plainLive !== null && plainLive.preserveDrawingBuffer === false &&
+      plainLive.desynchronized !== true,
+    `preserveDrawingBuffer=${String(plainLive?.preserveDrawingBuffer)} ` +
+      `desynchronized=${String(plainLive?.desynchronized)}`,
+  );
+  plain.dispose();
+  plain.gl.getExtension('WEBGL_lose_context')?.loseContext();
+  plainCanvas.remove();
 }
 
 // --------------------------------------------------------------- pixel checks
@@ -584,6 +637,7 @@ async function main(): Promise<void> {
     testTransform();
     testPlan();
     testLayout();
+    testContextAttributes();
     testAgainstCpuRaster();
     testNoData();
     testLiveAppend();

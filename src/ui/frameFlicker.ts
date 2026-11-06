@@ -4,6 +4,7 @@ export interface CanvasSample {
   mean: number;
   alpha: number;
   hash: string;
+  stale?: boolean;
 }
 
 export interface FlickerFrame {
@@ -68,7 +69,7 @@ function seriesOf(frames: readonly FlickerFrame[], canvas: string): number[] {
   const out: number[] = [];
   for (const frame of frames) {
     const sample = frame.canvases[canvas];
-    if (sample !== undefined) out.push(finite(sample.mean));
+    if (sample !== undefined && sample.stale !== true) out.push(finite(sample.mean));
   }
   return out;
 }
@@ -89,7 +90,7 @@ export function blankCanvasFrames(frames: readonly FlickerFrame[]): BlankCanvasR
     let seen = false;
     for (let index = 0; index < frames.length; index++) {
       const sample = frames[index]!.canvases[canvas];
-      if (sample === undefined) continue;
+      if (sample === undefined || sample.stale === true) continue;
       const mean = finite(sample.mean);
       if (!seen) {
         if (mean > BLANK_PAINTED_MIN_MEAN) seen = true;

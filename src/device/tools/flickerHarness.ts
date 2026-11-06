@@ -3,9 +3,9 @@
 import { Canvas2dRenderer, WaveformRenderer } from '../../render/index.js';
 import type { FrameStats } from '../../render/index.js';
 import { bytesPerSampleForChannels, type ChannelCount } from '../../types.js';
-import type { FrameStatsSnapshot } from '../../ui/frameStats.js';
+import type { FrameStatsSnapshot, FrameLayer } from '../../ui/frameStats.js';
 import {
-  blankCanvasFrames, type BlankCanvasHit, type CanvasSample,
+  blankCanvasFrames, brightnessOutliers, type BlankCanvasHit, type CanvasSample,
 } from '../../ui/frameFlicker.js';
 import type { App } from '../../ui/app.js';
 import type { CaptureSettings } from '../../ui/state.js';
@@ -19,6 +19,14 @@ const CANVAS_SELECTORS: readonly string[] = [
   '.wave-canvas', '.grid-canvas', '.overlay-canvas', '#axis', '#overview',
 ];
 
+const CANVAS_LAYERS: Record<string, readonly FrameLayer[]> = {
+  '.wave-canvas': ['wave'],
+  '.grid-canvas': ['overlay'],
+  '.overlay-canvas': ['overlay', 'bus'],
+  '#axis': ['axis'],
+  '#overview': ['overview'],
+};
+
 const SNAPSHOT_SCALE = 0.1;
 const COMPOSITE_SAMPLE_WIDTH = 256;
 const COMPOSITE_BRIGHT_LUMA = 160;
@@ -26,6 +34,16 @@ const PRIME_SETTLE_MS = 250;
 const START_TIMEOUT_MS = 30_000;
 const STOP_TIMEOUT_MS = 30_000;
 const HASH_STRIDE = 4;
+const IDLE_CANVAS_SAMPLE_MS = 50;
+const IDLE_CHANGE_LIMIT = 20;
+const IDLE_DRAIN_MS = 15_000;
+const IDLE_QUIET_MS = 600;
+const IDLE_READING_LIMIT = 20_000;
+const IDLE_QUIESCE_MS = 400;
+const IDLE_QUIESCE_LIMIT_MS = 30_000;
+const IDLE_STIMULUS_MS = 66;
+const IDLE_STIMULUS_SIZE = 2;
+const IDLE_STIMULUS_COLORS: readonly string[] = ['#101010', '#e6e6e6'];
 
 export interface FlickerCanvasFrame {
   atMs: number;
@@ -100,6 +118,73 @@ export interface CompositeFrameReading {
   bright: number;
   width: number;
   height: number;
+}
+
+export interface IdleFlickerProbeOptions {
+  seconds: number;
+  primeSeconds?: number;
+  forcePrime?: boolean;
+  channels?: ChannelCount;
+  samplerate?: number;
+}
+
+export interface IdlePresentedFrame {
+  atMs: number;
+  mean: number;
+}
+
+export interface IdlePresentedOutlier {
+  atMs: number;
+  mean: number;
+  ratio: number;
+  index: number;
+}
+
+export interface IdleCanvasChange {
+  atMs: number;
+  canvas: string;
+  from: string;
+  to: string;
+  fromMean: number;
+  toMean: number;
+  drawn: number;
+  skipped: number;
+}
+
+export interface IdleFlickerProbeReport {
+  seconds: number;
+  primeSeconds: number;
+  primed: boolean;
+  wallStartMs: number;
+  wallEndMs: number;
+  frames: number;
+  median: number;
+  outliers: IdlePresentedOutlier[];
+  drawnDuringIdle: number;
+  skippedDuringIdle: number;
+  statusRendersDuringIdle: number;
+  paintsDuringIdle: number;
+  layersDuringIdle: Record<string, FlickerLayerDelta>;
+  settleMs: number;
+  canvasChangeCount: number;
+  waveChangeCount: number;
+  waveReadableSamples: number;
+  canvasChanges: IdleCanvasChange[];
+  canvasNames: string[];
+  waveCanvasNames: string[];
+  readings: IdlePresentedFrame[];
+  pumpTicks: number;
+  stimulus: string;
+  visibility: string;
+  storeLength: number;
+  running: boolean;
+  live: boolean;
+  frameStatsBefore: FrameStatsSnapshot;
+  frameStatsAfter: FrameStatsSnapshot;
+  pageErrors: string[];
+  deviceLeak: boolean;
+  deviceRestored: boolean;
+  previousDeviceSerial: string | null;
 }
 
 interface RenderLike {
@@ -240,6 +325,32 @@ function layerDelta(
   return out;
 }
 
+function paintTally(stats: FrameStatsSnapshot): number {
+  let total = stats.drawn + stats.skipped + stats.statusRenders;
+  for (const name of Object.keys(stats.layers) as Array<keyof typeof stats.layers>) {
+    total += stats.layers[name].draws + stats.layers[name].skips;
+  }
+  return total;
+}
+
+async function openScriptedDevice(channels: ChannelCount, samplerate: number): Promise<Device> {
+  const bytesPerMs = samplerate * bytesPerSampleForChannels(channels) / 1000;
+  const worker = new FakeUsbWorker({ name: String(bytesPerMs) });
+  const dev = await WorkerSlogicDevice.open(
+    { vendorId: 0x359f, productId: 0x3032, serial: 'clock' },
+    { spawn: () => worker, openTimeoutMs: 5000 },
+  ).catch((error: unknown) => {
+    worker.terminate();
+    throw error;
+  });
+  const originalStart = dev.start.bind(dev);
+  dev.start = (cfg, sink, onDropout, startOptions) => originalStart(cfg, async (chunk) => {
+    fillCounter16(chunk);
+    await sink(chunk);
+  }, onDropout, startOptions);
+  return dev;
+}
+
 export async function runFlickerProbe(options: FlickerProbeOptions): Promise<FlickerProbeReport> {
   const app = window.logicweb as unknown as FlickerAppProbe | undefined;
   if (!app) throw new Error('the App is not ready');
@@ -258,20 +369,7 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
   const previousSettings: CaptureSettings = { ...app.settings };
   const previousEnabled = app.channels.map((channel) => channel.enabled);
   app.discardDevice();
-  const bytesPerMs = samplerate * bytesPerSampleForChannels(channels) / 1000;
-  const worker = new FakeUsbWorker({ name: String(bytesPerMs) });
-  const dev = await WorkerSlogicDevice.open(
-    { vendorId: 0x359f, productId: 0x3032, serial: 'clock' },
-    { spawn: () => worker, openTimeoutMs: 5000 },
-  ).catch((error: unknown) => {
-    worker.terminate();
-    throw error;
-  });
-  const originalStart = dev.start.bind(dev);
-  dev.start = (cfg, sink, onDropout, startOptions) => originalStart(cfg, async (chunk) => {
-    fillCounter16(chunk);
-    await sink(chunk);
-  }, onDropout, startOptions);
+  const dev = await openScriptedDevice(channels, samplerate);
 
   const pageErrors: string[] = [];
   const onPageError = (event: ErrorEvent): void => { pageErrors.push(event.message); };
@@ -321,6 +419,7 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
     const grab = canvasGrabber(SNAPSHOT_SCALE);
     const names: string[] = [];
     let lastSampleAt = startedAt;
+    let lastDraws: Record<FrameLayer, number> | null = null;
     let hintShown = hint !== null && hint.style.display !== 'none';
     let sawLive = false;
     frameLoop = true;
@@ -329,17 +428,33 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
       const now = Date.now();
       if (app.running) sawLive = true;
       const frame: FlickerCanvasFrame = { atMs: now - startedAt, canvases: {} };
+      const stats = app.debug.frameStats();
+      const drew = new Set<string>();
+      for (const selector of CANVAS_SELECTORS) {
+        const owners = CANVAS_LAYERS[selector] ?? [];
+        if (owners.some((layer) => lastDraws === null || lastDraws[layer] !== stats.layers[layer].draws)) {
+          drew.add(selector);
+        }
+      }
       for (const selector of CANVAS_SELECTORS) {
         const list = document.querySelectorAll<HTMLCanvasElement>(selector);
         for (let index = 0; index < list.length; index++) {
           const canvas = list[index]!;
           const sample = grab(canvas);
           if (sample === null) continue;
+          if (!drew.has(selector)) sample.stale = true;
           const name = `${selector}[${index}]`;
           if (!names.includes(name)) names.push(name);
           frame.canvases[name] = sample;
         }
       }
+      lastDraws = {
+        wave: stats.layers.wave.draws,
+        axis: stats.layers.axis.draws,
+        overlay: stats.layers.overlay.draws,
+        bus: stats.layers.bus.draws,
+        overview: stats.layers.overview.draws,
+      };
       if (canvasFrames.length < maxFrames) canvasFrames.push(frame);
       const shown = hint !== null && hint.style.display !== 'none';
       if (shown !== hintShown) {
@@ -442,6 +557,333 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
         ? false
         : await restorePreviousDevice(app, previousSerial);
       if (report !== null) report.deviceRestored = deviceRestored;
+    }
+  }
+}
+
+let idleSink: ((mean: number, atMs: number) => void) | null = null;
+
+const IDLE_STIMULUS_ID = '__flicker-idle-stimulus';
+
+function idleStimulusSpot(): { left: number; top: number } | null {
+  const plot = document.getElementById('plot');
+  const rect = plot === null ? null : plot.getBoundingClientRect();
+  const size = IDLE_STIMULUS_SIZE;
+  const candidates = [
+    { left: 0, top: 0 },
+    { left: Math.max(0, window.innerWidth - size), top: 0 },
+    { left: 0, top: Math.max(0, window.innerHeight - size) },
+    {
+      left: Math.max(0, window.innerWidth - size),
+      top: Math.max(0, window.innerHeight - size),
+    },
+  ];
+  const free = candidates.find((spot) => rect === null
+    || spot.left + size <= rect.left || spot.left >= rect.right
+    || spot.top + size <= rect.top || spot.top >= rect.bottom);
+  return free ?? null;
+}
+
+interface IdleStimulus {
+  remove(): void;
+  ticks(): number;
+  spot: string;
+}
+
+function installIdleStimulus(): IdleStimulus | null {
+  const spot = idleStimulusSpot();
+  if (spot === null) return null;
+  const el = document.createElement('div');
+  el.id = IDLE_STIMULUS_ID;
+  el.setAttribute('aria-hidden', 'true');
+  el.style.cssText = 'position:fixed;width:2px;height:2px;margin:0;padding:0;' +
+    'pointer-events:none;z-index:2147483647';
+  el.style.left = `${spot.left}px`;
+  el.style.top = `${spot.top}px`;
+  el.style.background = IDLE_STIMULUS_COLORS[0]!;
+  document.body.appendChild(el);
+  let running = true;
+  let ticks = 0;
+  let lastTickAt = 0;
+  const tick = (): void => {
+    if (!running) return;
+    const now = Date.now();
+    if (now - lastTickAt >= IDLE_STIMULUS_MS) {
+      lastTickAt = now;
+      ticks += 1;
+      el.style.background = IDLE_STIMULUS_COLORS[ticks % 2]!;
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  return {
+    remove: () => { running = false; el.remove(); },
+    ticks: () => ticks,
+    spot: `${spot.left},${spot.top}`,
+  };
+}
+
+async function quiescePaints(app: FlickerAppProbe): Promise<number> {
+  const startedAt = Date.now();
+  const limit = startedAt + IDLE_QUIESCE_LIMIT_MS;
+  const first = paintTally(app.debug.frameStats());
+  let last = first;
+  let quietSince = startedAt;
+  for (;;) {
+    await wait(100);
+    const now = paintTally(app.debug.frameStats());
+    if (now !== last) {
+      last = now;
+      quietSince = Date.now();
+    } else if (Date.now() - quietSince >= IDLE_QUIESCE_MS) {
+      return Date.now() - startedAt;
+    }
+    if (Date.now() >= limit) {
+      throw new Error(`the app never stopped painting before the idle window: ` +
+        `${now - first} paints in ${Date.now() - startedAt} ms`);
+    }
+  }
+}
+
+let idleWindowState: { startMs: number; endMs: number | null } | null = null;
+
+export function idleMeasurementWindow(): { startMs: number; endMs: number | null } | null {
+  return idleWindowState === null ? null : { ...idleWindowState };
+}
+
+export function pushIdlePresentedFrame(mean: number, atMs: number): boolean {
+  if (idleSink === null || !Number.isFinite(mean)) return false;
+  idleSink(mean, atMs);
+  return true;
+}
+
+async function drainIdlePresentations(readings: readonly IdlePresentedFrame[]): Promise<void> {
+  let seen = readings.length;
+  let quietSince = Date.now();
+  const deadline = Date.now() + IDLE_DRAIN_MS;
+  for (;;) {
+    await wait(200);
+    if (readings.length !== seen) {
+      seen = readings.length;
+      quietSince = Date.now();
+    } else if (Date.now() - quietSince >= IDLE_QUIET_MS) {
+      return;
+    }
+    if (Date.now() >= deadline) return;
+  }
+}
+
+export async function runIdleFlickerProbe(
+  options: IdleFlickerProbeOptions,
+): Promise<IdleFlickerProbeReport> {
+  const app = window.logicweb as unknown as FlickerAppProbe | undefined;
+  if (!app) throw new Error('the App is not ready');
+  const seconds = options.seconds;
+  if (!(seconds > 0)) throw new Error('the idle flicker probe needs a positive --idle');
+  const channels = options.channels ?? 32;
+  const samplerate = options.samplerate ?? 80e6;
+  const primeSeconds = Math.max(0, options.primeSeconds ?? 2);
+
+  const previousSerial = app.device === null ? null : app.device.serial;
+  const previousSettings: CaptureSettings = { ...app.settings };
+  const previousEnabled = app.channels.map((channel) => channel.enabled);
+  idleWindowState = null;
+
+  const pageErrors: string[] = [];
+  const onPageError = (event: ErrorEvent): void => { pageErrors.push(event.message); };
+  const onUnhandledRejection = (event: PromiseRejectionEvent): void => {
+    pageErrors.push(String(event.reason));
+  };
+  window.addEventListener('error', onPageError);
+  window.addEventListener('unhandledrejection', onUnhandledRejection);
+
+  const readings: IdlePresentedFrame[] = [];
+  const canvasChanges: IdleCanvasChange[] = [];
+  const canvasNames: string[] = [];
+  let canvasChangeCount = 0;
+  let waveChangeCount = 0;
+  let waveReadableSamples = 0;
+  let sampling = false;
+  let primed = false;
+  let stimulus: IdleStimulus | null = null;
+  let report: IdleFlickerProbeReport | null = null;
+
+  try {
+    if (app.running || app.stopping) {
+      await withTimeout(app.debug.stop(), STOP_TIMEOUT_MS, 'the running capture did not stop');
+      await wait(PRIME_SETTLE_MS);
+    }
+    if (app.store.length === 0 || options.forcePrime === true) {
+      primed = true;
+      app.discardDevice();
+      const dev = await openScriptedDevice(channels, samplerate);
+      app.installDevice(dev, app.deviceEpoch);
+      for (let index = channels; index < app.channels.length; index++) {
+        app.debug.toggleChannel(index, false);
+      }
+      app.debug.setSettings({
+        mode: 'single',
+        channels,
+        samplerate,
+        testMode: 2,
+        softwareTrigger: false,
+        singleUnlimited: true,
+      });
+      await withTimeout(app.debug.start(), START_TIMEOUT_MS, 'the idle prime capture did not start');
+      await wait(primeSeconds * 1000);
+      await withTimeout(app.debug.stop(), STOP_TIMEOUT_MS, 'the idle prime capture did not stop');
+      await wait(PRIME_SETTLE_MS);
+    }
+
+    app.debug.resetFrameStats();
+    const settleMs = await quiescePaints(app);
+    const frameStatsBefore = app.debug.frameStats();
+    const storeLength = app.store.length;
+
+    const grab = canvasGrabber(SNAPSHOT_SCALE);
+    const hashes: Record<string, CanvasSample> = {};
+    const waveCanvasNames: string[] = [];
+    const sampleCanvases = (atMs: number): void => {
+      for (const selector of CANVAS_SELECTORS) {
+        const list = document.querySelectorAll<HTMLCanvasElement>(selector);
+        for (let index = 0; index < list.length; index++) {
+          const sample = grab(list[index]!);
+          if (sample === null) continue;
+          const name = `${selector}[${index}]`;
+          if (!canvasNames.includes(name)) canvasNames.push(name);
+          if (selector === '.wave-canvas' && !waveCanvasNames.includes(name)) {
+            waveCanvasNames.push(name);
+          }
+          const previous = hashes[name];
+          hashes[name] = sample;
+          if (selector === '.wave-canvas' && sample.mean > 0) waveReadableSamples += 1;
+          if (previous === undefined || previous.hash === sample.hash) continue;
+          canvasChangeCount += 1;
+          if (selector === '.wave-canvas') waveChangeCount += 1;
+          if (canvasChanges.length < IDLE_CHANGE_LIMIT) {
+            const stats = app.debug.frameStats();
+            canvasChanges.push({
+              atMs,
+              canvas: name,
+              from: previous.hash,
+              to: sample.hash,
+              fromMean: previous.mean,
+              toMean: sample.mean,
+              drawn: stats.drawn,
+              skipped: stats.skipped,
+            });
+          }
+        }
+      }
+    };
+
+    const stimulusProbe = installIdleStimulus();
+    if (stimulusProbe === null) {
+      throw new Error('the idle probe found no viewport corner outside the measured plot');
+    }
+    stimulus = stimulusProbe;
+    sampleCanvases(Date.now());
+    const wallStartMs = Date.now();
+    idleWindowState = { startMs: wallStartMs, endMs: null };
+    idleSink = (mean, atMs) => {
+      if (readings.length >= IDLE_READING_LIMIT) return;
+      readings.push({ atMs, mean });
+    };
+    sampling = true;
+    let lastSampleAt = wallStartMs;
+    const sampleFrame = (): void => {
+      if (!sampling) return;
+      const now = Date.now();
+      if (now - lastSampleAt >= IDLE_CANVAS_SAMPLE_MS) {
+        lastSampleAt = now;
+        sampleCanvases(now);
+      }
+      requestAnimationFrame(sampleFrame);
+    };
+    requestAnimationFrame(sampleFrame);
+
+    await wait(seconds * 1000);
+    const wallEndMs = Date.now();
+    idleWindowState = { startMs: wallStartMs, endMs: wallEndMs };
+    sampling = false;
+    const pumpTicks = stimulusProbe.ticks();
+    stimulusProbe.remove();
+    await drainIdlePresentations(readings);
+    idleSink = null;
+
+    const inWindow = readings.filter(
+      (frame) => frame.atMs >= wallStartMs && frame.atMs <= wallEndMs,
+    );
+    const analysis = brightnessOutliers(inWindow.map((frame) => frame.mean));
+    const frameStatsAfter = app.debug.frameStats();
+    report = {
+      seconds,
+      primeSeconds,
+      primed,
+      wallStartMs,
+      wallEndMs,
+      frames: inWindow.length,
+      median: analysis.median,
+      outliers: analysis.outliers.map((hit) => ({
+        atMs: inWindow[hit.frame]!.atMs,
+        mean: hit.mean,
+        ratio: hit.ratio,
+        index: hit.frame,
+      })),
+      drawnDuringIdle: frameStatsAfter.drawn - frameStatsBefore.drawn,
+      skippedDuringIdle: frameStatsAfter.skipped - frameStatsBefore.skipped,
+      statusRendersDuringIdle: frameStatsAfter.statusRenders - frameStatsBefore.statusRenders,
+      paintsDuringIdle: paintTally(frameStatsAfter) - paintTally(frameStatsBefore),
+      layersDuringIdle: layerDelta(frameStatsBefore, frameStatsAfter),
+      settleMs,
+      canvasChangeCount,
+      waveChangeCount,
+      waveReadableSamples,
+      canvasChanges,
+      canvasNames,
+      waveCanvasNames,
+      readings: inWindow,
+      pumpTicks,
+      stimulus: stimulusProbe.spot,
+      visibility: document.visibilityState,
+      storeLength,
+      running: app.running || app.stopping,
+      live: app.statusError === null,
+      frameStatsBefore,
+      frameStatsAfter,
+      pageErrors,
+      deviceLeak: false,
+      deviceRestored: false,
+      previousDeviceSerial: previousSerial,
+    };
+    return report;
+  } finally {
+    sampling = false;
+    idleSink = null;
+    stimulus?.remove();
+    stimulus = null;
+    try {
+      if (app.running || app.stopping) {
+        await withTimeout(app.debug.stop(), STOP_TIMEOUT_MS, 'the capture did not stop');
+      }
+    } finally {
+      window.removeEventListener('error', onPageError);
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
+      if (primed) {
+        app.discardDevice();
+        if (report !== null) report.deviceLeak = app.device !== null;
+        app.debug.setSettings(previousSettings);
+        const enabled = app.channels.map((channel) => channel.enabled);
+        for (let index = 0; index < enabled.length; index++) {
+          if (enabled[index] !== previousEnabled[index]) {
+            app.debug.toggleChannel(index, previousEnabled[index] === true);
+          }
+        }
+        const deviceRestored = previousSerial === null
+          ? false
+          : await restorePreviousDevice(app, previousSerial);
+        if (report !== null) report.deviceRestored = deviceRestored;
+      }
     }
   }
 }

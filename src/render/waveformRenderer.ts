@@ -84,6 +84,15 @@ export interface FrameStats {
   rows: number;
 }
 
+export const WAVE_CONTEXT_ATTRS = Object.freeze({
+  alpha: false,
+  antialias: false, // every primitive is axis-aligned; MSAA would only blur it
+  depth: false,
+  stencil: false,
+  desynchronized: false,
+  powerPreference: 'high-performance',
+} as const);
+
 const UNIFORM_NAMES = [
   'u_canvas', 'u_map', 'u_dataBins', 'u_cols', 'u_lineW', 'u_edgeW',
   'u_bg', 'u_noData', 'u_noDataWash', 'u_noDataBorderA', 'u_noDataBorderH',
@@ -161,12 +170,7 @@ export class WaveformRenderer {
     this.assertChannels();
 
     const gl = this.canvas.getContext('webgl2', {
-      alpha: false,
-      antialias: false, // every primitive is axis-aligned; MSAA would only blur it
-      depth: false,
-      stencil: false,
-      desynchronized: true,
-      powerPreference: 'high-performance',
+      ...WAVE_CONTEXT_ATTRS,
       preserveDrawingBuffer: opts.preserveDrawingBuffer ?? false,
     });
     if (!gl) throw new Error('WebGL2 is not available on this context');
