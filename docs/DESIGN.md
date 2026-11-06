@@ -278,9 +278,18 @@ Analog channels are not bus rows. Each analog signal has a row with:
   form. Clicking an attached analyzer's name loads its mapping and current options into
   the same form ("Edit UART", decoder locked); Apply replaces the old result by
   re-decoding with the new options.
-- The decoder picker's search ranks protocol aliases first (串口 → uart, IIC/I²C → i2c,
-  单总线/1-Wire → onewire_link, 红外/IR → ir_*), one alias table for every locale; then the
-  fuzzy match on id and localized long name.
+- The decoder picker shows sigrok's short name and the localized long name
+  ("UART - 通用异步收发器"); the stored value is the id. Its search ranks protocol aliases
+  first (串口 → uart, IIC/I²C → i2c, 单总线/1-Wire → onewire_link, 红外/IR → ir_*; a prefix
+  of a shown name counts as an alias), one alias table for every locale; then the fuzzy
+  match on name, localized long name and id. Common protocols (uart, i2c, spi,
+  onewire_link, can, usb_signalling, ...) rank first among hits of one tier.
+- Channels are matched by name when the form seeds a mapping: a capture channel whose
+  name, or one word of it, is a decoder channel's id, name or a common synonym
+  (UART_TX → TX, I2C_SDA → SDA, MOSI0 → MOSI, SCK → CLK) is prefilled and the form says
+  "Matched by channel name". A channel the user set by hand is never moved again.
+- sigrok's "-1 = off" for a free integer option (UART packet delimiter/length) shows as
+  an empty field reading "off"; the stored value stays -1.
 - **New data re-decodes.** With "Auto-decode" on (per session, default on), every attached
   analyzer re-runs after a capture stops and after a file opens — never during ingest;
   Repeat waves between intervals are not decoded, the session's last wave is. Opening a
@@ -730,6 +739,11 @@ polite live region, so assistive technology reads the area and hints when they c
 - Touch copy says "Tap", mouse copy says "Click"; shared copy avoids both. A hint never
   relies on hover alone.
 - Decoder-produced names/fields pass through untranslated; surrounding labels localise.
+  Annotation row and class names ("RX data", "Address write") are metadata and localize
+  through `decoder.<id>.row.<rowId>` / `decoder.<id>.ann.<classId>` (uart, i2c, spi,
+  onewire_link, can; others show sigrok's English), in the results list and the lane
+  labels. The annotation payload text stays English: the decoder builds it at run time
+  with values spliced in, and it must match sigrok/PulseView output and exported files.
 - `<html lang>` and the tab title (`app.title`) follow the active locale. The label column,
   the plot (waveforms, annotations, scales) and numeric readouts carry `translate="no"` so
   browser page translation never rewrites data; the empty hint opts back in.

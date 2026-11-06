@@ -53,7 +53,11 @@ import {
   busChannelBank,
   captureWidthTiers, channelBankIndices, channelBankStart, busOutOfWidth, lockedChannelBanks,
 } from './channelBanks.js';
-import { ChannelList, type BusCell, type BusScopePatch, type ChannelCell, type ChannelConfiguration } from './channelList.js';
+import {
+  ChannelList, type BusCell, type BusScopePatch, type ChannelCell, type ChannelConfiguration,
+  type ChannelLaneLabel,
+} from './channelList.js';
+import { decoderRowName } from './decoderI18n.js';
 import { computeChannelRowHeight } from './channelLayout.js';
 import {
   MAX_SAMPLES, levelAt, loadFiles, loadLwcap, saveLwcap,
@@ -2014,6 +2018,7 @@ export class App {
         channel: c,
         heightCss: base + mine.length * ROWS.laneHeight,
         laneCss: mine.length * ROWS.laneHeight,
+        lanes: mine.map((l) => this.laneLabel(l)),
         analyzers: this.analyzers.filter((a) => this.chipChannels(a).includes(c.index)),
         trigger: {
           mode: this.settings.triggerModes[c.index] ?? DEFAULT_TRIGGER_MODE,
@@ -2072,6 +2077,14 @@ export class App {
       }
     }
     return out;
+  }
+
+  /** The channel cell's name for a plot lane: its localized annotation row name. */
+  private laneLabel(lane: Lane): ChannelLaneLabel {
+    const info = getDecoder(lane.analyzer.decoderId);
+    const row = displayRows(info)[lane.displayRow];
+    const text = row ? decoderRowName(info, row) : '';
+    return { text, title: `${lane.analyzer.label}: ${text}`, color: lane.analyzer.color };
   }
 
   /** Capture channels this analyzer should show a chip on: every channel it reads. */

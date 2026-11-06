@@ -24,8 +24,9 @@ import {
   joinTextLines, resultSeconds, resultsCsv, resultsText, usedRows, virtualWindow,
   type ExportNames, type ResultLine, type ResultSource,
 } from './decodeResults.js';
+import { decoderAnnotationClassName, decoderRowName } from './decoderI18n.js';
 import { formatCount, formatDuration } from './format.js';
-import { t } from './i18n.js';
+import { getLocale, t } from './i18n.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { AnalyzerState } from './state.js';
 
@@ -97,7 +98,9 @@ export class DecodeResultsPanel {
       this.root.replaceChildren();
       return;
     }
-    const analyzersKey = withResult.map((x) => x.id).join(' ');
+    // The locale is part of the key: row and class names are localized (the payload
+    // text is not), so a locale switch rebuilds the list with its choices kept.
+    const analyzersKey = `${withResult.map((x) => x.id).join(' ')}|${getLocale()}`;
     if (a.id !== this.analyzerId || a.result !== this.result || this.el?.dataset.analyzers !== analyzersKey) {
       const sameAnalyzer = a.id === this.analyzerId;
       this.load(a, a.result, sameAnalyzer);
@@ -114,8 +117,10 @@ export class DecodeResultsPanel {
     const info = getDecoder(a.decoderId);
     const rows = displayRows(info);
     this.rowIds = rows.map((r) => r.id);
-    this.rowNames = rows.map((r) => r.desc);
-    this.classNames = info.annotations.map((x) => x.desc);
+    // Row and class names are localized catalog entries (English sigrok text as the
+    // fallback); `textsOf` below is the decoder's own payload text and stays English.
+    this.rowNames = rows.map((r) => decoderRowName(info, r));
+    this.classNames = info.annotations.map((x) => decoderAnnotationClassName(info.id, x));
     const map = rowForClass(info);
     const ann = result.annotations;
     this.src = {

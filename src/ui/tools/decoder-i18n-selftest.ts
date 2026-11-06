@@ -6,7 +6,8 @@ import {
   decoderDescriptionKey, decoderDescriptionText, decoderLongNameKey, decoderLongNameText,
   decoderOptionKey, decoderOptionLabel, decoderOptionValueKey, decoderOptionValueLabel,
   decoderOptionValueTuples, decoderPickerLabel, decoderPickerOptions, decoderPickerSearchText,
-  PRESERVED_LONGNAME_DECODER_IDS,
+  decoderAnnotationClassName, decoderAnnotationKey, decoderRowKey, decoderRowName,
+  LOCALIZED_ANNOTATION_DECODER_IDS, PRESERVED_LONGNAME_DECODER_IDS,
   PRESERVED_OPTION_VALUES, type DecoderMetadata, type DecoderOptionMetadata,
 } from '../decoderI18n.js';
 import { fuzzyMatch, fuzzyRank } from '../fuzzy.js';
@@ -85,6 +86,13 @@ function localNameQuery(text: string): string {
   return normalizeSpace(text.replace(/[./():,]/g, ' ')).split(' ')[0] ?? '';
 }
 
+/** The expected picker label, built independently of decoderPickerLabel. */
+function pickerLabelOf(decoder: { readonly id: string; readonly name?: string }, longText: string): string {
+  const name = decoder.name ?? decoder.id;
+  const flat = (x: string): string => x.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  return flat(name) === flat(longText) ? name : `${name} - ${longText}`;
+}
+
 const LOGIC_DECODERS = listDecoders()
   .filter(isLogicDecoder)
   .sort((a, b) => a.id.localeCompare(b.id));
@@ -154,7 +162,8 @@ const NON_ENGLISH_CATALOGS: readonly (readonly [Exclude<Locale, 'en'>, DecoderMe
   const label = decoderOptionLabel('i2c', ADDRESS_FORMAT);
   check('English presentation helpers fall through to sigrok source text byte-for-byte',
     desc === I2C.desc && longname === I2C.longname &&
-    picker === 'i2c' && corpus === `i2c - ${I2C.longname}` && label === ADDRESS_FORMAT.desc,
+    picker === `i2c - ${I2C.longname}` && corpus === `i2c - ${I2C.longname} i2c` &&
+    label === ADDRESS_FORMAT.desc,
     `${JSON.stringify(picker)} / ${JSON.stringify(corpus)} / ${JSON.stringify(label)}`);
 }
 
@@ -485,13 +494,14 @@ check('the reachable picker inventory pins one long-name key per logic decoder',
     const corpus = LOGIC_DECODERS.map((d) => decoderPickerSearchText(d));
     LOGIC_DECODERS.forEach((decoder, i) => {
       const text = decoderLongNameText(decoder);
-      if (labels[i] !== decoder.id) {
+      const shown = pickerLabelOf(decoder, text);
+      if (labels[i] !== shown) {
         bad.push(`${locale}:${decoder.id}:label=${JSON.stringify(labels[i])}`);
       }
-      if (corpus[i] !== `${decoder.id} - ${text}`) {
+      if (corpus[i] !== `${shown} ${decoder.id}`) {
         bad.push(`${locale}:${decoder.id}:corpus=${JSON.stringify(corpus[i])}`);
       }
-      if (!corpus[i]?.startsWith(decoder.id)) bad.push(`${locale}:${decoder.id}:prefix`);
+      if (!corpus[i]?.startsWith(labels[i] ?? '\u0000')) bad.push(`${locale}:${decoder.id}:prefix`);
       if (PRESERVED_LONGNAME_DECODER_IDS.has(decoder.id)) {
         if (text !== decoder.longname) {
           bad.push(`${locale}:${decoder.id}:preserved=${JSON.stringify(text)}`);
@@ -518,9 +528,9 @@ check('the reachable picker inventory pins one long-name key per logic decoder',
   }
   const restored = await setLocale('en');
   const english = LOGIC_DECODERS.every((d) =>
-    decoderLongNameText(d) === d.longname && decoderPickerLabel(d) === d.id &&
-    decoderPickerSearchText(d) === `${d.id} - ${d.longname}`);
-  check('picker labels show the raw id while the localized corpus keeps long names searchable',
+    decoderLongNameText(d) === d.longname && decoderPickerLabel(d) === pickerLabelOf(d, d.longname) &&
+    decoderPickerSearchText(d) === `${pickerLabelOf(d, d.longname)} ${d.id}`);
+  check('picker labels show the short name and localized long name; the id stays searchable',
     bad.length === 0 && restored === 'committed' && getLocale() === 'en' && english,
     bad.length === 0
       ? `${summary.join(' ')}; ids searchable, localized names rank first`
@@ -785,21 +795,99 @@ check('the reachable constrained inventory pins every raw option value occurrenc
 
 // -------------------------------------------------------- expected key union
 
+// ------------------------------------------------- annotation row/class names
+
+const ANNOTATION_DECODERS = LOCALIZED_ANNOTATION_DECODER_IDS.map((id) => getDecoder(id));
+const ANNOTATION_KEYS: readonly string[] = ANNOTATION_DECODERS.flatMap((d) => [
+  ...d.annotation_rows.map((r) => decoderRowKey(d.id, r.id)),
+  ...d.annotations.map((a) => decoderAnnotationKey(d.id, a.id)),
+]);
+const ANNOTATION_KEY_COUNT = 85;
+
+check('row/class keys follow decoder.<id>.row.<rowId> / decoder.<id>.ann.<classId>',
+  decoderRowKey('uart', 'rx-data-vals') === 'decoder.uart.row.rx-data-vals' &&
+  decoderAnnotationKey('i2c', 'address-write') === 'decoder.i2c.ann.address-write' &&
+  LOCALIZED_ANNOTATION_DECODER_IDS.join() === 'uart,i2c,spi,onewire_link,can' &&
+  new Set(ANNOTATION_KEYS).size === ANNOTATION_KEY_COUNT,
+  `${ANNOTATION_KEYS.length} keys, ${new Set(ANNOTATION_KEYS).size} unique`);
+
+{
+  const bad: string[] = [];
+  const sample: string[] = [];
+  for (const locale of ['en', 'zh-CN', 'fr', 'ru'] as const) {
+    const switched = await setLocale(locale);
+    if (switched !== 'committed') bad.push(`${locale}:switch=${switched}`);
+    const dict = NON_ENGLISH_CATALOGS.find(([l]) => l === locale)?.[1] ?? null;
+    for (const d of ANNOTATION_DECODERS) {
+      for (const r of d.annotation_rows) {
+        const got = decoderRowName(d, r);
+        const want = dict ? dict[decoderRowKey(d.id, r.id)] : r.desc;
+        if (got !== want || got.trim() === '') bad.push(`${locale}:${d.id}.row.${r.id}=${JSON.stringify(got)}`);
+      }
+      for (const a of d.annotations) {
+        const got = decoderAnnotationClassName(d.id, a);
+        const want = dict ? dict[decoderAnnotationKey(d.id, a.id)] : a.desc;
+        if (got !== want || got.trim() === '') bad.push(`${locale}:${d.id}.ann.${a.id}=${JSON.stringify(got)}`);
+      }
+    }
+    const uart = getDecoder('uart');
+    const i2c = getDecoder('i2c');
+    sample.push(`${locale}:${decoderAnnotationClassName('uart', uart.annotations.find((a) => a.id === 'rx-start')!)}` +
+      `/${decoderAnnotationClassName('i2c', i2c.annotations.find((a) => a.id === 'address-write')!)}`);
+  }
+  await setLocale('zh-CN');
+  const uart = getDecoder('uart');
+  const i2c = getDecoder('i2c');
+  const zhSpot = decoderAnnotationClassName('uart', uart.annotations.find((a) => a.id === 'rx-stop')!) === 'RX 停止位' &&
+    decoderAnnotationClassName('i2c', i2c.annotations.find((a) => a.id === 'address-write')!) === '写地址' &&
+    decoderRowName(i2c, i2c.annotation_rows.find((r) => r.id === 'addr-data')!) === '地址/数据';
+  // A decoder outside the covered set, and one with no declared rows, fall back to sigrok's English.
+  const pwm = getDecoder('pwm');
+  const pwmRow = pwm.annotation_rows[0];
+  const swd = getDecoder('swd');
+  const synth = { id: swd.annotations[0]!.id, desc: swd.annotations[0]!.desc };
+  const fallback = (pwmRow === undefined || decoderRowName(pwm, pwmRow) === pwmRow.desc) &&
+    decoderAnnotationClassName('pwm', pwm.annotations[0]!) === pwm.annotations[0]!.desc &&
+    decoderRowName({ id: 'nosuch', annotations: [synth], annotation_rows: [] }, synth) === synth.desc &&
+    decoderRowName({ id: 'nosuch', annotations: [], annotation_rows: [{ id: 'r', desc: 'Raw row' }] },
+      { id: 'r', desc: 'Raw row' }) === 'Raw row';
+  const restored = await setLocale('en');
+  check('covered decoders resolve every row and class name in all four locales; others fall back to English',
+    bad.length === 0 && zhSpot && fallback && restored === 'committed',
+    bad.length === 0 ? `${sample.join(' ')}; zh spot=${zhSpot}, fallback=${fallback}` : bad.slice(0, 8).join('; '));
+}
+
+{
+  const source = fs.readFileSync('src/ui/decodeResultsPanel.ts', 'utf8');
+  const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const design = fs.readFileSync('docs/DESIGN.md', 'utf8');
+  check('the results list and the lane labels name rows/classes through the catalog, payload text stays sigrok',
+    source.includes('rows.map((r) => decoderRowName(info, r))') &&
+    source.includes('decoderAnnotationClassName(info.id, x)') &&
+    source.includes('textsOf: (i) => annotationTexts(result, i)') &&
+    !source.includes('rows.map((r) => r.desc)') &&
+    app.includes('decoderRowName(info, row)') &&
+    /payload text[^.]*stays? (in )?English/i.test(design),
+    'decodeResultsPanel + app lane labels + DESIGN.md');
+}
+
 const EXPECTED_DECODER_KEYS: readonly string[] = [
   ...DESCRIPTION_KEYS,
   ...TRANSLATED_LONGNAME_KEYS,
   ...OPTION_KEYS,
   ...OPTION_VALUE_KEYS,
+  ...ANNOTATION_KEYS,
 ];
 const EXPECTED_DECODER_KEY_SET: ReadonlySet<string> = new Set(EXPECTED_DECODER_KEYS);
 const EXPECTED_DECODER_KEY_COUNT = REACHABLE_DECODER_COUNT + LONGNAME_TRANSLATED_COUNT +
-  REACHABLE_OPTION_COUNT + TRANSLATED_OPTION_VALUES.length;
+  REACHABLE_OPTION_COUNT + TRANSLATED_OPTION_VALUES.length + ANNOTATION_KEY_COUNT;
 
-check('the four localized surfaces build one disjoint expected decoder key union',
+check('the five localized surfaces build one disjoint expected decoder key union',
   EXPECTED_DECODER_KEY_SET.size === EXPECTED_DECODER_KEYS.length &&
   EXPECTED_DECODER_KEY_SET.size === EXPECTED_DECODER_KEY_COUNT,
   `${DESCRIPTION_KEYS.length} descriptions + ${TRANSLATED_LONGNAME_KEYS.length} long names + ` +
-  `${OPTION_KEYS.length} option labels + ${OPTION_VALUE_KEYS.length} value labels = ` +
+  `${OPTION_KEYS.length} option labels + ${OPTION_VALUE_KEYS.length} value labels + ` +
+  `${ANNOTATION_KEYS.length} row/class names = ` +
   `${EXPECTED_DECODER_KEY_COUNT} expected keys, ${EXPECTED_DECODER_KEYS.length} built, ` +
   `${EXPECTED_DECODER_KEY_SET.size} unique`);
 
@@ -1009,8 +1097,8 @@ check('the four localized surfaces build one disjoint expected decoder key union
     first.longname === frenchDecoder['decoder.i2c.longname'] &&
     first.option === frenchDecoder['decoder.i2c.opt.address_format'] &&
     first.value === frenchDecoder['decoder.optval.shifted'] &&
-    decoderPickerLabel(I2C) === 'i2c' &&
-    decoderPickerSearchText(I2C) === `i2c - ${frenchDecoder['decoder.i2c.longname']}`,
+    decoderPickerLabel(I2C) === `i2c - ${frenchDecoder['decoder.i2c.longname']}` &&
+    decoderPickerSearchText(I2C) === `i2c - ${frenchDecoder['decoder.i2c.longname']} i2c`,
     JSON.stringify(seen));
   check('dot-bearing raw values resolve as whole keys, never split on the dot',
     decoderOptionValueKey('1.25') === 'decoder.optval.1.25' &&
@@ -1038,14 +1126,15 @@ check('the four localized surfaces build one disjoint expected decoder key union
   const badSlots = tuples.filter((tuple, i) => {
     const decoder = LOGIC_DECODERS[i];
     return decoder === undefined ||
-      tuple[0] !== decoder.id || tuple[1] !== decoder.id ||
-      tuple[2] !== `${decoder.id} - ${decoderLongNameText(decoder)}`;
+      tuple[0] !== decoder.id || tuple[1] !== decoderPickerLabel(decoder) ||
+      tuple[2] !== `${decoderPickerLabel(decoder)} ${decoder.id}`;
   });
-  check('picker option tuples pair the raw id label with the localized search corpus',
+  check('picker option tuples keep the raw id value with the localized label and corpus',
     tuples.length === LOGIC_DECODERS.length && badSlots.length === 0 &&
-    i2c?.[2] === `i2c - ${translateDecoder('decoder.i2c.longname', I2C.longname)}`,
+    i2c?.[1] === `I²C - ${translateDecoder('decoder.i2c.longname', I2C.longname)}` &&
+    i2c?.[2] === `I²C - ${translateDecoder('decoder.i2c.longname', I2C.longname)} i2c`,
     badSlots.length === 0
-      ? `${tuples.length} tuples: value=label=id, corpus localized`
+      ? `${tuples.length} tuples: value=id, label "${i2c?.[1]}"`
       : JSON.stringify(badSlots.slice(0, 2)));
 }
 

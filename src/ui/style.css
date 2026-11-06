@@ -724,6 +724,27 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
 /* The reserved decoder strip: one fixed-height line in EVERY card, empty when no
    analyzer is attached, so attaching or removing a decoder never shifts the
    tag/name row. [MEASURED] 14px = the .ch-analyzer line (12px) plus its 2px gap. */
+/* The lane strip above a decoded channel's card names each annotation lane (the
+   localized row name, in the analyzer colour). Out of the flex flow, so the card's
+   measured pitch is untouched; a hover shows the analyzer and row as a tooltip. */
+.ch-lane-labels { display: none; }
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-cell { position: relative; }
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-lane-labels {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: calc(var(--strip-w) + 6px);
+  right: 4px;
+}
+.ch-lane-label {
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 :is(html[data-theme="dark"], html[data-theme="light"]) .ch-analyzers {
   display: flex;
   flex-direction: column;

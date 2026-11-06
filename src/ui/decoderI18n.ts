@@ -6,8 +6,17 @@ import type { SelectOptionTuple } from './select.js';
 
 export interface DecoderMetadata {
   readonly id: string;
+  /** sigrok's short display name ("UART", "I²C"); the id stands in when absent. */
+  readonly name?: string;
   readonly longname: string;
   readonly desc: string;
+}
+
+/** The annotation metadata the row/class name helpers read (a `DecoderInfo` fits). */
+export interface DecoderAnnotationMetadata {
+  readonly id: string;
+  readonly annotations: readonly { readonly id: string; readonly desc: string }[];
+  readonly annotation_rows: readonly { readonly id: string; readonly desc: string }[];
 }
 
 export interface DecoderOptionMetadata {
@@ -47,12 +56,25 @@ export function decoderLongNameText(decoder: DecoderMetadata): string {
   return translateDecoder(decoderLongNameKey(decoder.id), decoder.longname);
 }
 
+/**
+ * The picker's visible label: sigrok's short name and the localized long name
+ * ("UART - 通用异步收发器"), or the short name alone when the long name only repeats it.
+ * The stored value stays the decoder id; the label is presentation only.
+ */
 export function decoderPickerLabel(decoder: DecoderMetadata): string {
-  return decoder.id;
+  const name = decoder.name?.trim() || decoder.id;
+  const long = decoderLongNameText(decoder);
+  return foldName(long) === foldName(name) ? name : `${name} - ${long}`;
 }
 
+const foldName = (text: string): string => text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
+/**
+ * The fuzzy corpus: the visible label first (so highlight positions land on it), then
+ * the raw id, which is searchable but past the label, where highlights are clipped.
+ */
 export function decoderPickerSearchText(decoder: DecoderMetadata): string {
-  return `${decoder.id} - ${decoderLongNameText(decoder)}`;
+  return `${decoderPickerLabel(decoder)} ${decoder.id}`;
 }
 
 /**
@@ -102,8 +124,32 @@ export function decoderSearchAliases(decoderId: string): readonly string[] {
   return [decoderId, ...(DECODER_SEARCH_ALIASES[decoderId] ?? [])];
 }
 
+/**
+ * The picker's aliases: the table's, plus the display names - sigrok's short name and
+ * the localized long name - so typing the start of a shown name ("通用", "Contr") ranks
+ * that decoder in the alias tiers, above scattered fuzzy hits elsewhere.
+ */
 export function decoderPickerAliases(decoders: readonly DecoderMetadata[]): (readonly string[])[] {
-  return decoders.map((decoder) => decoderSearchAliases(decoder.id));
+  return decoders.map((decoder) => [
+    ...decoderSearchAliases(decoder.id),
+    ...(decoder.name ? [decoder.name] : []),
+    decoderLongNameText(decoder),
+  ]);
+}
+
+/**
+ * The protocols most captures are about. [CHOICE] Among hits of one tier they rank
+ * first, so "s" offers SPI before S/PDIF or SDQ; an exact alias or a much better fuzzy
+ * match elsewhere still wins (the boost is below the alias tiers and one fuzzy boundary
+ * bonus or two).
+ */
+export const COMMON_DECODER_IDS: readonly string[] = [
+  'uart', 'i2c', 'spi', 'onewire_link', 'can', 'usb_signalling', 'i2s', 'jtag', 'swd', 'pwm',
+];
+export const COMMON_DECODER_BOOST = 12;
+
+export function decoderPickerBoosts(decoders: readonly DecoderMetadata[]): number[] {
+  return decoders.map((decoder) => COMMON_DECODER_IDS.includes(decoder.id) ? COMMON_DECODER_BOOST : 0);
 }
 
 export function decoderPickerOptions(
@@ -111,6 +157,44 @@ export function decoderPickerOptions(
 ): SelectOptionTuple[] {
   return decoders.map((decoder): SelectOptionTuple =>
     [decoder.id, decoderPickerLabel(decoder), decoderPickerSearchText(decoder)]);
+}
+
+/**
+ * Annotation ROW and CLASS names ("RX data", "Start condition") localize through
+ * `decoder.<id>.row.<rowId>` / `decoder.<id>.ann.<classId>`, English sigrok text as the
+ * fallback. Catalogs cover the decoders in `LOCALIZED_ANNOTATION_DECODER_IDS`; any other
+ * decoder shows sigrok's English names. The annotation PAYLOAD text (`annotationTexts`:
+ * "Data write: 3A", "Start") is NOT translated: it is built by the Python decoder at run
+ * time, often with values spliced in, and is what sigrok/PulseView users and exported
+ * files compare against - so it stays byte-identical to sigrok.
+ */
+export const LOCALIZED_ANNOTATION_DECODER_IDS: readonly string[] = [
+  'uart', 'i2c', 'spi', 'onewire_link', 'can',
+];
+
+export function decoderRowKey(decoderId: string, rowId: string): string {
+  return `decoder.${decoderId}.row.${rowId}`;
+}
+
+export function decoderAnnotationKey(decoderId: string, classId: string): string {
+  return `decoder.${decoderId}.ann.${classId}`;
+}
+
+export function decoderAnnotationClassName(
+  decoderId: string, cls: { readonly id: string; readonly desc: string },
+): string {
+  return translateDecoder(decoderAnnotationKey(decoderId, cls.id), cls.desc);
+}
+
+/**
+ * A display row's name. A decoder that declares no rows gets one synthesized row per
+ * class (`displayRows`), which is named like that class.
+ */
+export function decoderRowName(
+  info: DecoderAnnotationMetadata, row: { readonly id: string; readonly desc: string },
+): string {
+  if (info.annotation_rows.length === 0) return decoderAnnotationClassName(info.id, row);
+  return translateDecoder(decoderRowKey(info.id, row.id), row.desc);
 }
 
 export function decoderOptionLabel(decoderId: string, option: DecoderOptionMetadata): string {

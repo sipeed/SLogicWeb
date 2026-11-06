@@ -626,6 +626,9 @@ export const ru: Messages = {
   'analyzerPanel.apply': 'Применить и декодировать',
   'analyzerPanel.cancelEdit': 'Отмена',
   'analyzerPanel.advancedOptions': 'Дополнительные параметры ({count})',
+  'analyzerPanel.nameMatched': 'Сопоставлено по именам каналов: {list}',
+  'analyzerPanel.optionOff': 'выкл.',
+  'analyzerPanel.optionOffHint': 'Оставьте пустым (или введите -1), чтобы отключить',
 
   // ----------------------------- analyzer status notes (formatted at render)
   'analyzerNote.pending': 'не декодировано',

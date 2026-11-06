@@ -635,6 +635,9 @@ export const fr: Messages = {
   'analyzerPanel.apply': 'Appliquer et décoder',
   'analyzerPanel.cancelEdit': 'Annuler',
   'analyzerPanel.advancedOptions': 'Options avancées ({count})',
+  'analyzerPanel.nameMatched': 'Associé d’après le nom des voies : {list}',
+  'analyzerPanel.optionOff': 'désactivé',
+  'analyzerPanel.optionOffHint': 'Laisser vide (ou saisir -1) pour désactiver',
 
   // ----------------------------- analyzer status notes (formatted at render)
   'analyzerNote.pending': 'non décodé',

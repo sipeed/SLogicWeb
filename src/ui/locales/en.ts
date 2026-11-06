@@ -635,6 +635,9 @@ export const en = {
   'analyzerPanel.apply': 'Apply and decode',
   'analyzerPanel.cancelEdit': 'Cancel',
   'analyzerPanel.advancedOptions': 'Advanced options ({count})',
+  'analyzerPanel.nameMatched': 'Matched by channel name: {list}',
+  'analyzerPanel.optionOff': 'off',
+  'analyzerPanel.optionOffHint': 'Leave empty (or enter -1) to turn this off',
 
   // ----------------------------- analyzer status notes (formatted at render)
   'analyzerNote.pending': 'not decoded',

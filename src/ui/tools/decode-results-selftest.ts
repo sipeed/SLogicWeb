@@ -11,7 +11,8 @@
 
 import { getDecoder, hydrateDecoders, isLogicDecoder, listDecoders } from '../../decode/registry.js';
 import {
-  changedOptions, defaultChannelMapping, mapsNoChannel, reconcileAnalyzers, splitDecoderOptions,
+  changedOptions, channelNameWords, defaultChannelMapping, isOffSentinelOption, mapsNoChannel,
+  optionFieldRaw, optionFieldText, reconcileAnalyzers, seedChannelMapping, splitDecoderOptions,
 } from '../analyzerForm.js';
 import {
   CLIPBOARD_LINE_CAP, TEXT_LINE_CAP, annotationLine, defaultResultRows, filterResults,
@@ -19,7 +20,8 @@ import {
   type ExportNames, type ResultSource,
 } from '../decodeResults.js';
 import {
-  DECODER_SEARCH_ALIASES, decoderPickerAliases, decoderPickerSearchText,
+  DECODER_SEARCH_ALIASES, decoderPickerAliases, decoderPickerBoosts, decoderPickerOptions,
+  decoderPickerSearchText,
 } from '../decoderI18n.js';
 import { ALIAS_EXACT, aliasRank, foldAlias } from '../fuzzy.js';
 import { getLocale, setLocale } from '../i18n.js';
@@ -251,6 +253,62 @@ await hydrateDecoders();
   check('required channels fill in order around a name match', mi[0] === 0 && mi[1] === 7,
     JSON.stringify(mi));
 
+  // Synthetic name sets: prefixes, suffixes, digits and synonyms (decoder channel order:
+  // required first, then optional - uart [rx, tx], i2c [scl, sda], spi [clk, miso, mosi, cs]).
+  const names = (list: readonly string[]) => list.map((name, index) => ({ index, name }));
+  const spiInfo = getDecoder('spi');
+  const cases: [string, typeof uartInfo, readonly string[], Record<number, number>, number[]][] = [
+    ['uart prefixed', uartInfo, ['', 'UART_TX', '', 'UART_RX'], { 0: 3, 1: 1 }, [0, 1]],
+    ['uart RXD/TXD', uartInfo, ['txd', 'rxd'], { 0: 1, 1: 0 }, [0, 1]],
+    ['i2c prefixed', i2c, ['I2C_SDA', 'I2C_SCL'], { 0: 1, 1: 0 }, [0, 1]],
+    ['i2c suffixed digits', i2c, ['', 'SCL1', 'SDA1'], { 0: 1, 1: 2 }, [0, 1]],
+    ['spi digits and synonyms', spiInfo, ['CS#', 'MISO0', 'SCK', 'MOSI0'], { 0: 2, 1: 1, 2: 3, 3: 0 }, [0, 1, 2, 3]],
+    ['spi lower-case prefixed', spiInfo, ['spi_clk', 'spi_mosi', 'spi_nss'], { 0: 0, 2: 1, 3: 2 }, [0, 2, 3]],
+    ['onewire DQ', getDecoder('onewire_link'), ['', '', 'DQ'], { 0: 2 }, [0]],
+    ['can CAN_RX', getDecoder('can'), ['', 'CAN_RX'], { 0: 1 }, [0]],
+    ['generic names fill in order', i2c, ['', '', ''], { 0: 0, 1: 1 }, []],
+    ['unrelated names do not match', i2c, ['LED', 'BUTTON', 'SCLK'], { 0: 0, 1: 1 }, []],
+    ['first of two same-named channels wins', uartInfo, ['TX0', 'TX1'], { 1: 0 }, [1]],
+  ];
+  const caseBad: string[] = [];
+  for (const [label, info, list, want, matched] of cases) {
+    const got = seedChannelMapping(info, names(list));
+    if (JSON.stringify(got.mapping) !== JSON.stringify(want) ||
+      got.nameMatched.join() !== matched.join()) {
+      caseBad.push(`${label}: ${JSON.stringify(got)}`);
+    }
+  }
+  check('channel names auto-match decoder channels across prefixes, suffixes, digits and synonyms',
+    caseBad.length === 0, caseBad.join('; ') || `${cases.length} name sets`);
+  check('channel name words split on separators and drop trailing digits',
+    [...channelNameWords('UART_TX')].join() === 'uarttx,uart,tx' &&
+    [...channelNameWords('MOSI0')].join() === 'mosi0,mosi' && channelNameWords('').size === 0,
+    `${[...channelNameWords('UART_TX')]} | ${[...channelNameWords('MOSI0')]}`);
+
+  // A channel set by hand is never overridden, an explicit "none" stays none, and the
+  // channel it took is not handed to a name match.
+  const handSet = seedChannelMapping(i2c, names(['SCL', 'SDA', 'X']), { 1: 2 });
+  const handNone = seedChannelMapping(uartInfo, names(['RX', 'TX']), { 0: -1 });
+  const handTaken = seedChannelMapping(i2c, names(['SDA', 'SCL']), { 0: 0 });
+  check('a hand-set channel is kept, an explicit none stays none, and its wire is not re-used',
+    handSet.mapping[0] === 0 && handSet.mapping[1] === 2 && handSet.nameMatched.join() === '0' &&
+    handNone.mapping[0] === undefined && handNone.mapping[1] === 1 && handNone.nameMatched.join() === '1' &&
+    handTaken.mapping[0] === 0 && handTaken.mapping[1] === 2 - 1 && handTaken.nameMatched.join() === '',
+    `${JSON.stringify(handSet)} ${JSON.stringify(handNone)} ${JSON.stringify(handTaken)}`);
+  check('defaultChannelMapping is the seed with nothing set by hand',
+    JSON.stringify(defaultChannelMapping(spiInfo, names(['SCK', 'MOSI']))) ===
+    JSON.stringify(seedChannelMapping(spiInfo, names(['SCK', 'MOSI'])).mapping), 'same');
+
+  const delim = uartInfo.options.find((o) => o.id === 'rx_packet_delim')!;
+  const baud = uartInfo.options.find((o) => o.id === 'baudrate')!;
+  const sentinelIds = uartInfo.options.filter(isOffSentinelOption).map((o) => o.id).sort().join();
+  check('UART packet delimiter/length show -1 as an empty "off" field and store -1',
+    sentinelIds === 'rx_packet_delim,rx_packet_len,tx_packet_delim,tx_packet_len' &&
+    optionFieldText(delim, -1) === '' && optionFieldText(delim, 10) === '10' &&
+    optionFieldRaw(delim, '') === '-1' && optionFieldRaw(delim, ' 13 ') === ' 13 ' &&
+    !isOffSentinelOption(baud) && optionFieldText(baud, -1) === '-1' && optionFieldRaw(baud, '') === '',
+    sentinelIds);
+
   const { primary, advanced } = splitDecoderOptions('uart', uartInfo.options);
   check('UART shows baud rate, framing and format up front; packet/invert options are advanced',
     primary.map((o) => o.id).join() === 'baudrate,data_bits,parity,stop_bits,format' &&
@@ -301,6 +359,28 @@ await hydrateDecoders();
     if (!ir.every((id) => id.startsWith('ir_'))) bad.push(`${locale}:红外->${ir}`);
     const irEn = aliasRank('IR', corpus, aliases)[0];
     if (!irEn || !logic[irEn.index]!.id.startsWith('ir_') || irEn.score < ALIAS_EXACT) bad.push(`${locale}:IR`);
+  }
+  await setLocale('en');
+  {
+    const corpus = logic.map((d) => decoderPickerSearchText(d));
+    const boosts = decoderPickerBoosts(logic);
+    const ids = (q: string) => aliasRank(q, corpus, aliases, boosts).map((r) => logic[r.index]!.id);
+    const s1 = ids('s');
+    const common = (id: string) => ['uart', 'i2c', 'spi', 'onewire_link', 'can', 'usb_signalling'].includes(id);
+    const contr = ids('Contr')[0];
+    const plainRank = aliasRank('s', corpus, aliases).map((r) => logic[r.index]!.id);
+    if (!common(s1[0] ?? '')) bad.push(`s->${s1.slice(0, 3)}`);
+    if (contr !== 'can') bad.push(`Contr->${contr}`);
+    if (s1.length !== plainRank.length) bad.push('boost changed the hit set');
+    if (ids('串口')[0] !== 'uart' || ids('i2c')[0] !== 'i2c') bad.push('boost broke an exact alias');
+  }
+  await setLocale('zh-CN');
+  {
+    const corpus = logic.map((d) => decoderPickerSearchText(d));
+    const top = logic[aliasRank('通用异步', corpus, decoderPickerAliases(logic), decoderPickerBoosts(logic))[0]?.index ?? -1]?.id;
+    if (top !== 'uart') bad.push(`zh 通用异步->${top}`);
+    const label = decoderPickerOptions(logic).find((o) => o[0] === 'uart')?.[1];
+    if (label !== 'UART - 通用异步收发器') bad.push(`zh label ${label}`);
   }
   await setLocale('en');
   check('protocol aliases rank the expected decoder first in every locale ("串口" finds uart)',

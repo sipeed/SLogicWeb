@@ -200,11 +200,14 @@ export function foldAlias(text: string): string {
  * that starts with it ranks above the remaining fuzzy hits. Ties keep the input order.
  * The positions are the fuzzy match on the haystack when there is one, otherwise empty
  * (an alias is not part of the visible label, so there is nothing to highlight).
+ * `boosts` (optional, per item) adds to a ranked item's score - a nudge for common
+ * choices; it never makes a non-matching item rank.
  */
 export function aliasRank(
   needle: string,
   haystacks: readonly string[],
   aliases: readonly (readonly string[])[],
+  boosts?: readonly number[],
 ): readonly FuzzyRank[] {
   const folded = foldAlias(needle);
   const ranks: FuzzyRank[] = [];
@@ -219,7 +222,7 @@ export function aliasRank(
       }
     }
     if (tier === 0 && match === null) continue;
-    ranks.push({ score: tier + (match?.score ?? 0), positions: match?.positions ?? [], index: i });
+    ranks.push({ score: tier + (match?.score ?? 0) + (boosts?.[i] ?? 0), positions: match?.positions ?? [], index: i });
   }
   ranks.sort((a, b) => (b.score - a.score) || (a.index - b.index));
   return ranks;

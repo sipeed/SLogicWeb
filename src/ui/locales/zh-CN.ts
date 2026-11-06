@@ -557,7 +557,7 @@ export const zhCN: Messages = {
   'analyzerPanel.subWarm': 'sigrok 内置解码器：{count} 个。工作线程已就绪。',
   'analyzerPanel.subCold': 'sigrok 内置解码器：{count} 个。工作线程正在预热（约 850 ms，每次会话一次）。',
   'analyzerPanel.decoding': '解码中…',
-  'analyzerPanel.attached': '已挂载',
+  'analyzerPanel.attached': '已添加',
   'analyzerPanel.decodeAction': '解码 {label}',
   'analyzerPanel.removeAction': '移除 {label}',
   'analyzerPanel.cancelDecode': '取消解码',
@@ -568,7 +568,7 @@ export const zhCN: Messages = {
   'analyzerPanel.decoderNoMatch': '没有与 "{query}" 匹配的协议',
   'analyzerPanel.stacked': '{id} 需要 {inputs}，因此必须堆叠在产出解码器之上。本面板不提供堆叠功能。',
   'analyzerPanel.optionalSuffix': '（可选）',
-  'analyzerPanel.attach': '挂载',
+  'analyzerPanel.attach': '添加',
   'analyzerPanel.loadFirst': '请先加载或录制采集；解码器需要边沿数据。',
   'analyzerPanel.dropped': '已移除本次采集中缺少通道的解码器：{list}。',
   'analyzerPanel.dismiss': '知道了',
@@ -580,6 +580,9 @@ export const zhCN: Messages = {
   'analyzerPanel.apply': '应用并解码',
   'analyzerPanel.cancelEdit': '取消',
   'analyzerPanel.advancedOptions': '高级选项（{count}）',
+  'analyzerPanel.nameMatched': '已按通道名自动匹配：{list}',
+  'analyzerPanel.optionOff': '不使用',
+  'analyzerPanel.optionOffHint': '留空（或输入 -1）表示不使用',
 
   // ----------------------------- analyzer status notes (formatted at render)
   'analyzerNote.pending': '未解码',

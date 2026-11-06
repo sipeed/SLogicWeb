@@ -16,6 +16,8 @@ export interface SelectSearch {
    * hits on the search text - e.g. "串口" for `uart`. Not shown; only searched.
    */
   readonly aliases?: readonly (readonly string[])[];
+  /** Per-option score nudges for `aliasRank` (common choices first among equals). */
+  readonly boosts?: readonly number[];
 }
 
 export interface SelectConfig {
@@ -367,7 +369,7 @@ export class SelectControl extends EventTarget {
       return;
     }
     const ranks = search.aliases
-      ? aliasRank(query, this.searchTexts, search.aliases)
+      ? aliasRank(query, this.searchTexts, search.aliases, search.boosts)
       : fuzzyRank(query, this.searchTexts);
     const hit = new Set(ranks.map((rank) => rank.index));
     this.items.forEach((item, index) => {

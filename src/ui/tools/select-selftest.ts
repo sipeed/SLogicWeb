@@ -350,7 +350,7 @@ check(
 
   const searchNeedles = [
     "import { aliasRank, fuzzyRank, highlightRuns } from './fuzzy.js';",
-    'aliasRank(query, this.searchTexts, search.aliases)',
+    'aliasRank(query, this.searchTexts, search.aliases, search.boosts)',
     'export type SelectOptionTuple = readonly [value: string, label: string, search?: string];',
     'this.searchTexts = options.map((option) => option[2] ?? option[1]);',
     'fuzzyRank(query, this.searchTexts)',

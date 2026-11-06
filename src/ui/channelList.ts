@@ -37,6 +37,14 @@ export interface ChannelConfiguration {
   color: string;
 }
 
+export interface ChannelLaneLabel {
+  /** The row name shown in the lane strip. */
+  readonly text: string;
+  /** The tooltip: analyzer label and row name. */
+  readonly title: string;
+  readonly color: string;
+}
+
 export interface ChannelCell {
   channel: ChannelState;
   /** Total CSS height, base row plus every lane this channel carries. */
@@ -47,6 +55,11 @@ export interface ChannelCell {
    * cards are one consistent height whether or not a decoder is attached.
    */
   laneCss: number;
+  /**
+   * One label per annotation lane above the trace, top to bottom: the localized row
+   * name ("RX data", "地址/数据") in the analyzer's colour. Absent or empty: no lanes.
+   */
+  lanes?: readonly ChannelLaneLabel[];
   analyzers: AnalyzerState[];
   trigger: {
     mode: TriggerMode;
@@ -573,6 +586,23 @@ export class ChannelList {
          inline padding: a property is inert until a rule reads it, so the default
          theme - where .ch-card is display:contents - stays pixel-identical. */
       if (cell.laneCss > 0) el.style.setProperty('--ch-lane-offset', `${cell.laneCss}px`);
+      const lanes = cell.lanes ?? [];
+      if (lanes.length > 0 && cell.laneCss > 0) {
+        // The lane strip above the card names each plot lane's annotation row.
+        const strip = document.createElement('div');
+        strip.className = 'ch-lane-labels';
+        strip.style.height = `${cell.laneCss}px`;
+        for (const lane of lanes) {
+          const label = document.createElement('div');
+          label.className = 'ch-lane-label';
+          label.style.height = `${cell.laneCss / lanes.length}px`;
+          label.style.color = lane.color;
+          label.textContent = lane.text;
+          label.title = lane.title;
+          strip.appendChild(label);
+        }
+        el.appendChild(strip);
+      }
 
       /* The card wrapper groups strip+body so a theme can render the cell as one
          rounded card; the chips container lets a theme reserve the decoder strip.

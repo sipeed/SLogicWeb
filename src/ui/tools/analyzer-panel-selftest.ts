@@ -204,7 +204,7 @@ check(
   'constrained option values resolve display labels while state keeps the raw select value',
   panel.includes('const optionValues: SelectOptionTuple[] = decoderOptionValueTuples(opt.values);') &&
     panel.includes('this.draftOptions[opt.id] = coerce(opt.type, sel.value);') &&
-    panel.includes('this.draftOptions[opt.id] = coerce(opt.type, inp.value);') &&
+    panel.includes('this.draftOptions[opt.id] = coerce(opt.type, optionFieldRaw(opt, inp.value));') &&
     !panel.includes('(x) => [String(x), String(x)] as SelectOptionTuple,') &&
     !panel.includes('[decoderOptionValueLabel('),
   `tuples=${panel.includes('decoderOptionValueTuples(opt.values)')}, coerce=${count(panel, /coerce\(opt\.type, (sel|inp)\.value\)/g)}`,
@@ -213,7 +213,7 @@ check(
 const PICKER_CALL = 'decoderPickerOptions(logic)';
 const RAW_PICKER_LABEL = '${d.id} - ${d.longname}';
 check(
-  'the decoder picker renders the raw protocol id backed by the localized search corpus',
+  'the decoder picker renders localized labels backed by the localized search corpus',
   panel.includes(PICKER_CALL) &&
     panel.includes('decoderPickerOptions,') && panel.includes(DECODER_I18N_IMPORT) &&
     panel.includes('this.chosen = pick.value;') &&

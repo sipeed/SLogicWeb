@@ -27,12 +27,13 @@ import {
 } from '../decode/index.js';
 import type { DecoderInfo, DecoderOptionInfo } from '../decode/index.js';
 import {
-  changedOptions, defaultChannelMapping, mapsNoChannel, splitDecoderOptions,
+  changedOptions, isOffSentinelOption, mapsNoChannel, optionFieldRaw, optionFieldText,
+  seedChannelMapping, splitDecoderOptions,
 } from './analyzerForm.js';
 import { button, div, labelled, section } from './capturePanel.js';
 import {
   decoderDescriptionText, decoderLongNameText, decoderOptionLabel, decoderOptionValueTuples,
-  decoderPickerAliases, decoderPickerOptions,
+  decoderPickerAliases, decoderPickerBoosts, decoderPickerOptions,
 } from './decoderI18n.js';
 import { formatMountedAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
@@ -73,6 +74,13 @@ export class AnalyzerPanel {
   private draftOptions: Record<string, string | number> = {};
   /** False until the draft mapping got its defaults for `chosen`. */
   private mappingSeeded = false;
+  /**
+   * Decoder channels the user set by hand in the Add form. Every Add render re-seeds the
+   * other ones (a channel renamed "SDA" after picking I2C is then found), never these.
+   */
+  private touched = new Set<number>();
+  /** Decoder channels the current Add mapping found by capture channel name. */
+  private nameMatched: readonly number[] = [];
   /** The attached analyzer the form edits, or null when it adds a new one. */
   private editing: string | null = null;
   private advancedOpen = false;
@@ -91,6 +99,8 @@ export class AnalyzerPanel {
     this.draftChannels = { ...a.channels };
     this.draftOptions = { ...a.options };
     this.mappingSeeded = true;
+    this.touched.clear();
+    this.nameMatched = [];
     try {
       const info = getDecoder(a.decoderId);
       const { advanced } = splitDecoderOptions(info.id, info.options);
@@ -128,6 +138,8 @@ export class AnalyzerPanel {
     this.draftChannels = {};
     this.draftOptions = {};
     this.mappingSeeded = false;
+    this.touched.clear();
+    this.nameMatched = [];
     this.advancedOpen = false;
   }
 
@@ -232,6 +244,7 @@ export class AnalyzerPanel {
         placeholder: t('analyzerPanel.decoderSearchPlaceholder'),
         empty: t('analyzerPanel.decoderNoMatch'),
         aliases: decoderPickerAliases(logic),
+        boosts: decoderPickerBoosts(logic),
       },
     });
     // An attached analyzer keeps its decoder; editing changes its wiring and options.
@@ -241,6 +254,7 @@ export class AnalyzerPanel {
       this.draftChannels = {};
       this.draftOptions = {};
       this.mappingSeeded = false;
+      this.touched.clear();
       this.advancedOpen = false;
       this.render(v);
     });
@@ -281,9 +295,15 @@ export class AnalyzerPanel {
     const enabled = v.channels.filter((c) => c.index < v.captureChannels);
     const realName = (c: ChannelState): string =>
       c.name && c.name !== defaultChannelName(c.index) ? c.name : '';
-    if (!this.mappingSeeded) {
-      this.draftChannels = defaultChannelMapping(info,
-        enabled.map((c) => ({ index: c.index, name: realName(c) })));
+    // Add mode re-seeds every render around the channels set by hand; an edited
+    // analyzer keeps the mapping it was attached with.
+    if (!this.mappingSeeded || this.editing === null) {
+      const fixed: Record<number, number> = {};
+      for (const i of this.touched) fixed[i] = this.draftChannels[i] ?? -1;
+      const seed = seedChannelMapping(info,
+        enabled.map((c) => ({ index: c.index, name: realName(c) })), fixed);
+      this.draftChannels = seed.mapping;
+      this.nameMatched = this.editing === null ? seed.nameMatched : [];
       this.mappingSeeded = true;
     }
     const chanOpts = (required: boolean): [string, string][] => [
@@ -309,6 +329,8 @@ export class AnalyzerPanel {
       );
       sel.addEventListener('change', () => {
         const val = Number(sel.value);
+        // An explicit choice: re-seeding by name never moves it again.
+        this.touched.add(i);
         if (val < 0) delete this.draftChannels[i];
         else this.draftChannels[i] = val;
         // The "reads no channel" complaint and the action's enabled state follow the mapping.
@@ -316,6 +338,15 @@ export class AnalyzerPanel {
       });
       add.body.appendChild(sel.el);
     });
+
+    const matched = this.nameMatched.filter((i) => !this.touched.has(i) && allChans[i] !== undefined);
+    if (matched.length > 0) {
+      const note = div('panel-note analyzer-name-match');
+      note.textContent = t('analyzerPanel.nameMatched', {
+        list: matched.map((i) => allChans[i]!.name).join(', '),
+      });
+      add.body.appendChild(note);
+    }
 
     const { primary, advanced } = splitDecoderOptions(info.id, info.options);
     for (const opt of primary) add.body.appendChild(this.optionControl(info, opt));
@@ -392,8 +423,16 @@ export class AnalyzerPanel {
     }
     const inp = document.createElement('input');
     inp.type = opt.type === 'str' ? 'text' : 'number';
-    inp.value = String(cur);
-    inp.addEventListener('change', () => { this.draftOptions[opt.id] = coerce(opt.type, inp.value); });
+    // sigrok's -1 "off" shows as an empty field reading "off"; the stored value stays -1.
+    inp.value = optionFieldText(opt, cur);
+    if (isOffSentinelOption(opt)) {
+      inp.placeholder = t('analyzerPanel.optionOff');
+      inp.title = t('analyzerPanel.optionOffHint');
+    }
+    inp.addEventListener('change', () => {
+      inp.value = optionFieldText(opt, optionFieldRaw(opt, inp.value));
+      this.draftOptions[opt.id] = coerce(opt.type, optionFieldRaw(opt, inp.value));
+    });
     return labelled(decoderOptionLabel(info.id, opt), inp);
   }
 }
