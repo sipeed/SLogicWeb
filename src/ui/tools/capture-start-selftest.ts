@@ -171,7 +171,7 @@ const HOLD: CaptureStartDisplayInput = {
 
   const settleCallers = [
     ['App.startCapture', bodyBetween('private async startCapture(', 'private enforceLoopRetention(')],
-    ['App.adoptCapture', bodyBetween('private adoptCapture(', 'private save(')],
+    ['App.adoptCapture', bodyBetween('private adoptCapture(', 'private saveItems(')],
     ['App.discardDevice', bodyBetween('private discardDevice(', 'private detachDevice(')],
     ['App.finishCapture', bodyBetween('private finishCapture(', 'private discardDecodeState(')],
   ].filter(([, body]) => body.length === 0 || !body.includes('this.settleHeldCaptureStart();'));
