@@ -437,7 +437,7 @@ for i18next in a tree whose only runtime dependency is pyodide.
   the only way a mid-session locale switch can retranslate them. `debug.snapshot()`
   still returns the formatted strings, so the script contract is unchanged. The
   console.error prefix in `fail()` is now the stable message KEY (`error.openCapture`
-  and friends), greppable in every locale; the status bar still shows the translated
+  and friends), greppable in every locale; the top error banner still shows the translated
   prefix followed by the raw diagnostic detail.
 - **Analyzer status notes are structured too** (`AnalyzerNote` in state.ts): pending /
   edges / stats / timeout / cancelled are translated at render time, while decoder
@@ -533,8 +533,8 @@ one-item revert in `settingsItems()`.
   spacer and plot CSS background must meet that pixel seamlessly (the measured seam in
   this file's §1). Mapping `--bg10` to the near-black `--background` would have stepped
   the label column against every waveform row. The dark shell differentiation comes from
-  explicit semantic overrides on the toolbar, side panel, rail and status bar instead,
-  and the plot reads as an inset well by tonal contrast alone. A `#plot` frame was
+  explicit semantic overrides on the toolbar, side panel and rail instead, and the plot
+  reads as an inset well by tonal contrast alone. A `#plot` frame was
   evaluated and rejected: a `border-top` doubles the axis hairline and (border-box)
   shifts the waveform canvases 1 px out of row alignment, an inset `box-shadow` paints
   *under* the child canvases (invisible), and a `border-radius` reveals the body's
@@ -878,7 +878,14 @@ color label in translated probes, and 14/14 theme results including 15 unique va
 presets and unchanged UI/renderer defaults. `tsc --noEmit` and the production Vite build
 also passed; only the pre-existing chunk-size warning remained.
 
-## 20. AI assistant sidebar
+## 20. AI assistant sidebar (UI removed)
+
+The assistant chat column and its toolbar button have been removed from the UI. The
+provider-neutral library under `src/assistant/` and the view in
+`src/ui/assistantPanel.ts` remain in the source tree, and App keeps the private
+`assistantHost()` exposed as `debug.agentHost()` so an AI agent can drive the page over
+CDP (see `.claude/skills/logicweb/SKILL.md`). The rest of this section describes the
+removed panel and the surviving tool library.
 
 A fourth sidebar choice (after Device, Analyzers) opens a chat with a model the user
 reaches with their **own API key**: Claude through the official `@anthropic-ai/sdk`, or
@@ -1074,8 +1081,8 @@ changes set the ordinary dirty flag and draw in the next frame. Consequences:
 - A 32 ch/200 MS/s loop (800 MB/s) used to suspend drawing entirely; it now shows a live
   view at 20 fps while background bus-overview builds are skipped above 160 MB/s and
   finish after the stop.
-- The progress text in the device panel updates every 500 ms; the waveform, status bar
-  and live edge update on the 50 ms clock.
+- The progress text in the device panel updates every 500 ms; the waveform and live edge
+  update on the 50 ms clock.
 - Nothing in the data path renders or touches the DOM, so a burst of small transfers
   cannot force a render per transfer.
 
@@ -1304,8 +1311,8 @@ whole D. If edges return while a Loop runs free, the page locks automatically ag
 (button, double-click, `F`), zoom and pan never release the lock; they only move V inside
 D. Follow-latest resumes on a release only if it was active when the lock was taken.
 Digital loop triggers keep a one-shot lock: they never roll, the front drops normally,
-and the view releases to follow once T leaves the retained window; the status line says
-so. Single and Repeat captures and a loop with
+and the view releases to follow once T leaves the retained window; the trigger status chip
+says so. Single and Repeat captures and a loop with
 no trigger keep their existing viewport rules. The pre-trigger buffer remains meaningful
 in every mode: while the matcher waits, the ring is the only source of samples before T,
 and in a loop the percentage is also T's position in D. There is no separate analog

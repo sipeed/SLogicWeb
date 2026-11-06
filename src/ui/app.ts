@@ -30,7 +30,6 @@ import type { ChannelEdges, DecodeRequest, DecodeResult } from '../decode/index.
 import type { AssistantHost, CaptureOutcome } from '../assistant/tools.js';
 
 import { AnalyzerPanel } from './analyzerPanel.js';
-import { AssistantPanel } from './assistantPanel.js';
 import { BusBuilder, validateBusSpec } from '../data/busValue.js';
 import { BusPanel, cloneBusConfig, defaultBusConfig } from './busPanel.js';
 import {
@@ -57,11 +56,15 @@ import {
 import { connectSamplerate } from './connectDefaults.js';
 import { formatCursorTimes } from './cursorTime.js';
 import { sameUsbDevice } from './deviceIdentity.js';
-import { formatCount, formatDuration, formatFreq, formatRate,
+import { formatCount, formatDuration, formatFreq,
   formatAnalyzerNote, formatCaptureLabel, formatStatusError,
   formatStatusErrorDebug, statusDetailOf } from './format.js';
 import { applyStaticI18n, getLocale, LOCALE_LABELS, LOCALES, onLocaleChange, setLocale, t,
   type Locale, type MessageKey, type MessageVars } from './i18n.js';
+import {
+  interactionAreaLabelKey, interactionAreaOf, interactionHints, MOUSE_PART_LABEL_KEYS,
+  type HintSpec, type InteractionArea, type MousePart,
+} from './interactionHints.js';
 import { getMode, getTheme, onThemeChange, setMode, THEME_MODES, THEME_MODE_LABEL_KEYS,
   type ThemeId } from './theme.js';
 import {
@@ -73,8 +76,7 @@ import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
 import { MenuStack } from './menuStack.js';
 import {
-  DEFAULT_SIDEBAR_STATE, hideSidebar, selectSidebarPage, showAssistant,
-  toggleAssistant as nextAssistantState, toggleSidebarVisible,
+  DEFAULT_SIDEBAR_STATE, hideSidebar, selectSidebarPage, toggleSidebarVisible,
   type SidebarPage, type SidebarState,
 } from './sidebar.js';
 import { SidebarHost } from './sidebarHost.js';
@@ -91,6 +93,7 @@ import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannels, defaultChannelName, channelColor,
   carryChannelState,
   DEFAULT_TRIGGER_MODE,
+  analogTriggerAutoArms,
   edgeTriggerAutoArms, clampLoopSamples, DEFAULT_LOOP_SAMPLES, loopDropSamples,
   modesToConditions, triggerModeFromCondition, mappedCaptureChannels,
   type AnalogTriggerSetting, type AnalyzerState, type CaptureSettings, type ChannelState,
@@ -174,6 +177,24 @@ const LOOP_STORE_HARD_SAMPLES = 0x7fffffff - 0x1000000;
  */
 const LOOP_BUILD_SUSPEND_BYTES_PER_SEC = 160e6;
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Create one SVG node with constant attributes; the hint glyph has no other DOM needs. */
+function svgNode(tag: string, attrs: Readonly<Record<string, string>>): SVGElement {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [name, value] of Object.entries(attrs)) node.setAttribute(name, value);
+  return node;
+}
+
+/** The `+` between a keycap and the mouse glyph in one hint. */
+function hintPlus(): HTMLSpanElement {
+  const plus = document.createElement('span');
+  plus.className = 'hint-plus';
+  plus.setAttribute('aria-hidden', 'true');
+  plus.textContent = '+';
+  return plus;
+}
+
 interface Lane {
   analyzer: AnalyzerState;
   /** Index into displayRows(decoder). */
@@ -200,9 +221,7 @@ export class App {
   private capturePanel!: CapturePanel;
   private analyzerPanel!: AnalyzerPanel;
   private readonly sidebarHost: SidebarHost;
-  /** Built on first open and never cleared: it owns a conversation and a draft. */
-  private assistantPanel: AssistantPanel | null = null;
-  /** Resolved when the running capture stops (the assistant waits on a capture). */
+  /** Resolved when the running capture stops (the assistant API waits on a capture). */
   private captureWaiters: (() => void)[] = [];
   private busPanel!: BusPanel;
   /** Parallel-bus (ADC) views, drawn as analog rows above the channels. */
@@ -362,6 +381,11 @@ export class App {
 
   private captureLabel: CaptureLabel = { kind: 'none' };
   private statusError: StatusError | null = null;
+  /** The area under the pointer, rendered by the bottom hint bar. */
+  private hoveredInteractionArea: InteractionArea = 'none';
+  /** Last area/capture state drawn, so pointer moves do not rebuild the bar. */
+  private renderedInteractionArea: InteractionArea | null = null;
+  private renderedInteractionHasCapture: boolean | null = null;
   private decodeBusy = false;
   private decodeWarm = false;
   private reacquiring = false;
@@ -390,11 +414,14 @@ export class App {
     plot: HTMLDivElement; waveStack: HTMLDivElement; axis: HTMLCanvasElement;
     overview: HTMLCanvasElement;
     scroll: HTMLDivElement; main: HTMLDivElement; resizer: HTMLDivElement;
-    channelList: HTMLDivElement; side: HTMLDivElement; status: HTMLDivElement;
+    channelList: HTMLDivElement; side: HTMLDivElement;
+    interactionBar: HTMLDivElement; interactionArea: HTMLSpanElement;
+    interactionHints: HTMLUListElement;
     hint: HTMLDivElement; transport: HTMLButtonElement;
     connect: HTMLButtonElement; open: HTMLButtonElement; save: HTMLButtonElement;
     fit: HTMLButtonElement; fullscreen: HTMLButtonElement; settings: HTMLButtonElement;
-    language: HTMLButtonElement; theme: HTMLButtonElement; assistant: HTMLButtonElement;
+    language: HTMLButtonElement; theme: HTMLButtonElement;
+    errorBanner: HTMLDivElement; errorBannerText: HTMLSpanElement; errorDismiss: HTMLButtonElement;
     fileInput: HTMLInputElement;
   };
 
@@ -409,7 +436,9 @@ export class App {
       overview: must<HTMLCanvasElement>('overview'),
       channelList: must<HTMLDivElement>('channel-list'),
       side: must<HTMLDivElement>('side-panel'),
-      status: must<HTMLDivElement>('status'),
+      interactionBar: must<HTMLDivElement>('interaction-bar'),
+      interactionArea: must<HTMLSpanElement>('interaction-area'),
+      interactionHints: must<HTMLUListElement>('interaction-hints'),
       hint: must<HTMLDivElement>('empty-hint'),
       transport: must<HTMLButtonElement>('transport'),
       connect: must<HTMLButtonElement>('btn-connect'),
@@ -420,7 +449,9 @@ export class App {
       settings: must<HTMLButtonElement>('btn-settings'),
       language: must<HTMLButtonElement>('btn-language'),
       theme: must<HTMLButtonElement>('btn-theme'),
-      assistant: must<HTMLButtonElement>('btn-assistant'),
+      errorBanner: must<HTMLDivElement>('error-banner'),
+      errorBannerText: must<HTMLSpanElement>('error-banner-text'),
+      errorDismiss: must<HTMLButtonElement>('error-banner-dismiss'),
       fileInput: must<HTMLInputElement>('file-input'),
     };
 
@@ -517,6 +548,7 @@ export class App {
 
     this.wireToolbar();
     this.wirePlot();
+    this.wireInteractionHints();
 
     // A locale switch is a full re-render pass: every render path is clear-and-rebuild,
     // so re-running them swaps the language with no stale strings anywhere.
@@ -752,6 +784,10 @@ export class App {
       : {};
     this.applySettings({
       ...this.settings,
+      // Setting a crossing is user intent to arm, like committing a digital edge mode.
+      // Removing one leaves the mask as the user set it.
+      ...(analogTriggerAutoArms(kind, this.settings.triggerEnableMask)
+        ? { triggerEnableMask: true } : {}),
       ...(kind ? { triggerSource: 'analog' as const } : {}),
       analogTriggers,
     });
@@ -1801,9 +1837,9 @@ export class App {
         // text, never rebuild the panel (that would drop focus mid-edit).
         if (this.captureIsLoop) this.capturePanel.updateLoopMetrics(this.computeLoopMetrics());
       }
-      // The status line is not part of the draw pass, and a live frame whose window
+      // The hint bar is not part of the draw pass, and a live frame whose window
       // cannot change no longer reaches it, so refresh it on this clock instead.
-      this.renderStatus();
+      this.renderInteractionBar();
     }
     // Interactions (`dirty`) draw in the next frame. New samples (`livePending`) draw on
     // a cadence paced by the cost of the previous frame, instead of on every packet.
@@ -2047,7 +2083,7 @@ export class App {
     }
     this.layerFingerprint = fingerprint;
     this.renderOverview(force);
-    this.renderStatus();
+    this.renderInteractionBar();
     this.recordDrawnWindow();
   }
 
@@ -3407,6 +3443,23 @@ export class App {
 
   // ------------------------------------------------------------------ toolbar
 
+  /**
+   * Track the hovered interaction area for the bottom hint bar. Passive and area-
+   * granular: moving inside one area does no work, and the bar only rebuilds when the
+   * area (or the capture state, checked in renderInteractionBar) actually changes.
+   * The bar itself is excluded so reaching down to read it does not reset the hints.
+   */
+  private wireInteractionHints(): void {
+    document.addEventListener('pointermove', (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target !== null && this.el.interactionBar.contains(target)) return;
+      const area = interactionAreaOf(target);
+      if (area === this.hoveredInteractionArea) return;
+      this.hoveredInteractionArea = area;
+      this.renderInteractionBar();
+    }, { passive: true });
+  }
+
   private wireToolbar(): void {
     this.el.connect.addEventListener('click', () => void this.connect());
     this.el.transport.addEventListener('click', () => this.primaryAction());
@@ -3440,10 +3493,10 @@ export class App {
       this.menuStack.closeOthers(this.themeMenu, 'outside');
       this.themeMenu.toggle(this.themeItems());
     });
-    this.el.assistant.addEventListener('click', () => {
-      this.channelList.closeDialog();
-      this.menuStack.closeAll('outside');
-      this.toggleAssistant();
+    this.el.errorDismiss.addEventListener('click', () => {
+      this.statusError = null;
+      this.renderErrorBanner();
+      this.relayout();
     });
   }
 
@@ -3453,15 +3506,6 @@ export class App {
       else await document.exitFullscreen();
     } catch {
     }
-  }
-
-  /** The toolbar shortcut to the assistant: open it, or close it and land on the page the user had. */
-  private toggleAssistant(): void {
-    const showing = this.assistantShown();
-    this.applySidebar(showing
-      ? nextAssistantState(this.sidebar)
-      : showAssistant(this.sidebar));
-    if (!showing) this.assistantPanel?.focusInput();
   }
 
   private settingsItems(): SettingsMenuItem[] {
@@ -3560,22 +3604,17 @@ export class App {
 
   private capturePageShown(): boolean {
     const s = this.sidebar;
-    return s.visible && !s.assistant && s.page === 'capture';
+    return s.visible && s.page === 'capture';
   }
 
   private cursorsPageShown(): boolean {
     const s = this.sidebar;
-    return s.visible && !s.assistant && s.page === 'cursors';
+    return s.visible && s.page === 'cursors';
   }
 
   private decodersPageShown(): boolean {
     const s = this.sidebar;
-    return s.visible && !s.assistant && s.page === 'decoders';
-  }
-
-  private assistantShown(): boolean {
-    const s = this.sidebar;
-    return s.visible && s.assistant;
+    return s.visible && s.page === 'decoders';
   }
 
   private applySidebar(next: SidebarState): void {
@@ -3585,14 +3624,7 @@ export class App {
     this.relayout();
   }
 
-  private selectPanel(p: 'device' | 'analyzers' | 'assistant' | null): void {
-    if (p === 'assistant') {
-      if (!this.assistantShown()) {
-        this.applySidebar(showAssistant(this.sidebar));
-        this.assistantPanel?.focusInput();
-      }
-      return;
-    }
+  private selectPanel(p: 'device' | 'analyzers' | null): void {
     if (p === null) {
       this.applySidebar(hideSidebar(this.sidebar));
       return;
@@ -3611,8 +3643,7 @@ export class App {
 
   private handleExpand(): void {
     this.applySidebar(toggleSidebarVisible(this.sidebar));
-    if (this.assistantShown()) this.assistantPanel?.focusInput();
-    else this.sidebarHost.focusAfterExpand();
+    this.sidebarHost.focusAfterExpand();
   }
 
   private mountSidebarPage(page: SidebarPage, container: HTMLElement): void {
@@ -3667,8 +3698,8 @@ export class App {
     if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings();
     this.relayout();       // channel cells rebuild; an open channel dialog closes here
     this.renderPanels();   // side panels + toolbar chrome
-    this.assistantPanel?.render();  // its chrome only; the conversation is history
-    this.renderStatus();   // status line
+    this.renderInteractionBar(true);  // hint text follows the locale
+    this.renderErrorBanner();
     this.dirty = true;     // canvas labels (the overview origin, tick units) re-render
   }
 
@@ -3787,18 +3818,6 @@ export class App {
 
   private renderSidebarContent(): void {
     if (!this.sidebar.visible) return;
-    if (this.assistantShown()) {
-      // The assistant is mounted once and only shown or hidden: re-rendering it on every
-      // state change would drop a streaming answer, a pending approval and the draft.
-      if (!this.assistantPanel) {
-        this.assistantPanel = new AssistantPanel(this.assistantHost());
-        this.assistantPanel.el.hidden = false;
-        this.sidebarHost.assistantLayer().appendChild(this.assistantPanel.el);
-        this.assistantPanel.render();
-      }
-      return;
-    }
-
     if (this.sidebar.page === 'capture' || this.sidebar.page === 'cursors') {
       this.capturePanel.render(this.capturePanelView());
       return;
@@ -3910,8 +3929,6 @@ export class App {
     this.el.settings.setAttribute('aria-label', t('settings.title'));
     this.el.language.setAttribute('aria-label', t('toolbar.languageTitle'));
     this.el.theme.setAttribute('aria-label', t('toolbar.themeTitle'));
-    this.el.assistant.setAttribute('aria-label', t('toolbar.assistantTitle'));
-    this.el.assistant.setAttribute('aria-pressed', String(this.assistantShown()));
 
     const btn = this.el.transport;
     btn.setAttribute('aria-label', this.stopping ? t('toolbar.stopping')
@@ -3930,56 +3947,92 @@ export class App {
         : this.device ? t('toolbar.startTitle') : t('toolbar.connectHint');
   }
 
-  private renderStatus(): void {
+  /**
+   * The bottom bar: the area under the pointer and only the gestures its handlers
+   * implement. The area/capture guard is the "update only on change" rule - the draw
+   * pass may call this freely, but pointer movement inside one area touches no DOM.
+   */
+  private renderInteractionBar(force = false): void {
+    // Counted per refresh attempt (the live-window bench gates on it), not per rebuild.
     this.statusRenders += 1;
-    // Capture statistics describe the current wave. A held previous frame is the only
-    // exception: the capture is empty while the old wave is what the user sees, so report
-    // that wave and say which one it is.
-    const showingPrevious = this.repeatShowingFront;
-    const store = showingPrevious ? this.store : this.captureStore;
-    const view = this.stack.view;
-    const sr = store.samplerate;
-    const parts: string[] = [];
-    parts.push(formatCaptureLabel(this.captureLabel));
-    if (showingPrevious) parts.push(t('status.previousWave'));
-    if (store.length > 0) {
-      if (this.captureIsLoop && (this.running || this.droppedTotal > 0)) {
-        parts.push(t('status.loop', {
-          kept: formatCount(store.length), total: formatCount(store.length + this.droppedTotal),
-        }));
-      } else {
-        parts.push(t('status.summary', { samples: formatCount(store.length), rate: formatRate(sr) }));
-        parts.push(t('status.total', { duration: formatDuration(store.length / sr) }));
-      }
-      parts.push(t('status.view', { duration: formatDuration((view.end - view.start) / sr) }));
-    }
-    // Cursor positions share the axis's origin: T=0 is the trigger sample when there
-    // is one, so a pre-trigger cursor reads as the negative time the axis shows.
-    const origin = this.displayOriginSample();
-    const active = this.activeCursor();
-    const markerSample = active?.marker.sample ?? null;
-    if (active !== null && markerSample !== null) {
-      parts.push(`${active.marker.label} ${formatDuration((markerSample - origin) / sr)}`);
-    }
+    const area = this.hoveredInteractionArea;
+    const hasCapture = this.store.length > 0;
+    if (!force && area === this.renderedInteractionArea &&
+        hasCapture === this.renderedInteractionHasCapture) return;
+    this.renderedInteractionArea = area;
+    this.renderedInteractionHasCapture = hasCapture;
+    this.el.interactionArea.textContent = t(interactionAreaLabelKey(area));
+    const hints = interactionHints(area, { hasCapture, running: this.running });
+    this.el.interactionHints.replaceChildren(
+      ...hints.map((spec) => this.interactionHintItem(spec)));
+  }
 
-    this.el.status.replaceChildren();
-    parts.forEach((p, i) => {
-      if (i) {
-        const s = document.createElement('span');
-        s.className = 'sep';
-        s.textContent = '·';
-        this.el.status.appendChild(s);
-      }
-      const s = document.createElement('span');
-      s.textContent = p;
-      this.el.status.appendChild(s);
-    });
-    if (this.statusError) {
-      const s = document.createElement('span');
-      s.className = 'right err';
-      s.textContent = formatStatusError(this.statusError);
-      this.el.status.appendChild(s);
+  /** One hint: optional Ctrl/Shift keycaps, a mouse glyph with the used part lit, text. */
+  private interactionHintItem(spec: HintSpec): HTMLLIElement {
+    const item = document.createElement('li');
+    item.className = 'interaction-hint';
+    let first = true;
+    const separate = (): void => {
+      if (!first) item.appendChild(hintPlus());
+      first = false;
+    };
+    for (const modifier of spec.modifiers) {
+      separate();
+      const key = document.createElement('kbd');
+      key.className = 'hint-key';
+      key.textContent = modifier;
+      item.appendChild(key);
     }
+    if (spec.mouse !== 'none') {
+      separate();
+      item.appendChild(this.interactionMouseIcon(spec.mouse));
+    }
+    const text = document.createElement('span');
+    text.className = 'interaction-hint-text';
+    text.textContent = t(spec.key);
+    item.appendChild(text);
+    return item;
+  }
+
+  /** The inline mouse glyph; `part` is the button or wheel the hint uses. */
+  private interactionMouseIcon(part: Exclude<MousePart, 'none'>): SVGElement {
+    const svg = svgNode('svg', {
+      viewBox: '0 0 24 24',
+      class: 'hint-mouse',
+      role: 'img',
+      'aria-label': t(MOUSE_PART_LABEL_KEYS[part]),
+      focusable: 'false',
+    });
+    const active = (mouse: MousePart): string => (mouse === part ? ' active' : '');
+    svg.appendChild(svgNode('rect', {
+      class: 'hint-mouse-body', x: '6', y: '2', width: '12', height: '20', rx: '6',
+    }));
+    svg.appendChild(svgNode('path', {
+      class: `hint-mouse-part hint-mouse-left${active('left')}`,
+      d: 'M6 9V8a6 6 0 0 1 6-6v7H6Z',
+    }));
+    svg.appendChild(svgNode('path', {
+      class: `hint-mouse-part hint-mouse-right${active('right')}`,
+      d: 'M18 9V8a6 6 0 0 0-6-6v7h6Z',
+    }));
+    svg.appendChild(svgNode('rect', {
+      class: `hint-mouse-part hint-mouse-wheel${active('wheel')}`,
+      x: '11', y: '4', width: '2', height: '5', rx: '1',
+    }));
+    return svg;
+  }
+
+  /**
+   * The only rendering of `statusError`, in the full-width banner above the main row.
+   * The bottom bar is interaction hints, not a status summary; dismissing the banner
+   * clears the same state the debug snapshot reports.
+   */
+  private renderErrorBanner(): void {
+    const err = this.statusError;
+    // Fill the alert before revealing it, so a screen reader announces the message
+    // rather than an empty live region.
+    this.el.errorBannerText.textContent = err === null ? '' : formatStatusError(err);
+    this.el.errorBanner.hidden = err === null;
   }
 
   private fail(what: MessageKey, e: unknown, vars?: MessageVars): void {
@@ -3987,6 +4040,9 @@ export class App {
     // The console prefix is the stable message KEY, not the translated text -
     // greppable in every locale.
     console.error(`[ui] ${what}`, e);
+    // Failures that abort a draw still have to show the user something, so the banner
+    // is updated on the error path itself.
+    this.renderErrorBanner();
     this.dirty = true;
   }
 
@@ -4007,6 +4063,7 @@ export class App {
   private async openFiles(files: File[]): Promise<void> {
     try {
       this.statusError = null;
+      this.renderErrorBanner();
       // An opened capture replaces the store the running sink appends to; stop first so
       // the sink cannot keep dropping/retaining the imported data. A Repeat wave in
       // teardown or between waves can still arm the next interval, so end it before and
@@ -4044,7 +4101,6 @@ export class App {
     this.clearRepeatLayers();
     this.relayout();
     this.renderPanels();
-    this.renderStatus();
     this.dirty = true;
   }
 
@@ -4144,7 +4200,6 @@ export class App {
       this.clearRepeatLayers();
       this.relayout();
       this.renderPanels();
-      this.renderStatus();
       this.dirty = true;
     }
     return epoch;
@@ -4234,6 +4289,7 @@ export class App {
   private async connect(): Promise<AcquireOutcome> {
     try {
       this.statusError = null;
+      this.renderErrorBanner();
       let epoch = this.deviceEpoch;
       let d: Device;
       try {
@@ -4330,6 +4386,7 @@ export class App {
     const generation = ++this.captureGeneration;
     try {
       this.statusError = null;
+      this.renderErrorBanner();
       this.startMutatedCapture = false;
       const cfg: CaptureConfig = {
         channels: this.settings.channels,
@@ -4435,10 +4492,9 @@ export class App {
         else this.storeRef.set(store);
       }
       this.captureLabel = { kind: 'capturing', channels: cfg.channels, rate: cfg.samplerate };
-      // A quiet wave does not rebuild the panel or plot, but the status line must stop
-      // describing the previous wave's completed capture and show the new interval.
+      // A quiet wave does not rebuild the panel or plot, but the trigger note must
+      // stop describing the previous wave's completed capture and show this interval.
       if (quietRepeat) {
-        this.renderStatus();
         if (this.capturePageShown()) {
           this.capturePanel.updateTriggerStatus(this.triggerStatusView());
         }
@@ -5102,7 +5158,6 @@ export class App {
       this.setFollow(false);
       this.relayout();
       this.renderPanels();
-      this.renderStatus();
       return;
     }
     if (!this.running || this.stopping) return;
@@ -5281,6 +5336,7 @@ export class App {
     const stale = (): boolean => this.captureStore !== store || !this.analyzers.includes(a);
     try {
       this.statusError = null;
+      this.renderErrorBanner();
       const { used, outside } = mappedCaptureChannels(a.channels, store.channelCount);
       if (outside !== null) {
         throw new DiagnosticError('decode.channelOutOfRange', {
@@ -5490,6 +5546,11 @@ export class App {
    * path rather than a parallel one built for the test.
    */
   readonly debug = {
+    /**
+     * The tool-facing view of the app (src/assistant/tools.ts), for an AI agent driving
+     * the page over CDP. There is no chat column; this accessor is the replacement.
+     */
+    agentHost: () => this.assistantHost(),
     connect: () => this.connect(),
     setLocale: (l: Locale) => setLocale(l),
     getLocale: () => getLocale(),
@@ -5513,7 +5574,7 @@ export class App {
       id: b.id, name: b.name, color: b.color, summary: busSummary(b.spec), hideSources: b.hideSources,
       built: b.builder?.done ?? false, progress: b.builder?.progress ?? 0,
     })),
-    setPanel: (p: 'device' | 'analyzers' | 'assistant' | null) => {
+    setPanel: (p: 'device' | 'analyzers' | null) => {
       this.selectPanel(p);
     },
     setViewportSeconds: (a: number, b: number) => {

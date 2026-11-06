@@ -1520,7 +1520,7 @@ check('restored views get fresh IDs/null runtime and all generic/bank mutations 
 }
 
 {
-  const sidebarPaths = ['selectPage', 'handleCollapse', 'handleExpand', 'toggleAssistant', 'selectPanel'];
+  const sidebarPaths = ['selectPage', 'handleCollapse', 'handleExpand', 'selectPanel'];
   const unrouted = sidebarPaths.filter((name) => !appMethodBody(name).includes('this.applySidebar('));
   const applyBody = appMethodBody('applySidebar');
   const writeOrder = [
@@ -1537,7 +1537,7 @@ check('restored views get fresh IDs/null runtime and all generic/bank mutations 
     'this.persistWorkspace();\n    this.renderPanels();',
     'this.renderPanels();\n    this.persistWorkspace();');
   const noWriter = applyBody.replace('this.persistWorkspace();', '');
-  check('page, collapse, expand, assistant and debug paths all commit through one persisting applySidebar',
+  check('page, collapse, expand and debug paths all commit through one persisting applySidebar',
     unrouted.length === 0 && writesOnce &&
     writeOrder.every((index, i) => index >= 0 && (i === 0 || index > writeOrder[i - 1])) &&
     writesBeforeRender(applyBody) && !writesBeforeRender(renderFirst) && !writesBeforeRender(noWriter),

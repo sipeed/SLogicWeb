@@ -35,8 +35,38 @@ export {
   createDigitalSignalStore,
   type DigitalSignalGroupOptions,
   type DigitalSignalStoreOptions,
+  type SignalRecordOptions,
   type SignalStoreErrorCode,
 } from './signalStore.js';
+export {
+  DEFAULT_MAX_CHUNK_BYTES,
+  OpfsRecordReader,
+  OpfsRecordWriter,
+  RecordError,
+  recordChunkPath,
+  recordCrc32,
+  type RecordChunkInfo,
+  type RecordExport,
+  type RecordFile,
+  type RecordGap,
+  type RecordManifest,
+  type RecordProfile,
+  type RecordRecovery,
+  type RecordStorage,
+  type RecordTimeRange,
+} from './opfsRecord.js';
+export {
+  createOpfsRecordStorage,
+  type OpfsDirectoryHandle,
+  type OpfsFileHandle,
+  type OpfsHandle,
+} from './opfsStorage.js';
+export {
+  DEFAULT_MAX_QUEUED_BYTES,
+  OpfsRecordController,
+  RecordArchive,
+  type OpfsRecordControllerOptions,
+} from './recordController.js';
 export { appendLostSamples, channelAcrossGaps } from './gaps.js';
 export { PlanarSampleStore, type PlanarStoreOptions } from './planarStore.js';
 export { InterleavedSampleStore } from './interleavedStore.js';

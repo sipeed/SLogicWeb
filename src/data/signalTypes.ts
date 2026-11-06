@@ -4,15 +4,14 @@
  * The v2 SignalStore contract from docs/ARCHITECTURE.md §4.
  *
  * This is deliberately separate from ./types.ts, which is the pre-v2 SampleStore
- * contract. The digital implementation in ./signalStore.ts may use a SampleStore
- * underneath, but callers only see this file: one canonical float64 sample-position
- * space per group, seconds for display, per-column status, and gap spans that carry a
- * reason.
+ * contract. The implementation in ./signalStore.ts may use a SampleStore underneath,
+ * but callers only see this file: one canonical float64 sample-position space per group,
+ * seconds for display, per-column status, and gap spans that carry a reason.
  *
  * Digital columns carry low/high/edge/packed exactly like SampleStore's ColumnView.
  * `packed` keeps the same WebGL2 R8UI layout (bit0 high, bit1 low, bit2 edge, bit3 gap)
- * so the renderer can upload either view without a translation pass. Analog shapes are
- * declared here now so the interface does not change when analog groups arrive in M1.
+ * so the renderer can upload either view without a translation pass. Analog columns
+ * carry calibrated-volt min/max/mean summaries and never a packed view.
  */
 
 /** A float64 sample index at the group's rate. Exact integers up to 2^53. */
@@ -42,8 +41,9 @@ export interface SignalGroup {
   readonly kind: SignalKind;
   /**
    * First device channel index covered by this group. This is a channel-range start,
-   * not a time or sample-position origin: every group shares the canonical timeline and
-   * position 0 is the same instant for all rates.
+   * not a time or sample-position origin: each group has its own position space, and the
+   * first non-empty append fixes that group's origin. Multi-rate groups are aligned by
+   * time (seconds), never by comparing raw indices.
    */
   readonly start: number;
   readonly channels: number;
@@ -74,7 +74,11 @@ export interface DigitalSignalColumns {
   readonly packed: Uint8Array;
 }
 
-/** Analog bins, calibrated volts. Reserved for M1; the digital store never emits it. */
+/**
+ * Analog bins, calibrated volts. Emitted only for analog signals. A bin with no
+ * trustworthy samples (pending, evicted, or inside a gap) reports NaN for all three
+ * arrays rather than implying 0 V; a partly unknown bin summarizes its known sub-ranges.
+ */
 export interface AnalogSignalColumns {
   readonly min: Float32Array;
   readonly max: Float32Array;
@@ -86,9 +90,10 @@ export interface AnalogSignalColumns {
  * requested bounds are expanded to whole samples), so callers converting bins back to
  * time must read these fields rather than reusing their request.
  *
- * `status` is one byte per bin: COLUMN_OK, COLUMN_PENDING or COLUMN_GAP. For a digital
- * store `digital` is always present and `analog` never is. A pending bin has no data
- * yet; a gap bin overlaps a span with no trustworthy samples.
+ * `status` is one byte per bin: COLUMN_OK, COLUMN_PENDING or COLUMN_GAP. A digital
+ * signal's result carries `digital` and never `analog`; an analog signal's result
+ * carries `analog` and never `digital`. A pending bin has no data yet; a gap bin
+ * overlaps a span with no trustworthy samples.
  */
 export interface SignalColumns {
   readonly signal: SignalId;
@@ -139,8 +144,12 @@ export interface RecordController {
 /**
  * The v2 storage interface consumed by render, DSP, decode and the UI.
  *
- * Positions are float64 sample indices at each group's rate; `retainedFrom` is the
- * display window's left edge in canonical seconds. `newest` is exclusive and per group.
+ * Positions are float64 sample indices at each group's own rate. One store owns every
+ * group. `retainedFrom` is the latest per-group left edge in canonical seconds (the
+ * time from which all groups are consistently retained); `newest` is exclusive and per
+ * group. `append` takes digital device-format bytes for a digital group, and interleaved
+ * little-endian Float32 calibrated volts (`channels * 4` bytes per sample) for an analog
+ * group. A multi-rate append must not assume indices align across groups.
  */
 export interface SignalStore {
   readonly groups: readonly SignalGroup[];

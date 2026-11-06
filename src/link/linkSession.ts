@@ -9,34 +9,66 @@
  * machine is exercised by the fake port in `linkSessionSelftest.ts` and by the
  * browser adapter without a branch.
  *
+ * Identity sources, in order:
+ *
+ * - `LinkPort.describe()` is the required source. The stock U3 protocol has no
+ *   identity, firmware or inventory register: the libsigrok driver learns all of
+ *   it from USB descriptors (VID/PID/serial and the negotiated link class), so
+ *   the descriptor path is what a real device uses today.
+ * - The `identity` control request and the `probe` control request are a
+ *   PROPOSAL for a future firmware extension, not current device protocol. The
+ *   stock protocol exposes only vendor requests 0x00/0x01 (register read/write
+ *   in 4-byte chunks, docs/PROTOCOL-SLOGIC16U3.md); there is no LW identity
+ *   record, no firmware-version register and no 15 MB probe. They run only when
+ *   the port implements `control()` and answers; an `unsupported` refusal falls
+ *   back to descriptors with firmware, profile id and inventory unknown and
+ *   `probe: null`. A stock device must reach `ready` without either request.
+ *
  * Deliberate rules:
  *
  * - There is no automatic reconnect. Pairing and the connect/disconnect events
  *   produce at most one attempt per caller action; a failure is a terminal
  *   `lost`/`idle`/`busy` state and the UI offers Reconnect. No timers fire here.
- * - The link probe is bounded twice: by the profile/options and by the hard
- *   limits below. A probe is `bursts` control round-trips of `bytes` payload
- *   bytes; it never grows while a device is answering slowly.
- * - A profile/id/firmware/inventory mismatch is a typed `profile` refusal and
- *   the interface is released for another owner. A transport failure during
- *   identity or probe is `transfer`/`lost`; the device is not usable.
- * - The identity format below is the M0 control-plane contract between the
- *   page and the firmware's identity reply. The injected `LinkPort` owns the
- *   vendor request that produces it; the session only parses and validates the
- *   reply, so no WebUSB request fields leak into this module.
+ * - The descriptor's VID/PID (and shape) are checked immediately after `open()`
+ *   and before `claim()`: the session never claims the interface of a device
+ *   that does not match the selected profile. A descriptor/profile/id/inventory
+ *   mismatch is a typed `profile` refusal; a wrong device is closed unclaimed,
+ *   and a later identity mismatch releases the interface for another owner. A
+ *   transport failure during descriptor, identity or probe is
+ *   `transfer`/`lost`; the device is not usable.
+ * - The probe is optional (see above) and, when it runs, bounded twice: by the
+ *   profile/options and by the hard limits below. A probe is `bursts` control
+ *   round-trips of `bytes` payload bytes; it never grows while a device is
+ *   answering slowly.
+ * - Duplicate/ambiguous-serial detection (P6) is out of scope for a single
+ *   session. This session sees only the one descriptor behind its injected
+ *   `LinkPort`; deciding that two granted devices share a serial requires
+ *   enumerating the origin's devices and holding cross-device state, which
+ *   belongs to the platform adapter that selects the port, not here. The
+ *   session enforces only what one descriptor can prove: a profile that
+ *   requires a serial refuses an empty one, and the origin-scoped descriptor
+ *   string is never treated as a stable unit identity.
+ * - `profile.firmware.min` is documentation only: the stock protocol cannot
+ *   read a firmware version, and the shipped 32U3 floor is a hardware S/N, not
+ *   a dotted version.
  *
  * Assumptions resolved from the contract:
  *
+ * - `connect()` reads the descriptor once, right after `open()` returns and
+ *   before `claim()`, and reuses that verified descriptor for the handshake so
+ *   the identity guard costs no extra port round-trip. `handshakeAndProbe()`
+ *   (resume/re-probe) reads a fresh descriptor on the already-claimed link.
  * - `LinkPort.open()` covers selection and `USBDevice.open()`; the state is
  *   `selecting` while it is pending when a user-gesture permission request was
  *   asked for, and `opening` when reconnecting from an existing grant. The port
  *   boundary does not expose the chooser/open split, so `opening` is entered as
  *   soon as `open()` returns and is immediately followed by `claiming`.
- * - The firmware-reported link rate is validated against `profile.link.rates`.
- *   M0 stores the measured probe throughput and latency for stream sizing but
- *   does not infer a different USB speed from a control-transfer round-trip:
- *   control latency cannot distinguish FS/HS/SS reliably, and guessing would
- *   violate "a profile mismatch is never a fallback that guesses".
+ * - The descriptor's negotiated link class is the rate source and is validated
+ *   against `profile.link.rates`. M0 stores measured probe throughput and
+ *   latency for stream sizing when the optional probe ran, but never infers a
+ *   different USB speed from a control-transfer round-trip: control latency
+ *   cannot distinguish FS/HS/SS reliably, and guessing would violate "a profile
+ *   mismatch is never a fallback that guesses".
  */
 
 import type { DeviceProfile, LinkRate } from '../device/profileTypes.js';
@@ -85,7 +117,37 @@ export class LinkError extends Error {
 }
 
 /**
+ * USB link class the port observed for this connection.
+ *
+ * The adapter maps the platform's USB speed report to this vocabulary: full
+ * speed -> `fs`, high speed -> `hs`, SuperSpeed 5 Gbps -> `ss5`, SuperSpeed+
+ * 10 Gbps -> `ss10`. This is the only rate source; a probe measures throughput
+ * and latency but never re-classifies the link.
+ */
+export type LinkClass = 'fs' | 'hs' | 'ss5' | 'ss10';
+
+/**
+ * Facts the transport can obtain without any device-specific request: USB
+ * descriptors and the link class. This is the required identity source for a
+ * stock U3 device and is available before (or without) any control-plane
+ * extension.
+ *
+ * `serialNumber` is WebUSB's origin-scoped serial (empty when the browser
+ * withholds it), not a stable unit identity.
+ */
+export interface LinkPortDescriptor {
+  readonly vendorId: number;
+  readonly productId: number;
+  readonly serialNumber: string;
+  readonly linkClass: LinkClass;
+}
+
+/**
  * One control-plane request the session makes through the injected port.
+ *
+ * These are PROPOSALS requiring a future firmware extension; the stock protocol
+ * has no such request. The session only sends them when the port implements
+ * `control()`, and treats an `unsupported` refusal as "extension absent".
  *
  * - `identity`: the firmware's fixed identity record (layout below).
  * - `probe`: one link-probe burst. The port must move exactly `bytes` payload
@@ -98,18 +160,29 @@ export type LinkControlRequest =
 
 /**
  * The injectable USB boundary. No WebUSB type appears here: the browser adapter
- * translates these calls to `USBDevice.open()`/`claimInterface()`/vendor
- * control transfers, and the fake port in the self-test implements them
- * directly. `release()` is called exactly once after a successful claim;
+ * translates these calls to `USBDevice.open()`/`claimInterface()`/descriptor
+ * reads/vendor control transfers, and the fake port in the self-test implements
+ * them directly. `release()` is called exactly once after a successful claim;
  * `close()` closes whatever `open()` acquired. The adapter owns the per-origin
  * Web Lock and must throw `LinkError('busy', owner)` (P7) when another owner
  * holds the interface.
+ *
+ * `describe()` is required: VID/PID, serial and link class all come from USB
+ * descriptors the stock protocol already provides. `control()` is optional and
+ * implements the proposed extension only; a port that does not implement it (or
+ * that throws `LinkError('unsupported')`) yields a descriptor-only handshake
+ * with `probe: null`.
  */
 export interface LinkPort {
   open(): Promise<void>;
   claim(): Promise<void>;
   release(): Promise<void>;
-  control(request: LinkControlRequest): Promise<Uint8Array>;
+  describe(): Promise<LinkPortDescriptor>;
+  /**
+   * Optional proposed extension. `undefined` is the stock device: no identity
+   * or probe request exists.
+   */
+  control?: ((request: LinkControlRequest) => Promise<Uint8Array>) | undefined;
   close(): Promise<void>;
   /** Optional disconnect notification (cable unplugged, device reset, ...). */
   onDisconnect?(callback: () => void): void;
@@ -130,20 +203,42 @@ export interface LinkProbeResult {
   readonly elapsedMs: number;
   /** Payload bytes/second over the whole probe. 0 when the clock did not advance. */
   readonly bytesPerSecond: number;
-  /** Mean wall-clock time of one probe round-trip. */
+  /**
+   * Mean host-measured round-trip time of one probe burst (`elapsedMs /
+   * bursts`), not the USB link latency: it includes scheduling, transport and
+   * device turnaround, so it is not comparable across hosts and must never be
+   * used to classify FS/HS/SS. It is reported for diagnostics and stream
+   * sizing only.
+   */
   readonly latencyMs: number;
 }
 
-/** Immutable identity plus probe snapshot stored on a ready session. */
+/**
+ * Which identity source produced the handshake. `descriptor` is the stock
+ * device: the proposed control-plane extension is absent, so firmware, profile
+ * id, protocol and inventory are all `null` and no probe ran.
+ */
+export type LinkIdentitySource = 'control' | 'descriptor';
+
+/** Immutable identity plus optional probe snapshot stored on a ready session. */
 export interface LinkHandshake {
-  readonly protocol: { readonly major: number; readonly minor: number };
-  readonly firmware: string;
+  readonly identitySource: LinkIdentitySource;
+  /** From the optional identity record; null when only descriptors are available. */
+  readonly protocol: { readonly major: number; readonly minor: number } | null;
+  /** From the optional identity record; null when the protocol cannot report it. */
+  readonly firmware: string | null;
+  /** Descriptor serial: always available, possibly empty. */
   readonly serial: string;
-  readonly profileId: string;
-  readonly channels: number;
-  readonly analogGroups: number;
+  /** From the optional identity record; null when only descriptors are available. */
+  readonly profileId: string | null;
+  /** From the optional identity record; null when only descriptors are available. */
+  readonly channels: number | null;
+  /** From the optional identity record; null when only descriptors are available. */
+  readonly analogGroups: number | null;
+  /** Negotiated link class from the descriptor, validated against the profile. */
   readonly linkRate: LinkRate;
-  readonly probe: LinkProbeResult;
+  /** Null when the optional probe is unsupported by the port. */
+  readonly probe: LinkProbeResult | null;
 }
 
 /** Platform facts supplied by `src/platform` (P1). */
@@ -173,7 +268,7 @@ export interface LinkConnectOptions {
 export const LINK_PROTOCOL_MAJOR = 1;
 export const LINK_PROTOCOL_MINOR = 0;
 
-/** Format version of the identity record below. */
+/** Format version of the proposed identity record below (not a stock request). */
 export const LINK_IDENTITY_FORMAT = 1;
 
 /** Hard bounds on the link probe; profile/options cannot exceed them. */
@@ -187,7 +282,9 @@ const SERIAL_MAX_BYTES = 128;
 const PROFILE_ID_MAX_BYTES = 64;
 
 /**
- * Identity record (all integers little-endian):
+ * PROPOSED identity record for a future firmware extension (all integers
+ * little-endian). The stock U3 protocol has no such request; see the module
+ * header. It is used only when the port implements `control()`.
  *
  *   offset  size  field
  *   0       2     magic 'L' 'W'
@@ -204,7 +301,7 @@ const PROFILE_ID_MAX_BYTES = 64;
  *   16+N    M     profile id, printable ASCII
  *   16+N+M  2     reported digital channel inventory
  *   18+N+M  1     analog group count
- *   19+N+M  1     link rate code (0=fs, 1=hs, 2=ss)
+ *   19+N+M  1     link rate code (0=fs, 1=hs, 2=ss5, 3=ss10)
  *
  * Trailing bytes are accepted because the vendor control transport rounds
  * transfers up to four bytes. Anything else is a `handshake` refusal.
@@ -213,18 +310,11 @@ interface IdentityRecord {
   readonly protocolMajor: number;
   readonly protocolMinor: number;
   readonly firmware: string;
-  readonly firmwareVersion: Version;
   readonly serial: string;
   readonly profileId: string;
   readonly channels: number;
   readonly analogGroups: number;
   readonly linkRate: LinkRate;
-}
-
-interface Version {
-  readonly major: number;
-  readonly minor: number;
-  readonly patch: number;
 }
 
 export class LinkSession {
@@ -364,6 +454,14 @@ export class LinkSession {
       await this.throwIfSuperseded(epoch);
 
       if (requestPermission) this._state = 'opening';
+
+      // Post-open, pre-claim identity guard: open() selected a device, but the
+      // profile is only usable when that device's descriptor carries the same
+      // VID/PID (and is well formed). Refuse before taking the interface so a
+      // wrong device is closed instead of claimed, then reused by the
+      // handshake without a second describe() round-trip.
+      const descriptor = await this.verifyOpenedDevice(epoch);
+
       this._state = 'claiming';
       try {
         await this.port.claim();
@@ -377,7 +475,7 @@ export class LinkSession {
       await this.throwIfSuperseded(epoch);
 
       this._state = 'handshaking';
-      await this.runHandshake(epoch);
+      await this.runHandshake(epoch, descriptor);
     } finally {
       this.connectInFlight = false;
     }
@@ -483,39 +581,84 @@ export class LinkSession {
     this.startLossCleanup();
   };
 
-  private async runHandshake(epoch: number): Promise<LinkHandshake> {
+  /**
+   * Identity and optional probe on an already-claimed link.
+   *
+   * `openedDescriptor` is the descriptor `connect()` read and identity-checked
+   * between `open()` and `claim()`. Passing it avoids a second `describe()`
+   * round-trip; it is re-validated here so this method stands alone.
+   * `handshakeAndProbe()` passes nothing and reads a fresh descriptor, because
+   * a resumed or re-probed device may have changed.
+   */
+  private async runHandshake(
+    epoch: number,
+    openedDescriptor?: LinkPortDescriptor,
+  ): Promise<LinkHandshake> {
     try {
-      const probe = this.resolveProbe();
       this.validateProfile();
       this.assertEpoch(epoch);
 
-      let rawIdentity: Uint8Array;
-      try {
-        rawIdentity = await this.port.control({ kind: 'identity' });
-      } catch (error) {
-        this.assertEpoch(epoch);
-        throw toTransferError(error, 'identity read failed');
+      // The control plane is a proposed extension. Validate its probe bounds
+      // only when it is actually present, so a stock device is never refused
+      // for a probe it will not run.
+      const control = this.port.control?.bind(this.port);
+      const probeConfig = control === undefined ? null : this.resolveProbe();
+      this.assertEpoch(epoch);
+
+      // The descriptor is the required identity source: the stock device has no
+      // identity register, only USB descriptors.
+      const descriptor = openedDescriptor ?? await this.readDescriptor(epoch);
+      this.validateDescriptor(descriptor);
+      this.assertEpoch(epoch);
+
+      let identity: IdentityRecord | null = null;
+      if (control !== undefined) {
+        try {
+          const rawIdentity = await control({ kind: 'identity' });
+          this.assertEpoch(epoch);
+          identity = decodeIdentity(rawIdentity);
+          this.validateIdentity(identity);
+          this.assertEpoch(epoch);
+        } catch (error) {
+          if (!isControlUnsupported(error)) {
+            throw toTransferError(error, 'identity read failed');
+          }
+          // The extension is absent (or this firmware does not implement it):
+          // stay on descriptors rather than failing the handshake.
+          identity = null;
+        }
+      }
+
+      // The probe is optional for the same reason. If identity control is
+      // unsupported, skip the probe instead of sending another request the
+      // device cannot answer.
+      let probeResult: LinkProbeResult | null = null;
+      if (identity !== null && probeConfig !== null && control !== undefined) {
+        try {
+          probeResult = await this.runProbe(epoch, probeConfig, control);
+        } catch (error) {
+          if (!isControlUnsupported(error)) throw error;
+          probeResult = null;
+        }
       }
       this.assertEpoch(epoch);
 
-      const identity = decodeIdentity(rawIdentity);
-      this.validateIdentity(identity);
-      this.assertEpoch(epoch);
-
-      const probeResult = await this.runProbe(epoch, probe);
-      this.assertEpoch(epoch);
-
       const handshake: LinkHandshake = Object.freeze({
-        protocol: Object.freeze({
-          major: identity.protocolMajor,
-          minor: identity.protocolMinor,
-        }),
-        firmware: identity.firmware,
-        serial: identity.serial,
-        profileId: identity.profileId,
-        channels: identity.channels,
-        analogGroups: identity.analogGroups,
-        linkRate: identity.linkRate,
+        identitySource: identity === null ? 'descriptor' : 'control',
+        protocol: identity === null
+          ? null
+          : Object.freeze({
+            major: identity.protocolMajor,
+            minor: identity.protocolMinor,
+          }),
+        firmware: identity === null ? null : identity.firmware,
+        // The descriptor serial is the required source; the proposed identity
+        // record's serial is not trusted over it.
+        serial: descriptor.serialNumber,
+        profileId: identity === null ? null : identity.profileId,
+        channels: identity === null ? null : identity.channels,
+        analogGroups: identity === null ? null : identity.analogGroups,
+        linkRate: linkRateForClass(descriptor.linkClass),
         probe: probeResult,
       });
       this._handshake = handshake;
@@ -527,14 +670,46 @@ export class LinkSession {
     }
   }
 
-  private async runProbe(epoch: number, config: LinkProbeOptions): Promise<LinkProbeResult> {
+  private async readDescriptor(epoch: number): Promise<LinkPortDescriptor> {
+    try {
+      return await this.port.describe();
+    } catch (error) {
+      this.assertEpoch(epoch);
+      throw toTransferError(error, 'port descriptor read failed');
+    }
+  }
+
+  /**
+   * Post-open identity guard: read the descriptor and confirm it names the
+   * profile's device before the session claims the interface. A wrong or
+   * malformed descriptor is a typed refusal (`profile` or `handshake`) and the
+   * port is closed unclaimed. Descriptor failures use the handshake mapping so
+   * they surface as `transfer`/`lost` exactly like a handshake descriptor read.
+   */
+  private async verifyOpenedDevice(epoch: number): Promise<LinkPortDescriptor> {
+    let descriptor: LinkPortDescriptor;
+    try {
+      descriptor = await this.readDescriptor(epoch);
+      this.validateDeviceIdentity(descriptor);
+    } catch (error) {
+      throw await this.failHandshake(epoch, error);
+    }
+    await this.throwIfSuperseded(epoch);
+    return descriptor;
+  }
+
+  private async runProbe(
+    epoch: number,
+    config: LinkProbeOptions,
+    control: (request: LinkControlRequest) => Promise<Uint8Array>,
+  ): Promise<LinkProbeResult> {
     const started = monotonicNow();
     let totalBytes = 0;
 
     for (let burst = 0; burst < config.bursts; ++burst) {
       let reply: Uint8Array;
       try {
-        reply = await this.port.control({ kind: 'probe', bytes: config.bytes });
+        reply = await control({ kind: 'probe', bytes: config.bytes });
       } catch (error) {
         this.assertEpoch(epoch);
         throw toTransferError(error, `probe burst ${burst + 1} failed`);
@@ -600,26 +775,70 @@ export class LinkSession {
     if (!Number.isInteger(this.profile.digital.maxChannels) || this.profile.digital.maxChannels < 1) {
       throw new LinkError('profile', `profile ${this.profile.id} has no digital channel inventory`);
     }
-    if (parseVersion(this.profile.firmware.min) === null) {
+    // `firmware.min` is documentation, not a handshake gate: the stock register
+    // protocol exposes no firmware version register. The shipped 32U3 value is a
+    // vendor hardware S/N ("202610150528"), not a dotted version, and parsing it
+    // as one would make that device permanently unreachable. Only the profile
+    // schema's non-empty-string rule is checked here.
+    if (typeof this.profile.firmware.min !== 'string' || this.profile.firmware.min.trim().length === 0) {
       throw new LinkError(
         'profile',
-        `profile ${this.profile.id} has an invalid firmware minimum '${this.profile.firmware.min}'`,
+        `profile ${this.profile.id} has an empty firmware minimum`,
       );
     }
   }
 
-  private validateIdentity(identity: IdentityRecord): void {
-    const minimum = parseVersion(this.profile.firmware.min);
-    if (minimum === null) {
-      // validateProfile() already refused; keep the guard local and explicit.
-      throw new LinkError('profile', `profile ${this.profile.id} has an invalid firmware minimum`);
+  /**
+   * Descriptor facts required before claiming the interface: a well-formed USB
+   * identity that matches the profile's VID/PID. A mismatch is a typed
+   * `profile` refusal, never a fallback that guesses. The remaining descriptor
+   * checks (serial field, link class, profile requirements) run in
+   * `validateDescriptor()` during the handshake.
+   */
+  private validateDeviceIdentity(descriptor: LinkPortDescriptor): void {
+    if (!Number.isInteger(descriptor.vendorId) || descriptor.vendorId < 0 ||
+      !Number.isInteger(descriptor.productId) || descriptor.productId < 0) {
+      throw new LinkError('handshake', 'the port descriptor has no valid USB identity');
     }
-    if (compareVersions(identity.firmwareVersion, minimum) < 0) {
+    if (descriptor.vendorId !== this.profile.vid || descriptor.productId !== this.profile.pid) {
       throw new LinkError(
         'profile',
-        `firmware ${identity.firmware} is older than ${this.profile.firmware.min} required by profile ${this.profile.id}`,
+        `device is ${hex4(descriptor.vendorId)}:${hex4(descriptor.productId)}, ` +
+        `profile ${this.profile.id} expects ${hex4(this.profile.vid)}:${hex4(this.profile.pid)}`,
       );
     }
+  }
+
+  private validateDescriptor(descriptor: LinkPortDescriptor): void {
+    this.validateDeviceIdentity(descriptor);
+    if (typeof descriptor.serialNumber !== 'string') {
+      throw new LinkError('handshake', 'the port descriptor has no serial number field');
+    }
+    if (!isLinkClass(descriptor.linkClass)) {
+      throw new LinkError(
+        'handshake',
+        `the port descriptor reports unknown link class '${String(descriptor.linkClass)}'`,
+      );
+    }
+    const linkRate = linkRateForClass(descriptor.linkClass);
+    if (!this.profile.link.rates.includes(linkRate)) {
+      throw new LinkError(
+        'profile',
+        `device reports link class '${linkRate}', which profile ${this.profile.id} does not support`,
+      );
+    }
+    if (this.profile.serial?.required === true && descriptor.serialNumber.length === 0) {
+      throw new LinkError('profile', `profile ${this.profile.id} requires a serial number`);
+    }
+  }
+
+  /**
+   * Cross-check the optional identity record against the profile. This is not
+   * weakened when the control plane is present: channel/profile inventory and
+   * the reported rate must still agree with the profile. `firmware.min` is not
+   * enforced here (see validateProfile()).
+   */
+  private validateIdentity(identity: IdentityRecord): void {
     if (identity.profileId !== this.profile.id) {
       throw new LinkError(
         'profile',
@@ -643,9 +862,6 @@ export class LinkSession {
         'profile',
         `device reports link rate '${identity.linkRate}', which profile ${this.profile.id} does not support`,
       );
-    }
-    if (this.profile.serial?.required === true && identity.serial.length === 0) {
-      throw new LinkError('profile', `profile ${this.profile.id} requires a serial number`);
     }
   }
 
@@ -926,11 +1142,9 @@ function decodeIdentity(bytes: Uint8Array): IdentityRecord {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const protocolMajor = view.getUint16(4, true);
   const protocolMinor = view.getUint16(6, true);
-  const firmwareVersion: Version = {
-    major: view.getUint16(8, true),
-    minor: view.getUint16(10, true),
-    patch: view.getUint16(12, true),
-  };
+  const firmwareMajor = view.getUint16(8, true);
+  const firmwareMinor = view.getUint16(10, true);
+  const firmwarePatch = view.getUint16(12, true);
   if (protocolMajor !== LINK_PROTOCOL_MAJOR) {
     throw new LinkError(
       'handshake',
@@ -974,8 +1188,7 @@ function decodeIdentity(bytes: Uint8Array): IdentityRecord {
   return {
     protocolMajor,
     protocolMinor,
-    firmware: `${firmwareVersion.major}.${firmwareVersion.minor}.${firmwareVersion.patch}`,
-    firmwareVersion,
+    firmware: `${firmwareMajor}.${firmwareMinor}.${firmwarePatch}`,
     serial,
     profileId,
     channels,
@@ -1002,28 +1215,40 @@ function linkRateFromCode(code: number): LinkRate {
   switch (code) {
     case 0: return 'fs';
     case 1: return 'hs';
-    case 2: return 'ss';
+    // Historical "ss" split into its two named SuperSpeed classes. Code 3 is
+    // part of the proposed extension; no stock firmware emits either.
+    case 2: return 'ss5';
+    case 3: return 'ss10';
     default:
       throw new LinkError('handshake', `identity reports unknown link rate code ${code}`);
   }
 }
 
-function parseVersion(text: string): Version | null {
-  // The device identity always carries a full triple; the profile minimum may
-  // be written as "1", "1.2" or "1.2.3". Missing components are zero.
-  const match = /^v?(\d{1,6})(?:\.(\d{1,6}))?(?:\.(\d{1,6}))?$/.exec(text);
-  if (match === null) return null;
-  return {
-    major: Number(match[1]),
-    minor: match[2] === undefined ? 0 : Number(match[2]),
-    patch: match[3] === undefined ? 0 : Number(match[3]),
-  };
+function isLinkClass(value: unknown): value is LinkClass {
+  return value === 'fs' || value === 'hs' || value === 'ss5' || value === 'ss10';
 }
 
-function compareVersions(a: Version, b: Version): number {
-  if (a.major !== b.major) return a.major - b.major;
-  if (a.minor !== b.minor) return a.minor - b.minor;
-  return a.patch - b.patch;
+/**
+ * Map the port's negotiated link class onto the profile vocabulary. The two
+ * unions currently have the same members, but this is the single mapping point:
+ * the descriptor is the only rate source and profiles validate the result.
+ */
+function linkRateForClass(linkClass: LinkClass): LinkRate {
+  switch (linkClass) {
+    case 'fs': return 'fs';
+    case 'hs': return 'hs';
+    case 'ss5': return 'ss5';
+    case 'ss10': return 'ss10';
+  }
+}
+
+/** True when a control-plane extension is simply not implemented. */
+function isControlUnsupported(error: unknown): boolean {
+  return error instanceof LinkError && error.reason === 'unsupported';
+}
+
+function hex4(value: number): string {
+  return `0x${value.toString(16).padStart(4, '0')}`;
 }
 
 function monotonicNow(): number {

@@ -15,7 +15,7 @@
   --bg10: #1B1B1C;   /* plot, label column, toolbar   [MEASURED] */
   --bg20: #212224;
   --bg30: #2C2C2E;
-  --panel: #3A3A3E;  /* right rail, status bar        [MEASURED] */
+  --panel: #3A3A3E;  /* right rail, muted surfaces     [MEASURED] */
   --border-low: #303136;
   --border-high: #57575E;
   --text: #FFFFFF;
@@ -35,7 +35,7 @@
   --toolbar-h: 57px;   /* content device y 66..125, border 126..127 */
   --axis-h: 30px;      /* content device y 128..185, border 186..187 */
   --overview-h: 56px;  /* the whole-capture preview strip and its fixed time scale */
-  --status-h: 40px;    /* border device y 1920..1921, content 1922..1999 */
+  --status-h: 40px;    /* bottom interaction bar, border device y 1920..1921 */
   /* [CHOICE] the D-tag, the (optional) read-only name and the settings button; default
      channel names are empty now, so the column no longer reserves "Channel 15" width. */
   --labels-w: 128px;
@@ -113,7 +113,7 @@ html[data-theme="dark"] {
      [MEASURED] EXCEPTION --bg10 stays the canvas tone #1B1B1C: the axis canvas paints
      metrics.ts COLORS.bg10 and the labels column / labels spacer / plot CSS must meet
      the canvas pixel-perfectly (the measured seam documented in this sheet's header).
-     Toolbar, side panel and status get explicit semantic overrides instead. */
+     Toolbar and side panel get explicit semantic overrides instead. */
   --bg00: oklch(0.12 0 0);
   --bg10: #1B1B1C;
   --bg20: var(--card);
@@ -209,7 +209,7 @@ html, body {
 }
 
 /* Mobile browsers resize the layout viewport as their URL bar comes and goes; 100dvh
-   tracks it where supported, so the status bar is never pushed off-screen. */
+   tracks it where supported, so the bottom interaction bar is never pushed off-screen. */
 @supports (height: 100dvh) {
   html, body, #app { height: 100dvh; }
 }
@@ -299,7 +299,6 @@ html[data-theme="light"] button:active { box-shadow: inset 0 0 0 999px rgb(0 0 0
 #toolbar .primary .toolbar-item-media,
 #toolbar .danger .toolbar-item-media { background: transparent; color: inherit; }
 #toolbar .toolbar-device.connected .toolbar-item-media { color: var(--primary); }
-#toolbar .toolbar-assistant[aria-pressed="true"] .toolbar-item-media { color: var(--primary); }
 #toolbar .toolbar-separator {
   align-self: center; flex: none; width: 1px; height: 28px; margin: 0 2px; background: var(--border);
 }
@@ -324,10 +323,11 @@ html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dar
   #toolbar button.toolbar-item { width: 38px; height: 38px; padding: 4px; }
   #toolbar .toolbar-separator,
   #toolbar .spacer { display: none; }
-  #toolbar .toolbar-assistant { margin-left: auto; }
+  /* The spacer is gone, so the last group keeps itself at the right edge. */
+  #toolbar .toolbar-group:last-of-type { margin-left: auto; }
 }
 
-/* Ten 38 px commands need 428 px; the smallest common phones are 360 px wide. */
+/* Nine 38 px commands need 386 px; the smallest common phones are 360 px wide. */
 @media (max-width: 400px) {
   #toolbar button.toolbar-item { width: 34px; height: 34px; padding: 3px; }
 }
@@ -1008,6 +1008,62 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
 /* ---------------------------------------------------------------- plot */
 
 #plot-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+/*
+ * The prominent error banner. It is a flex row between the toolbar and #main, so it
+ * spans the full shell, pushes the app down instead of covering it, and cannot scroll
+ * out of view with a long channel list. Destructive tokens carry both themes; the
+ * dismiss control inherits the banner ink and keeps a visible focus ring.
+ */
+.error-banner {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--destructive);
+  border-bottom: 1px solid color-mix(in oklab, var(--destructive) 70%, black);
+  color: var(--destructive-foreground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.error-banner[hidden] { display: none; }
+.error-banner-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+}
+.error-banner-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.error-banner-dismiss {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin: -3px -6px -3px 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--radius) / 2);
+  color: inherit;
+  cursor: pointer;
+}
+.error-banner-dismiss:hover { background: rgb(0 0 0 / 18%); }
+.error-banner-dismiss:focus-visible {
+  outline: 2px solid var(--destructive-foreground);
+  outline-offset: 1px;
+}
+.error-banner-dismiss svg { width: 14px; height: 14px; }
+
+@media (max-width: 760px) {
+  .error-banner { padding: 7px 8px; font-size: 11px; }
+}
 
 #overview {
   height: var(--overview-h);
@@ -1767,30 +1823,87 @@ html[data-theme="light"] .analog-button:not(.on) { border-color: #2F6FAF; color:
 :is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area::-webkit-scrollbar-track,
 :is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar-track { background: transparent; }
 
-/* ---------------------------------------------------------------- status bar */
+/* -------------------------------------------------------- interaction bar */
 
-#status {
+#interaction-bar {
   min-height: var(--status-h);
-  background: var(--panel);
-  border-top: 1px solid var(--border-high);
+  background: var(--background);
+  border-top: 1px solid var(--border);
+  color: var(--card-foreground);
   display: flex;
   align-items: center;
-  flex-wrap: wrap;       /* phones: measurements wrap instead of vanishing */
-  gap: 2px 16px;
+  flex-wrap: wrap;       /* phones: hints wrap instead of vanishing */
+  gap: 2px 14px;
   padding: 4px 12px;
   font-size: 11px;
-  color: var(--text80);
 }
-#status .sep { color: var(--text50); }
-#status .right { margin-left: auto; }
-#status .err { color: var(--negative); }
+.interaction-area {
+  flex: none;
+  color: var(--muted-foreground);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.interaction-hints {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+.interaction-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.interaction-hint-text { color: var(--card-foreground); }
+.hint-key {
+  display: inline-block;
+  padding: 0 4px;
+  border: 1px solid var(--border-high);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  background: var(--muted);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 10px;
+  line-height: 14px;
+}
+.hint-plus { color: var(--muted-foreground); }
+.hint-mouse {
+  width: 14px;
+  height: 18px;
+  flex: none;
+  overflow: visible;
+}
+.hint-mouse-body {
+  fill: none;
+  stroke: var(--muted-foreground);
+  stroke-width: 1.5;
+}
+.hint-mouse-part {
+  fill: var(--muted-foreground);
+  opacity: 0.25;
+  transition: opacity var(--motion-fast) var(--motion-ease),
+    fill var(--motion-fast) var(--motion-ease);
+}
+.hint-mouse-part.active {
+  fill: var(--primary);
+  opacity: 1;
+}
 
-/* Dark theme: the status bar joins the shell ground; a visible focus ring exists ONLY
-   here - under the default theme the browser's outline stays untouched, because adding
-   one would break its pixel identity. */
-:is(html[data-theme="dark"], html[data-theme="light"]) #status {
-  background: var(--background); border-top-color: var(--border); color: var(--card-foreground);
+@media (max-width: 760px) {
+  #interaction-bar { gap: 2px 10px; padding: 4px 8px; }
+  .interaction-hints { gap: 2px 12px; }
+  .interaction-hint { white-space: normal; }
 }
+
+/* A visible focus ring exists ONLY under a themed shell - under the default theme the
+   browser's outline stays untouched, because adding one would break its pixel identity. */
 :is(html[data-theme="dark"], html[data-theme="light"]) :is(button, input, summary):focus-visible {
   outline: 2px solid var(--ring); outline-offset: 1px;
 }

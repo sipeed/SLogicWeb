@@ -65,7 +65,7 @@ function makeProfile(id: string, options: ProfileOptions = {}): DeviceProfile {
       interfaceClass: 0xff,
       endpoints: { in: 1, out: 2 },
       maxTransferBytes: 262_144,
-      rates: ['ss'],
+      rates: ['ss5', 'ss10'],
       probe: { bytes: 64, bursts: 1 },
     },
     digital: {
@@ -269,6 +269,7 @@ function makeInput(
       plan.preTrigger.percent === 10 &&
       plan.preTrigger.seconds === 0.1 &&
       plan.preTrigger.capBytes === 200_000 &&
+      plan.preTrigger.samples === 100_000 &&
       plan.compiledAt === 42,
     plan === null ? failDetail(result) : JSON.stringify(plan.preTrigger),
   );
@@ -302,7 +303,8 @@ function makeInput(
     plan !== null &&
       plan.preTrigger.percent === 25 &&
       plan.preTrigger.seconds === 0.5 &&
-      plan.preTrigger.capBytes === 1_000_000,
+      plan.preTrigger.capBytes === 1_000_000 &&
+      plan.preTrigger.samples === 500_000,
     plan === null ? failDetail(result) : JSON.stringify(plan.preTrigger),
   );
 }
@@ -462,6 +464,7 @@ function makeInput(
     result.ok &&
       result.plan.preTrigger.percent === 10 &&
       result.plan.preTrigger.seconds === 0.0001 &&
+      result.plan.preTrigger.samples === 100 &&
       result.plan.budget.kind === 'samples' &&
       result.plan.budget.value === 1000,
     failDetail(result),
@@ -480,7 +483,47 @@ function makeInput(
     result.ok &&
       result.plan.preTrigger.percent === 10 &&
       result.plan.preTrigger.seconds === 0.0001 &&
-      result.plan.preTrigger.capBytes === 200,
+      result.plan.preTrigger.capBytes === 200 &&
+      result.plan.preTrigger.samples === 100,
+    failDetail(result),
+  );
+}
+
+{
+  // 24.9% of 1000 is 249 whole samples at 1 MHz, but 249/1e6 * 1e6 floors to 248.
+  // The plan must carry the exact integer so consumers do not repeat that round-trip.
+  const result = compileTriggerPlan(makeInput(makeProfile('p0-32u3'), {
+    digital: [{ signal: 'd0', kind: 'rising' }],
+    postTrigger: { kind: 'samples', value: 1000 },
+    capture: { samplerate: 1e6, channels: 8 },
+    preTriggerPercent: 24.9,
+  }));
+  const plan = result.ok ? result.plan : null;
+  check(
+    'a fractional percent yields an exact sample count despite the float round-trip',
+    plan !== null &&
+      plan.preTrigger.percent === 24.9 &&
+      plan.preTrigger.samples === 249 &&
+      plan.preTrigger.seconds === 249 / 1e6 &&
+      Math.floor(plan.preTrigger.seconds * 1e6) === 248,
+    plan === null ? failDetail(result) : JSON.stringify(plan.preTrigger),
+  );
+}
+
+{
+  // A time budget without capture states a duration but no exact whole-sample count;
+  // inventing one from the profile's byte cap would be wrong, so the field is absent.
+  const result = compileTriggerPlan(makeInput(makeProfile('p0-32u3'), {
+    digital: [{ signal: 'd0', kind: 'rising' }],
+    postTrigger: { kind: 'time', value: 1 },
+    preTriggerPercent: 10,
+  }));
+  check(
+    'a duration-only pre-trigger omits the exact sample count',
+    result.ok &&
+      result.plan.preTrigger.seconds === 0.1 &&
+      result.plan.preTrigger.samples === undefined &&
+      result.plan.preTrigger.capBytesIsBound === true,
     failDetail(result),
   );
 }
@@ -501,7 +544,22 @@ function makeInput(
       result.plan.loop !== undefined &&
       result.plan.loop.anchor === 'trigger' &&
       result.plan.preTrigger.seconds === 0.1 &&
-      result.plan.preTrigger.capBytes === 200_000,
+      result.plan.preTrigger.capBytes === 200_000 &&
+      result.plan.preTrigger.samples === 100_000,
+    failDetail(result),
+  );
+}
+
+{
+  const result = compileTriggerPlan(makeInput(makeProfile('p0-32u3'), {
+    digital: [{ signal: 'd0', kind: 'rising' }],
+    postTrigger: { kind: 'time', value: 1 },
+    loop: { seconds: 1, anchor: 'trigger' },
+    preTriggerPercent: 10,
+  }));
+  check(
+    'a Loop plan refuses a second finite post-trigger budget',
+    !result.ok && result.reason === 'invalid-budget',
     failDetail(result),
   );
 }
@@ -530,7 +588,8 @@ function makeInput(
     result.ok &&
       result.plan.preTrigger.percent === 0 &&
       result.plan.preTrigger.seconds === 0 &&
-      result.plan.preTrigger.capBytes === 0,
+      result.plan.preTrigger.capBytes === 0 &&
+      result.plan.preTrigger.samples === 0,
     failDetail(result),
   );
 }
@@ -586,7 +645,30 @@ function makeInput(
     result.ok &&
       result.plan.preTrigger.percent === 50 &&
       result.plan.preTrigger.seconds === 0.5 &&
-      result.plan.preTrigger.capBytes === 1000,
+      result.plan.preTrigger.capBytes === 1000 &&
+      result.plan.preTrigger.samples === 500,
+    failDetail(result),
+  );
+}
+
+{
+  const profile = makeProfile('p0-32u3', {
+    preTriggerMaxPercent: 75,
+    preTriggerMaxBytes: 64 * 1024 * 1024,
+  });
+  const result = compileTriggerPlan(makeInput(profile, {
+    digital: [{ signal: 'd0', kind: 'rising' }],
+    preTriggerPercent: 10,
+    postTrigger: { kind: 'time', value: 1 },
+    capture: { samplerate: 1.4e9, channels: 4 },
+  }));
+  const capSamples = 64 * 1024 * 1024;
+  check(
+    'the byte cap keeps capBytes/bytesPerSample samples, not one fewer from percent rounding',
+    result.ok &&
+      result.plan.preTrigger.samples === capSamples &&
+      result.plan.preTrigger.percent === (capSamples * 100) / 1.4e9 &&
+      result.plan.preTrigger.capBytes === capSamples,
     failDetail(result),
   );
 }
@@ -608,7 +690,8 @@ function makeInput(
     result.ok &&
       result.plan.preTrigger.percent === 50 &&
       result.plan.preTrigger.seconds === 0.0005 &&
-      result.plan.preTrigger.capBytes === 1000,
+      result.plan.preTrigger.capBytes === 1000 &&
+      result.plan.preTrigger.samples === 500,
     failDetail(result),
   );
 }

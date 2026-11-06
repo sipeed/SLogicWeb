@@ -6,7 +6,6 @@
  */
 
 import { App } from './app.js';
-import { initAssistantSettings } from '../assistant/settings.js';
 import { initLocale } from './i18n.js';
 import { initPanelWidth } from './panelWidth.js';
 import { initTheme } from './theme.js';
@@ -32,7 +31,6 @@ async function boot(): Promise<void> {
     initTheme();
     initToolbarOverride();
     initPanelWidth();
-    initAssistantSettings();
     await initLocale();
     window.logicweb = new App();
     try {

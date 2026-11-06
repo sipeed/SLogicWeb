@@ -23,3 +23,6 @@ tmp/
 .trellis/
 AGENTS.md
 .codegraph/
+
+# Claude Code runtime lock; the project Skill is tracked separately.
+.claude/scheduled_tasks.lock

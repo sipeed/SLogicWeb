@@ -5,16 +5,30 @@
  * This is a contract test, not a hardware test. It drives the session through a
  * fake `LinkPort` and checks:
  *
- *   - the happy-path transition order idle -> selecting -> opening/claiming ->
- *     handshaking -> ready and the stored identity/probe snapshot;
- *   - an unsupported platform refuses without touching the port;
- *   - a claim conflict is `busy` and is recoverable by an explicit retry;
- *   - an identity/profile mismatch is a typed `profile`/`handshake` refusal in
- *     `idle`, with the interface released;
+ *   - the stock-device path: USB descriptors (VID/PID/serial/link class) are the
+ *     required identity source, and every shipped PROFILE reaches `ready` with
+ *     `probe: null` and no control-plane request;
+ *   - the proposed firmware-extension path: when `control()` exists and answers,
+ *     the LW identity record and bounded probe are cross-checked and reported;
+ *   - an `unsupported` control refusal falls back to descriptors;
+ *   - `profile.firmware.min` is documentation: the shipped 32U3 hardware-S/N
+ *     floor is not parsed or enforced, and an old reported firmware still ready;
+ *   - descriptor/identity profile mismatches are typed `profile`/`handshake`
+ *     refusals in `idle`; a VID/PID mismatch closes the device unclaimed, and
+ *     later identity mismatches release the already-claimed interface;
  *   - a probe failure is `lost` and no automatic retry follows;
  *   - suspend/resume re-handshakes and a failed resume becomes `lost`;
  *   - a device disconnect event becomes `lost` and explicit disconnect closes;
- *   - a concurrent connect/handshake is refused and does not run twice.
+ *   - a concurrent connect/handshake is refused and does not run twice;
+ *   - the descriptor is read once per connect, after open() and before claim(),
+ *     and a VID/PID mismatch is refused without claiming the interface.
+ *
+ * Timing is deterministic: the fake port never sleeps. A test that needs to
+ * interleave two transitions holds `open()` with a deferred promise and
+ * releases it manually; cleanup and negative retry assertions use explicit
+ * microtask flushes. Probe timing is checked as an invariant of the reported
+ * numbers (mean round-trip = elapsedMs / bursts), never against wall-clock
+ * values.
  *
  * Run:
  *   node_modules/.bin/esbuild src/link/linkSessionSelftest.ts --bundle \
@@ -30,14 +44,17 @@ import {
   LinkError,
   LinkSession,
   MAX_PROBE_BURSTS,
+  type LinkClass,
   type LinkControlRequest,
   type LinkErrorReason,
   type LinkPort,
+  type LinkPortDescriptor,
   type LinkProbeOptions,
   type LinkSessionOptions,
   type LinkState,
 } from './linkSession.js';
-import type { DeviceProfile } from '../device/profileTypes.js';
+import { PROFILES } from '../device/profiles.js';
+import type { DeviceProfile, LinkRate } from '../device/profileTypes.js';
 
 const PROFILE: DeviceProfile = {
   id: 'slogic32u3',
@@ -49,7 +66,7 @@ const PROFILE: DeviceProfile = {
     interfaceClass: 0xff,
     endpoints: { in: 2, out: 2 },
     maxTransferBytes: 1024 * 1024,
-    rates: ['hs', 'ss'],
+    rates: ['hs', 'ss5', 'ss10'],
     probe: { bytes: 1024, bursts: 4 },
   },
   digital: {
@@ -77,6 +94,14 @@ const PROFILE: DeviceProfile = {
 };
 
 const DEFAULT_SERIAL = 'SN-202610300413';
+
+const DEFAULT_DESCRIPTOR: LinkPortDescriptor = {
+  vendorId: PROFILE.vid,
+  productId: PROFILE.pid,
+  serialNumber: DEFAULT_SERIAL,
+  linkClass: 'ss5',
+};
+
 const DEFAULT_IDENTITY: IdentityOverrides = {
   magic: [0x4c, 0x57],
   format: LINK_IDENTITY_FORMAT,
@@ -103,64 +128,72 @@ interface IdentityOverrides {
   readonly linkRateCode?: number;
 }
 
-type ProbeFailure = 'throw-link' | 'throw-generic' | 'short';
+type ProbeFailure = 'throw-link' | 'throw-generic' | 'short' | 'unsupported';
 
 class FakePort implements LinkPort {
   readonly calls: string[] = [];
   readonly stateAtCall: LinkState[] = [];
   session: LinkSession | null = null;
   identity = DEFAULT_IDENTITY;
+  descriptor: LinkPortDescriptor = { ...DEFAULT_DESCRIPTOR };
   probeFailure: ProbeFailure | null = null;
+  identityError: unknown = null;
   openError: unknown = null;
   claimError: unknown = null;
+  describeError: unknown = null;
   probeBursts = 0;
   probeBytes = 0;
 
-  private disconnectCallback: (() => void) | null = null;
+  /**
+   * The proposed extension. `undefined` models a stock port that has no such
+   * request at all; tests set it to `undefined` to exercise the descriptor-only
+   * path.
+   */
+  control: ((request: LinkControlRequest) => Promise<Uint8Array>) | undefined;
 
-  constructor(private readonly delayMs = 1) {}
+  private disconnectCallback: (() => void) | null = null;
+  /** When armed, open() stays pending until releaseOpen() resolves it. */
+  private openGate: Deferred<void> | null = null;
+
+  constructor() {
+    this.control = (request) => this.handleControl(request);
+  }
+
+  /** Hold open() pending so a test can interleave another transition. */
+  deferOpen(): void {
+    this.openGate = deferred<void>();
+  }
+
+  /** Resolve a deferred open(); a no-op when open() is not held. */
+  releaseOpen(): void {
+    const gate = this.openGate;
+    this.openGate = null;
+    gate?.resolve();
+  }
 
   async open(): Promise<void> {
     this.record('open');
-    await delay(this.delayMs);
+    await this.openGate?.promise;
     if (this.openError !== null) throw this.openError;
   }
 
   async claim(): Promise<void> {
     this.record('claim');
-    await delay(this.delayMs);
     if (this.claimError !== null) throw this.claimError;
   }
 
   async release(): Promise<void> {
     this.record('release');
-    await delay(0);
   }
 
   async close(): Promise<void> {
     this.record('close');
   }
 
-  async control(request: LinkControlRequest): Promise<Uint8Array> {
-    this.record(request.kind);
-    if (request.kind === 'identity') {
-      await delay(this.delayMs);
-      return encodeIdentity(this.identity);
-    }
-
-    this.probeBursts += 1;
-    this.probeBytes += request.bytes;
-    await delay(this.delayMs);
-    if (this.probeFailure === 'throw-link') {
-      throw new LinkError('transfer', 'simulated probe stall');
-    }
-    if (this.probeFailure === 'throw-generic') {
-      throw new Error('simulated probe stall');
-    }
-    if (this.probeFailure === 'short') {
-      return new Uint8Array(Math.max(0, request.bytes - 1));
-    }
-    return new Uint8Array(request.bytes);
+  async describe(): Promise<LinkPortDescriptor> {
+    this.record('describe');
+    if (this.describeError !== null) throw this.describeError;
+    return { ...this.descriptor };
   }
 
   onDisconnect(callback: () => void): void {
@@ -173,6 +206,30 @@ class FakePort implements LinkPort {
 
   count(call: string): number {
     return this.calls.filter((entry) => entry === call).length;
+  }
+
+  private async handleControl(request: LinkControlRequest): Promise<Uint8Array> {
+    this.record(request.kind);
+    if (request.kind === 'identity') {
+      if (this.identityError !== null) throw this.identityError;
+      return encodeIdentity(this.identity);
+    }
+
+    this.probeBursts += 1;
+    this.probeBytes += request.bytes;
+    if (this.probeFailure === 'throw-link') {
+      throw new LinkError('transfer', 'simulated probe stall');
+    }
+    if (this.probeFailure === 'throw-generic') {
+      throw new Error('simulated probe stall');
+    }
+    if (this.probeFailure === 'unsupported') {
+      throw new LinkError('unsupported', 'probe request is not implemented');
+    }
+    if (this.probeFailure === 'short') {
+      return new Uint8Array(Math.max(0, request.bytes - 1));
+    }
+    return new Uint8Array(request.bytes);
   }
 
   private record(call: string): void {
@@ -224,8 +281,70 @@ function ascii(text: string): Uint8Array {
   return bytes;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  resolve(value: T): void;
+}
+
+/** A promise a test can settle by hand instead of sleeping. */
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+/**
+ * Drain the microtask queue. `LinkSession` schedules no timers and the fake
+ * port never sleeps, so every pending transition, cleanup and would-be retry
+ * runs as a promise continuation; a bounded number of rounds settles them all.
+ */
+async function flushMicrotasks(rounds = 32): Promise<void> {
+  for (let round = 0; round < rounds; ++round) {
+    await Promise.resolve();
+  }
+}
+
+/**
+ * Pick a link class a shipped profile declares. Prefers the fastest named class
+ * so the test tracks the profile table without hard-coding a model.
+ */
+function rateForProfile(profile: DeviceProfile): LinkRate {
+  const preferred: readonly LinkRate[] = ['ss10', 'ss5', 'hs', 'fs'];
+  for (const rate of preferred) {
+    if (profile.link.rates.includes(rate)) return rate;
+  }
+  throw new Error(`profile ${profile.id} declares no link rate the self-test can use`);
+}
+
+function descriptorForProfile(profile: DeviceProfile): LinkPortDescriptor {
+  return {
+    vendorId: profile.vid,
+    productId: profile.pid,
+    serialNumber: `SN-${profile.id}`,
+    linkClass: rateForProfile(profile),
+  };
+}
+
+function linkRateCodeForClass(linkClass: LinkClass): number {
+  switch (linkClass) {
+    case 'fs': return 0;
+    case 'hs': return 1;
+    case 'ss5': return 2;
+    case 'ss10': return 3;
+  }
+}
+
+function identityForProfile(profile: DeviceProfile, linkClass: LinkClass): IdentityOverrides {
+  return {
+    ...DEFAULT_IDENTITY,
+    serial: `SN-${profile.id}`,
+    profileId: profile.id,
+    channels: profile.digital.maxChannels,
+    analogGroups: profile.analog.groups.length,
+    linkRateCode: linkRateCodeForClass(linkClass),
+  };
 }
 
 let checks = 0;
@@ -245,10 +364,14 @@ function checkState(name: string, session: LinkSession, expected: LinkState): vo
   check(name, session.state === expected, `state ${session.state}, expected ${expected}`);
 }
 
-function newSession(port: FakePort, probe?: LinkProbeOptions): LinkSession {
+function newSession(
+  port: FakePort,
+  probe?: LinkProbeOptions,
+  profile: DeviceProfile = PROFILE,
+): LinkSession {
   const options: LinkSessionOptions = probe === undefined
-    ? { port, profile: PROFILE, capabilities: { usb: true, secureContext: true } }
-    : { port, profile: PROFILE, capabilities: { usb: true, secureContext: true }, probe };
+    ? { port, profile, capabilities: { usb: true, secureContext: true } }
+    : { port, profile, capabilities: { usb: true, secureContext: true }, probe };
   const session = new LinkSession(options);
   port.session = session;
   return session;
@@ -279,9 +402,11 @@ async function connectFailure(
   overrides: IdentityOverrides,
   reason: LinkErrorReason,
   expectedState: LinkState,
+  descriptorOverrides: Partial<LinkPortDescriptor> = {},
 ): Promise<FakePort> {
-  const port = new FakePort(0);
+  const port = new FakePort();
   port.identity = { ...DEFAULT_IDENTITY, ...overrides };
+  port.descriptor = { ...DEFAULT_DESCRIPTOR, ...descriptorOverrides };
   const session = newSession(port);
   const error = await expectLinkError(`${name}: typed reason`, session.connect(), reason);
   checkState(`${name}: state`, session, expectedState);
@@ -293,7 +418,72 @@ async function connectFailure(
 }
 
 async function main(): Promise<void> {
-  console.log('== happy path ==');
+  console.log('== every shipped profile reaches ready ==');
+  for (const profile of PROFILES) {
+    // Stock device: descriptors only, no proposed control plane.
+    {
+      const port = new FakePort();
+      port.control = undefined;
+      port.descriptor = descriptorForProfile(profile);
+      const session = newSession(port, undefined, profile);
+
+      checkState(`${profile.id}: stock session starts idle`, session, 'idle');
+      await session.connect();
+      checkState(`${profile.id}: stock device reaches ready`, session, 'ready');
+
+      const handshake = session.handshake;
+      check(`${profile.id}: descriptor-only identity source`,
+        handshake?.identitySource === 'descriptor', handshake?.identitySource);
+      check(`${profile.id}: firmware is unknown`, handshake?.firmware === null, String(handshake?.firmware));
+      check(`${profile.id}: profile id is unknown`, handshake?.profileId === null, String(handshake?.profileId));
+      check(`${profile.id}: protocol is unknown`, handshake?.protocol === null);
+      check(`${profile.id}: channel inventory is unknown`, handshake?.channels === null);
+      check(`${profile.id}: analog inventory is unknown`, handshake?.analogGroups === null);
+      check(`${profile.id}: probe is optional and skipped`, handshake?.probe === null);
+      check(`${profile.id}: serial comes from the descriptor`,
+        handshake?.serial === port.descriptor.serialNumber, handshake?.serial);
+      check(`${profile.id}: link rate comes from the descriptor`,
+        handshake?.linkRate === port.descriptor.linkClass,
+        `${String(handshake?.linkRate)} vs ${port.descriptor.linkClass}`);
+      check(`${profile.id}: no extension request was sent`,
+        port.count('identity') === 0 && port.count('probe') === 0,
+        `identity ${port.count('identity')}, probe ${port.count('probe')}`);
+      if (profile.id === 'slogic32u3') {
+        check('32U3 hardware-S/N firmware floor does not gate ready',
+          profile.firmware.min === '202610150528' && session.state === 'ready',
+          `${profile.firmware.min} in ${session.state}`);
+      }
+      await session.disconnect();
+    }
+
+    // Proposed extension: the identity + probe path stays a contract test for
+    // the future firmware request.
+    {
+      const port = new FakePort();
+      port.descriptor = descriptorForProfile(profile);
+      port.identity = identityForProfile(profile, port.descriptor.linkClass);
+      const session = newSession(port, { bytes: 1024, bursts: 2 }, profile);
+
+      await session.connect();
+      checkState(`${profile.id}: extension device reaches ready`, session, 'ready');
+
+      const handshake = session.handshake;
+      check(`${profile.id}: control identity source`,
+        handshake?.identitySource === 'control', handshake?.identitySource);
+      check(`${profile.id}: firmware is reported`, handshake?.firmware === '1.2.3', String(handshake?.firmware));
+      check(`${profile.id}: profile id is reported`,
+        handshake?.profileId === profile.id, String(handshake?.profileId));
+      check(`${profile.id}: channel inventory is reported`,
+        handshake?.channels === profile.digital.maxChannels, String(handshake?.channels));
+      check(`${profile.id}: analog inventory is reported`,
+        handshake?.analogGroups === profile.analog.groups.length, String(handshake?.analogGroups));
+      check(`${profile.id}: bounded probe ran`, handshake?.probe?.totalBytes === 2048,
+        String(handshake?.probe?.totalBytes));
+      await session.disconnect();
+    }
+  }
+
+  console.log('== happy path with the proposed extension ==');
   {
     const port = new FakePort();
     const session = newSession(port);
@@ -306,31 +496,119 @@ async function main(): Promise<void> {
     checkState('connect reaches ready', session, 'ready');
     check('ready session has no error', session.error === null);
     check('selecting is the state while open() selects', port.stateAtCall[0] === 'selecting', port.stateAtCall[0]);
-    check('claiming is the state during claim()', port.stateAtCall[1] === 'claiming', port.stateAtCall[1]);
-    check('handshaking is the state during identity', port.stateAtCall[2] === 'handshaking', port.stateAtCall[2]);
+    check('opening is the state during the descriptor guard',
+      port.stateAtCall[1] === 'opening', port.stateAtCall[1]);
+    check('claiming is the state during claim()', port.stateAtCall[2] === 'claiming', port.stateAtCall[2]);
+    check('handshaking is the state during identity()', port.stateAtCall[3] === 'handshaking', port.stateAtCall[3]);
     check('open is called once', port.count('open') === 1, String(port.count('open')));
     check('claim is called once', port.count('claim') === 1, String(port.count('claim')));
+    check('descriptor is read once per connect', port.count('describe') === 1, String(port.count('describe')));
+    check('descriptor is read before claim (post-open guard)',
+      port.calls.indexOf('describe') < port.calls.indexOf('claim'), port.calls.join(','));
+    check('descriptor is read before identity', port.calls.indexOf('describe') < port.calls.indexOf('identity'),
+      port.calls.join(','));
 
     const handshake = session.handshake;
     check('handshake snapshot exists', handshake !== null);
     if (handshake !== null) {
-      check('protocol is stored', handshake.protocol.major === 1 && handshake.protocol.minor === 0);
-      check('firmware is stored', handshake.firmware === '1.2.3', handshake.firmware);
+      check('identity source is the control plane', handshake.identitySource === 'control', handshake.identitySource);
+      check('protocol is stored', handshake.protocol?.major === 1 && handshake.protocol?.minor === 0);
+      check('firmware is stored', handshake.firmware === '1.2.3', String(handshake.firmware));
       check('serial is stored', handshake.serial === DEFAULT_SERIAL, handshake.serial);
-      check('profile id is stored', handshake.profileId === PROFILE.id, handshake.profileId);
+      check('profile id is stored', handshake.profileId === PROFILE.id, String(handshake.profileId));
       check('channel inventory is stored', handshake.channels === 32, String(handshake.channels));
       check('analog inventory is stored', handshake.analogGroups === 0, String(handshake.analogGroups));
-      check('link rate is stored', handshake.linkRate === 'ss', handshake.linkRate);
-      check('probe burst size is stored', handshake.probe.bytesPerBurst === 1024);
-      check('probe burst count is stored', handshake.probe.bursts === 4);
-      check('probe moved the configured bytes', handshake.probe.totalBytes === 4096);
-      check('probe latency is measured', handshake.probe.latencyMs > 0, String(handshake.probe.latencyMs));
-      check('probe throughput is measured', handshake.probe.bytesPerSecond > 0, String(handshake.probe.bytesPerSecond));
+      check('link rate is stored', handshake.linkRate === 'ss5', handshake.linkRate);
+      check('probe burst size is stored', handshake.probe?.bytesPerBurst === 1024);
+      check('probe burst count is stored', handshake.probe?.bursts === 4);
+      check('probe moved the configured bytes', handshake.probe?.totalBytes === 4096);
+      const probe = handshake.probe;
+      check('probe reports a finite, non-negative elapsed time',
+        probe !== null && Number.isFinite(probe.elapsedMs) && probe.elapsedMs >= 0,
+        String(probe?.elapsedMs));
+      check('probe latency is the mean round-trip (elapsedMs / bursts)',
+        probe !== null && probe.latencyMs === probe.elapsedMs / probe.bursts,
+        `${String(probe?.latencyMs)} vs ${String(probe?.elapsedMs)} / ${String(probe?.bursts)}`);
+      check('probe throughput is derived from elapsed time, 0 when the clock did not advance',
+        probe !== null && (probe.elapsedMs > 0
+          ? probe.bytesPerSecond === probe.totalBytes / (probe.elapsedMs / 1000)
+          : probe.bytesPerSecond === 0),
+        String(probe?.bytesPerSecond));
     }
     check('four probe bursts ran', port.count('probe') === 4, String(port.count('probe')));
 
     await session.disconnect('test complete');
     checkState('disconnect closes the session', session, 'closed');
+  }
+
+  console.log('== firmware.min is documentation ==');
+  {
+    const port = new FakePort();
+    port.identity = { ...DEFAULT_IDENTITY, firmware: [0, 9, 0] };
+    const session = newSession(port);
+    await session.connect();
+    checkState('old reported firmware still reaches ready', session, 'ready');
+    check('old firmware is reported, not enforced', session.handshake?.firmware === '0.9.0',
+      String(session.handshake?.firmware));
+    check('profile firmware minimum does not gate old firmware',
+      PROFILE.firmware.min === '1.0.0' && session.state === 'ready');
+    await session.disconnect();
+  }
+
+  console.log('== descriptor-only fallback ==');
+  {
+    const port = new FakePort();
+    port.control = undefined;
+    const session = newSession(port);
+    await session.connect();
+    checkState('port without a control plane reaches ready', session, 'ready');
+    check('fallback identity source is the descriptor', session.handshake?.identitySource === 'descriptor',
+      session.handshake?.identitySource);
+    check('fallback leaves firmware unknown', session.handshake?.firmware === null);
+    check('fallback leaves inventory unknown', session.handshake?.channels === null);
+    check('fallback reports probe null', session.handshake?.probe === null);
+    check('fallback makes no identity or probe request',
+      port.count('identity') === 0 && port.count('probe') === 0,
+      `identity ${port.count('identity')}, probe ${port.count('probe')}`);
+    await session.disconnect();
+  }
+  {
+    const port = new FakePort();
+    port.identityError = new LinkError('unsupported', 'no identity register');
+    const session = newSession(port);
+    await session.connect();
+    checkState('unsupported identity control falls back to descriptors', session, 'ready');
+    check('unsupported fallback keeps descriptor identity', session.handshake?.identitySource === 'descriptor',
+      session.handshake?.identitySource);
+    check('unsupported fallback marks firmware unknown', session.handshake?.firmware === null);
+    check('unsupported fallback skips the probe', session.handshake?.probe === null && port.count('probe') === 0,
+      `probe ${port.count('probe')}`);
+    check('identity request was attempted exactly once', port.count('identity') === 1,
+      String(port.count('identity')));
+    await session.disconnect();
+  }
+  {
+    const port = new FakePort();
+    port.probeFailure = 'unsupported';
+    const session = newSession(port);
+    await session.connect();
+    checkState('unsupported probe keeps the identity handshake ready', session, 'ready');
+    check('unsupported probe reports null', session.handshake?.probe === null);
+    check('unsupported probe keeps the control identity', session.handshake?.identitySource === 'control',
+      session.handshake?.identitySource);
+    check('unsupported probe leaves firmware known', session.handshake?.firmware === '1.2.3',
+      String(session.handshake?.firmware));
+    await session.disconnect();
+  }
+  {
+    const port = new FakePort();
+    port.descriptor = { ...DEFAULT_DESCRIPTOR, serialNumber: 'USB-SERIAL-1' };
+    port.identity = { ...DEFAULT_IDENTITY, serial: 'FIRMWARE-SERIAL-9' };
+    const session = newSession(port);
+    await session.connect();
+    check('descriptor serial wins over the proposed identity serial',
+      session.handshake?.serial === 'USB-SERIAL-1', String(session.handshake?.serial));
+    await session.disconnect();
   }
 
   console.log('== reconnect without a permission gesture ==');
@@ -391,6 +669,49 @@ async function main(): Promise<void> {
   console.log('== handshake and profile refusals ==');
   {
     const port = await connectFailure(
+      'descriptor VID/PID mismatch',
+      {},
+      'profile',
+      'idle',
+      { productId: 0x9999 },
+    );
+    check('descriptor mismatch is refused before claim', port.count('claim') === 0,
+      String(port.count('claim')));
+    check('descriptor mismatch releases nothing (nothing was claimed)', port.count('release') === 0,
+      String(port.count('release')));
+    check('descriptor mismatch closes the device', port.count('close') === 1, String(port.count('close')));
+    check('descriptor mismatch sends no identity request', port.count('identity') === 0,
+      String(port.count('identity')));
+  }
+  {
+    await connectFailure(
+      'descriptor link class unsupported by the profile',
+      {},
+      'profile',
+      'idle',
+      { linkClass: 'fs' },
+    );
+  }
+  {
+    await connectFailure(
+      'descriptor missing required serial',
+      {},
+      'profile',
+      'idle',
+      { serialNumber: '' },
+    );
+  }
+  {
+    await connectFailure(
+      'malformed descriptor link class',
+      {},
+      'handshake',
+      'idle',
+      { linkClass: 'ss20' as LinkClass },
+    );
+  }
+  {
+    const port = await connectFailure(
       'profile id mismatch',
       { profileId: 'slogic16u3' },
       'profile',
@@ -402,17 +723,17 @@ async function main(): Promise<void> {
   }
   {
     const port = await connectFailure(
-      'firmware below minimum',
-      { firmware: [0, 9, 0] },
+      'channel inventory mismatch',
+      { channels: 16 },
       'profile',
       'idle',
     );
-    check('old firmware is refused after identity', port.count('identity') === 1);
+    check('channel mismatch is refused after identity', port.count('identity') === 1);
   }
   {
     await connectFailure(
-      'channel inventory mismatch',
-      { channels: 16 },
+      'analog inventory mismatch',
+      { analogGroups: 1 },
       'profile',
       'idle',
     );
@@ -441,18 +762,10 @@ async function main(): Promise<void> {
       'idle',
     );
   }
-  {
-    await connectFailure(
-      'missing required serial',
-      { serial: '' },
-      'profile',
-      'idle',
-    );
-  }
 
   console.log('== probe failure ==');
   {
-    const port = new FakePort(0);
+    const port = new FakePort();
     port.probeFailure = 'throw-generic';
     const session = newSession(port);
     const error = await expectLinkError('probe failure is a transfer error', session.connect(), 'transfer');
@@ -466,16 +779,29 @@ async function main(): Promise<void> {
     port.probeFailure = null;
     await session.connect();
     checkState('explicit retry after a lost probe reaches ready', session, 'ready');
-    check('explicit retry re-read identity and probed again', port.count('identity') === 2 && port.probeBursts === 5,
+    check('explicit retry re-read identity and probed again',
+      port.count('identity') === 2 && port.probeBursts === 5,
       `identity ${port.count('identity')}, bursts ${port.probeBursts}`);
     await session.disconnect();
   }
   {
-    const port = new FakePort(0);
+    const port = new FakePort();
     port.probeFailure = 'short';
     const session = newSession(port);
     await expectLinkError('short probe reply is a transfer error', session.connect(), 'transfer');
     checkState('short probe reply becomes lost', session, 'lost');
+  }
+  {
+    const port = new FakePort();
+    port.describeError = new Error('descriptor read failed');
+    const session = newSession(port);
+    await expectLinkError('descriptor read failure is a transfer error', session.connect(), 'transfer');
+    checkState('descriptor read failure becomes lost', session, 'lost');
+    check('descriptor read failure closes the unclaimed device',
+      port.count('release') === 0 && port.count('close') === 1,
+      `release ${port.count('release')}, close ${port.count('close')}`);
+    check('descriptor read failure never claims', port.count('claim') === 0, String(port.count('claim')));
+    check('descriptor read failure sends no identity request', port.count('identity') === 0);
   }
 
   console.log('== suspend and resume ==');
@@ -498,6 +824,7 @@ async function main(): Promise<void> {
     checkState('resume returns to ready', session, 'ready');
     check('resume re-handshakes', port.count('identity') === 2, String(port.count('identity')));
     check('resume ran a second probe', port.probeBursts === 8, String(port.probeBursts));
+    check('resume re-reads the descriptor', port.count('describe') === 2, String(port.count('describe')));
 
     await session.resume();
     checkState('resume on a ready link is a no-op', session, 'ready');
@@ -521,7 +848,7 @@ async function main(): Promise<void> {
     checkState('disconnect event becomes lost', session, 'lost');
     check('disconnect event has a lost reason', session.error?.reason === 'lost', session.error?.reason);
     check('disconnect event clears the handshake', session.handshake === null);
-    await delay(5);
+    await flushMicrotasks();
     check('disconnect event releases and closes', port.count('release') === 1 && port.count('close') === 1,
       `release ${port.count('release')}, close ${port.count('close')}`);
 
@@ -552,21 +879,25 @@ async function main(): Promise<void> {
 
   console.log('== no unbounded retry ==');
   {
-    const port = new FakePort(0);
+    const port = new FakePort();
     port.probeFailure = 'throw-link';
     const session = newSession(port);
     await expectLinkError('initial attempt fails', session.connect(), 'transfer');
     const calls = port.calls.slice();
 
-    await delay(25);
+    // LinkSession owns no timer: a failed attempt publishes `lost` and stops.
+    // Draining the microtask queue settles every continuation it could have
+    // queued, so any retry would already appear in `calls`.
+    await flushMicrotasks();
     check('no retry fires after a failed attempt',
       calls.length === port.calls.length && calls.every((call, index) => port.calls[index] === call),
       `before ${calls.join(',')} after ${port.calls.join(',')}`);
     checkState('failed attempt stays lost while idle', session, 'lost');
-    check('one open, one claim, one identity, one probe',
+    check('one open, one claim, one describe, one identity, one probe',
       port.count('open') === 1 && port.count('claim') === 1 &&
-      port.count('identity') === 1 && port.count('probe') === 1,
-      `open ${port.count('open')}, claim ${port.count('claim')}, identity ${port.count('identity')}, probe ${port.count('probe')}`);
+      port.count('describe') === 1 && port.count('identity') === 1 && port.count('probe') === 1,
+      `open ${port.count('open')}, claim ${port.count('claim')}, describe ${port.count('describe')}, ` +
+      `identity ${port.count('identity')}, probe ${port.count('probe')}`);
   }
 
   console.log('== concurrent operations ==');
@@ -594,15 +925,16 @@ async function main(): Promise<void> {
 
   console.log('== bounded probe configuration ==');
   {
-    const port = new FakePort(0);
+    const port = new FakePort();
     const session = newSession(port, { bytes: 0, bursts: 1 });
     await expectLinkError('zero probe bytes is a profile refusal', session.connect(), 'profile');
     checkState('invalid probe config leaves idle', session, 'idle');
     check('invalid probe config never reads identity', port.count('identity') === 0, String(port.count('identity')));
+    check('invalid probe config never probes', port.count('probe') === 0, String(port.count('probe')));
     check('invalid probe config releases the claim', port.count('release') === 1);
   }
   {
-    const port = new FakePort(0);
+    const port = new FakePort();
     const session = newSession(port, { bytes: 1024, bursts: MAX_PROBE_BURSTS + 1 });
     await expectLinkError('too many probe bursts is a profile refusal', session.connect(), 'profile');
     check('too many bursts never probes', port.count('probe') === 0, String(port.count('probe')));
@@ -610,7 +942,7 @@ async function main(): Promise<void> {
 
   console.log('== open failure mapping ==');
   {
-    const port = new FakePort(0);
+    const port = new FakePort();
     const denied = new Error('blocked by policy');
     denied.name = 'SecurityError';
     port.openError = denied;
@@ -622,14 +954,30 @@ async function main(): Promise<void> {
 
   console.log('== disconnect racing open ==');
   {
-    const port = new FakePort(5);
+    const port = new FakePort();
+    port.deferOpen();
     const session = newSession(port);
     const connecting = session.connect();
-    await delay(1);
-    await session.disconnect('user cancelled');
+    await flushMicrotasks();
+
+    checkState('connect waits in selecting while open() is held', session, 'selecting');
+    check('nothing is claimed while open() is held', port.count('claim') === 0, String(port.count('claim')));
+
+    const closing = session.disconnect('user cancelled');
+    await flushMicrotasks();
+    checkState('disconnect during a pending open leaves closed', session, 'closed');
+    check('disconnect closes the device while open() is still pending',
+      port.count('close') === 1, String(port.count('close')));
+    check('disconnect during a pending open never claims', port.count('claim') === 0,
+      String(port.count('claim')));
+
+    port.releaseOpen();
     await expectLinkError('connect superseded by disconnect fails lost', connecting, 'lost');
+    await closing;
     checkState('racing disconnect leaves closed', session, 'closed');
-    check('racing disconnect closes the later open', port.count('close') >= 1, String(port.count('close')));
+    check('the later open is closed again, never claimed',
+      port.count('claim') === 0 && port.count('close') >= 2,
+      `claim ${port.count('claim')}, close ${port.count('close')}`);
   }
 }
 

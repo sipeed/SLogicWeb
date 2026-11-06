@@ -207,6 +207,18 @@ export function edgeTriggerAutoArms(
   return previous !== committed && isEdgeTriggerMode(committed) && !maskEnabled;
 }
 
+/**
+ * Committing an analog rising/falling condition is the same user intent as committing a
+ * digital edge mode: arm the global trigger. Removing the condition (`kind` null) is not
+ * a disarm request - the mask keeps whatever the user last chose.
+ */
+export function analogTriggerAutoArms(
+  kind: 'rising' | 'falling' | null,
+  maskEnabled: boolean,
+): boolean {
+  return kind !== null && !maskEnabled;
+}
+
 export type Source = 'none' | 'file' | 'device';
 
 /**
@@ -228,7 +240,7 @@ export type StatusDetail =
   | { kind: 'text'; text: string };
 
 /**
- * The status-bar error as structured data: `what` is chrome (a catalog key, translated
+ * The banner error as structured data: `what` is chrome (a catalog key, translated
  * at render time). See format.ts's formatStatusError.
  */
 export interface StatusError {

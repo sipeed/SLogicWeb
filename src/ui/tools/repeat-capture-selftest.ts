@@ -115,7 +115,7 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
 
 {
   const primary = app.split('private primaryAction()')[1]?.split('private renderToolbarState()')[0] ?? '';
-  const toolbar = app.split('private renderToolbarState()')[1]?.split('private renderStatus()')[0] ?? '';
+  const toolbar = app.split('private renderToolbarState()')[1]?.split('private renderInteractionBar(')[0] ?? '';
   const pendingUi = primary.includes('this.running || this.repeatTimer.pending') &&
     toolbar.includes('const showStop = this.running || repeatPending') &&
     toolbar.includes('this.device === null && !showStop') &&

@@ -34,7 +34,8 @@ export {
   SLOGIC32U3_PROFILE,
 } from './profiles.js';
 
-const LINK_RATES: readonly LinkRate[] = ['fs', 'hs', 'ss'];
+/** Link classes in ascending wire capacity; a slower link can never offer more. */
+const LINK_RATES: readonly LinkRate[] = ['fs', 'hs', 'ss5', 'ss10'];
 const LINK_RATE_SET: ReadonlySet<string> = new Set<string>(LINK_RATES);
 const TRIGGER_KINDS: ReadonlySet<string> = new Set([
   'level', 'rising', 'falling', 'edge', 'high', 'low',
@@ -105,6 +106,25 @@ function checkLinkRateMap(
       );
     }
   }
+  // A slower link cannot sustain more than a faster one. Compare the present
+  // keys in wire-capacity order so an hs ceiling above its ss5 ceiling, or an
+  // ss5 ceiling above its ss10 ceiling, is refused rather than offered.
+  let previousLink: LinkRate | undefined;
+  let previousHz = 0;
+  for (const link of LINK_RATES) {
+    if (!declared.has(link) || !Object.hasOwn(map, link)) continue;
+    const value = map[link];
+    if (typeof value !== 'number') continue; // rejected above
+    if (previousLink !== undefined && value < previousHz) {
+      return fail(
+        `${owner}.ordering`,
+        `${owner}[${link}] is ${value} Hz, below the slower ${previousLink} ceiling of ` +
+          `${previousHz} Hz`,
+      );
+    }
+    previousLink = link;
+    previousHz = value;
+  }
   return null;
 }
 
@@ -169,16 +189,26 @@ export function validateProfile(p: DeviceProfile): ProfileValidation {
   }
   const endpoints: unknown = link.endpoints;
   if (!isRecord(endpoints)) return fail('link-endpoints', 'link.endpoints must be an object');
-  if (!isByte(endpoints.in) || !isByte(endpoints.out)) {
+  if (!isByte(endpoints.in)) {
     return fail(
       'link-endpoints',
-      `link.endpoints must be byte values, got in=${String(endpoints.in)} out=${String(endpoints.out)}`,
+      `link.endpoints.in must be a byte, got ${String(endpoints.in)}`,
     );
   }
-  if (endpoints.in === endpoints.out) {
+  // `out: null` is the honest "no OUT endpoint" value; a number is a real OUT
+  // endpoint. `undefined` (a missing field) is not accepted as either.
+  if (endpoints.out !== null && !isByte(endpoints.out)) {
     return fail(
       'link-endpoints',
-      `link.endpoints.in and .out must differ, both are ${endpoints.in}`,
+      `link.endpoints.out must be null (no OUT endpoint) or a byte, got ` +
+        `${String(endpoints.out)}`,
+    );
+  }
+  if (endpoints.out !== null && endpoints.out === endpoints.in) {
+    return fail(
+      'link-endpoints',
+      `link.endpoints.in and .out must differ when an OUT endpoint exists, both are ` +
+        `${endpoints.in}`,
     );
   }
   const maxTransferBytes: unknown = link.maxTransferBytes;
@@ -301,6 +331,7 @@ export function validateProfile(p: DeviceProfile): ProfileValidation {
     );
   }
   const tierWidths = new Set<number>();
+  const tierMaps: { channels: ChannelCount; hz: Record<string, unknown> }[] = [];
   for (const tier of tiers) {
     if (!isRecord(tier)) return fail('digital-rates', 'every rate tier must be an object');
     const channels: unknown = tier.channels;
@@ -320,10 +351,30 @@ export function validateProfile(p: DeviceProfile): ProfileValidation {
       declaredRates,
     );
     if (problem) return problem;
+    tierMaps.push({ channels: channels as ChannelCount, hz: tier.hz as Record<string, unknown> });
   }
   for (const width of widthSet) {
     if (!tierWidths.has(width)) {
       return fail('digital-rates-coverage', `no rate tier for ${width} channels`);
+    }
+  }
+
+  // A wider capture samples the same wire, so its per-channel ceiling can only
+  // stay or fall. Check each link class independently, ascending by width.
+  const ascendingTiers = [...tierMaps].sort((a, b) => a.channels - b.channels);
+  for (const link of LINK_RATES) {
+    let previous: { channels: ChannelCount; hz: number } | undefined;
+    for (const tier of ascendingTiers) {
+      const value = tier.hz[link];
+      if (typeof value !== 'number') continue;
+      if (previous !== undefined && value > previous.hz) {
+        return fail(
+          'digital-rates-width-ordering',
+          `${link} ceiling for ${tier.channels} channels (${value} Hz) is above the ` +
+            `${previous.channels}-channel ceiling (${previous.hz} Hz)`,
+        );
+      }
+      previous = { channels: tier.channels, hz: value };
     }
   }
 
@@ -342,6 +393,23 @@ export function validateProfile(p: DeviceProfile): ProfileValidation {
     }
   }
 
+  if (digital.sampleratesHz !== undefined) {
+    const offered: unknown = digital.sampleratesHz;
+    if (!Array.isArray(offered) || offered.length === 0) {
+      return fail('digital-samplerates', 'digital.sampleratesHz must be a non-empty array when present');
+    }
+    let previous = 0;
+    for (const hz of offered) {
+      if (!isFiniteNumber(hz) || hz <= 0) {
+        return fail('digital-samplerates', `samplerate ${String(hz)} is not a positive finite number`);
+      }
+      if (hz <= previous) {
+        return fail('digital-samplerates-order', 'digital.sampleratesHz must be strictly ascending');
+      }
+      previous = hz;
+    }
+  }
+
   const testModes: unknown = digital.testModes;
   if (!Array.isArray(testModes) || testModes.length === 0) {
     return fail('digital-test-modes', 'digital.testModes must be a non-empty array');
@@ -355,6 +423,14 @@ export function validateProfile(p: DeviceProfile): ProfileValidation {
       return fail('digital-test-modes', `test mode ${String(mode)} appears more than once`);
     }
     seenTestModes.add(mode);
+  }
+  if (seenTestModes.has(2) &&
+      digital.emulationPattern !== 'slogic16u3' &&
+      digital.emulationPattern !== 'slogic32u3') {
+    return fail(
+      'digital-emulation-pattern',
+      'digital.emulationPattern must name the test-mode-2 table when that mode is offered',
+    );
   }
 
   // ---- analog -------------------------------------------------------------
@@ -555,9 +631,10 @@ export function profileForVidPid(vid: number, pid: number): DeviceProfile | null
 }
 
 /**
- * The discrete samplerates this profile offers for a capture width on a link,
- * ascending. An absent tier or an absent link-rate ceiling yields no offer: the
- * profile never guesses a rate for a link it has no evidence for.
+ * The discrete samplerates this profile offers for a capture width on a link
+ * class, ascending. An absent tier or an absent link-rate ceiling yields no
+ * offer: the profile never guesses a rate for a link it has no evidence for
+ * (FS and, on the 16U3, SS10 are the expected empty answers).
  */
 export function sampleRatesFor(
   profile: DeviceProfile,
@@ -569,7 +646,8 @@ export function sampleRatesFor(
   if (!tier) return [];
   const ceiling = tier.hz[linkRate];
   if (ceiling === undefined) return [];
-  return SAMPLERATES_HZ.filter((hz) => hz <= ceiling);
+  const table = profile.digital.sampleratesHz ?? SAMPLERATES_HZ;
+  return table.filter((hz) => hz <= ceiling);
 }
 
 /** Highest offered rate for a capture width and link, or 0 when none is offered. */
@@ -596,7 +674,7 @@ export type CapabilityFeature =
 export interface CapabilityContext {
   /** Capture width the caller intends to use. */
   channels?: ChannelCount;
-  /** Negotiated link rate; FS/HS/SS is invisible to WebUSB and comes from the probe. */
+  /** Negotiated link class; FS/HS/SS5/SS10 is invisible to WebUSB and comes from the probe. */
   linkRate?: LinkRate;
   /** Number of analog groups the caller wants active. */
   analogGroups?: number;
@@ -656,6 +734,15 @@ export function capabilityReason(
           (context.analogGroups < 0 || context.analogGroups > profile.analog.groups.length)) {
         return `${profile.name} has ${profile.analog.groups.length} analog group(s); ` +
           `cannot enable ${context.analogGroups}.`;
+      }
+      if (context.channels !== undefined && context.analogGroups !== undefined) {
+        const fitting = profile.analog.groups.filter(
+          (group) => group.start + group.channels <= context.channels!,
+        ).length;
+        if (context.analogGroups > fitting) {
+          return `${profile.name} can read ${fitting} complete analog group(s) at ` +
+            `${context.channels} channels; cannot enable ${context.analogGroups}.`;
+        }
       }
       if (context.linkRate !== undefined &&
           !profile.analog.groups.some(

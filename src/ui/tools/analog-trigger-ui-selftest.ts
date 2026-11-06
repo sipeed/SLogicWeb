@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import { analogTriggerAutoArms } from '../state.js';
+
 const nodeProcess = (() => {
   const p = (globalThis as {
     process?: { exit(code: number): never; getBuiltinModule?(id: string): unknown };
@@ -30,6 +32,8 @@ const deviceTypes = fs.readFileSync('src/device/types.ts', 'utf8');
 const triggerEngine = fs.readFileSync('src/data/softwareTrigger.ts', 'utf8');
 const en = fs.readFileSync('src/ui/locales/en.ts', 'utf8');
 const zh = fs.readFileSync('src/ui/locales/zh-CN.ts', 'utf8');
+const fr = fs.readFileSync('src/ui/locales/fr.ts', 'utf8');
+const ru = fs.readFileSync('src/ui/locales/ru.ts', 'utf8');
 const channel = fs.readFileSync('src/ui/channelList.ts', 'utf8');
 const overlay = fs.readFileSync('src/ui/overlay.ts', 'utf8');
 const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
@@ -249,6 +253,53 @@ function cssRules(selector: string): string[] {
     channel.includes("cell.trigger.armed ? ' armed' : ' configured'");
   check('disabling Global trigger hides its panel and leaves every condition neutral',
     disabled, `disabled=${disabled}`);
+}
+
+{
+  const rows: { kind: 'rising' | 'falling' | null; mask: boolean; arms: boolean }[] = [
+    { kind: 'rising', mask: false, arms: true },
+    { kind: 'falling', mask: false, arms: true },
+    { kind: 'rising', mask: true, arms: false },
+    { kind: 'falling', mask: true, arms: false },
+    { kind: null, mask: false, arms: false },
+    { kind: null, mask: true, arms: false },
+  ];
+  const bad = rows.filter(({ kind, mask, arms }) => analogTriggerAutoArms(kind, mask) !== arms);
+  check('an analog rise/fall arms the global trigger; removal never forces it off',
+    bad.length === 0,
+    bad.length === 0
+      ? 'rising/falling arm only while the mask is off; null leaves the mask untouched'
+      : bad.map(({ kind, mask, arms }) =>
+        `kind=${kind}, mask=${mask}: expected=${arms}, ` +
+        `actual=${analogTriggerAutoArms(kind, mask)}`).join('; '));
+}
+
+{
+  const configureStart = app.indexOf('private configureAnalogTrigger(');
+  const configureEnd = app.indexOf('private syncActiveTrigger(', configureStart);
+  const configure = configureStart >= 0
+    ? app.slice(configureStart, configureEnd > configureStart ? configureEnd : undefined)
+    : '';
+  const usesHelper = configure.includes(
+    'analogTriggerAutoArms(kind, this.settings.triggerEnableMask)') &&
+    configure.includes('triggerEnableMask: true');
+  const noForcedDisarm = configure.length > 0 && !configure.includes('triggerEnableMask: false');
+  check('App.configureAnalogTrigger delegates the auto-arm decision to the tested helper',
+    usesHelper && noForcedDisarm,
+    `slice=${configure.length}, usesHelper=${usesHelper}, noForcedDisarm=${noForcedDisarm}`);
+}
+
+{
+  const sites = panel.includes('triggerSec.el.appendChild(enableHelp)') &&
+    panel.includes("t('capturePanel.triggerEnableHelp')") &&
+    panel.includes("t('capturePanel.triggerSourceHelp')") &&
+    panel.includes("t('capturePanel.testModeHelp')");
+  const catalogs = [en, zh, fr, ru].every((source) =>
+    source.includes("'capturePanel.triggerEnableHelp':") &&
+    source.includes("'capturePanel.triggerSourceHelp':") &&
+    source.includes("'capturePanel.testModeHelp':"));
+  check('trigger and test-mode toggles carry localized help, with the enable note outside the hidden body',
+    sites && catalogs, `sites=${sites}, catalogs=${catalogs}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

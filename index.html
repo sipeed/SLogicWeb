@@ -118,15 +118,6 @@
         </button>
       </div>
       <span class="spacer"></span>
-      <button id="btn-assistant" class="toolbar-item toolbar-assistant" data-i18n-title="toolbar.assistantTitle" title="AI assistant" aria-label="AI assistant" aria-controls="side-panel" aria-pressed="false">
-        <span class="toolbar-item-media">
-          <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
-            <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path>
-            <path d="M20 3v4M22 5h-4M4 17v2M5 18H3"></path>
-          </svg>
-        </span>
-        <span class="toolbar-item-label" aria-hidden="true" data-i18n="toolbar.shortAssistant">Assistant</span>
-      </button>
       <div class="toolbar-group" role="group" aria-label="Language and theme" data-i18n-aria-label="toolbar.switchGroup">
         <button id="btn-language" class="toolbar-item toolbar-language" data-i18n-title="toolbar.languageTitle" title="Choose language" aria-label="Choose language" aria-controls="language-menu" aria-expanded="false">
           <span class="toolbar-item-media">
@@ -153,6 +144,23 @@
           <span class="toolbar-item-label" aria-hidden="true" data-i18n="toolbar.shortTheme">Theme</span>
         </button>
       </div>
+    </div>
+
+    <!-- The only copy of the status error: a user cannot miss it, it clears on
+         dismiss and stays hidden while there is no error. Full-width above the main
+         row so it cannot scroll out of view with the channel list. -->
+    <div id="error-banner" class="error-banner" role="alert" hidden>
+      <svg class="error-banner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"></path>
+        <path d="M12 9v4M12 17h.01"></path>
+      </svg>
+      <span id="error-banner-text" class="error-banner-text"></span>
+      <button id="error-banner-dismiss" class="error-banner-dismiss" type="button"
+              aria-label="Close" data-i18n-aria-label="shortcuts.close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M18 6 6 18M6 6l12 12"></path>
+        </svg>
+      </button>
     </div>
 
     <div id="main">
@@ -183,7 +191,14 @@
       <div id="side-panel"></div>
     </div>
 
-    <div id="status"></div>
+    <!-- Bottom bar: context-sensitive mouse hints for the area under the pointer.
+         Errors are not summarized here; the top alert banner is their only home. -->
+    <div id="interaction-bar" class="interaction-bar" role="status" aria-live="polite"
+         aria-atomic="true" aria-label="Mouse controls"
+         data-i18n-aria-label="hints.barLabel">
+      <span id="interaction-area" class="interaction-area"></span>
+      <ul id="interaction-hints" class="interaction-hints"></ul>
+    </div>
   </div>
 
   <input id="file-input" type="file" multiple hidden

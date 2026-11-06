@@ -537,11 +537,9 @@ const describe = (s: SidebarState): string =>
     'mount: (page, container) => this.mountSidebarPage(page, container),',
     "cursors: this.sidebarHost.containerFor('cursors'),",
     'this.capturePanel.render(this.capturePanelView());',
-    'this.sidebarHost.assistantLayer().appendChild(this.assistantPanel.el);',
     'this.sidebarHost.show(this.sidebar);',
     'this.sidebarHost.focusAfterCollapse();',
-    'if (this.assistantShown()) this.assistantPanel?.focusInput();',
-    'else this.sidebarHost.focusAfterExpand();',
+    'this.sidebarHost.focusAfterExpand();',
     'private selectPage(page: SidebarPage): void {',
     'this.applySidebar(toggleSidebarVisible(this.sidebar));',
   ].filter((needle) => !app.includes(needle));

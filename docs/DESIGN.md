@@ -31,7 +31,7 @@ visual system, copy and the UI review gate. C3 (migration) is §17 here; split i
 - **Never silently reconfigure.** A change applies live, is staged, or is a named restart
   the interface announces. A running capture is never a hidden side effect.
 - **State, not prose.** A lifecycle state is a chip, a badge, a disabled control or a
-  short status line. Long explanations belong in tooltips and documentation.
+  short hint. Long explanations belong in tooltips and documentation.
 - **One interaction mechanism per job.** Direct manipulation, row slot, popover, sheet,
   dialog or panel; not three of them for the same job.
 - **Capability-driven.** Every offered value/action is validated against the
@@ -48,7 +48,7 @@ visual system, copy and the UI review gate. C3 (migration) is §17 here; split i
 - **Flat, tokenised, measured.** Surfaces are flat; tokens from §14; no raw component
   colours/sizes; no per-theme component override blocks.
 - **Failures are visible.** Every async action ends in a state or a typed error in the
-  status bar; nothing only reaches the console.
+  top alert banner; nothing only reaches the console.
 - **Tests describe behaviour.** UI tests assert view models/DOM/transitions, not source
   text.
 
@@ -104,8 +104,8 @@ into a menu/section, or wait for a milestone.
   minimum width cannot shrink further.
 - Compact is not a shrunken desktop: controls reflow, labels truncate, secondary actions
   move into overflow menus, and the primary action moves to the bottom action bar.
-- Safe areas: `env(safe-area-inset-*)` on the shell, bottom bar and sheets. The bottom bar
-  sits above the system navigation area.
+- Safe areas: `env(safe-area-inset-*)` on the shell, bottom interaction bar and sheets.
+  The bottom interaction bar sits above the system navigation area.
 - Orientation: portrait and landscape are both supported; the sheet height is capped at
   `min(72dvh, viewport − 96px)` and can be dragged between peek and full.
 - A persisted pane width is clamped so the other pane keeps its minimum (§15).
@@ -140,7 +140,7 @@ One panel view model is rendered by one of three presenters:
 - Android back closes the topmost overlay, then the sheet; if none is open it is left to
   the browser (never trapped).
 - The panel switcher is the only way to change panels. It has one entry per layout:
-  toolbar on wide/medium, a "Panels" control in the bottom bar on compact.
+  toolbar on wide/medium, a "Panels" control in the compact bottom action bar.
 
 ## 4. Shell and primary action
 
@@ -431,21 +431,36 @@ clear-data action; an update is an explicit prompt, never a silent reload.
 - Panels never contain the primary Capture action or a second editor for a row-owned
   value.
 - A panel's view model is presentation-ready; the presenter does not re-derive values.
-- On compact, the panel switcher is in the bottom bar and the sheet is the presenter; on
-  wide, the switcher is in the top bar and the presenter is docked.
-- The Assistant has no entry in the baseline; the host interface is debug/test only.
+- On compact, the panel switcher is in the compact bottom action bar and the sheet is
+  the presenter; on wide, the switcher is in the top bar and the presenter is docked.
+- The Assistant chat entry is removed from the baseline. External AI agents use the
+  debug `agentHost` surface and the repository Skill; the top alert banner remains a
+  first-class UI surface.
 
-## 11. Status, errors and progress
+## 11. Interaction hints, errors and progress
 
-The status bar has three fixed zones, never wraps, and keeps its height token:
+The bottom bar is a context-sensitive mouse hint bar. It names the area under the
+pointer and lists only the gestures that area's handlers implement, each with a small
+inline mouse glyph (the used wheel or button lit) and any Ctrl/Shift keycaps. It is a
+polite live region, so assistive technology reads the area and hints when they change.
 
-| Zone | Contents |
+| Area | Hints |
 | --- | --- |
-| Left | Link, acquisition, trigger and record state; sample/time counts; suspended/lost notice. Each value once. |
-| Centre | Viewport: zoom out, time/div (fixed width, tabular), zoom in, Fit. |
-| Right | Typed error/notice, progress or quota warning; fixed width, truncates with a tooltip. |
+| Waveform | wheel scrolls rows; Ctrl+wheel zooms time; Shift+wheel pans time; drag pans; double-click adds a cursor |
+| Time axis | wheel scrolls rows; Ctrl+wheel zooms; Shift+wheel pans; drag pans |
+| Overview | wheel scrolls rows; Ctrl+wheel zooms the timeline; Shift+wheel pans it; click or drag centers the view |
+| Channel labels | wheel scrolls rows; double-click a name renames it; the trigger slot opens the trigger editor |
+| Side panel | wheel scrolls the panel |
+| Toolbar | click activates the command |
 
-- A fatal error appears here; a panel may add context but is never the only surface.
+- Hints are mapped from handler behaviour, not from aspirational documentation: an
+  area never advertises a gesture its code does not implement.
+- With no capture, zoom/pan/cursor gestures are omitted because their handlers no-op.
+  The bar keeps the gestures that still work (scrolling, opening a file) and says how
+  to get a capture.
+- A fatal error appears only in the prominent top alert banner; the bottom bar does
+  not summarize errors. The banner has a dismiss action and uses the destructive
+  token pair in both themes.
 - Errors are typed (`unsupported-platform`, `permission`, `busy`, `handshake`,
   `profile`, `transfer`, `lost`, `suspended`, `memory`, `quota`, `record-full`, ...) and
   actionable; the diagnostic code stays in the console prefix.
@@ -498,7 +513,7 @@ The status bar has three fixed zones, never wraps, and keeps its height token:
 | Token | Use |
 | --- | --- |
 | `--canvas` | plot background and waveform field |
-| `--chrome` | shell, label column, status bar |
+| `--chrome` | shell, label column, bottom interaction bar |
 | `--raise` | dialogs and sheets |
 | `--menu` | menus/popovers |
 | `--control` / `--control-hover` | inputs and buttons |
@@ -583,7 +598,8 @@ Review blockers:
 - A raw colour/size in a component rule; a per-theme component override block.
 - A touch action that requires hover, or a target below 48 px.
 - Dead markup/CSS/tests/docs for a replaced interaction.
-- A status bar that duplicates a value or wraps.
+- A hint bar that advertises a gesture the area does not implement, or does not wrap
+  at compact widths.
 - A label that promises behaviour the code does not implement.
 - A panel with two headers, or a mode that hides link/capture/trigger state.
 - A console-only failure.

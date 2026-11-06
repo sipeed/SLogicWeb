@@ -6,3 +6,4 @@
  */
 
 export * from './linkSession.js';
+export * from './webUsbPort.js';

@@ -27,6 +27,7 @@ import {
   configureTestMode,
   configureThreshold,
   decodeDeviceFlags,
+  MAX_SAMPLERATE_HZ,
   MAX_SAMPLERATE_HZ_SLOGIC32_U3,
   PID_SLOGIC16_U3,
   PID_SLOGIC32_U3,
@@ -37,8 +38,9 @@ import {
 } from './protocol.js';
 import {
   LoopStallWatch, Slogic16U3, deriveStreamTuning, expandPacked, getGrantedDevices,
-  headDropBytesForProductId, requestDevice, type Stats,
+  headDropBytesForProductId, maxSamplerateHzForProfile, requestDevice, type Stats,
 } from './slogic16u3.js';
+import { SLOGIC16U3_PROFILE, SLOGIC32U3_PROFILE } from './profile.js';
 import { WorkerSlogicDevice } from './workerTransport.js';
 import { getGrantedDevicesOnBestThread, requestDeviceOnBestThread } from './index.js';
 import { createCommandQueue, describeFailure } from './commandQueue.js';
@@ -1086,6 +1088,66 @@ async function main(): Promise<void> {
     check('a 32U3 capture drops no head bytes',
       stats.rawBytes - stats.sinkBytes === 0,
       `raw ${stats.rawBytes} sink ${stats.sinkBytes}`);
+  }
+  {
+    /*
+     * The transport no longer identifies the model itself: maxChannels, maxSamplerateHz
+     * and the analog refusal come from the profile table. The per-width ceiling is the
+     * maximum over the profile's link tiers because this layer has no negotiated link
+     * class yet; for both shipped profiles it must reproduce the native table the
+     * constructor used to hard-code.
+     */
+    const fake16 = new FakeStreamDevice(recorded(), []);
+    const dev16 = new Slogic16U3(fake16 as unknown as USBDevice);
+    const fake32 = new FakeStreamDevice(recorded32(), [], 0x3032);
+    const dev32 = new Slogic16U3(fake32 as unknown as USBDevice);
+    check('the channel envelope is the profile\'s, not a product-id branch',
+      dev16.maxChannels === SLOGIC16U3_PROFILE.digital.maxChannels &&
+      dev32.maxChannels === SLOGIC32U3_PROFILE.digital.maxChannels,
+      `16U3 ${dev16.maxChannels}ch, 32U3 ${dev32.maxChannels}ch`);
+    check('the profile ceiling is the maximum over its declared link rates',
+      JSON.stringify(maxSamplerateHzForProfile(SLOGIC16U3_PROFILE)) ===
+        JSON.stringify(MAX_SAMPLERATE_HZ) &&
+      JSON.stringify(maxSamplerateHzForProfile(SLOGIC32U3_PROFILE)) ===
+        JSON.stringify(MAX_SAMPLERATE_HZ_SLOGIC32_U3),
+      `16U3 ${JSON.stringify(maxSamplerateHzForProfile(SLOGIC16U3_PROFILE))}, ` +
+      `32U3 ${JSON.stringify(maxSamplerateHzForProfile(SLOGIC32U3_PROFILE))}`);
+    check('the instance ceilings are the derived profile record',
+      JSON.stringify(dev16.maxSamplerateHz) === JSON.stringify(MAX_SAMPLERATE_HZ) &&
+      JSON.stringify(dev32.maxSamplerateHz) === JSON.stringify(MAX_SAMPLERATE_HZ_SLOGIC32_U3),
+      `16U3 ${JSON.stringify(dev16.maxSamplerateHz)}, ` +
+      `32U3 ${JSON.stringify(dev32.maxSamplerateHz)}`);
+    const unnamed = new FakeStreamDevice(recorded32(), [], 0x3032);
+    delete (unnamed as unknown as { productName?: string }).productName;
+    const devUnnamed = new Slogic16U3(unnamed as unknown as USBDevice);
+    check('a device with no productName falls back to its profile name',
+      devUnnamed.name === SLOGIC32U3_PROFILE.name, devUnnamed.name);
+  }
+  {
+    // Analog conditions are refused by capability: the 16U3 profile has neither
+    // converter groups nor analog trigger kinds, so the refusal happens before the
+    // start sequence writes anything. 32U3 acceptance is the A3 test below.
+    const fake = new FakeStreamDevice(recorded(), []);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    await dev.open();
+    const logAtOpen = fake.log.length;
+    let refusal = '';
+    try {
+      await dev.start(
+        { channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {}, undefined,
+        {
+          softwareTrigger: {
+            channels: 16, analog: [{ start: 0, kind: 'rising', level: 100 }],
+            preTriggerSamples: 0, maxSamples: 4,
+          },
+        },
+      );
+    } catch (e) { refusal = String(e); }
+    check('a profile without analog inputs refuses analog trigger conditions',
+      refusal.includes('analog triggers are only available on the SLogic32U3') &&
+        fake.transferInCalls === 0 && fake.log.length === logAtOpen,
+      `${refusal || '<no throw>'}, ${fake.transferInCalls} bulk read(s), ` +
+        `${fake.log.length - logAtOpen} command(s)`);
   }
   {
     // Stopping replenishment while the producer is still running lets every

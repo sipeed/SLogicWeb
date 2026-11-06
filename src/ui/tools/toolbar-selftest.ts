@@ -47,8 +47,12 @@ const workerTransportSrc = fs.readFileSync('src/device/workerTransport.ts', 'utf
 const metricsSrc = fs.readFileSync('src/ui/metrics.ts', 'utf8');
 const toolbarStart = html.indexOf('<div id="toolbar">');
 const mainStart = html.indexOf('<div id="main">');
-const toolbar = toolbarStart >= 0 && mainStart > toolbarStart
-  ? html.slice(toolbarStart, mainStart)
+// The error banner is a sibling between the toolbar and main; it carries its own
+// dismiss button, so the toolbar slice must stop before it.
+const bannerStart = html.indexOf('<div id="error-banner"');
+const toolbarEnd = bannerStart > toolbarStart ? bannerStart : mainStart;
+const toolbar = toolbarStart >= 0 && toolbarEnd > toolbarStart
+  ? html.slice(toolbarStart, toolbarEnd)
   : '';
 const connectIndex = toolbar.indexOf('id="btn-connect"');
 const transportIndex = toolbar.indexOf('id="transport"');
@@ -416,10 +420,9 @@ check(
 );
 
 const leftCommandIds = ['btn-connect', 'transport', 'btn-open', 'btn-save', 'btn-fit', 'btn-fullscreen', 'btn-settings'];
-const assistantCommandId = 'btn-assistant';
 const languageCommandId = 'btn-language';
 const themeCommandId = 'btn-theme';
-const commandIds = [...leftCommandIds, assistantCommandId, languageCommandId, themeCommandId];
+const commandIds = [...leftCommandIds, languageCommandId, themeCommandId];
 
 const toolbarGroupStarts = [...toolbar.matchAll(/<div class="toolbar-group"[^>]*>/g)]
   .map((match) => match.index ?? -1);
@@ -685,13 +688,6 @@ check(
     `runtime=${fullscreenStateIsRuntime}`,
 );
 
-const assistantIndex = toolbar.indexOf(`id="${assistantCommandId}"`);
-const assistantButtonStart = assistantIndex >= 0 ? toolbar.lastIndexOf('<button', assistantIndex) : -1;
-const assistantButtonEnd = assistantIndex >= 0 ? toolbar.indexOf('</button>', assistantIndex) : -1;
-const spacerToAssistant = spacerIndex >= 0 && assistantButtonStart > spacerIndex
-  ? toolbar.slice(spacerIndex, assistantButtonStart) : '';
-const assistantDirectlyAfterSpacer = spacerToAssistant.length > 0 &&
-  !spacerToAssistant.includes('<button') && !spacerToAssistant.includes('role="separator"');
 const switchGroup = toolbarGroupOf(languageCommandId);
 const switchGroupStart = switchGroup?.start ?? -1;
 const switchGroupMarkup = switchGroup?.markup ?? '';
@@ -703,10 +699,10 @@ const switchGroupOrder = languageIndex >= 0 && themeIndex > languageIndex &&
 const switchGroupAccessible = switchGroupMarkup.includes('role="group"') &&
   switchGroupMarkup.includes('aria-label="Language and theme"') &&
   switchGroupMarkup.includes('data-i18n-aria-label="toolbar.switchGroup"');
-const assistantToGroup = assistantButtonEnd > assistantButtonStart && switchGroupStart > assistantButtonEnd
-  ? toolbar.slice(assistantButtonEnd, switchGroupStart) : '';
-const groupDirectlyAfterAssistant = assistantDirectlyAfterSpacer && assistantToGroup.length > 0 &&
-  !assistantToGroup.includes('<button') && !assistantToGroup.includes('role="separator"');
+const spacerToGroup = spacerIndex >= 0 && switchGroupStart > spacerIndex
+  ? toolbar.slice(spacerIndex, switchGroupStart) : '';
+const groupDirectlyAfterSpacer = spacerToGroup.length > 0 &&
+  !spacerToGroup.includes('<button') && !spacerToGroup.includes('role="separator"');
 
 const themeButtonIndex = toolbar.indexOf(`id="${themeCommandId}"`);
 const themeButtonStart = themeButtonIndex >= 0 ? toolbar.lastIndexOf('<button', themeButtonIndex) : -1;
@@ -714,10 +710,10 @@ const lastButtonIndex = toolbar.lastIndexOf('<button');
 const themeIsFinalCommand = lastButtonIndex >= 0 && lastButtonIndex === themeButtonStart &&
   toolbar.indexOf('role="separator"', themeButtonIndex) === -1;
 check(
-  'assistant and the language/theme group follow the spacer in that order, the theme command last',
-  switchGroupOrder && switchGroupAccessible && groupDirectlyAfterAssistant && themeIsFinalCommand,
-  `spacer@${spacerIndex}, assistant@${assistantIndex}, group@${switchGroupStart}, theme@${themeButtonIndex}, ` +
-  `groupOrder=${switchGroupOrder}, accessible=${switchGroupAccessible}, afterAssistant=${groupDirectlyAfterAssistant}, ` +
+  'the language/theme group follows the spacer and the theme command is last',
+  switchGroupOrder && switchGroupAccessible && groupDirectlyAfterSpacer && themeIsFinalCommand,
+  `spacer@${spacerIndex}, group@${switchGroupStart}, theme@${themeButtonIndex}, ` +
+  `groupOrder=${switchGroupOrder}, accessible=${switchGroupAccessible}, afterSpacer=${groupDirectlyAfterSpacer}, ` +
   `final=${themeIsFinalCommand}`,
 );
 
@@ -732,50 +728,15 @@ check(
   `plain=${groupPlain}, rules=${groupRules.length}`,
 );
 
-const assistantMarkup = commandMarkup(assistantCommandId);
-const assistantShownStart = app.indexOf('private assistantShown(');
-const assistantShownEnd = assistantShownStart >= 0 ? app.indexOf('\n  }', assistantShownStart) : -1;
-const assistantShownBody = assistantShownStart >= 0 && assistantShownEnd > assistantShownStart
-  ? app.slice(assistantShownStart, assistantShownEnd)
-  : '';
-const assistantShownSource = assistantShownBody.includes('s.visible && s.assistant');
-const assistantToggleAt = app.indexOf('private toggleAssistant(');
-const assistantToggleBody = methodBody('private toggleAssistant(');
-const spliceToggle = (body: string): string => assistantToggleAt >= 0 && assistantToggleBody.length > 0
-  ? app.slice(0, assistantToggleAt) + body + app.slice(assistantToggleAt + assistantToggleBody.length)
-  : '';
-const assistantToggleShape = (body: string): boolean => {
-  const showingAt = body.indexOf('const showing = this.assistantShown();');
-  const applyAt = body.indexOf('this.applySidebar(');
-  const closeAt = body.indexOf('nextAssistantState(this.sidebar)');
-  const openAt = body.indexOf('showAssistant(this.sidebar)');
-  const focusAt = body.indexOf('if (!showing) this.assistantPanel?.focusInput();');
-  return showingAt >= 0 && closeAt > showingAt && openAt > showingAt &&
-    applyAt > showingAt && applyAt < openAt && applyAt < closeAt && focusAt > openAt;
-};
-const assistantToggleSpread = assistantToggleBody.replace(
-  'showAssistant(this.sidebar)', '{ ...this.sidebar, assistant: true }');
-const assistantToggleSpreadApp = spliceToggle(assistantToggleSpread);
-const spreadKeepsWholeAppNeedle = assistantToggleSpreadApp.includes('showAssistant(this.sidebar)');
-const spreadStaysGreen = assistantToggleSpread !== assistantToggleBody &&
-  spreadKeepsWholeAppNeedle && assistantToggleShape(assistantToggleSpread);
-const assistantWiring = [
-  "this.el.assistant.addEventListener('click'",
-  'this.toggleAssistant();',
-  "this.el.assistant.setAttribute('aria-pressed', String(this.assistantShown()))",
-  'if (this.assistantShown()) {',
-  "this.el.assistant.setAttribute('aria-label', t('toolbar.assistantTitle'))",
-].filter((needle) => !app.includes(needle));
+const assistantMarkupGone = !html.includes('btn-assistant') && !toolbar.includes('toolbar-assistant');
+const assistantWiringGone = !app.includes('this.el.assistant') &&
+  !app.includes('AssistantPanel') && !app.includes('assistantPanel') &&
+  !app.includes('assistantShown') && !app.includes('showAssistant(') &&
+  !app.includes('toggleAssistant') && !app.includes('assistantLayer()');
 check(
-  'the assistant button is a toggle: aria-pressed and the visible flag come from one shown derivation',
-  assistantMarkup.includes('aria-pressed="false"') && assistantMarkup.includes('aria-controls="side-panel"') &&
-    assistantMarkup.includes('data-i18n-title="toolbar.assistantTitle"') &&
-    assistantWiring.length === 0 && assistantShownSource &&
-    assistantToggleShape(assistantToggleBody) && !spreadStaysGreen,
-  `missing=${JSON.stringify(assistantWiring)}, shownSource=${assistantShownSource}, ` +
-  `toggle=${assistantToggleShape(assistantToggleBody)}, ` +
-  `spreadKeepsWholeAppNeedle=${spreadKeepsWholeAppNeedle}, ` +
-  `sliceCatchesSpread=${!assistantToggleShape(assistantToggleSpread)}`,
+  'the AI chat column is gone: no toolbar button, panel mount or sidebar selection remains',
+  assistantMarkupGone && assistantWiringGone,
+  `markup=${assistantMarkupGone}, wiring=${assistantWiringGone}`,
 );
 
 const retiredSidebarMarkup = !html.includes('btn-sidebar') && !toolbar.includes('toolbar-sidebar');
@@ -879,7 +840,7 @@ const selectPanelShape = selectPanelBody.includes('this.applySidebar(') &&
   applySidebarBody.includes('this.sidebar = next;') &&
   applySidebarBody.includes('this.renderPanels();') &&
   applySidebarBody.includes('this.relayout();');
-const setPanelStart = app.indexOf("setPanel: (p: 'device' | 'analyzers' | 'assistant' | null) => {");
+const setPanelStart = app.indexOf("setPanel: (p: 'device' | 'analyzers' | null) => {");
 const setPanelEnd = setPanelStart >= 0 ? app.indexOf('\n    },', setPanelStart) : -1;
 const setPanelBody = setPanelStart >= 0 && setPanelEnd > setPanelStart
   ? app.slice(setPanelStart, setPanelEnd)
@@ -907,7 +868,6 @@ const toolbarHandler = (needle: string): string => {
 const settingsHandler = toolbarHandler("must<HTMLButtonElement>('btn-settings').addEventListener('click'");
 const languageHandler = toolbarHandler("this.el.language.addEventListener('click'");
 const themeHandler = toolbarHandler("this.el.theme.addEventListener('click'");
-const assistantHandler = toolbarHandler("this.el.assistant.addEventListener('click'");
 const menuHandlerCases = [
   { name: 'settings', body: settingsHandler, menu: 'settingsMenu', items: 'settingsItems', others: ['languageMenu', 'themeMenu'] },
   { name: 'language', body: languageHandler, menu: 'languageMenu', items: 'languageItems', others: ['settingsMenu', 'themeMenu'] },
@@ -925,21 +885,14 @@ for (const item of menuHandlerCases) {
     if (item.body.includes(`this.${other}.close(`)) menuHandlerFailures.push(`${item.name}:${other}`);
   }
 }
-const assistantClosesMenus = assistantHandler.includes("this.menuStack.closeAll('outside')") &&
-  ['settingsMenu', 'languageMenu', 'themeMenu']
-    .every((menu) => !assistantHandler.includes(`this.${menu}.close(`));
-const assistantOpensSharedPath = assistantHandler.includes('this.channelList.closeDialog()') &&
-  assistantHandler.includes('this.toggleAssistant()');
 const stackRegistration = ['settingsMenu', 'languageMenu', 'themeMenu']
   .every((menu) => methodBody('constructor() {').includes(`this.menuStack.register(this.${menu});`)) &&
   methodBody('constructor() {').indexOf('this.menuStack.register(this.settingsMenu);') >
     methodBody('constructor() {').indexOf('this.settingsMenu = new SettingsMenu(');
 check(
-  'every toolbar menu and the assistant close competing overlays and the channel dialog',
-  menuHandlerFailures.length === 0 && assistantClosesMenus && assistantOpensSharedPath &&
-    stackRegistration,
-  `failures=${JSON.stringify(menuHandlerFailures)}, ` +
-  `assistant=${assistantClosesMenus && assistantOpensSharedPath}, stack=${stackRegistration}`,
+  'every toolbar menu closes competing overlays and the channel dialog',
+  menuHandlerFailures.length === 0 && stackRegistration,
+  `failures=${JSON.stringify(menuHandlerFailures)}, stack=${stackRegistration}`,
 );
 
 const retranslateBody = methodBody('private retranslate(): void {');
@@ -1082,21 +1035,68 @@ const toolbarSummaryAbsent = !toolbar.includes('toolbar-session') &&
   !css.includes('toolbar-session');
 const titleLookupAbsent = !app.includes("'capture-title'") && !app.includes('this.el.title');
 const toolbarStateStart = app.indexOf('private renderToolbarState(): void {');
-const statusStart = app.indexOf('private renderStatus(): void {');
-const statusEnd = statusStart >= 0 ? app.indexOf('\n  private fail(', statusStart) : -1;
-const toolbarStateBody = toolbarStateStart >= 0 && statusStart > toolbarStateStart
-  ? app.slice(toolbarStateStart, statusStart)
+const hintBarStart = app.indexOf('private renderInteractionBar(');
+const toolbarStateBody = toolbarStateStart >= 0 && hintBarStart > toolbarStateStart
+  ? app.slice(toolbarStateStart, hintBarStart)
   : '';
-const statusBody = statusStart >= 0 && statusEnd > statusStart
-  ? app.slice(statusStart, statusEnd)
-  : '';
+const hintBarEnd = hintBarStart >= 0
+  ? app.indexOf('private renderErrorBanner(): void {', hintBarStart) : -1;
+const hintBarBody = hintBarStart >= 0 && hintBarEnd > hintBarStart
+  ? app.slice(hintBarStart, hintBarEnd) : '';
 const toolbarStateDescribesCapture = toolbarStateBody.length === 0 ||
   toolbarStateBody.includes('formatCaptureLabel') || toolbarStateBody.includes('captureLabel');
-const statusOwnsCaptureLabel = statusBody.includes('parts.push(formatCaptureLabel(this.captureLabel))');
+const hintBarMarkup = /<div id="interaction-bar"[^>]*aria-live="polite"[^>]*>/.test(html) &&
+  html.includes('id="interaction-area"') &&
+  html.includes('id="interaction-hints"') &&
+  html.includes('data-i18n-aria-label="hints.barLabel"');
+const hintBarStyles = /#interaction-bar \{[^}]*min-height: var\(--status-h\);/s.test(css) &&
+  !/#status\b/.test(css);
+const hintBarRenders = hintBarBody.includes('interactionHints(area,') &&
+  hintBarBody.includes('interactionAreaLabelKey(area)') &&
+  hintBarBody.includes('this.el.interactionHints.replaceChildren(') &&
+  hintBarBody.includes('area === this.renderedInteractionArea');
+const oldStatusSummaryGone = !app.includes('renderStatus') &&
+  !app.includes('this.el.status') && !app.includes("must<HTMLDivElement>('status')") &&
+  !app.includes("t('status.summary'") && !app.includes("t('status.view'") &&
+  !app.includes('parts.push(formatCaptureLabel(this.captureLabel))') &&
+  !/#status\b/.test(html);
 check(
-  'the toolbar carries no capture summary and the status bar is the sole description site',
-  toolbarSummaryAbsent && titleLookupAbsent && !toolbarStateDescribesCapture && statusOwnsCaptureLabel,
-  `toolbarAbsent=${toolbarSummaryAbsent}, appAbsent=${titleLookupAbsent}, toolbarDescribes=${toolbarStateDescribesCapture}, status=${statusOwnsCaptureLabel}`,
+  'the toolbar carries no capture summary and the bottom bar is interaction hints, not a status summary',
+  toolbarSummaryAbsent && titleLookupAbsent && !toolbarStateDescribesCapture &&
+    hintBarMarkup && hintBarStyles && hintBarRenders && oldStatusSummaryGone,
+  `toolbarAbsent=${toolbarSummaryAbsent}, appAbsent=${titleLookupAbsent}, ` +
+    `toolbarDescribes=${toolbarStateDescribesCapture}, markup=${hintBarMarkup}, ` +
+    `styles=${hintBarStyles}, renders=${hintBarRenders}, oldGone=${oldStatusSummaryGone}`,
+);
+
+const errorBannerMarkup =
+  /<div id="error-banner"[^>]*\brole="alert"[^>]*\bhidden\b/.test(html) &&
+  html.includes('id="error-banner-text"') &&
+  html.includes('id="error-banner-dismiss"') &&
+  html.includes('data-i18n-aria-label="shortcuts.close"');
+const bannerMethodStart = app.indexOf('private renderErrorBanner(): void {');
+const bannerMethodEnd = bannerMethodStart >= 0 ? app.indexOf('\n  }', bannerMethodStart) : -1;
+const bannerMethodBody = bannerMethodStart >= 0 && bannerMethodEnd > bannerMethodStart
+  ? app.slice(bannerMethodStart, bannerMethodEnd) : '';
+const bannerShape = bannerMethodBody.includes('this.el.errorBanner.hidden = err === null;') &&
+  bannerMethodBody.includes(
+    "this.el.errorBannerText.textContent = err === null ? '' : formatStatusError(err);");
+const dismissHandler = toolbarHandler("this.el.errorDismiss.addEventListener('click'");
+const bannerClears = dismissHandler.includes('this.statusError = null;') &&
+  dismissHandler.includes('this.renderErrorBanner();') &&
+  dismissHandler.includes('this.relayout();');
+const bannerStyles = /\.error-banner \{[^}]*background: var\(--destructive\);[^}]*color: var\(--destructive-foreground\);/s.test(css) &&
+  css.includes('.error-banner[hidden] { display: none; }');
+const bannerUpdatesOnFail = methodBody('private fail(').includes('this.renderErrorBanner();');
+const errorClears = app.split('this.statusError = null;').slice(1);
+const bannerClearsOnRecovery = errorClears.every((after) =>
+  after.slice(0, 160).includes('this.renderErrorBanner();'));
+check(
+  'a role=alert error banner above the plot mirrors statusError and dismiss clears it',
+  errorBannerMarkup && bannerShape && bannerClears && bannerStyles && bannerUpdatesOnFail &&
+    bannerClearsOnRecovery,
+  `markup=${errorBannerMarkup}, shape=${bannerShape}, clears=${bannerClears}, ` +
+    `css=${bannerStyles}, fail=${bannerUpdatesOnFail}, recovery=${bannerClearsOnRecovery}`,
 );
 
 const capturePanelKeepsLabelKey = capturePanel.includes("t('capturePanel.capture')");
@@ -1180,12 +1180,14 @@ const mobileBlock = mobileBlockStart >= 0 && mobileBlockEnd > mobileBlockStart
   ? css.slice(mobileBlockStart, mobileBlockEnd)
   : '';
 const sidebarMobileOverrideAbsent = !css.includes('.toolbar-sidebar');
-const assistantMobileFlushRight = mobileBlock.includes('#toolbar .toolbar-assistant { margin-left: auto; }');
+const switchGroupMobileFlushRight =
+  mobileBlock.includes('#toolbar .toolbar-group:last-of-type { margin-left: auto; }');
 check(
-  'the retired sidebar selector hands its mobile flush-right placement to the assistant command',
+  'the retired sidebar selector hands its mobile flush-right placement to the language/theme group',
   mobileBlock.includes('#toolbar .spacer { display: none; }') &&
-    sidebarMobileOverrideAbsent && assistantMobileFlushRight,
-  `mobileBlock=${mobileBlock.length}, overrideAbsent=${sidebarMobileOverrideAbsent}, flushRight=${assistantMobileFlushRight}`,
+    sidebarMobileOverrideAbsent && switchGroupMobileFlushRight,
+  `mobileBlock=${mobileBlock.length}, overrideAbsent=${sidebarMobileOverrideAbsent}, ` +
+    `flushRight=${switchGroupMobileFlushRight}`,
 );
 
 function mediaBlockContaining(needle: string): string {

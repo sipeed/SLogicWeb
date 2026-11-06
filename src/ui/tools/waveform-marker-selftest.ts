@@ -849,17 +849,17 @@ function between(source: string, start: string, end: string): string {
     ...bTokens.filter((token) => appSource.includes(token)),
     ...(/\bcursorB\b/.test(appSource) ? ['cursorB'] : []),
   ];
-  check('marker B leaves no state, draw, status segment, or debug parameter behind',
+  check('marker B leaves no state, draw, readout, or debug parameter behind',
     bTraces.length === 0, `traces=${JSON.stringify(bTraces)}`);
 
-  const statusSource = between(appSource, 'private renderStatus(): void {', 'private fail(');
-  const activeStatus = statusSource.match(/parts\.push\(`\$\{active\.marker\.label\} /g) ?? [];
-  check('the status bar has exactly one active-cursor segment carrying its order label',
-    activeStatus.length === 1 &&
-    statusSource.includes('const active = this.activeCursor();') &&
-    statusSource.includes('parts.push(`${active.marker.label} ${formatDuration((markerSample - origin) / sr)}`);') &&
-    !statusSource.includes('`A '),
-    `segments=${activeStatus.length}, len=${statusSource.length}`);
+  const barSource = between(appSource, 'private renderInteractionBar(', 'private fail(');
+  const barDropsCursorReadout = barSource.length > 0 &&
+    !barSource.includes('activeCursor(') && !barSource.includes('markerSample') &&
+    !barSource.includes('formatDuration(');
+  check('the bottom interaction bar renders gestures, not the active cursor position',
+    barDropsCursorReadout && !appSource.includes('renderStatus'),
+    `len=${barSource.length}, cursor=${barSource.includes('activeCursor(')}, ` +
+    `renderStatus=${appSource.includes('renderStatus')}`);
 
   const downSource = between(appSource, "plot.addEventListener('pointerdown'", "plot.addEventListener('pointermove'");
   const pinchBranch = between(downSource, 'if (pointers.size === 2) {', '} else if (pointers.size === 1) {');

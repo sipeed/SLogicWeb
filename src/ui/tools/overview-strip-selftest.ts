@@ -143,8 +143,10 @@ function check(name: string, pass: boolean, detail: string): void {
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
   const overviewAt = html.indexOf('id="overview"');
   const axisAt = html.indexOf('id="axis"');
-  const placed = overviewAt >= 0 && axisAt > overviewAt &&
-    html.slice(overviewAt - 40, overviewAt).includes('plot-col');
+  const plotColAt = html.indexOf('<div id="plot-col">');
+  const panelSplitAt = html.indexOf('id="panel-resizer"');
+  const placed = plotColAt >= 0 && overviewAt > plotColAt && axisAt > overviewAt &&
+    panelSplitAt > axisAt;
   const styled = sheet.includes('--overview-h: 56px') &&
     sheet.includes('#overview {') && sheet.includes('height: var(--overview-h)') &&
     sheet.includes('top: var(--overview-h);') &&

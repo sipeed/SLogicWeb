@@ -32,8 +32,6 @@ import {
   CTRL_RUN,
   CTRL_STOP,
   EP_IN,
-  MAX_SAMPLERATE_HZ,
-  MAX_SAMPLERATE_HZ_SLOGIC32_U3,
   CONTROL_TIMEOUT_MS,
   PID_SLOGIC16_U3,
   PID_SLOGIC32_U3,
@@ -57,6 +55,8 @@ import {
   type TraceEntry,
   withControlTimeout,
 } from './protocol.js';
+import { profileForVidPid, SLOGIC16U3_PROFILE } from './profile.js';
+import type { DeviceProfile } from './profileTypes.js';
 import { LoopStallWatch, THREAD_STALL_THRESHOLD_MS, USB_FILTERS } from './usbCore.js';
 
 export { LoopStallWatch, USB_FILTERS };
@@ -80,6 +80,50 @@ export const HEAD_DROP_BYTES_32U3 = 0;
 
 export function headDropBytesForProductId(productId: number): number {
   return productId === PID_SLOGIC32_U3 ? HEAD_DROP_BYTES_32U3 : HEAD_DROP_BYTES_16U3;
+}
+
+/**
+ * The profile for the handle this transport was given.
+ *
+ * WebUSB always reports a VID, but the offline harness and `bench-rate` build
+ * device-shaped objects without one, and this layer historically identified a model by
+ * product id alone. The PID-only lookup keeps those models on their real profile. A pair
+ * that matches nothing falls back to the 16U3, which is exactly what the old
+ * `is32` test did for every product id but the 32U3.
+ */
+function profileForDevice(usb: USBDevice): DeviceProfile {
+  return profileForVidPid(usb.vendorId, usb.productId)
+    ?? profileForVidPid(USB_VID_SIPEED, usb.productId)
+    ?? SLOGIC16U3_PROFILE;
+}
+
+/**
+ * Per-width samplerate ceiling for a transport with no negotiated link class.
+ *
+ * The legacy device layer predates `LinkSession`, so it cannot ask the port which link
+ * it trained at; a configuration is accepted as soon as any declared link could carry
+ * it. The ceiling is therefore the maximum over the profile's rate tiers, which is the
+ * `ss10` tier where one exists and the 5 Gbit/s tier otherwise. For the shipped
+ * profiles this reproduces the old native tables exactly. A future transport that knows
+ * the link class should call `maxSamplerateFor(profile, channels, linkRate)` instead.
+ *
+ * The limitation is concrete for the 32U3: 32 channels at 200 MHz needs 800 MB/s, which
+ * only `ss10` carries, so on a 5 Gbit/s link this transport still offers and accepts it.
+ * That is the old fixed table's behavior; it stays until the negotiated class is
+ * available at this layer.
+ */
+export function maxSamplerateHzForProfile(
+  profile: DeviceProfile,
+): Readonly<Record<number, number>> {
+  const ceilings: Record<number, number> = {};
+  for (const tier of profile.digital.rates) {
+    let hz = 0;
+    for (const candidate of Object.values(tier.hz)) {
+      if (typeof candidate === 'number' && candidate > hz) hz = candidate;
+    }
+    if (hz > 0) ceilings[tier.channels] = hz;
+  }
+  return ceilings;
 }
 
 /** SuperSpeed bulk max packet size; transfer lengths stay a multiple of this. */
@@ -339,18 +383,22 @@ export interface StartOptions extends CaptureStartOptions {
 }
 
 function assertValidConfig(
-  cfg: CaptureConfig, maxSamplerateHz: Readonly<Record<number, number>>, maxChannels: number,
+  cfg: CaptureConfig,
+  profile: DeviceProfile,
+  maxSamplerateHz: Readonly<Record<number, number>>,
 ): void {
-  if (!(SUPPORTED_CHANNELS as readonly number[]).includes(cfg.channels) || cfg.channels > maxChannels) {
+  const widths = profile.digital.widths;
+  if (!widths.includes(cfg.channels)) {
     throw new DiagnosticError('device.unsupportedChannels', {
       channels: cfg.channels,
-      offered: SUPPORTED_CHANNELS.filter((n) => n <= maxChannels).join(', '),
+      offered: widths.join(', '),
     });
   }
-  if (!SAMPLERATES_HZ.includes(cfg.samplerate)) {
+  const samplerates = profile.digital.sampleratesHz ?? SAMPLERATES_HZ;
+  if (!samplerates.includes(cfg.samplerate)) {
     throw new DiagnosticError('device.unsupportedSamplerate', {
       samplerate: cfg.samplerate,
-      offered: SAMPLERATES_HZ.map((r) => `${r / 1e6}M`).join(', '),
+      offered: samplerates.map((r) => `${r / 1e6}M`).join(', '),
     });
   }
   const ceiling = maxSamplerateHz[cfg.channels];
@@ -362,8 +410,7 @@ function assertValidConfig(
   if (!Number.isFinite(cfg.thresholdVolts)) {
     throw new DiagnosticError('device.threshold', { threshold: cfg.thresholdVolts });
   }
-  if (cfg.testMode !== undefined && cfg.testMode !== TEST_MODE_NORMAL &&
-      cfg.testMode !== TEST_MODE_USB_MAX_SPEED && cfg.testMode !== TEST_MODE_EMULATION) {
+  if (cfg.testMode !== undefined && !profile.digital.testModes.includes(cfg.testMode)) {
     throw new DiagnosticError('device.testMode', { mode: cfg.testMode });
   }
 }
@@ -460,6 +507,10 @@ export class Slogic16U3 implements Device {
   readonly serial: string;
   readonly maxChannels: number;
   readonly maxSamplerateHz: Readonly<Record<number, number>>;
+  /** Capability data for the model this handle was opened on. */
+  private readonly profile: DeviceProfile;
+  /** A profile executes analog conditions only with converters and trigger kinds. */
+  private readonly analogTriggersSupported: boolean;
 
   /**
    * Fatal errors from the background read loop land here. They are also
@@ -539,13 +590,16 @@ export class Slogic16U3 implements Device {
   readonly serialIsBrowserSupplied = true;
 
   constructor(private readonly usb: USBDevice) {
-    const is32 = usb.productId === PID_SLOGIC32_U3;
-    this.maxChannels = is32 ? 32 : 16;
+    const profile = profileForDevice(usb);
+    this.profile = profile;
+    this.maxChannels = profile.digital.maxChannels;
     this.headDrop = headDropBytesForProductId(usb.productId);
     this.headRemaining = this.headDrop;
-    this.maxSamplerateHz = is32 ? MAX_SAMPLERATE_HZ_SLOGIC32_U3 : MAX_SAMPLERATE_HZ;
-    this.name = usb.productName ?? (is32 ? 'SLogic32 U3' : 'SLogic16 U3');
+    this.maxSamplerateHz = maxSamplerateHzForProfile(profile);
+    this.name = usb.productName ?? profile.name;
     this.serial = usb.serialNumber ?? '';
+    this.analogTriggersSupported = profile.analog.groups.length > 0 &&
+      profile.trigger.analog.length > 0;
   }
 
   private static zeroStats(): Stats {
@@ -895,7 +949,7 @@ export class Slogic16U3 implements Device {
     if (this.loopUnsettled) {
       throw new TransportDeadError('device.loopUnsettled', 'loop-unsettled');
     }
-    assertValidConfig(cfg, this.maxSamplerateHz, this.maxChannels);
+    assertValidConfig(cfg, this.profile, this.maxSamplerateHz);
     if (!this.bus) throw new DiagnosticError('device.startBeforeOpen');
     const bus = this.bus;
 
@@ -959,7 +1013,10 @@ export class Slogic16U3 implements Device {
         });
       }
       if (opts.softwareTrigger.analog?.length) {
-        if (this.maxChannels < 32) {
+        // Profile capability, not a model test: analog conditions need converter groups
+        // and a profile that executes them. The refusal text still names the only
+        // shipped model that has both.
+        if (!this.analogTriggersSupported) {
           throw new Error('analog triggers are only available on the SLogic32U3');
         }
         // The ADC module's sample clock must come from its 800 MHz PLL (HSync adc.rs).
@@ -1649,7 +1706,7 @@ export class Slogic16U3 implements Device {
     // digital trigger can be running below the ADC minimum; arming an analog level then
     // stays pending for the next acquisition instead of matching meaningless codes.
     if (config.analog?.length) {
-      if (this.maxChannels < 32) return false;
+      if (!this.analogTriggersSupported) return false;
       const rate = this.cfg?.samplerate ?? 0;
       if (rate < 100e6 || 800e6 % rate !== 0) return false;
     }
@@ -1968,7 +2025,7 @@ export class Slogic16U3 implements Device {
         thresholdVolts: 1.6,
         testMode,
       };
-      assertValidConfig(cfg, this.maxSamplerateHz, this.maxChannels);
+      assertValidConfig(cfg, this.profile, this.maxSamplerateHz);
       const started = performance.now();
       // The drain wait lets the host consume the queued finite budget; `stats.elapsedMs`
       // is the last completion, so it is not padding in the measured rate.

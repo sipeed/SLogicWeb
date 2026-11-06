@@ -31,7 +31,7 @@ export interface HostSnapshot {
   running: boolean;
   stopping: boolean;
   repeatPending: boolean;
-  /** Formatted status-bar error, '' when none. */
+  /** Formatted error-banner error, '' when none. */
   error: string;
   label: string;
   samples: number;

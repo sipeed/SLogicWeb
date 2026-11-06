@@ -739,12 +739,19 @@ const handlers = (sink: { text: string; thinking: string }) => ({
 // ------------------------------------------------------------------ 6. wiring and the built chunks
 {
   const main = fs.readFileSync('src/ui/main.ts', 'utf8');
-  const init = main.indexOf('initAssistantSettings();');
-  check('main.ts restores assistant settings before constructing App',
-    init !== -1 && init < main.indexOf('new App()'));
+  check('main.ts no longer initializes the removed chat column\'s UI settings',
+    !main.includes('initAssistantSettings') && !main.includes('../assistant/settings.js'));
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
-  check('the assistant opens from its own toolbar button',
-    app.includes("this.el.assistant.addEventListener('click'") && fs.readFileSync('index.html', 'utf8').includes('id="btn-assistant"'));
+  const html = fs.readFileSync('index.html', 'utf8');
+  check('no assistant toolbar button, panel mount or sidebar selection remains in the UI',
+    !app.includes('this.el.assistant') && !app.includes('AssistantPanel') &&
+    !app.includes('assistantPanel') && !app.includes('showAssistant(') &&
+    !app.includes('toggleAssistant') && !app.includes("'assistant' | null") &&
+    !html.includes('btn-assistant'));
+  check('the private assistantHost stays as the agent-facing API, exposed through debug.agentHost',
+    app.includes('private assistantHost(): AssistantHost {') &&
+    app.includes('agentHost: () => this.assistantHost(),') &&
+    app.includes("from '../assistant/tools.js';"));
   const claude = fs.readFileSync('src/assistant/providers/claude.ts', 'utf8');
   const runtimeImports = [...claude.matchAll(/^import\s+(?!type\b)[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);
   check('the lazy Claude provider imports nothing at runtime but the SDK',

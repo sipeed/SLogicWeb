@@ -21,7 +21,18 @@
  * `preTrigger.capBytes` is the effective byte position of T in the retained stream, as
  * §5.1 describes it. It is the whole-sample prefix this plan may retain, clamped by the
  * profile's `preTriggerMaxBytes`. When bytes cannot be derived (no `capture`), the
- * profile's hard byte cap is reported instead: it is then the only known bound.
+ * profile's hard byte cap is reported instead and `capBytesIsBound` is true: it is then
+ * an upper bound, not T's position.
+ *
+ * A Loop plan owns an unbounded window, so `loop` is accepted only with an `unlimited`
+ * post-trigger budget; the pre-trigger percentage applies to `loop.seconds`.
+ *
+ * `preTrigger.samples` is the exact whole-sample prefix whenever the compiler knows it:
+ * the budget itself is in samples, or `capture` gives the rate and width. It is the
+ * authoritative value for consumers (the SimDriver and the host matcher); `seconds` is a
+ * float and a `seconds * samplerate` round-trip may land one sample short, so no consumer
+ * should recover the count by flooring that product. It is omitted when only a duration
+ * is known (time budget with no capture) because no exact sample count exists then.
  *
  * ## Caps: clamp, do not refuse
  *
@@ -79,11 +90,32 @@ export interface TriggerPlanLoop {
   anchor: 'trigger' | 'free';
 }
 
+/**
+ * The effective pre-trigger window.
+ *
+ * `samples` is the exact whole-sample prefix when the compiler could derive it (the
+ * budget is in samples, or `capture` states rate and width). Consumers must prefer it:
+ * `seconds` is the float duration and `Math.floor(seconds * samplerate)` can lose a
+ * whole sample to floating-point round-off. It is absent when only a duration is known.
+ */
+export interface TriggerPlanPreTrigger {
+  percent: number;
+  seconds: number;
+  capBytes: number;
+  samples?: number;
+  /**
+   * True when `capBytes` is only the profile's hard upper bound, not T's actual byte
+   * position (no capture rate/width was supplied). Consumers must not treat it as a
+   * position in that case.
+   */
+  capBytesIsBound?: boolean;
+}
+
 export interface TriggerPlan {
   source: TriggerSource;
   conditions: readonly TriggerCondition[];
   execution: 'device' | 'host';
-  preTrigger: { percent: number; seconds: number; capBytes: number };
+  preTrigger: TriggerPlanPreTrigger;
   budget: TriggerBudget;
   loop?: TriggerPlanLoop;
   compiledAt: number;
@@ -153,7 +185,7 @@ export type TriggerPlanResult =
   | { ok: true; plan: TriggerPlan }
   | { ok: false; reason: TriggerPlanFailureReason; detail: string };
 
-const TRIGGER_KINDS: readonly TriggerKind[] = [
+export const TRIGGER_KINDS: readonly TriggerKind[] = [
   'level', 'rising', 'falling', 'edge', 'high', 'low',
 ];
 const ANALOG_TRIGGER_KINDS: readonly AnalogTriggerKind[] = ['rising', 'falling'];
@@ -439,6 +471,13 @@ export function compileTriggerPlan(input: TriggerPlanInput): TriggerPlanResult {
         `Loop seconds must be a positive finite number, got ${String(input.loop.seconds)}`,
       );
     }
+    if (input.postTrigger.kind !== 'unlimited') {
+      return fail(
+        'invalid-budget',
+        'a Loop plan owns an unbounded window; postTrigger must be unlimited so the ' +
+          'pre-trigger percentage cannot apply to a second, finite budget',
+      );
+    }
     loop = { seconds: input.loop.seconds, anchor: input.loop.anchor };
   }
 
@@ -525,14 +564,12 @@ export function compileTriggerPlan(input: TriggerPlanInput): TriggerPlanResult {
   if (profileMaxBytes === 0) percent = 0;
   if (baseSamples !== null) {
     // The historic rule: keep at least the trigger sample (and one post-trigger sample)
-    // inside the requested base budget.
+    // inside the requested base budget. The byte cap is applied to the resulting whole
+    // sample count below, not to the percentage: clamping the percentage first would
+    // floor the product one sample below floor(capBytes / bytesPerSample).
     percent = baseSamples > 0
       ? Math.min(percent, Math.max(0, ((baseSamples - 1) * 100) / baseSamples))
       : 0;
-    if (capture !== null && baseSamples > 0) {
-      const capSamples = profileMaxBytes / capture.bytesPerSample;
-      percent = Math.min(percent, Math.max(0, (capSamples * 100) / baseSamples));
-    }
   }
 
   let preSamples: number | null = null;
@@ -543,6 +580,12 @@ export function compileTriggerPlan(input: TriggerPlanInput): TriggerPlanResult {
       ? Math.floor(profileMaxBytes / capture.bytesPerSample)
       : Number.POSITIVE_INFINITY;
     preSamples = Math.max(0, Math.min(byPercent, maxByBase, maxByBytes));
+    // Only a cap that actually reduces the request changes the reported percentage.
+    // A plain integer floor (4096 * 10% = 409) must keep the requested 10%, not report
+    // 9.985...; the byte cap, by contrast, is a user-visible "up to" limit.
+    if (baseSamples > 0 && preSamples < byPercent) {
+      percent = (preSamples * 100) / baseSamples;
+    }
   }
 
   let preSeconds: number;
@@ -561,14 +604,17 @@ export function compileTriggerPlan(input: TriggerPlanInput): TriggerPlanResult {
   }
 
   // §5.1: capBytes is T's byte position in the retained stream. Without rate/width it
-  // cannot be computed, so the profile's hard bound is the only honest value.
+  // cannot be computed, so the profile's hard bound is the only honest value and is
+  // marked as a bound rather than a position.
   let capBytes: number;
+  let capBytesIsBound = false;
   if (percent === 0) {
     capBytes = 0;
   } else if (capture !== null && preSamples !== null) {
     capBytes = Math.min(profileMaxBytes, preSamples * capture.bytesPerSample);
   } else {
     capBytes = profileMaxBytes;
+    capBytesIsBound = true;
   }
 
   const planSource: TriggerSource =
@@ -591,6 +637,10 @@ export function compileTriggerPlan(input: TriggerPlanInput): TriggerPlanResult {
       percent,
       seconds: preSeconds,
       capBytes,
+      ...(capBytesIsBound ? { capBytesIsBound: true } : {}),
+      // Exact whole-sample prefix whenever it exists. This is what SimDriver and the host
+      // matcher must use instead of recovering a count from the float `seconds`.
+      ...(preSamples === null ? {} : { samples: preSamples }),
     },
     budget: copyBudget(post),
     ...(loop === undefined ? {} : { loop: { ...loop } }),

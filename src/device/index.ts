@@ -29,6 +29,19 @@ export type {
   TestMode,
   TriggerKind,
 } from './profileTypes.js';
+export {
+  SIM_CH0_PERIOD_SAMPLES,
+  SimDriver,
+  SimDriverError,
+  type SimDriverErrorCode,
+  type SimDriverOptions,
+  type SimDriverState,
+  type SimFault,
+  type SimFaultKind,
+  type SimGapSpan,
+  type SimSink,
+  type SimStartConfig,
+} from './simDriver.js';
 export { WorkerSlogicDevice, workerTransport } from './workerTransport.js';
 
 /**

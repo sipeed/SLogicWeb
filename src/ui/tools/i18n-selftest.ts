@@ -336,17 +336,18 @@ function check(name: string, pass: boolean, detail: string): void {
   const expectedText = [
     'emptyHint.line1', 'emptyHint.line2',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortOpen', 'toolbar.shortSave',
-    'toolbar.shortFit', 'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortAssistant', 'toolbar.shortLanguage',
+    'toolbar.shortFit', 'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage',
     'toolbar.shortTheme',
   ];
   const expectedTitles = [
     'toolbar.startTitle', 'toolbar.openTitle', 'toolbar.saveTitle', 'toolbar.fitTitle',
     'toolbar.enterFullscreenTitle',
-    'toolbar.themeTitle', 'toolbar.languageTitle', 'toolbar.assistantTitle',
+    'toolbar.themeTitle', 'toolbar.languageTitle',
     'settings.titleHint', 'panel.resizeTitle',
   ];
   const expectedAriaLabels = [
-    'panel.resizeLabel', 'toolbar.switchGroup', 'toolbar.viewGroup',
+    'panel.resizeLabel', 'toolbar.switchGroup', 'toolbar.viewGroup', 'shortcuts.close',
+    'hints.barLabel',
   ];
 
   const missingTextKeys = expectedText.filter((k) => !textFound.has(k));
@@ -396,7 +397,6 @@ function check(name: string, pass: boolean, detail: string): void {
     ['btn-fit', 'toolbar.fit'],
     ['btn-fullscreen', 'toolbar.fullscreen'],
     ['btn-settings', 'settings.title'],
-    ['btn-assistant', 'toolbar.assistantTitle'],
     ['btn-language', 'toolbar.languageTitle'],
     ['btn-theme', 'toolbar.themeTitle'],
   ];
@@ -730,7 +730,7 @@ function check(name: string, pass: boolean, detail: string): void {
   const throwSite = renderer.includes("new DiagnosticError('render.contextLost')") &&
     !renderer.includes('WebGL context was lost; the renderer is dead');
   const route = /catch \(e\) \{\s*this\.fail\('error\.render', e\);\s*\}/.test(app);
-  check('render.contextLost is thrown by the renderer and reaches the status bar',
+  check('render.contextLost is thrown by the renderer and reaches the error banner',
     throwSite && route, `throw=${throwSite} route=${route}`);
 }
 
@@ -873,6 +873,7 @@ const baseSettings: CaptureSettings = {
     'bus.loopInvalid', 'bus.loopUnavailable', 'bus.advanced',
     'toolbar.demo', 'toolbar.shortDemo', 'toolbar.demoTitle', 'toolbar.demoLoading', 'error.demo',
     'capture.demo',
+    'status.previousWave', 'status.summary', 'status.total', 'status.loop', 'status.view',
   ];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const present = Object.entries(dicts).filter(([, dict]) =>
@@ -940,6 +941,7 @@ const baseSettings: CaptureSettings = {
     'diagnostic.decode.noCapture',
     'diagnostic.decode.channelOutOfRange',
     'diagnostic.render.contextLost',
+    'hints.barLabel', 'hints.plot.scroll', 'hints.overview.center', 'hints.noCapture',
   ];
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const enSpellings: readonly { locale: string; key: keyof Messages }[] = [

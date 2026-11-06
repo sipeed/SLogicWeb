@@ -12,6 +12,7 @@
 import {
   ACQUISITION_STATES,
   EDIT_FEATURES,
+  TRANSITION_REFUSAL_CODES,
   createAcquisitionContext,
   mayEdit,
   transition,
@@ -22,6 +23,7 @@ import {
   type EditFeature,
   type Effect,
   type RecordingState,
+  type TransitionRefusalCode,
 } from './acquisition.js';
 
 let failures = 0;
@@ -250,11 +252,11 @@ const transitionCases: readonly TransitionCase[] = [
     effects: ['stop-device'],
   },
   {
-    name: 'stop with a running record ends the record into exporting',
+    name: 'stop with a running record pauses it for Finish record (DESIGN §4)',
     from: { connection: 'ready', acquisition: 'waiting', recording: 'recording' },
     event: 'stop',
-    to: { acquisition: 'stopping', recording: 'exporting' },
-    effects: ['stop-device', 'stop-record', 'flush-record'],
+    to: { acquisition: 'stopping', recording: 'paused' },
+    effects: ['stop-device', 'pause-record'],
   },
   {
     name: 'stopping + drained -> idle',
@@ -264,11 +266,11 @@ const transitionCases: readonly TransitionCase[] = [
     effects: ['drain-capture'],
   },
   {
-    name: 'a completed capture ends at idle and exports its record',
+    name: 'a completed capture ends at idle and pauses its record',
     from: { connection: 'ready', acquisition: 'running', recording: 'recording' },
     event: 'completed',
-    to: { acquisition: 'idle', recording: 'exporting' },
-    effects: ['drain-capture', 'stop-record', 'flush-record'],
+    to: { acquisition: 'idle', recording: 'paused' },
+    effects: ['drain-capture', 'pause-record'],
   },
   {
     name: 'a drained stop finalises an exporting record',
@@ -358,6 +360,39 @@ const transitionCases: readonly TransitionCase[] = [
     effects: ['suspend-device', 'pause-record'],
   },
   {
+    name: 'suspend while stopping freezes the drain phase',
+    from: { connection: 'ready', acquisition: 'stopping' },
+    event: 'suspend',
+    to: {
+      connection: 'suspended',
+      acquisition: 'suspended',
+      acquisitionBeforeSuspend: 'stopping',
+    },
+    effects: ['suspend-device'],
+  },
+  {
+    name: 'resume restores a suspended stopping phase so the drain can complete',
+    from: {
+      connection: 'suspended',
+      acquisition: 'suspended',
+      acquisitionBeforeSuspend: 'stopping',
+    },
+    event: 'resume',
+    to: {
+      connection: 'handshaking',
+      acquisition: 'stopping',
+      acquisitionBeforeSuspend: null,
+    },
+    effects: ['resume-device', 'handshake-device'],
+  },
+  {
+    name: 'the restored drain completes once the link is ready',
+    from: { connection: 'handshaking', acquisition: 'stopping' },
+    event: 'completed',
+    to: { connection: 'ready', acquisition: 'idle' },
+    effects: ['connection-ready', 'drain-capture'],
+  },
+  {
     name: 'suspend with an idle acquisition still suspends the link',
     from: { connection: 'ready' },
     event: 'suspend',
@@ -424,6 +459,31 @@ const transitionCases: readonly TransitionCase[] = [
     to: { connection: 'lost', acquisition: 'lost', recording: 'paused' },
     effects: [],
   },
+  {
+    name: 'transport loss ends a suspended link and its suspended acquisition',
+    from: {
+      connection: 'suspended',
+      acquisition: 'suspended',
+      acquisitionBeforeSuspend: 'running',
+      recording: 'paused',
+    },
+    event: 'lost',
+    to: {
+      connection: 'lost',
+      acquisition: 'lost',
+      recording: 'paused',
+      triggerMatched: false,
+      acquisitionBeforeSuspend: null,
+    },
+    effects: ['mark-lost'],
+  },
+  {
+    name: 'transport loss marks a suspended idle link lost',
+    from: { connection: 'suspended' },
+    event: 'lost',
+    to: { connection: 'lost', acquisition: 'idle' },
+    effects: ['mark-lost'],
+  },
 
   // Recording lifecycle.
   {
@@ -460,6 +520,48 @@ const transitionCases: readonly TransitionCase[] = [
     event: 'completed',
     to: { recording: 'off' },
     effects: ['finalize-record'],
+  },
+  {
+    name: 'a record error stops and flushes a running record',
+    from: { connection: 'ready', acquisition: 'running', recording: 'recording' },
+    event: 'record-error',
+    to: { recording: 'error', acquisition: 'running' },
+    effects: ['stop-record', 'flush-record'],
+  },
+  {
+    name: 'a record error flushes an already paused record',
+    from: { connection: 'ready', acquisition: 'running', recording: 'paused' },
+    event: 'record-error',
+    to: { recording: 'error' },
+    effects: ['flush-record'],
+  },
+  {
+    name: 'a full record flushes and stays recoverable',
+    from: { connection: 'ready', acquisition: 'running', recording: 'recording' },
+    event: 'record-full',
+    to: { recording: 'full' },
+    effects: ['flush-record'],
+  },
+  {
+    name: 'a full notification on a paused record only flushes it',
+    from: { connection: 'ready', recording: 'paused' },
+    event: 'record-full',
+    to: { recording: 'full' },
+    effects: ['flush-record'],
+  },
+  {
+    name: 'a repeated record error is an idempotent no-op',
+    from: { connection: 'ready', recording: 'error' },
+    event: 'record-error',
+    to: { recording: 'error' },
+    effects: [],
+  },
+  {
+    name: 'export is the recovery path for a failed record',
+    from: { connection: 'ready', recording: 'error' },
+    event: 'export',
+    to: { recording: 'exporting' },
+    effects: ['flush-record'],
   },
 
   // View policy transitions.
@@ -539,6 +641,7 @@ interface RefusalCase {
   readonly name: string;
   readonly from: Partial<AcquisitionContext>;
   readonly event: AcquisitionEvent;
+  readonly code: TransitionRefusalCode;
 }
 
 const refusalCases: readonly RefusalCase[] = [
@@ -546,167 +649,274 @@ const refusalCases: readonly RefusalCase[] = [
     name: 'start while running is refused',
     from: { connection: 'ready', acquisition: 'running' },
     event: 'start',
+    code: 'acquisition-state',
   },
   {
     name: 'start without a ready link is refused',
     from: { connection: 'idle' },
     event: 'start',
+    code: 'link-state',
+  },
+  {
+    name: 'arming a record without a ready link is refused',
+    from: { connection: 'idle', recording: 'off' },
+    event: { type: 'start', record: 'arm' },
+    code: 'link-state',
+  },
+  {
+    name: 'arming a record on a closed link is refused',
+    from: { connection: 'closed', recording: 'off' },
+    event: { type: 'start', record: 'arm' },
+    code: 'link-state',
+  },
+  {
+    name: 'arming a record on a suspended link is refused',
+    from: { connection: 'suspended', acquisition: 'suspended', recording: 'off' },
+    event: { type: 'start', record: 'arm' },
+    code: 'suspended',
+  },
+  {
+    name: 'starting a record without a ready link is refused',
+    from: { connection: 'idle', recording: 'off' },
+    event: { type: 'start', record: 'record' },
+    code: 'link-state',
+  },
+  {
+    name: 'starting a record on a closed link is refused',
+    from: { connection: 'closed', recording: 'off' },
+    event: { type: 'start', record: 'record' },
+    code: 'link-state',
+  },
+  {
+    name: 'starting a record on a suspended link is refused',
+    from: { connection: 'suspended', acquisition: 'suspended', recording: 'off' },
+    event: { type: 'start', record: 'record' },
+    code: 'suspended',
   },
   {
     name: 'start with an invalid record target is refused',
     from: { connection: 'ready' },
     event: { type: 'start', record: 'bogus' } as unknown as AcquisitionEvent,
+    code: 'invalid-event',
   },
   {
     name: 'stop with no acquisition is refused',
     from: { connection: 'ready', acquisition: 'idle' },
     event: 'stop',
+    code: 'acquisition-state',
   },
   {
     name: 'stop while already stopping is refused',
     from: { connection: 'ready', acquisition: 'stopping' },
     event: 'stop',
+    code: 'stopping',
   },
   {
     name: 'stop while suspended is refused',
     from: { connection: 'suspended', acquisition: 'suspended' },
     event: 'stop',
+    code: 'suspended',
   },
   {
     name: 'restart with no acquisition is refused',
     from: { connection: 'ready', acquisition: 'idle' },
     event: 'restart',
+    code: 'acquisition-state',
   },
   {
     name: 'restart while retrying is refused',
     from: { connection: 'ready', acquisition: 'retrying' },
     event: 'restart',
+    code: 'acquisition-state',
   },
   {
     name: 'retune after a non-live match is refused as pending',
     from: { connection: 'ready', acquisition: 'running', mode: 'single', triggerMatched: true },
     event: 'retune',
+    code: 'trigger-state',
   },
   {
     name: 'retune while stopping is refused',
     from: { connection: 'ready', acquisition: 'stopping' },
     event: 'retune',
+    code: 'stopping',
   },
   {
     name: 'trigger with no waiting acquisition is refused',
     from: { connection: 'ready', acquisition: 'idle' },
     event: 'trigger',
+    code: 'acquisition-state',
+  },
+  {
+    name: 'a trigger match while arming is refused',
+    from: { connection: 'ready', acquisition: 'arming' },
+    event: 'trigger',
+    code: 'acquisition-state',
   },
   {
     name: 'a second trigger match without a live detector is refused',
     from: { connection: 'ready', acquisition: 'running', mode: 'single', triggerMatched: true },
     event: 'trigger',
+    code: 'trigger-state',
   },
   {
     name: 'a free-running acquisition cannot report a trigger match',
     from: { connection: 'ready', acquisition: 'running', mode: 'single' },
     event: 'trigger',
+    code: 'trigger-state',
   },
   {
     name: 'release without a trigger lock is refused',
     from: { view: 'follow' },
     event: 'release',
+    code: 'trigger-state',
   },
   {
     name: 'pause without a running record is refused',
     from: { connection: 'ready', acquisition: 'running', recording: 'off' },
     event: 'pause',
+    code: 'record-state',
   },
   {
     name: 'pause while stopping is refused',
     from: { connection: 'ready', acquisition: 'stopping', recording: 'recording' },
     event: 'pause',
+    code: 'stopping',
   },
   {
     name: 'resume with nothing suspended or paused is refused',
     from: { connection: 'ready', acquisition: 'running', recording: 'off' },
     event: 'resume',
+    code: 'no-op',
   },
   {
     name: 'resume after loss is refused',
     from: { connection: 'lost', acquisition: 'lost', recording: 'paused' },
     event: 'resume',
+    code: 'lost',
   },
   {
     name: 'export with no record is refused',
     from: { connection: 'ready', recording: 'off' },
     event: 'export',
+    code: 'record-state',
   },
   {
     name: 'export of an armed but unstarted record is refused',
     from: { connection: 'ready', recording: 'armed' },
     event: 'export',
+    code: 'record-state',
   },
   {
     name: 'completed with no pending step is refused',
     from: { connection: 'ready', acquisition: 'idle', recording: 'off' },
     event: 'completed',
+    code: 'no-op',
   },
   {
     name: 'connect while already ready is refused',
     from: { connection: 'ready' },
     event: 'connect',
+    code: 'no-op',
   },
   {
     name: 'connect while already selecting is refused',
     from: { connection: 'selecting' },
     event: 'connect',
+    code: 'link-state',
   },
   {
     name: 'disconnect while idle is refused',
     from: { connection: 'idle' },
     event: 'disconnect',
+    code: 'no-op',
   },
   {
     name: 'disconnect when already closed is refused',
     from: { connection: 'closed' },
     event: 'disconnect',
+    code: 'no-op',
   },
   {
     name: 'a loss notification without a live session is refused',
     from: { connection: 'idle', acquisition: 'idle', recording: 'off' },
     event: 'lost',
+    code: 'no-op',
+  },
+  {
+    name: 'a loss notification on a closed link is refused',
+    from: { connection: 'closed', acquisition: 'idle', recording: 'off' },
+    event: 'lost',
+    code: 'no-op',
+  },
+  {
+    name: 'a record error without an active record is refused',
+    from: { connection: 'ready', recording: 'off' },
+    event: 'record-error',
+    code: 'record-state',
+  },
+  {
+    name: 'a record full while the record is only armed is refused',
+    from: { connection: 'ready', recording: 'armed' },
+    event: 'record-full',
+    code: 'record-state',
+  },
+  {
+    name: 'a record error while exporting is refused',
+    from: { connection: 'ready', recording: 'exporting' },
+    event: 'record-error',
+    code: 'record-state',
+  },
+  {
+    name: 'a different failure event on an already full record is refused',
+    from: { connection: 'ready', recording: 'full' },
+    event: 'record-error',
+    code: 'record-state',
   },
   {
     name: 'a suspend notification without a live session is refused',
     from: { connection: 'idle', acquisition: 'idle', recording: 'off' },
     event: 'suspend',
+    code: 'no-op',
   },
   {
     name: 'unknown event names are refused',
     from: { connection: 'ready' },
     event: 'bogus' as unknown as AcquisitionEvent,
+    code: 'invalid-event',
   },
   {
     name: 'an object with an unknown type is refused',
     from: { connection: 'ready' },
     event: { type: 'bogus' } as unknown as AcquisitionEvent,
+    code: 'invalid-event',
   },
   {
     name: 'a non-event value is refused',
     from: { connection: 'ready' },
     event: null as unknown as AcquisitionEvent,
+    code: 'invalid-event',
   },
   {
     name: 'an object without a type is refused',
     from: { connection: 'ready' },
     event: {} as unknown as AcquisitionEvent,
+    code: 'invalid-event',
   },
 ];
 
 for (const testCase of refusalCases) {
   const result = transition(context(testCase.from), testCase.event);
-  const refused = 'refused' in result && typeof result.refused === 'string' &&
-    result.refused.length > 0;
+  if (!('refused' in result)) {
+    check(testCase.name, false, 'transition was accepted');
+    continue;
+  }
+  const codeKnown = TRANSITION_REFUSAL_CODES.includes(result.code);
+  const proseOk = typeof result.refused === 'string' && result.refused.length > 0;
   check(
     testCase.name,
-    refused,
-    'refused' in result ? result.refused : 'transition was accepted',
+    codeKnown && proseOk && result.code === testCase.code,
+    `code=${result.code} want ${testCase.code}; refused=${result.refused}`,
   );
 }
 
@@ -717,6 +927,7 @@ for (const testCase of refusalCases) {
   transition(before, 'suspend');
   transition(before, 'lost');
   transition(before, 'gesture');
+  transition(before, 'record-error');
   check('transition never mutates its input context', JSON.stringify(before) === snapshot);
 }
 
@@ -887,6 +1098,29 @@ for (const group of Object.keys(EDIT_GROUPS) as EditGroup[]) {
         `got ${decision.kind}`,
       );
     }
+  }
+}
+
+// A record start needs a ready link even when the acquisition itself is idle.
+{
+  const ready = mayEdit('recordStart', editContext('recordStart', 'idle'));
+  check(
+    'mayEdit(recordStart) with a ready link and the record off is allow',
+    ready.kind === 'allow',
+    `got ${ready.kind}`,
+  );
+  for (const linkState of ['idle', 'closed', 'suspended'] as const) {
+    const decision = mayEdit(
+      'recordStart',
+      editContext('recordStart', 'idle', { connection: linkState }),
+    );
+    check(
+      `mayEdit(recordStart) with link ${linkState} is a typed refusal`,
+      decision.kind === 'refuse' &&
+        (decision.code === 'link-not-ready' || decision.code === 'acquisition-frozen') &&
+        typeof decision.reason === 'string' && decision.reason.length > 0,
+      `got ${decision.kind}${decision.kind === 'refuse' ? `/${decision.code}` : ''}`,
+    );
   }
 }
 

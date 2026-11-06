@@ -493,8 +493,8 @@ const edgeMethodsSource = slice(app,
     'private cursorsPageShown(): boolean {');
   check('the cursors page predicate tests the cursors page only, so live drag refreshes keep running there',
     shown.length > 0 &&
-    shown.includes("return s.visible && !s.assistant && s.page === 'cursors';") &&
-    !shown.includes('capture') &&
+    shown.includes("return s.visible && s.page === 'cursors';") &&
+    !shown.includes('assistant') && !shown.includes('capture') &&
     captureShown.includes("s.page === 'capture'") &&
     !captureShown.includes("'cursors'"),
     `shown=${shown.length} chars, capture=${shown.includes('capture')}, ` +

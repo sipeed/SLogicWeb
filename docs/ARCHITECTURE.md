@@ -65,8 +65,11 @@ instructions.
 - **P7 Exclusivity.** One interface has one owner at a time (another tab, desktop software,
   or a system driver). The link reports `busy`; tabs within this origin coordinate with
   Web Locks.
-- **P8 Link rate is invisible.** `USBDevice` does not expose FS/HS/SS; the firmware
-  reports it and the handshake corrects it with a link probe (§3.3).
+- **P8 Link rate is invisible.** `USBDevice` does not expose FS/HS/SS. The injected
+  `LinkPort` supplies the negotiated class from a platform capability; a future firmware
+  identity record may also report it. The session never infers the class from control
+  latency or probe throughput. If no source is available, the UI must offer only the
+  HS-safe tiers until the adapter can name the class (§3.1, §3.2).
 - **P9 Android.** OTG is required; phone-port power is limited, so the UI recommends a
   powered Y-cable or hub. The system may add its own USB permission prompt. Backgrounding
   or screen-off may suspend the page; the acquisition reports `suspended` (§5.2).
@@ -131,9 +134,10 @@ docs/        contracts, migration, NOTES
 - **Platform contract.** `src/platform` owns feature probes, Wake Lock, visibility,
   share/export and storage estimates. It exposes capabilities and typed degradations; it
   never owns device or UI state.
-- **DSP contract.** `src/dsp` compiles `TriggerPlan`, runs the host matcher, and computes
-  measurements/math/FFT on complete samples. Pure and deterministic; no DOM, USB or
-  rendering.
+- **DSP contract.** `src/dsp` compiles `TriggerPlan`, runs the bounded host matcher
+  (`hostTrigger.ts`, plus the `captureTriggerPlan.ts` legacy bridge), computes
+  measurements and FFT on complete samples, and does not touch the DOM, USB or storage.
+  Pure and deterministic.
 - **Render contract.** `src/render` consumes `SignalStore.query`/`edges` only; it owns the
   canvas, the time/sample transform, tiles and overlay layers, and exposes
   `setViewport(startSeconds, endSeconds)` and `render()`. It never mutates the store,
@@ -160,7 +164,7 @@ One `LinkSession` owns the physical connection. States:
 | `selecting` | The browser chooser is open. |
 | `opening` | `device.open()` / interface claim in progress. |
 | `claiming` | Interface and endpoint claim in progress; Web Locks held. |
-| `handshaking` | Identity, firmware, capabilities and link probe. |
+| `handshaking` | Descriptor identity, optional control-plane identity and link probe. |
 | `ready` | Streaming commands are accepted. |
 | `busy` | Another owner holds the interface; a typed reason names the conflict. |
 | `suspended` | The page is hidden/backgrounded; the device may have paused. |
@@ -173,11 +177,22 @@ Rules:
   `getDevices()`. The origin/domain must not change without re-pairing.
 - Claim the vendor interface exclusively; hold a Web Lock for the origin. On failure,
   report `busy` with the owner if known.
-- Handshake reads the protocol/firmware version, serial, channel/analog inventory, link
-  rate and the profile id. A profile mismatch is a typed refusal, never a fallback that
-  guesses.
-- The link probe measures sustained throughput and latency for one short transfer burst.
-  The result selects the streaming tile and record chunk sizes.
+- Handshake identity comes from the USB descriptors first: VID/PID, serial and the
+  negotiated link class. The stock U3 protocol exposes no firmware-version register, so
+  `firmware.min` is documentation, not an enforced gate. A future firmware may add the
+  `LW` identity record and inventory reply; when the port implements that optional
+  control plane, the session validates profile id, firmware, channel/analog inventory and
+  reported link rate, and a mismatch is a typed refusal, never a fallback that guesses.
+  When the control plane is absent or returns `unsupported`, the session stays on the
+  descriptor identity, reports the unknown fields as `null`, and skips the probe.
+- The optional link probe measures sustained throughput and latency for one short transfer
+  burst. The result selects the streaming tile and record chunk sizes. Probe failures
+  other than `unsupported` remain typed `handshake`/`transfer` errors.
+- The concrete browser adapter is `src/link/webUsbPort.ts`: it claims the vendor
+  interface, maps USB failures to typed `LinkError`s, implements descriptor-only identity,
+  and never calls `USBDevice.reset()`. WebUSB exposes no negotiated speed, so the
+  platform adapter supplies `linkClass`; the per-origin Web Lock is owned by that platform
+  layer, not the port.
 - Reconnect is bounded: `connect`/`disconnect` events trigger at most one attempt per
   event; a failed attempt surfaces `lost` and offers "Reconnect". No unbounded retry loop.
 - `visibilitychange`/`freeze` moves to `suspended`; on resume the session re-handshakes
@@ -197,9 +212,9 @@ interface DeviceProfile {
   serial?: { required: boolean };
   link: {
     interfaceClass: 0xff;
-    endpoints: { in: number; out: number };
+    endpoints: { in: number; out: number | null }; // null = no OUT endpoint, EP0 control writes only
     maxTransferBytes: number;
-    rates: readonly LinkRate[];       // FS/HS/SS as reported/probed
+    rates: readonly LinkRate[];       // FS/HS/SS5/SS10 as reported/probed
     probe: { bytes: number; bursts: number };
   };
   digital: {
@@ -207,8 +222,10 @@ interface DeviceProfile {
     groups: readonly DigitalGroup[];  // channel ranges that share a rate
     widths: readonly ChannelCount[];
     rates: readonly RateTier[];       // per width/group, per link rate
+    sampleratesHz?: readonly number[]; // discrete rates the device accepts
     thresholdVolts: readonly number[] | null;
     testModes: readonly TestMode[];
+    emulationPattern?: 'slogic16u3' | 'slogic32u3'; // test-mode-2 table, required when offered
   };
   analog: {
     groups: readonly AnalogGroup[];   // group start, channels, ranges, resolution, maxRate
@@ -223,7 +240,7 @@ interface DeviceProfile {
     preTriggerMaxBytes: number;
   };
   modes: { single: boolean; repeat: boolean; loop: boolean; record: boolean };
-  firmware: { min: string };
+  firmware: { min: string };          // opaque documentation floor (often a hardware S/N), never enforced
   quirks?: readonly ProfileQuirk[];
 }
 ```
@@ -231,7 +248,7 @@ interface DeviceProfile {
 Supporting types:
 
 ```ts
-type LinkRate = 'fs' | 'hs' | 'ss';
+type LinkRate = 'fs' | 'hs' | 'ss5' | 'ss10';   // 5G vs 5G+ SuperSpeed are distinct tiers
 type ChannelCount = 4 | 8 | 16 | 32 | 64 | 128;
 type TestMode = 0 | 1 | 2;
 type TriggerKind = 'level' | 'rising' | 'falling' | 'edge' | 'high' | 'low';
@@ -263,11 +280,14 @@ interface ProfileQuirk { id: string; note: string }
   codec and the commands; `src/link` implements USB; `src/dsp` compiles triggers. Profile
   values (rates, channel counts, ranges) are copied from the protocol documents and
   verified by the M0 device matrix; this contract defines the shape, not the numbers.
-- A capture request is validated against the profile before any device command. A
-  refusal carries a typed reason (`unsupported-channel-count`, `unsupported-rate`,
-  `no-analog`, `trigger-unsupported`, `record-unsupported`, ...).
+- A capture request is validated against the profile before any device command: the rate
+  must be one of `digital.sampleratesHz` and at or below the selected width's ceiling for
+  the current link class. A refusal carries a typed reason (`unsupported-channel-count`,
+  `unsupported-rate`, `no-analog`, `trigger-unsupported`, `record-unsupported`, ...).
 - Rate tiers may depend on the enabled channel count, analog groups and the negotiated
-  link rate. The UI reads the same profile and renders only offered values.
+  link rate. `ss5` is capped by the 5 Gbit/s payload (3200 Mbit/s / channels), while
+  `ss10` carries the native per-width ceiling; the 16U3 declares no `ss10` tier. The UI
+  reads the same profile and renders only offered values.
 - Analog groups are hardware-defined ranges (e.g. ±15 V); vertical scale and offset are
   view state, not profile capability.
 
@@ -279,8 +299,10 @@ next step. A short USB packet is delivered at its actual length and never implie
 a real dropout is reported through the gap API.
 
 - Samples are little-endian, `ceil(channels/8)` bytes per digital sample (plus analog
-  group bytes when present). A sample carried across a transfer boundary is completed
-  before matching or storing.
+  group bytes when present). The 4-channel wire mode packs two samples per byte; the
+  transport expands it before the sink, so the sink and SignalStore see one byte per
+  sample. A sample carried across a transfer boundary is completed before matching or
+  storing.
 - The frame codec owns the run header/trailer, timestamps/counters and error flags.
   Timestamps reconstruct absolute sample positions; a discontinuity becomes a `GapSpan`
   with a reason, never a silent splice.
@@ -303,7 +325,10 @@ UI tests use it; hardware tests remain separate.
 - A position is a **float64 sample index** at the group's rate. The canonical timeline is
   seconds; `Timeline` maps `positionToSeconds(group, pos)` and
   `secondsToPosition(group, s)`. Removing the 2^31-sample ceiling is deliberate; the
-  practical limit is memory/OPFS, and positions above 2^53 are unsupported.
+  practical limit is memory/OPFS, and positions above 2^53 are unsupported. Until the
+  paged store lands (M1), the array-backed M0 store still has a `MAX_SAMPLES` (2^31)
+  implementation ceiling; it is surfaced as typed `store-full`, never as an unhandled
+  append.
 - There is exactly one display origin, `displayOrigin()` in seconds: T when the current
   wave has a trigger, otherwise the sweep start, otherwise the held wave's T. Every
   readout, axis, cursor, debug/test output and export uses it. No presentation code
@@ -386,6 +411,16 @@ interface RecordController {
   status. `packed` is laid out for direct upload as a WebGL2 texture.
 - `GapSpan` carries `reason` (`dropout`, `overrun`, `suspend`, `record-gap`, `import-gap`,
   `store-full`) and a range. Overlaps merge; `gaps()` and `query` agree.
+- The first non-empty `append` establishes the group's **origin** (its absolute sample
+  position); positions before it are gap, never pending. Later appends stay contiguous,
+  and `dropBefore` never renumbers positions.
+- `noteGap` may report a span ending past `newest`: it is a pending gap watermark, so a
+  device can report a dropout before the bytes after it arrive. An append that starts
+  beyond `newest` is accepted only when a group-wide gap covers the skipped span; the
+  store pads that span internally and continues to report it as gap. Uncovered skips
+  remain a typed `non-contiguous` error.
+- Retention is bounded by `maxSamples` (the profile/UI budget); exceeding it is a typed
+  `store-full` error, never an unhandled append or a silent truncation.
 - `dropBefore` drops every group before a canonical time, so multi-rate groups stay
   aligned; the record is never affected. The quantum is a store detail, not a time-base
   change.
@@ -399,7 +434,11 @@ interface RecordController {
   of the display window. A Loop can roll in RAM while recording every delivered sample.
 - Record states: `off`, `armed`, `recording`, `paused`, `exporting`, `error`, `full`.
   A record manifest lists chunks, byte ranges, absolute time ranges, gaps, profile and
-  calibration; an interrupted record is recoverable.
+  calibration; an interrupted record is recoverable. `src/data/opfsRecord.ts` implements
+  the storage-agnostic chunk writer/reader and manifest recovery; `opfsStorage.ts` is the
+  browser OPFS adapter, and `recordController.ts` connects it to SignalStore. The
+  acquisition/display path never awaits record I/O; a record failure surfaces as typed
+  state and does not stop the capture. The Record UI still needs its presenter wiring.
 - Export writes `.lwcap` v2 (signals, rates, gaps, trigger metadata, profile id) through
   the save picker/share/download. Raw CSV and VCD/FST are optional exporters; the format
   header states which signals/rates/gaps it can represent.
@@ -431,7 +470,10 @@ interface TriggerPlan {
   source: 'digital' | 'analog' | 'mixed';
   conditions: readonly TriggerCondition[]; // AND on one complete sample
   execution: 'device' | 'host';
-  preTrigger: { percent: number; seconds: number; capBytes: number };
+  preTrigger: {
+    percent: number; seconds: number; capBytes: number;
+    samples?: number; capBytesIsBound?: boolean;
+  };
   budget: TriggerBudget;
   loop?: { seconds: number; anchor: 'trigger' | 'free' };
   compiledAt: number;
@@ -459,21 +501,34 @@ type TriggerBudget =
   The UI does not offer mixed conditions on a profile that cannot execute them.
 - `execution` comes from the profile. A host plan runs in `dsp` on complete samples; a
   device plan is downloaded and its match is reported by the firmware. Both report T in
-  absolute emitted-stream coordinates and use the same pre-trigger/budget rules.
+  absolute emitted-stream coordinates and use the same pre-trigger/budget rules. M0 ships
+  the compiler, the SimDriver executor and the digital host executor adapter
+  (`src/dsp/hostTrigger.ts`, reusing the bounded `SoftwareTrigger` matcher); analog/mixed
+  plan execution and production device/capture wiring remain M1 work.
 - `budget.kind='samples'` is expressed on the reference digital group's rate; a
   mixed/multi-rate plan uses `time` so every group shares one budget.
 - The pre-trigger ring is bounded by `preTrigger.capBytes`, which is also T's position in
-  the Loop window (0% on the left edge). The percentage applies to the requested
-  post-trigger budget for Single/Repeat and to the Loop window for Loop; it is not a
-  percentage of total retained bytes. An early match keeps the total budget; the post
-  trigger span may be longer than the requested split. The UI says "up to".
+  the Loop window (0% on the left edge). When the compiler has no capture rate/width it
+  reports the profile's hard byte cap and sets `capBytesIsBound`, so consumers do not
+  mistake an upper bound for T's position. `preTrigger.samples` is the authoritative exact
+  whole-sample prefix when the compiler can derive it; consumers must not recover the
+  count by flooring `seconds * samplerate` (the float round-trip can lose a sample). The
+  percentage applies to the requested post-trigger budget for Single/Repeat and to the
+  Loop window for Loop; it is not a percentage of total retained bytes. A Loop plan is
+  accepted only with an `unlimited` post-trigger budget, so it cannot carry a second
+  finite window. A finite acquisition retires `preTrigger.samples + post-trigger samples`
+  in total even when the match is earlier than the pre-trigger window, so an early match
+  extends the post span. The UI says "up to".
 - Retune: while waiting, a new plan is recompiled and sent; edge continuity restarts.
   After a match, edits are pending for the next acquisition unless the profile supports a
   live detector (analog Loop). A restart is a named transition with a typed reason; it
   never reuses the user Stop path.
 - Loop: D is the fixed data window, V the user viewport. A digital Lock is one-shot and
   releases when T leaves retention; an analog detector can re-lock when edges return. The
-  plan owns the anchor, not the UI.
+  plan owns the anchor, not the UI. The acquisition executor enforces D by calling
+  `dropBefore` after delivered chunks; SignalStore does not infer a window from the plan,
+  so a consumer that forgets the drop is the bug, and the store's `maxSamples` remains the
+  hard backstop.
 
 ### 5.2 Composite state machine
 
@@ -487,12 +542,18 @@ Four state zones are tracked independently; the UI renders their tuple:
 | View | `follow`, `fixed`, `triggerLocked` |
 
 - Commands are events (`connect`, `disconnect`, `start`, `stop`, `retune`, `restart`,
-  `pause`, `resume`, `export`, `lost`, `completed`); each returns the next tuple and a
-  declared side-effect list in one pure module.
+  `pause`, `resume`, `export`, `record-error`, `record-full`, `lost`, `completed`); each
+  returns the next tuple and a declared side-effect list in one pure module.
+- A record can start or be armed only while the connection is `ready`; there is no fake
+  recording state over an idle, closed, suspended or lost link.
 - `suspended` freezes acquisition and recording; on resume the link re-handshakes. A
   device that no longer holds the stream becomes `lost`, never a fake continuation.
 - `mayEdit(feature, context)` is the only capability decision. It returns `allow`,
-  `next`, `restart` or a typed refusal; the UI, host interface and debug surface use it. No local `captureLocked` predicates.
+  `next`, `restart` or a typed refusal with a stable code plus diagnostic prose; the UI,
+  host interface and debug surface use it. No local `captureLocked` predicates.
+- The transition function's refusals are typed the same way (`invalid-event`,
+  `link-state`, `acquisition-state`, `record-state`, `trigger-state`, `no-op`,
+  `lost`, `suspended`, `stopping`, `unknown-state`).
 - A restart is a first-class transition with its own visible phase. It must not tear down
   the session as a user stop would, and it must not discard a displayed capture silently.
 
@@ -515,8 +576,8 @@ Key transitions (the full table is generated in one pure module):
 | record `armed` | acquisition starts | `recording` |
 | record `recording` | `pause` | `paused` |
 | record `paused` | `resume` | `recording` |
-| record `recording` | acquisition stops / user stops | `exporting` → `off` |
-| record any | quota/IO failure | `error` / `full` |
+| record `recording` | acquisition stops / user stops | `paused` → explicit export → `off` |
+| record any active | `record-error` / `record-full` | `error` / `full`, exported explicitly |
 | view `follow` | pan/zoom | `fixed` |
 | view `fixed` | Fit | `follow` |
 | view `follow` | trigger match (Loop) | `triggerLocked` |
@@ -529,6 +590,13 @@ Key transitions (the full table is generated in one pure module):
   clamp/validate against profile/capabilities → carry duration → apply live/pending
   classification → device acknowledgement for device-side settings → trigger recompile →
   persist → relayout → render.
+- A commit returns both the canonical `next` configuration (including pending/restart
+  keys) and the `applied` configuration the active acquisition actually uses. It compiles
+  `activePlan` from `applied` and `nextPlan` from `next`; a pending edit never retunes or
+  recompiles the active plan. `recompile-trigger` is emitted only when the active plan
+  changed, and `disarm-trigger` when an active mask is turned off.
+- Recording is an acquisition command, not a `CaptureConfig` setting: the Capture menu and
+  the Record panel dispatch the same record command, so there is one owner of record state.
 - Panels send field patches, never whole snapshots. A preview gesture writes a draft;
   the canonical settings change only on commit.
 - A device-side setting is not committed until the device acknowledges it. A refusal
@@ -567,6 +635,8 @@ Key transitions (the full table is generated in one pure module):
   `record`, `settings`, `diagnostics`. Each panel owns exactly one host it may clear.
 - **One view model, three presenters.** The same immutable panel view model is rendered by
   `Docked` (wide mouse/pen), `Sheet` (medium/compact touch) or `Dialog` (modal). The
+  DOM-free decision table and single-slot invariant live in `src/ui/presenters.ts`; the
+  actual panel hosts still adopt it. The
   presenter owns placement, dismissal, focus and back; the panel owns content and
   callbacks.
 - A panel exposes `render(view)` and, if needed, `update(view)` over every field that can
@@ -576,8 +646,9 @@ Key transitions (the full table is generated in one pure module):
 - One `OverlayController` owns the stack of menus, popovers, sheets and dialogs. Opening
   one closes its transient siblings; Escape/back closes the topmost; focus returns to the
   invoker by token.
-- The Assistant is not part of the baseline. The same host interface remains available to
-  the debug/test surface only; no toolbar/panel entry ships.
+- The Assistant chat is not part of the baseline and has no toolbar/panel entry. The same
+  host interface remains available to external AI agents through the debug
+  `agentHost` surface; the repository Skill documents the CDP/user-gesture workflow.
 
 ## 7. Persistence and delivery
 
@@ -685,7 +756,7 @@ protect a compromised OS or browser.
 | Milestone | Scope |
 | --- | --- |
 | M0 | Platform probes, LinkSession, DeviceProfile, SignalStore digital, TriggerPlan P0, composite state machine, settings transaction, docs split, SimDriver |
-| M1 | Analog groups as first-class signals, multi-rate timeline, mixed trigger P1, touch shell and presenters, recording/OPFS, measurements/math/FFT |
+| M1 | Analog groups as first-class signals, multi-rate timeline, mixed trigger P1, analog/mixed and device executors plus capture wiring, touch shell and presenters, recording/OPFS, measurements/math/FFT |
 | M2 | First-party decode runtime default, Pyodide optional, PWA/offline, security hardening, Android/device matrix, migration completion |
 
 The M0/M1/M2 gates are product decisions, not estimates. A feature that is not in the

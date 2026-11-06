@@ -61,7 +61,7 @@ export const COLORS = {
   bg20: '#212224',
   /** [SOURCE] background-30. [MEASURED] also the badge background on a multi-bubble. */
   bg30: '#2C2C2E',
-  /** [MEASURED] the right icon rail and the status bar. [SOURCE] calls this "hover". */
+  /** [MEASURED] the right icon rail. [SOURCE] calls this "hover". */
   panel: '#3A3A3E',
   borderLow: '#303136',
   borderHigh: '#57575E',

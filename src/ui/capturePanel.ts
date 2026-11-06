@@ -788,6 +788,13 @@ export class CapturePanel {
     mask.setAttribute('aria-label', mask.title);
     triggerSec.header.appendChild(mask);
     mask.addEventListener('change', () => this.cb.onSettings({ ...s, triggerEnableMask: mask.checked }));
+    // Always visible, even while the section body is collapsed: this is the note that
+    // tells a first-time user what the checkbox does, why conditions can be stored
+    // without being armed, and why configuring a condition turns it on by itself.
+    const enableHelp = div('panel-note');
+    enableHelp.textContent = t('capturePanel.triggerEnableHelp');
+    enableHelp.style.marginTop = '8px';
+    triggerSec.el.appendChild(enableHelp);
     triggerSec.body.hidden = !s.triggerEnableMask;
     if (s.triggerEnableMask) {
       // Analog triggering needs an active ADC group, and its preview below only reflects
@@ -852,6 +859,11 @@ export class CapturePanel {
         sourceSeg.appendChild(button);
       }
       triggerSec.body.appendChild(sourceSeg);
+      // What the source choice means and how Single/Repeat differ from Loop; the enable
+      // note above stays visible while this body is collapsed.
+      const sourceHelp = div('panel-note');
+      sourceHelp.textContent = t('capturePanel.triggerSourceHelp');
+      triggerSec.body.appendChild(sourceHelp);
       this.triggerNotesEl = div('trigger-notes');
       this.triggerArmedEl = null;
       triggerSec.body.appendChild(this.triggerNotesEl);
@@ -1244,6 +1256,10 @@ export class CapturePanel {
     source.addEventListener('change', () =>
       this.cb.onSettings({ ...s, testMode: Number(source.value) as 0 | 1 | 2 }));
     body.appendChild(source.el);
+    // What the test modes are for (and are not) before the user selects one.
+    const testModeHelp = div('panel-note');
+    testModeHelp.textContent = t('capturePanel.testModeHelp');
+    body.appendChild(testModeHelp);
     if (s.testMode !== 0) {
       const analogNote = div('panel-note');
       analogNote.textContent = t('capturePanel.testModeAnalog');

@@ -7,11 +7,23 @@
  *
  * Rate evidence:
  * - Discrete rates come from `SAMPLERATES_HZ`, which is the vendor driver's table.
- * - SuperSpeed ceilings are the model's native channel-count limits
- *   (`MAX_SAMPLERATE_HZ`, `MAX_SAMPLERATE_HZ_SLOGIC32_U3`). The 16U3 link is
- *   5 Gbit/s and every offered width uses the same 400 MB/s wire budget; the
- *   32U3 link is SuperSpeed Plus and the native table is what the current
- *   transport has been measured against (NOTES 8.7/8.26).
+ * - Link classes are the driver's `slogic_link` values: Full Speed, High Speed,
+ *   SuperSpeed 5 Gbit/s (`SLOGIC_LINK_SUPER`, `ss5`) and SuperSpeedPlus
+ *   10 Gbit/s (`SLOGIC_LINK_SUPER_PLUS`, `ss10`).
+ * - The 5 Gbit/s link carries 3200 Mbit/s of stream payload (~400 MB/s,
+ *   `slogic_data.c` `link_payload_bps`), so `ss5` is
+ *   min(native, 3200 Mbit/s / channels). On a 32U3 that gives 4/8/16/32 ch =
+ *   800/400/200/100 MHz: its native 32 ch ceiling of 200 MHz needs 800 MB/s and
+ *   is only reachable on `ss10`.
+ * - On `ss10` the link is not the limit (`link_payload_bps` returns 0 for
+ *   SuperSpeedPlus), so the native per-width tables (`MAX_SAMPLERATE_HZ`,
+ *   `MAX_SAMPLERATE_HZ_SLOGIC32_U3`) are the ceilings. The 16U3 is a 5 Gbit/s
+ *   device and must not declare `ss10`.
+ * - NOTES 5, 8.6 and 8.7 record the same boundary: 32ch/200M offers 800 MB/s,
+ *   which a 5 Gbit/s link cannot carry; on the measured 10 Gb/s link the
+ *   browser delivered roughly half of it and the abort wedged the sampling
+ *   path. 32ch/100M is 400 MB/s - exactly the 5 Gbit/s ceiling - and NOTES 5
+ *   records five consecutive clean 100M captures.
  * - High Speed is capped at 320 Mbit/s of payload (40 MB/s), the same figure
  *   libsigrok uses for `SLOGIC_LINK_HIGH` (`slogic_data.c`, `link_payload_bps`).
  * - Full Speed is declared as a possible link rate but carries no tier: no
@@ -27,6 +39,7 @@ import {
   MAX_SAMPLERATE_HZ_SLOGIC32_U3,
   PID_SLOGIC16_U3,
   PID_SLOGIC32_U3,
+  SAMPLERATES_HZ,
   TEST_MODE_EMULATION,
   TEST_MODE_NORMAL,
   TEST_MODE_USB_MAX_SPEED,
@@ -51,8 +64,17 @@ const MAX_TRANSFER_BYTES = 32 * 1024 * 1024;
 const PROBE_BYTES = 3_129_344;
 const PROBE_BURSTS = 5;
 
-/** Payload a USB 2.0 High Speed link sustains for the U3 stream. */
+/** Payload a USB 2.0 High Speed link sustains for the U3 stream: 320 Mbit/s. */
 const USB2_LINK_PAYLOAD_BPS = 320_000_000;
+
+/** Payload a USB 3.0 5 Gbit/s (SuperSpeed) link sustains: 3200 Mbit/s. */
+const USB3_5G_LINK_PAYLOAD_BPS = 3_200_000_000;
+
+/** Links the 5 Gbit/s 16U3 negotiates; it has no SuperSpeedPlus tier. */
+const SLOGIC16U3_LINK_RATES = ['fs', 'hs', 'ss5'] as const;
+
+/** Links the SuperSpeedPlus-capable 32U3 negotiates. */
+const SLOGIC32U3_LINK_RATES = ['fs', 'hs', 'ss5', 'ss10'] as const;
 
 /** Pre-trigger history the host matcher may retain (`SoftwareTrigger` cap). */
 const PRE_TRIGGER_MAX_PERCENT = 75;
@@ -94,12 +116,34 @@ function nativeRate(
 }
 
 /**
- * One rate tier: the native ceiling on SuperSpeed and the USB 2.0 link cap on
- * High Speed. Full Speed is deliberately absent; see the file comment.
+ * One rate tier. `ss10` is the native per-width ceiling (the 10 Gbit/s link is
+ * not the limit for this device); `ss5` is that ceiling capped by the 5 Gbit/s
+ * payload; `hs` is capped by the USB 2.0 payload. Only the links the model
+ * declares are populated, which is what keeps `ss10` off the 16U3. Full Speed
+ * is deliberately absent; see the file comment.
  */
-function rateTier(channels: ChannelCount, nativeHz: number): RateTier {
-  const hz: Partial<Record<LinkRate, number>> = { ss: nativeHz };
-  hz.hs = Math.min(nativeHz, USB2_LINK_PAYLOAD_BPS / channels);
+function rateTier(
+  channels: ChannelCount,
+  nativeHz: number,
+  links: readonly LinkRate[],
+): RateTier {
+  const hz: Partial<Record<LinkRate, number>> = {};
+  for (const link of links) {
+    switch (link) {
+      case 'ss10':
+        hz.ss10 = nativeHz;
+        break;
+      case 'ss5':
+        hz.ss5 = Math.min(nativeHz, USB3_5G_LINK_PAYLOAD_BPS / channels);
+        break;
+      case 'hs':
+        hz.hs = Math.min(nativeHz, USB2_LINK_PAYLOAD_BPS / channels);
+        break;
+      case 'fs':
+        // No offered rate fits Full Speed, so the tier stays absent.
+        break;
+    }
+  }
   return { channels, hz };
 }
 
@@ -110,9 +154,11 @@ function analogGroup(start: number): AnalogGroup {
     ranges: ADC_RANGES_V,
     resolutionBits: ADC_RESOLUTION_BITS,
     maxHz: {
-      // One complete bank is eight inputs, so the 800 MHz PLL's own clock is the
-      // SuperSpeed ceiling; High Speed is capped by the eight-input wire load.
-      ss: ADC_CLOCK_HZ,
+      // One complete bank is eight inputs. The 800 MHz PLL is the native
+      // ceiling; the 5 Gbit/s and USB 2.0 links are capped by the eight-input
+      // wire load.
+      ss10: ADC_CLOCK_HZ,
+      ss5: Math.min(ADC_CLOCK_HZ, USB3_5G_LINK_PAYLOAD_BPS / ADC_GROUP_CHANNELS),
       hs: Math.min(ADC_CLOCK_HZ, USB2_LINK_PAYLOAD_BPS / ADC_GROUP_CHANNELS),
     },
   };
@@ -127,8 +173,9 @@ const U3_COMMON_QUIRKS = [
   },
   {
     id: 'firmware-version-unreadable',
-    note: 'The U3 register protocol exposes no firmware version register; ' +
-      'firmware.min is a documentation floor the handshake cannot enforce.',
+    note: 'The U3 register protocol exposes no firmware version register, so firmware.min ' +
+      'is documentation the handshake can neither parse nor enforce; the shipped 32U3 ' +
+      'value is an opaque vendor hardware S/N, not a dotted version.',
   },
 ] as const;
 
@@ -142,10 +189,10 @@ export const SLOGIC16U3_PROFILE: DeviceProfile = {
   link: {
     interfaceClass: 0xff,
     // All writes are vendor control transfers on EP0; the only bulk endpoint is
-    // the sample stream's IN pipe (protocol.c). `out: 0` names that fact.
-    endpoints: { in: EP_IN, out: 0 },
+    // the sample stream's IN pipe (protocol.c). `out: null` means "no OUT pipe".
+    endpoints: { in: EP_IN, out: null },
     maxTransferBytes: MAX_TRANSFER_BYTES,
-    rates: ['fs', 'hs', 'ss'],
+    rates: SLOGIC16U3_LINK_RATES,
     probe: { bytes: PROBE_BYTES, bursts: PROBE_BURSTS },
   },
   digital: {
@@ -154,12 +201,14 @@ export const SLOGIC16U3_PROFILE: DeviceProfile = {
     groups: [{ start: 0, channels: 16 }],
     widths: [4, 8, 16],
     rates: [
-      rateTier(4, nativeRate(MAX_SAMPLERATE_HZ, 4)),
-      rateTier(8, nativeRate(MAX_SAMPLERATE_HZ, 8)),
-      rateTier(16, nativeRate(MAX_SAMPLERATE_HZ, 16)),
+      rateTier(4, nativeRate(MAX_SAMPLERATE_HZ, 4), SLOGIC16U3_LINK_RATES),
+      rateTier(8, nativeRate(MAX_SAMPLERATE_HZ, 8), SLOGIC16U3_LINK_RATES),
+      rateTier(16, nativeRate(MAX_SAMPLERATE_HZ, 16), SLOGIC16U3_LINK_RATES),
     ],
+    sampleratesHz: SAMPLERATES_HZ,
     thresholdVolts: THRESHOLD_VOLTS,
     testModes: [TEST_MODE_NORMAL, TEST_MODE_USB_MAX_SPEED, TEST_MODE_EMULATION],
+    emulationPattern: 'slogic16u3',
   },
   analog: {
     // The 16U3 has no ADC module.
@@ -196,9 +245,10 @@ export const SLOGIC32U3_PROFILE: DeviceProfile = {
   serial: { required: false },
   link: {
     interfaceClass: 0xff,
-    endpoints: { in: EP_IN, out: 0 },
+    // Same wiring as the 16U3: control transfers only, one bulk IN pipe.
+    endpoints: { in: EP_IN, out: null },
     maxTransferBytes: MAX_TRANSFER_BYTES,
-    rates: ['fs', 'hs', 'ss'],
+    rates: SLOGIC32U3_LINK_RATES,
     probe: { bytes: PROBE_BYTES, bursts: PROBE_BURSTS },
   },
   digital: {
@@ -206,13 +256,15 @@ export const SLOGIC32U3_PROFILE: DeviceProfile = {
     groups: [{ start: 0, channels: 32 }],
     widths: [4, 8, 16, 32],
     rates: [
-      rateTier(4, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 4)),
-      rateTier(8, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 8)),
-      rateTier(16, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 16)),
-      rateTier(32, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 32)),
+      rateTier(4, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 4), SLOGIC32U3_LINK_RATES),
+      rateTier(8, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 8), SLOGIC32U3_LINK_RATES),
+      rateTier(16, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 16), SLOGIC32U3_LINK_RATES),
+      rateTier(32, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 32), SLOGIC32U3_LINK_RATES),
     ],
+    sampleratesHz: SAMPLERATES_HZ,
     thresholdVolts: THRESHOLD_VOLTS,
     testModes: [TEST_MODE_NORMAL, TEST_MODE_USB_MAX_SPEED, TEST_MODE_EMULATION],
+    emulationPattern: 'slogic32u3',
   },
   analog: {
     groups: ADC_GROUP_STARTS.map(analogGroup),
@@ -229,21 +281,36 @@ export const SLOGIC32U3_PROFILE: DeviceProfile = {
     preTriggerMaxBytes: PRE_TRIGGER_MAX_BYTES,
   },
   modes: { single: true, repeat: true, loop: true, record: true },
-  // Vendor requirement quoted by `slogic16u3.ts` (README): firmware S/N
-  // 202610150528 or newer, i.e. the build that gates on whole sample words.
+  // Documentation only: vendor support floor from the SLogic README
+  // ("SLogic32U3 requires firmware S/N 202610150528 or newer"), also recorded in
+  // `sub_service/ota/firmware.json`. The value is an opaque hardware S/N, not a
+  // dotted version, and the stock register protocol exposes no version register,
+  // so nothing parses or enforces it. Whole-word stream gating (the
+  // `whole-word-head` quirk below) is documented from the earlier S/N
+  // 202610120954 (`slogic32u3.c`, `slogic-protocol.md`); 202610150528 is a later
+  // support floor, not the behaviour boundary.
   firmware: { min: '202610150528' },
   quirks: [
     ...U3_COMMON_QUIRKS,
     {
       id: 'whole-word-head',
-      note: 'Supported firmware gates on whole sample words, so the stream has no ' +
-        'partial head bytes to drop.',
+      note: 'Whole-word gating is documented from firmware S/N 202610120954; supported ' +
+        'firmware is newer, so the stream has no partial head bytes to drop.',
     },
     {
       id: 'adc-800mhz-pll',
       note: 'An active analog group takes its sample clock from the ADC 800 MHz PLL: ' +
         'offered rates are that PLL\'s divisors from 100 MHz up (or the slower ' +
         'divisors when the link cannot carry the minimum).',
+    },
+    {
+      id: 'ss5-32ch-payload-edge',
+      note: '32 channels at 100 MHz is exactly the 5 Gbit/s payload ceiling ' +
+        '(32 x 100 MHz / 8 = 400 MB/s) and triggered an underrun in headless ' +
+        'acceptance; a later 80 MHz run also underran, while 50 MHz was clean. ' +
+        '100 MHz stays in the capability table because libsigrok declares it. ' +
+        'Until a sustained run is clean, the UI should use a conservative 50 MHz ' +
+        'default on ss5 when 32 channels are enabled.',
     },
   ],
 };

@@ -105,17 +105,41 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
 }
 
 {
+  const smoothStart = overlay.indexOf("f.kind === 'columns' && o.smooth");
+  const smoothEnd = overlay.indexOf("} else if (f.kind === 'columns')", smoothStart);
+  const smoothColumns = smoothStart >= 0 && smoothEnd > smoothStart
+    ? overlay.slice(smoothStart, smoothEnd) : '';
   const smooth = overlay.includes('function smoothTrace(') &&
     overlay.includes('c.lineTo(px, y(py))') &&
-    overlay.includes("f.kind === 'columns' && o.smooth") &&
+    overlay.includes('function catmullRomWalk(') &&
+    overlay.includes('function smoothBandEdges(') &&
     overlay.includes("f.kind === 'points' && o.smooth") &&
     overlay.includes('smoothTrace(c, cx, cy, y)') &&
     // Never hold a trace flat across trailing unknown columns (a gap, or the not-yet-
     // captured right part of a trigger-anchored view).
     overlay.includes('const endsKnown = f.count > 0 && !Number.isNaN(f.v[f.count - 1]!);') &&
     overlay.includes('if (hasLast && endsKnown) c.lineTo(this.wCss, y(lastY));');
-  check('analog points are reconstructed smoothly and wide windows use an envelope plus centreline',
-    smooth, `smooth=${smooth}`);
+  // The columns band is Catmull-Rom through the per-column max and min; the closed path
+  // follows those smoothed samples for both edges. The raw per-column staircase must not
+  // survive.
+  const envelope = smoothColumns.includes('smoothBandEdges(xs, mins, maxs)') &&
+    smoothColumns.includes('const last = band.x.length - 1;') &&
+    smoothColumns.includes('c.moveTo(band.x[0]!, y(band.upper[0]!));') &&
+    smoothColumns.includes('c.lineTo(band.x[i]!, y(band.upper[i]!));') &&
+    smoothColumns.includes('c.lineTo(band.x[i]!, y(band.lower[i]!));') &&
+    smoothColumns.includes('c.globalAlpha = bandAlpha;') &&
+    smoothColumns.includes('c.fill();') &&
+    smoothColumns.includes('c.globalAlpha = edgeAlpha;') &&
+    smoothColumns.includes('c.stroke();');
+  // "No rectangular fill": no device-pixel bars and no straight envelope segments in the
+  // smooth branch, and the fill stays translucent through the per-run alpha.
+  const noRects = smoothColumns.length > 0 &&
+    !smoothColumns.includes('fillRect') &&
+    !smoothColumns.includes('setTransform') &&
+    !smoothColumns.includes('c.lineTo(i / d, y(f.max[i]!))') &&
+    !smoothColumns.includes('c.lineTo(i / d, y(f.min[i]!))');
+  check('analog columns are reconstructed from a smooth Catmull-Rom min/max envelope plus centreline, with no bar fill',
+    smooth && envelope && noRects, `smooth=${smooth}, envelope=${envelope}, noRects=${noRects}`);
 }
 
 {

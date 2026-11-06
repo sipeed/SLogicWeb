@@ -10,6 +10,7 @@
 
 import type { ChannelCount } from '../types.js';
 import {
+  EP_IN,
   MAX_SAMPLERATE_HZ,
   MAX_SAMPLERATE_HZ_SLOGIC32_U3,
   PID_SLOGIC16_U3,
@@ -46,7 +47,7 @@ function check(name: string, pass: boolean, detail: string): void {
   results.push({ name, pass, detail });
 }
 
-const LINK_RATES: readonly LinkRate[] = ['fs', 'hs', 'ss'];
+const LINK_RATES: readonly LinkRate[] = ['fs', 'hs', 'ss5', 'ss10'];
 
 function clone(base: DeviceProfile): DeviceProfile {
   return JSON.parse(JSON.stringify(base)) as DeviceProfile;
@@ -111,6 +112,16 @@ check(
   );
 }
 
+check(
+  'shipped profiles declare the IN endpoint and no OUT endpoint (null, not 0)',
+  PROFILES.every((profile) =>
+    profile.link.endpoints.in === EP_IN && profile.link.endpoints.out === null),
+  PROFILES
+    .map((profile) =>
+      `${profile.id}: in=${profile.link.endpoints.in} out=${String(profile.link.endpoints.out)}`)
+    .join('; '),
+);
+
 // ---- validation rejects malformed profiles -------------------------------
 
 expectInvalid('a duplicate profile id', clone(SLOGIC32U3_PROFILE), 'id-duplicate');
@@ -132,6 +143,41 @@ expectInvalid(
   variant(SLOGIC32U3_PROFILE, (p) => { p.pid = 0x10000; }),
   'pid-invalid',
 );
+expectInvalid(
+  'an OUT endpoint that is neither null nor a byte',
+  variant(SLOGIC32U3_PROFILE, (p) => {
+    p.link = { ...p.link, endpoints: { in: EP_IN, out: 0x100 } };
+  }),
+  'link-endpoints',
+);
+expectInvalid(
+  'an omitted OUT endpoint',
+  variant(SLOGIC32U3_PROFILE, (p) => {
+    p.link = {
+      ...p.link,
+      endpoints: { in: EP_IN } as unknown as DeviceProfile['link']['endpoints'],
+    };
+  }),
+  'link-endpoints',
+);
+expectInvalid(
+  'an OUT endpoint equal to the IN endpoint',
+  variant(SLOGIC32U3_PROFILE, (p) => {
+    p.link = { ...p.link, endpoints: { in: EP_IN, out: EP_IN } };
+  }),
+  'link-endpoints',
+);
+{
+  const withOut = variant(SLOGIC32U3_PROFILE, (p) => {
+    p.link = { ...p.link, endpoints: { in: EP_IN, out: 1 } };
+  });
+  const result = validateProfile(withOut);
+  check(
+    'validation accepts a real OUT endpoint distinct from IN',
+    result.ok,
+    result.ok ? 'accepted in=2 out=1' : `${result.reason}: ${result.detail}`,
+  );
+}
 expectInvalid(
   'a gap between digital groups',
   variant(SLOGIC32U3_PROFILE, (p) => {
@@ -188,6 +234,45 @@ expectInvalid(
   }),
 );
 expectInvalid(
+  'an SS10 tier on a 5 Gbit/s-only profile',
+  variant(SLOGIC16U3_PROFILE, (p) => {
+    p.digital = {
+      ...p.digital,
+      rates: p.digital.rates.map((tier) => ({
+        ...tier,
+        hz: { ...tier.hz, ss10: 1e9 },
+      })) as DeviceProfile['digital']['rates'],
+    };
+  }),
+  'digital.rates[4ch].hz.undeclared',
+);
+expectInvalid(
+  'an SS5 ceiling above the SS10 ceiling',
+  variant(SLOGIC32U3_PROFILE, (p) => {
+    p.digital = {
+      ...p.digital,
+      rates: p.digital.rates.map((tier) => ({
+        ...tier,
+        hz: tier.channels === 4 ? { ...tier.hz, ss5: 2e9 } : tier.hz,
+      })) as DeviceProfile['digital']['rates'],
+    };
+  }),
+  'digital.rates[4ch].hz.ordering',
+);
+expectInvalid(
+  'a wider capture offering a higher ceiling than a narrower one',
+  variant(SLOGIC32U3_PROFILE, (p) => {
+    p.digital = {
+      ...p.digital,
+      rates: p.digital.rates.map((tier) => ({
+        ...tier,
+        hz: tier.channels === 32 ? { ...tier.hz, ss10: 800e6 } : tier.hz,
+      })) as DeviceProfile['digital']['rates'],
+    };
+  }),
+  'digital-rates-width-ordering',
+);
+expectInvalid(
   'a zero analog range',
   variant(SLOGIC32U3_PROFILE, (p) => {
     const first = p.analog.groups[0]!;
@@ -229,7 +314,7 @@ expectInvalid(
       groups: [
         {
           ...first,
-          maxHz: { ss: first.maxHz.ss!, usb4: 1 } as DeviceProfile['analog']['groups'][number]['maxHz'],
+          maxHz: { ss5: first.maxHz.ss5!, usb4: 1 } as DeviceProfile['analog']['groups'][number]['maxHz'],
         },
       ],
     };
@@ -314,12 +399,18 @@ expectInvalid(
 }
 
 check(
-  '32U3 gates analog capability by capture width and link rate',
+  '32U3 gates analog capability by capture width and link class',
   capabilityReason(SLOGIC32U3_PROFILE, 'analog') === null &&
     capabilityReason(SLOGIC32U3_PROFILE, 'analog', { channels: 8 }) === null &&
     capabilityReason(SLOGIC32U3_PROFILE, 'analog', { channels: 32 }) === null &&
     capabilityReason(SLOGIC32U3_PROFILE, 'analog', { channels: 4 }) !== null &&
+    capabilityReason(SLOGIC32U3_PROFILE, 'analog', { channels: 16, analogGroups: 4 }) !== null &&
+    capabilityReason(SLOGIC32U3_PROFILE, 'analog', { channels: 16, analogGroups: 2 }) === null &&
+    capabilityReason(SLOGIC32U3_PROFILE, 'analog', { channels: 8, analogGroups: 2 }) !== null &&
+    capabilityReason(SLOGIC32U3_PROFILE, 'analog', { channels: 32, analogGroups: 4 }) === null &&
     capabilityReason(SLOGIC32U3_PROFILE, 'analog', { linkRate: 'hs' }) === null &&
+    capabilityReason(SLOGIC32U3_PROFILE, 'analog', { linkRate: 'ss5' }) === null &&
+    capabilityReason(SLOGIC32U3_PROFILE, 'analog', { linkRate: 'ss10' }) === null &&
     capabilityReason(SLOGIC32U3_PROFILE, 'analog', { linkRate: 'fs' }) !== null,
   `${capabilityReason(SLOGIC32U3_PROFILE, 'analog') ?? 'analog ok'}; ` +
     `4ch=${capabilityReason(SLOGIC32U3_PROFILE, 'analog', { channels: 4 }) ?? 'ok'}; ` +
@@ -335,11 +426,68 @@ check(
     `triggerKinds=${SLOGIC16U3_PROFILE.trigger.analog.length}`,
 );
 
+{
+  const floor = SLOGIC32U3_PROFILE.firmware.min;
+  const noVersionRegister = SLOGIC32U3_PROFILE.quirks
+    ?.find((quirk) => quirk.id === 'firmware-version-unreadable')?.note ?? '';
+  check(
+    '32U3 documents the vendor hardware-S/N floor and the absent version register',
+    floor === '202610150528' &&
+      /^\d{12}$/.test(floor) &&
+      floor > '202610120954' &&
+      SLOGIC16U3_PROFILE.firmware.min === '0' &&
+      noVersionRegister.includes('no firmware version register') &&
+      noVersionRegister.includes('documentation') &&
+      noVersionRegister.includes('hardware S/N'),
+    `32U3 floor=${floor}, 16U3 floor=${SLOGIC16U3_PROFILE.firmware.min}, ` +
+      `quirk=${JSON.stringify(noVersionRegister)}`,
+  );
+}
+
+{
+  // The field is an opaque documentation string, not a parsed version: any
+  // non-empty string validates and nothing compares it. This pins "no runtime
+  // enforcement" without depending on a handshake implementation.
+  const documented = variant(SLOGIC32U3_PROFILE, (p) => {
+    p.firmware = { min: '1.0.0' };
+  });
+  const result = validateProfile(documented);
+  check(
+    'firmware.min is documentation, not a parsed version',
+    result.ok,
+    result.ok ? 'accepted a dotted documentation string' : `${result.reason}: ${result.detail}`,
+  );
+}
+
+{
+  const edge = SLOGIC32U3_PROFILE.quirks
+    ?.find((quirk) => quirk.id === 'ss5-32ch-payload-edge');
+  const note = edge?.note ?? '';
+  check(
+    '32U3 documents the 5G 32ch/100MHz payload edge and keeps 100 MHz offered',
+    edge !== undefined &&
+      note.includes('400 MB/s') &&
+      note.includes('underrun') &&
+      note.includes('100 MHz') &&
+      note.includes('80 MHz') &&
+      note.includes('50 MHz') &&
+      note.includes('libsigrok') &&
+      /default/i.test(note) &&
+      sampleRatesFor(SLOGIC32U3_PROFILE, 32, 'ss5').includes(100e6) &&
+      maxSamplerateFor(SLOGIC32U3_PROFILE, 32, 'ss5') === 100e6,
+    `quirk=${edge === undefined ? 'missing' : JSON.stringify(note)}, ` +
+      `32ch/ss5=[${sampleRatesFor(SLOGIC32U3_PROFILE, 32, 'ss5').join(',')}]`,
+  );
+}
+
 // ---- offered rates ------------------------------------------------------
 
 {
-  // 320 Mbit/s of payload, as libsigrok's link_payload_bps() uses for HS/FS.
+  // libsigrok's link_payload_bps(): 3200 Mbit/s on SuperSpeed (5G), 320 Mbit/s
+  // on High Speed. SuperSpeedPlus is device-limited, so SS10 uses the native
+  // per-width table.
   const USB2_PAYLOAD_BPS = 320_000_000;
+  const USB3_5G_PAYLOAD_BPS = 3_200_000_000;
   const problems: string[] = [];
   for (const profile of PROFILES) {
     const nativeTable = profile === SLOGIC16U3_PROFILE
@@ -354,26 +502,34 @@ check(
           if (rates.length !== 0 || max !== 0) problems.push(`${label} guessed an FS rate`);
           continue;
         }
+        if (!profile.link.rates.includes(link)) {
+          if (rates.length !== 0 || max !== 0) {
+            problems.push(`${label} offers a rate on a link the profile does not declare`);
+          }
+          continue;
+        }
         if (rates.length === 0) {
           problems.push(`${label} offers no rate`);
           continue;
         }
+        const native = nativeTable[channels]!;
+        const ceiling = link === 'hs'
+          ? Math.min(native, USB2_PAYLOAD_BPS / channels)
+          : link === 'ss5'
+            ? Math.min(native, USB3_5G_PAYLOAD_BPS / channels)
+            : native;
         for (let i = 0; i < rates.length; i++) {
           const rate = rates[i]!;
           if (!SAMPLERATES_HZ.includes(rate)) problems.push(`${label} invents ${rate} Hz`);
           if (i > 0 && rate <= rates[i - 1]!) problems.push(`${label} is not ascending`);
-          const native = nativeTable[channels]!;
-          if (rate > native) problems.push(`${label} ${rate} exceeds native ${native}`);
-          if (link === 'hs' && rate > USB2_PAYLOAD_BPS / channels) {
-            problems.push(`${label} ${rate} exceeds the USB 2.0 link cap`);
-          }
+          if (rate > ceiling) problems.push(`${label} ${rate} exceeds ceiling ${ceiling}`);
         }
         if (max !== rates[rates.length - 1]!) {
           problems.push(`${label} max ${max} is not the last offered rate`);
         }
       }
     }
-    for (const link of ['hs', 'ss'] as const) {
+    for (const link of LINK_RATES) {
       const widths = profile.digital.widths;
       for (let i = 1; i < widths.length; i++) {
         const narrower = maxSamplerateFor(profile, widths[i - 1]!, link);
@@ -385,27 +541,70 @@ check(
     }
   }
   check(
-    'offered rate lists are ascending, within native and link ceilings, and shrink with width',
+    'offered rate lists are ascending, within native/link ceilings, and shrink with width',
     problems.length === 0,
     problems.length === 0 ? 'all profiles/widths/links within bounds' : problems.join('; '),
   );
 }
 
 check(
-  '16U3 tops out at 800 MHz on 4ch and never offers the 32U3-only 1400 MHz rate',
-  maxSamplerateFor(SLOGIC16U3_PROFILE, 4, 'ss') === 800e6 &&
-    sampleRatesFor(SLOGIC16U3_PROFILE, 4, 'ss').every((rate) => rate <= 800e6) &&
-    !sampleRatesFor(SLOGIC16U3_PROFILE, 16, 'ss').includes(1.4e9),
-  `4ch/ss max=${maxSamplerateFor(SLOGIC16U3_PROFILE, 4, 'ss')}, ` +
-    `16ch/ss=${sampleRatesFor(SLOGIC16U3_PROFILE, 16, 'ss').join(',')}`,
+  '32U3 declares SS5 and SS10; the 5 Gbit/s 16U3 declares no SS10',
+  SLOGIC16U3_PROFILE.link.rates.join(',') === 'fs,hs,ss5' &&
+    SLOGIC32U3_PROFILE.link.rates.join(',') === 'fs,hs,ss5,ss10' &&
+    !SLOGIC16U3_PROFILE.link.rates.includes('ss10') &&
+    sampleRatesFor(SLOGIC16U3_PROFILE, 4, 'ss10').length === 0 &&
+    maxSamplerateFor(SLOGIC16U3_PROFILE, 4, 'ss10') === 0,
+  `16U3=[${SLOGIC16U3_PROFILE.link.rates.join(',')}], ` +
+    `32U3=[${SLOGIC32U3_PROFILE.link.rates.join(',')}], ` +
+    `16U3/4ch/ss10=[${sampleRatesFor(SLOGIC16U3_PROFILE, 4, 'ss10').join(',')}]`,
 );
 
 check(
-  '32U3 reaches 1400 MHz on 4ch and 200 MHz on 32ch over SuperSpeed',
-  maxSamplerateFor(SLOGIC32U3_PROFILE, 4, 'ss') === 1.4e9 &&
-    maxSamplerateFor(SLOGIC32U3_PROFILE, 32, 'ss') === 200e6,
-  `4ch=${maxSamplerateFor(SLOGIC32U3_PROFILE, 4, 'ss')}, ` +
-    `32ch=${maxSamplerateFor(SLOGIC32U3_PROFILE, 32, 'ss')}`,
+  'sampleRatesFor filters tiers by the negotiated link class',
+  maxSamplerateFor(SLOGIC32U3_PROFILE, 4, 'ss5') === 800e6 &&
+    maxSamplerateFor(SLOGIC32U3_PROFILE, 4, 'ss10') === 1.4e9 &&
+    maxSamplerateFor(SLOGIC16U3_PROFILE, 4, 'ss5') === 800e6 &&
+    sampleRatesFor(SLOGIC16U3_PROFILE, 4, 'ss10').length === 0,
+  `32U3 4ch ss5=${maxSamplerateFor(SLOGIC32U3_PROFILE, 4, 'ss5')}, ` +
+    `32U3 4ch ss10=${maxSamplerateFor(SLOGIC32U3_PROFILE, 4, 'ss10')}, ` +
+    `16U3 4ch ss5=${maxSamplerateFor(SLOGIC16U3_PROFILE, 4, 'ss5')}`,
+);
+
+check(
+  '16U3 keeps its native SS5 tiers and never offers the 32U3-only 1400 MHz rate',
+  maxSamplerateFor(SLOGIC16U3_PROFILE, 4, 'ss5') === 800e6 &&
+    maxSamplerateFor(SLOGIC16U3_PROFILE, 8, 'ss5') === 400e6 &&
+    maxSamplerateFor(SLOGIC16U3_PROFILE, 16, 'ss5') === 200e6 &&
+    sampleRatesFor(SLOGIC16U3_PROFILE, 4, 'ss5').every((rate) => rate <= 800e6) &&
+    !sampleRatesFor(SLOGIC16U3_PROFILE, 16, 'ss5').includes(1.4e9),
+  `4/8/16ch/ss5=${[4, 8, 16]
+    .map((channels) => maxSamplerateFor(SLOGIC16U3_PROFILE, channels as ChannelCount, 'ss5'))
+    .join('/')}, 16ch/ss5=[${sampleRatesFor(SLOGIC16U3_PROFILE, 16, 'ss5').join(',')}]`,
+);
+
+check(
+  '32U3 uses native ceilings on SS10 and the 5 Gbit/s cap on SS5',
+  maxSamplerateFor(SLOGIC32U3_PROFILE, 4, 'ss10') === 1.4e9 &&
+    maxSamplerateFor(SLOGIC32U3_PROFILE, 8, 'ss10') === 800e6 &&
+    maxSamplerateFor(SLOGIC32U3_PROFILE, 16, 'ss10') === 400e6 &&
+    maxSamplerateFor(SLOGIC32U3_PROFILE, 32, 'ss10') === 200e6 &&
+    maxSamplerateFor(SLOGIC32U3_PROFILE, 4, 'ss5') === 800e6 &&
+    maxSamplerateFor(SLOGIC32U3_PROFILE, 8, 'ss5') === 400e6 &&
+    maxSamplerateFor(SLOGIC32U3_PROFILE, 16, 'ss5') === 200e6 &&
+    maxSamplerateFor(SLOGIC32U3_PROFILE, 32, 'ss5') === 100e6,
+  `ss10 4/8/16/32ch=${[4, 8, 16, 32]
+    .map((channels) => maxSamplerateFor(SLOGIC32U3_PROFILE, channels as ChannelCount, 'ss10'))
+    .join('/')}, ss5 4/8/16/32ch=${[4, 8, 16, 32]
+    .map((channels) => maxSamplerateFor(SLOGIC32U3_PROFILE, channels as ChannelCount, 'ss5'))
+    .join('/')}`,
+);
+
+check(
+  '32U3 32ch on SS5 is capped at 100 MHz, not the 200 MHz native rate',
+  maxSamplerateFor(SLOGIC32U3_PROFILE, 32, 'ss5') === 100e6 &&
+    sampleRatesFor(SLOGIC32U3_PROFILE, 32, 'ss5').every((rate) => rate <= 100e6) &&
+    !sampleRatesFor(SLOGIC32U3_PROFILE, 32, 'ss5').includes(200e6),
+  `32ch/ss5=[${sampleRatesFor(SLOGIC32U3_PROFILE, 32, 'ss5').join(',')}]`,
 );
 
 check(
@@ -423,10 +622,10 @@ check(
   'Full Speed and unsupported widths offer nothing rather than guessing',
   sampleRatesFor(SLOGIC16U3_PROFILE, 16, 'fs').length === 0 &&
     maxSamplerateFor(SLOGIC16U3_PROFILE, 16, 'fs') === 0 &&
-    sampleRatesFor(SLOGIC16U3_PROFILE, 64 as ChannelCount, 'ss').length === 0 &&
-    maxSamplerateFor(SLOGIC16U3_PROFILE, 64 as ChannelCount, 'ss') === 0,
+    sampleRatesFor(SLOGIC16U3_PROFILE, 64 as ChannelCount, 'ss5').length === 0 &&
+    maxSamplerateFor(SLOGIC16U3_PROFILE, 64 as ChannelCount, 'ss5') === 0,
   `fs=[${sampleRatesFor(SLOGIC16U3_PROFILE, 16, 'fs').join(',')}], ` +
-    `64ch=[${sampleRatesFor(SLOGIC16U3_PROFILE, 64 as ChannelCount, 'ss').join(',')}]`,
+    `64ch=[${sampleRatesFor(SLOGIC16U3_PROFILE, 64 as ChannelCount, 'ss5').join(',')}]`,
 );
 
 {

@@ -101,6 +101,7 @@ const MOTION_CONSUMERS: readonly string[] = [
   '.shortcuts-dialog',
   '.shortcuts-dialog::backdrop',
   '.shortcuts-close',
+  '.hint-mouse-part',
 ];
 
 const ENTRY_RULES: readonly string[] = [
@@ -136,6 +137,7 @@ const NON_BUTTON_CONSUMERS: readonly string[] = [
   '#panel-resizer::after',
   ':is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area::-webkit-scrollbar-thumb, :is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar-thumb',
   '.select-popover::-webkit-scrollbar-thumb',
+  '.hint-mouse-part',
 ];
 
 {

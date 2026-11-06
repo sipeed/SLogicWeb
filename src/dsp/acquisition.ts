@@ -25,6 +25,17 @@
  *     link re-handshake and restores the acquisition phase saved by `suspend`; the
  *     runtime must emit `lost` if the re-handshake cannot reattach the stream. A record
  *     `paused` by a user or by `suspend` resumes to `recording` (§5.2's table).
+ *     `stopping` is suspendable as well: its phase is restored so the pending drain can
+ *     still complete, rather than stranding the acquisition in `suspended`.
+ *   - A `suspended` link is not live, but a transport loss still applies to it: `lost`
+ *     moves `suspended` to `lost` (only `unsupported`/`idle`/`lost`/`closed` are
+ *     unaffected). A suspended acquisition is lost with it.
+ *   - A running record pauses when the acquisition is stopped (DESIGN §4: "stopping the
+ *     acquisition pauses the record and offers Finish record"); exporting is explicit,
+ *     never an implicit consequence of `stop`.
+ *   - `record-error` and `record-full` are host/storage failure notifications. From
+ *     `recording` or `paused` they move the record to `error`/`full` and flush it; only
+ *     the explicit `export` command (Finish record) leaves those states.
  *   - Only a Loop trigger match changes the view to `triggerLocked`. Single/Repeat still
  *     move their axis origin to T, but never lock the viewport. `fixed` wins over a
  *     later Loop match, and `release` restores the policy that was current when the lock
@@ -40,6 +51,14 @@
  * An event is applied to every zone that accepts it (the zones are independent). It is
  * refused only when no zone changes and no zone already held the requested terminal
  * state (repeated `suspend`/`lost` notifications are idempotent).
+ *
+ * ## Refusal codes
+ *
+ * A refusal carries the diagnostic prose in `refused` and a stable `code` beside it, so
+ * callers and i18n never parse English. The code names the blocking condition: the event
+ * itself (`invalid-event`), the connection/acquisition/record/trigger state, a frozen
+ * `lost`/`suspended`/`stopping` session, an already-satisfied request (`no-op`), or a
+ * defensive `unknown-state` fallback for a value outside the model.
  *
  * ## Edit policy
  *
@@ -112,8 +131,11 @@ export type AcquisitionMode = 'single' | 'repeat' | 'loop';
 /** A view policy that can be restored after a Loop trigger lock releases. */
 export type UnlockedViewState = Exclude<ViewState, 'triggerLocked'>;
 
-/** An acquisition phase that can be frozen and later resumed. */
-export type SuspendableAcquisitionState = Exclude<AcquisitionState, 'stopping' | 'suspended' | 'lost'>;
+/**
+ * An acquisition phase that can be frozen and later resumed. `stopping` is included so a
+ * drain interrupted by a page/device suspend is restored and can finish.
+ */
+export type SuspendableAcquisitionState = Exclude<AcquisitionState, 'suspended' | 'lost'>;
 
 /** The four zones the UI renders. */
 export interface AcquisitionTuple {
@@ -159,6 +181,8 @@ export const ACQUISITION_EVENT_TYPES = [
   'pause',
   'resume',
   'export',
+  'record-error',
+  'record-full',
   'lost',
   'suspend',
   'fit',
@@ -221,7 +245,24 @@ export interface TransitionSuccess {
   readonly effects: readonly Effect[];
 }
 
+/** Stable refusal identifiers; the prose in `refused` stays diagnostic, never a key. */
+export const TRANSITION_REFUSAL_CODES = [
+  'invalid-event',
+  'link-state',
+  'acquisition-state',
+  'record-state',
+  'trigger-state',
+  'no-op',
+  'lost',
+  'suspended',
+  'stopping',
+  'unknown-state',
+] as const;
+export type TransitionRefusalCode = (typeof TRANSITION_REFUSAL_CODES)[number];
+
 export interface TransitionRefusal {
+  /** Stable code for callers and i18n; `refused` is diagnostic prose, not a key. */
+  readonly code: TransitionRefusalCode;
   readonly refused: string;
 }
 
@@ -254,8 +295,20 @@ export interface EditAllow {
   readonly reason?: string;
 }
 
+export type EditRefusalCode =
+  | 'acquisition-frozen'
+  | 'trigger-frozen'
+  | 'device-frozen'
+  | 'capture-frozen'
+  | 'link-not-ready'
+  | 'record-active'
+  | 'record-state'
+  | 'unknown-feature';
+
 export interface EditRefuse {
   readonly kind: 'refuse';
+  /** Stable code for callers and i18n; `reason` is diagnostic prose, not a key. */
+  readonly code: EditRefusalCode;
   readonly reason: string;
 }
 
@@ -305,8 +358,8 @@ const HOST_EDIT_FEATURES: ReadonlySet<EditFeature> = new Set<EditFeature>([
   'loopWindow',
 ]);
 
-function refuseEdit(reason: string): EditRefuse {
-  return { kind: 'refuse', reason };
+function refuseEdit(code: EditRefusalCode, reason: string): EditRefuse {
+  return { kind: 'refuse', code, reason };
 }
 
 function nextEdit(reason: string): EditAllow {
@@ -321,21 +374,41 @@ function allowEdit(): EditAllow {
   return { kind: 'allow' };
 }
 
-function frozenReason(context: AcquisitionContext): string | null {
+interface FrozenRefusal {
+  readonly code: TransitionRefusalCode;
+  readonly reason: string;
+}
+
+function frozenRefusal(context: AcquisitionContext): FrozenRefusal | null {
   if (context.connection === 'suspended') {
-    return 'the link is suspended; resume it before editing acquisition settings';
+    return {
+      code: 'suspended',
+      reason: 'the link is suspended; resume it before editing acquisition settings',
+    };
   }
   if (context.connection === 'lost') {
-    return 'the link is lost; reconnect before editing acquisition settings';
+    return {
+      code: 'lost',
+      reason: 'the link is lost; reconnect before editing acquisition settings',
+    };
   }
   if (context.acquisition === 'suspended') {
-    return 'the acquisition is suspended; resume it before editing acquisition settings';
+    return {
+      code: 'suspended',
+      reason: 'the acquisition is suspended; resume it before editing acquisition settings',
+    };
   }
   if (context.acquisition === 'lost') {
-    return 'the acquisition is lost; reconnect before editing acquisition settings';
+    return {
+      code: 'lost',
+      reason: 'the acquisition is lost; reconnect before editing acquisition settings',
+    };
   }
   if (context.acquisition === 'stopping') {
-    return 'the acquisition is stopping; settings are frozen until it drains';
+    return {
+      code: 'stopping',
+      reason: 'the acquisition is stopping; settings are frozen until it drains',
+    };
   }
   return null;
 }
@@ -349,8 +422,8 @@ export function mayEdit(feature: EditFeature, context: AcquisitionContext): Edit
   // View and preference settings never touch the device or the capture session.
   if (VIEW_EDIT_FEATURES.has(feature)) return allowEdit();
 
-  const frozen = frozenReason(context);
-  if (frozen !== null) return refuseEdit(frozen);
+  const frozen = frozenRefusal(context);
+  if (frozen !== null) return refuseEdit('acquisition-frozen', frozen.reason);
 
   if (TRIGGER_EDIT_FEATURES.has(feature)) {
     switch (context.acquisition) {
@@ -373,10 +446,10 @@ export function mayEdit(feature: EditFeature, context: AcquisitionContext): Edit
       case 'retrying':
         return nextEdit('the acquisition is between sweeps; the edit is pending for the next sweep');
       case 'restarting':
-        return nextEdit('the edit is included in the restart in progress');
+        return nextEdit('the edit is pending after the restart in progress');
       default:
-        // stopping/suspended/lost are handled by frozenReason above.
-        return refuseEdit(`the acquisition is ${context.acquisition}; trigger edits are frozen`);
+        // stopping/suspended/lost are handled by frozenRefusal above.
+        return refuseEdit('trigger-frozen', `the acquisition is ${context.acquisition}; trigger edits are frozen`);
     }
   }
 
@@ -392,9 +465,9 @@ export function mayEdit(feature: EditFeature, context: AcquisitionContext): Edit
       case 'retrying':
         return nextEdit('the acquisition is between sweeps; the edit applies to the next sweep');
       case 'restarting':
-        return nextEdit('the edit is included in the restart in progress');
+        return nextEdit('the edit is pending after the restart in progress');
       default:
-        return refuseEdit(`the acquisition is ${context.acquisition}; device edits are frozen`);
+        return refuseEdit('device-frozen', `the acquisition is ${context.acquisition}; device edits are frozen`);
     }
   }
 
@@ -409,25 +482,32 @@ export function mayEdit(feature: EditFeature, context: AcquisitionContext): Edit
       case 'restarting':
         return nextEdit('the change applies to the next acquisition');
       default:
-        return refuseEdit(`the acquisition is ${context.acquisition}; capture edits are frozen`);
+        return refuseEdit('capture-frozen', `the acquisition is ${context.acquisition}; capture edits are frozen`);
     }
   }
 
   if (feature === 'recordStart') {
+    // A record needs a live, ready link; idle/closed/suspended/lost/busy cannot record.
+    if (context.connection !== 'ready') {
+      return refuseEdit(
+        'link-not-ready',
+        `the link is ${context.connection}; a record can start only while the link is ready`,
+      );
+    }
     switch (context.recording) {
       case 'off':
       case 'armed':
         return allowEdit();
       case 'recording':
-        return refuseEdit('a record is already running');
+        return refuseEdit('record-active', 'a record is already running');
       case 'paused':
-        return refuseEdit('the record is paused; resume or export it instead');
+        return refuseEdit('record-state', 'the record is paused; resume or export it instead');
       case 'exporting':
-        return refuseEdit('the record is exporting');
+        return refuseEdit('record-state', 'the record is exporting');
       case 'error':
-        return refuseEdit('the record failed; export or recover it');
+        return refuseEdit('record-state', 'the record failed; export or recover it');
       case 'full':
-        return refuseEdit('the record is full; export it');
+        return refuseEdit('record-state', 'the record is full; export it');
     }
   }
 
@@ -437,15 +517,55 @@ export function mayEdit(feature: EditFeature, context: AcquisitionContext): Edit
       case 'paused':
         return allowEdit();
       default:
-        return refuseEdit(`there is no record to pause or resume (record is ${context.recording})`);
+        return refuseEdit('record-state', `there is no record to pause or resume (record is ${context.recording})`);
     }
   }
 
-  return refuseEdit(`unknown edit feature: ${String(feature)}`);
+  return refuseEdit('unknown-feature', `unknown edit feature: ${String(feature)}`);
 }
 
-function refusal(reason: string): TransitionRefusal {
-  return { refused: reason };
+function refusal(code: TransitionRefusalCode, reason: string): TransitionRefusal {
+  return { code, refused: reason };
+}
+
+/**
+ * The code for a connection-state refusal. `lost` and `suspended` keep their own codes;
+ * every other link state is an ordinary `link-state` mismatch.
+ */
+function connectionRefusalCode(state: ConnectionState): TransitionRefusalCode {
+  switch (state) {
+    case 'suspended':
+      return 'suspended';
+    case 'lost':
+      return 'lost';
+    default:
+      return 'link-state';
+  }
+}
+
+/**
+ * The code for an acquisition-phase refusal. `lost`/`suspended`/`stopping` keep their own
+ * codes so callers can tell a frozen session from an ordinary phase mismatch.
+ */
+function acquisitionRefusalCode(state: AcquisitionState): TransitionRefusalCode {
+  switch (state) {
+    case 'suspended':
+      return 'suspended';
+    case 'lost':
+      return 'lost';
+    case 'stopping':
+      return 'stopping';
+    case 'idle':
+    case 'arming':
+    case 'waiting':
+    case 'running':
+    case 'restarting':
+    case 'retrying':
+      return 'acquisition-state';
+    default:
+      // Defensive: a value outside the model still yields a stable code.
+      return 'unknown-state';
+  }
 }
 
 function success(context: AcquisitionContext, effects: readonly Effect[]): TransitionSuccess {
@@ -497,13 +617,35 @@ function isSuspendableAcquisition(state: AcquisitionState): state is Suspendable
     case 'arming':
     case 'waiting':
     case 'running':
+    case 'stopping':
     case 'restarting':
     case 'retrying':
       return true;
     case 'idle':
-    case 'stopping':
     case 'suspended':
     case 'lost':
+      return false;
+  }
+}
+
+/**
+ * A transport loss can end a live link or a suspended one (the stream died while the page
+ * was hidden). `unsupported`/`idle`/`lost`/`closed` have no stream to lose.
+ */
+function canBeLostConnection(state: ConnectionState): boolean {
+  switch (state) {
+    case 'selecting':
+    case 'opening':
+    case 'claiming':
+    case 'handshaking':
+    case 'ready':
+    case 'busy':
+    case 'suspended':
+      return true;
+    case 'unsupported':
+    case 'idle':
+    case 'lost':
+    case 'closed':
       return false;
   }
 }
@@ -543,26 +685,29 @@ function connect(context: AcquisitionContext): TransitionResult {
     case 'opening':
     case 'claiming':
     case 'handshaking':
-      return refusal(`a connection attempt is already in progress (${context.connection})`);
+      return refusal(
+        'link-state',
+        `a connection attempt is already in progress (${context.connection})`,
+      );
     case 'ready':
-      return refusal('the device is already connected');
+      return refusal('no-op', 'the device is already connected');
     case 'busy':
-      return refusal('the device is busy with another owner');
+      return refusal('link-state', 'the device is busy with another owner');
     case 'suspended':
-      return refusal('the link is suspended; resume it before connecting again');
+      return refusal('suspended', 'the link is suspended; resume it before connecting again');
     case 'unsupported':
-      return refusal('WebUSB is unavailable in this browser or context');
+      return refusal('link-state', 'WebUSB is unavailable in this browser or context');
   }
 }
 
 function disconnect(context: AcquisitionContext): TransitionResult {
   switch (context.connection) {
     case 'unsupported':
-      return refusal('WebUSB is unavailable; there is no device to disconnect');
+      return refusal('link-state', 'WebUSB is unavailable; there is no device to disconnect');
     case 'idle':
-      return refusal('no device is connected');
+      return refusal('no-op', 'no device is connected');
     case 'closed':
-      return refusal('the device is already disconnected');
+      return refusal('no-op', 'the device is already disconnected');
     case 'selecting':
     case 'opening':
     case 'claiming':
@@ -600,29 +745,47 @@ function disconnect(context: AcquisitionContext): TransitionResult {
 }
 
 function armRecord(context: AcquisitionContext): TransitionResult {
-  const frozen = frozenReason(context);
-  if (frozen !== null) return refusal(`${frozen}; the record cannot be armed`);
+  const frozen = frozenRefusal(context);
+  if (frozen !== null) return refusal(frozen.code, `${frozen.reason}; the record cannot be armed`);
+  if (context.connection !== 'ready') {
+    return refusal(
+      'link-state',
+      `the link is ${context.connection}; a record can be armed only while the link is ready`,
+    );
+  }
   if (context.recording !== 'off') {
-    return refusal(`cannot arm the record while it is ${context.recording}`);
+    return refusal('record-state', `cannot arm the record while it is ${context.recording}`);
   }
   return success({ ...context, recording: 'armed' }, ['arm-record']);
 }
 
 function startRecordNow(context: AcquisitionContext): TransitionResult {
-  const frozen = frozenReason(context);
-  if (frozen !== null) return refusal(`${frozen}; the record cannot start`);
+  const frozen = frozenRefusal(context);
+  if (frozen !== null) return refusal(frozen.code, `${frozen.reason}; the record cannot start`);
+  if (context.connection !== 'ready') {
+    return refusal(
+      'link-state',
+      `the link is ${context.connection}; a record can start only while the link is ready`,
+    );
+  }
   if (context.recording !== 'off' && context.recording !== 'armed') {
-    return refusal(`cannot start a record while it is ${context.recording}`);
+    return refusal('record-state', `cannot start a record while it is ${context.recording}`);
   }
   return success({ ...context, recording: 'recording' }, ['start-record']);
 }
 
 function startAcquisition(context: AcquisitionContext): TransitionResult {
   if (context.connection !== 'ready') {
-    return refusal(`the link is ${context.connection}; a capture can start only when it is ready`);
+    return refusal(
+      connectionRefusalCode(context.connection),
+      `the link is ${context.connection}; a capture can start only when it is ready`,
+    );
   }
   if (context.acquisition !== 'idle') {
-    return refusal(`the acquisition is ${context.acquisition}; stop it before starting another`);
+    return refusal(
+      acquisitionRefusalCode(context.acquisition),
+      `the acquisition is ${context.acquisition}; stop it before starting another`,
+    );
   }
 
   const effects: Effect[] = ['start-device'];
@@ -651,13 +814,13 @@ function startAcquisition(context: AcquisitionContext): TransitionResult {
 function stopAcquisition(context: AcquisitionContext): TransitionResult {
   switch (context.acquisition) {
     case 'idle':
-      return refusal('there is no acquisition to stop');
+      return refusal('acquisition-state', 'there is no acquisition to stop');
     case 'stopping':
-      return refusal('the acquisition is already stopping');
+      return refusal('stopping', 'the acquisition is already stopping');
     case 'suspended':
-      return refusal('the acquisition is suspended; resume it before stopping');
+      return refusal('suspended', 'the acquisition is suspended; resume it before stopping');
     case 'lost':
-      return refusal('the acquisition is lost; reconnect and start a new capture');
+      return refusal('lost', 'the acquisition is lost; reconnect and start a new capture');
     case 'arming':
     case 'waiting':
     case 'running':
@@ -669,9 +832,10 @@ function stopAcquisition(context: AcquisitionContext): TransitionResult {
   const effects: Effect[] = ['stop-device'];
   let recording = context.recording;
   if (recording === 'recording') {
-    // §5.2: an acquisition stop ends the record and exports it.
-    recording = 'exporting';
-    effects.push('stop-record', 'flush-record');
+    // DESIGN §4: stopping the acquisition pauses the record and offers "Finish record".
+    // Export is an explicit command, never an implicit consequence of stop.
+    recording = 'paused';
+    effects.push('pause-record');
   }
 
   return success(
@@ -695,22 +859,35 @@ function retuneTrigger(context: AcquisitionContext): TransitionResult {
         return success(context, ['recompile-trigger']);
       }
       return refusal(
+        'trigger-state',
         'trigger edits are pending for the next acquisition; restart to apply them now',
       );
     case 'idle':
-      return refusal('no trigger plan is armed; configure the trigger before starting');
+      return refusal(
+        'trigger-state',
+        'no trigger plan is armed; configure the trigger before starting',
+      );
     case 'arming':
-      return refusal('the trigger plan is still arming; the edit is pending for the next acquisition');
+      return refusal(
+        'trigger-state',
+        'the trigger plan is still arming; the edit is pending for the next acquisition',
+      );
     case 'retrying':
-      return refusal('the acquisition is between sweeps; the edit is pending for the next sweep');
+      return refusal(
+        'trigger-state',
+        'the acquisition is between sweeps; the edit is pending for the next sweep',
+      );
     case 'restarting':
-      return refusal('the acquisition is restarting; the edit is pending');
+      return refusal('trigger-state', 'the acquisition is restarting; the edit is pending');
     case 'stopping':
-      return refusal('the acquisition is stopping; the trigger cannot be retuned');
+      return refusal('stopping', 'the acquisition is stopping; the trigger cannot be retuned');
     case 'suspended':
-      return refusal('the acquisition is suspended; resume it before retuning the trigger');
+      return refusal(
+        'suspended',
+        'the acquisition is suspended; resume it before retuning the trigger',
+      );
     case 'lost':
-      return refusal('the acquisition is lost; reconnect before retuning the trigger');
+      return refusal('lost', 'the acquisition is lost; reconnect before retuning the trigger');
   }
 }
 
@@ -720,19 +897,25 @@ function restartAcquisition(context: AcquisitionContext): TransitionResult {
     case 'running':
       break;
     case 'idle':
-      return refusal('there is no acquisition to restart');
+      return refusal('acquisition-state', 'there is no acquisition to restart');
     case 'arming':
-      return refusal('the acquisition is still arming; stop it instead of restarting');
+      return refusal(
+        'acquisition-state',
+        'the acquisition is still arming; stop it instead of restarting',
+      );
     case 'stopping':
-      return refusal('the acquisition is stopping; wait for it to drain');
+      return refusal('stopping', 'the acquisition is stopping; wait for it to drain');
     case 'restarting':
-      return refusal('the acquisition is already restarting');
+      return refusal('no-op', 'the acquisition is already restarting');
     case 'retrying':
-      return refusal('the acquisition is between sweeps; wait for the next attempt or stop it');
+      return refusal(
+        'acquisition-state',
+        'the acquisition is between sweeps; wait for the next attempt or stop it',
+      );
     case 'suspended':
-      return refusal('the acquisition is suspended; resume it before restarting');
+      return refusal('suspended', 'the acquisition is suspended; resume it before restarting');
     case 'lost':
-      return refusal('the acquisition is lost; reconnect and start a new capture');
+      return refusal('lost', 'the acquisition is lost; reconnect and start a new capture');
   }
 
   // A restart keeps the session, the recording and the displayed capture. It only clears
@@ -749,25 +932,30 @@ function restartAcquisition(context: AcquisitionContext): TransitionResult {
 }
 
 function pauseRecord(context: AcquisitionContext): TransitionResult {
-  const frozen = frozenReason(context);
-  if (frozen !== null) return refusal(`${frozen}; record controls are frozen`);
+  const frozen = frozenRefusal(context);
+  if (frozen !== null) return refusal(frozen.code, `${frozen.reason}; record controls are frozen`);
   if (context.recording !== 'recording') {
-    return refusal(`there is no recording to pause (record is ${context.recording})`);
+    return refusal(
+      'record-state',
+      `there is no recording to pause (record is ${context.recording})`,
+    );
   }
   return success({ ...context, recording: 'paused' }, ['pause-record']);
 }
 
 function resume(context: AcquisitionContext): TransitionResult {
   if (context.connection === 'lost' || context.acquisition === 'lost') {
-    return refusal('the link or acquisition is lost; reconnect instead of resuming');
+    return refusal('lost', 'the link or acquisition is lost; reconnect instead of resuming');
   }
   if (context.acquisition === 'stopping') {
-    return refusal('the acquisition is stopping; wait for it to drain');
+    return refusal('stopping', 'the acquisition is stopping; wait for it to drain');
   }
 
   const effects: Effect[] = [];
   let connection = context.connection;
-  let acquisition = context.acquisition;
+  // Explicitly widen: the early `stopping` refusal narrows the initializer, but restore
+  // may legitimately bring back any suspendable phase (including `stopping`).
+  let acquisition: AcquisitionState = context.acquisition;
   let acquisitionBeforeSuspend = context.acquisitionBeforeSuspend;
   let recording = context.recording;
   let changed = false;
@@ -789,11 +977,45 @@ function resume(context: AcquisitionContext): TransitionResult {
     changed = true;
   }
 
-  if (!changed) return refusal('nothing is suspended or paused');
+  if (!changed) return refusal('no-op', 'nothing is suspended or paused');
   return success(
     { ...context, connection, acquisition, recording, acquisitionBeforeSuspend },
     effects,
   );
+}
+
+/**
+ * A host/storage failure notification. Only an active or paused record can fail; a
+ * terminal failure state ignores a repeat of its own event and refuses a different one.
+ */
+function recordFailure(
+  context: AcquisitionContext,
+  target: 'error' | 'full',
+): TransitionResult {
+  switch (context.recording) {
+    case 'recording':
+    case 'paused':
+      break;
+    case 'error':
+    case 'full':
+      if (context.recording === target) return success(context, []);
+      return refusal('record-state', `the record is already ${context.recording}`);
+    case 'off':
+    case 'armed':
+      return refusal(
+        'record-state',
+        `there is no active record to fail (record is ${context.recording})`,
+      );
+    case 'exporting':
+      return refusal('record-state', 'the record is exporting; its failure cannot be recorded');
+  }
+
+  const effects: Effect[] = [];
+  // A running record must be stopped; a paused one is already stopped. Either way the
+  // buffered data is flushed so the record stays recoverable/exportable.
+  if (context.recording === 'recording' && target === 'error') effects.push('stop-record');
+  effects.push('flush-record');
+  return success({ ...context, recording: target }, effects);
 }
 
 function exportRecord(context: AcquisitionContext): TransitionResult {
@@ -809,11 +1031,14 @@ function exportRecord(context: AcquisitionContext): TransitionResult {
       effects.push('flush-record');
       break;
     case 'off':
-      return refusal('there is no record to export');
+      return refusal('record-state', 'there is no record to export');
     case 'armed':
-      return refusal('the record has not started, so there is nothing to export');
+      return refusal(
+        'record-state',
+        'the record has not started, so there is nothing to export',
+      );
     case 'exporting':
-      return refusal('the record is already exporting');
+      return refusal('no-op', 'the record is already exporting');
   }
   return success({ ...context, recording: 'exporting' }, effects);
 }
@@ -824,7 +1049,7 @@ function lose(context: AcquisitionContext): TransitionResult {
   let changed = false;
   let linkLost = false;
 
-  if (isLiveConnection(context.connection)) {
+  if (canBeLostConnection(context.connection)) {
     next.connection = 'lost';
     linkLost = true;
     changed = true;
@@ -847,7 +1072,7 @@ function lose(context: AcquisitionContext): TransitionResult {
     if (context.connection === 'lost' || context.acquisition === 'lost') {
       return success(context, []);
     }
-    return refusal('there is no live session to lose');
+    return refusal('no-op', 'there is no live session to lose');
   }
   if (linkLost) effects.unshift('mark-lost');
   return success(next, effects);
@@ -880,7 +1105,7 @@ function suspend(context: AcquisitionContext): TransitionResult {
     if (context.connection === 'suspended' || context.acquisition === 'suspended') {
       return success(context, []);
     }
-    return refusal('there is no live session to suspend');
+    return refusal('no-op', 'there is no live session to suspend');
   }
   if (deviceSuspended) effects.unshift('suspend-device');
   return success(next, effects);
@@ -986,12 +1211,20 @@ function complete(context: AcquisitionContext): TransitionResult {
     effects.push('finalize-record');
     changed = true;
   } else if (acquisitionEnded && context.recording === 'recording') {
-    next.recording = 'exporting';
-    effects.push('stop-record', 'flush-record');
+    // A finite capture ending is still an acquisition stop (DESIGN §4): pause the
+    // independent record and let the user choose Finish record, rather than exporting
+    // it silently.
+    next.recording = 'paused';
+    effects.push('pause-record');
     changed = true;
   }
 
-  if (!changed) return refusal('no pending connection, acquisition or record step to complete');
+  if (!changed) {
+    return refusal(
+      'no-op',
+      'no pending connection, acquisition or record step to complete',
+    );
+  }
   if (acquisitionEnded) next.acquisitionBeforeSuspend = null;
   return success(next, effects);
 }
@@ -1002,26 +1235,26 @@ function matchTrigger(context: AcquisitionContext): TransitionResult {
     case 'running':
       break;
     case 'idle':
-      return refusal('there is no acquisition waiting for a trigger');
+      return refusal('acquisition-state', 'there is no acquisition waiting for a trigger');
     case 'arming':
-      return refusal('the acquisition is still arming');
+      return refusal('acquisition-state', 'the acquisition is still arming');
     case 'stopping':
-      return refusal('the acquisition is stopping');
+      return refusal('stopping', 'the acquisition is stopping');
     case 'restarting':
-      return refusal('the acquisition is restarting');
+      return refusal('acquisition-state', 'the acquisition is restarting');
     case 'retrying':
-      return refusal('the acquisition is between sweeps');
+      return refusal('acquisition-state', 'the acquisition is between sweeps');
     case 'suspended':
-      return refusal('the acquisition is suspended');
+      return refusal('suspended', 'the acquisition is suspended');
     case 'lost':
-      return refusal('the acquisition is lost');
+      return refusal('lost', 'the acquisition is lost');
   }
 
   if (context.acquisition === 'running' &&
       !(context.mode === 'loop' && context.liveTriggerRetune)) {
     return context.triggerMatched
-      ? refusal('the trigger already matched for this acquisition')
-      : refusal('the acquisition is free-running; restart it to arm a trigger');
+      ? refusal('trigger-state', 'the trigger already matched for this acquisition')
+      : refusal('trigger-state', 'the acquisition is free-running; restart it to arm a trigger');
   }
 
   const acquisition: AcquisitionState =
@@ -1043,7 +1276,7 @@ function matchTrigger(context: AcquisitionContext): TransitionResult {
 
 function releaseTriggerLock(context: AcquisitionContext): TransitionResult {
   if (context.view !== 'triggerLocked') {
-    return refusal('there is no trigger lock to release');
+    return refusal('trigger-state', 'there is no trigger lock to release');
   }
   return success(
     { ...context, view: context.viewBeforeLock, viewBeforeLock: 'follow' },
@@ -1060,7 +1293,7 @@ export function transition(
   event: AcquisitionEvent,
 ): TransitionResult {
   const type = eventTypeOf(event);
-  if (type === null) return refusal('invalid acquisition event');
+  if (type === null) return refusal('invalid-event', 'invalid acquisition event');
 
   switch (type) {
     case 'connect':
@@ -1070,7 +1303,7 @@ export function transition(
     case 'start': {
       const target = startTargetOf(event);
       if (target === 'invalid') {
-        return refusal('start.record must be "arm" or "record"');
+        return refusal('invalid-event', 'start.record must be "arm" or "record"');
       }
       if (target === 'record-arm') return armRecord(context);
       if (target === 'record-start') return startRecordNow(context);
@@ -1090,6 +1323,10 @@ export function transition(
       return resume(context);
     case 'export':
       return exportRecord(context);
+    case 'record-error':
+      return recordFailure(context, 'error');
+    case 'record-full':
+      return recordFailure(context, 'full');
     case 'lost':
       return lose(context);
     case 'suspend':
@@ -1111,6 +1348,6 @@ export function transition(
     case 'release':
       return releaseTriggerLock(context);
     default:
-      return refusal(`unknown acquisition event: ${type}`);
+      return refusal('invalid-event', `unknown acquisition event: ${type}`);
   }
 }

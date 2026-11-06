@@ -49,6 +49,35 @@ const MIN_BRACKET_PX = 6;
 const READOUT_OFFSET = 30;
 
 /**
+ * Catmull-Rom samples through the analog points: `visit` receives the first point and
+ * then every interpolated sample. `steps` is the samples per span; callers working from
+ * one column per device pixel can lower it, since the source is already resolved in x.
+ */
+function catmullRomWalk(
+  xs: readonly number[], ys: readonly number[],
+  visit: (x: number, sample: number) => void, steps = 12,
+): void {
+  if (xs.length === 0) return;
+  visit(xs[0]!, ys[0]!);
+  for (let i = 0; i < xs.length - 1; i++) {
+    const x0 = xs[Math.max(0, i - 1)]!, y0 = ys[Math.max(0, i - 1)]!;
+    const x1 = xs[i]!, y1 = ys[i]!;
+    const x2 = xs[i + 1]!, y2 = ys[i + 1]!;
+    const x3 = xs[Math.min(xs.length - 1, i + 2)]!, y3 = ys[Math.min(xs.length - 1, i + 2)]!;
+    for (let step = 1; step <= steps; step++) {
+      const t = step / steps;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      const px = 0.5 * ((2 * x1) + (-x0 + x2) * t +
+        (2 * x0 - 5 * x1 + 4 * x2 - x3) * t2 + (-x0 + 3 * x1 - 3 * x2 + x3) * t3);
+      const py = 0.5 * ((2 * y1) + (-y0 + y2) * t +
+        (2 * y0 - 5 * y1 + 4 * y2 - y3) * t2 + (-y0 + 3 * y1 - 3 * y2 + y3) * t3);
+      visit(px, py);
+    }
+  }
+}
+
+/**
  * Catmull-Rom reconstruction through the analog points. The ADC is a sampled signal, so a
  * straight polyline makes every sample a corner; this is the practical band-limited
  * interpolation the scope look wants (a windowed sinc on an irregular point set is not
@@ -57,24 +86,53 @@ const READOUT_OFFSET = 30;
 function smoothTrace(
   c: CanvasRenderingContext2D, xs: readonly number[], ys: readonly number[], y: (v: number) => number,
 ): void {
-  if (xs.length === 0) return;
-  c.moveTo(xs[0]!, y(ys[0]!));
-  for (let i = 0; i < xs.length - 1; i++) {
-    const x0 = xs[Math.max(0, i - 1)]!, y0 = ys[Math.max(0, i - 1)]!;
-    const x1 = xs[i]!, y1 = ys[i]!;
-    const x2 = xs[i + 1]!, y2 = ys[i + 1]!;
-    const x3 = xs[Math.min(xs.length - 1, i + 2)]!, y3 = ys[Math.min(xs.length - 1, i + 2)]!;
-    for (let step = 1; step <= 12; step++) {
-      const t = step / 12;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      const px = 0.5 * ((2 * x1) + (-x0 + x2) * t +
-        (2 * x0 - 5 * x1 + 4 * x2 - x3) * t2 + (-x0 + 3 * x1 - 3 * x2 + x3) * t3);
-      const py = 0.5 * ((2 * y1) + (-y0 + y2) * t +
-        (2 * y0 - 5 * y1 + 4 * y2 - y3) * t2 + (-y0 + 3 * y1 - 3 * y2 + y3) * t3);
+  let first = true;
+  catmullRomWalk(xs, ys, (px, py) => {
+    if (first) {
+      c.moveTo(px, y(py));
+      first = false;
+    } else {
       c.lineTo(px, y(py));
     }
+  });
+}
+
+/**
+ * The two edges of a column frame's min/max band, as Catmull-Rom curves through the
+ * per-column maxima and minima.
+ *
+ * A straight envelope through one column per device pixel is a staircase, and the old
+ * polygon fill built that way read as a rectangular backdrop behind the centreline at
+ * some zoom windows. Smoothing both edges turns the band into a curve at every zoom.
+ *
+ * Both edges are sampled at the same x positions so they can be clamped against each
+ * other: a spline through a steep jump can overshoot, and an unclamped upper edge would
+ * cross below the lower edge where the band is thin, filling as a bow-tie.
+ */
+function smoothBandEdges(
+  xs: readonly number[], mins: readonly number[], maxs: readonly number[],
+): { x: number[]; upper: number[]; lower: number[] } {
+  // A span is already about one device pixel wide in the columns path; twelve
+  // subdivisions per span would only add path points, not visible smoothness.
+  const steps = Math.max(2, Math.min(12, Math.ceil(480 / Math.max(1, xs.length))));
+  const x: number[] = [];
+  const upper: number[] = [];
+  const rawLower: number[] = [];
+  catmullRomWalk(xs, maxs, (px, py) => { x.push(px); upper.push(py); }, steps);
+  catmullRomWalk(xs, mins, (_px, py) => { rawLower.push(py); }, steps);
+  const lower: number[] = [];
+  for (let i = 0; i < upper.length; i++) {
+    let hi = upper[i]!;
+    let lo = rawLower[i]!;
+    if (hi < lo) {
+      const mid = (hi + lo) / 2;
+      hi = mid;
+      lo = mid;
+    }
+    upper[i] = hi;
+    lower.push(lo);
   }
+  return { x, upper, lower };
 }
 
 /**
@@ -426,31 +484,55 @@ export class Overlay {
     c.lineWidth = 1.25;
     c.lineJoin = 'round';
     if (f.kind === 'columns' && o.smooth) {
-      // The zoomed-out half: a translucent min/max envelope with a smooth centreline,
-      // not one opaque bar per column. Columns are device px; this path draws in CSS px.
+      // The zoomed-out half: a smooth min/max band with a smooth centreline, not one
+      // opaque bar per column - and not the old straight-edged envelope polygon, which
+      // read as a staircase of rectangular blocks at some zoom windows. Columns are
+      // device px; this path draws in CSS px.
       //
       // A run is the contiguous span of known columns between NaN columns (a gap, or a
-      // region the builder has not reached). Each run is filled and smoothed on its own:
-      // joining across a NaN would paint unknown time as signal. Provisional columns are
-      // sampled rather than built, so their envelope is a touch lighter.
+      // region the builder has not reached). Each run is smoothed on its own: joining
+      // across a NaN would paint unknown time as signal. Provisional columns are sampled
+      // rather than built, so their band is a touch lighter.
       const d = this.dpr;
       const len = f.min.length;
       const known = (x: number): boolean =>
         !Number.isNaN(f.min[x]!) && !Number.isNaN(f.max[x]!);
-      c.globalAlpha = f.provisional ? 0.22 : 0.34;
+      const bandAlpha = f.provisional ? 0.12 : 0.18;
+      const edgeAlpha = f.provisional ? 0.45 : 0.65;
       for (let x = 0; x < len;) {
         if (!known(x)) { x++; continue; }
         let end = x;
         while (end + 1 < len && known(end + 1)) end++;
+        const xs: number[] = [];
+        const mins: number[] = [];
+        const maxs: number[] = [];
+        for (let i = x; i <= end; i++) {
+          xs.push(i / d);
+          mins.push(f.min[i]!);
+          maxs.push(f.max[i]!);
+        }
+        const band = smoothBandEdges(xs, mins, maxs);
+        const last = band.x.length - 1;
+        // One smooth closed path through the Catmull-Rom samples: upper edge, right
+        // cap, lower edge, left cap. It is filled as a translucent wash - never the
+        // opaque block the raw min/max polygon used to paint - and stroked so the
+        // silhouette stays readable where the centreline is nearly flat (a sine whose
+        // period is only a few columns wide).
         c.beginPath();
-        c.moveTo(x / d, y(f.max[x]!));
-        for (let i = x + 1; i <= end; i++) c.lineTo(i / d, y(f.max[i]!));
-        for (let i = end; i >= x; i--) c.lineTo(i / d, y(f.min[i]!));
+        c.moveTo(band.x[0]!, y(band.upper[0]!));
+        for (let i = 1; i < band.x.length; i++) c.lineTo(band.x[i]!, y(band.upper[i]!));
+        c.lineTo(band.x[last]!, y(band.lower[last]!));
+        for (let i = last; i >= 0; i--) c.lineTo(band.x[i]!, y(band.lower[i]!));
         c.closePath();
+        c.globalAlpha = bandAlpha;
         c.fill();
+        c.globalAlpha = edgeAlpha;
+        c.lineWidth = 1;
+        c.stroke();
         x = end + 1;
       }
       c.globalAlpha = 1;
+      c.lineWidth = 1.25;
       for (let x = 0; x < len;) {
         if (!known(x)) { x++; continue; }
         let end = x;
