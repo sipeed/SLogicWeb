@@ -377,7 +377,7 @@ export const zhCN: Messages = {
   'overview.viewport': '显示 {from} – {to}',
 
   // ------------------------------------------------------- capture panel
-  'capturePanel.digital': '数字通道',
+  'capturePanel.digital': '通道',
   'capturePanel.channelWidth': '通道规格',
   'capturePanel.channelWidthBusy': '采集停止期间无法更改通道宽度',
   'capturePanel.channelWidthTip': '采集 {channels} 个通道，最高 {rate}。通道越少，可用的采样率越高。',

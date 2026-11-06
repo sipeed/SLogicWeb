@@ -421,7 +421,7 @@ export const ru: Messages = {
   'overview.viewport': 'Показано {from} – {to}',
 
   // ------------------------------------------------------- capture panel
-  'capturePanel.digital': 'Цифровые каналы',
+  'capturePanel.digital': 'Каналы',
   'capturePanel.channelWidth': 'Ширина каналов',
   'capturePanel.channelWidthBusy': 'Ширину каналов нельзя изменить во время остановки захвата',
   'capturePanel.channelWidthTip': 'Захват {channels} каналов, до {rate}. Чем меньше каналов, тем выше доступная частота.',

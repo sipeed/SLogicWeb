@@ -430,7 +430,7 @@ export const en = {
   'overview.viewport': 'Showing {from} – {to}',
 
   // ------------------------------------------------------- capture panel
-  'capturePanel.digital': 'Digital',
+  'capturePanel.digital': 'Channels',
   'capturePanel.channelWidth': 'Channel width',
   'capturePanel.channelWidthBusy': 'Channel width is locked while the capture is stopping',
   'capturePanel.channelWidthTip': 'Capture {channels} channels, up to {rate}. Fewer channels allow a faster rate.',

@@ -430,7 +430,7 @@ export const fr: Messages = {
   'overview.viewport': 'Affichage de {from} à {to}',
 
   // ------------------------------------------------------- capture panel
-  'capturePanel.digital': 'Canaux numériques',
+  'capturePanel.digital': 'Canaux',
   'capturePanel.channelWidth': 'Largeur des canaux',
   'capturePanel.channelWidthBusy': 'La largeur des canaux est verrouillée pendant l’arrêt de la capture',
   'capturePanel.channelWidthTip': 'Capturer {channels} voies, jusqu’à {rate}. Moins de voies permettent une fréquence plus élevée.',
