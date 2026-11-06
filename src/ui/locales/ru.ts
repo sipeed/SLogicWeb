@@ -149,6 +149,7 @@ export const ru: Messages = {
   'notice.noUsb': 'В этом браузере можно только просматривать и декодировать файлы. Для подключения устройства используйте Chrome или Edge.',
   'notice.noUsbInsecure': 'Эта страница открыта не в защищённом контексте, поэтому можно только просматривать и декодировать файлы. Для подключения устройства откройте её по HTTPS (или через localhost) в Chrome или Edge.',
   'notice.dismiss': 'Закрыть',
+  'notice.srProbesDropped': '{file} объявляет {declared} каналов, но его отсчёты содержат только {loaded}; остальные {dropped} не загружены.',
 
   // ------------------------------------------------------- device menu
   'deviceMenu.model': 'Модель',
@@ -270,8 +271,6 @@ export const ru: Messages = {
   'diagnostic.file.sr.analogChannels':
     'аналоговые каналы в этой записи не поддерживаются (их {count})',
   'diagnostic.file.sr.unitsize': 'unitsize {unitsize} вне диапазона 1..16 байт',
-  'diagnostic.file.sr.unitsizeProbes':
-    'unitsize {unitsize} не вмещает {probes} каналов',
   'diagnostic.file.sr.samplerate': 'не удалось разобрать частоту дискретизации {value}',
   'diagnostic.file.sr.dataLength':
     'длина данных {bytes} не кратна образцам по {unitsize} байт',

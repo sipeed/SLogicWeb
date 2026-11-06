@@ -49,7 +49,6 @@ export const DIAGNOSTIC_CODES = [
   'file.sr.probes',
   'file.sr.analogChannels',
   'file.sr.unitsize',
-  'file.sr.unitsizeProbes',
   'file.sr.samplerate',
   'file.sr.dataLength',
   'file.sr.tooLong',

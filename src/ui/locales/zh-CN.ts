@@ -147,6 +147,7 @@ export const zhCN: Messages = {
   'notice.noUsb': '当前浏览器只能查看和解码文件，连接设备请使用 Chrome 或 Edge。',
   'notice.noUsbInsecure': '当前页面不是安全上下文，只能查看和解码文件。连接设备请在 Chrome 或 Edge 中通过 HTTPS（或 localhost）打开本页。',
   'notice.dismiss': '关闭',
+  'notice.srProbesDropped': '{file} 声明了 {declared} 个通道，但其采样数据只包含 {loaded} 个；其余 {dropped} 个通道未加载。',
 
   // ------------------------------------------------------- device menu
   'deviceMenu.model': '型号',
@@ -250,7 +251,6 @@ export const zhCN: Messages = {
   'diagnostic.file.sr.probes': '文件中的 “total probes” 为 {probes}，超出 1..128',
   'diagnostic.file.sr.analogChannels': '不支持本次采集中的模拟通道（存在 {count} 个）',
   'diagnostic.file.sr.unitsize': 'unitsize {unitsize} 超出 1..16 字节',
-  'diagnostic.file.sr.unitsizeProbes': 'unitsize {unitsize} 无法容纳 {probes} 个通道',
   'diagnostic.file.sr.samplerate': '无法解析采样率 {value}',
   'diagnostic.file.sr.dataLength':
     '数据长度 {bytes} 不是 {unitsize} 字节样本的整数倍',

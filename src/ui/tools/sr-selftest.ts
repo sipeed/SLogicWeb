@@ -462,6 +462,58 @@ async function main(): Promise<void> {
     });
   }
 
+  // ------------------------------------------------- more probes than the word carries
+  // sigrok-dumps' DS1307 capture declares 32 probes with unitsize 1: only the first eight
+  // have bits. They load; the other 24 are dropped and counted, never read past the word.
+  {
+    const samples = [0x00, 0x81, 0xff, 0x7e, 0x01, 0x00];
+    const probeLines = Array.from({ length: 32 }, (_, i) => `probe${i + 1}=P${i}`);
+    const metadata = [
+      '[global]', 'sigrok version=0.2.0',
+      '[device 1]', 'capturefile=logic-1', 'total probes=32', 'samplerate=100 kHz',
+      'total analog=0', ...probeLines, 'unitsize=1', '',
+    ].join('\n');
+    let fail = '';
+    for (const deflate of [false, true]) {
+      const zip = await buildZip([
+        { name: 'version', data: new TextEncoder().encode('2') },
+        { name: 'metadata', data: new TextEncoder().encode(metadata), deflate },
+        { name: 'logic-1-1', data: new Uint8Array(samples), deflate },
+      ]);
+      const cap = await parseSr(zip, 'ds1307-like.sr');
+      const s = cap.store;
+      if (s.channelCount !== 8 || s.length !== samples.length || s.samplerate !== 1e5) {
+        fail ||= `shape ch=${s.channelCount} len=${s.length} rate=${s.samplerate}`;
+      }
+      if (cap.droppedProbes?.declared !== 32 || cap.droppedProbes.loaded !== 8) {
+        fail ||= `droppedProbes=${JSON.stringify(cap.droppedProbes)}`;
+      }
+      if (cap.channelNames.length !== 8 || cap.channelNames[7] !== 'P7') {
+        fail ||= `names=${cap.channelNames.join(',')}`;
+      }
+      if (!cap.sourceDescription.includes('8 CH')) fail ||= `source=${cap.sourceDescription}`;
+      for (let c = 0; c < 8 && !fail; c++) {
+        const want: number[] = [];
+        for (let i = 1; i < samples.length; i++) {
+          if (((samples[i]! >> c) & 1) !== ((samples[i - 1]! >> c) & 1)) want.push(i);
+        }
+        const got = Array.from(s.edges(c, 0, s.length));
+        if (got.join(',') !== want.join(',')) fail = `ch${c} got [${got}] want [${want}]`;
+      }
+    }
+    const fitting = await parseSr(await buildZip([
+      { name: 'version', data: new TextEncoder().encode('2') },
+      { name: 'metadata', data: new TextEncoder().encode(metadata.replace('total probes=32', 'total probes=8')) },
+      { name: 'logic-1-1', data: new Uint8Array(samples) },
+    ]), 'fits.sr');
+    if (!fail && fitting.droppedProbes !== undefined) fail = `a fitting session reports ${JSON.stringify(fitting.droppedProbes)} dropped`;
+    results.push({
+      name: 'a session declaring more probes than unitsize carries loads the probes that fit',
+      pass: fail === '',
+      detail: fail || '32 declared, unitsize 1: 8 loaded with exact edges, 24 reported dropped',
+    });
+  }
+
   // ---------------------------------------------------------------- corrupt
   {
     const mk = (metadata: string, data?: Uint8Array, deflate = false) =>
@@ -556,8 +608,6 @@ async function main(): Promise<void> {
         async () => parseSr(await mk(base.replace('total analog=0', 'total analog=2'), samples), 'analog-channels.sr')],
       ['unitsize 17', 'file.sr.unitsize',
         async () => parseSr(await mk(base.replace('unitsize=1', 'unitsize=17'), samples), 'unitsize-17.sr')],
-      ['unitsize too small for the probes', 'file.sr.unitsizeProbes',
-        async () => parseSr(await mk(base.replace('total probes=4', 'total probes=16'), samples), 'unitsize-probes.sr')],
       ['an unparsable samplerate', 'file.sr.samplerate',
         async () => parseSr(await mk(base.replace('10 kHz', 'quack'), samples), 'samplerate.sr')],
       ['a zero samplerate', 'file.sr.samplerate',

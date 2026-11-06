@@ -352,6 +352,8 @@ export class App {
     window: { navigator: navigator as PlatformNavigatorLike, isSecureContext: window.isSecureContext },
   }));
   private platformNoticeDismissed = false;
+  /** Info about the file just opened (e.g. probes an old .sr could not carry); null when none. */
+  private fileNotice: { key: MessageKey; vars?: MessageVars } | null = null;
   private readonly shortcutsDialog: ShortcutsDialog;
   private readonly aboutDialog: AboutDialog;
   private detailedLabels = true;
@@ -570,6 +572,7 @@ export class App {
     errorGuidance: HTMLSpanElement; errorRetry: HTMLButtonElement;
     platformNotice: HTMLDivElement; platformNoticeText: HTMLSpanElement;
     platformNoticeDismiss: HTMLButtonElement; hintDetail: HTMLSpanElement; hintExample: HTMLButtonElement;
+    fileNotice: HTMLDivElement; fileNoticeText: HTMLSpanElement; fileNoticeDismiss: HTMLButtonElement;
     errorDetails: HTMLDetailsElement; errorDetailText: HTMLSpanElement;
     errorAction: HTMLButtonElement;
     fileInput: HTMLInputElement;
@@ -614,6 +617,9 @@ export class App {
       platformNotice: must<HTMLDivElement>('platform-notice'),
       platformNoticeText: must<HTMLSpanElement>('platform-notice-text'),
       platformNoticeDismiss: must<HTMLButtonElement>('platform-notice-dismiss'),
+      fileNotice: must<HTMLDivElement>('file-notice'),
+      fileNoticeText: must<HTMLSpanElement>('file-notice-text'),
+      fileNoticeDismiss: must<HTMLButtonElement>('file-notice-dismiss'),
       hintDetail: must<HTMLSpanElement>('empty-hint-detail'),
       hintExample: must<HTMLButtonElement>('empty-hint-example'),
       errorDetails: must<HTMLDetailsElement>('error-banner-details'),
@@ -4152,6 +4158,7 @@ export class App {
       this.relayout();
     });
     this.el.errorRetry.addEventListener('click', () => void this.retryAcquire());
+    this.el.fileNoticeDismiss.addEventListener('click', () => this.setFileNotice(null));
     this.el.platformNoticeDismiss.addEventListener('click', () => {
       this.platformNoticeDismissed = true;
       try { sessionStorage.setItem(PLATFORM_NOTICE_DISMISSED_KEY, '1'); } catch { /* per-tab convenience only */ }
@@ -4293,6 +4300,19 @@ export class App {
     this.relayout();
     if (!hadDevice) await this.reconnectGranted();
     if (this.statusError === null && (hadDevice || this.device === null)) await this.connect();
+  }
+
+  private setFileNotice(notice: { key: MessageKey; vars?: MessageVars } | null): void {
+    if (notice === null && this.fileNotice === null) return;
+    this.fileNotice = notice;
+    this.renderFileNotice();
+    this.relayout();
+  }
+
+  private renderFileNotice(): void {
+    const notice = this.fileNotice;
+    this.el.fileNoticeText.textContent = notice ? t(notice.key, notice.vars) : '';
+    this.el.fileNotice.hidden = notice === null;
   }
 
   private renderPlatformNotice(): void {
@@ -4494,6 +4514,7 @@ export class App {
     this.renderCorner();              // corner strings are part of the view, keyed by text
     this.renderErrorBanner();
     this.renderPlatformNotice();
+    this.renderFileNotice();
     this.dirty = true;     // canvas labels (the overview origin, tick units) re-render
   }
 
@@ -5166,6 +5187,14 @@ export class App {
       this.adoptCapture(cap.store, cap.channelNames,
         { kind: 'loaded', source: cap.sourceDescription, ms: Math.round(performance.now() - t0) });
       this.captureOrigin = { model: null, fileName: cap.fileName ?? null };
+      const probes = cap.droppedProbes;
+      this.setFileNotice(probes ? {
+        key: 'notice.srProbesDropped',
+        vars: {
+          file: cap.fileName ?? '', declared: probes.declared, loaded: probes.loaded,
+          dropped: probes.declared - probes.loaded,
+        },
+      } : null);
     } catch (e) {
       this.fail('error.openCapture', e);
     }
@@ -5736,6 +5765,7 @@ export class App {
         else this.storeRef.set(store);
       }
       this.captureLabel = { kind: 'capturing', channels: cfg.channels, rate: cfg.samplerate };
+      this.setFileNotice(null);
       this.captureOrigin = { model: this.device?.name ?? null, fileName: null };
       // A quiet wave does not rebuild the panel or plot, but the trigger note must
       // stop describing the previous wave's completed capture and show this interval.

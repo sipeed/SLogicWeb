@@ -36,6 +36,11 @@ export interface LoadedCapture {
   sourceDescription: string;
   /** Name of the file the capture came from (Save defaults to its base name). */
   fileName?: string;
+  /**
+   * `.sr` only: probes the metadata declares but the sample words cannot carry
+   * (`total probes > unitsize * 8`). They are not loaded; the app shows a notice.
+   */
+  droppedProbes?: { declared: number; loaded: number };
 }
 
 /** Load whatever the user picked: a sigrok session, or our own file. */

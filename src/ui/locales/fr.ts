@@ -149,6 +149,7 @@ export const fr: Messages = {
   'notice.noUsb': 'Ce navigateur permet seulement d’afficher et de décoder des fichiers. Pour connecter un appareil, utilisez Chrome ou Edge.',
   'notice.noUsbInsecure': 'Cette page n’est pas un contexte sécurisé : elle permet seulement d’afficher et de décoder des fichiers. Pour connecter un appareil, ouvrez-la en HTTPS (ou localhost) dans Chrome ou Edge.',
   'notice.dismiss': 'Fermer',
+  'notice.srProbesDropped': '{file} déclare {declared} voies, mais ses échantillons n’en contiennent que {loaded} ; les {dropped} autres n’ont pas été chargées.',
 
   // ------------------------------------------------------- device menu
   'deviceMenu.model': 'Modèle',
@@ -271,8 +272,6 @@ export const fr: Messages = {
   'diagnostic.file.sr.analogChannels':
     'les canaux analogiques de cette capture ne sont pas pris en charge ({count} présents)',
   'diagnostic.file.sr.unitsize': 'unitsize {unitsize} est hors de 1..16 octets',
-  'diagnostic.file.sr.unitsizeProbes':
-    'unitsize {unitsize} ne peut pas contenir {probes} canaux',
   'diagnostic.file.sr.samplerate': 'fréquence d’échantillonnage illisible {value}',
   'diagnostic.file.sr.dataLength':
     'la longueur {bytes} n’est pas un nombre entier d’échantillons de {unitsize} octets',

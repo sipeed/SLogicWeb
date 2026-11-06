@@ -485,6 +485,10 @@ interface RecordController {
 - `.sr`/`.lwcap` and waveform files map to signals and groups; missing rates are inferred
   only when the file states them, otherwise the import asks or refuses.
 - Imported data is record-tier (immutable) and can be viewed/decoded but not appended to.
+- An old `.sr` whose `total probes` exceeds what `unitsize` bytes carry (sigrok-dumps'
+  DS1307: 32 probes, unitsize 1) loads its first `unitsize * 8` probes; the rest have no
+  bits in the data and are dropped. A dismissible file notice names how many; it clears on
+  the next Open and when a capture starts.
 
 ## 5. Trigger, acquisition, recording and view
 

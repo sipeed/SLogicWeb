@@ -15,7 +15,9 @@
  * throws rather than guessing.
  *
  * Only logic captures are supported - analog .sr data is a different file format
- * entirely and is refused with that reason. The format has no gap concept, so no span
+ * entirely and is refused with that reason. A session whose `total probes` exceeds what
+ * `unitsize` bytes carry loads its first `unitsize * 8` probes; `droppedProbes` says how
+ * many were declared and loaded so the app can show a notice. The format has no gap concept, so no span
  * is ever marked missing here.
  */
 
@@ -183,7 +185,10 @@ async function inflate(
 
 interface SrDevice {
   capturefile: string;
+  /** Probes the sample words carry: `min(total probes, unitsize * 8)`. */
   probes: number;
+  /** `total probes` as the metadata states it; more than `probes` in old sessions. */
+  declaredProbes: number;
   analog: number;
   samplerate: number;
   unitsize: number;
@@ -242,14 +247,13 @@ function parseMetadata(text: string): SrDevice {
   if (!Number.isInteger(dev.unitsize) || dev.unitsize < 1 || dev.unitsize > 16) {
     throw new DiagnosticError('file.sr.unitsize', { unitsize: dev.unitsize });
   }
-  if (dev.unitsize < Math.ceil(dev.probes / 8)) {
-    throw new DiagnosticError('file.sr.unitsizeProbes', {
-      unitsize: dev.unitsize, probes: dev.probes,
-    });
-  }
+  // Old sessions (sigrok-dumps' DS1307 capture: 32 probes, unitsize 1) declare more
+  // probes than one sample word can carry. The extra probes have no bits in the data, so
+  // only the first unitsize*8 are loaded; the caller names the rest as dropped.
   return {
     capturefile: dev.capturefile,
-    probes: dev.probes,
+    probes: Math.min(dev.probes, dev.unitsize * 8),
+    declaredProbes: dev.probes,
     analog: dev.analog,
     samplerate,
     unitsize: dev.unitsize,
@@ -282,7 +286,10 @@ export function srSampleCount(bytes: number, unitsize: number): number {
   return length;
 }
 
-/** Per-probe transition lists from unitsize-byte little-endian samples. */
+/**
+ * Per-probe transition lists from unitsize-byte little-endian samples. `probes` never
+ * exceeds `unitsize * 8` (parseMetadata clamps it), so every read stays inside its word.
+ */
 function samplesToChannels(
   data: Uint8Array, unitsize: number, probes: number,
 ): Array<{ initial: 0 | 1; edges: Int32Array }> {
@@ -361,5 +368,7 @@ export async function parseSr(buf: ArrayBuffer, source: string): Promise<LoadedC
     // Language-neutral notation (DESIGN §15 units: MS/s, CH), so the title never mixes
     // English words into a translated sentence.
     sourceDescription: `${source} @ ${formatRate(dev.samplerate)}, ${dev.probes} CH`,
+    ...(dev.declaredProbes > dev.probes
+      ? { droppedProbes: { declared: dev.declaredProbes, loaded: dev.probes } } : {}),
   };
 }

@@ -153,6 +153,7 @@ export const en = {
   'notice.noUsb': 'This browser can only view and decode files. To connect a device, use Chrome or Edge.',
   'notice.noUsbInsecure': 'This page is not a secure context, so it can only view and decode files. To connect a device, open it over HTTPS (or localhost) in Chrome or Edge.',
   'notice.dismiss': 'Dismiss',
+  'notice.srProbesDropped': '{file} declares {declared} probes, but its samples carry only {loaded}; the other {dropped} were not loaded.',
 
   // ------------------------------------------------------- device menu
   'deviceMenu.model': 'Model',
@@ -274,7 +275,6 @@ export const en = {
   'diagnostic.file.sr.analogChannels':
     'analog channels in this capture are not supported ({count} present)',
   'diagnostic.file.sr.unitsize': 'unitsize {unitsize} is outside 1..16 bytes',
-  'diagnostic.file.sr.unitsizeProbes': 'unitsize {unitsize} cannot carry {probes} channels',
   'diagnostic.file.sr.samplerate': 'unparsable samplerate {value}',
   'diagnostic.file.sr.dataLength':
     'data length {bytes} is not a whole number of {unitsize}-byte samples',
