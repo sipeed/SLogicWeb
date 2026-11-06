@@ -46,7 +46,7 @@ class SpyMenu implements ExclusiveMenu {
   }
 }
 
-const ids = ['settings-menu', 'language-menu', 'theme-menu'] as const;
+const ids = ['language-menu', 'theme-menu'] as const;
 
 const spies = (): SpyMenu[] => ids.map((id) => new SpyMenu(id));
 
@@ -113,7 +113,7 @@ const permutations = <T>(items: readonly T[]): T[][] =>
   const calls = menus.map((menu) => menu.calls.join());
   check(
     'registering the same instance twice never duplicates a close call',
-    calls.join('|') === 'retranslate|escape,retranslate|escape,retranslate',
+    calls.join('|') === 'retranslate|escape,retranslate',
     `calls=${JSON.stringify(calls)}, all=${JSON.stringify(callsOf(menus))}`,
   );
 }
@@ -140,8 +140,8 @@ const permutations = <T>(items: readonly T[]): T[][] =>
 
 {
   const stack = new MenuStack();
-  const registered = new SpyMenu('settings-menu');
-  const stranger = new SpyMenu('language-menu');
+  const registered = new SpyMenu('language-menu');
+  const stranger = new SpyMenu('theme-menu');
   stack.register(registered);
   stack.closeOthers(null, 'outside');
   stack.closeAll('theme');
@@ -165,11 +165,11 @@ const permutations = <T>(items: readonly T[]): T[][] =>
   const stack = new MenuStack();
   const menus = spies();
   for (const menu of menus) stack.register(menu);
-  stack.closeOthers(menus[2]!, 'pick');
+  stack.closeOthers(menus[1]!, 'pick');
   const order = menus.map((menu) => `${menu.id}:${menu.calls.join() || '-'}`);
   check(
     'each menu sees exactly one close call per closeOthers pass',
-    order.join(' ') === 'settings-menu:pick language-menu:pick theme-menu:-',
+    order.join(' ') === 'language-menu:pick theme-menu:-',
     `order=${order.join(' ')}`,
   );
 }

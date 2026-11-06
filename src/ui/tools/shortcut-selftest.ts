@@ -391,31 +391,33 @@ function dialogConstructions(source: string): number {
 }
 
 {
-  const items = methodBody(appSource, 'private settingsItems(');
-  const displayAt = items.indexOf("label: t('settings.detailedLabels')");
-  const rowAt = items.indexOf("t('settings.shortcuts')");
-  const row = rowAt >= 0 ? items.slice(rowAt) : '';
-  const closeAt = row.indexOf('this.channelList.closeDialog();');
-  const openAt = row.indexOf('this.shortcutsDialog.open(this.el.settings, this.wheelZooms);');
-  const shortcutsRow = row.includes("hint: '▸'") && closeAt >= 0 && openAt >= 0 && closeAt < openAt;
-  const displayToggle = displayAt >= 0 && items.includes('checked: this.detailedLabels');
-  check('the settings menu keeps the display toggle and adds the shortcuts row that opens the dialog',
-    displayToggle && shortcutsRow && rowAt > displayAt,
-    `displayToggle=${displayToggle}, shortcutsRow=${shortcutsRow}, order=${displayAt}:${rowAt}`);
+  const settingsDialogSource = fs.readFileSync('src/ui/settingsDialog.ts', 'utf8');
+  const rows = settingsDialogSource.indexOf('this.labelsRow(), this.shortcutsRow()');
+  const labelsRow = methodBody(settingsDialogSource, 'private labelsRow(): HTMLButtonElement {');
+  const shortcutsRow = methodBody(settingsDialogSource, 'private shortcutsRow(): HTMLButtonElement {');
+  const displayToggle = labelsRow.includes("t('settings.detailedLabels')") &&
+    labelsRow.includes('this.host.setDetailedLabels(') &&
+    labelsRow.includes('this.host.detailedLabels()');
+  const shortcutsEntry = shortcutsRow.includes("t('settings.shortcuts')") &&
+    shortcutsRow.includes("hint.textContent = '▸';") &&
+    shortcutsRow.includes('this.host.openShortcuts(row)');
+  check('the settings window keeps the display toggle and hands the shortcuts row to the dialog through the host',
+    displayToggle && shortcutsEntry && rows >= 0,
+    `displayToggle=${displayToggle}, shortcutsEntry=${shortcutsEntry}, order=${rows}`);
 }
 
 {
   const start = appSource.indexOf("must<HTMLButtonElement>('btn-settings').addEventListener('click'");
   const end = start >= 0 ? appSource.indexOf('\n    });', start) : -1;
   const handler = start >= 0 && end > start ? appSource.slice(start, end) : '';
-  const closeAt = handler.indexOf("this.menuStack.closeOthers(this.settingsMenu, 'outside')");
-  const toggleAt = handler.indexOf('this.settingsMenu.toggle(this.settingsItems())');
+  const closeAt = handler.indexOf("this.menuStack.closeOthers(null, 'outside')");
+  const openAt = handler.indexOf('this.settingsDialog.open(this.el.settings)');
   const closes = handler.includes('this.channelList.closeDialog()') &&
-    closeAt >= 0 && toggleAt > closeAt &&
+    closeAt >= 0 && openAt > closeAt &&
     ['languageMenu', 'themeMenu'].every((menu) => !handler.includes(`this.${menu}.close(`));
-  check('the settings handler keeps closing the channel dialog and the other menus before its own toggle',
-    closes && toggleAt >= 0,
-    `closes=${closes}, closeAt=${closeAt}, toggleAt=${toggleAt}, length=${handler.length}`);
+  check('the settings handler keeps closing the channel dialog and the other menus before its own open',
+    closes && openAt >= 0,
+    `closes=${closes}, closeAt=${closeAt}, openAt=${openAt}, length=${handler.length}`);
 }
 
 {

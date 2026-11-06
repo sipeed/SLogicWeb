@@ -39,8 +39,11 @@ const settingsMenuSrc = fs.readFileSync('src/ui/settingsMenu.ts', 'utf8');
 const css = fs.readFileSync('src/ui/style.css', 'utf8');
 const localeSources = ['en', 'zh-CN', 'fr', 'ru']
   .map((locale) => ({ locale, source: fs.readFileSync(`src/ui/locales/${locale}.ts`, 'utf8') }));
-const menuIdConstructor = /constructor\([\s\S]*?menuId: string = 'settings-menu'/.test(settingsMenuSrc) &&
-  settingsMenuSrc.includes('menu.id = this.menuId;');
+const menuIdParam = (source: string): boolean =>
+  /constructor\(\s*private readonly anchor: HTMLButtonElement,\s*private readonly menuId: string,\s*\)/.test(source) &&
+  !source.includes("menuId: string = 'settings-menu'") &&
+  source.includes('menu.id = this.menuId;');
+const menuIdConstructor = menuIdParam(settingsMenuSrc);
 const deviceTypes = fs.readFileSync('src/device/types.ts', 'utf8');
 const pageTransport = fs.readFileSync('src/device/slogic16u3.ts', 'utf8');
 const workerTransportSrc = fs.readFileSync('src/device/workerTransport.ts', 'utf8');
@@ -509,6 +512,14 @@ check(
   `items=${languageItemsShape}, menuId=${menuIdConstructor}`,
 );
 
+{
+  const mutated = settingsMenuSrc.replace('    private readonly menuId: string,\n',
+    "    private readonly menuId: string = 'settings-menu',\n");
+  check('control: restoring a default menu id fails the same required-parameter predicate',
+    mutated !== settingsMenuSrc && !menuIdParam(mutated) && menuIdParam(settingsMenuSrc),
+    `mutated=${menuIdParam(mutated)}, real=${menuIdParam(settingsMenuSrc)}`);
+}
+
 const menuRightCases = [
   { viewport: 1280, anchor: 1100, width: 150, expected: 180 },
   { viewport: 400, anchor: 65, width: 147, expected: 247 },
@@ -873,9 +884,8 @@ const settingsHandler = toolbarHandler("must<HTMLButtonElement>('btn-settings').
 const languageHandler = toolbarHandler("this.el.language.addEventListener('click'");
 const themeHandler = toolbarHandler("this.el.theme.addEventListener('click'");
 const menuHandlerCases = [
-  { name: 'settings', body: settingsHandler, menu: 'settingsMenu', items: 'settingsItems', others: ['languageMenu', 'themeMenu'] },
-  { name: 'language', body: languageHandler, menu: 'languageMenu', items: 'languageItems', others: ['settingsMenu', 'themeMenu'] },
-  { name: 'theme', body: themeHandler, menu: 'themeMenu', items: 'themeItems', others: ['settingsMenu', 'languageMenu'] },
+  { name: 'language', body: languageHandler, menu: 'languageMenu', items: 'languageItems', others: ['themeMenu'] },
+  { name: 'theme', body: themeHandler, menu: 'themeMenu', items: 'themeItems', others: ['languageMenu'] },
 ];
 const menuHandlerFailures: string[] = [];
 for (const item of menuHandlerCases) {
@@ -889,14 +899,24 @@ for (const item of menuHandlerCases) {
     if (item.body.includes(`this.${other}.close(`)) menuHandlerFailures.push(`${item.name}:${other}`);
   }
 }
-const stackRegistration = ['settingsMenu', 'languageMenu', 'themeMenu']
+const settingsHandlerOpensWindow = settingsHandler.includes('this.channelList.closeDialog()') &&
+  settingsHandler.includes("this.menuStack.closeOthers(null, 'outside')") &&
+  settingsHandler.includes('this.settingsDialog.open(this.el.settings)') &&
+  settingsHandler.indexOf('this.channelList.closeDialog()') <
+    settingsHandler.indexOf("this.menuStack.closeOthers(null, 'outside')") &&
+  settingsHandler.indexOf("this.menuStack.closeOthers(null, 'outside')") <
+    settingsHandler.indexOf('this.settingsDialog.open(this.el.settings)') &&
+  !settingsHandler.includes('settingsMenu');
+const stackRegistration = ['deviceMenu', 'languageMenu', 'themeMenu']
   .every((menu) => methodBody('constructor() {').includes(`this.menuStack.register(this.${menu});`)) &&
-  methodBody('constructor() {').indexOf('this.menuStack.register(this.settingsMenu);') >
-    methodBody('constructor() {').indexOf('this.settingsMenu = new SettingsMenu(');
+  methodBody('constructor() {').indexOf('this.menuStack.register(this.languageMenu);') >
+    methodBody('constructor() {').indexOf('this.languageMenu = new SettingsMenu(') &&
+  !methodBody('constructor() {').includes('this.settingsMenu');
 check(
   'every toolbar menu closes competing overlays and the channel dialog',
-  menuHandlerFailures.length === 0 && stackRegistration,
-  `failures=${JSON.stringify(menuHandlerFailures)}, stack=${stackRegistration}`,
+  menuHandlerFailures.length === 0 && settingsHandlerOpensWindow && stackRegistration,
+  `failures=${JSON.stringify(menuHandlerFailures)}, ` +
+  `settings=${settingsHandlerOpensWindow}, stack=${stackRegistration}`,
 );
 
 const retranslateBody = methodBody('private retranslate(): void {');
@@ -905,46 +925,41 @@ const themeChangeBody = themeHandlerAt >= 0 && themeHandlerEnd > themeHandlerAt
 const lifecycleCloseFailures = [
   ...(!retranslateBody.includes("this.menuStack.closeAll('retranslate')") ? ['retranslate:stack'] : []),
   ...(!themeChangeBody.includes("this.menuStack.closeAll('theme')") ? ['theme:stack'] : []),
-  ...['settingsMenu', 'languageMenu', 'themeMenu'].flatMap((menu) => [
+  ...['languageMenu', 'themeMenu'].flatMap((menu) => [
     ...(retranslateBody.includes(`this.${menu}.close(`) ? [`retranslate:${menu}`] : []),
     ...(themeChangeBody.includes(`this.${menu}.close(`) ? [`theme:${menu}`] : []),
   ]),
 ];
 check(
-  'all three remaining toolbar menus close for retranslation and theme changes',
+  'both remaining toolbar menus close for retranslation and theme changes',
   lifecycleCloseFailures.length === 0,
   `missing=${JSON.stringify(lifecycleCloseFailures)}`,
 );
 
-const settingsItemsBody = methodBody('private settingsItems(');
-const detailedLabelsToggle = settingsItemsBody.includes("label: t('settings.detailedLabels')") &&
-  settingsItemsBody.includes('checked: this.detailedLabels') &&
-  settingsItemsBody.includes('this.detailedLabels = !this.detailedLabels;') &&
-  settingsItemsBody.includes('this.reflectDetailedLabels();');
+const settingsDialogSrc = fs.readFileSync('src/ui/settingsDialog.ts', 'utf8');
+const setDetailedLabelsBody = methodBody('private setDetailedLabels(on: boolean): void {');
+const detailedLabelsToggle = setDetailedLabelsBody.includes('this.detailedLabels = on;') &&
+  setDetailedLabelsBody.includes('this.pendingToolbarViewport = { start, end, follow };') &&
+  setDetailedLabelsBody.includes('this.reflectDetailedLabels();');
 const detailedLabelsDefault = app.includes('private detailedLabels = true;');
-const shortcutsRowAt = settingsItemsBody.indexOf("t('settings.shortcuts')");
-const shortcutsRowBody = shortcutsRowAt >= 0 ? settingsItemsBody.slice(shortcutsRowAt) : '';
-const detailedLabelsRowAt = settingsItemsBody.indexOf("label: t('settings.detailedLabels')");
-const shortcutsRowOpensDialog = shortcutsRowBody.includes("hint: '▸'") &&
-  shortcutsRowBody.includes('this.channelList.closeDialog();') &&
-  shortcutsRowBody.includes('this.shortcutsDialog.open(this.el.settings, this.wheelZooms);') &&
-  shortcutsRowBody.indexOf('this.channelList.closeDialog();') <
-    shortcutsRowBody.indexOf('this.shortcutsDialog.open(this.el.settings, this.wheelZooms);') &&
-  !shortcutsRowBody.includes('checked:');
-const settingsRowsScoped = !settingsItemsBody.includes("t('settings.language')") &&
-  !settingsItemsBody.includes('LOCALES.map') && !settingsItemsBody.includes('children:') &&
-  // Detailed labels, wheel zooms, compact rows, hide idle, developer tools, shortcuts, About.
-  (settingsItemsBody.match(/onPick:/g)?.length ?? 0) === 7 &&
-  settingsItemsBody.indexOf("t('settings.about')") > shortcutsRowAt &&
-  settingsItemsBody.includes('checked: this.wheelZooms') &&
-  settingsItemsBody.includes('checked: this.developerTools') &&
+const detailedLabelsRowAt = settingsDialogSrc.indexOf("row.dataset.settingsKey = 'detailedLabels';");
+const shortcutsRowAt = settingsDialogSrc.indexOf("row.dataset.settingsKey = 'shortcuts';");
+const shortcutsRowBody = shortcutsRowAt >= 0 ? settingsDialogSrc.slice(shortcutsRowAt) : '';
+const shortcutsRowOpensDialog = shortcutsRowBody.includes("hint.textContent = '▸';") &&
+  shortcutsRowBody.includes('this.host.openShortcuts(row)') &&
+  !shortcutsRowBody.includes('this.shortcutsDialog.open(');
+const settingsRowsScoped = !settingsDialogSrc.includes("t('settings.language')") &&
+  !settingsDialogSrc.includes("t('settings.theme')") &&
+  !settingsDialogSrc.includes('LOCALES.map') &&
+  !settingsDialogSrc.includes('settingsMenu') &&
+  (settingsDialogSrc.match(/data-settings-key/g)?.length ?? 0) === 2 &&
   detailedLabelsRowAt >= 0 && shortcutsRowAt > detailedLabelsRowAt;
 const constructorBody = methodBody('constructor() {');
 const detailedLabelsReflection = app.includes("document.documentElement.removeAttribute('data-toolbar-labels')") &&
   app.includes("document.documentElement.setAttribute('data-toolbar-labels', 'off')") &&
   (app.match(/this\.reflectDetailedLabels\(\);/g)?.length ?? 0) === 2 &&
   constructorBody.includes('this.reflectDetailedLabels();') &&
-  settingsItemsBody.includes('this.reflectDetailedLabels();');
+  setDetailedLabelsBody.includes('this.reflectDetailedLabels();');
 check(
   'settings offers the checked default-on display toggle, one row that opens the shortcuts reference, and About last',
   detailedLabelsToggle && detailedLabelsDefault && detailedLabelsReflection && settingsRowsScoped &&
@@ -959,10 +974,10 @@ const viewportRestoreOrder = [
   'this.pendingToolbarViewport = { start, end, follow };',
   'this.reflectDetailedLabels();',
   'this.relayout();',
-].map((needle) => settingsItemsBody.indexOf(needle));
-const noTransientWidthSync = !settingsItemsBody.includes('this.stack.syncSize();');
-const noImmediateViewportMutation = !settingsItemsBody.includes('this.stack.setViewport') &&
-  !settingsItemsBody.includes('this.stack.setFollowLatest');
+].map((needle) => setDetailedLabelsBody.indexOf(needle));
+const noTransientWidthSync = !setDetailedLabelsBody.includes('this.stack.syncSize();');
+const noImmediateViewportMutation = !setDetailedLabelsBody.includes('this.stack.setViewport') &&
+  !setDetailedLabelsBody.includes('this.stack.setFollowLatest');
 const drawBody = methodBody('private draw(');
 const frameRestoreOrder = [
   'this.pendingToolbarViewport = null;',

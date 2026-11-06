@@ -838,6 +838,7 @@ export const ru: Messages = {
   'about.notice': 'Сторонние уведомления (декодеры sigrok)',
   'settings.language': 'Язык',
   'settings.theme': 'Тема',
+  'settings.close': 'Закрыть',
 
   // ----------------------------------------------------------- shortcuts
   'shortcuts.title': 'Клавиши и жесты',

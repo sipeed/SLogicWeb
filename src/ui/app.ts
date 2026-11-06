@@ -119,6 +119,7 @@ import {
 } from './workspacePreferences.js';
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
+import { SettingsDialog } from './settingsDialog.js';
 import { MenuStack } from './menuStack.js';
 import {
   DEFAULT_SIDEBAR_STATE, hideSidebar, selectSidebarPage, toggleSidebarVisible,
@@ -350,7 +351,7 @@ export class App {
   private readonly layerSkips: Record<FrameLayer, number> =
     { wave: 0, axis: 0, overlay: 0, bus: 0, overview: 0 };
   private readonly menuStack = new MenuStack();
-  private readonly settingsMenu: SettingsMenu;
+  private readonly settingsDialog: SettingsDialog;
   private readonly languageMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
   private readonly saveMenu: SettingsMenu;
@@ -711,12 +712,18 @@ export class App {
     this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(this.workspaceSnapshot());
     this.reflectDetailedLabels();
 
-    this.settingsMenu = new SettingsMenu(must<HTMLButtonElement>('btn-settings'));
+    this.settingsDialog = new SettingsDialog({
+      detailedLabels: () => this.detailedLabels,
+      setDetailedLabels: (on) => this.setDetailedLabels(on),
+      openShortcuts: (invoker) => {
+        this.channelList.closeDialog();
+        this.shortcutsDialog.open(invoker);
+      },
+    });
     this.languageMenu = new SettingsMenu(this.el.language, 'language-menu');
     this.themeMenu = new SettingsMenu(this.el.theme, 'theme-menu');
     this.deviceMenu = new SettingsMenu(this.el.connect, 'device-menu');
     this.menuStack.register(this.deviceMenu);
-    this.menuStack.register(this.settingsMenu);
     this.menuStack.register(this.languageMenu);
     this.menuStack.register(this.themeMenu);
     this.saveMenu = new SettingsMenu(this.el.save, 'save-menu');
@@ -4192,10 +4199,9 @@ export class App {
     must<HTMLButtonElement>('btn-fullscreen').addEventListener('click', () => void this.toggleFullscreen());
     document.addEventListener('fullscreenchange', () => this.renderToolbarState());
     must<HTMLButtonElement>('btn-settings').addEventListener('click', () => {
-      // Keep the channel dialog and this transient menu from competing for focus.
       this.channelList.closeDialog();
-      this.menuStack.closeOthers(this.settingsMenu, 'outside');
-      this.settingsMenu.toggle(this.settingsItems());
+      this.menuStack.closeOthers(null, 'outside');
+      this.settingsDialog.open(this.el.settings);
     });
     this.el.language.addEventListener('click', () => {
       this.channelList.closeDialog();
@@ -4240,76 +4246,14 @@ export class App {
     }
   }
 
-  private settingsItems(): SettingsMenuItem[] {
-    return [
-      {
-        label: t('settings.detailedLabels'),
-        checked: this.detailedLabels,
-        onPick: () => {
-          const { start, end } = this.stack.view;
-          const follow = this.stack.followLatest;
-          this.pendingToolbarViewport = { start, end, follow };
-          this.detailedLabels = !this.detailedLabels;
-          this.reflectDetailedLabels();
-          this.persistWorkspace();
-          this.relayout();
-        },
-      },
-      {
-        label: t('settings.wheelZooms'),
-        checked: this.wheelZooms,
-        onPick: () => {
-          this.wheelZooms = !this.wheelZooms;
-          this.persistWorkspace();
-          this.renderInteractionBar(true);
-          if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings(this.wheelZooms);
-        },
-      },
-      {
-        label: t('settings.compactRows'),
-        checked: this.compactRows,
-        onPick: () => {
-          this.compactRows = !this.compactRows;
-          this.persistWorkspace();
-          this.relayout();
-        },
-      },
-      {
-        label: t('settings.hideIdle'),
-        checked: this.hideIdleChannels,
-        onPick: () => {
-          this.hideIdleChannels = !this.hideIdleChannels;
-          this.persistWorkspace();
-          this.relayout();
-          this.renderPanels();
-        },
-      },
-      {
-        label: t('settings.developerTools'),
-        checked: this.developerTools,
-        onPick: () => {
-          this.developerTools = !this.developerTools;
-          this.persistWorkspace();
-          this.renderPanels();
-        },
-      },
-      {
-        label: t('settings.shortcuts'),
-        hint: '▸',
-        onPick: () => {
-          this.channelList.closeDialog();
-          this.shortcutsDialog.open(this.el.settings, this.wheelZooms);
-        },
-      },
-      {
-        label: t('settings.about'),
-        hint: '▸',
-        onPick: () => {
-          this.channelList.closeDialog();
-          this.aboutDialog.open(this.el.settings);
-        },
-      },
-    ];
+  private setDetailedLabels(on: boolean): void {
+    const { start, end } = this.stack.view;
+    const follow = this.stack.followLatest;
+    this.pendingToolbarViewport = { start, end, follow };
+    this.detailedLabels = on;
+    this.reflectDetailedLabels();
+    this.persistWorkspace();
+    this.relayout();
   }
 
   private deviceMenuItems(): SettingsMenuItem[] {
@@ -4565,6 +4509,7 @@ export class App {
     applyStaticI18n(document);
     if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings(this.wheelZooms);
     if (this.aboutDialog.isOpen) this.aboutDialog.renderStrings();
+    if (this.settingsDialog.isOpen) this.settingsDialog.renderStrings();
     this.relayout();       // channel cells rebuild; an open channel dialog closes here
     this.renderPanels();   // side panels + toolbar chrome
     this.renderInteractionBar(true);  // hint text follows the locale

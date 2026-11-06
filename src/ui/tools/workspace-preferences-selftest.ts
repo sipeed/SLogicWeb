@@ -1298,12 +1298,12 @@ check('the boot restoration slice never hydrates, decodes, connects, claims load
     `ids=${restored.map((a) => a.id).join(',')}, next=${next}, empty=${empty}, runtime=${runtimeFields.length}`);
 }
 
-const settingsStart = app.indexOf('private settingsItems(');
+const settingsStart = app.indexOf('private setDetailedLabels(on: boolean): void {');
 const settingsEnd = settingsStart >= 0 ? app.indexOf('\n  }', settingsStart) : -1;
 const settingsBody = settingsStart >= 0 && settingsEnd > settingsStart
   ? app.slice(settingsStart, settingsEnd) : '';
 const toggleOrder = [
-  'this.detailedLabels = !this.detailedLabels;',
+  'this.detailedLabels = on;',
   'this.reflectDetailedLabels();',
   'this.persistWorkspace();',
   'this.relayout();',
@@ -1423,7 +1423,7 @@ const expectedWriters = [
   'adoptCapture', 'adoptDeviceChannels', 'afterChannelChange', 'applySettings', 'applySidebar',
   'attachAnalyzer', 'configureAnalogGain', 'configureBusScope', 'configureChannel', 'dragScopeTrigger',
   'finishCapture',
-  'removeAnalyzer', 'reorder', 'settingsItems', 'showIdleChannels', 'startCapture', 'updateAnalyzer',
+  'removeAnalyzer', 'reorder', 'setDetailedLabels', 'showIdleChannels', 'startCapture', 'updateAnalyzer',
 ].sort();
 const quietMethods = ['runDecode', 'discardDecodeState', 'renderPanels', 'relayout', 'retranslate'];
 const quiet = quietMethods.map((name) => ({ name, body: appMethodBody(name) }));

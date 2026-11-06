@@ -1108,6 +1108,57 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
   filter: brightness(1.1);
 }
 
+/* -------------------------------------------------------- settings dialog */
+
+.settings-dialog {
+  width: min(560px, calc(100vw - 32px));
+  min-height: min(360px, calc(100dvh - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow-y: auto;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  animation: motion-pop var(--motion-fast) var(--motion-ease);
+}
+.settings-dialog::backdrop {
+  background: rgb(0 0 0 / 60%);
+  animation: motion-fade var(--motion-fast) var(--motion-ease);
+}
+html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop); }
+.settings-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-dialog-header h2 { margin: 0; font-size: 14px; line-height: 20px; }
+.settings-dialog-close {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  color: var(--muted-foreground);
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+.settings-dialog-close:hover { background: var(--muted); color: var(--foreground); }
+.settings-dialog-close:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.settings-dialog-close svg { display: block; width: 14px; height: 14px; }
+.settings-dialog-body { padding: 12px 16px 16px; }
+.settings-pane { display: flex; flex-direction: column; gap: 1px; }
+
 .select-popover, .settings-menu, .settings-flyout {
   background: var(--popover); color: var(--popover-foreground);
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -1180,7 +1231,8 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
 }
 :is(html[data-theme="dark"], html[data-theme="light"]) .channel-settings-dialog,
 :is(html[data-theme="dark"], html[data-theme="light"]) .channel-color-palette,
-:is(html[data-theme="dark"], html[data-theme="light"]) .shortcuts-dialog { box-shadow: 0 8px 24px var(--shadow); }
+:is(html[data-theme="dark"], html[data-theme="light"]) .shortcuts-dialog,
+:is(html[data-theme="dark"], html[data-theme="light"]) .settings-dialog { box-shadow: 0 8px 24px var(--shadow); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .tooltip { box-shadow: 0 4px 12px var(--shadow); }
 
 .ch-analyzer {

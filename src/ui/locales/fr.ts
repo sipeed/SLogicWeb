@@ -847,6 +847,7 @@ export const fr: Messages = {
   'about.notice': 'Mentions tierces (décodeurs sigrok)',
   'settings.language': 'Langue',
   'settings.theme': 'Thème',
+  'settings.close': 'Fermer',
 
   // ----------------------------------------------------------- shortcuts
   'shortcuts.title': 'Raccourcis et gestes',

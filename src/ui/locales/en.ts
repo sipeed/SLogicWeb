@@ -848,6 +848,7 @@ export const en = {
   'about.notice': 'Third-party notices (sigrok decoders)',
   'settings.language': 'Language',
   'settings.theme': 'Theme',
+  'settings.close': 'Close',
 
   // ----------------------------------------------------------- shortcuts
   'shortcuts.title': 'Shortcuts and gestures',

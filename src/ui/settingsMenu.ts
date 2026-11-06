@@ -56,7 +56,7 @@ export class SettingsMenu {
 
   constructor(
     private readonly anchor: HTMLButtonElement,
-    private readonly menuId: string = 'settings-menu',
+    private readonly menuId: string,
   ) {}
 
   get id(): string { return this.menuId; }

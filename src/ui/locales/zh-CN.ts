@@ -793,6 +793,7 @@ export const zhCN: Messages = {
   'about.notice': '第三方声明（sigrok 解码器）',
   'settings.language': '语言',
   'settings.theme': '主题',
+  'settings.close': '关闭',
 
   // ----------------------------------------------------------- shortcuts
   'shortcuts.title': '快捷键与鼠标操作',

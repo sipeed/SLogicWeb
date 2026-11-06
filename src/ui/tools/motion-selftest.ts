@@ -104,6 +104,9 @@ const MOTION_CONSUMERS: readonly string[] = [
   '.bus-dialog::backdrop',
   '.shortcuts-close',
   '.hint-mouse-part',
+  '.settings-dialog',
+  '.settings-dialog::backdrop',
+  '.settings-dialog-close',
 ];
 
 const ENTRY_RULES: readonly string[] = [
@@ -116,6 +119,8 @@ const ENTRY_RULES: readonly string[] = [
   '.shortcuts-dialog::backdrop',
   '.bus-dialog',
   '.bus-dialog::backdrop',
+  '.settings-dialog',
+  '.settings-dialog::backdrop',
 ];
 
 const BUTTON_CONSUMERS: readonly string[] = [
