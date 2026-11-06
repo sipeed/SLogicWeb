@@ -848,6 +848,7 @@ export const fr: Messages = {
   'settings.language': 'Langue',
   'settings.theme': 'Thème',
   'settings.close': 'Fermer',
+  'settings.sections.appearance': 'Apparence',
 
   // ----------------------------------------------------------- shortcuts
   'shortcuts.title': 'Raccourcis et gestes',

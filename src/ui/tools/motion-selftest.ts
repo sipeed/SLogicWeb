@@ -90,6 +90,7 @@ const MOTION_CONSUMERS: readonly string[] = [
   '.select-trigger',
   '.select-item',
   '.settings-item',
+  '.settings-nav-item',
   '#panel-resizer::after',
   ':is(html[data-theme="dark"], html[data-theme="light"]) #scroll-area::-webkit-scrollbar-thumb, :is(html[data-theme="dark"], html[data-theme="light"]) #side-panel::-webkit-scrollbar-thumb',
   '.select-popover::-webkit-scrollbar-thumb',
@@ -135,6 +136,7 @@ const BUTTON_CONSUMERS: readonly string[] = [
   '.ch-analyzer-x',
   '.select-trigger',
   '.settings-item',
+  '.settings-nav-item',
 ];
 
 const NON_BUTTON_CONSUMERS: readonly string[] = [

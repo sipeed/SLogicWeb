@@ -1,4 +1,11 @@
-import { SETTINGS_DIALOG_HEIGHT, SETTINGS_DIALOG_ID, SETTINGS_DIALOG_WIDTH, SETTINGS_NAV_WIDTH } from '../settingsDialog.js';
+import {
+  SETTINGS_DIALOG_HEIGHT,
+  SETTINGS_DIALOG_ID,
+  SETTINGS_DIALOG_WIDTH,
+  SETTINGS_NAV_WIDTH,
+  SETTINGS_SECTIONS,
+  settingsSectionAfter,
+} from '../settingsDialog.js';
 import type { MessageKey } from '../i18n.js';
 import { en } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
@@ -98,7 +105,7 @@ function focusRestoreByKey(source: string): boolean {
   const body = start >= 0 && end > start ? source.slice(start, end) : '';
   return body.includes("active.closest<HTMLElement>('[data-settings-key]')") &&
     body.includes('?.dataset.settingsKey') &&
-    body.indexOf('this.body.replaceChildren(') < body.indexOf('this.focusRow(restore)');
+    body.indexOf('this.renderBody();') < body.indexOf('this.focusKeyed(restore)');
 }
 
 {
@@ -158,6 +165,170 @@ function focusRestoreByKey(source: string): boolean {
   check('a locale rebuild redraws the pane and returns focus to the same keyed control',
     focusRestoreByKey(dialogSource),
     `restore=${focusRestoreByKey(dialogSource)}`);
+}
+
+function methodBody(source: string, needle: string): string {
+  const start = source.indexOf(needle);
+  const end = start >= 0 ? source.indexOf('\n  }', start) : -1;
+  return start >= 0 && end > start ? source.slice(start, end) : '';
+}
+
+function sectionAfterSource(source: string): boolean {
+  const start = source.indexOf('export function settingsSectionAfter(');
+  const end = start >= 0 ? source.indexOf('\n}', start) : -1;
+  const body = start >= 0 && end > start ? source.slice(start, end) : '';
+  return body.includes("if (key === 'ArrowUp') next = SETTINGS_SECTIONS[index > 0 ? index - 1 : last];") &&
+    body.includes("else if (key === 'ArrowDown') next = SETTINGS_SECTIONS[index < last ? index + 1 : 0];") &&
+    body.includes("else if (key === 'Home') next = SETTINGS_SECTIONS[0];") &&
+    body.includes("else if (key === 'End') next = SETTINGS_SECTIONS[last];") &&
+    body.includes('return next === current ? null : next;');
+}
+
+function navKeyCommitted(source: string): boolean {
+  const body = methodBody(source, 'private onNavKey(event: KeyboardEvent): void {');
+  const resolveAt = body.indexOf('const target = settingsSectionAfter(event.key, this.section);');
+  const bailAt = body.indexOf('if (target === null) return;');
+  const preventAt = body.indexOf('event.preventDefault();');
+  const selectAt = body.indexOf('this.selectSection(target);');
+  return resolveAt >= 0 && bailAt > resolveAt && preventAt > bailAt && selectAt > preventAt;
+}
+
+function openFocusesActiveTab(source: string): boolean {
+  const body = methodBody(source, '  open(invoker: HTMLElement | null): void {');
+  return body.includes('this.dialog.showModal();') &&
+    body.indexOf('this.focusKeyed(null);') > body.indexOf('this.dialog.showModal();');
+}
+
+function focusFallsBackToActiveTab(source: string): boolean {
+  const body = methodBody(source, 'private focusKeyed(key: string | null): void {');
+  return body.includes('(keyed ?? this.activeTab() ?? this.closeButton).focus({ preventScroll: true });');
+}
+
+const SECTION = SETTINGS_SECTIONS[0];
+const SECTION_LABEL_KEY = `settings.sections.${SECTION}`;
+
+const NAV_NEEDLES: readonly string[] = [
+  "nav.className = 'settings-nav';",
+  "nav.setAttribute('role', 'tablist');",
+  "nav.setAttribute('aria-orientation', 'vertical');",
+  "nav.setAttribute('aria-label', t('settings.title'));",
+  'tab.id = `settings-tab-${section}`;',
+  "tab.setAttribute('role', 'tab');",
+  "tab.setAttribute('aria-controls', `settings-panel-${section}`);",
+  "tab.classList.toggle('selected', selected);",
+  "tab.setAttribute('aria-selected', String(selected));",
+  'tab.tabIndex = selected ? 0 : -1;',
+  "pane.setAttribute('role', 'tabpanel');",
+  "pane.setAttribute('aria-labelledby', `settings-tab-${this.section}`);",
+  'pane.tabIndex = 0;',
+  'this.body.replaceChildren(this.nav(), this.pane());',
+];
+
+{
+  const keys = ['ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter', 'Tab', ' ', 'a', 'Escape'];
+  const rows = keys.map((key) => ({ key, next: settingsSectionAfter(key, SECTION) }));
+  const changed = rows.filter((row) => row.next !== null);
+  check('the shipped section table is a single section and no key resolves to a different one',
+    SETTINGS_SECTIONS.length === 1 && SECTION === 'appearance' && changed.length === 0,
+    `sections=${JSON.stringify(SETTINGS_SECTIONS)}, changed=${JSON.stringify(changed)}`);
+}
+
+{
+  const inert = ['ArrowUp', 'ArrowDown', 'Home', 'End']
+    .every((key) => settingsSectionAfter(key, SECTION) === null);
+  check('every roving key is inert on the shipped single-section table without throwing',
+    inert && settingsSectionAfter('ArrowDown', SECTION) === null &&
+    settingsSectionAfter('', SECTION) === null,
+    `inert=${inert}`);
+}
+
+{
+  check('the section walker resolves wrap, Home and End before rejecting an unchanged target',
+    sectionAfterSource(dialogSource),
+    `ok=${sectionAfterSource(dialogSource)}`);
+}
+
+{
+  const mutated = dialogSource.replace('  return next === current ? null : next;', '  return next;');
+  check('control: dropping the unchanged-target guard is detected by the same walker predicate',
+    mutated !== dialogSource && !sectionAfterSource(mutated) && sectionAfterSource(dialogSource),
+    `mutated=${sectionAfterSource(mutated)}, real=${sectionAfterSource(dialogSource)}`);
+}
+
+{
+  check('the navigation list and its panel are paired tabs of one section table',
+    NAV_NEEDLES.every((needle) => dialogSource.includes(needle)),
+    `missing=${JSON.stringify(NAV_NEEDLES.filter((needle) => !dialogSource.includes(needle)))}`);
+}
+
+{
+  const tabIds = dialogSource.match(/settings-tab-/g)?.length ?? 0;
+  const panelIds = dialogSource.match(/settings-panel-/g)?.length ?? 0;
+  const literalIds = [`settings-tab-${SECTION}`, `settings-panel-${SECTION}`]
+    .filter((id) => dialogSource.includes(`'${id}'`) || dialogSource.includes(`"${id}"`));
+  check('tab and panel ids are composed from the section table, never written as literals',
+    tabIds === 3 && panelIds === 2 && literalIds.length === 0,
+    `tabs=${tabIds}, panels=${panelIds}, literal=${JSON.stringify(literalIds)}`);
+}
+
+{
+  const mutated = dialogSource.replace('tab.tabIndex = selected ? 0 : -1;', 'tab.tabIndex = 0;');
+  check('control: dropping the roving tabindex is detected by the same needle predicate',
+    mutated !== dialogSource && !NAV_NEEDLES.every((needle) => mutated.includes(needle)) &&
+    NAV_NEEDLES.every((needle) => dialogSource.includes(needle)),
+    `mutatedMissing=${NAV_NEEDLES.filter((needle) => !mutated.includes(needle)).length}`);
+}
+
+{
+  const mutated = dialogSource.replace("  nav.setAttribute('role', 'tablist');", '');
+  check('control: dropping the tablist role is detected by the same needle predicate',
+    mutated !== dialogSource && !NAV_NEEDLES.every((needle) => mutated.includes(needle)) &&
+    NAV_NEEDLES.every((needle) => dialogSource.includes(needle)),
+    `mutatedMissing=${NAV_NEEDLES.filter((needle) => !mutated.includes(needle)).length}`);
+}
+
+{
+  check('navigation keys move only when the resolved section actually changes',
+    navKeyCommitted(dialogSource),
+    `body=${JSON.stringify(methodBody(dialogSource, 'private onNavKey(event: KeyboardEvent): void {').replace(/\s+/g, ' '))}`);
+}
+
+{
+  const unconditional = dialogSource.replace('    if (target === null) return;\n', '');
+  const early = dialogSource.replace(
+    '    const target = settingsSectionAfter(event.key, this.section);\n    if (target === null) return;\n    event.preventDefault();',
+    '    event.preventDefault();\n    const target = settingsSectionAfter(event.key, this.section);\n    if (target === null) return;');
+  check('control: an unconditional or premature preventDefault is detected by the same predicate',
+    unconditional !== dialogSource && !navKeyCommitted(unconditional) &&
+    early !== dialogSource && !navKeyCommitted(early) && navKeyCommitted(dialogSource),
+    `unconditional=${navKeyCommitted(unconditional)}, early=${navKeyCommitted(early)}, ` +
+    `real=${navKeyCommitted(dialogSource)}`);
+}
+
+{
+  check('the window opens with focus on the active section tab',
+    openFocusesActiveTab(dialogSource),
+    `ok=${openFocusesActiveTab(dialogSource)}`);
+}
+
+{
+  const mutated = dialogSource.replace('    this.focusKeyed(null);\n', '');
+  check('control: dropping the open-time focus move is detected by the same predicate',
+    mutated !== dialogSource && !openFocusesActiveTab(mutated) && openFocusesActiveTab(dialogSource),
+    `mutated=${openFocusesActiveTab(mutated)}, real=${openFocusesActiveTab(dialogSource)}`);
+}
+
+{
+  check('a keyed rebuild falls back to the active tab when that key is gone',
+    focusFallsBackToActiveTab(dialogSource),
+    `ok=${focusFallsBackToActiveTab(dialogSource)}`);
+}
+
+{
+  const mutated = dialogSource.replace('(keyed ?? this.activeTab() ?? this.closeButton)', '(keyed ?? this.closeButton)');
+  check('control: dropping the active-tab fallback is detected by the same predicate',
+    mutated !== dialogSource && !focusFallsBackToActiveTab(mutated) && focusFallsBackToActiveTab(dialogSource),
+    `mutated=${focusFallsBackToActiveTab(mutated)}, real=${focusFallsBackToActiveTab(dialogSource)}`);
 }
 
 {
@@ -419,6 +590,307 @@ function forcedOrRawHex(block: string): boolean {
     `nav=${SETTINGS_NAV_WIDTH}, drifted=${drifted}`);
 }
 
+function ruleBlock(block: string, selector: string): string {
+  const start = block.indexOf(selector);
+  const end = start >= 0 ? block.indexOf('\n}', start) : -1;
+  return start >= 0 && end > start ? block.slice(start, end) : '';
+}
+
+function paneScrollsNotWindow(block: string): boolean {
+  const dialogRule = ruleBlock(block, '.settings-dialog {');
+  const paneRule = ruleBlock(block, '.settings-pane {');
+  return dialogRule.includes('overflow: hidden;') &&
+    !dialogRule.includes('overflow-y: auto;') &&
+    paneRule.includes('overflow-y: auto;') &&
+    paneRule.includes('min-height: 0;');
+}
+
+const NAV_CSS_NEEDLES: readonly string[] = [
+  `--settings-nav-w: ${SETTINGS_NAV_WIDTH}px;`,
+  'grid-template-columns: var(--settings-nav-w) minmax(0, 1fr);',
+  '.settings-dialog[open] { display: flex; flex-direction: column; }',
+  '.settings-nav {',
+  '.settings-nav-item {',
+  'height: 28px;',
+  'background: var(--background);',
+  'border-right: 1px solid var(--border);',
+  'border-radius: calc(var(--radius) - 2px);',
+  '.settings-nav-item:hover { background: var(--muted); color: var(--foreground); }',
+  '.settings-nav-item.selected { background: var(--muted); color: var(--foreground); }',
+  '.settings-dialog .settings-nav-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }',
+  '.settings-pane {',
+];
+
+{
+  const missing = NAV_CSS_NEEDLES.filter((needle) => !dialogCss.includes(needle));
+  check('the sheet gives the window its two-column navigation column from the mirrored metrics',
+    dialogCss.length > 0 && missing.length === 0,
+    `missing=${JSON.stringify(missing)}, block=${dialogCss.length}`);
+}
+
+{
+  check('the section pane owns the scrolling while the window itself clips',
+    dialogCss.length > 0 && paneScrollsNotWindow(dialogCss),
+    `dialog=${JSON.stringify(ruleBlock(dialogCss, '.settings-dialog {'))}, ` +
+    `pane=${JSON.stringify(ruleBlock(dialogCss, '.settings-pane {'))}`);
+}
+
+{
+  const mutated = dialogCss.replace('  overflow: hidden;\n', '  overflow-y: auto;\n');
+  check('control: a window that scrolls its own header is detected by the same predicate',
+    mutated !== dialogCss && !paneScrollsNotWindow(mutated) && paneScrollsNotWindow(dialogCss),
+    `mutated=${paneScrollsNotWindow(mutated)}, real=${paneScrollsNotWindow(dialogCss)}`);
+}
+
+function railScrollsInsteadOfCompressing(block: string): boolean {
+  const rail = ruleBlock(block, '.settings-nav {');
+  const item = ruleBlock(block, '.settings-nav-item {');
+  return rail.includes('display: flex;') && rail.includes('flex-direction: column;') &&
+    rail.includes('overflow-y: auto;') && item.includes('flex: none;');
+}
+
+{
+  check('the navigation rail scrolls its items instead of compressing them',
+    dialogCss.length > 0 && railScrollsInsteadOfCompressing(dialogCss),
+    `rail=${JSON.stringify(ruleBlock(dialogCss, '.settings-nav {'))}, ` +
+    `item=${JSON.stringify(ruleBlock(dialogCss, '.settings-nav-item {'))}`);
+}
+
+{
+  const shrinkable = dialogCss.replace(
+    '.settings-nav-item {\n  flex: none;\n  display: flex;\n  align-items: center;',
+    '.settings-nav-item {\n  display: flex;\n  align-items: center;');
+  const blockRail = dialogCss.replace(
+    '.settings-nav {\n  display: flex;\n  flex-direction: column;',
+    '.settings-nav {\n  flex-direction: column;');
+  check('control: a rail that is not a column flex, or an item free to shrink, is detected by the same predicate',
+    shrinkable !== dialogCss && blockRail !== dialogCss &&
+    !railScrollsInsteadOfCompressing(shrinkable) && !railScrollsInsteadOfCompressing(blockRail) &&
+    railScrollsInsteadOfCompressing(dialogCss),
+    `shrinkable=${railScrollsInsteadOfCompressing(shrinkable)}, ` +
+    `blockRail=${railScrollsInsteadOfCompressing(blockRail)}, real=${railScrollsInsteadOfCompressing(dialogCss)}`);
+}
+
+function splitTopLevel(text: string, separator: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    else if (ch === separator && depth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts.map((part) => part.trim()).filter((part) => part.length > 0);
+}
+
+function matchingBrace(text: string, openAt: number): number {
+  let depth = 0;
+  for (let i = openAt; i < text.length; i += 1) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+interface CssRule {
+  selectors: readonly string[];
+  body: string;
+}
+
+function cssRules(sheet: string): CssRule[] {
+  const rules: CssRule[] = [];
+  const walk = (text: string): void => {
+    let headerStart = 0;
+    for (let i = 0; i < text.length; i += 1) {
+      const ch = text[i];
+      if (ch === '}' || ch === ';') headerStart = i + 1;
+      else if (ch === '{') {
+        const header = text.slice(headerStart, i).trim();
+        const end = matchingBrace(text, i);
+        if (end < 0) return;
+        const body = text.slice(i + 1, end);
+        if (header.startsWith('@')) walk(body);
+        else if (header.length > 0) rules.push({ selectors: splitTopLevel(header, ','), body });
+        i = end;
+        headerStart = end + 1;
+      }
+    }
+  };
+  walk(sheet);
+  return rules;
+}
+
+function rightmostCompound(selector: string): string {
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < selector.length; i += 1) {
+    const ch = selector[i];
+    if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    else if (depth === 0 && (ch === ' ' || ch === '>' || ch === '+' || ch === '~')) start = i + 1;
+  }
+  return selector.slice(start).trim();
+}
+
+function expandMatches(compound: string): string[] {
+  const match = /:(?:is|where)\(([^()]*)\)/.exec(compound);
+  if (match === null) return [compound];
+  const head = compound.slice(0, match.index);
+  const tail = compound.slice(match.index + match[0].length);
+  return splitTopLevel(match[1], ',').flatMap((member) => expandMatches(`${head}${member}${tail}`));
+}
+
+const NAV_ITEM_CLASSES: readonly string[] = ['settings-nav-item', 'selected'];
+const NAV_ITEM_TYPES: readonly string[] = ['button'];
+const NAV_ITEM_IDS: readonly string[] = SETTINGS_SECTIONS.map((section) => `settings-tab-${section}`);
+
+function couldFocusSettingsNavItem(selector: string): boolean {
+  return expandMatches(rightmostCompound(selector)).some((compound) => {
+    const rest = compound.replace(/:focus-visible/g, '').replace(/:focus(?![\-\w])/g, '');
+    if (rest.length === 0) return true;
+    const ids = [...rest.matchAll(/#([a-z0-9-]+)/g)].map((match) => match[1]);
+    const classes = [...rest.matchAll(/\.([a-z0-9-]+)/g)].map((match) => match[1]);
+    const types = [...rest.matchAll(/(?:^|[\s>+~])([a-z][a-z0-9-]*)/g)].map((match) => match[1]);
+    return ids.every((name) => NAV_ITEM_IDS.includes(name)) &&
+      classes.every((name) => NAV_ITEM_CLASSES.includes(name)) &&
+      types.every((name) => NAV_ITEM_TYPES.includes(name));
+  });
+}
+
+interface NavRingVerdict {
+  ring: string;
+  inset: boolean;
+  rivals: readonly string[];
+  losing: readonly string[];
+}
+
+function navRingVerdict(sheet: string): NavRingVerdict | null {
+  const rules = cssRules(sheet);
+  const describesNavItem = (selector: string): boolean =>
+    rightmostCompound(selector).includes('.settings-nav-item');
+  const ringRule = rules.find((rule) =>
+    rule.selectors.some(describesNavItem) && rule.body.includes('outline-offset: -2px'));
+  if (ringRule === undefined) return null;
+  const own = ringRule.selectors.filter(describesNavItem);
+  const rivals = [...new Set(rules
+    .filter((rule) => rule !== ringRule)
+    .flatMap((rule) => rule.selectors)
+    .filter((selector) => selector.includes(':focus-visible') && couldFocusSettingsNavItem(selector)))];
+  const losing = rivals.filter((rival) => own.every((selector) =>
+    !specificityAtLeast(selectorSpecificity(selector), selectorSpecificity(rival))));
+  return {
+    ring: own.join(', '),
+    inset: ringRule.body.includes('outline: 2px solid var(--ring);') &&
+      ringRule.body.includes('outline-offset: -2px;'),
+    rivals,
+    losing,
+  };
+}
+
+function selectorSpecificity(selector: string): [number, number, number] {
+  const acc: [number, number, number] = [0, 0, 0];
+  const heaviest = (group: string): [number, number, number] => splitTopLevel(group, ',')
+    .map((part) => selectorSpecificity(part))
+    .reduce((best, next) => (specificityAtLeast(next, best) ? next : best), [0, 0, 0]);
+  const rest = selector.replace(/:is\(([^()]*)\)/g, (_whole, group: string) => {
+    const best = heaviest(group);
+    acc[0] += best[0];
+    acc[1] += best[1];
+    acc[2] += best[2];
+    return ' ';
+  });
+  const count = (re: RegExp): number => rest.match(re)?.length ?? 0;
+  return [
+    acc[0] + count(/#/g),
+    acc[1] + count(/\./g) + count(/\[[^\]]*\]/g) + count(/:(?!:)[a-z-]+(?!\()/g),
+    acc[2] + count(/(?:^|[\s>+~])[a-z][a-z0-9-]*(?![\w(-])/g) + count(/::[a-z-]+/g),
+  ];
+}
+
+function specificityAtLeast(a: [number, number, number], b: [number, number, number]): boolean {
+  return a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] > b[2];
+}
+
+const GENERIC_FOCUS_RING =
+  ':is(html[data-theme="dark"], html[data-theme="light"]) :is(button, input, summary):focus-visible';
+const HEAVIER_THEMED_RING =
+  ':is(html[data-theme="dark"], html[data-theme="light"]) .settings-dialog :is(button, input):focus-visible';
+
+{
+  const table: ReadonlyArray<readonly [string, [number, number, number]]> = [
+    ['button:active', [0, 1, 1]],
+    ['#panel-resizer:focus-visible', [1, 1, 0]],
+    ['.settings-nav-item:focus-visible', [0, 2, 0]],
+    ['.settings-dialog .settings-nav-item:focus-visible', [0, 3, 0]],
+    [GENERIC_FOCUS_RING, [0, 2, 2]],
+    [HEAVIER_THEMED_RING, [0, 3, 2]],
+  ];
+  const wrong = table.filter(([selector, want]) =>
+    selectorSpecificity(selector).join(',') !== want.join(','));
+  check('the specificity counter reproduces the exact weights of the sheet selectors it compares',
+    wrong.length === 0 && table.length === 6,
+    `wrong=${JSON.stringify(wrong.map(([s]) => [s, selectorSpecificity(s)]))}`);
+}
+
+const SCOPED_RING = '.settings-dialog .settings-nav-item:focus-visible';
+const UNSCOPED_RING = '.settings-nav-item:focus-visible';
+
+{
+  const verdict = navRingVerdict(css);
+  check('the rail focus ring is inset and outranks every themed focus rule that can match a rail tab',
+    verdict !== null && verdict.inset && verdict.rivals.length > 0 && verdict.losing.length === 0 &&
+    dialogCss.includes(verdict.ring),
+    `ring=${JSON.stringify(verdict?.ring ?? null)}, inset=${verdict?.inset}, ` +
+    `rivals=${JSON.stringify(verdict?.rivals ?? [])}, losing=${JSON.stringify(verdict?.losing ?? [])}`);
+}
+
+{
+  const unscoped = css.replaceAll(SCOPED_RING, UNSCOPED_RING);
+  const mutated = navRingVerdict(unscoped);
+  const real = navRingVerdict(css);
+  check('control: the unscoped rail ring loses the cascade, so the ancestor scope is load-bearing',
+    unscoped !== css && mutated !== null && mutated.losing.length > 0 &&
+    real !== null && real.losing.length === 0,
+    `losing=${JSON.stringify(mutated?.losing ?? [])}, realLosing=${JSON.stringify(real?.losing ?? [])}`);
+}
+
+{
+  const injected = `${css}\n${HEAVIER_THEMED_RING} { outline: 2px solid var(--ring); outline-offset: 1px; }\n`;
+  const verdict = navRingVerdict(injected);
+  const real = navRingVerdict(css);
+  check('control: a heavier themed ring added to the sheet is found to outrank the rail ring',
+    verdict !== null && verdict.losing.includes(HEAVIER_THEMED_RING) &&
+    real !== null && real.losing.length === 0,
+    `losing=${JSON.stringify(verdict?.losing ?? [])}`);
+}
+
+{
+  const idRing = `#${NAV_ITEM_IDS[0]}:focus-visible`;
+  const verdict = navRingVerdict(`${css}\n${idRing} { outline: 2px solid var(--ring); outline-offset: 1px; }\n`);
+  const real = navRingVerdict(css);
+  check('control: an id ring on a nav tab is found to outrank the rail rule while other ids stay out',
+    NAV_ITEM_IDS.length === SETTINGS_SECTIONS.length && verdict !== null &&
+    verdict.losing.includes(idRing) && real !== null && !real.rivals.includes('#panel-resizer:focus-visible'),
+    `losing=${JSON.stringify(verdict?.losing ?? [])}, ids=${JSON.stringify(NAV_ITEM_IDS)}`);
+}
+
+{
+  const navWidthMirrored = (block: string): boolean => block.includes(`--settings-nav-w: ${SETTINGS_NAV_WIDTH}px;`);
+  const mutated = dialogCss.replace(`--settings-nav-w: ${SETTINGS_NAV_WIDTH}px;`, '--settings-nav-w: 160px;');
+  check('control: a nav width the sheet does not mirror from the constant fails the same predicate',
+    mutated !== dialogCss && SETTINGS_NAV_WIDTH === 152 &&
+    !navWidthMirrored(mutated) && navWidthMirrored(dialogCss),
+    `constant=${SETTINGS_NAV_WIDTH}, mutated=${navWidthMirrored(mutated)}, real=${navWidthMirrored(dialogCss)}`);
+}
+
 const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string, Record<string, string>]> = [
   ['en', (key) => en[key], en],
   ['zh-CN', (key) => zhCN[key], zhCN],
@@ -457,6 +929,38 @@ const EN_SETTINGS_KEYS = Object.keys(en).filter((key) => key.startsWith('setting
   delete mutated['settings.close'];
   const missingKeys = Object.keys(mutated).filter((key) => key.startsWith('settings.')).sort();
   check('control: a catalog missing the close label fails the same key-set predicate',
+    !parity(missingKeys) && parity(EN_SETTINGS_KEYS),
+    `mutatedKeys=${missingKeys.length}, realKeys=${EN_SETTINGS_KEYS.length}`);
+}
+
+{
+  const want = ['Appearance', '外观', 'Внешний вид', 'Apparence'];
+  const drift = CATALOGS
+    .map(([locale, lookup], index) => ({ locale, actual: lookup(SECTION_LABEL_KEY as MessageKey), want: want[index]! }))
+    .filter((row) => row.actual !== row.want);
+  check('all four catalogs carry the appearance section label with its pinned value',
+    drift.length === 0,
+    drift.length === 0 ? want.join(' | ')
+      : drift.map((row) => `${row.locale}=${JSON.stringify(row.actual)}`).join('; '));
+}
+
+{
+  const sectionKeys = SETTINGS_SECTIONS.map((section) => `settings.sections.${section}` as MessageKey);
+  const missing = CATALOGS
+    .flatMap(([locale, , dict]) => sectionKeys
+      .filter((key) => !(key in dict))
+      .map((key) => `${locale}:${key}`));
+  check('every shipped section id has a label in every catalog',
+    sectionKeys.length === SETTINGS_SECTIONS.length && missing.length === 0,
+    missing.length === 0 ? `${CATALOGS.length} catalogs × ${sectionKeys.length} sections` : missing.join(', '));
+}
+
+{
+  const mutated = { ...en } as Record<string, string>;
+  const parity = (keys: string[]): boolean => keys.join(',') === EN_SETTINGS_KEYS.join(',');
+  delete mutated[SECTION_LABEL_KEY];
+  const missingKeys = Object.keys(mutated).filter((key) => key.startsWith('settings.')).sort();
+  check('control: a catalog missing the appearance section label fails the same key-set predicate',
     !parity(missingKeys) && parity(EN_SETTINGS_KEYS),
     `mutatedKeys=${missingKeys.length}, realKeys=${EN_SETTINGS_KEYS.length}`);
 }

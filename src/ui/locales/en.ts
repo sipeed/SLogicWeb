@@ -849,6 +849,7 @@ export const en = {
   'settings.language': 'Language',
   'settings.theme': 'Theme',
   'settings.close': 'Close',
+  'settings.sections.appearance': 'Appearance',
 
   // ----------------------------------------------------------- shortcuts
   'shortcuts.title': 'Shortcuts and gestures',

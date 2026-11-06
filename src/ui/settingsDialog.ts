@@ -1,9 +1,28 @@
 import { t } from './i18n.js';
+import type { MessageKey } from './i18n.js';
 
 export const SETTINGS_DIALOG_ID = 'settings-dialog';
 export const SETTINGS_DIALOG_WIDTH = 560;
 export const SETTINGS_DIALOG_HEIGHT = 360;
 export const SETTINGS_NAV_WIDTH = 152;
+
+export const SETTINGS_SECTIONS = ['appearance'] as const;
+export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number];
+
+const SECTION_LABELS: Record<SettingsSectionId, MessageKey> = {
+  appearance: 'settings.sections.appearance',
+};
+
+export function settingsSectionAfter(key: string, current: SettingsSectionId): SettingsSectionId | null {
+  const index = SETTINGS_SECTIONS.indexOf(current);
+  const last = SETTINGS_SECTIONS.length - 1;
+  let next: SettingsSectionId | null = null;
+  if (key === 'ArrowUp') next = SETTINGS_SECTIONS[index > 0 ? index - 1 : last];
+  else if (key === 'ArrowDown') next = SETTINGS_SECTIONS[index < last ? index + 1 : 0];
+  else if (key === 'Home') next = SETTINGS_SECTIONS[0];
+  else if (key === 'End') next = SETTINGS_SECTIONS[last];
+  return next === current ? null : next;
+}
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -35,6 +54,7 @@ export class SettingsDialog {
   private readonly title: HTMLHeadingElement;
   private readonly closeButton: HTMLButtonElement;
   private readonly body: HTMLDivElement;
+  private section: SettingsSectionId = SETTINGS_SECTIONS[0];
   private invoker: HTMLElement | null = null;
 
   constructor(private readonly host: SettingsDialogHost) {
@@ -80,7 +100,7 @@ export class SettingsDialog {
     this.invoker = invoker;
     this.renderStrings();
     this.dialog.showModal();
-    this.focusRow(null);
+    this.focusKeyed(null);
   }
 
   close(): void {
@@ -97,23 +117,81 @@ export class SettingsDialog {
       : undefined;
     this.title.textContent = t('settings.title');
     this.closeButton.setAttribute('aria-label', t('settings.close'));
-    this.body.replaceChildren(this.appearancePane());
-    if (restore !== undefined) this.focusRow(restore);
+    this.renderBody();
+    if (restore !== undefined) this.focusKeyed(restore);
   }
 
-  private focusRow(key: string | null): void {
-    const rows = [...this.body.querySelectorAll<HTMLElement>('[data-settings-key]')];
-    const row = key === null
-      ? rows[0]
-      : rows.find((candidate) => candidate.dataset.settingsKey === key) ?? rows[0];
-    (row ?? this.closeButton).focus({ preventScroll: true });
+  private renderBody(): void {
+    this.body.replaceChildren(this.nav(), this.pane());
   }
 
-  private appearancePane(): HTMLElement {
-    const pane = document.createElement('div');
+  private nav(): HTMLElement {
+    const nav = document.createElement('nav');
+    nav.className = 'settings-nav';
+    nav.setAttribute('role', 'tablist');
+    nav.setAttribute('aria-orientation', 'vertical');
+    nav.setAttribute('aria-label', t('settings.title'));
+    nav.addEventListener('keydown', (event) => this.onNavKey(event));
+    for (const section of SETTINGS_SECTIONS) nav.appendChild(this.navItem(section));
+    return nav;
+  }
+
+  private navItem(section: SettingsSectionId): HTMLButtonElement {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = 'settings-nav-item';
+    tab.id = `settings-tab-${section}`;
+    tab.dataset.settingsKey = `tab:${section}`;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-controls', `settings-panel-${section}`);
+    const selected = section === this.section;
+    tab.classList.toggle('selected', selected);
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    tab.textContent = t(SECTION_LABELS[section]);
+    tab.addEventListener('click', () => this.selectSection(section));
+    return tab;
+  }
+
+  private pane(): HTMLElement {
+    const pane = document.createElement('section');
     pane.className = 'settings-pane';
-    pane.append(this.labelsRow(), this.shortcutsRow());
+    pane.id = `settings-panel-${this.section}`;
+    pane.tabIndex = 0;
+    pane.setAttribute('role', 'tabpanel');
+    pane.setAttribute('aria-labelledby', `settings-tab-${this.section}`);
+    pane.append(...this.paneContent(this.section));
     return pane;
+  }
+
+  private paneContent(section: SettingsSectionId): HTMLElement[] {
+    return section === 'appearance' ? [this.labelsRow(), this.shortcutsRow()] : [];
+  }
+
+  private onNavKey(event: KeyboardEvent): void {
+    const target = settingsSectionAfter(event.key, this.section);
+    if (target === null) return;
+    event.preventDefault();
+    this.selectSection(target);
+  }
+
+  private selectSection(section: SettingsSectionId): void {
+    if (section === this.section) return;
+    this.section = section;
+    this.renderBody();
+    this.focusKeyed(`tab:${section}`);
+  }
+
+  private focusKeyed(key: string | null): void {
+    const keyed = key === null
+      ? undefined
+      : [...this.body.querySelectorAll<HTMLElement>('[data-settings-key]')]
+        .find((candidate) => candidate.dataset.settingsKey === key);
+    (keyed ?? this.activeTab() ?? this.closeButton).focus({ preventScroll: true });
+  }
+
+  private activeTab(): HTMLElement | null {
+    return this.body.querySelector<HTMLElement>(`#settings-tab-${this.section}`);
   }
 
   private labelsRow(): HTMLButtonElement {
