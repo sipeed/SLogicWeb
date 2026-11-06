@@ -1842,7 +1842,7 @@ export class App {
     const view = this.stack.view;
     return liveWindowHasNewData(
       this.stack.followLatest, view.start, view.end,
-      this.store.length, this.store.droppedSamples, this.drawnWindow,
+      this.captureStore.length, this.store.droppedSamples, this.drawnWindow,
     );
   }
 
@@ -1861,7 +1861,7 @@ export class App {
     this.drawnWindow = {
       viewStart: view.start,
       viewEnd: view.end,
-      dataLen: this.store.length,
+      dataLen: this.captureStore.length,
       dropped: this.store.droppedSamples,
     };
   }

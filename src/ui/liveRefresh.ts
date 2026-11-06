@@ -42,6 +42,7 @@ export function liveDrawDue(
 export interface LiveWindow {
   viewStart: number;
   viewEnd: number;
+  /** End of the data that can still grow: `store.length`, or a composite's frontier. */
   dataLen: number;
   dropped: number;
 }

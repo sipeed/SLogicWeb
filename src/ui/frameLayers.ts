@@ -55,7 +55,7 @@ export function planLayers(
     prev.frontier !== next.frontier || prev.triggerSample !== next.triggerSample ||
     prev.tintSig !== next.tintSig;
   return {
-    wave: view || size || rows || theme || data,
+    wave: view || size || rows || theme || data || prev.frontier !== next.frontier,
     axis: size || prev.tickSig !== next.tickSig,
     overlay,
     // The bus rows share the overlay canvas, which beginFrame() clears.

@@ -37,7 +37,7 @@ const base: FrameFingerprint = {
     ['the row list changed', changed({ rowSig: 12 }), [true, false, true, true]],
     ['the theme changed', changed({ themeSig: 'light' }), [true, false, true, true]],
     ['the ticks changed', changed({ tickSig: 23 }), [false, true, false, false]],
-    ['the live edge moved', changed({ frontier: 5001 }), [false, false, true, true]],
+    ['the current wave advanced (repeat composite)', changed({ frontier: 5001 }), [true, false, true, true]],
     ['the trigger moved', changed({ triggerSample: 1500 }), [false, false, true, true]],
     ['the repeat tint changed', changed({ tintSig: 45 }), [false, false, true, true]],
     ['a bus input changed', changed({ busSig: 34 }), [false, false, false, true]],
