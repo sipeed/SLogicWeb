@@ -818,7 +818,7 @@ function between(source: string, start: string, end: string): string {
     !appSource.includes("new WaveformMarker('A'"),
     `constructions=${constructions.length}`);
 
-  const drawBlock = between(appSource, 'private draw(): void {', 'private drawAxisCanvas(');
+  const drawBlock = between(appSource, 'private draw(', 'private drawAxisCanvas(');
   const draws = appSource.match(/\.draw\(this\.overlay, /g) ?? [];
   check('the application paints every cursor through the class in one list-order loop',
     draws.length === 1 &&

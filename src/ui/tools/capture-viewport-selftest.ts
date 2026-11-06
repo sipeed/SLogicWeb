@@ -67,7 +67,7 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
   const note = between(app, 'private beginViewportGesture()', 'private fitViewport()');
   const capture = between(app, 'private captureFixedView()', 'private sessionRetainedSeconds()');
   const apply = between(app, 'private applySessionView()', 'private applyTriggerViewAnchor');
-  const draw = between(app, 'private draw(): void {', 'private drawLaneSurfaces');
+  const draw = between(app, 'private draw(', 'private drawLaneSurfaces');
   const wired = app.includes('private viewIntent = false;') &&
     note.includes('if (this.session) this.viewIntent = true;') &&
     note.includes('this.setFollow(false);') &&
@@ -174,7 +174,7 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
 }
 
 {
-  const draw = between(app, 'private draw(): void {', 'private drawLaneSurfaces');
+  const draw = between(app, 'private draw(', 'private drawLaneSurfaces');
   const pendingAt = draw.indexOf('this.stack.setViewport(pendingViewport.start, pendingViewport.end);');
   const applyAt = draw.indexOf('this.applySessionView();');
   const triggerAt = draw.indexOf('this.applyTriggerViewAnchor(rescaled);');
@@ -250,7 +250,7 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
 }
 
 {
-  const draw = between(app, 'private draw(): void {', 'private drawLaneSurfaces');
+  const draw = between(app, 'private draw(', 'private drawLaneSurfaces');
   const syncAt = draw.indexOf('this.stack.syncSize();');
   const pendingAt = draw.indexOf('this.stack.setViewport(pendingViewport.start, pendingViewport.end);');
   check('draw applies width adaptation before the pending toolbar viewport',

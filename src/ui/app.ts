@@ -103,6 +103,9 @@ import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.j
 import { capturePostTriggerSamples, carryCaptureDuration } from './capturePolicy.js';
 import { liveDrawDue, liveWindowHasNewData, type LiveWindow } from './liveRefresh.js';
 import {
+  fingerprintOf, planLayers, type FrameFingerprint,
+} from './frameLayers.js';
+import {
   FRAME_LAYERS, FrameCostRing,
   type FrameLayer, type FrameStatsSnapshot,
 } from './frameStats.js';
@@ -216,6 +219,7 @@ export class App {
   private liveFramesSkipped = 0;
   private statusRenders = 0;
   private drawnWindow: LiveWindow = { viewStart: 0, viewEnd: 0, dataLen: 0, dropped: 0 };
+  private layerFingerprint: FrameFingerprint | null = null;
   private ingestBlocks = 0;
   private readonly layerDraws: Record<FrameLayer, number> =
     { wave: 0, axis: 0, overlay: 0, bus: 0, overview: 0 };
@@ -1814,12 +1818,13 @@ export class App {
       }
     }
     if (!this.dirty && !liveDue) return;
+    const forced = this.dirty;
     this.dirty = false;
     this.livePending = false;
     this.liveDrawAt = now;
     const drawStartedAt = performance.now();
     try {
-      this.draw();
+      this.draw(forced);
     } catch (e) {
       this.fail('error.render', e);
     } finally {
@@ -1898,13 +1903,14 @@ export class App {
     this.liveFramesSkipped = 0;
     this.statusRenders = 0;
     this.ingestBlocks = 0;
+    this.layerFingerprint = null;
     for (const layer of FRAME_LAYERS) {
       this.layerDraws[layer] = 0;
       this.layerSkips[layer] = 0;
     }
   }
 
-  private draw(): void {
+  private draw(force = true): void {
     // A quiet Repeat wave keeps the previous frame until its first samples arrive; a
     // blank store would otherwise flash the plot and axis at every wave boundary.
     if (this.repeatWaveHolding && this.store.length === 0) return;
@@ -1933,8 +1939,17 @@ export class App {
     this.overlay.syncSize(wCss, hCss);
     this.el.hint.style.display = this.store.length > 0 ? 'none' : 'flex';
 
-    this.stack.render();
-    this.layerDraws.wave += 1;
+    const boxes = this.stack.boxes();
+    const repeatTints = this.repeatTintRegions();
+    const before = this.stack.view;
+    const wavePlan = planLayers(this.layerFingerprint, this.frameFingerprint(
+      before.start, before.end, boxes, repeatTints, hCss, 0), force);
+    if (wavePlan.wave) {
+      this.stack.render();
+      this.layerDraws.wave += 1;
+    } else {
+      this.layerSkips.wave += 1;
+    }
     const view = this.stack.view;
     this.syncScopeBars();
     const sr = this.store.samplerate;
@@ -1944,55 +1959,132 @@ export class App {
       ((view.end - timeOrigin) / sr) * 1e12,
       wCss, sr,
     );
+    const fingerprint = this.frameFingerprint(
+      view.start, view.end, boxes, repeatTints, hCss, this.tickSignature(ticks, wCss));
+    const plan = planLayers(this.layerFingerprint, fingerprint, force);
 
-    this.drawAxisCanvas(ticks, wCss);
-    this.layerDraws.axis += 1;
-
-    this.overlay.beginFrame();
-    this.layerDraws.overlay += 1;
-    const boxes = this.stack.boxes();
-    const repeatTints = this.repeatTintRegions();
-    if (repeatTints) {
-      // On the grid canvas, before its gridlines: the tint is the layer "behind" the
-      // opaque waveform canvases. No vertical rule - the two surfaces are the signal.
-      this.overlay.drawRegionTint(repeatTints, boxes);
+    if (plan.axis) {
+      this.drawAxisCanvas(ticks, wCss);
+      this.layerDraws.axis += 1;
+    } else {
+      this.layerSkips.axis += 1;
     }
-    this.overlay.drawGrid(ticks);
-    this.drawLaneSurfaces(boxes, repeatTints);
-    for (const b of boxes) {
-      if (b.spec.kind === 'blank') {
-        this.overlay.drawBlankRow(b.top, b.band, t('plot.notCaptured'), repeatTints);
+
+    if (plan.overlay) {
+      this.overlay.beginFrame();
+      this.layerDraws.overlay += 1;
+      if (repeatTints) {
+        // On the grid canvas, before its gridlines: the tint is the layer "behind" the
+        // opaque waveform canvases. No vertical rule - the two surfaces are the signal.
+        this.overlay.drawRegionTint(repeatTints, boxes);
       }
-    }
-    this.overlay.drawLevels(boxes.map((b) => ({
-      top: b.top, band: b.band, isChannel: b.spec.kind === 'channel',
-    })));
-    this.drawLaneBubbles(boxes, wCss);
-    beginAnalogFrameBudget();
-    try {
-      this.drawBusRows(boxes, repeatTints);
-      this.layerDraws.bus += 1;
-    } finally {
-      endAnalogFrameBudget();
-    }
-
-    const triggerAt = this.displayTriggerSample();
-    if (triggerAt !== null) {
-      this.overlay.drawTrigger(this.toPx(triggerAt));
+      this.overlay.drawGrid(ticks);
+      this.drawLaneSurfaces(boxes, repeatTints);
+      for (const b of boxes) {
+        if (b.spec.kind === 'blank') {
+          this.overlay.drawBlankRow(b.top, b.band, t('plot.notCaptured'), repeatTints);
+        }
+      }
+      this.overlay.drawLevels(boxes.map((b) => ({
+        top: b.top, band: b.band, isChannel: b.spec.kind === 'channel',
+      })));
+      this.drawLaneBubbles(boxes, wCss);
+    } else {
+      this.layerSkips.overlay += 1;
     }
 
-    // The live edge belongs to the current wave, not to the composite's far end: a Fixed
-    // Repeat viewport keeps old data beyond the frontier, and a held previous frame is
-    // not live at all.
-    const liveAt = this.repeatShowingFront ? null : this.captureStore.length;
-    if (this.running && liveAt !== null && liveAt > 0) {
-      this.overlay.drawLiveEdge(this.toPx(liveAt));
+    if (plan.bus) {
+      beginAnalogFrameBudget();
+      try {
+        this.drawBusRows(boxes, repeatTints);
+        this.layerDraws.bus += 1;
+      } finally {
+        endAnalogFrameBudget();
+      }
+    } else {
+      this.layerSkips.bus += 1;
     }
-    for (const cursor of this.cursors) cursor.marker.draw(this.overlay, (sample) => this.toPx(sample));
-    if (this.hover) this.overlay.drawHover(this.hover);
+
+    if (plan.overlay) {
+      const triggerAt = this.displayTriggerSample();
+      if (triggerAt !== null) {
+        this.overlay.drawTrigger(this.toPx(triggerAt));
+      }
+
+      // The live edge belongs to the current wave, not to the composite's far end: a Fixed
+      // Repeat viewport keeps old data beyond the frontier, and a held previous frame is
+      // not live at all.
+      const liveAt = this.repeatShowingFront ? null : this.captureStore.length;
+      if (this.running && liveAt !== null && liveAt > 0) {
+        this.overlay.drawLiveEdge(this.toPx(liveAt));
+      }
+      for (const cursor of this.cursors) cursor.marker.draw(this.overlay, (sample) => this.toPx(sample));
+      if (this.hover) this.overlay.drawHover(this.hover);
+    }
+    this.layerFingerprint = fingerprint;
     this.renderOverview();
     this.renderStatus();
     this.recordDrawnWindow();
+  }
+
+  private frameFingerprint(
+    viewStart: number, viewEnd: number, boxes: readonly RowBox[],
+    tints: readonly RegionTint[] | null, hCss: number, tickSig: number,
+  ): FrameFingerprint {
+    const dpr = globalThis.devicePixelRatio || 1;
+    const rows: (string | number)[] = [];
+    for (const box of boxes) {
+      rows.push(box.spec.kind, box.spec.channel, box.spec.heightCss,
+        box.spec.analyzer ?? -1, box.spec.bus ?? -1, box.spec.shows ?? -1, box.top, box.band);
+    }
+    for (const channel of this.channels) rows.push(channel.color);
+    for (const lane of this.lanes) {
+      rows.push(lane.laneChannel, lane.displayRow, lane.analyzer.id, lane.analyzer.color,
+        lane.analyzer.result?.annotations.count ?? -1);
+    }
+    const tintParts: (string | number)[] = [];
+    for (const tint of tints ?? []) tintParts.push(tint.startCss, tint.endCss, tint.color);
+    return {
+      viewStart,
+      viewEnd,
+      widthPx: this.stack.widthDevicePx,
+      heightPx: Math.round(hCss * dpr),
+      dataLen: this.store.length,
+      dropped: this.store.droppedSamples,
+      frontier: this.captureStore.length,
+      triggerSample: this.displayTriggerSample(),
+      rowSig: fingerprintOf(rows),
+      themeSig: this.paintedTheme,
+      tickSig,
+      busSig: this.busSignature(viewStart, viewEnd),
+      tintSig: fingerprintOf(tintParts),
+    };
+  }
+
+  private tickSignature(ticks: TickSet, wCss: number): number {
+    const parts: (string | number)[] = [
+      Math.round(wCss), ticks.minorPs, ticks.majorPs,
+      ticks.pinned?.label ?? '', ticks.pinned?.x ?? -1,
+    ];
+    for (const tick of ticks.ticks) parts.push(tick.ps, tick.x, tick.major ? 1 : 0, tick.label);
+    for (const cursor of this.cursors) {
+      parts.push(cursor.marker.label, cursor.marker.sample ?? -1);
+    }
+    return fingerprintOf(parts);
+  }
+
+  private busSignature(viewStart: number, viewEnd: number): number {
+    const parts: (string | number | boolean)[] = [
+      viewStart, viewEnd, this.stack.widthDevicePx, this.store.length,
+      this.store.droppedSamples, this.captureStore.length, this.running,
+    ];
+    for (const bus of this.busViews) {
+      parts.push(bus.id, bus.color, bus.heightCss, bus.style, bus.hideSources,
+        bus.fullScaleV ?? -1, bus.offsetV, bus.voltsPerDiv ?? -1, bus.zeroPosition ?? -1,
+        bus.analogGroup ?? -1, bus.spec.bits.join(','), String(bus.spec.clock ?? -1),
+        bus.spec.encoding, bus.builder?.pyramid.doneUpTo ?? -1, bus.builder?.done ?? false);
+    }
+    return fingerprintOf(parts);
   }
 
   private overviewState(): OverviewState {

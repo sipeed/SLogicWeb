@@ -104,7 +104,7 @@ function referencePercentile(values: readonly number[], p: number): number {
   const permitted = frame.includes('this.liveFramesPermitted += 1;');
   const drawnAt = frame.indexOf('this.liveFramesDrawn += 1;');
   const costStart = frame.indexOf('const drawStartedAt = performance.now();');
-  const drawCall = frame.indexOf('this.draw();');
+  const drawCall = frame.search(/this\.draw\([^)]*\);/);
   const recorded = frame.indexOf('this.recordFrameCost(performance.now() - drawStartedAt, liveDue);');
   const finallyBlock = recorded > 0 && frame.lastIndexOf('} finally {', recorded) > 0;
   const timed = costStart >= 0 && drawCall > costStart && recorded > drawCall && finallyBlock;

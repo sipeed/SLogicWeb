@@ -289,7 +289,7 @@ const startSrc = app.slice(
 {
   const enforce = app.slice(app.indexOf('private enforceLoopRetention'),
     app.indexOf('private async stopCapture'));
-  const draw = app.slice(app.indexOf('private draw(): void {'), app.indexOf('private drawLaneSurfaces'));
+  const draw = app.slice(app.indexOf('private draw('), app.indexOf('private drawLaneSurfaces'));
   const gestures = app.slice(app.indexOf('private noteViewportIntent()'),
     app.indexOf('private centerOverview'));
 

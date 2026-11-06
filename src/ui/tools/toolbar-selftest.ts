@@ -1002,7 +1002,7 @@ const viewportRestoreOrder = [
 const noTransientWidthSync = !settingsItemsBody.includes('this.stack.syncSize();');
 const noImmediateViewportMutation = !settingsItemsBody.includes('this.stack.setViewport') &&
   !settingsItemsBody.includes('this.stack.setFollowLatest');
-const drawBody = methodBody('private draw(): void {');
+const drawBody = methodBody('private draw(');
 const frameRestoreOrder = [
   'this.pendingToolbarViewport = null;',
   'this.stack.view.start === pendingViewport.start',

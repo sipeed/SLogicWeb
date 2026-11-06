@@ -337,7 +337,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     surfacePass && bubblePass && !app.includes('this.drawLanes('),
     `surface=${surfacePass}, bubbles=${bubblePass}, oldPass=${app.includes('this.drawLanes(')}`);
 
-  const drawStart = app.indexOf('private draw(): void {');
+  const drawStart = app.indexOf('private draw(');
   const drawEnd = app.indexOf('private drawAxisCanvas(');
   const drawSource = drawStart >= 0 && drawEnd > drawStart
     ? app.slice(drawStart, drawEnd) : '';
@@ -588,7 +588,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `hint=${pumpSrc.includes('this.captureIsLoop ? this.loopRetentionLen * 2 : store.length')}`);
 
   const frameStart = appSrc.indexOf('private frame =');
-  const frameEnd = frameStart >= 0 ? appSrc.indexOf('private draw()', frameStart) : -1;
+  const frameEnd = frameStart >= 0 ? appSrc.indexOf('private draw(', frameStart) : -1;
   const frameSrc = frameEnd > frameStart ? appSrc.slice(frameStart, frameEnd) : '';
   const highRateGuard = frameSrc.includes('this.running && this.captureIsLoop &&') &&
     frameSrc.includes('this.store.samplerate * bytesPerSampleForChannels(this.store.channelCount) >= LOOP_BUILD_SUSPEND_BYTES_PER_SEC');

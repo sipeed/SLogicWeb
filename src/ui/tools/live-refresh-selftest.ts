@@ -113,7 +113,7 @@ function check(name: string, pass: boolean, detail: string): void {
       return at > previous;
     }) &&
     frame.includes('this.dirty = false;') && frame.includes('this.livePending = false;') &&
-    frame.includes('this.liveDrawAt = now;') && frame.includes('this.draw();');
+    frame.includes('this.liveDrawAt = now;') && /this\.draw\([^)]*\);/.test(frame);
   // The old high-rate branch returned before drawing: a fast loop showed no live view.
   const liveAtAnyRate = frame.length > 0 && !frame.includes('if (highRateLoop) return;') &&
     frame.includes('this.pumpBusBuilders();');
