@@ -15,6 +15,11 @@
  *   - #axis       wheel per `wheelAction`; Shift+wheel pans time; left drag pans.
  *   - #overview   wheel per `wheelAction`; Shift+wheel pans the timeline; left click or
  *                 drag centers the viewport.
+ *   - #labels-spacer (the corner cell, DESIGN §3.4) click Fit fits the view; the wheel
+ *                 over Fit zooms with or without Ctrl and Shift+wheel pans
+ *                 (`fitWheelAction`); clicking the capture summary opens the Capture
+ *                 panel; clicking + Decoder opens the Decoders panel. It sits inside
+ *                 #labels-col, so it is matched first.
  *   - #labels-col wheel scrolls the row stack; double-clicking a name renames it; the
  *                 trigger slot opens the trigger editor.
  *   - #side-panel wheel scrolls the panel.
@@ -39,10 +44,10 @@
  */
 
 import type { MessageKey } from './i18n.js';
-import { wheelAction } from './wheelGesture.js';
+import { fitWheelAction, wheelAction } from './wheelGesture.js';
 
 export const INTERACTION_AREAS = [
-  'none', 'toolbar', 'labels', 'plot', 'axis', 'overview', 'side-panel',
+  'none', 'toolbar', 'labels', 'plot', 'axis', 'overview', 'side-panel', 'corner',
 ] as const;
 
 export type InteractionArea = (typeof INTERACTION_AREAS)[number];
@@ -91,6 +96,7 @@ export interface InteractionAreaSelector {
  * drift from the mapping.
  */
 export const INTERACTION_AREA_SELECTORS: readonly InteractionAreaSelector[] = Object.freeze([
+  Object.freeze({ area: 'corner', selector: '#labels-spacer' }),
   Object.freeze({ area: 'plot', selector: '#plot' }),
   Object.freeze({ area: 'axis', selector: '#axis' }),
   Object.freeze({ area: 'overview', selector: '#overview' }),
@@ -122,6 +128,7 @@ export function interactionAreaLabelKey(area: InteractionArea): MessageKey {
     case 'axis': return 'hints.area.axis';
     case 'overview': return 'hints.area.overview';
     case 'side-panel': return 'hints.area.sidePanel';
+    case 'corner': return 'hints.area.corner';
     case 'none': return 'hints.area.none';
   }
 }
@@ -211,6 +218,33 @@ const LABELS_NO_CAPTURE = Object.freeze([
   hint('hints.labels.trigger', 'left'),
 ]);
 
+/** The corner's Fit wheel hints, read off `fitWheelAction` like the other wheel areas. */
+function cornerWheelHints(): HintSpec[] {
+  const out: HintSpec[] = [];
+  const plain = fitWheelAction({ ctrlKey: false, shiftKey: false }, true);
+  const ctrl = fitWheelAction({ ctrlKey: true, shiftKey: false }, true);
+  if (plain === 'zoom') out.push(hint('hints.corner.zoom', 'wheel'));
+  if (ctrl === 'zoom' && plain !== 'zoom') out.push(hint('hints.corner.zoom', 'wheel', 'Ctrl'));
+  if (fitWheelAction({ ctrlKey: false, shiftKey: true }, true) === 'pan') {
+    out.push(hint('hints.corner.pan', 'wheel', 'Shift'));
+  }
+  return out;
+}
+
+const CORNER_PANELS = [
+  hint('hints.corner.summary', 'left'),
+  hint('hints.corner.addDecoder', 'left'),
+];
+
+const CORNER_CAPTURE = Object.freeze([
+  hint('hints.corner.fit', 'left'),
+  ...cornerWheelHints(),
+  ...CORNER_PANELS,
+]);
+
+/** Fit is disabled without a capture; the summary and + Decoder still open their panels. */
+const CORNER_NO_CAPTURE = Object.freeze([NO_CAPTURE, ...CORNER_PANELS]);
+
 const SIDE_PANEL_HINTS = Object.freeze([
   hint('hints.sidePanel.scroll', 'wheel'),
 ]);
@@ -236,6 +270,7 @@ export function interactionHints(
       return context.hasCapture ? WHEEL_CAPTURE.overview[wheelVariant(context)] : OVERVIEW_NO_CAPTURE;
     case 'labels': return context.hasCapture ? LABELS_CAPTURE : LABELS_NO_CAPTURE;
     case 'side-panel': return SIDE_PANEL_HINTS;
+    case 'corner': return context.hasCapture ? CORNER_CAPTURE : CORNER_NO_CAPTURE;
     case 'toolbar': return TOOLBAR_HINTS;
     case 'none': return GENERAL_HINTS;
   }

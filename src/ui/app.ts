@@ -99,7 +99,10 @@ import {
 } from './sidebar.js';
 import { SidebarHost } from './sidebarHost.js';
 import { shortcutIdFor } from './shortcuts.js';
-import { wheelAction, wheelDeltaPixels, type WheelAction, type WheelModifiers } from './wheelGesture.js';
+import {
+  fitWheelAction, wheelAction, wheelDeltaPixels, type WheelAction, type WheelModifiers,
+} from './wheelGesture.js';
+import { cornerView, cornerViewEqual, type CornerView } from './cornerCell.js';
 import { ShortcutsDialog } from './shortcutsDialog.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
 import {
@@ -466,6 +469,8 @@ export class App {
   private renderedInteractionArea: InteractionArea | null = null;
   private renderedInteractionHasCapture: boolean | null = null;
   private renderedInteractionOverflow: boolean | null = null;
+  /** The corner strings last written, so an unchanged frame skips the DOM. */
+  private renderedCorner: CornerView | null = null;
   private decodeBusy = false;
   private decodeWarm = false;
   private reacquiring = false;
@@ -504,7 +509,10 @@ export class App {
     interactionHints: HTMLUListElement;
     hint: HTMLDivElement; transport: HTMLButtonElement;
     connect: HTMLButtonElement; open: HTMLButtonElement; save: HTMLButtonElement;
-    fit: HTMLButtonElement; fullscreen: HTMLButtonElement; settings: HTMLButtonElement;
+    fullscreen: HTMLButtonElement; settings: HTMLButtonElement;
+    corner: HTMLDivElement; cornerSummary: HTMLButtonElement; cornerSummaryText: HTMLSpanElement;
+    cornerFit: HTMLButtonElement; cornerFitSpan: HTMLSpanElement;
+    cornerAddDecoder: HTMLButtonElement; cornerAddText: HTMLSpanElement; cornerTrigger: HTMLSpanElement;
     language: HTMLButtonElement; theme: HTMLButtonElement;
     errorBanner: HTMLDivElement; errorBannerText: HTMLSpanElement; errorDismiss: HTMLButtonElement;
     errorGuidance: HTMLSpanElement; errorRetry: HTMLButtonElement;
@@ -534,7 +542,14 @@ export class App {
       connect: must<HTMLButtonElement>('btn-connect'),
       open: must<HTMLButtonElement>('btn-open'),
       save: must<HTMLButtonElement>('btn-save'),
-      fit: must<HTMLButtonElement>('btn-fit'),
+      corner: must<HTMLDivElement>('labels-spacer'),
+      cornerSummary: must<HTMLButtonElement>('corner-summary'),
+      cornerSummaryText: mustQuery<HTMLSpanElement>('#corner-summary .corner-summary-text'),
+      cornerFit: must<HTMLButtonElement>('corner-fit'),
+      cornerFitSpan: mustQuery<HTMLSpanElement>('#corner-fit .corner-fit-span'),
+      cornerAddDecoder: must<HTMLButtonElement>('corner-add-decoder'),
+      cornerAddText: mustQuery<HTMLSpanElement>('#corner-add-decoder .corner-add-text'),
+      cornerTrigger: must<HTMLSpanElement>('corner-trigger'),
       fullscreen: must<HTMLButtonElement>('btn-fullscreen'),
       settings: must<HTMLButtonElement>('btn-settings'),
       language: must<HTMLButtonElement>('btn-language'),
@@ -658,6 +673,7 @@ export class App {
     this.sidebarHost.containerFor('decoders');
 
     this.wireToolbar();
+    this.wireCorner();
     this.wirePlot();
     this.wireInteractionHints();
 
@@ -2089,6 +2105,7 @@ export class App {
       // The hint bar is not part of the draw pass, and a live frame whose window
       // cannot change no longer reaches it, so refresh it on this clock instead.
       this.renderInteractionBar();
+      this.renderCorner();
     }
     // Interactions (`dirty`) draw in the next frame. New samples (`livePending`) draw on
     // a cadence paced by the cost of the previous frame, instead of on every packet.
@@ -2333,6 +2350,7 @@ export class App {
     this.layerFingerprint = fingerprint;
     this.renderOverview(force);
     this.renderInteractionBar();
+    this.renderCorner();
     this.recordDrawnWindow();
   }
 
@@ -2551,8 +2569,8 @@ export class App {
     // and the hint bar. By default a plain wheel scrolls the channel stack while it
     // overflows (HSync/DSView habit), Ctrl zooms time and Shift pans it; with every row on
     // screen, or with the "wheel zooms" preference (PulseView habit), a plain wheel zooms.
-    const wheelNavigate = (e: WheelEvent, left: number): void => {
-      const action = this.wheelActionFor(e);
+    const wheelNavigate = (e: WheelEvent, left: number, target: 'rows' | 'fit' = 'rows'): void => {
+      const action = this.wheelActionFor(e, target);
       if (action === 'native') return;
       // The browser's own Ctrl+wheel page zoom must be stopped even before any capture
       // exists; only after that is it safe to treat an empty store as a no-op.
@@ -2587,6 +2605,11 @@ export class App {
     this.el.axis.addEventListener('wheel', (e) => {
       const left = this.el.axis.getBoundingClientRect().left;
       wheelNavigate(e, left);
+    }, { passive: false });
+    // The corner Fit button zooms like the ruler, around the plot centre as +/- do: the
+    // button is not on the time axis, so the pointer has no time of its own.
+    this.el.cornerFit.addEventListener('wheel', (e) => {
+      wheelNavigate(e, e.clientX - this.el.plot.clientWidth / 2, 'fit');
     }, { passive: false });
 
     // One pointer drags (pan) or grabs a cursor; two pointers pinch-zoom around their
@@ -3184,7 +3207,9 @@ export class App {
 
   /** Bookkeeping shared by every viewport gesture. */
   /** The shared wheel decision for the plot, axis and overview strip right now. */
-  private wheelActionFor(e: WheelModifiers): WheelAction {
+  private wheelActionFor(e: WheelModifiers, target: 'rows' | 'fit' = 'rows'): WheelAction {
+    // The corner Fit button is a zoom control, not a row surface (DESIGN §3.4).
+    if (target === 'fit') return fitWheelAction(e, this.store.length > 0);
     return wheelAction(e, {
       wheelZooms: this.wheelZooms,
       rowsOverflow: this.rowsOverflow(),
@@ -3784,9 +3809,6 @@ export class App {
       this.menuStack.closeOthers(this.saveMenu, 'outside');
       this.saveMenu.toggle(this.saveItems());
     });
-    must<HTMLButtonElement>('btn-fit').addEventListener('click', () => {
-      this.fitViewport();
-    });
     must<HTMLButtonElement>('btn-fullscreen').addEventListener('click', () => void this.toggleFullscreen());
     document.addEventListener('fullscreenchange', () => this.renderToolbarState());
     must<HTMLButtonElement>('btn-settings').addEventListener('click', () => {
@@ -4116,6 +4138,7 @@ export class App {
     this.relayout();       // channel cells rebuild; an open channel dialog closes here
     this.renderPanels();   // side panels + toolbar chrome
     this.renderInteractionBar(true);  // hint text follows the locale
+    this.renderCorner();              // corner strings are part of the view, keyed by text
     this.renderErrorBanner();
     this.renderPlatformNotice();
     this.dirty = true;     // canvas labels (the overview origin, tick units) re-render
@@ -4386,7 +4409,6 @@ export class App {
     this.renderDeviceCommand();
     this.el.open.setAttribute('aria-label', t('toolbar.open'));
     this.el.save.setAttribute('aria-label', t('toolbar.save'));
-    this.el.fit.setAttribute('aria-label', t('toolbar.fit'));
     const full = !!document.fullscreenElement;
     const fullscreenUnavailable = document.fullscreenEnabled === false ||
       typeof document.documentElement.requestFullscreen !== 'function';
@@ -4414,6 +4436,58 @@ export class App {
     btn.title = this.stopping ? t('toolbar.stoppingTitle')
       : showStop ? t('toolbar.stopTitle')
         : this.device ? t('toolbar.startTitle') : t('toolbar.connectHint');
+  }
+
+  /**
+   * The corner cell (DESIGN §3.4). Called from the draw pass, the running-panel clock and
+   * a locale change; the strings are compared with what was last written, so a frame
+   * whose summary, span and locale did not change touches no DOM.
+   */
+  private renderCorner(): void {
+    const cap = this.captureStore;
+    const shown = this.store;
+    const view = this.stack.view;
+    const next = cornerView(
+      cap.length > 0
+        ? { samples: cap.length, samplerate: cap.samplerate, channels: cap.channelCount } : null,
+      { storeSamples: shown.length, spanSamples: view.end - view.start, samplerate: shown.samplerate },
+    );
+    const last = this.renderedCorner;
+    if (last !== null && cornerViewEqual(last, next)) return;
+    this.renderedCorner = next;
+    const el = this.el;
+    el.cornerSummaryText.textContent = next.summary;
+    el.cornerSummary.title = next.summaryTitle;
+    el.cornerFitSpan.textContent = next.span;
+    el.cornerFit.disabled = next.fitDisabled;
+    el.cornerFit.title = next.fitTitle;
+    el.cornerFit.setAttribute('aria-label', next.fitLabel);
+    el.cornerAddText.textContent = next.addDecoder;
+    el.cornerAddDecoder.title = next.addDecoderTitle;
+    el.cornerAddDecoder.setAttribute('aria-label', next.addDecoderLabel);
+    el.cornerTrigger.title = next.triggerTitle;
+    el.corner.setAttribute('aria-label', next.groupLabel);
+  }
+
+  /** Corner clicks: Fit is the `F` action, the summary and + Decoder open their panels. */
+  private wireCorner(): void {
+    this.el.cornerFit.addEventListener('click', () => {
+      this.fitViewport();
+    });
+    this.el.cornerSummary.addEventListener('click', () => this.selectPanel('device'));
+    this.el.cornerAddDecoder.addEventListener('click', () => this.openAddDecoder());
+    this.renderCorner();
+  }
+
+  /**
+   * + Decoder: the Decoders panel with its picker focused, in Add mode. It works without a
+   * capture - attached analyzers run when data arrives. The panel mounts on first show,
+   * so the focus request is repeated once it exists.
+   */
+  private openAddDecoder(): void {
+    (this.analyzerPanel as AnalyzerPanel | undefined)?.requestPickerFocus();
+    this.selectPanel('analyzers');
+    (this.analyzerPanel as AnalyzerPanel | undefined)?.requestPickerFocus();
   }
 
   /**
@@ -6609,6 +6683,12 @@ function must<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
   if (!el) throw new Error(`index.html is missing #${id}`);
   return el as T;
+}
+
+function mustQuery<T extends HTMLElement>(selector: string): T {
+  const el = document.querySelector<T>(selector);
+  if (!el) throw new Error(`index.html is missing ${selector}`);
+  return el;
 }
 
 export { COLORS };

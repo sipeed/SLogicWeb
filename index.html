@@ -86,14 +86,6 @@
         </span>
         <span class="toolbar-item-label" aria-hidden="true" data-i18n="toolbar.shortSave">Save</span>
       </button>
-      <button id="btn-fit" class="toolbar-item" data-i18n-title="toolbar.fitTitle" title="Zoom to the whole capture" aria-label="Fit">
-        <span class="toolbar-item-media">
-          <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
-            <path d="M8 7l-5 5 5 5M16 7l5 5-5 5"></path>
-          </svg>
-        </span>
-        <span class="toolbar-item-label" aria-hidden="true" data-i18n="toolbar.shortFit">Fit</span>
-      </button>
       <span class="toolbar-separator" role="separator" aria-orientation="vertical"></span>
       <div class="toolbar-group" role="group" aria-label="View and settings" data-i18n-aria-label="toolbar.viewGroup">
         <button id="btn-fullscreen" class="toolbar-item toolbar-fullscreen" data-i18n-title="toolbar.enterFullscreenTitle" title="Enter fullscreen" aria-label="Fullscreen" aria-pressed="false">
@@ -196,7 +188,32 @@
         <!-- Channel names, waveforms, decoder annotations and readouts are data: the
              browser must never machine-translate them (the empty hint opts back in). -->
         <div id="labels-col" translate="no">
-          <div id="labels-spacer"></div>
+          <!-- The corner cell (DESIGN §3.4): capture summary and Fit over the overview,
+               + Decoder and the trigger-column caption over the ruler. App fills the
+               text; the fallbacks below are the English catalog values. -->
+          <div id="labels-spacer" class="corner-cell" role="group" aria-label="View controls">
+            <div class="corner-overview">
+              <button id="corner-summary" class="corner-summary" type="button"
+                      title="No capture yet. Click to open the Capture panel."><span class="corner-summary-text">No capture</span></button>
+              <button id="corner-fit" class="corner-btn corner-fit" type="button" disabled
+                      title="Fit is unavailable: there is no capture to fit yet." aria-label="Fit">
+                <svg class="corner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                  <path d="M8 7l-5 5 5 5M16 7l5 5-5 5"></path>
+                </svg>
+                <span class="corner-fit-span" aria-hidden="true"></span>
+              </button>
+            </div>
+            <div class="corner-ruler">
+              <button id="corner-add-decoder" class="corner-btn corner-add-decoder" type="button"
+                      title="Add a protocol decoder: opens the Decoders panel with the decoder picker" aria-label="Add decoder">
+                <svg class="corner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                  <path d="M12 5v14M5 12h14"></path>
+                </svg>
+                <span class="corner-add-text" aria-hidden="true" translate="yes">+ Decoder</span>
+              </button>
+              <span id="corner-trigger" class="corner-trigger" title="Trigger column: each row's slot below sets that channel's trigger">T</span>
+            </div>
+          </div>
           <div id="channel-list"></div>
         </div>
 

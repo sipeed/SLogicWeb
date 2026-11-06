@@ -76,6 +76,8 @@ export class AnalyzerPanel {
   /** The attached analyzer the form edits, or null when it adds a new one. */
   private editing: string | null = null;
   private advancedOpen = false;
+  /** The corner's + Decoder asked for the picker; honoured by the next render that has it. */
+  private pickerFocusPending = false;
 
   constructor(
     private readonly root: HTMLElement,
@@ -96,6 +98,25 @@ export class AnalyzerPanel {
     } catch {
       this.advancedOpen = false;
     }
+  }
+
+  /**
+   * Leave edit mode and focus the decoder picker (the corner's + Decoder). The picker is
+   * focused now if it is on screen, otherwise by the render that builds it - including
+   * the one after the decoder catalog hydrates.
+   */
+  requestPickerFocus(): void {
+    if (this.editing !== null) this.stopEditing();
+    this.pickerFocusPending = true;
+    this.focusPicker();
+  }
+
+  private focusPicker(): void {
+    const trigger = this.root.querySelector<HTMLElement>(
+      '.select-trigger[data-select-key="analyzer.decoder"]');
+    if (trigger === null || !trigger.isConnected || trigger.getClientRects().length === 0) return;
+    this.pickerFocusPending = false;
+    trigger.focus();
   }
 
   get editingId(): string | null {
@@ -353,6 +374,11 @@ export class AnalyzerPanel {
       add.body.appendChild(p);
     }
     this.root.appendChild(add.el);
+    if (this.pickerFocusPending) {
+      this.focusPicker();
+      // One render only: a later unrelated re-render must not steal focus.
+      this.pickerFocusPending = false;
+    }
   }
 
   private optionControl(info: DecoderInfo, opt: DecoderOptionInfo): HTMLElement {

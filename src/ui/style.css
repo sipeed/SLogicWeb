@@ -331,7 +331,7 @@ html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dar
   #toolbar .toolbar-device-state { display: none; }
 }
 
-/* Nine 38 px commands need 386 px; the smallest common phones are 360 px wide. */
+/* Eight 38 px commands need 344 px; the smallest common phones are 360 px wide. */
 @media (max-width: 400px) {
   #toolbar button.toolbar-item { width: 34px; height: 34px; padding: 3px; }
 }
@@ -411,7 +411,9 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
 }
 
 /* The label column starts BELOW the axis: [MEASURED] the axis strip spans only the plot
-   area and the corner above the labels is plain background. */
+   area. The corner above the labels is the view's control point (DESIGN §3.4): the
+   overview half (capture summary, Fit with the view span) lines up with the overview
+   strip, the ruler half (+ Decoder, the T caption) with the time axis. */
 #labels-spacer {
   height: calc(var(--axis-h) + var(--overview-h));
   min-height: calc(var(--axis-h) + var(--overview-h));
@@ -420,6 +422,107 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
   top: 0;
   z-index: 3;
   background: var(--bg10);
+  display: flex;
+  flex-direction: column;
+  /* The per-row trigger slot's right inset: the .ch-body padding (default shell). */
+  --corner-trigger-inset: 4px;
+}
+.corner-overview {
+  height: var(--overview-h);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 3px 4px 3px 6px;
+  min-width: 0;
+}
+.corner-ruler {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 var(--corner-trigger-inset) 0 6px;
+  border-top: 1px solid var(--border-low);
+  min-width: 0;
+}
+.corner-summary,
+.corner-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 5px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 4px);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.corner-summary {
+  height: 20px;
+  padding: 0 2px;
+  color: var(--foreground);
+  font-variant-numeric: tabular-nums;
+}
+.corner-summary-text { overflow: hidden; text-overflow: ellipsis; }
+.corner-btn {
+  height: 22px;
+  align-self: flex-start;
+  max-width: 100%;
+  border-color: var(--border);
+  background: var(--secondary);
+}
+.corner-fit-span { font-variant-numeric: tabular-nums; color: var(--foreground); }
+.corner-add-text { overflow: hidden; text-overflow: ellipsis; }
+.corner-icon { display: block; flex: none; width: 14px; height: 14px; }
+/* Wide/medium: "+ Decoder" is text; the plus glyph is the compact icon. */
+.corner-add-decoder .corner-icon { display: none; }
+.corner-summary:not(:disabled):hover,
+.corner-btn:not(:disabled):hover { color: var(--foreground); border-color: var(--border); background: var(--muted); }
+.corner-btn:disabled { opacity: 0.45; cursor: default; }
+.corner-summary:focus-visible,
+.corner-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* The T caption heads the per-row trigger slots: same 24 px width, same right edge. */
+.corner-trigger {
+  flex: none;
+  margin-left: auto;
+  width: 24px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  cursor: default;
+  user-select: none;
+}
+/* Themed shells inset the row card (cell padding 4 px + card border 1 px + body 4 px). */
+:is(html[data-theme="dark"], html[data-theme="light"]) #labels-spacer { --corner-trigger-inset: 9px; }
+/* Compact: two 40 px icon buttons (Fit, Add decoder); the summary lives in the Capture
+   panel and the T caption gives way to the touch targets. */
+@media (max-width: 760px) {
+  #labels-spacer {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 0 4px;
+  }
+  .corner-overview, .corner-ruler { display: contents; }
+  .corner-summary, .corner-trigger, .corner-fit-span, .corner-add-text { display: none; }
+  .corner-btn {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    align-self: center;
+    justify-content: center;
+  }
+  .corner-icon { width: 18px; height: 18px; }
+  .corner-add-decoder .corner-icon { display: block; }
 }
 
 #channel-list { flex: 1; }

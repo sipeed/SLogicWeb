@@ -337,11 +337,11 @@ function check(name: string, pass: boolean, detail: string): void {
     'app.title', 'connectHelp.retry',
     'emptyHint.line1', 'emptyHint.line2',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortOpen', 'toolbar.shortSave',
-    'toolbar.shortFit', 'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage',
+    'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage',
     'toolbar.shortTheme', 'error.details',
   ];
   const expectedTitles = [
-    'toolbar.startTitle', 'toolbar.openTitle', 'toolbar.saveTitle', 'toolbar.fitTitle',
+    'toolbar.startTitle', 'toolbar.openTitle', 'toolbar.saveTitle',
     'toolbar.enterFullscreenTitle',
     'toolbar.themeTitle', 'toolbar.languageTitle',
     'settings.titleHint', 'panel.resizeTitle',
@@ -395,7 +395,6 @@ function check(name: string, pass: boolean, detail: string): void {
     ['transport', 'toolbar.start'],
     ['btn-open', 'toolbar.open'],
     ['btn-save', 'toolbar.save'],
-    ['btn-fit', 'toolbar.fit'],
     ['btn-fullscreen', 'toolbar.fullscreen'],
     ['btn-settings', 'settings.title'],
     ['btn-language', 'toolbar.languageTitle'],
@@ -901,7 +900,7 @@ const baseSettings: CaptureSettings = {
     'toolbar.start', 'settings.language', 'settings.theme',
     'settings.detailedLabels', 'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortStop',
     'toolbar.shortStopping', 'toolbar.shortOpen', 'toolbar.shortSave',
-    'toolbar.shortFit', 'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage', 'toolbar.shortTheme',
+    'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage', 'toolbar.shortTheme',
     'toolbar.fullscreen', 'toolbar.enterFullscreenTitle',
     'toolbar.exitFullscreenTitle', 'toolbar.fullscreenUnavailable',
     'trigger.anyEdge',
@@ -972,7 +971,7 @@ const baseSettings: CaptureSettings = {
     return hanCount === 0 || hanCount > 4;
   });
   check('every Chinese toolbar shorthand contains one to four Han characters',
-    shortKeys.length >= 12 && bad.length === 0,
+    shortKeys.length >= 11 && bad.length === 0,
     bad.length === 0 ? `${shortKeys.length} concise labels` : bad.join(', '));
 }
 
@@ -981,7 +980,7 @@ const baseSettings: CaptureSettings = {
     ['toolbar.shortDevice', 'toolbar.device'], ['toolbar.shortStart', 'toolbar.start'],
     ['toolbar.shortStop', 'toolbar.stop'], ['toolbar.shortStopping', 'toolbar.stopping'],
     ['toolbar.shortOpen', 'toolbar.open'],
-    ['toolbar.shortSave', 'toolbar.save'], ['toolbar.shortFit', 'toolbar.fit'],
+    ['toolbar.shortSave', 'toolbar.save'],
     ['toolbar.shortFullscreen', 'toolbar.fullscreen'],
     ['toolbar.shortSettings', 'settings.title'], ['toolbar.shortAssistant', 'toolbar.assistantTitle'],
     ['toolbar.shortLanguage', 'toolbar.languageTitle'], ['toolbar.shortTheme', 'toolbar.themeTitle'],

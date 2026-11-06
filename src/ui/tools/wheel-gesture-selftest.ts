@@ -1,5 +1,5 @@
 // Pins the one wheel decision shared by the plot, axis, overview strip and hint bar.
-import { wheelAction, wheelDeltaPixels, type WheelAction } from '../wheelGesture.js';
+import { fitWheelAction, wheelAction, wheelDeltaPixels, type WheelAction } from '../wheelGesture.js';
 import {
   parseWorkspaceSnapshot, serializeWorkspaceSnapshot, WORKSPACE_SCHEMA_VERSION,
 } from '../workspacePreferences.js';
@@ -62,6 +62,17 @@ const TABLE: Array<[boolean, boolean, boolean, [WheelAction, WheelAction, WheelA
   const both = wheelAction({ ctrlKey: true, shiftKey: true },
     { wheelZooms: false, rowsOverflow: true, hasCapture: true });
   check('Shift wins over Ctrl: Ctrl+Shift+wheel pans', both === 'pan', `got=${both}`);
+}
+
+{
+  // The corner Fit button zooms on a plain wheel and on Ctrl/⌘+wheel and pans on Shift,
+  // independent of the preference; without a capture it keeps wheelAction's guards.
+  const order: Mod[] = ['plain', 'ctrl', 'meta', 'shift'];
+  const got = (hasCapture: boolean): string =>
+    order.map((mod) => fitWheelAction(mods(mod), hasCapture)).join(',');
+  check('the Fit button wheel zooms with or without Ctrl, pans with Shift, and is inert without a capture',
+    got(true) === 'zoom,zoom,zoom,pan' && got(false) === 'native,block,block,block',
+    `capture=${got(true)}, none=${got(false)}`);
 }
 
 {

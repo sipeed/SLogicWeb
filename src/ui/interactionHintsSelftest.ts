@@ -74,6 +74,9 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
       'wheel:hints.labels.scroll|left:hints.labels.rename|left:hints.labels.trigger'],
     ['side-panel', 'wheel:hints.sidePanel.scroll'],
     ['toolbar', 'left:hints.toolbar.activate'],
+    ['corner',
+      'left:hints.corner.fit|wheel:hints.corner.zoom|Shift+wheel:hints.corner.pan|' +
+      'left:hints.corner.summary|left:hints.corner.addDecoder'],
     ['none', 'none:hints.general'],
   ]);
   const bad = [...expected.entries()]
@@ -88,6 +91,7 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
     'hints.plot.zoom', 'hints.plot.pan', 'hints.plot.addCursor',
     'hints.axis.zoom', 'hints.axis.pan', 'hints.axis.dragPan',
     'hints.overview.zoom', 'hints.overview.pan', 'hints.overview.center',
+    'hints.corner.fit', 'hints.corner.zoom', 'hints.corner.pan',
   ];
   const bad: string[] = [];
   for (const area of INTERACTION_AREAS) {
@@ -101,7 +105,7 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
   // plot/axis/overview/labels areas explain how to get a capture instead of promising
   // zoom/pan gestures that their handlers no-op on an empty store.
   check('no capture removes only non-functional gestures and keeps guidance',
-    bad.length === 0, bad.length === 0 ? 'all 7 areas clean' : bad.join('; '));
+    bad.length === 0, bad.length === 0 ? `all ${INTERACTION_AREAS.length} areas clean` : bad.join('; '));
 
   function expectedStillWorks(area: InteractionArea, specs: readonly HintSpec[]): boolean {
     if (area === 'labels') {
@@ -110,6 +114,12 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
       return specs.some((spec) => spec.key === 'hints.labels.rename') &&
         specs.some((spec) => spec.key === 'hints.labels.trigger') &&
         specs.some((spec) => spec.mouse === 'wheel');
+    }
+    if (area === 'corner') {
+      // Fit is disabled without a capture; the summary and + Decoder still open panels.
+      return specs.some((spec) => spec.key === 'hints.noCapture' && spec.mouse === 'none') &&
+        specs.some((spec) => spec.key === 'hints.corner.summary') &&
+        specs.some((spec) => spec.key === 'hints.corner.addDecoder');
     }
     if (area === 'plot' || area === 'axis' || area === 'overview') {
       return specs.some((spec) => spec.key === 'hints.noCapture' && spec.mouse === 'none') &&
@@ -149,7 +159,7 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
     .map(([area, zooms, overflow]) => `${area}/${zooms}/${overflow}: ${variant(area, zooms, overflow)}`);
   // Labels, side panel and toolbar have no wheel handler of their own; the setting must
   // not change what they advertise.
-  const steady = (['labels', 'side-panel', 'toolbar', 'none'] as const).every((area) =>
+  const steady = (['labels', 'side-panel', 'toolbar', 'corner', 'none'] as const).every((area) =>
     variant(area, true, false) === signatures(area, true));
   // Without a capture a plain wheel stays native scrolling in every variant.
   const noCapture = (['plot', 'axis', 'overview'] as const).every((area) =>
@@ -179,10 +189,10 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
 }
 
 {
-  const want = 'plot:#plot,axis:#axis,overview:#overview,labels:#labels-col,' +
+  const want = 'corner:#labels-spacer,plot:#plot,axis:#axis,overview:#overview,labels:#labels-col,' +
     'side-panel:#side-panel,toolbar:#toolbar';
   const got = INTERACTION_AREA_SELECTORS.map((entry) => `${entry.area}:${entry.selector}`).join(',');
-  check('the hover areas are exactly the six interactive shell regions',
+  check('the hover areas are exactly the seven interactive shell regions (corner before its label column)',
     got === want, `got ${got}`);
 
   interface Stub {
@@ -196,6 +206,8 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
     ['axis', stub('#axis')],
     ['overview', stub('#overview')],
     ['labels', stub('#labels-col')],
+    // The corner cell is inside the label column: the more specific area wins.
+    ['corner', stub('#labels-spacer', '#labels-col')],
     ['side-panel', stub('#side-panel')],
     ['toolbar', stub('#toolbar')],
     ['none', stub('#panel-resizer')],
@@ -210,7 +222,7 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
 {
   const want = 'none:hints.area.none,toolbar:hints.area.toolbar,labels:hints.area.labels,' +
     'plot:hints.area.plot,axis:hints.area.axis,overview:hints.area.overview,' +
-    'side-panel:hints.area.sidePanel';
+    'side-panel:hints.area.sidePanel,corner:hints.area.corner';
   const got = INTERACTION_AREAS.map((area) => `${area}:${interactionAreaLabelKey(area)}`).join(',');
   check('every area has its own localized label', got === want, `got ${got}`);
 }

@@ -54,6 +54,17 @@ export function wheelAction(mods: WheelModifiers, ctx: WheelContext): WheelActio
   return 'native';
 }
 
+/**
+ * The wheel over the corner cell's Fit button (DESIGN §3.4): it is a zoom control, not a
+ * row surface, so a plain wheel and Ctrl/⌘+wheel both zoom time and Shift+wheel pans,
+ * whatever the "wheel zooms" preference or the row overflow. It is `wheelAction` read
+ * with "rows all fit", so it inherits the no-capture rules unchanged: a plain wheel stays
+ * native scrolling and Ctrl/Shift are swallowed.
+ */
+export function fitWheelAction(mods: WheelModifiers, hasCapture: boolean): WheelAction {
+  return wheelAction(mods, { wheelZooms: false, rowsOverflow: false, hasCapture });
+}
+
 /** Pixels for one wheel event's vertical delta, whatever its `deltaMode`. */
 export function wheelDeltaPixels(deltaY: number, deltaMode: number, pageHeight: number): number {
   if (deltaMode === 1) return deltaY * 16;

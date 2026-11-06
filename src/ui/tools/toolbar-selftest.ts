@@ -103,7 +103,6 @@ const actionNeedles = [
   "this.el.transport.addEventListener('click'",
   "must<HTMLButtonElement>('btn-open').addEventListener('click'",
   "must<HTMLButtonElement>('btn-save').addEventListener('click'",
-  "must<HTMLButtonElement>('btn-fit').addEventListener('click'",
   "must<HTMLButtonElement>('btn-settings').addEventListener('click'",
 ];
 const missingActions = actionNeedles.filter((needle) => !app.includes(needle));
@@ -422,7 +421,8 @@ check(
   `local=${localController}, guardedFinish=${finallyGuarded}, publish=${publishesController}, cancel=${cancelBindingKept}`,
 );
 
-const leftCommandIds = ['btn-connect', 'transport', 'btn-open', 'btn-save', 'btn-fit', 'btn-fullscreen', 'btn-settings'];
+// Fit left the top bar for the corner cell (DESIGN §3.4); corner-cell-selftest pins it there.
+const leftCommandIds = ['btn-connect', 'transport', 'btn-open', 'btn-save', 'btn-fullscreen', 'btn-settings'];
 const languageCommandId = 'btn-language';
 const themeCommandId = 'btn-theme';
 const commandIds = [...leftCommandIds, languageCommandId, themeCommandId];
@@ -535,18 +535,19 @@ check(
 const separatorCount = toolbar.match(/role="separator"/g)?.length ?? 0;
 const verticalSeparatorCount = toolbar.match(/aria-orientation="vertical"/g)?.length ?? 0;
 check(
-  'ten commands expose shadcn anatomy, one media wrapper and decorative short label each, distinct icons, and separators',
+  'nine commands expose shadcn anatomy, one media wrapper and decorative short label each, distinct icons, and separators',
   anatomyFailures.length === 0 && iconSignatures.size === commandIds.length &&
     separatorCount === 2 && verticalSeparatorCount === 2,
   `failures=${JSON.stringify(anatomyFailures)}, icons=${iconSignatures.size}, separators=${separatorCount}/${verticalSeparatorCount}`,
 );
 
 const cornerBracketGlyph = 'M8 3H3v5';
-const fitMarkup = commandMarkup('btn-fit');
-const fitGlyphIsHorizontalSpan = fitMarkup.includes('M8 7l-5 5 5 5M16 7l5 5-5 5');
-const cornerBracketGlyphRetired = !fitMarkup.includes(cornerBracketGlyph);
+const fitHtmlAt = html.indexOf('<button id="corner-fit"');
+const fitHtml = fitHtmlAt < 0 ? '' : html.slice(fitHtmlAt, html.indexOf('</button>', fitHtmlAt));
+const fitGlyphIsHorizontalSpan = fitHtml.includes('M8 7l-5 5 5 5M16 7l5 5-5 5');
+const cornerBracketGlyphRetired = !fitHtml.includes(cornerBracketGlyph) && !toolbar.includes('id="btn-fit"');
 check(
-  'the fit command shows the horizontal-span glyph and no longer keeps the corner-bracket glyph',
+  'Fit lives in the corner cell with the horizontal-span glyph, not in the top bar or the corner-bracket glyph',
   fitGlyphIsHorizontalSpan && cornerBracketGlyphRetired,
   `fitGlyph=${fitGlyphIsHorizontalSpan}, cornerBracketRetired=${cornerBracketGlyphRetired}`,
 );
@@ -561,7 +562,7 @@ check(
     `icons=${iconSignatures.size}/${commandIds.length}`,
 );
 
-const fitIndex = toolbar.indexOf('id="btn-fit"');
+const saveIndex = toolbar.indexOf('id="btn-save"');
 const spacerIndex = toolbar.indexOf('class="spacer"');
 const settingsIndex = toolbar.indexOf('id="btn-settings"');
 const fullscreenIndex = toolbar.indexOf('id="btn-fullscreen"');
@@ -573,7 +574,7 @@ const viewGroupMarkup = viewGroup?.markup ?? '';
 const viewGroupSeparatorIndex = viewGroupStart >= 0
   ? toolbar.lastIndexOf('role="separator"', viewGroupStart)
   : -1;
-const viewGroupBeforeSpacer = fitIndex >= 0 && viewGroupSeparatorIndex > fitIndex &&
+const viewGroupBeforeSpacer = saveIndex >= 0 && viewGroupSeparatorIndex > saveIndex &&
   viewGroupStart > viewGroupSeparatorIndex && spacerIndex > viewGroupEnd;
 const earlierCommandIndexes = leftCommandIds
   .filter((id) => id !== 'btn-settings' && id !== 'btn-fullscreen')
@@ -582,9 +583,9 @@ const settingsIsLastLeftCommand = settingsIndex >= 0 && viewGroupStart >= 0 &&
   earlierCommandIndexes.every((index) => index >= 0 && index < viewGroupStart) &&
   spacerIndex > settingsIndex;
 check(
-  'the fit command precedes the view/settings group and settings is its last command before the spacer',
+  'save precedes the view/settings group and settings is its last command before the spacer',
   viewGroupBeforeSpacer && settingsIsLastLeftCommand,
-  `fit@${fitIndex}, separator@${viewGroupSeparatorIndex}, group@${viewGroupStart}..${viewGroupEnd}, ` +
+  `save@${saveIndex}, separator@${viewGroupSeparatorIndex}, group@${viewGroupStart}..${viewGroupEnd}, ` +
     `settings@${settingsIndex}, spacer@${spacerIndex}`,
 );
 
@@ -1003,7 +1004,6 @@ const dynamicNames = [
   "button.setAttribute('aria-label', view.ariaLabel);",
   "this.el.open.setAttribute('aria-label', t('toolbar.open'))",
   "this.el.save.setAttribute('aria-label', t('toolbar.save'))",
-  "this.el.fit.setAttribute('aria-label', t('toolbar.fit'))",
   "this.el.settings.setAttribute('aria-label', t('settings.title'))",
   "this.el.language.setAttribute('aria-label', t('toolbar.languageTitle'))",
 ];

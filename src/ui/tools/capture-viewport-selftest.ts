@@ -165,7 +165,8 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
     !between(app, 'private centerOverview', 'private captureFixedView').includes('noteLockGesture');
   const fitSites = [
     between(app, "if (shortcut === 'view.fit') {", "} else if (shortcut === 'cursors.clear') {"),
-    between(app, "must<HTMLButtonElement>('btn-fit').addEventListener('click'", "must<HTMLButtonElement>('btn-settings').addEventListener('click'"),
+    // Fit moved from the top bar to the corner cell (DESIGN §3.4); it is the same action.
+    between(app, "this.el.cornerFit.addEventListener('click'", "this.el.cornerSummary.addEventListener('click'"),
   ];
   const fitBody = between(app, 'private fitViewport()', 'private centerOverview');
   check('each explicit viewport action is recorded as user intent',
@@ -214,7 +215,7 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
   // everything else - including Ctrl+wheel before any capture exists.
   check('plot, axis and overview wheels all route through wheelAction before touching the view',
     navNative >= 0 && navPrevent > navNative && navBlock > navPrevent && navStore > navBlock &&
-    navigate.includes('const action = this.wheelActionFor(e);') &&
+    navigate.includes('const action = this.wheelActionFor(e, target);') &&
     navigate.includes('this.scrollRowsBy(e);') &&
     navigate.includes('this.stack.zoomAt(') && navigate.includes('this.stack.panPixels(') &&
     navigate.includes("wheelSpanFactor(e.deltaY, { isPhysicalWheel: physical, shift: false })") &&
@@ -248,7 +249,7 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
   const dragSite = between(app, '      if (dragging) {', 'this.updateHover');
   const axisSite = between(app, "this.el.axis.addEventListener('pointermove'", 'const axisEnd');
   const fitShortcut = between(app, "if (shortcut === 'view.fit') {", "} else if (shortcut === 'cursors.clear') {");
-  const fitButton = between(app, "must<HTMLButtonElement>('btn-fit').addEventListener('click'", "must<HTMLButtonElement>('btn-settings').addEventListener('click'");
+  const fitButton = between(app, "this.el.cornerFit.addEventListener('click'", "this.el.cornerSummary.addEventListener('click'");
   const debugViewport = between(app, 'setViewportSeconds: (a: number', 'setMarker:');
   const debugZoom = between(app, 'zoomToAnnotation: (analyzerIndex', 'snapshot:');
   const focus = between(app, 'private focusCursor(', 'private removeCursor(');
