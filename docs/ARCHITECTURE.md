@@ -523,6 +523,24 @@ type TriggerBudget =
   or falling crossing of a level, optional hysteresis, one or more analog groups when the
   profile supports it. Conditions are ANDed. (P0/P1 here are trigger phases; platform
   rules are P1–P10 in §1.3.)
+- **Analog crossings are qualified, never raw.** The ADC module's bus is sampled
+  asynchronously to its code transitions, so at a carry boundary the host can read the OR
+  of the old and new codes (143→144 reads 159, 127→128 reads 255) for up to ~140 ns —
+  measured 2026-11-06 on a 32U3 at 100 MS/s: 1338 such runs in 10 ms, every one at a carry
+  boundary, 1–14 samples long. A raw "previous < level ≤ current" test therefore fires on
+  the falling slope of a Rising condition. Every analog executor (the `SoftwareTrigger`
+  matcher behind Single/Repeat and the host plan, and the Loop page scanner) applies one
+  rule: **hysteresis** — rising arms only after a code ≤ `level − h`, falling after a code
+  ≥ `level + h`, h = 4 codes — and **persistence** — a candidate (the first armed sample
+  at or past the level) is confirmed only when the code stays at or past the level for
+  `P = ceil(240 ns × samplerate)` samples (24 at 100 MS/s); a sample back across the level
+  drops the candidate and keeps the arm. T is the candidate sample, not the confirming
+  one. Candidate state carries across transfers and gaps reset it; the matcher keeps at
+  most P samples beyond the pre-trigger ring so the emitted prefix still ends at T, and
+  the persistence samples count toward the search limit. On the measured trace this
+  confirms 1000/1000 crossings on the right slope (raw: 8651 of 17985 detections on the
+  wrong one) with T −0.2…+0.7 µs from the smoothed crossing. h and the 240 ns window are
+  constants beside the ADC scale data; displayed and saved samples are not filtered.
 - **P0 keeps the single-family rule** (digital *or* analog) to preserve current
   behaviour. **P1 allows mixed digital + analog** when `profile.trigger.mixed` is true.
   The UI does not offer mixed conditions on a profile that cannot execute them.

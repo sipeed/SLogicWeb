@@ -75,15 +75,16 @@ visual system, copy and the UI review gate. C3 (migration) is §17 here; split i
 
 ```
 ┌ shell ───────────────────────────────────────────────────────────────────────┐
-│ [Device] [Capture ▾] │ [Open] [Save] │ [Fit] [Panel] [Settings]              │
-├──────────────────────────────────────────────────────────────────────────────┤
-│ overview strip (retention / record ranges, viewport frame)                    │
-├ label column ┬ plot: ruler + grouped rows ────────────────┬ presenter ───────┤
-│ D0  ◇ trigger│ digital / analog / math / bus / lanes      │ Docked           │
-│ A0  ◇ trigger│ annotations / cursors / T / record band   │ or Sheet/Dialog  │
-│ …            │                                           │                  │
+│ [Device] [Capture ▾] │ [Open] [Save] │ [Panel] [Settings]                    │
+├ corner cell ─┬───────────────────────────────────────────────────────────────┤
+│ 100 MS/s     │ overview strip (retention / record ranges, viewport frame)    │
+│ ⤢ 1.30 ms    │                                                               │
+│ + Decoder  T │ ruler                                       ┬ presenter ──────┤
+├ label column ┼ plot: grouped rows ─────────────────────────┤ Docked          │
+│ D0  ◇ trigger│ digital / analog / math / bus / lanes      │ or Sheet/Dialog │
+│ A0  ◇ trigger│ annotations / cursors / T / record band   │                 │
 ├──────────────┴───────────────────────────────────────────┴──────────────────┤
-│ status: link · capture · trigger · record · samples/time   timebase · notice │
+│ interaction hints for the area under the pointer (never status)              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -142,6 +143,25 @@ One panel view model is rendered by one of three presenters:
 - The panel switcher is the only way to change panels. It has one entry per layout:
   toolbar on wide/medium, a "Panels" control in the compact bottom action bar.
 
+### 3.4 Corner cell
+
+The cell where the label column meets the overview strip and the ruler (`#labels-spacer`,
+`--labels-w` × `--overview-h + --axis-h`) is the view's own control point, not padding:
+
+- **Overview half — capture summary and Fit.** First line: the displayed capture's rate and
+  length (`100 MS/s · 20.0 ms`; the sample count and channel width in its tooltip). It is
+  the readout the old status line carried; clicking it opens the Acquire panel. Second
+  line: **Fit** with the current view span (`⤢ 1.30 ms`): click fits the viewport to
+  retention (`F` is the same action), wheel/Ctrl+wheel over it zoom like the ruler. Fit
+  exists only here and in the long-press/context menus — not in the top bar.
+- **Ruler half — Add decoder and the trigger column.** `+ Decoder` (HSync's "Add
+  decoder" place) opens the Decoders panel with the picker focused; it is enabled without
+  a capture, because attached analyzers re-run when data arrives. At the right, a small
+  `T` caption heads the column of per-row trigger slots below it.
+- With no capture the summary reads "No capture" and Fit is disabled with a reason.
+- Compact: the cell keeps only two 40 px icon buttons (Fit, Add decoder); the summary
+  moves into the Acquire panel. The hint bar names the cell's gestures like any other area.
+
 ## 4. Shell and primary action
 
 Target top bar, left to right (≤ 8 commands):
@@ -152,7 +172,6 @@ Target top bar, left to right (≤ 8 commands):
 | Capture / Stop | Primary split button; label/summary names mode and retention (`Single · 10 ms`, `Loop · 1.0 s`, `Record`) | The only start/stop action. Chevron: Single, Repeat, Loop, Autoset. Disabled with the same `canRun` guard for click, keyboard, host interface and debug. |
 | Open | Icon + label | Imports a capture; stops a running acquisition after confirmation if data would be lost. |
 | Save / Export | Icon + label | Saves the displayed capture or exports the record; opens the export sheet. Disabled without data. Today it opens a two-row format menu: `.lwcap` (first; lossless, keeps gaps) and `.sr` (sigrok session for PulseView; digital channels only). With the File System Access picker both types are offered and the picked extension decides the format; otherwise the file downloads. Default name: `<model>_<N>ch_<rate>_<local YYYYMMDD-HHMMSS>` (model = the device's reported name without spaces, `capture` without one), or the opened file's base name. |
-| Fit | Icon + label | Fits the viewport to retention; `F`. |
 | Panel | Icon + label | Shows/hides the presenter and opens the panel switcher. |
 | Settings | Icon | App preferences: theme, locale, density, units, shortcuts, about/diagnostics. |
 | — | — | No Assistant, Language, Theme or fullscreen as top-level commands; they live in Settings or the compact overflow. |
@@ -161,7 +180,7 @@ Fullscreen, language, theme, density and shortcuts live in Settings or the compa
 overflow; they never take a top-bar slot.
 
 **Compact bottom action bar:** one Capture/Stop split button, a Panels control and an
-overflow menu (Open/Save/Fit/Settings). It has no duplicate Capture; the top bar on compact
+overflow menu (Open/Save/Settings; Fit is in the corner cell, §3.4). It has no duplicate Capture; the top bar on compact
 shows Device and status only. The bar respects safe areas and stays reachable one-handed.
 
 **Capture split menu:**
@@ -212,12 +231,13 @@ Analog channels are not bus rows. Each analog signal has a row with:
 - **Range is hardware, scale is view.** Range (e.g. ±1 V, ±16 V) and coupling/attenuation
   are probe settings in the channel editor and require a profile capability. `V/div` and
   zero position are view state and can be changed without affecting the device.
-- **Gain is declared, not set.** A group whose profile lists `gains` shows one gain
-  control in the Acquire panel (the profile presets plus Custom, a ratio field while
-  Custom is chosen), with one plain sentence: the gain must match the module's own
-  setting and is used to convert codes to true voltages. The group's cell and row label
-  name the gain and the range it gives ("A0 ×2 · ±8 V"); the control row shows range,
-  bits and volts per code. Changing it rescales the display, V/div (reset to the gain's
+- **Gain is declared, not set.** A group whose profile lists `gains` carries its one gain
+  control inside the group's cell in the Acquire panel — the cell that replaces the eight
+  D chips reads `A0 [×1 ▾] ±16 V`, the select holding the profile presets and "Custom…";
+  Custom turns the select into a ratio field in place (Enter/blur applies, Esc reverts).
+  There is no separate gain row. The cell's "?" tip says the gain must match the module's
+  own setting and is used to convert codes to true voltages, and gives bits and volts per
+  code (`8-bit · 125.5 mV/code`). The row label names the gain and range ("×2 · ±8 V"). Changing it rescales the display, V/div (reset to the gain's
   default, the finest 1-2-5 step showing the whole range) and trigger level, never the
   device, and is allowed while a capture runs without restarting it. A configured trigger
   level keeps its volts, re-snapped to the new code grid and moved to the range edge when
@@ -260,12 +280,23 @@ Analog channels are not bus rows. Each analog signal has a row with:
   are removed and named in a dismissible panel note. Channel names are not compared
   (sigrok files usually carry generic D0..Dn names). A decode that finds nothing says
   "no annotations" on the row.
+- **Bus views** are a section whose header row carries one `Add` button at its right; Add
+  opens the bus editor in a dialog (the presenter's Dialog form), not an inline form. Each
+  listed bus view has exactly two inline actions, `Edit` (the same dialog, prefilled) and
+  `Remove`; bit-order swap lives in the editor. An analog bank's row is managed by its
+  Analog button and shows `Remove` only.
 - A bus/decoder never changes capture channels or trigger conditions.
 
 ### 5.4 Row height and groups
 
-- Wide: digital rows 26–34 px, analog 80–240 px, lane rows 18–26 px; compact touch:
-  digital 48 px, analog 96–240 px, lanes 32 px.
+- Wide: digital rows 26–34 px, analog 80–480 px, lane rows 18–26 px; compact touch:
+  digital 48 px, analog 96–480 px, lanes 32 px. Analog heights snap to 80, 120, 160, 240,
+  320, 400, 480 px (handle drag, arrow keys); a new analog row starts at 160 px.
+- **An analog row's graticule follows its height**: about 38 px per division, an even
+  count from 4 to 8 (≤ 160 px: 4, 240 px: 6, ≥ 320 px: 8), so 0 V stays on a line. Resizing
+  keeps V/div and the zero position; a taller row shows more divisions and a wider range,
+  exactly like a scope with a bigger screen. A gain's default V/div is the finest 1-2-5
+  step showing the whole range on the row's current division count.
 - Row height is per-channel view/workspace state; double-click/row menu restores the
   default. Group headers are 32 px (compact 40 px) and collapse their rows.
 - Group headers show the group's rate and channel range; an analog group shows its
