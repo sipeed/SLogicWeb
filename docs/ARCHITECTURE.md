@@ -536,7 +536,8 @@ type TriggerBudget =
   Edge/crossing state at the first eligible sample is its true predecessor (the newest
   ring sample, including one carried across a transfer boundary), so an edge landing on
   that sample is valid. Holdoff samples are inspected and count toward the search limit
-  (Repeat's `pre + post` therefore leaves `post` samples in which a match may occur). A
+  (Repeat's limit is therefore `pre + (pre + post)`: after the holdoff a sweep can still
+  match anywhere in one sweep's `pre + post` window, as it could before the holdoff). A
   continuity reset or gap (`resetContinuity`/`noteGap`, or a SimDriver waiting dropout)
   empties the ring and restarts the holdoff so the prefix never spans the gap; a retune
   keeps the ring and the remaining holdoff. Each Repeat wave and each Single starts a new

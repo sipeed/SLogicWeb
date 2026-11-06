@@ -1416,8 +1416,8 @@ comes from the displayed wave, so the held old frame keeps its T.
 B1 is explicit: a Repeat wave that finds no trigger stops as `completed` with an empty
 store, the panel reports the miss, the session stays Capturing, and the next Interval
 retries. The previous wave is not replaced by that empty search. The miss is reachable
-because a Repeat sweep's matcher inspects one sweep's sample budget before reporting
-`not-found` (`triggerSearchSamples`); Single keeps waiting indefinitely for its one
+because a Repeat sweep's matcher inspects one sweep's sample budget (plus the pre-fill
+holdoff's `pre` samples) before reporting `not-found` (`triggerSearchSamples`); Single keeps waiting indefinitely for its one
 trigger and Loop is unbounded.
 
 **Loop local updates and instrumentation.** The auto-roll still advances one scanned

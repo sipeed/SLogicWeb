@@ -201,7 +201,7 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
     panel.includes("t('capturePanel.repeatMissRetry')") &&
     app.includes('const liveAt = this.repeatShowingFront ? null : this.captureStore.length;') &&
     app.includes('dataEnd: this.captureStore.length,') &&
-    app.includes('triggerSearchSamples(mode, this.captureLimitSamples)') &&
+    app.includes('triggerSearchSamples(mode, this.captureLimitSamples, preTriggerSamples)') &&
     app.includes('searchLimitSamples: triggerSearchLimit') &&
     app.includes('private settleHeldRepeatWave(): void') &&
     app.includes('remapRepeatSample(') &&

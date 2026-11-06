@@ -309,8 +309,12 @@ function kind(policy: ViewPolicy): string {
   // waits for its one trigger and Loop is unbounded; both stay Infinity.
   const repeat = triggerSearchSamples('repeat', 2_500_000);
   const repeatEmpty = triggerSearchSamples('repeat', 0);
+  // The pre-fill holdoff inspects `pre` samples without matching; they are added on top
+  // so the match window stays one sweep.
+  const repeatHeld = triggerSearchSamples('repeat', 2_500_000, 250_000);
   check('only Repeat gets a finite one-sweep trigger search allowance',
     repeat === 2_500_000 && repeatEmpty === Number.POSITIVE_INFINITY &&
+    repeatHeld === 2_750_000 &&
     triggerSearchSamples('single', 2_500_000) === Number.POSITIVE_INFINITY &&
     triggerSearchSamples('loop', 2_500_000) === Number.POSITIVE_INFINITY,
     `repeat=${repeat}, empty=${repeatEmpty}, ` +

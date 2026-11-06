@@ -327,8 +327,8 @@ function translateAnalog(
 /**
  * The legacy Repeat search allowance. Mirrors `triggerSearchSamples(mode,
  * captureLimitSamples)` from the capture-session policy: only Repeat retries, and one
- * sweep's allowance is its finite retained budget (`post + pre`, capped by the host
- * sample envelope). Single waits indefinitely and Loop is unbounded.
+ * sweep's match window is its finite retained budget (`post + pre`, capped by the host
+ * sample envelope), plus the `pre` samples the pre-fill holdoff inspects first. Single waits indefinitely and Loop is unbounded.
  */
 function legacySearchLimit(
   mode: LegacyCaptureMode,
@@ -340,8 +340,10 @@ function legacySearchLimit(
     MAX_SAMPLES - 1,
     postTriggerSamples + preTriggerSamples,
   );
+  // The pre-fill holdoff spends the first `pre` samples without matching; they are
+  // added on top so the match window stays one sweep (as triggerSearchSamples does).
   return Number.isFinite(sweepSamples) && sweepSamples > 0
-    ? Math.floor(sweepSamples)
+    ? Math.floor(sweepSamples) + Math.max(0, Math.floor(preTriggerSamples))
     : Number.POSITIVE_INFINITY;
 }
 

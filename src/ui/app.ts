@@ -5046,10 +5046,10 @@ export class App {
         // the post-trigger window, not the prefix - the trigger keeps its full ring.
         this.captureLimitSamples = Math.min(MAX_SAMPLES - 1, postTriggerSamples + preTriggerSamples);
       }
-      // A Repeat sweep's search allowance is one sweep's sample budget: a missing trigger
-      // then reports not-found, which B1 turns into a miss + next-Interval retry. Single
+      // A Repeat sweep's match window is one sweep's sample budget, after the pre-fill
+      // holdoff (added to the limit): a missing trigger then reports not-found, which B1 turns into a miss + next-Interval retry. Single
       // waits indefinitely for its one trigger and Loop is unbounded.
-      const triggerSearchLimit = triggerSearchSamples(mode, this.captureLimitSamples);
+      const triggerSearchLimit = triggerSearchSamples(mode, this.captureLimitSamples, preTriggerSamples);
       // A live retune may change conditions but not these: the ring was sized here and
       // the emitted-stream budget fixes the store's stop point.
       this.captureTriggerBase = softwareTrigger ? {
@@ -5190,7 +5190,7 @@ export class App {
           })),
           preTriggerSamples,
           maxSamples: isLoop ? Number.POSITIVE_INFINITY : this.captureLimitSamples,
-          searchLimitSamples: triggerSearchSamples(mode, this.captureLimitSamples),
+          searchLimitSamples: triggerSearchSamples(mode, this.captureLimitSamples, preTriggerSamples),
         },
         onTriggerState: (state, triggerSampleIndex) => {
           // A superseded acquisition or a disarmed trigger must not pin the view.

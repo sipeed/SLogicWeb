@@ -327,16 +327,22 @@ export function sessionSweepPattern(mode: CaptureMode): SessionSweepPattern {
  * Samples a software-trigger sweep may inspect while waiting before it reports
  * `not-found`.
  *
- * Repeat is the only mode that can retry: one sweep's own sample budget is its search
- * allowance, so a missing trigger ends that sweep (B1) and the next Interval tries
+ * Repeat is the only mode that can retry: one sweep's own sample budget is its match
+ * window, so a missing trigger ends that sweep (B1) and the next Interval tries
  * again. Single waits indefinitely for its one trigger; Loop is unbounded by design.
  * `sweepSamples` is the sweep's retained budget (post-trigger + pre-trigger); a
  * non-positive value leaves the limit at Infinity rather than inventing a search.
+ *
+ * The pre-fill holdoff inspects the first `preTriggerSamples` of every sweep without
+ * matching, so the limit adds them on top: a sweep can still match anywhere in a window
+ * of `sweepSamples` once the pre-trigger ring is full, as it could before the holdoff.
  */
-export function triggerSearchSamples(mode: CaptureMode, sweepSamples: number): number {
+export function triggerSearchSamples(
+  mode: CaptureMode, sweepSamples: number, preTriggerSamples = 0,
+): number {
   if (mode !== 'repeat') return Number.POSITIVE_INFINITY;
   if (!Number.isFinite(sweepSamples) || sweepSamples <= 0) return Number.POSITIVE_INFINITY;
-  return Math.floor(sweepSamples);
+  return Math.floor(sweepSamples) + Math.max(0, Math.floor(preTriggerSamples));
 }
 
 /**

@@ -101,13 +101,18 @@ function legacyCaptureLimitSamples(
   return Math.min(MAX_SAMPLES - 1, postTriggerSamples + preTriggerSamples);
 }
 
-/** `captureSession.ts` triggerSearchSamples: only Repeat retries within one sweep. */
-function legacySearchSamples(mode: LegacyCaptureMode, sweepSamples: number): number {
+/**
+ * `captureSession.ts` triggerSearchSamples: only Repeat retries within one sweep, and the
+ * pre-fill holdoff's `pre` inspected samples sit on top of the one-sweep match window.
+ */
+function legacySearchSamples(
+  mode: LegacyCaptureMode, sweepSamples: number, preTriggerSamples: number,
+): number {
   if (mode !== 'repeat') return Number.POSITIVE_INFINITY;
   if (!Number.isFinite(sweepSamples) || sweepSamples <= 0) {
     return Number.POSITIVE_INFINITY;
   }
-  return Math.floor(sweepSamples);
+  return Math.floor(sweepSamples) + Math.max(0, Math.floor(preTriggerSamples));
 }
 
 // ---------------------------------------------------------------------------------
@@ -556,13 +561,13 @@ for (const sample of [
   const pre = plan?.preTrigger.samples;
   const expected = pre === undefined
     ? Number.NaN
-    : legacySearchSamples('repeat', legacyCaptureLimitSamples('repeat', 1000, pre));
+    : legacySearchSamples('repeat', legacyCaptureLimitSamples('repeat', 1000, pre), pre);
   check(
-    'Repeat exposes the legacy one-sweep search allowance',
+    'Repeat exposes the one-sweep match window after the pre-fill holdoff',
     plan !== undefined &&
       armed(result) !== null &&
       armed(result)!.host.searchLimitSamples === expected &&
-      expected === 1250,
+      expected === 1250 + (pre ?? Number.NaN),
     show(result),
   );
 }
@@ -573,9 +578,10 @@ for (const sample of [
     postTriggerSamples: MAX_SAMPLES - 1,
     preTriggerPercent: 75,
   }));
+  const pre = armed(result)?.plan.preTrigger.samples ?? Number.NaN;
   check(
-    'the Repeat allowance caps at MAX_SAMPLES - 1 like the legacy capture limit',
-    armed(result)?.host.searchLimitSamples === MAX_SAMPLES - 1,
+    'the Repeat match window caps at MAX_SAMPLES - 1 like the legacy capture limit',
+    armed(result)?.host.searchLimitSamples === MAX_SAMPLES - 1 + pre,
     show(result),
   );
 }
