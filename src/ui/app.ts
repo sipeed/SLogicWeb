@@ -29,9 +29,11 @@ import type { ChannelEdges, DecodeRequest, DecodeResult } from '../decode/index.
 
 import type { AssistantHost, CaptureOutcome } from '../assistant/tools.js';
 
+import { reconcileAnalyzers } from './analyzerForm.js';
 import { AnalyzerPanel } from './analyzerPanel.js';
 import { BusBuilder, validateBusSpec } from '../data/busValue.js';
 import { BusPanel, cloneBusConfig, defaultBusConfig } from './busPanel.js';
+import { DecodeResultsPanel } from './decodeResultsPanel.js';
 import {
   analogFrame, applyBusBitOrder, beginAnalogFrameBudget, busColor, busLabel, busSummary,
   busValueAt, busYRange, endAnalogFrameBudget, type AnalogFrame,
@@ -238,6 +240,18 @@ export class App {
   private readonly channelList: ChannelList;
   private capturePanel!: CapturePanel;
   private analyzerPanel!: AnalyzerPanel;
+  private decodeResultsPanel!: DecodeResultsPanel;
+  /** The analyzer the results list shows; null follows the first one with a result. */
+  private selectedAnalyzer: string | null = null;
+  /**
+   * Re-run the attached decoders when new data arrives (a capture completed, a file
+   * opened). A per-session toggle in the analyzer panel; on by default.
+   */
+  private autoDecode = true;
+  /** Bumped by every new capture store, so a stale auto-decode pass stops. */
+  private autoDecodeGen = 0;
+  /** Analyzers the last file open dropped, as listed in the panel note. */
+  private droppedAnalyzersNote: string | null = null;
   private readonly sidebarHost: SidebarHost;
   /** Resolved when the running capture stops (the assistant API waits on a capture). */
   private captureWaiters: (() => void)[] = [];
@@ -3798,14 +3812,28 @@ export class App {
     if (page === 'decoders') {
       const analyzerRoot = document.createElement('div');
       analyzerRoot.className = 'side-body';
+      const resultsRoot = document.createElement('div');
+      resultsRoot.className = 'side-body';
       const busRoot = document.createElement('div');
       busRoot.className = 'side-body';
-      container.append(analyzerRoot, busRoot);
+      container.append(analyzerRoot, resultsRoot, busRoot);
       this.analyzerPanel = new AnalyzerPanel(analyzerRoot, {
         onAttach: (id, ch, opts) => void this.attachAnalyzer(id, ch, opts),
+        onUpdate: (id, ch, opts) => void this.updateAnalyzer(id, ch, opts),
+        onSelect: (id) => { this.selectedAnalyzer = id; this.renderPanels(); },
         onRemove: (id) => this.removeAnalyzer(id),
         onRedecode: (id) => void this.runDecode(id),
         onCancel: () => this.abort?.abort(),
+        onAutoDecode: (on) => { this.autoDecode = on; this.renderPanels(); },
+        onDismissNote: () => { this.droppedAnalyzersNote = null; this.renderPanels(); },
+      });
+      this.decodeResultsPanel = new DecodeResultsPanel(resultsRoot, {
+        onSelect: (id) => { this.selectedAnalyzer = id; this.renderPanels(); },
+        onJump: (id, ann) => this.panToAnnotation(id, ann),
+        viewRange: () => {
+          const view = this.stack.view;
+          return [Math.floor(view.start), Math.ceil(view.end)];
+        },
       });
       this.busPanel = new BusPanel(busRoot, {
         onAdd: (cfg) => this.addBus(cfg),
@@ -3972,6 +4000,15 @@ export class App {
       hasCapture: this.captureStore.length > 0,
       warm: this.decodeWarm,
       busy: this.decodeBusy,
+      selectedId: this.selectedAnalyzer,
+      autoDecode: this.autoDecode,
+      droppedNote: this.droppedAnalyzersNote,
+    });
+    this.decodeResultsPanel.update({
+      analyzers: this.analyzers,
+      selectedId: this.selectedAnalyzer,
+      originSample: this.displayOriginSample(),
+      samplerate: this.captureStore.samplerate,
     });
     this.busPanel.render({
       buses: this.busViews, channelCount: this.displayChannelCount(),
@@ -4328,10 +4365,21 @@ export class App {
       }
     }
     this.order = this.channels.map((c) => c.index);
-    // Annotations belong to a capture; a new one invalidates them.
+    // Annotations belong to a capture; a new one invalidates them. An analyzer that maps a
+    // channel this file lacks is dropped and named in the panel; the rest re-decode below.
     for (const a of this.analyzers) {
       a.result = null; a.index = null; a.status = 'idle'; a.note = { kind: 'pending' };
     }
+    const { kept, dropped } = reconcileAnalyzers(this.analyzers, store.channelCount);
+    this.analyzers = kept;
+    this.droppedAnalyzersNote = dropped.length
+      ? dropped.map((a) => `${a.label} (${Object.values(a.channels).filter((c) => c >= 0)
+        .map((c) => `D${c}`).join(', ')})`).join(', ')
+      : null;
+    if (this.selectedAnalyzer !== null && !kept.some((a) => a.id === this.selectedAnalyzer)) {
+      this.selectedAnalyzer = null;
+    }
+    this.autoDecodeGen++;
     this.resetBusBuilds();
     this.clearCursors();
     this.triggerState = 'off';
@@ -4357,6 +4405,7 @@ export class App {
     this.stack.zoomToFit();
     this.renderPanels();
     this.dirty = true;
+    this.scheduleAutoDecode();
   }
 
   /** One Save entry point: a two-row format menu (.lwcap first, .sr for sigrok). */
@@ -4698,6 +4747,7 @@ export class App {
       for (const a of this.analyzers) {
         a.result = null; a.index = null; a.status = 'idle'; a.note = { kind: 'pending' };
       }
+      this.autoDecodeGen++;
       this.captureBytes = 0;
       this.lostSamples = 0;
       this.droppedTotal = 0;
@@ -5546,6 +5596,9 @@ export class App {
       this.relayout();
       this.renderPanels();
       this.dirty = true;
+      // After the capture stopped, never during ingest. Repeat waves between intervals are
+      // not decoded (the next wave would cancel it); the session's last wave is.
+      this.scheduleAutoDecode();
     }
     const waiters = this.captureWaiters;
     this.captureWaiters = [];
@@ -5585,8 +5638,71 @@ export class App {
     await this.runDecode(a.id);
   }
 
+  /**
+   * Re-decode every attached analyzer against the current capture, one after another,
+   * on a later macrotask so the capture-stop / file-load frame paints first. The pass
+   * stops as soon as a new capture or file replaces the store (`autoDecodeGen`), or a
+   * capture starts. Decoding itself runs in the decode worker; only the edge extraction
+   * of each runDecode is on this thread, and it runs after acquisition ended.
+   */
+  private scheduleAutoDecode(): void {
+    if (!this.autoDecode || this.analyzers.length === 0) return;
+    const gen = this.autoDecodeGen;
+    const store = this.captureStore;
+    setTimeout(() => {
+      void (async () => {
+        for (const a of [...this.analyzers]) {
+          if (gen !== this.autoDecodeGen || this.captureStore !== store || store.length === 0 ||
+              this.running || this.stopping || !this.analyzers.includes(a)) return;
+          if (a.result || a.status === 'decoding') continue;
+          await this.runDecode(a.id);
+        }
+      })();
+    }, 0);
+  }
+
+  /** Apply an edited mapping and options; the old result is dropped and re-decoded. */
+  private async updateAnalyzer(
+    id: string, channels: Record<number, number>, options: Record<string, string | number>,
+  ): Promise<void> {
+    const a = this.analyzers.find((x) => x.id === id);
+    if (!a) return;
+    if (a.status === 'decoding') this.abort?.abort();
+    a.channels = channels;
+    a.options = options;
+    a.laneChannel = analyzerLaneChannel(channels);
+    a.result = null;
+    a.index = null;
+    a.status = 'idle';
+    a.note = { kind: 'pending' };
+    this.persistWorkspace();
+    this.relayout();
+    this.renderPanels();
+    if (this.captureStore.length > 0) await this.runDecode(a.id);
+  }
+
+  /** Bring an annotation into view (results list selection), keeping the zoom when it fits. */
+  private panToAnnotation(id: string, ann: number): void {
+    const a = this.analyzers.find((x) => x.id === id);
+    if (!a?.result || ann < 0 || ann >= a.result.annotations.count) return;
+    const s = a.result.annotations.start[ann]!;
+    const e = Math.max(a.result.annotations.end[ann]!, s + 1);
+    const view = this.stack.view;
+    const width = view.end - view.start;
+    if (e - s <= width * 0.8) {
+      const mid = (s + e) / 2;
+      this.stack.setViewport(mid - width / 2, mid + width / 2);
+    } else {
+      const pad = (e - s) * 0.25;
+      this.stack.setViewport(s - pad, e + pad);
+    }
+    this.noteExplicitViewport();
+    this.dirty = true;
+  }
+
   private removeAnalyzer(id: string): void {
     this.analyzers = this.analyzers.filter((a) => a.id !== id);
+    if (this.selectedAnalyzer === id) this.selectedAnalyzer = null;
     this.persistWorkspace();
     this.relayout();
     this.renderPanels();

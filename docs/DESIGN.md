@@ -232,6 +232,23 @@ Analog channels are not bus rows. Each analog signal has a row with:
 - Decoder lanes sit under the signal that carries them; the analyzer label, status and
   remove action are in the row. Decoding follows the retention window and states whether
   it is a snapshot.
+- The analyzer form lists channel mapping first, then the decoder's main options, then the
+  Attach/Apply action; the remaining options sit in a collapsed "Advanced options"
+  disclosure under the action. A decoder whose channels are all optional (UART) starts
+  with its first channel mapped, and a mapping that reads no channel is refused in the
+  form. Clicking an attached analyzer's name loads its mapping and current options into
+  the same form ("Edit UART", decoder locked); Apply replaces the old result by
+  re-decoding with the new options.
+- The decoder picker's search ranks protocol aliases first (串口 → uart, IIC/I²C → i2c,
+  单总线/1-Wire → onewire_link, 红外/IR → ir_*), one alias table for every locale; then the
+  fuzzy match on id and localized long name.
+- **New data re-decodes.** With "Auto-decode" on (per session, default on), every attached
+  analyzer re-runs after a capture stops and after a file opens — never during ingest;
+  Repeat waves between intervals are not decoded, the session's last wave is. Opening a
+  file keeps an analyzer only when every channel it maps exists in the file; the others
+  are removed and named in a dismissible panel note. Channel names are not compared
+  (sigrok files usually carry generic D0..Dn names). A decode that finds nothing says
+  "no annotations" on the row.
 - A bus/decoder never changes capture channels or trigger conditions.
 
 ### 5.4 Row height and groups
@@ -314,6 +331,16 @@ Analog channels are not bus rows. Each analog signal has a row with:
 - The Analyze panel lists the events of the selected decoder: time, kind and fields, one
   row per event; the list states its window (retention or record) and whether it is a
   snapshot.
+- Implemented as "Decode results" on the decoders page (`decodeResultsPanel.ts`): time
+  from the displayed origin (T, else the capture start; negative before T), annotation
+  class, text. Rows default to the decoder's main rows (per-bit rows left out, as on the
+  lanes). A Text view joins consecutive annotations of a row into lines (UART ascii
+  "H" "e" "l" "l" "o" reads "Hello"; `[0A]` ends a line, framing start/stop bits are left
+  out, an idle gap starts a new line). The list is virtual and filtering runs in slices,
+  so a million-annotation result does not block the page. Copy (selected/all, capped at
+  100 k lines) and Export CSV/TXT write the listed lines; the range is the whole decode or
+  the visible window at the time it is chosen. Selecting a row pans its block into view;
+  selecting a block on the plot does not yet select the row.
 - Selecting a row highlights the matching block and pans it into view; selecting a block
   selects the row. A search/filter uses the same field model.
 - Copy/export writes the listed fields; the range control offers the visible window or

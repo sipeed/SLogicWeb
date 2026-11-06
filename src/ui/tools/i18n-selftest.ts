@@ -788,6 +788,7 @@ function check(name: string, pass: boolean, detail: string): void {
     // and hiding it behind the diagnostic would claim the result tracks the capture.
     [{ kind: 'stats', anns: 1, decodeMs: 2, wallMs: 3, firstError: 'uart: bad frame', snapshot: true },
       'done', 'snapshot of a running loop - does not track the capture · uart: bad frame'],
+    [{ kind: 'stats', anns: 0, decodeMs: 1, wallMs: 2 }, 'done', 'no annotations'],
     [{ kind: 'stats', anns: 512, decodeMs: 41.6, wallMs: 87.4 }, 'decoding', 'decoding…'],
     [{ kind: 'pending' }, 'decoding', 'decoding…'],
     [{ kind: 'pending' }, 'idle', 'not decoded'],
@@ -805,7 +806,7 @@ function check(name: string, pass: boolean, detail: string): void {
   const bad = cases.filter(([note, status, want]) => formatMountedAnalyzerNote(note, status) !== want);
   check('formatMountedAnalyzerNote hides statistics, keeps diagnostics, delegates the rest',
     bad.length === 0,
-    bad.length === 0 ? `${cases.length}/12 cases match`
+    bad.length === 0 ? `${cases.length}/13 cases match`
       : bad.map(([n, s, want]) => `${n.kind}/${s}: got ` +
         `${JSON.stringify(formatMountedAnalyzerNote(n, s))} want ${JSON.stringify(want)}`).join('; '));
 }

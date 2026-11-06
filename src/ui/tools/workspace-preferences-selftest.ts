@@ -1362,7 +1362,7 @@ const persistWriters = [...new Set(appMethodNames
 const expectedWriters = [
   'adoptCapture', 'adoptDeviceChannels', 'afterChannelChange', 'applySettings', 'applySidebar',
   'attachAnalyzer', 'configureBusScope', 'configureChannel', 'dragScopeTrigger', 'finishCapture',
-  'removeAnalyzer', 'reorder', 'settingsItems', 'startCapture',
+  'removeAnalyzer', 'reorder', 'settingsItems', 'startCapture', 'updateAnalyzer',
 ].sort();
 const quietMethods = ['runDecode', 'discardDecodeState', 'renderPanels', 'relayout', 'retranslate'];
 const quiet = quietMethods.map((name) => ({ name, body: appMethodBody(name) }));

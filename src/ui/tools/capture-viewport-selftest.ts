@@ -161,7 +161,7 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
   const fitBody = between(app, 'private fitViewport()', 'private centerOverview');
   check('each explicit viewport action is recorded as user intent',
     app.includes('private noteViewportIntent(): void') &&
-    intentCalls === 5 && explicitCalls === 2 && fitCalls === 1 && gestures &&
+    intentCalls === 5 && explicitCalls === 3 && fitCalls === 1 && gestures &&
     overviewIntent &&
     fitSites[0]!.includes('this.fitLockedViewport()') &&
     fitSites[0]!.includes('this.stack.zoomToFit();') &&

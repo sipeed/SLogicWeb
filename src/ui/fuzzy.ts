@@ -181,6 +181,50 @@ export function fuzzyRank(needle: string, haystacks: readonly string[]): readonl
   return ranks;
 }
 
+/** Score tiers above any fuzzy score: an exact alias, then an alias prefix. */
+export const ALIAS_EXACT = 1_000_000;
+export const ALIAS_PREFIX = 100_000;
+
+/**
+ * Fold a query or alias for alias comparison: case, width (NFKC also turns "I²C" into
+ * "I2C"), whitespace and the `-`, `_`, `.`, `/` separators are not significant, so
+ * "1 wire", "1-Wire" and "1wire" are one alias.
+ */
+export function foldAlias(text: string): string {
+  return text.normalize('NFKC').toLowerCase().replace(/[\s\-_./]+/g, '');
+}
+
+/**
+ * Rank `haystacks` for `needle` like `fuzzyRank`, with per-item aliases on top: an item
+ * with an alias equal to the folded needle ranks above every fuzzy hit, one with an alias
+ * that starts with it ranks above the remaining fuzzy hits. Ties keep the input order.
+ * The positions are the fuzzy match on the haystack when there is one, otherwise empty
+ * (an alias is not part of the visible label, so there is nothing to highlight).
+ */
+export function aliasRank(
+  needle: string,
+  haystacks: readonly string[],
+  aliases: readonly (readonly string[])[],
+): readonly FuzzyRank[] {
+  const folded = foldAlias(needle);
+  const ranks: FuzzyRank[] = [];
+  for (let i = 0; i < haystacks.length; i++) {
+    const match = fuzzyMatch(needle, haystacks[i]);
+    let tier = 0;
+    if (folded.length > 0) {
+      for (const alias of aliases[i] ?? []) {
+        const a = foldAlias(alias);
+        if (a === folded) { tier = ALIAS_EXACT; break; }
+        if (a.startsWith(folded)) tier = ALIAS_PREFIX;
+      }
+    }
+    if (tier === 0 && match === null) continue;
+    ranks.push({ score: tier + (match?.score ?? 0), positions: match?.positions ?? [], index: i });
+  }
+  ranks.sort((a, b) => (b.score - a.score) || (a.index - b.index));
+  return ranks;
+}
+
 export function highlightRuns(positions: readonly number[], length: number): readonly FuzzyRun[] {
   const runs: FuzzyRun[] = [];
   let k = 0;

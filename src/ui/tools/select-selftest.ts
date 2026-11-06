@@ -349,7 +349,8 @@ check(
   );
 
   const searchNeedles = [
-    "import { fuzzyRank, highlightRuns } from './fuzzy.js';",
+    "import { aliasRank, fuzzyRank, highlightRuns } from './fuzzy.js';",
+    'aliasRank(query, this.searchTexts, search.aliases)',
     'export type SelectOptionTuple = readonly [value: string, label: string, search?: string];',
     'this.searchTexts = options.map((option) => option[2] ?? option[1]);',
     'fuzzyRank(query, this.searchTexts)',
@@ -756,7 +757,10 @@ check(
   ];
   const missingAnalyzerKeys = analyzerKeys.filter((needle) => !analyzer.includes(needle));
   const pickRoot = analyzer.includes('add.body.appendChild(pick.el)');
-  const selRoots = analyzer.match(/add\.body\.appendChild\(sel\.el\)/g)?.length ?? 0;
+  // One channel-map append; enumerated options return their control to the form,
+  // which places it either up front or in the advanced disclosure.
+  const selRoots = (analyzer.match(/add\.body\.appendChild\(sel\.el\)/g)?.length ?? 0) +
+    (analyzer.match(/return sel\.el;/g)?.length ?? 0);
   check(
     'the decoder picker, channel maps, and enumerated options all use selectControl with stable keys',
     analyzerMigrated && missingAnalyzerKeys.length === 0 && pickRoot && selRoots === 2,

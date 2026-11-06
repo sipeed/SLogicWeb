@@ -1,4 +1,4 @@
-import { fuzzyRank, highlightRuns } from './fuzzy.js';
+import { aliasRank, fuzzyRank, highlightRuns } from './fuzzy.js';
 
 export interface SelectOption {
   readonly value: string;
@@ -11,6 +11,11 @@ export interface SelectSearch {
   readonly label: string;
   readonly placeholder: string;
   readonly empty: string;
+  /**
+   * Per-option aliases (same order as the options) that `aliasRank` ranks above fuzzy
+   * hits on the search text - e.g. "串口" for `uart`. Not shown; only searched.
+   */
+  readonly aliases?: readonly (readonly string[])[];
 }
 
 export interface SelectConfig {
@@ -361,7 +366,9 @@ export class SelectControl extends EventTarget {
       this.setActive(selected >= 0 ? selected : 0);
       return;
     }
-    const ranks = fuzzyRank(query, this.searchTexts);
+    const ranks = search.aliases
+      ? aliasRank(query, this.searchTexts, search.aliases)
+      : fuzzyRank(query, this.searchTexts);
     const hit = new Set(ranks.map((rank) => rank.index));
     this.items.forEach((item, index) => {
       item.hidden = !hit.has(index);

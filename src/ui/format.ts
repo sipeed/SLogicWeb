@@ -188,7 +188,10 @@ export function formatMountedAnalyzerNote(note: AnalyzerNote, status: AnalyzerSt
   // Statistics are hidden here, diagnostics are not - and neither is the snapshot tag:
   // a result that does not track the capture is a warning, not a statistic.
   if (note.kind === 'stats') {
+    // A decode that produced nothing is worth saying: the decoder ran on the wrong wire
+    // or the capture holds no traffic for it (an analyzer carried over to a new file).
     const tag = note.snapshot ? t('analyzerNote.snapshot') : '';
+    if (note.anns === 0) return [t('analyzerNote.noAnnotations'), tag, note.firstError].filter(Boolean).join(' · ');
     return [tag, note.firstError].filter(Boolean).join(' · ');
   }
   return formatAnalyzerNote(note);

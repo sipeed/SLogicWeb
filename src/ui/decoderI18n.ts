@@ -55,6 +55,57 @@ export function decoderPickerSearchText(decoder: DecoderMetadata): string {
   return `${decoder.id} - ${decoderLongNameText(decoder)}`;
 }
 
+/**
+ * Search-only aliases for common protocols: the names people type ("串口", "IIC",
+ * "单总线", "红外") rather than the decoder's id or long name. Deliberately one table
+ * for every locale - a Chinese alias still finds UART while the UI is in English - so
+ * the entries are vocabulary, not translations, and are not in the message catalogs.
+ * Folding (`foldAlias`) makes "I²C", "i2c" and "I 2 C" one alias.
+ */
+export const DECODER_SEARCH_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  uart: ['串口', '串行口', '串行端口', '异步串口', 'UART', 'USART', 'serial', 'serial port',
+    'RS232', 'RS-485', 'TTL', 'COM', 'port série', 'liaison série',
+    'последовательный порт', 'COM-порт'],
+  i2c: ['IIC', 'I2C', 'I²C', 'TWI', 'SMBus', '两线', 'двухпроводной'],
+  onewire_link: ['单总线', '一线', '1-Wire', 'onewire', 'one wire', 'DS18B20', 'однопроводной'],
+  spi: ['SPI', '串行外设接口', '四线'],
+  can: ['CAN', 'CAN总线', 'CAN bus', 'шина CAN', 'bus CAN'],
+  ir_nec: ['红外', '红外遥控', 'IR', 'infrared', 'infrarouge', 'инфракрасный', 'ИК'],
+  ir_rc5: ['红外', '红外遥控', 'IR', 'infrared', 'infrarouge', 'инфракрасный', 'ИК'],
+  ir_rc6: ['红外', '红外遥控', 'IR', 'infrared', 'infrarouge', 'инфракрасный', 'ИК'],
+  ir_sirc: ['红外', '红外遥控', 'IR', 'infrared', 'infrarouge', 'инфракрасный', 'ИК'],
+  ir_irmp: ['红外', '红外遥控', 'IR', 'infrared', 'infrarouge', 'инфракрасный', 'ИК'],
+  usb_signalling: ['USB', '通用串行总线'],
+  usb_power_delivery: ['USB PD', 'PD', '快充'],
+  i2s: ['I2S', 'IIS', '音频', 'audio'],
+  jtag: ['JTAG'],
+  swd: ['SWD', '调试'],
+  rgb_led_ws281x: ['WS2812', 'WS2812B', 'NeoPixel', '灯带', 'RGB LED'],
+  pwm: ['PWM', '脉宽调制'],
+  ps2: ['PS/2', '键盘', '鼠标'],
+  am230x: ['DHT11', 'DHT22', '温湿度'],
+  sdcard_sd: ['SD', 'SD卡'],
+  mdio: ['MDIO', 'SMI', '以太网'],
+  lpc: ['LPC'],
+  dcf77: ['DCF77'],
+  cec: ['CEC', 'HDMI'],
+  spdif: ['S/PDIF', 'SPDIF'],
+  wiegand: ['韦根', 'Wiegand'],
+  morse: ['摩尔斯', '莫尔斯', 'Morse', 'морзе'],
+  seven_segment: ['数码管', '七段'],
+  stepper_motor: ['步进电机'],
+  counter: ['计数'],
+};
+
+/** A decoder's search aliases: its own id (exact id hits rank first too) plus the table's. */
+export function decoderSearchAliases(decoderId: string): readonly string[] {
+  return [decoderId, ...(DECODER_SEARCH_ALIASES[decoderId] ?? [])];
+}
+
+export function decoderPickerAliases(decoders: readonly DecoderMetadata[]): (readonly string[])[] {
+  return decoders.map((decoder) => decoderSearchAliases(decoder.id));
+}
+
 export function decoderPickerOptions(
   decoders: readonly DecoderMetadata[],
 ): SelectOptionTuple[] {

@@ -309,6 +309,11 @@ export class AnnotationIndex {
     });
   }
 
+  /** Every annotation index of `instance`, ordered by start sample (shared, do not mutate). */
+  ordered(instance: number): Int32Array {
+    return this.byInst[instance] ?? new Int32Array(0);
+  }
+
   /** Indices of annotations for `instance` overlapping [startSample, endSample). */
   query(instance: number, startSample: number, endSample: number): number[] {
     const list = this.byInst[instance];

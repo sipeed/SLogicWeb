@@ -549,7 +549,8 @@ const describe = (s: SidebarState): string =>
   const panels = (mountBody.match(/new CapturePanel\(/g) ?? []).length === 1 &&
     (mountBody.match(/new AnalyzerPanel\(/g) ?? []).length === 1 &&
     (mountBody.match(/new BusPanel\(/g) ?? []).length === 1 &&
-    mountBody.includes("container.append(analyzerRoot, busRoot);");
+    (mountBody.match(/new DecodeResultsPanel\(/g) ?? []).length === 1 &&
+    mountBody.includes("container.append(analyzerRoot, resultsRoot, busRoot);");
   check('App owns the host wiring, mounts one panel per page, and carries no retired host, assistant-mode flag or toolbar sidebar selector',
     retired.length === 0 && retiredToolbar.length === 0 && wiring.length === 0 && panels,
     `retired=${JSON.stringify(retired)}, retiredToolbar=${JSON.stringify(retiredToolbar)}, ` +
