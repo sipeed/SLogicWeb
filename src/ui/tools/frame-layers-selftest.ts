@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  fingerprintOf, planLayers, type FrameFingerprint, type FrameLayerPlan,
+  fingerprintOf, planLayers, storeSignature, type FrameFingerprint, type FrameLayerPlan,
 } from '../frameLayers.js';
 
 const nodeProcess = (() => {
@@ -20,7 +20,7 @@ function check(name: string, pass: boolean, detail: string): void {
 
 const base: FrameFingerprint = {
   viewStart: 1000, viewEnd: 2000, widthPx: 1024, heightPx: 600,
-  dataLen: 5000, dropped: 0, frontier: 5000, triggerSample: null,
+  dataLen: 5000, dropped: 0, frontier: 5000, storeSig: 1, triggerSample: null,
   rowSig: 11, themeSig: 'dark', tickSig: 22, busSig: 33, tintSig: 44,
 };
 
@@ -36,7 +36,8 @@ const base: FrameFingerprint = {
     ['the plot was resized', changed({ widthPx: 1025 }), [true, true, true, true]],
     ['the row list changed', changed({ rowSig: 12 }), [true, false, true, true]],
     ['the theme changed', changed({ themeSig: 'light' }), [true, false, true, true]],
-    ['the ticks changed', changed({ tickSig: 23 }), [false, true, false, false]],
+    ['the ticks changed', changed({ tickSig: 23 }), [false, true, true, true]],
+    ['the displayed store was swapped', changed({ storeSig: 2 }), [true, false, true, true]],
     ['the current wave advanced (repeat composite)', changed({ frontier: 5001 }), [true, false, true, true]],
     ['the trigger moved', changed({ triggerSample: 1500 }), [false, false, true, true]],
     ['the repeat tint changed', changed({ tintSig: 45 }), [false, false, true, true]],
@@ -64,9 +65,12 @@ const base: FrameFingerprint = {
   const changed = fingerprintOf(['a', 1]) !== fingerprintOf(['a', 2]);
   const separated = fingerprintOf(['a', 'b']) !== fingerprintOf(['ab']);
   const unsigned = fingerprintOf([1.5, 'x']) >= 0 && Number.isInteger(fingerprintOf([1.5, 'x']));
+  const a = {};
+  const b = {};
+  const stable = storeSignature(a) === storeSignature(a) && storeSignature(a) !== storeSignature(b);
   check('the rolling hash is stable, order-aware and separator-aware',
-    equal && changed && separated && unsigned,
-    `equal=${equal}, changed=${changed}, separated=${separated}, unsigned=${unsigned}`);
+    equal && changed && separated && unsigned && stable,
+    `equal=${equal}, changed=${changed}, separated=${separated}, unsigned=${unsigned}, store=${stable}`);
 }
 
 {

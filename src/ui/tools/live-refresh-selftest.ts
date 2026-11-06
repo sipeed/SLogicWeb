@@ -41,6 +41,28 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 {
+  const budget = (lastCostMs: number): number => {
+    let permitted = 0;
+    let drawnAt = Number.NEGATIVE_INFINITY;
+    let cost = 0;
+    for (let now = 0; now < 1000; now += 1000 / 60) {
+      if (liveDrawDue(now, drawnAt, cost, true, true)) {
+        permitted += 1;
+        drawnAt = now;
+        cost = lastCostMs;
+      }
+    }
+    return permitted;
+  };
+  const cheap = budget(2);
+  const mid = budget(10);
+  const expensive = budget(40);
+  check('a 60 Hz clock permits 30..120 live draws per second and slows down with frame cost',
+    cheap >= 30 && cheap <= 120 && mid >= 30 && expensive <= 60 && expensive < mid,
+    `2ms=${cheap}, 10ms=${mid}, 40ms=${expensive}`);
+}
+
+{
   const cases: [number, number, number, boolean, boolean, boolean][] = [
     // now, lastDrawnAt, lastCostMs, pending, running, due
     [0, 0, 0, true, true, false],

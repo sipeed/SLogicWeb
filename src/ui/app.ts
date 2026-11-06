@@ -103,7 +103,7 @@ import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.j
 import { capturePostTriggerSamples, carryCaptureDuration } from './capturePolicy.js';
 import { liveDrawDue, liveWindowHasNewData, type LiveWindow } from './liveRefresh.js';
 import {
-  fingerprintOf, planLayers, type FrameFingerprint,
+  fingerprintOf, planLayers, storeSignature, type FrameFingerprint,
 } from './frameLayers.js';
 import {
   FRAME_LAYERS, FrameCostRing,
@@ -2022,7 +2022,7 @@ export class App {
       if (this.hover) this.overlay.drawHover(this.hover);
     }
     this.layerFingerprint = fingerprint;
-    this.renderOverview();
+    this.renderOverview(force);
     this.renderStatus();
     this.recordDrawnWindow();
   }
@@ -2052,6 +2052,7 @@ export class App {
       dataLen: this.store.length,
       dropped: this.store.droppedSamples,
       frontier: this.captureStore.length,
+      storeSig: storeSignature(this.store),
       triggerSample: this.displayTriggerSample(),
       rowSig: fingerprintOf(rows),
       themeSig: this.paintedTheme,
@@ -2068,7 +2069,7 @@ export class App {
     ];
     for (const tick of ticks.ticks) parts.push(tick.ps, tick.x, tick.major ? 1 : 0, tick.label);
     for (const cursor of this.cursors) {
-      parts.push(cursor.marker.label, cursor.marker.sample ?? -1);
+      parts.push(cursor.marker.label, cursor.marker.sample ?? -1, cursor.marker.color);
     }
     return fingerprintOf(parts);
   }
@@ -2077,6 +2078,8 @@ export class App {
     const parts: (string | number | boolean)[] = [
       viewStart, viewEnd, this.stack.widthDevicePx, this.store.length,
       this.store.droppedSamples, this.captureStore.length, this.running,
+      this.settings.triggerEnableMask, this.settings.triggerSource,
+      JSON.stringify(this.settings.analogTriggers ?? {}),
     ];
     for (const bus of this.busViews) {
       parts.push(bus.id, bus.color, bus.heightCss, bus.style, bus.hideSources,
@@ -2117,7 +2120,7 @@ export class App {
 
   private renderOverview(force = false): void {
     const state = this.overviewState();
-    if (!force && !this.overview.due(state, performance.now())) {
+    if (!this.overview.due(state, performance.now(), force)) {
       this.layerSkips.overview += 1;
       return;
     }

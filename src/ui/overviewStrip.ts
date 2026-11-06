@@ -157,7 +157,7 @@ interface CachedDensity extends OverviewDensity {
   channels: string;
 }
 
-/** Least time between two overview redraws: a minimap does not need the live cadence. */
+/** Least time between two overview redraws. */
 export const OVERVIEW_MIN_MS = 100;
 
 let nextOverviewStoreId = 1;
@@ -192,8 +192,9 @@ export function overviewSignature(
 /** The strip's redraw clock: a changed signature, at most once per OVERVIEW_MIN_MS. */
 export function overviewDue(
   lastSignature: string, lastRenderedAt: number, signature: string, nowMs: number,
+  force = false,
 ): boolean {
-  if (nowMs - lastRenderedAt < OVERVIEW_MIN_MS) return false;
+  if (!force && nowMs - lastRenderedAt < OVERVIEW_MIN_MS) return false;
   return signature !== lastSignature;
 }
 
@@ -236,10 +237,10 @@ export class OverviewStrip {
   }
 
   /** True when the strip's inputs changed and its clock allows another redraw. */
-  due(state: OverviewState, nowMs: number): boolean {
+  due(state: OverviewState, nowMs: number, force = false): boolean {
     return overviewDue(
       this.lastSignature, this.lastRenderedAt,
-      overviewSignature(state, this.widthCss, this.heightCss), nowMs,
+      overviewSignature(state, this.widthCss, this.heightCss), nowMs, force,
     );
   }
 

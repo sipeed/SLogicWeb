@@ -124,9 +124,13 @@ function check(name: string, pass: boolean, detail: string): void {
   const early = overviewDue(sig, 0, moved, OVERVIEW_MIN_MS - 1);
   const changed = overviewDue(sig, 0, moved, OVERVIEW_MIN_MS);
   const unchanged = overviewDue(sig, 0, sig, OVERVIEW_MIN_MS * 5);
+  const forced = overviewDue(sig, 0, moved, 1, true);
+  const forcedUnchanged = overviewDue(sig, 0, sig, 1, true);
   check('the overview redraws on a changed signature at most once per 100 ms',
-    OVERVIEW_MIN_MS === 100 && first && !early && changed && !unchanged,
-    `first=${first}, early=${early}, changed=${changed}, unchanged=${unchanged}`);
+    OVERVIEW_MIN_MS === 100 && first && !early && changed && !unchanged &&
+    forced && !forcedUnchanged,
+    `first=${first}, early=${early}, changed=${changed}, unchanged=${unchanged}, ` +
+    `forced=${forced}, forcedUnchanged=${forcedUnchanged}`);
 }
 
 {
@@ -152,7 +156,7 @@ function check(name: string, pass: boolean, detail: string): void {
     app.includes('const overviewH = this.el.overview.offsetHeight || 56;') &&
     app.includes('this.el.scroll.clientHeight || 630) - axisH - overviewH - analogH') &&
     app.includes('this.overview.render(state)') &&
-    app.includes('this.overview.due(state, performance.now())') &&
+    app.includes('this.overview.due(state, performance.now(), force)') &&
     app.includes('private overviewWindow()') &&
     app.includes('windowStart: overviewWindow.start') &&
     app.includes('windowSpan: overviewWindow.span') &&
