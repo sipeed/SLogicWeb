@@ -9,6 +9,7 @@ export const DIAGNOSTIC_CODES = [
   'io.nothingToSave',
   'io.srProbes',
   'io.srTooLarge',
+  'io.exportNoChannels',
   'file.noFiles',
   'file.unsupported',
   'file.lwcap.header',

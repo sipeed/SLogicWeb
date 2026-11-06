@@ -14,7 +14,9 @@
 
 import type { LocalDateParts } from './srSave.js';
 
-export type CaptureFileFormat = 'lwcap' | 'sr';
+/** Save formats, in Save-menu order: ours, sigrok, then the text exports (textExport.ts). */
+export type CaptureFileFormat = 'lwcap' | 'sr' | 'vcd' | 'csv';
+export const CAPTURE_FILE_FORMATS: readonly CaptureFileFormat[] = ['lwcap', 'sr', 'vcd', 'csv'];
 
 export interface CaptureFileNameInput {
   /** Device name at capture time (e.g. "SLogic32 U3"); null when unknown. */
@@ -82,8 +84,8 @@ export interface SaveFileType {
 }
 
 /**
- * File System Access picker types: both formats, the chosen one first (the picker's
- * default). `descriptions` are already translated.
+ * File System Access picker types: every format, the chosen one first (the picker's
+ * default), the rest in menu order. `descriptions` are already translated.
  */
 export function saveFilePickerTypes(
   first: CaptureFileFormat, descriptions: Readonly<Record<CaptureFileFormat, string>>,
@@ -91,8 +93,10 @@ export function saveFilePickerTypes(
   const all: Record<CaptureFileFormat, SaveFileType> = {
     lwcap: { description: descriptions.lwcap, accept: { 'application/octet-stream': ['.lwcap'] } },
     sr: { description: descriptions.sr, accept: { 'application/zip': ['.sr'] } },
+    vcd: { description: descriptions.vcd, accept: { 'text/plain': ['.vcd'] } },
+    csv: { description: descriptions.csv, accept: { 'text/csv': ['.csv'] } },
   };
-  return first === 'lwcap' ? [all.lwcap, all.sr] : [all.sr, all.lwcap];
+  return [first, ...CAPTURE_FILE_FORMATS.filter((f) => f !== first)].map((f) => all[f]);
 }
 
 /** The format a picked name asks for; an unrecognised extension keeps `fallback`. */
@@ -100,5 +104,7 @@ export function formatForFileName(name: string, fallback: CaptureFileFormat): Ca
   const lower = name.toLowerCase();
   if (lower.endsWith('.sr')) return 'sr';
   if (lower.endsWith('.lwcap')) return 'lwcap';
+  if (lower.endsWith('.vcd')) return 'vcd';
+  if (lower.endsWith('.csv')) return 'csv';
   return fallback;
 }

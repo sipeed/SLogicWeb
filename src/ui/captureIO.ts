@@ -9,6 +9,9 @@
  * OUT, to sigrok: `src/ui/srSave.ts` exports the digital channels as a `.sr` session
  * (no gaps, no trigger, analog groups as their raw input bits) for PulseView.
  *
+ * OUT, as text: `src/ui/textExport.ts` writes `.vcd` (value change dump) and `.csv` (one row
+ * per transition) from the same transition lists, in bounded chunks.
+ *
  * OUT, and back in: `.lwcap` is ours. It stores transitions, not samples, so a 5 s
  * 16-channel capture is ~400 kB instead of 200 MB, and it round-trips through
  * `SampleStore.edges()` exactly - which also means it loads straight into an edge store

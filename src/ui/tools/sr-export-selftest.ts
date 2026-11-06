@@ -246,12 +246,18 @@ async function main(): Promise<void> {
   check('base name strips folders and only the last extension',
     fileBaseName('a/b\\c.d.sr') === 'c.d' && fileBaseName('.hidden') === '.hidden');
   check('rate tokens', [100e6, 250e3, 1e9, 33.333333e6, 999].map(rateToken).join() === '100MHz,250kHz,1GHz,33.333MHz,999Hz');
-  const types = saveFilePickerTypes('sr', { lwcap: 'L', sr: 'S' });
-  check('picker offers both types, chosen first',
-    types.length === 2 && types[0]!.accept['application/zip']?.[0] === '.sr' &&
-    types[1]!.accept['application/octet-stream']?.[0] === '.lwcap');
+  const names = { lwcap: 'L', sr: 'S', vcd: 'V', csv: 'C' };
+  const ext = (list: ReturnType<typeof saveFilePickerTypes>): string =>
+    list.map((ty) => Object.values(ty.accept)[0]![0]).join(',');
+  const types = saveFilePickerTypes('sr', names);
+  check('picker offers every type, chosen first, the rest in menu order',
+    ext(types) === '.sr,.lwcap,.vcd,.csv' && types[0]!.description === 'S' &&
+    ext(saveFilePickerTypes('csv', names)) === '.csv,.lwcap,.sr,.vcd' &&
+    ext(saveFilePickerTypes('lwcap', names)) === '.lwcap,.sr,.vcd,.csv' &&
+    saveFilePickerTypes('vcd', names)[0]!.accept['text/plain']?.[0] === '.vcd', ext(types));
   check('picked name decides the format',
     formatForFileName('x.SR', 'lwcap') === 'sr' && formatForFileName('x.lwcap', 'sr') === 'lwcap' &&
+    formatForFileName('x.VCD', 'sr') === 'vcd' && formatForFileName('x.csv', 'lwcap') === 'csv' &&
     formatForFileName('x.bin', 'sr') === 'sr');
   const d = new Date(2026, 10, 6, 11, 0, 50);
   const parts = localDateParts(d);

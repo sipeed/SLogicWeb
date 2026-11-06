@@ -73,7 +73,8 @@ const SAVE_PROGRESS_MIN_BYTES = 8 << 20;
 import {
   captureFileName, formatForFileName, localDateParts, saveFilePickerTypes, type CaptureFileFormat,
 } from './captureFileName.js';
-import { saveSr, srExportParts, type SrProbe } from './srSave.js';
+import { srExportParts, type SrProbe } from './srSave.js';
+import { csvExportParts, vcdExportParts } from './textExport.js';
 import { FileDragDepth, SavedCaptures, captureUnsaved } from './fileGuards.js';
 import { ConfirmDialog } from './confirmDialog.js';
 import { connectSamplerate } from './connectDefaults.js';
@@ -238,6 +239,20 @@ const LOOP_STORE_HARD_SAMPLES = 0x7fffffff - 0x1000000;
 const LOOP_BUILD_SUSPEND_BYTES_PER_SEC = 160e6;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+/** Download MIME type per save format (the picker path takes it from the handle). */
+const EXPORT_MIME: Record<CaptureFileFormat, string> = {
+  lwcap: 'application/octet-stream', sr: 'application/zip', vcd: 'text/plain', csv: 'text/csv',
+};
+
+/** A Blob over export parts, kept as separate parts (no concatenated copy). */
+async function partsBlob(
+  parts: AsyncIterable<Uint8Array<ArrayBuffer>> | Iterable<Uint8Array<ArrayBuffer>>, type: string,
+): Promise<Blob> {
+  const list: Uint8Array<ArrayBuffer>[] = [];
+  for await (const p of parts) list.push(p);
+  return new Blob(list, { type });
+}
+
 /** sessionStorage flag: this tab's user dismissed the browser-support notice. */
 const PLATFORM_NOTICE_DISMISSED_KEY = 'logicweb.platformNoticeDismissed';
 
@@ -5383,7 +5398,6 @@ export class App {
     this.scheduleAutoDecode();
   }
 
-  /** The file chooser for Open (a menu pick is still a user gesture). */
   /** One Open entry point: a file from disk first, then the bundled example capture. */
   private openItems(): SettingsMenuItem[] {
     return [
@@ -5407,15 +5421,21 @@ export class App {
     await this.openFiles([file]);
   }
 
-  /** One Save entry point: a two-row format menu (.lwcap first, .sr for sigrok). */
+  /**
+   * One Save entry point: a format menu - `.lwcap` first (ours, lossless), `.sr` for
+   * sigrok, then the text exports `.vcd` and `.csv` (textExport.ts). Every format except
+   * `.lwcap` writes the enabled digital channels.
+   */
   private saveItems(): SettingsMenuItem[] {
     return [
       { label: t('save.lwcap'), hint: t('save.lwcapHint'), onPick: () => void this.save('lwcap') },
       { label: t('save.sr'), hint: t('save.srHint'), onPick: () => void this.save('sr') },
+      { label: t('save.vcd'), hint: t('save.vcdHint'), onPick: () => void this.save('vcd') },
+      { label: t('save.csv'), hint: t('save.csvHint'), onPick: () => void this.save('csv') },
     ];
   }
 
-  /** `.sr` probes: the enabled channels the capture holds, in channel order. */
+  /** `.sr`/`.vcd`/`.csv` channels: the enabled channels the capture holds, in channel order. */
   private srProbes(store: SampleStore): SrProbe[] {
     return this.enabledChannels()
       .filter((c) => c.index < store.channelCount)
@@ -5423,21 +5443,34 @@ export class App {
       .map((c) => ({ index: c.index, name: c.name }));
   }
 
+  /**
+   * The file body for a non-`.lwcap` format, snapshotted NOW (a live capture keeps
+   * appending): bounded parts generated on demand - never one concatenated buffer of the
+   * whole export. `.lwcap` goes through `writeLwcapWithProgress` instead.
+   */
+  private exportBody(
+    format: Exclude<CaptureFileFormat, 'lwcap'>, store: SampleStore, now: Date,
+  ): AsyncIterable<Uint8Array<ArrayBuffer>> | Iterable<Uint8Array<ArrayBuffer>> {
+    switch (format) {
+      case 'sr': return srExportParts(store, this.srProbes(store), { modified: localDateParts(now) });
+      case 'vcd': return vcdExportParts(store, this.srProbes(store), { date: now.toISOString() });
+      case 'csv': return csvExportParts(store, this.srProbes(store));
+    }
+  }
+
   private async save(format: CaptureFileFormat): Promise<void> {
     try {
       const store = this.captureStore;
       if (store.length === 0) throw new DiagnosticError('io.nothingToSave');
-      const names = this.channels.map((c) => c.name);
       const probes = this.srProbes(store);
       const now = new Date();
       const nameFor = (f: CaptureFileFormat): string => captureFileName({
         model: this.captureOrigin.model,
-        channels: f === 'sr' ? probes.length : store.channelCount,
+        channels: f === 'lwcap' ? store.channelCount : probes.length,
         samplerateHz: store.samplerate,
         when: localDateParts(now),
         sourceFileName: this.captureOrigin.fileName,
       }, f);
-      const modified = localDateParts(now);
 
       const picker = (window as unknown as { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker;
       if (detectCapabilities().saveFilePicker && picker) {
@@ -5445,7 +5478,10 @@ export class App {
         try {
           handle = await picker.call(window, {
             suggestedName: nameFor(format),
-            types: saveFilePickerTypes(format, { lwcap: t('save.lwcapType'), sr: t('save.srType') }),
+            types: saveFilePickerTypes(format, {
+              lwcap: t('save.lwcapType'), sr: t('save.srType'),
+              vcd: t('save.vcdType'), csv: t('save.csvType'),
+            }),
           });
         } catch (e) {
           if (e instanceof DOMException && e.name === 'AbortError') return; // user cancelled
@@ -5454,13 +5490,16 @@ export class App {
         const chosen = formatForFileName(handle.name, format);
         // Snapshot before the first await on the file: a live capture keeps appending.
         const savedLength = store.length;
-        const parts = chosen === 'sr' ? srExportParts(store, probes, { modified }) : null;
-        const lwcap = chosen === 'lwcap' ? planLwcap(store, names) : null;
         const writable = await handle.createWritable();
         try {
           // Streamed: bounded parts straight to the file, never one whole-file buffer.
-          if (lwcap) await this.writeLwcapWithProgress(lwcap, (part) => writable.write(part));
-          if (parts) for await (const p of parts) await writable.write(p);
+          // .lwcap goes through the progress writer; the rest are generated on demand.
+          if (chosen === 'lwcap') {
+            const plan = planLwcap(store, this.channels.map((c) => c.name));
+            await this.writeLwcapWithProgress(plan, (part) => writable.write(part));
+          } else {
+            for await (const p of this.exportBody(chosen, store, now)) await writable.write(p);
+          }
           await writable.close();
         } catch (e) {
           await writable.abort().catch(() => undefined);
@@ -5472,15 +5511,15 @@ export class App {
 
       const savedLength = store.length;
       let blob: Blob;
-      if (format === 'sr') {
-        blob = await saveSr(store, probes, { modified });
-      } else {
+      if (format === 'lwcap') {
         // The download fallback still never builds one buffer: the Blob holds the bounded
         // parts, which the browser may keep on disk.
-        const plan = planLwcap(store, names);
+        const plan = planLwcap(store, this.channels.map((c) => c.name));
         const blobParts: BlobPart[] = [];
         await this.writeLwcapWithProgress(plan, (part) => { blobParts.push(part); });
         blob = new Blob(blobParts, { type: 'application/octet-stream' });
+      } else {
+        blob = await partsBlob(this.exportBody(format, store, now), EXPORT_MIME[format]);
       }
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
