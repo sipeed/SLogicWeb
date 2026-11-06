@@ -21,6 +21,7 @@ import { parseWorkspaceSnapshot, serializeWorkspaceSnapshot } from '../workspace
 import { defaultChannels } from '../state.js';
 import { analogGainChoice, parseAnalogGain } from '../capturePanel.js';
 import { SLOGIC32U3_PROFILE } from '../../device/index.js';
+import { SoftwareTrigger } from '../../data/softwareTrigger.js';
 
 interface FsLike { readFileSync(path: string, encoding: 'utf8'): string }
 
@@ -285,7 +286,8 @@ function roundTrip(views: unknown[], analogTriggers?: Record<string, unknown>): 
   const end = app.indexOf('\n  }\n', start);
   const body = start >= 0 && end > start ? app.slice(start, end) : '';
   const gainPath = body.includes('this.clampSettings(this.settings)') &&
-    body.includes('if (hadTrigger) this.syncActiveTrigger();') &&
+    body.includes("if (after !== undefined && this.settings.triggerSource === 'analog') this.syncActiveTrigger();") &&
+    body.includes('this.analogLevelClamped = before !== undefined && after !== undefined &&') &&
     body.includes('...analogSpan(gain), voltsPerDiv: analogDefaultVoltsPerDiv(gain)') &&
     !body.includes('restartCapture') && !body.includes('stopCapture') &&
     !body.includes('this.device') && !body.includes('applySettings') &&
@@ -304,6 +306,43 @@ function roundTrip(views: unknown[], analogTriggers?: Record<string, unknown>): 
     list.includes("t('channels.analogGainSub', {") && list.includes('level.max = String(half);');
   check('a gain change is conversion only: re-snapped through the settings clamp, retuned live, never restarted',
     gainPath && triggerPath && ui, `gainPath=${gainPath}, triggerPath=${triggerPath}, ui=${ui}`);
+}
+
+// End to end: a level declared in volts at a gain reaches the matcher as the code the
+// gain selects, and fires (or not) on raw ADC bytes exactly at that code.
+{
+  // The module wires its bus MSB first: input 0 of the group carries the code's MSB.
+  const raw = (code: number): number => {
+    let reversed = 0;
+    for (let bit = 0; bit < 8; bit++) reversed = (reversed << 1) | ((code >> bit) & 1);
+    return reversed;
+  };
+  const run = (codes: number[], kind: 'rising' | 'falling', volts: number, gain: number) => {
+    const level = analogCodeFromVolts(analogTriggerVolts(kind, volts, gain), gain);
+    const out: number[] = [];
+    const trigger = new SoftwareTrigger({
+      config: {
+        channels: 8, conditions: [], analog: [{ start: 0, kind, level }],
+        preTriggerSamples: 0, maxSamples: 2, searchLimitSamples: codes.length,
+      },
+      emit: (chunk) => out.push(...chunk),
+    });
+    trigger.feed(Uint8Array.from(codes.map(raw)));
+    trigger.finish();
+    // No pre-trigger, so the first emitted sample is the one that matched.
+    return { level, stats: trigger.stats, first: out.length > 0 ? raw(out[0]!) : null };
+  };
+  const rising = run([170, 180, 187, 188, 200], 'rising', 2.5, 3);
+  const falling = run([210, 200, 189, 188, 150], 'falling', 2.5, 3);
+  const none = run([170, 180, 187, 186, 150], 'rising', 2.5, 3);
+  const oneX = run([140, 145, 150, 160], 'rising', 2.5, 1);
+  check('3x +2.5 V arms the matcher on code 188: rising, falling and no trigger',
+    rising.level === 188 && rising.stats.matched && rising.first === 188 &&
+    falling.level === 188 && falling.stats.matched && falling.first === 188 &&
+    none.stats.noTrigger && !none.stats.matched &&
+    oneX.level === 148 && oneX.stats.matched && oneX.first === 150,
+    `rising=${rising.level}@${rising.first}, falling=${falling.level}@${falling.first}, ` +
+    `none=${none.stats.noTrigger}, 1x=${oneX.level}@${oneX.first}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

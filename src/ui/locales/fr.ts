@@ -442,6 +442,7 @@ export const fr: Messages = {
   'capturePanel.analogGainRange': 'Saisissez un rapport de gain entre {min} et {max}.',
   'capturePanel.analogGainReadout': '±{range} V · {bits} bits · {step} mV/code',
   'capturePanel.analogGainHelp': 'Le gain doit correspondre au réglage du module ; il sert à calculer les tensions réelles.',
+  'capturePanel.analogLevelClamped': 'Le niveau de déclenchement {from} de {name} sort de la nouvelle plage ; il vaut maintenant {to}.',
   'capturePanel.analogGainDetail': 'Le gain du module ADC se règle sur le module lui-même ; l’application ne peut ni le lire ni le modifier. Les codes 0–255 couvrent environ ±16 V divisés par le gain (2× donne ±8 V). Le changer ici ne fait que recalculer l’affichage et le niveau de déclenchement, même pendant une capture ; un niveau hors de la nouvelle plage est ramené à sa limite. Rapports de {min} à {max}.',
   'channels.analogGainSub': '{gain} · ±{range} V',
   'capturePanel.analogEnable': 'Analogique {name} : lire le module ADC branché sur {range} comme une tension {span} ({bits} bits). Branchez le signal sur l’entrée du module ADC ; {range} transportent alors ses échantillons, et non des niveaux logiques.',

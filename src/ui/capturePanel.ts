@@ -122,6 +122,11 @@ export interface CapturePanelView {
   channels: readonly ChannelState[];
   widthOptions: readonly number[];
   buses: readonly BusViewState[];
+  /**
+   * The last gain change moved a group's stored trigger level to the new range's edge
+   * (the stored volts no longer fit); shown once under the gain rows.
+   */
+  analogLevelClamped?: { start: number; from: number; to: number } | null;
   /** Analog groups (A0–A3) the current device and width expose; 0 disables the buttons. */
   analogGroups: number;
   deviceName: string | null;
@@ -631,6 +636,16 @@ export class CapturePanel {
         min: ANALOG_GAIN_MIN, max: ANALOG_GAIN_MAX,
       })));
       chSec.body.appendChild(gainHelp);
+    }
+    const clamped = v.analogLevelClamped;
+    if (clamped && gainStarts.includes(clamped.start)) {
+      const note = div('panel-note');
+      note.dataset.analogLevelClamped = '';
+      note.textContent = t('capturePanel.analogLevelClamped', {
+        name: `A${clamped.start / CHANNEL_BANK_SIZE}`,
+        from: `${clamped.from.toFixed(3)} V`, to: `${clamped.to.toFixed(3)} V`,
+      });
+      chSec.body.appendChild(note);
     }
 
     // ---- rate + threshold

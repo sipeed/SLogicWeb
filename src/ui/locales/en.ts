@@ -442,6 +442,7 @@ export const en = {
   'capturePanel.analogGainRange': 'Enter a gain ratio from {min} to {max}.',
   'capturePanel.analogGainReadout': '±{range} V · {bits}-bit · {step} mV/code',
   'capturePanel.analogGainHelp': 'The gain must match the setting on the module; it is used to convert readings to true voltages.',
+  'capturePanel.analogLevelClamped': '{name} trigger level {from} is outside the new range; it is now {to}.',
   'capturePanel.analogGainDetail': 'The ADC module’s gain is set on the module itself; this app cannot read or change it. Codes 0–255 span about ±16 V divided by the gain (2× gives ±8 V). Changing it here only rescales the display and the trigger level, also during a capture; a trigger level outside the new range moves to its edge. Ratios from {min} to {max}.',
   'channels.analogGainSub': '{gain} · ±{range} V',
   'capturePanel.analogEnable': 'Analog {name}: read the ADC module on inputs {range} as one {span} voltage ({bits}-bit). Connect the signal to the ADC module\'s input; {range} then carry its samples, not logic levels.',

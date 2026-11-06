@@ -2200,7 +2200,7 @@ export function runSoftwareTriggerSuite(): SoftwareTriggerTestResult[] {
   }
 
   // A transport gap must break the transition: the sample before the gap is not a
-  // valid `previous` for the sample after it (AGENTS.md dropout rule).
+  // valid `previous` for the sample after it (the dropout rule).
   {
     const gap = new SoftwareTrigger({
       config: {

@@ -247,6 +247,8 @@ export class App {
   private readonly scopeScaleAnimations = new Map<string, { from: number; to: number; startedAt: number }>();
   /** The gain last declared per analog bank start this session (see `configureAnalogGain`). */
   private readonly analogGainMemory = new Map<number, number>();
+  /** Set when a gain change clamped a stored analog level to the new range's edge. */
+  private analogLevelClamped: { start: number; from: number; to: number } | null = null;
   private scopeWheelPersist: number | null = null;
   private readonly channelList: ChannelList;
   private capturePanel!: CapturePanel;
@@ -895,11 +897,17 @@ export class App {
     this.busViews[index] = {
       ...bus, analogGain: gain, ...analogSpan(gain), voltsPerDiv: analogDefaultVoltsPerDiv(gain),
     };
-    const hadTrigger = this.settings.analogTriggers[start] !== undefined;
+    const before = this.settings.analogTriggers[start]?.volts;
     this.settings = this.clampSettings(this.settings);
-    // Re-snapping may keep the same volts while the code they select changes, so the
-    // matcher is retuned whenever this group carries a level, not only on a volts change.
-    if (hadTrigger) this.syncActiveTrigger();
+    const after = this.settings.analogTriggers[start]?.volts;
+    // A level the new range cannot hold moves to its edge; say so instead of letting the
+    // stored volts change silently. Re-snapping within one code is not a move.
+    this.analogLevelClamped = before !== undefined && after !== undefined &&
+      Math.abs(after - before) > analogVoltsPerCode(gain)
+      ? { start, from: before, to: after } : null;
+    // Re-snapping may keep the same volts while the code they select changes, so an
+    // armed analog matcher is retuned whenever this group carries a level.
+    if (after !== undefined && this.settings.triggerSource === 'analog') this.syncActiveTrigger();
     this.dirty = true;
     this.persistWorkspace();
     this.relayout();
@@ -937,6 +945,8 @@ export class App {
   ): void {
     const bus = this.busViews.find((candidate) => candidate.id === id);
     if (!bus || bus.analogGroup === undefined) return;
+    // A level the user sets supersedes the note about one a gain change clamped.
+    this.analogLevelClamped = null;
     const start = bus.analogGroup * CHANNEL_BANK_SIZE;
     const gain = analogGainOf(bus);
     const analogTriggers = kind
@@ -4277,6 +4287,7 @@ export class App {
       channels: this.channels.slice(0, this.displayChannelCount()),
       widthOptions: this.widthTiers(),
       buses: this.busViews,
+      analogLevelClamped: this.analogLevelClamped,
       analogGroups: this.analogGroups(),
       deviceName: this.device?.name ?? null,
       developerTools: this.developerTools,

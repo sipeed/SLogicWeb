@@ -389,6 +389,7 @@ export const zhCN: Messages = {
   'capturePanel.analogGainRange': '请输入 {min} 到 {max} 之间的增益倍数。',
   'capturePanel.analogGainReadout': '±{range} V · {bits} 位 · {step} mV/码',
   'capturePanel.analogGainHelp': '增益须与模块上的设置一致；用于换算真实电压。',
+  'capturePanel.analogLevelClamped': '{name} 的触发电平 {from} 超出新量程，已调整为 {to}。',
   'capturePanel.analogGainDetail': 'ADC 模块的增益在模块上设置，本软件无法读取或更改。码值 0–255 对应约 ±16 V 除以增益（2× 即 ±8 V）。在这里更改只会重新换算显示和触发电平，采集进行中也可更改；超出新量程的触发电平会移到量程边缘。可输入 {min} 到 {max} 的倍数。',
   'channels.analogGainSub': '{gain} · ±{range} V',
   'capturePanel.analogEnable': '模拟 {name}：把接在 {range} 上的 ADC 模块读成一路 {span} 电压（{bits} 位）。被测信号接 ADC 模块的输入端；此时 {range} 传输的是它的采样值，不再是逻辑电平。',
