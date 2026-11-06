@@ -93,6 +93,21 @@ that does not match the zip.
 Bumping it is deliberate: change the ref, run `npm run vendor -- <libsigrokdecode/decoders>`,
 and commit the regenerated manifest in the same change.
 
+## The offline shell (`sw.js`, `manifest.webmanifest`)
+
+A hosted build emits a service worker and a web manifest (`src/pwa/`, policy in
+ARCHITECTURE.md §7.2), so the installed or revisited page starts without the network.
+Every file it serves has a content-hashed name except `index.html`, `sw.js`, the manifest
+and the icons, and the worker refetches the last three itself on each new version. After a
+deploy, purge exactly **`index.html` and `sw.js`** from the CDN; a stale `sw.js` only delays
+the update, and a stale `index.html` makes the new worker's install fail (it checks the
+`logicweb-build` stamp) until the purge lands. Open tabs then show "A new version is ready"
+and reload only when the user clicks.
+
+The worker's scope is the site root, so it also sees `/ota/` requests, but it answers only
+the app document and the files its build listed; everything else, `/ota/` included, goes to
+the network untouched. The portable single-file build has no worker and no manifest.
+
 ## What was verified, and the one thing that will break it
 
 Measured against a build served from a `/logicweb/` subdirectory in headless Brave:

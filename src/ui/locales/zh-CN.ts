@@ -771,6 +771,11 @@ export const zhCN: Messages = {
   'theme.dark': '深色',
   'theme.light': '浅色',
   'theme.system': '跟随系统',
+
+  // ------------------------------------------------- app update (PWA shell)
+  'update.ready': '新版本已就绪，刷新启用。',
+  'update.reload': '刷新',
+  'update.later': '稍后',
 };
 
 export { zhCNDecoder } from './decoder/zh-CN.js';

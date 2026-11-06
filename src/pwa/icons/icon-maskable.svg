@@ -1,0 +1,15 @@
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Copyright (C) 2026 Daniel Tralamazza -->
+<!--
+  public/favicon.svg as a maskable app icon: the background is full-bleed (the launcher
+  supplies the mask shape) and the two traces are scaled to 80% about the centre so they
+  sit inside the 40%-radius safe zone every mask shape keeps.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <rect width="32" height="32" fill="#1B1B1C"/>
+  <g fill="none" stroke-width="2.5" stroke-linejoin="miter" stroke-linecap="butt"
+     transform="translate(16 16) scale(0.8) translate(-16 -17)">
+    <path stroke="#53A9FD" d="M4 15 H9 V9 H15 V15 H21 V9 H28"/>
+    <path stroke="#58c667" d="M4 25 H8 V19 H13 V25 H20 V19 H24 V25 H28"/>
+  </g>
+</svg>

@@ -5,6 +5,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- --bg10, the default dark shell. A hosted build also gains the web manifest link
+       and its build stamp here (src/pwa/shell.mjs); the portable build does not. -->
+  <meta name="theme-color" content="#1B1B1C" />
   <title data-i18n="app.title">SLogic Logic Analyzer</title>
   <!--
     Declaring an icon is what stops the browser probing /favicon.ico at the DOMAIN root -
@@ -225,6 +228,19 @@
             <div id="empty-hint" translate="yes">
               <span data-i18n="emptyHint.line1">No capture loaded.</span><br />
               <span id="empty-hint-detail" data-i18n="emptyHint.line2">Open a .sr or .lwcap file, or connect an SLogic16/32 U3.</span>
+              <!-- Static boot progress: a slow network shows this instead of a dead hint.
+                   main.ts removes it once App has constructed. Localized here because the
+                   catalogs are not loaded yet (same record and matching as i18n.ts). -->
+              <span id="empty-hint-starting" class="empty-hint-starting"><br />Starting…</span>
+              <script>
+                try {
+                  const tag = (localStorage.getItem('logicweb.lang') || navigator.language || '').toLowerCase();
+                  const text = tag.startsWith('zh') ? '正在启动…' : tag.startsWith('fr') ? 'Démarrage…'
+                    : tag.startsWith('ru') ? 'Запуск…' : null;
+                  if (text) document.getElementById('empty-hint-starting').lastChild.textContent = text;
+                } catch {
+                }
+              </script>
             </div>
           </div>
         </div>

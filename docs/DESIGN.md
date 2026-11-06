@@ -552,6 +552,11 @@ clear-data action; an update is an explicit prompt, never a silent reload. Today
 modal dialog from the Settings menu: name, version and build id (package version and
 short git hash, `dev` when absent), `GPL-3.0-or-later · no warranty`, the copyright, and
 plain links to the source repository, LICENSE and NOTICE.md.
+The update state
+comes from `getUpdateState()` / `onUpdateStateChange()` / `applyUpdate()` in
+`src/ui/pwaUpdate.ts` (`off` without a service worker, `idle`, `ready`). A waiting version
+also shows a notice under the platform notice — "A new version is ready. Reload to use it."
+with Reload and Later; Later hides it for this page load, the state stays `ready`.
 
 - One panel at a time; one presenter. The panel switcher opens it; the same control closes
   it. A collapsed panel leaves a full-height 24 px reopen strip at the right edge (in flow,

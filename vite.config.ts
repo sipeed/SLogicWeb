@@ -7,6 +7,7 @@ import {
 } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, type Plugin, type ServerOptions } from 'vite';
+import { buildPwaShell } from './src/pwa/shell.mjs';
 
 /*
  * Development serving.
@@ -233,6 +234,10 @@ function emitLicense(): Plugin {
             'host - Node and npm are not runtime dependencies. The entry source map is inlined\n' +
             'for browser debugging; other maps ship beside their files. Advanced contains the\n' +
             'USB console.\n\n' +
+            'sw.js is the offline shell (a service worker) and manifest.webmanifest makes the\n' +
+            'page installable. Every other file has a content-hashed name, so after a deploy\n' +
+            'purge exactly two URLs from any CDN: index.html and sw.js. Open tabs then show a\n' +
+            '"new version is ready" notice and reload into it only when the user clicks.\n\n' +
             'Double-clicking index.html still opens the UI and capture works through the\n' +
             'in-page USB fallback, but the workers and the decoder detail data cannot load\n' +
             'from file://, so protocol decoding needs the portable single-file build instead.\n',
@@ -310,6 +315,50 @@ function inlineEntryForFileOpen(): Plugin {
           if (existsSync(generated)) rmSync(generated, { recursive: true });
         }
       }
+    },
+  };
+}
+
+/*
+ * The PWA shell (docs/ARCHITECTURE.md section 7.2): manifest.webmanifest, icons/ and a
+ * hand-written service worker whose precache list is enumerated from the finished dist/
+ * (src/pwa/shell.mjs). Hosted builds only. The portable single-file build gets none of
+ * it - a file:// page cannot register a worker, and nothing may sit beside index.html -
+ * and the dev server never registers one (__LOGICWEB_PWA__ is false there), so Vite's
+ * module graph is never shadowed by a cache.
+ *
+ * Runs after inlineEntryForFileOpen (both enforce 'post', this one listed later; both
+ * closeBundle hooks are synchronous), so the index.html it versions and stamps is the
+ * final one, and the entry JS/CSS that plugin inlined are left out of the list.
+ */
+function pwaShell(): Plugin {
+  let enabled = false;
+  const inlined: string[] = [];
+  return {
+    name: 'logicweb:pwa-shell',
+    enforce: 'post',
+    config(_config, env) {
+      enabled = env.command === 'build' && !portable;
+      return { define: { __LOGICWEB_PWA__: JSON.stringify(enabled) } };
+    },
+    generateBundle(_options, bundle) {
+      inlined.length = 0;
+      for (const file of Object.values(bundle)) {
+        if (file.type !== 'chunk' || !file.isEntry) continue;
+        inlined.push(file.fileName);
+        const css = (file as { viteMetadata?: { importedCss?: Set<string> } }).viteMetadata?.importedCss;
+        for (const name of css ?? []) inlined.push(name);
+      }
+    },
+    closeBundle() {
+      if (!enabled) return;
+      const { version, shell } = buildPwaShell(resolve(__dirname, 'dist'), {
+        inlined,
+        template: readFileSync(resolve(__dirname, 'src/pwa/sw.js'), 'utf8'),
+        iconDir: resolve(__dirname, 'src/pwa/icons'),
+      });
+      console.log(`pwa shell ${version}: ${shell.hashed.length + shell.plain.length + 1} files `
+        + `precached, ${shell.runtime.length} runtime (best-effort at install, else on first use)`);
     },
   };
 }
@@ -421,6 +470,6 @@ export default defineConfig({
 
   plugins: [
     serveUiControlEntry(), requireRuntimeAssets(), versionRuntimeAssets(), emitLicense(),
-    inlineEntryForFileOpen(), hostedWorkerFiles(),
+    inlineEntryForFileOpen(), hostedWorkerFiles(), pwaShell(),
   ],
 });

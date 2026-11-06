@@ -2512,3 +2512,27 @@ html[data-theme="light"] .bus-dialog::backdrop { background: var(--backdrop); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-btn:hover,
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-cell-edit:hover { border-color: var(--primary); color: var(--foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-btn--remove:hover { border-color: var(--destructive); color: var(--destructive); }
+
+/* ------------------------------------------------- app update + boot progress */
+
+/* A waiting new version (src/ui/pwaUpdate.ts): the platform notice's neutral surface,
+   with the reload as the one primary action. Never auto-reloads. */
+.update-notice { align-items: center; }
+.update-notice-reload, .update-notice-later {
+  flex: none;
+  min-height: 24px;
+  padding: 2px 10px;
+  border-radius: calc(var(--radius) / 2);
+  font: inherit;
+  cursor: pointer;
+}
+.update-notice-reload {
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  color: var(--primary-foreground);
+}
+.update-notice-later { background: transparent; border: 1px solid var(--border-high); color: inherit; }
+.update-notice-reload:focus-visible, .update-notice-later:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+
+/* index.html's static "Starting…" line, removed by main.ts once App has constructed. */
+.empty-hint-starting { font-size: 12px; opacity: 0.8; }

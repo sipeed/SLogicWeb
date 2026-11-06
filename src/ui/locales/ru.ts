@@ -817,6 +817,11 @@ export const ru: Messages = {
   'theme.dark': 'Тёмная',
   'theme.light': 'Светлая',
   'theme.system': 'Системная',
+
+  // ------------------------------------------------- app update (PWA shell)
+  'update.ready': 'Новая версия готова. Перезагрузите страницу, чтобы её включить.',
+  'update.reload': 'Перезагрузить',
+  'update.later': 'Позже',
 };
 
 export { ruDecoder } from './decoder/ru.js';

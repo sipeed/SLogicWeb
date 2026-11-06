@@ -749,6 +749,35 @@ Key transitions (the full table is generated in one pure module):
 
 - PWA shell caches only first-party assets; versioned precache, explicit update prompt,
   no background sync of user data. Offline replay works; acquisition requires the device.
+  **[SHIPPED]** for hosted builds (`src/pwa/sw.js`, hand-written, no workbox;
+  `src/pwa/shell.mjs` from a Vite `closeBundle` step; `src/ui/pwaUpdate.ts`):
+  - The build enumerates `dist/` into the worker: **shell** = `index.html`, hashed worker /
+    locale / lazy chunks, favicon, icons, `manifest.webmanifest`; **runtime** = every
+    `pyodide/<hash>/` file and `decoders/decoders-<hash>.zip`. Source maps, licences,
+    host files and the entry JS/CSS already inlined into `index.html` are never listed.
+    The version hashes every listed byte plus the worker template, and `index.html` is
+    stamped with it (`<meta name="logicweb-build">`).
+  - Caches are `logicweb:<scope>:shell-<version>` (one per version; activation deletes
+    every other version of the scope) and `logicweb:<scope>:runtime` (name-stable, pruned to
+    the URLs the active build lists, so an unchanged Pyodide survives a shell update).
+  - Install fetches `index.html` with `cache: 'reload'` and a version query, and refuses a
+    copy without the matching stamp (a stale CDN copy fails the install; it retries later).
+    Hashed files are reused from any older cache, else fetched normally.
+  - `index.html` is network-first with a 4 s timeout and 5xx fallback to the install-time
+    copy; the network copy is never stored. Listed shell files are cache-first. Cross-origin,
+    non-GET, range and unlisted requests (e.g. `/ota/`) pass through untouched.
+  - Pyodide/decoders (~14 MB): filled **best effort at install** while App warms the decode
+    worker at boot (the page downloads those bytes on its first visit anyway, and the HTTP
+    cache answers the fill), and otherwise cached on first use. A failed fill never fails
+    the install. If warm-up becomes on-demand, drop the fill: the runtime is then purely
+    lazy, so a phone that never decodes never pays for it.
+  - No `skipWaiting` on install. A waiting version raises a localized notice with Reload;
+    only that click posts `SKIP_WAITING`, and the page reloads on `controllerchange`.
+    Registration happens after App constructs, only when `__LOGICWEB_PWA__` (false for
+    `vite` dev and for the portable build), `navigator.serviceWorker`, a secure context and
+    an http(s) URL all hold — never from `file://`. The portable build also emits no
+    manifest, icons or worker file.
+  - Deploy: purge `index.html` and `sw.js` (docs/DEPLOY.md).
 - T0/T1/T2 hosting per §1.4. T1 is recommended for COOP/COEP and full CSP; T0 ships with
   the documented limitations; T2 serves isolated PCs from `localhost`.
 - Export uses the save picker/share/download; OPFS is never presented as a user folder.
@@ -832,7 +861,7 @@ protect a compromised OS or browser.
 | --- | --- |
 | M0 | Platform probes, LinkSession, DeviceProfile, SignalStore digital, TriggerPlan P0, composite state machine, settings transaction, docs split, SimDriver |
 | M1 | Analog groups as first-class signals, multi-rate timeline, mixed trigger P1, analog/mixed and device executors plus capture wiring, touch shell and presenters, recording/OPFS, measurements/math/FFT |
-| M2 | First-party decode runtime default, Pyodide optional, PWA/offline, security hardening, Android/device matrix, migration completion |
+| M2 | First-party decode runtime default, Pyodide optional, PWA/offline (shell shipped, §7.2), security hardening, Android/device matrix, migration completion |
 
 The M0/M1/M2 gates are product decisions, not estimates. A feature that is not in the
 current milestone is not merged behind a hidden flag; it waits for its milestone.

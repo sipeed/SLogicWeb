@@ -8,6 +8,7 @@
 import { App } from './app.js';
 import { initLocale } from './i18n.js';
 import { initPanelWidth } from './panelWidth.js';
+import { initServiceWorker } from './pwaUpdate.js';
 import { initTheme } from './theme.js';
 import { initToolbarOverride } from './toolbarOverride.js';
 import { initTooltip } from './tooltip.js';
@@ -33,6 +34,9 @@ async function boot(): Promise<void> {
     initPanelWidth();
     await initLocale();
     window.logicweb = new App();
+    document.getElementById('empty-hint-starting')?.remove();
+    // After App: the offline shell must never delay or break the first paint.
+    initServiceWorker();
     try {
       initTooltip();
     } catch (e) {
@@ -40,6 +44,7 @@ async function boot(): Promise<void> {
     }
   } catch (e) {
     console.error('[logicweb] failed to start', e);
+    document.getElementById('empty-hint-starting')?.remove();
     const pre = document.createElement('pre');
     pre.style.cssText = 'position:fixed;inset:0;margin:0;padding:24px;background:#1B1B1C;'
       + 'color:#f52a66;font:13px ui-monospace,monospace;white-space:pre-wrap;z-index:99';

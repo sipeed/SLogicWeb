@@ -138,6 +138,24 @@ try {
     const external = requests.filter(url =>
       url !== pageURL && !url.startsWith('blob:') && !url.startsWith('data:'));
     if (external.length) throw new Error(`unexpected external requests: ${external.join(', ')}`);
+    // The PWA shell is hosted-only: no worker, manifest or stamp in the portable file,
+    // and nothing registered from file:// (src/pwa/, src/ui/pwaUpdate.ts).
+    const shell = await cdp('Runtime.evaluate', {
+      awaitPromise: true, returnByValue: true,
+      expression: `(async () => ({
+        manifest: !!document.querySelector('link[rel="manifest"]'),
+        stamp: !!document.querySelector('meta[name="logicweb-build"]'),
+        controller: !!navigator.serviceWorker?.controller,
+        registrations: navigator.serviceWorker?.getRegistrations
+          ? (await navigator.serviceWorker.getRegistrations().catch(() => [])).length : 0,
+      }))()`,
+    });
+    const pwa = shell.result.value;
+    const html = fs.readFileSync(path.join(ROOT, 'dist/index.html'), 'utf8');
+    if (pwa.manifest || pwa.stamp || pwa.controller || pwa.registrations ||
+        fs.existsSync(path.join(ROOT, 'dist/sw.js')) || html.includes('sw.js')) {
+      throw new Error(`portable build carries the PWA shell: ${JSON.stringify(pwa)}`);
+    }
   }
   console.log(JSON.stringify({ ok: true, protocol: 'uart', byte: '0x55',
     annotations: answer.count, requests }, null, 2));

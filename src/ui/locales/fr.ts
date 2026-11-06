@@ -826,6 +826,11 @@ export const fr: Messages = {
   'theme.dark': 'Sombre',
   'theme.light': 'Clair',
   'theme.system': 'Système',
+
+  // ------------------------------------------------- app update (PWA shell)
+  'update.ready': 'Une nouvelle version est prête. Rechargez pour l’utiliser.',
+  'update.reload': 'Recharger',
+  'update.later': 'Plus tard',
 };
 
 export { frDecoder } from './decoder/fr.js';

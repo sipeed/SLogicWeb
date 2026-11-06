@@ -826,6 +826,11 @@ export const en = {
   'theme.dark': 'Dark',
   'theme.light': 'Light',
   'theme.system': 'System',
+
+  // ------------------------------------------------- app update (PWA shell)
+  'update.ready': 'A new version is ready. Reload to use it.',
+  'update.reload': 'Reload',
+  'update.later': 'Later',
 };
 
 /**
