@@ -70,6 +70,22 @@
  * Analog `volts` are carried in volts (never encoded to an ADC code) into the plan
  * input, so the compiler's range check sees exactly the legacy level.
  *
+ * ## Analog qualification
+ *
+ * Analog crossings are qualified, never raw (docs/ARCHITECTURE.md trigger section). The
+ * descriptor carries the two numbers every analog executor takes, with the
+ * `SoftwareTriggerConfig` field names: `analogHysteresis` (h, the module's
+ * `ADC_TRIGGER_HYSTERESIS_CODES` = 4 codes) and `analogPersistSamples` (P,
+ * `analogTriggerPersistSamples(samplerate)` = ceil(240 ns * rate), 24 at 100 MS/s), both
+ * from `analogTriggerQualification`. They are in codes and samples, not part of the
+ * plan: the plan stays in volts, and its optional volt `hysteresis` is still only set
+ * when the legacy input supplies one (the legacy default is none). A digital plan
+ * carries them too; a digital matcher ignores them. The `unsupported-analog-host`
+ * refusal carries the compiled plan and this descriptor, so lifting the refusal once an
+ * analog executor exists needs no plan change. Persistence samples are inspected
+ * samples: an executor counts them toward `searchLimitSamples`, so the Repeat allowance
+ * below needs no analog term (T must still lie inside the sweep).
+ *
  * ## Assumptions
  *
  * The caller supplies *effective* fields: conditions already filtered to visible
@@ -97,6 +113,7 @@ import {
   type TriggerPlanFailureReason,
   type TriggerPlanLoop,
 } from './triggerPlan.js';
+import { analogTriggerQualification } from '../ui/channelBanks.js';
 
 /** The mode names used by the legacy `CaptureSettings`. */
 export type LegacyCaptureMode = 'single' | 'repeat' | 'loop';
@@ -168,6 +185,13 @@ export interface CaptureHostTriggerDescriptor {
    * sweep's retained budget, or Infinity for Single and Loop.
    */
   readonly searchLimitSamples: number;
+  /** Analog arming hysteresis in ADC codes (`SoftwareTriggerConfig.analogHysteresis`). */
+  readonly analogHysteresis: number;
+  /**
+   * Samples an analog candidate must persist, `ceil(240 ns * samplerate)`
+   * (`SoftwareTriggerConfig.analogPersistSamples`).
+   */
+  readonly analogPersistSamples: number;
 }
 
 export type CaptureTriggerRefusalReason =
@@ -188,6 +212,12 @@ export interface CaptureTriggerRefusal {
   readonly ok: false;
   readonly reason: CaptureTriggerRefusalReason;
   readonly detail: string;
+  /**
+   * Only on `unsupported-analog-host`: the compiled plan and the descriptor an analog
+   * host executor would take (qualification included).
+   */
+  readonly plan?: TriggerPlan;
+  readonly host?: CaptureHostTriggerDescriptor;
 }
 
 /** The trigger is disabled or has no effective condition: the capture free-runs. */
@@ -454,11 +484,18 @@ export function captureTriggerPlan(
     );
   }
   if (plan.source !== 'digital') {
-    return refusal(
-      'unsupported-analog-host',
-      `the compiled plan is ${plan.source}; host execution supports digital plans only ` +
-        '(analog trigger execution is M1 work)',
-    );
+    const pre = plan.preTrigger.samples;
+    return {
+      ...refusal(
+        'unsupported-analog-host',
+        `the compiled plan is ${plan.source}; host execution supports digital plans only ` +
+          '(analog trigger execution is M1 work)',
+      ),
+      plan,
+      ...(pre !== undefined && Number.isSafeInteger(pre) && pre >= 0
+        ? { host: hostDescriptor(input, pre) }
+        : {}),
+    };
   }
   if (plan.loop !== undefined && plan.loop.anchor !== 'trigger') {
     return refusal(
@@ -477,18 +514,22 @@ export function captureTriggerPlan(
     );
   }
 
+  return { ok: true, armed: true, plan, host: hostDescriptor(input, preTriggerSamples) };
+}
+
+/** The `HostTriggerOptions` fields for a plan with an exact `pre` prefix. */
+function hostDescriptor(
+  input: CaptureTriggerPlanInput,
+  preTriggerSamples: number,
+): CaptureHostTriggerDescriptor {
   return {
-    ok: true,
-    armed: true,
-    plan,
-    host: {
-      channels: input.channels,
-      samplerate: input.samplerate,
-      searchLimitSamples: legacySearchLimit(
-        input.mode,
-        input.postTriggerSamples,
-        preTriggerSamples,
-      ),
-    },
+    channels: input.channels,
+    samplerate: input.samplerate,
+    searchLimitSamples: legacySearchLimit(
+      input.mode,
+      input.postTriggerSamples,
+      preTriggerSamples,
+    ),
+    ...analogTriggerQualification(input.samplerate),
   };
 }

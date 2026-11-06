@@ -33,6 +33,10 @@ import {
   type LegacyDigitalCondition,
   type LegacyTriggerSource,
 } from './captureTriggerPlan.js';
+import {
+  ADC_TRIGGER_HYSTERESIS_CODES,
+  analogTriggerPersistSamples,
+} from '../ui/channelBanks.js';
 
 interface TestResult {
   name: string;
@@ -843,6 +847,103 @@ for (const sample of [
     armed(result)?.host.channels === 16 &&
       armed(result)?.host.samplerate === 2_000_000,
     show(result),
+  );
+}
+
+// ---------------------------------------------------------------------------------
+// Analog qualification: hysteresis and persistence travel in the descriptor
+// ---------------------------------------------------------------------------------
+
+{
+  // P = ceil(240 ns * rate), from the plan's samplerate; h is the module's 4 codes.
+  const cases: Array<[number, number]> = [
+    [100e6, 24], [200e6, 48], [400e6, 96], [800e6, 192], [1000, 1], [12.5e6, 3],
+  ];
+  for (const [samplerate, persist] of cases) {
+    const result = captureTriggerPlan(makeInput({
+      source: 'analog',
+      digital: [],
+      analog: [{ start: 0, kind: 'rising', volts: 2.5 }],
+      samplerate,
+    }));
+    const host = result.ok ? null : result.host;
+    check(
+      `the analog refusal carries h=4 and P=${persist} at ${samplerate} Hz`,
+      !result.ok && result.reason === 'unsupported-analog-host' &&
+        result.plan?.source === 'analog' && host !== undefined && host !== null &&
+        host.analogHysteresis === ADC_TRIGGER_HYSTERESIS_CODES &&
+        host.analogHysteresis === 4 &&
+        host.analogPersistSamples === persist &&
+        host.analogPersistSamples === analogTriggerPersistSamples(samplerate) &&
+        host.samplerate === samplerate,
+      showRefusal(result) + ` host=${JSON.stringify(host)}`,
+    );
+  }
+}
+
+{
+  // The Repeat allowance is unchanged by persistence: an executor counts persistence
+  // samples as inspected, so no analog term is added to the sweep.
+  const digital = captureTriggerPlan(makeInput({ mode: 'repeat', samplerate: 100e6 }));
+  const analogResult = captureTriggerPlan(makeInput({
+    mode: 'repeat',
+    samplerate: 100e6,
+    source: 'analog',
+    digital: [],
+    analog: [{ start: 0, kind: 'falling', volts: -1 }],
+  }));
+  const analogHost = analogResult.ok ? undefined : analogResult.host;
+  check(
+    'an analog Repeat descriptor keeps the legacy search allowance',
+    armed(digital) !== null && analogHost !== undefined &&
+      analogHost.searchLimitSamples === armed(digital)!.host.searchLimitSamples &&
+      analogHost.searchLimitSamples === 1000 + 250 + 250,
+    `${show(digital)} ${JSON.stringify(analogHost)}`,
+  );
+}
+
+{
+  // Legacy defaults: the plan stays in volts with no volt hysteresis unless the legacy
+  // input states one; a digital descriptor carries the same numbers, which a digital
+  // matcher ignores.
+  const plain = captureTriggerPlan(makeInput({
+    source: 'analog',
+    digital: [],
+    analog: [{ start: 0, kind: 'rising', volts: 2.5 }],
+    samplerate: 100e6,
+  }));
+  const condition = plain.ok ? undefined : plain.plan?.conditions[0];
+  check(
+    'an analog plan keeps volts and adds no volt hysteresis by default',
+    condition !== undefined && condition.kind === 'analog' && condition.volts === 2.5 &&
+      !('hysteresis' in condition),
+    JSON.stringify(condition),
+  );
+  const withHysteresis = captureTriggerPlan(makeInput({
+    source: 'analog',
+    digital: [],
+    analog: [{ start: 0, kind: 'rising', volts: 2.5, hysteresis: 0.5 }],
+    samplerate: 100e6,
+  }));
+  const explicit = withHysteresis.ok ? undefined : withHysteresis.plan?.conditions[0];
+  check(
+    'an explicit legacy volt hysteresis still reaches the plan',
+    explicit !== undefined && explicit.kind === 'analog' && explicit.hysteresis === 0.5,
+    JSON.stringify(explicit),
+  );
+  const digitalResult = captureTriggerPlan(makeInput({ samplerate: 100e6 }));
+  check(
+    'a digital descriptor carries the qualification too (ignored by digital matching)',
+    armed(digitalResult)?.host.analogHysteresis === 4 &&
+      armed(digitalResult)?.host.analogPersistSamples === 24,
+    show(digitalResult),
+  );
+  const other = captureTriggerPlan(makeInput({ digital: [{ channel: 9, kind: 'rising' }] }));
+  check(
+    'refusals other than unsupported-analog-host carry no plan or descriptor',
+    !other.ok && other.reason === 'invalid-channel' &&
+      other.plan === undefined && other.host === undefined,
+    showRefusal(other),
   );
 }
 

@@ -29,6 +29,7 @@ import {
   type SimSink,
   type SimStartConfig,
 } from './simDriver.js';
+import { analogVoltsFromCode } from '../ui/channelBanks.js';
 
 const nodeProcess = (() => {
   const p = (globalThis as {
@@ -1157,6 +1158,335 @@ await expectReject(
       startConfig(8, 5e6, 2), new RecordingSink(),
     ),
     'unsupported-test-mode',
+  );
+}
+
+// ---------------------------------------------------------------- analog qualification
+
+/** Bit-reverse of one byte, written independently of the driver's table. */
+function reverseByte(value: number): number {
+  let r = 0;
+  for (let bit = 0; bit < 8; bit++) r |= ((value >>> bit) & 1) << (7 - bit);
+  return r;
+}
+
+/** Small deterministic integer hash. */
+function hash32(n: number): number {
+  let x = (n ^ 0x9e3779b9) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x85ebca6b) >>> 0;
+  x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35) >>> 0;
+  return (x ^ (x >>> 16)) >>> 0;
+}
+
+// Slow enough that genuine code transitions (one per ~64 samples at the steepest point,
+// plus the dither) are further apart than the longest 14-sample artifact, as on the
+// module at 100 MS/s: the artifacts are isolated, never chained.
+const SINE_PERIOD = 40000;
+const SINE_AMPLITUDE = 100;
+
+/** The noiseless sine in fractional codes, and its slope sign. */
+function sineClean(n: number): number {
+  return 128 + SINE_AMPLITUDE * Math.sin(2 * Math.PI * n / SINE_PERIOD);
+}
+function sineRising(n: number): boolean {
+  return Math.cos(2 * Math.PI * n / SINE_PERIOD) > 0;
+}
+
+/** The genuine converter code: the sine plus a +-1 code dither held for 32 samples. */
+function sineCode(n: number): number {
+  const dither = (hash32(Math.floor(n / 32)) % 3) - 1;
+  return Math.max(0, Math.min(255, Math.round(sineClean(n)) + dither));
+}
+
+/**
+ * What the host reads: at each genuine code transition the bus shows the OR of the old
+ * and new codes for 1..14 samples (hash-chosen), the module's carry-boundary artifact.
+ * A pure function of the position, as the SimDriver requires.
+ */
+function glitchedSineCode(n: number): number {
+  for (let j = 0; j < 14; j++) {
+    const m = n - j;
+    if (m <= 0) break;
+    const before = sineCode(m - 1);
+    const after = sineCode(m);
+    if (before !== after) return j < 1 + (hash32(m * 7 + 3) % 14) ? before | after : after;
+  }
+  return sineCode(n);
+}
+
+/** Device sample bytes at 8 channels with the ADC on bank 0: the reversed code. */
+function analogBytes(code: (n: number) => number, from: number, count: number): Uint8Array {
+  const out = new Uint8Array(count);
+  for (let i = 0; i < count; i++) out[i] = reverseByte(code(from + i));
+  return out;
+}
+
+function compiledAnalogPlan(
+  kind: 'rising' | 'falling',
+  code: number,
+  samplerate: number,
+  preTriggerPercent: number,
+  postSamples: number,
+): TriggerPlan {
+  const result = compileTriggerPlan({
+    profile: SLOGIC32U3_PROFILE,
+    enableMask: true,
+    source: 'analog',
+    digital: [],
+    analog: [{ signal: 'a0', kind, volts: analogVoltsFromCode(code) }],
+    preTriggerPercent,
+    postTrigger: { kind: 'samples', value: postSamples },
+    capture: { samplerate, channels: 8 },
+    compiledAt: 0,
+  });
+  if (!result.ok) throw new Error(`compiledAnalogPlan failed: ${result.reason}: ${result.detail}`);
+  return result.plan;
+}
+
+/** Run an analog plan in small, uneven steps through a small transfer size. */
+async function runAnalog(
+  plan: TriggerPlan,
+  code: (n: number) => number,
+  options: SimDriverOptions = {},
+  samplerate = 100e6,
+): Promise<{ driver: SimDriver; sink: RecordingSink }> {
+  const driver = new SimDriver(SLOGIC32U3_PROFILE, {
+    seed: 0x1234, transferBytes: 16, analog: { start: 0, code }, ...options,
+  });
+  const sink = new RecordingSink();
+  await driver.start(startConfig(8, samplerate), sink, { trigger: plan });
+  let steps = 0;
+  while (!driver.complete && driver.state !== 'stopped' && steps < 20000) {
+    await driver.step(7 + (steps % 5));
+    steps += 1;
+  }
+  return { driver, sink };
+}
+
+{
+  // The module's wiring: input 0 of the bank is the code's MSB, so the wire byte is the
+  // bit-reversed code; the other banks keep the digital generator's bytes.
+  const codes = [0x01, 0x80, 0x0f, 0x6f, 0x70, 0xa5];
+  const driver = new SimDriver(SLOGIC32U3_PROFILE, {
+    seed: 0x1234, analog: { start: 24, code: (n) => codes[n % codes.length]! },
+  });
+  const sink = new RecordingSink();
+  await driver.start(startConfig(32), sink);
+  await driver.step(12);
+  const bytes = sink.bytes();
+  const digital = expectedBytes(0x1234, 32, 12);
+  let ok = bytes.length === 48 && bytes[3] === 0x80 && bytes[7] === 0x01;
+  for (let i = 0; i < 12 && ok; i++) {
+    ok = bytes[i * 4 + 3] === reverseByte(codes[i % codes.length]!) &&
+      bytes[i * 4] === digital[i * 4] && bytes[i * 4 + 1] === digital[i * 4 + 1] &&
+      bytes[i * 4 + 2] === digital[i * 4 + 2];
+  }
+  check(
+    'an analog code is written bit-reversed on its bank (code 0x01 reads byte 0x80)',
+    ok,
+    toHex(bytes.subarray(0, 16)),
+  );
+}
+
+await expectReject(
+  'an analog source outside the capture width is refused',
+  () => new SimDriver(SLOGIC32U3_PROFILE, { analog: { start: 24, code: () => 0 } })
+    .start(startConfig(16), new RecordingSink()),
+  'invalid-config',
+);
+await expectReject(
+  'an out-of-range persistence window is refused',
+  () => new SimDriver(SLOGIC32U3_PROFILE, {
+    analog: { start: 0, code: () => 0 }, analogPersistSamples: 0,
+  }).start(startConfig(8), new RecordingSink()),
+  'invalid-config',
+);
+
+{
+  // Raw crossings (h = 1, P = 1) fire on the wrong slope on this signal: proof that the
+  // synthetic artifact is the one the qualification exists for.
+  let wrong = 0;
+  const raw: string[] = [];
+  for (const kind of ['rising', 'falling'] as const) {
+    for (const level of [60, 96, 112, 128, 144, 160, 200]) {
+      const plan = compiledAnalogPlan(kind, level, 100e6, 0, 64);
+      const { driver } = await runAnalog(plan, glitchedSineCode, {
+        analogHysteresis: 1, analogPersistSamples: 1,
+      });
+      const t = driver.triggeredAt;
+      if (t !== null && sineRising(t) !== (kind === 'rising')) {
+        wrong += 1;
+        raw.push(`${kind} ${level} T=${t}`);
+      }
+    }
+  }
+  check('a raw crossing test fires on the wrong slope of the glitched sine', wrong > 0,
+    raw.join(', '));
+}
+
+{
+  // Qualified (defaults: h = 4, P = 24 at 100 MS/s): every level, both slopes, reports
+  // T on the correct slope at the candidate sample, with the exact pre-trigger prefix.
+  const failures: string[] = [];
+  const P = 24;
+  for (const kind of ['rising', 'falling'] as const) {
+    for (const level of [40, 60, 96, 112, 127, 128, 144, 160, 200, 215]) {
+      for (const pre of [0, 3, 50]) {
+        const post = 100;
+        const plan = compiledAnalogPlan(kind, level, 100e6, pre / post * 100, post);
+        const preSamples = plan.preTrigger.samples!;
+        const { driver, sink } = await runAnalog(plan, glitchedSineCode);
+        const t = driver.triggeredAt;
+        const tag = `${kind} L=${level} pre=${preSamples}`;
+        if (t === null || !driver.complete) {
+          failures.push(`${tag}: no match`);
+          continue;
+        }
+        const past = (c: number): boolean => kind === 'rising' ? c >= level : c <= level;
+        // T is the candidate: past the level for P samples, and the sample before it is
+        // not past (else the candidate would have started earlier).
+        let persists = true;
+        for (let i = 0; i < P; i++) persists &&= past(glitchedSineCode(t + i));
+        const fresh = !past(glitchedSineCode(t - 1));
+        // Correct slope, close to the noiseless crossing.
+        const slope = sineRising(t) === (kind === 'rising');
+        const near = Math.abs(sineClean(t) - level) <= 4;
+        const range = deliveredRange(sink, 1);
+        const exact = range !== null && range.contiguous &&
+          range.first === t - preSamples && range.end === t + post &&
+          driver.firstSample === t - preSamples &&
+          equalBytes(sink.bytes(), analogBytes(glitchedSineCode, t - preSamples, preSamples + post));
+        if (!persists || !fresh || !slope || !near || !exact) {
+          failures.push(`${tag}: T=${t} persists=${persists} fresh=${fresh} slope=${slope} ` +
+            `near=${near} clean=${sineClean(t).toFixed(2)} range=${JSON.stringify(range)}`);
+        }
+      }
+    }
+  }
+  check(
+    'qualified crossings report T on the correct slope at the candidate, prefix exact',
+    failures.length === 0,
+    failures.slice(0, 6).join('\n        ') || '60 runs',
+  );
+}
+
+/** A piecewise-constant code: `steps` is [startSample, code] sorted by start. */
+function stepsCode(steps: ReadonlyArray<readonly [number, number]>): (n: number) => number {
+  return (n) => {
+    let code = steps[0]![1];
+    for (const [start, value] of steps) if (n >= start) code = value;
+    return code;
+  };
+}
+
+{
+  // A budget shorter than the persistence window: confirmation lands P - 1 samples after
+  // T, but delivery is still exactly [T - pre, T + post).
+  const code = stepsCode([[0, 50], [100, 200]]);
+  const plan = compiledAnalogPlan('rising', 128, 100e6, 200, 4);
+  const pre = plan.preTrigger.samples!;
+  const { driver, sink } = await runAnalog(plan, code);
+  const range = deliveredRange(sink, 1);
+  check(
+    'a post budget below P still delivers exactly [T - pre, T + post)',
+    driver.triggeredAt === 100 && driver.complete && range !== null && range.contiguous &&
+      range.first === 100 - pre && range.end === 104 &&
+      equalBytes(sink.bytes(), analogBytes(code, 100 - pre, pre + 4)),
+    `T=${String(driver.triggeredAt)} pre=${pre} range=${JSON.stringify(range)}`,
+  );
+}
+
+{
+  // A candidate that falls back across the level is dropped but keeps the arm: the
+  // codes after it (126, inside the hysteresis band) could never re-arm on their own.
+  const code = stepsCode([[0, 50], [100, 200], [110, 126], [150, 200]]);
+  const { driver } = await runAnalog(compiledAnalogPlan('rising', 128, 100e6, 0, 30), code);
+  check(
+    'a dropped candidate keeps the arm and the next persistent run is T',
+    driver.triggeredAt === 150,
+    `T=${String(driver.triggeredAt)}`,
+  );
+  // Arming needs P consecutive codes past the threshold: 23 low samples do not arm.
+  const shortArm = stepsCode([[0, 200], [100, 50], [123, 200], [400, 50], [500, 200]]);
+  const { driver: second } = await runAnalog(
+    compiledAnalogPlan('rising', 128, 100e6, 0, 30), shortArm,
+  );
+  check(
+    'an arm needs P consecutive samples past the threshold',
+    second.triggeredAt === 500,
+    `T=${String(second.triggeredAt)}`,
+  );
+}
+
+{
+  // Search limit accounting includes the persistence samples. T = 100 is confirmed at
+  // sample 123, the 124th inspected sample.
+  const code = stepsCode([[0, 50], [100, 200]]);
+  const plan = compiledAnalogPlan('rising', 128, 100e6, 0, 30);
+  const enough = await runAnalog(plan, code, { searchLimitSamples: 124 });
+  const short = await runAnalog(plan, code, { searchLimitSamples: 123 });
+  check(
+    'a search limit that covers the confirmation matches',
+    enough.driver.triggeredAt === 100 && enough.driver.complete &&
+      !enough.driver.searchExhausted,
+    `T=${String(enough.driver.triggeredAt)} exhausted=${enough.driver.searchExhausted}`,
+  );
+  check(
+    'a search limit that ends inside the persistence window finds nothing',
+    short.driver.triggeredAt === null && short.driver.searchExhausted &&
+      short.driver.state === 'stopped' && short.sink.writes.length === 0 &&
+      short.driver.position === 123,
+    `T=${String(short.driver.triggeredAt)} exhausted=${short.driver.searchExhausted} ` +
+      `state=${short.driver.state} writes=${short.sink.writes.length} pos=${short.driver.position}`,
+  );
+  // A digital plan obeys the same limit.
+  const digitalPlan = compiledDigitalPlan([{ signal: 'd7', kind: 'rising' }], 8, 5e6, 0, 8);
+  const digital = await runBoundedTrigger(digitalPlan, 8, { searchLimitSamples: 1 });
+  check(
+    'a digital search exhausts at its limit too',
+    digital.driver.searchExhausted && digital.driver.triggeredAt === null,
+    `exhausted=${digital.driver.searchExhausted} T=${String(digital.driver.triggeredAt)}`,
+  );
+}
+
+{
+  // A dropout in the middle of a candidate clears the candidate and the arm: the high
+  // codes after the gap cannot confirm, and the next armed crossing is T.
+  const code = stepsCode([[0, 50], [100, 200], [300, 50], [400, 200]]);
+  const plan = compiledAnalogPlan('rising', 128, 100e6, 100, 8);
+  const pre = plan.preTrigger.samples!;
+  const { driver, sink } = await runAnalog(plan, code, {
+    faults: [{ kind: 'dropout', atSample: 110, count: 32 }],
+  });
+  const range = deliveredRange(sink, 1);
+  check(
+    'a gap mid-candidate resets the qualification',
+    driver.triggeredAt === 400 && range !== null && range.first === 400 - pre &&
+      range.end === 408 && sink.gaps.length === 0,
+    `T=${String(driver.triggeredAt)} range=${JSON.stringify(range)} gaps=${sink.gaps.length}`,
+  );
+  const clean = await runAnalog(plan, code);
+  check('without the gap the first crossing is T', clean.driver.triggeredAt === 100,
+    `T=${String(clean.driver.triggeredAt)}`);
+}
+
+{
+  // A confirmation whose candidate lies inside the pre-fill holdoff is consumed
+  // unmatched; the analog plan also needs a source on its bank.
+  const code = stepsCode([[0, 50], [30, 200], [100, 50], [200, 200]]);
+  const plan = compiledAnalogPlan('rising', 128, 100e6, 50, 120);
+  const { driver } = await runAnalog(plan, code, { analogPersistSamples: 8 });
+  check(
+    'a candidate inside the holdoff is consumed; the next qualified crossing is T',
+    plan.preTrigger.samples === 60 && driver.triggeredAt === 200,
+    `pre=${String(plan.preTrigger.samples)} T=${String(driver.triggeredAt)}`,
+  );
+  await expectReject(
+    'an analog plan without an analog source is refused',
+    () => new SimDriver(SLOGIC32U3_PROFILE).start(
+      startConfig(8, 100e6), new RecordingSink(), { trigger: plan },
+    ),
+    'trigger-unsupported',
   );
 }
 

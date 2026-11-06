@@ -66,14 +66,55 @@
  *
  * ## Trigger matching
  *
- * `updateTrigger()` installs a digital `TriggerPlan` and is accepted only while
+ * `updateTrigger()` installs a `TriggerPlan` and is accepted only while
  * `state === 'waiting'`. Matching is evaluated on complete generated samples (never on
  * byte fragments), across `step()` boundaries, with all conditions ANDed. A retune
- * restarts edge continuity, as ARCHITECTURE §5.1 requires. Analog and mixed plans, and
- * signals outside the configured width, are refused by returning `false`. That is a
- * simulator limitation, not a profile statement: the 32U3 profile advertises analog
- * trigger kinds, but the M0 simulator generates digital samples only. The real host or
- * device executor must implement the plan's analog conditions.
+ * restarts edge continuity and any analog arm/candidate, as ARCHITECTURE §5.1 requires.
+ * Mixed plans, signals outside the configured width, and analog plans without a
+ * matching `analog` source are refused by returning `false` (a simulator limitation,
+ * not a profile statement).
+ *
+ * ## Analog source and qualified crossings
+ *
+ * The digital generator has no ADC. `options.analog` supplies one: `code(position)`
+ * returns the converter code (0..255) at a device sample position, and the driver
+ * writes it into the eight inputs of the bank at `start` with the module's wiring -
+ * input 0 carries the code's MSB, so the byte on the wire is the bit-reversed code
+ * (`reverseAdcByte`). `code` must be a pure function of the position: the pre-trigger
+ * window is regenerated from it at the match. A test models the module's carry-boundary
+ * artifact (the OR of the old and new codes for a few samples) inside `code`.
+ *
+ * An analog plan is one `rising`/`falling` condition on `a<start>`, the source's bank;
+ * several analog conditions are refused (the sim has one source and the qualification
+ * pins T to one candidate sample). Its volts are converted to a code at 1x gain
+ * (`analogTriggerCode`); the sim has no declared gain. Crossings are qualified, never
+ * raw (docs/ARCHITECTURE.md trigger section), with the same state machine and field
+ * names as `SoftwareTrigger`:
+ *
+ *  - hysteresis `analogHysteresis` (h codes, default `ADC_TRIGGER_HYSTERESIS_CODES`, or
+ *    the plan's volt hysteresis in codes when that is larger): a rising condition arms
+ *    after `analogPersistSamples` consecutive codes <= level - h (falling: >= level + h,
+ *    clamped to the code range);
+ *  - persistence `analogPersistSamples` (P, default `analogTriggerPersistSamples(rate)`,
+ *    i.e. ceil(240 ns * rate)): the first armed sample at/past the level is the
+ *    candidate; it is confirmed when P consecutive samples, the candidate included, stay
+ *    at/past the level. A sample back across the level drops the candidate and keeps
+ *    the arm; a confirmation disarms.
+ *
+ * T is the candidate sample, confirmed P - 1 samples later. The delivered range is still
+ * exactly [T - preSamples, T + postSamples): the window up to the confirming sample is
+ * regenerated at the match, so no extra prefix is retained while waiting. The holdoff
+ * applies to T; a confirmation whose candidate lies inside it is consumed (disarmed)
+ * without a match. A waiting dropout, `updateTrigger()` and `stop()` clear the arm and
+ * the candidate.
+ *
+ * ## Search limit
+ *
+ * `options.searchLimitSamples` bounds one search (a Repeat sweep): once that many
+ * samples have been inspected while waiting without a match, the driver stops with
+ * `searchExhausted === true` and delivers nothing. Analog persistence samples are
+ * inspected samples, so a crossing confirmed past the limit is not a match. Samples
+ * lost to a dropout are not inspected and do not count. Default: unlimited.
  *
  * Waiting retains no search prefix. The pre-trigger window is regenerated from the
  * deterministic source when a match occurs, bounded by `preTrigger.samples` when the
@@ -124,6 +165,13 @@ import {
   type ChannelCount,
 } from '../types.js';
 import type { TriggerPlan } from '../dsp/triggerPlan.js';
+import { reverseAdcByte } from '../data/softwareTrigger.js';
+import {
+  ADC_LSB_V,
+  ADC_TRIGGER_HYSTERESIS_CODES,
+  analogTriggerCode,
+  analogTriggerPersistSamples,
+} from '../ui/channelBanks.js';
 import { emulationRules } from './emulationPattern.js';
 import { sampleRatesFor } from './profile.js';
 import type {
@@ -147,6 +195,13 @@ const DEFAULT_SEED = 0x5109c16;
 const DEFAULT_TRANSFER_BYTES = 4096;
 const DEFAULT_GROUP_ID = 'digital';
 const DEFAULT_DROPOUT_SAMPLES = 32;
+
+/** Inputs of one ADC bank. */
+const SIM_ANALOG_BANK = 8;
+/** Bounds of the qualification fields; the same ranges `SoftwareTrigger` validates
+ * (`analogHysteresis` 1..255, `analogPersistSamples` 1..MAX_ANALOG_PERSIST_SAMPLES). */
+const SIM_ANALOG_HYSTERESIS_MAX = 255;
+const SIM_ANALOG_PERSIST_MAX = 4096;
 
 const LINK_RATES: readonly LinkRate[] = ['fs', 'hs', 'ss5', 'ss10'];
 const TRIGGER_KINDS: readonly TriggerKind[] = [
@@ -201,6 +256,16 @@ export interface SimSink {
   noteGap?(gap: SimGapSpan): void;
 }
 
+/**
+ * A deterministic ADC source overlaid on the eight inputs of the bank at `start` (see
+ * the module header). `code` must be a pure function of the device sample position and
+ * return an integer 0..255.
+ */
+export interface SimAnalogSource {
+  readonly start: number;
+  code(position: number): number;
+}
+
 export interface SimStartConfig {
   readonly channels: ChannelCount;
   readonly samplerate: number;
@@ -226,6 +291,23 @@ export interface SimDriverOptions {
   readonly trigger?: TriggerPlan | null;
   /** Called once, synchronously, when a bounded trigger budget has been delivered. */
   readonly onEnd?: (() => void) | null;
+  /** ADC source for the bank at `start`; `null` clears an inherited one. Default none. */
+  readonly analog?: SimAnalogSource | null;
+  /**
+   * Analog arming hysteresis in codes, an integer 1..255. Default
+   * `ADC_TRIGGER_HYSTERESIS_CODES` (4). Same meaning as `SoftwareTriggerConfig`.
+   */
+  readonly analogHysteresis?: number;
+  /**
+   * Samples an analog candidate (and an arm) must persist, an integer 1..4096. Default
+   * `analogTriggerPersistSamples(samplerate)` = ceil(240 ns * rate), 24 at 100 MS/s.
+   */
+  readonly analogPersistSamples?: number;
+  /**
+   * Samples one search may inspect before the driver gives up (`searchExhausted`), a
+   * positive integer or Infinity. Default Infinity.
+   */
+  readonly searchLimitSamples?: number;
 }
 
 export type SimDriverErrorCode =
@@ -269,6 +351,11 @@ interface ResolvedOptions {
   readonly faults: readonly SimFault[];
   readonly trigger: TriggerPlan | null;
   readonly onEnd: (() => void) | null;
+  readonly analog: SimAnalogSource | null;
+  /** Null: use the default for the resolved rate. */
+  readonly analogHysteresis: number | null;
+  readonly analogPersistSamples: number | null;
+  readonly searchLimitSamples: number;
 }
 
 interface ResolvedConfig {
@@ -278,6 +365,10 @@ interface ResolvedConfig {
   readonly bytesPerSample: number;
   readonly chunkSamples: number;
   readonly groupId: string;
+  readonly analog: SimAnalogSource | null;
+  readonly analogHysteresis: number;
+  readonly analogPersistSamples: number;
+  readonly searchLimitSamples: number;
 }
 
 interface FaultState {
@@ -293,8 +384,21 @@ interface SimTriggerCondition {
   readonly level: 0 | 1;
 }
 
+/** One qualified analog crossing in code space (see the module header). */
+interface SimAnalogCondition {
+  readonly rise: boolean;
+  /** The code the signal crosses. */
+  readonly level: number;
+  /** Arming threshold: rising arms at code <= arm, falling at code >= arm. */
+  readonly arm: number;
+  /** Persistence window P in samples. */
+  readonly persist: number;
+}
+
 interface SimTrigger {
   readonly conditions: readonly SimTriggerCondition[];
+  /** The analog crossing of an analog plan; null for a digital plan. */
+  readonly analog: SimAnalogCondition | null;
   /** Whole samples of history flushed when the trigger matches. */
   readonly preSamples: number;
   /** Samples delivered from T inclusive; Infinity for an unlimited budget. */
@@ -351,12 +455,17 @@ function compileSimTrigger(
   profile: DeviceProfile,
 ): SimTrigger | null {
   if (plan === null || typeof plan !== 'object') return null;
-  if (plan.source !== 'digital') return null;
+  if (plan.source !== 'digital' && plan.source !== 'analog') return null;
   if (!Array.isArray(plan.conditions) || plan.conditions.length === 0) return null;
   if (plan.execution !== 'device' && plan.execution !== 'host') return null;
 
   const conditions: SimTriggerCondition[] = [];
-  for (const condition of plan.conditions) {
+  let analog: SimAnalogCondition | null = null;
+  if (plan.source === 'analog') {
+    analog = compileSimAnalog(plan, config, profile);
+    if (analog === null) return null;
+  }
+  for (const condition of plan.source === 'digital' ? plan.conditions : []) {
     if (condition === null || typeof condition !== 'object') return null;
     if (condition.kind !== 'digital') return null;
     if (typeof condition.signal !== 'string') return null;
@@ -436,7 +545,41 @@ function compileSimTrigger(
     );
   }
 
-  return { conditions, preSamples, postSamples };
+  return { conditions, analog, preSamples, postSamples };
+}
+
+/**
+ * The single qualified crossing of an analog plan, or null when the simulator cannot
+ * run it: no source, a signal other than the source's bank, more than one condition, or
+ * a kind the profile does not advertise. Volts become a code at 1x gain.
+ */
+function compileSimAnalog(
+  plan: TriggerPlan,
+  config: ResolvedConfig,
+  profile: DeviceProfile,
+): SimAnalogCondition | null {
+  const source = config.analog;
+  if (source === null || plan.conditions.length !== 1) return null;
+  const condition = plan.conditions[0]!;
+  if (condition === null || typeof condition !== 'object' || condition.kind !== 'analog') {
+    return null;
+  }
+  if (condition.signal !== `a${source.start}`) return null;
+  if (condition.mode !== 'rising' && condition.mode !== 'falling') return null;
+  if (!profile.trigger.analog.includes(condition.mode)) return null;
+  if (!Number.isFinite(condition.volts)) return null;
+  const rise = condition.mode === 'rising';
+  const level = analogTriggerCode(condition.mode, condition.volts);
+  // A plan's volt hysteresis can only widen the module's code hysteresis.
+  let h = config.analogHysteresis;
+  const volts = condition.hysteresis;
+  if (volts !== undefined) {
+    if (!Number.isFinite(volts) || volts < 0) return null;
+    h = Math.min(SIM_ANALOG_HYSTERESIS_MAX, Math.max(h, Math.round(volts / ADC_LSB_V)));
+  }
+  // A level within h of the code range's end arms at the end code itself.
+  const arm = rise ? Math.max(0, level - h) : Math.min(255, level + h);
+  return { rise, level, arm, persist: config.analogPersistSamples };
 }
 
 function validateFaults(faults: readonly SimFault[]): FaultState[] {
@@ -504,7 +647,46 @@ function resolveOptions(
     : defaults.onEnd !== undefined ? defaults.onEnd : null;
   if (onEnd !== null && typeof onEnd !== 'function') throw invalid('onEnd must be a function');
 
-  return { seed, linkRate, groupId, transferBytes, faults, trigger, onEnd };
+  const analog = source.analog !== undefined
+    ? source.analog
+    : defaults.analog !== undefined ? defaults.analog : null;
+  if (analog !== null) {
+    if (typeof analog !== 'object' || typeof analog.code !== 'function') {
+      throw invalid('analog must be { start, code(position) }');
+    }
+    if (!Number.isSafeInteger(analog.start) || analog.start < 0 ||
+        analog.start % SIM_ANALOG_BANK !== 0) {
+      throw invalid(`analog start must be a bank start (a multiple of 8), got ${String(analog.start)}`);
+    }
+    if (!profile.analog.groups.some((group) => group.start === analog.start)) {
+      throw invalid(`profile ${profile.id} has no analog group at input ${analog.start}`);
+    }
+  }
+  const analogHysteresis = source.analogHysteresis ?? defaults.analogHysteresis ?? null;
+  if (analogHysteresis !== null &&
+      (!Number.isInteger(analogHysteresis) || analogHysteresis < 1 ||
+        analogHysteresis > SIM_ANALOG_HYSTERESIS_MAX)) {
+    throw invalid(`analogHysteresis must be an integer code count 1..255, got ${String(analogHysteresis)}`);
+  }
+  const analogPersistSamples = source.analogPersistSamples ?? defaults.analogPersistSamples ?? null;
+  if (analogPersistSamples !== null &&
+      (!Number.isInteger(analogPersistSamples) || analogPersistSamples < 1 ||
+        analogPersistSamples > SIM_ANALOG_PERSIST_MAX)) {
+    throw invalid(
+      `analogPersistSamples must be an integer 1..${SIM_ANALOG_PERSIST_MAX}, got ${String(analogPersistSamples)}`,
+    );
+  }
+  const searchLimitSamples = source.searchLimitSamples ?? defaults.searchLimitSamples ??
+    Number.POSITIVE_INFINITY;
+  if (searchLimitSamples !== Number.POSITIVE_INFINITY &&
+      (!Number.isSafeInteger(searchLimitSamples) || searchLimitSamples < 1)) {
+    throw invalid(`searchLimitSamples must be a positive integer or Infinity, got ${String(searchLimitSamples)}`);
+  }
+
+  return {
+    seed, linkRate, groupId, transferBytes, faults, trigger, onEnd,
+    analog, analogHysteresis, analogPersistSamples, searchLimitSamples,
+  };
 }
 
 /**
@@ -529,6 +711,15 @@ export class SimDriver {
   private nextSample = 0;
   /** Previous complete sample, for rising/falling/edge matching. */
   private previousWord: number | null = null;
+  /** Analog qualification state (module header): armed, candidate run, arm run. */
+  private analogArmed = false;
+  private analogRun = 0;
+  private analogArmRun = 0;
+  /** Position of the pending analog candidate; meaningful while `analogRun > 0`. */
+  private analogCandidate = 0;
+  /** Samples inspected by the current search (dropout samples excluded). */
+  private inspected = 0;
+  private exhausted = false;
   /** Position of the matching sample, or null before a match. */
   private matchPosition: number | null = null;
   /** Samples still owed after T inclusive. Infinity for an unlimited budget. */
@@ -571,6 +762,14 @@ export class SimDriver {
   /** Next device sample position; equals the number of samples advanced so far. */
   get position(): number {
     return this.nextSample;
+  }
+
+  /**
+   * True when the search inspected `searchLimitSamples` samples without a match; the
+   * driver is then `stopped` and delivered nothing.
+   */
+  get searchExhausted(): boolean {
+    return this.exhausted;
   }
 
   /** True once a bounded post-trigger budget has been fully delivered. */
@@ -631,7 +830,8 @@ export class SimDriver {
         throw new SimDriverError(
           'trigger-unsupported',
           'the initial trigger plan is not executable by the simulator: it must be a ' +
-            'digital, non-empty plan whose signals and modes fit the profile and width',
+            'non-empty digital plan, or one analog crossing on the analog source bank, ' +
+            'whose signals and modes fit the profile and width',
         );
       }
     } catch (error) {
@@ -645,6 +845,9 @@ export class SimDriver {
     this.faults = faults;
     this.nextSample = 0;
     this.previousWord = null;
+    this.resetAnalog();
+    this.inspected = 0;
+    this.exhausted = false;
     this.matchPosition = null;
     this.postRemaining = 0;
     this.stallRemaining = 0;
@@ -718,6 +921,7 @@ export class SimDriver {
     if (this.pending !== null) await this.flushPending();
     this.trigger = null;
     this.previousWord = null;
+    this.resetAnalog();
     // Nothing was emitted for waiting dropouts, so there is no delivered range to clip
     // them against; the next start() re-arms from scratch.
     this.waitingGaps = [];
@@ -735,6 +939,7 @@ export class SimDriver {
     if (compiled === null) return false;
     this.trigger = compiled;
     this.previousWord = null;
+    this.resetAnalog();
     return true;
   }
 
@@ -812,6 +1017,12 @@ export class SimDriver {
 
     const bytesPerSample = bytesPerSampleForChannels(channels);
     const chunkSamples = Math.max(1, Math.floor(options.transferBytes / bytesPerSample));
+    if (options.analog !== null &&
+        options.analog.start + SIM_ANALOG_BANK > channels) {
+      throw invalid(
+        `analog bank ${options.analog.start} lies outside the ${channels}-channel width`,
+      );
+    }
     return {
       channels,
       samplerate,
@@ -819,6 +1030,10 @@ export class SimDriver {
       bytesPerSample,
       chunkSamples,
       groupId: options.groupId,
+      analog: options.analog,
+      analogHysteresis: options.analogHysteresis ?? ADC_TRIGGER_HYSTERESIS_CODES,
+      analogPersistSamples: options.analogPersistSamples ?? analogTriggerPersistSamples(samplerate),
+      searchLimitSamples: options.searchLimitSamples,
     };
   }
 
@@ -833,6 +1048,24 @@ export class SimDriver {
   // ---------------------------------------------------------------- sample source
 
   private sampleWordAt(index: number): number {
+    const word = this.digitalWordAt(index);
+    const analog = this.config!.analog;
+    if (analog === null) return word;
+    // Input 0 of the bank is the code's MSB: the wire byte is the bit-reversed code.
+    const mask = (0xff << analog.start) >>> 0;
+    return ((word & ~mask) | (reverseAdcByte(this.analogCodeAt(index)) << analog.start)) >>> 0;
+  }
+
+  /** The source's converter code at a position, validated. */
+  private analogCodeAt(index: number): number {
+    const code = this.config!.analog!.code(index);
+    if (!Number.isInteger(code) || code < 0 || code > 255) {
+      throw invalid(`analog code at sample ${index} must be an integer 0..255, got ${String(code)}`);
+    }
+    return code;
+  }
+
+  private digitalWordAt(index: number): number {
     const cfg = this.config!;
     if (cfg.testMode === 2) return this.emulationWordAt(index);
     const low = cfg.testMode === 1 ? index & 0xffff : this.generatorWordAt(index);
@@ -917,6 +1150,47 @@ export class SimDriver {
     return true;
   }
 
+  private resetAnalog(): void {
+    this.analogArmed = false;
+    this.analogRun = 0;
+    this.analogArmRun = 0;
+    this.analogCandidate = 0;
+  }
+
+  /**
+   * Advance the qualified analog crossing by one complete sample (module header).
+   * Returns the confirmed candidate T, or -1. The same transitions as
+   * `SoftwareTrigger`'s analog state machine.
+   */
+  private stepAnalog(a: SimAnalogCondition, word: number, position: number): number {
+    const code = reverseAdcByte((word >>> this.config!.analog!.start) & 0xff);
+    const past = a.rise ? code >= a.level : code <= a.level;
+    if (this.analogRun > 0) {
+      // Back across the level drops the candidate and keeps the arm.
+      this.analogRun = past ? this.analogRun + 1 : 0;
+    } else if (past) {
+      if (this.analogArmed) {
+        this.analogRun = 1;
+        this.analogCandidate = position;
+      } else {
+        // Past the level is not past the arming threshold: an arm run restarts.
+        this.analogArmRun = 0;
+      }
+    } else if (!this.analogArmed) {
+      this.analogArmRun = (a.rise ? code <= a.arm : code >= a.arm) ? this.analogArmRun + 1 : 0;
+      if (this.analogArmRun >= a.persist) {
+        this.analogArmed = true;
+        this.analogArmRun = 0;
+      }
+    }
+    if (this.analogRun >= a.persist) {
+      const candidate = this.analogCandidate;
+      this.resetAnalog();
+      return candidate;
+    }
+    return -1;
+  }
+
   // ---------------------------------------------------------------- stepping
 
   private async stepWaiting(samples: number): Promise<number> {
@@ -959,38 +1233,55 @@ export class SimDriver {
         this.lastGapEnd = end;
         this.nextSample = end;
         this.previousWord = null;
+        this.resetAnalog();
         consumed += due.count;
         continue;
       }
 
+      const trigger = this.trigger!;
       const position = this.nextSample;
       const word = this.sampleWordAt(position);
-      const previous = this.previousWord;
-      const matched = this.matches(word, previous);
+      let matchPosition = -1;
+      if (trigger.analog !== null) {
+        // T is the candidate, up to P - 1 samples before this confirming sample. A
+        // confirmation inside the holdoff is consumed (the machine disarmed) unmatched.
+        const candidate = this.stepAnalog(trigger.analog, word, position);
+        if (candidate >= 0 && this.matchArmed(candidate)) matchPosition = candidate;
+      } else if (this.matches(word, this.previousWord) && this.matchArmed(position)) {
+        matchPosition = position;
+      }
       this.previousWord = word;
       this.nextSample += 1;
       consumed += 1;
+      this.inspected += 1;
 
-      if (matched && this.matchArmed(position)) {
-        const trigger = this.trigger!;
-        const matchPosition = position;
+      if (matchPosition >= 0) {
         this.matchPosition = matchPosition;
         this.phase = 'running';
         // §5.1: deliver preSamples + postSamples whole samples starting at `from`. The
         // holdoff (matchArmed) guarantees matchPosition >= preSamples; the clamp is
-        // defensive.
+        // defensive. The samples up to the deciding one (T itself, or an analog
+        // confirmation) are regenerated now, never retained while waiting; a budget
+        // shorter than the persistence window ends inside them.
         const total = trigger.preSamples + trigger.postSamples;
         const from = Math.max(0, matchPosition - trigger.preSamples);
         this.deliveryEnd = Number.isFinite(total)
           ? from + total
           : Number.POSITIVE_INFINITY;
         this.flushWaitingGaps(from);
-        await this.emitRange(from, matchPosition + 1 - from);
-        this.postRemaining = total - (matchPosition + 1 - from);
+        const emitted = Math.min(position + 1 - from, total);
+        await this.emitRange(from, emitted);
+        this.postRemaining = total - emitted;
         if (this.postRemaining <= 0) {
           await this.flushPending();
           this.finish();
         }
+        return consumed;
+      }
+      if (this.inspected >= this.config!.searchLimitSamples) {
+        // One sweep found nothing: stop without delivering (Repeat's not-found).
+        this.exhausted = true;
+        this.phase = 'stopped';
         return consumed;
       }
     }
