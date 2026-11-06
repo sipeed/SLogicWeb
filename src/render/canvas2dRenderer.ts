@@ -79,7 +79,6 @@ export class Canvas2dRenderer {
 
   private readonly view: ViewTransform;
   private follow = false;
-  private rafHandle = 0;
 
   /** Stats for the most recent render(). */
   lastFrame: FrameStats = {
@@ -264,14 +263,6 @@ export class Canvas2dRenderer {
 
   // ------------------------------------------------------------------ drawing
 
-  requestRender(): void {
-    if (this.rafHandle !== 0) return;
-    this.rafHandle = requestAnimationFrame(() => {
-      this.rafHandle = 0;
-      this.render();
-    });
-  }
-
   render(): FrameStats {
     const t0 = performance.now();
     // One length snapshot per frame, same as the WebGL path: during a live capture the
@@ -441,7 +432,6 @@ export class Canvas2dRenderer {
   }
 
   dispose(): void {
-    if (this.rafHandle !== 0) cancelAnimationFrame(this.rafHandle);
     this.img = null;
   }
 }

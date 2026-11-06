@@ -145,7 +145,6 @@ export class WaveformRenderer {
   private readonly view: ViewTransform;
   private follow = false;
   private contextLost = false;
-  private rafHandle = 0;
 
   /** Stats for the most recent render(). */
   lastFrame: FrameStats = {
@@ -396,15 +395,6 @@ export class WaveformRenderer {
 
   // ------------------------------------------------------------------ drawing
 
-  /** Coalesce many requests into one frame. Returns the rAF handle. */
-  requestRender(): void {
-    if (this.rafHandle !== 0) return;
-    this.rafHandle = requestAnimationFrame(() => {
-      this.rafHandle = 0;
-      this.render();
-    });
-  }
-
   render(): FrameStats {
     if (this.contextLost) throw new DiagnosticError('render.contextLost');
     const gl = this.gl;
@@ -568,7 +558,6 @@ export class WaveformRenderer {
   };
 
   dispose(): void {
-    if (this.rafHandle !== 0) cancelAnimationFrame(this.rafHandle);
     this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
     const gl = this.gl;
     gl.deleteTexture(this.tex);
