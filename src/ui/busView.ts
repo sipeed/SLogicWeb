@@ -6,8 +6,9 @@
  * reading). Per frame, `analogFrame` picks one of two sources for the visible range:
  *
  *   - zoomed in (few samples per pixel): the exact value timeline for the window, drawn
- *     as points when there are fewer values than pixels, or as a min/max per pixel
- *     column when there are more;
+ *     as points when there are fewer values than pixels or fewer than four samples per
+ *     device-pixel column, otherwise as the min/max of the samples timestamped in each
+ *     pixel column;
  *   - zoomed out: the background-built pyramid, a min/max per pixel column - the part not
  *     built yet is simply left empty and fills in as the builder runs.
  *
@@ -18,6 +19,7 @@ import {
   BusBuilder, busRange, busSteps, busValue, latchedBefore, readCode, type BusSpec,
 } from '../data/busValue.js';
 import type { GapSpan, SampleStore } from '../data/types.js';
+import { SMOOTH_POINTS_MAX_SPP } from './analogGeometry.js';
 
 export type BusDrawStyle = 'line' | 'step';
 
@@ -231,22 +233,36 @@ function compute(
   const e = Math.min(store.length, Math.ceil(end));
   if (e > s && spp <= EXACT_SPP && e - s <= EXACT_WINDOW) {
     const carry = latchedBefore(store, bv.spec, s);
-    const st = busSteps(store, bv.spec, s, e, { carry, maxSteps: widthPx * 8 });
+    // 16 steps per column: a signal changing on every sample keeps the exact
+    // (in-column) envelope up to 16 samples per column before the pyramid takes over.
+    const st = busSteps(store, bv.spec, s, e, { carry, maxSteps: widthPx * 16 });
     if (!st.truncated) {
       const x = (sample: number) => ((sample - start) / span) * widthPx;
-      if (st.count <= widthPx / 2) {
+      // Points while they are sparse, and also while a column holds fewer than
+      // SMOOTH_POINTS_MAX_SPP samples: at 1.4-2 samples per column the envelope below
+      // has one or two values per column and reads as stair steps, while the curve
+      // through the samples is exact. spp < 4 bounds the steps at four per column,
+      // so the path stays O(width).
+      if (st.count <= widthPx / 2 || spp < SMOOTH_POINTS_MAX_SPP) {
         const xs = new Float64Array(st.count);
         for (let i = 0; i < st.count; i++) xs[i] = x(st.pos[i]!);
         return { kind: 'points', x: xs, v: st.val.slice(0, st.count), count: st.count };
       }
-      // More values than pixels: the min/max each column covers.
+      // More values than pixels: the min/max of the samples whose timestamps fall in
+      // each column. A step holds its value from its position to the next step's, so it
+      // covers the columns of its first and last sample timestamp - not the column the
+      // last sample's period merely ends in, which smeared each value one column right
+      // and widened every band by a neighbour's value.
       const min = new Float64Array(widthPx).fill(Number.NaN);
       const max = new Float64Array(widthPx).fill(Number.NaN);
       for (let i = 0; i < st.count; i++) {
         const v = st.val[i]!;
         if (Number.isNaN(v)) continue;
-        const c0 = Math.max(0, Math.floor(x(st.pos[i]!)));
-        const c1 = Math.min(widthPx - 1, Math.floor(x(i + 1 < st.count ? st.pos[i + 1]! : e) - 1e-9));
+        const first = Math.max(st.pos[i]!, Math.ceil(start));
+        const last = (i + 1 < st.count ? st.pos[i + 1]! : e) - 1;
+        if (last < first) continue;
+        const c0 = Math.max(0, Math.floor(x(first)));
+        const c1 = Math.min(widthPx - 1, Math.floor(x(last)));
         for (let c = c0; c <= c1; c++) {
           if (!(v >= min[c]!)) min[c] = v;
           if (!(v <= max[c]!)) max[c] = v;

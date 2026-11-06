@@ -298,7 +298,9 @@ Analog channels are not bus rows. Each analog signal has a row with:
 - Digital: 1 px traces, channel-colour wash below high; dense transitions become byte
   blocks; a busy line omits the wash.
 - Analog: 1.5 px trace with a min/max envelope when zoomed out; dots when samples are far
-  apart; clipping at row edges; overload badge.
+  apart; clipping at row edges; overload badge. Below four samples per device-pixel column
+  the trace is a monotone cubic through the samples (no overshoot, never folds back in x),
+  not an envelope; an envelope column is the min/max of the samples timestamped inside it.
 - Gaps: a hatched neutral pattern with a text/tooltip reason; pending data: a dotted
   neutral pattern. Neither is drawn as a level.
 - Decode blocks use role colours (framing, address, command, control, data, check,

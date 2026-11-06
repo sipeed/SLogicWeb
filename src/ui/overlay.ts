@@ -17,6 +17,7 @@
  * the hover measurement and the live-edge marker - all of which really are on top.
  */
 
+import { catmullRomWalk, smoothBandEdges, traceSteps } from './analogGeometry.js';
 import type { Bubble } from './annotationLayout.js';
 import type { AnalogFrame } from './busView.js';
 import { canvasPalette, type CanvasPalette } from './canvasPalette.js';
@@ -49,39 +50,11 @@ const MIN_BRACKET_PX = 6;
 const READOUT_OFFSET = 30;
 
 /**
- * Catmull-Rom samples through the analog points: `visit` receives the first point and
- * then every interpolated sample. `steps` is the samples per span; callers working from
- * one column per device pixel can lower it, since the source is already resolved in x.
- */
-function catmullRomWalk(
-  xs: readonly number[], ys: readonly number[],
-  visit: (x: number, sample: number) => void, steps = 12,
-): void {
-  if (xs.length === 0) return;
-  visit(xs[0]!, ys[0]!);
-  for (let i = 0; i < xs.length - 1; i++) {
-    const x0 = xs[Math.max(0, i - 1)]!, y0 = ys[Math.max(0, i - 1)]!;
-    const x1 = xs[i]!, y1 = ys[i]!;
-    const x2 = xs[i + 1]!, y2 = ys[i + 1]!;
-    const x3 = xs[Math.min(xs.length - 1, i + 2)]!, y3 = ys[Math.min(xs.length - 1, i + 2)]!;
-    for (let step = 1; step <= steps; step++) {
-      const t = step / steps;
-      const t2 = t * t;
-      const t3 = t2 * t;
-      const px = 0.5 * ((2 * x1) + (-x0 + x2) * t +
-        (2 * x0 - 5 * x1 + 4 * x2 - x3) * t2 + (-x0 + 3 * x1 - 3 * x2 + x3) * t3);
-      const py = 0.5 * ((2 * y1) + (-y0 + y2) * t +
-        (2 * y0 - 5 * y1 + 4 * y2 - y3) * t2 + (-y0 + 3 * y1 - 3 * y2 + y3) * t3);
-      visit(px, py);
-    }
-  }
-}
-
-/**
  * Catmull-Rom reconstruction through the analog points. The ADC is a sampled signal, so a
  * straight polyline makes every sample a corner; this is the practical band-limited
  * interpolation the scope look wants (a windowed sinc on an irregular point set is not
- * well defined). The caller clips it to the row.
+ * well defined). The caller clips it to the row. The geometry is `smoothPolyline` in
+ * `analogGeometry.ts` (same walk, same `traceSteps`), which the self-test asserts on.
  */
 function smoothTrace(
   c: CanvasRenderingContext2D, xs: readonly number[], ys: readonly number[], y: (v: number) => number,
@@ -94,45 +67,7 @@ function smoothTrace(
     } else {
       c.lineTo(px, y(py));
     }
-  });
-}
-
-/**
- * The two edges of a column frame's min/max band, as Catmull-Rom curves through the
- * per-column maxima and minima.
- *
- * A straight envelope through one column per device pixel is a staircase, and the old
- * polygon fill built that way read as a rectangular backdrop behind the centreline at
- * some zoom windows. Smoothing both edges turns the band into a curve at every zoom.
- *
- * Both edges are sampled at the same x positions so they can be clamped against each
- * other: a spline through a steep jump can overshoot, and an unclamped upper edge would
- * cross below the lower edge where the band is thin, filling as a bow-tie.
- */
-function smoothBandEdges(
-  xs: readonly number[], mins: readonly number[], maxs: readonly number[],
-): { x: number[]; upper: number[]; lower: number[] } {
-  // A span is already about one device pixel wide in the columns path; twelve
-  // subdivisions per span would only add path points, not visible smoothness.
-  const steps = Math.max(2, Math.min(12, Math.ceil(480 / Math.max(1, xs.length))));
-  const x: number[] = [];
-  const upper: number[] = [];
-  const rawLower: number[] = [];
-  catmullRomWalk(xs, maxs, (px, py) => { x.push(px); upper.push(py); }, steps);
-  catmullRomWalk(xs, mins, (_px, py) => { rawLower.push(py); }, steps);
-  const lower: number[] = [];
-  for (let i = 0; i < upper.length; i++) {
-    let hi = upper[i]!;
-    let lo = rawLower[i]!;
-    if (hi < lo) {
-      const mid = (hi + lo) / 2;
-      hi = mid;
-      lo = mid;
-    }
-    upper[i] = hi;
-    lower.push(lo);
-  }
-  return { x, upper, lower };
+  }, traceSteps(xs));
 }
 
 /**

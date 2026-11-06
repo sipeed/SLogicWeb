@@ -24,6 +24,7 @@ const fs = nodeProcess.getBuiltinModule?.('fs') as {
 } | undefined;
 if (!fs) throw new Error('node fs module unavailable');
 const overlay = fs.readFileSync('src/ui/overlay.ts', 'utf8');
+const geometry = fs.readFileSync('src/ui/analogGeometry.ts', 'utf8');
 const app = fs.readFileSync('src/ui/app.ts', 'utf8');
 const list = fs.readFileSync('src/ui/channelList.ts', 'utf8');
 const banks = fs.readFileSync('src/ui/channelBanks.ts', 'utf8');
@@ -111,8 +112,8 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
     ? overlay.slice(smoothStart, smoothEnd) : '';
   const smooth = overlay.includes('function smoothTrace(') &&
     overlay.includes('c.lineTo(px, y(py))') &&
-    overlay.includes('function catmullRomWalk(') &&
-    overlay.includes('function smoothBandEdges(') &&
+    geometry.includes('export function catmullRomWalk(') &&
+    geometry.includes('export function smoothBandEdges(') &&
     overlay.includes("f.kind === 'points' && o.smooth") &&
     overlay.includes('smoothTrace(c, cx, cy, y)') &&
     // Never hold a trace flat across trailing unknown columns (a gap, or the not-yet-
