@@ -475,7 +475,7 @@ const edgeMethodsSource = slice(app,
   const branchAt = body.indexOf(twoPage);
   const panelAt = body.indexOf('this.capturePanel.render(this.capturePanelView());');
   const analyzerAt = body.indexOf('this.analyzerPanel.render({');
-  const busAt = body.indexOf('this.busPanel.render({');
+  const busAt = body.lastIndexOf('this.busPanel.render(this.busPanelView());');
   const returnAt = panelAt < 0 ? -1 : body.indexOf('return;', panelAt);
   check('the sidebar content renders the capture panel for the capture page and the cursors page',
     body.length > 0 && branchAt >= 0 && panelAt > branchAt && returnAt > panelAt &&

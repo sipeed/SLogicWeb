@@ -214,8 +214,10 @@ export type TriggerStatusView = Pick<CapturePanelView,
 
 export class CapturePanel {
   private advancedOpen = false;
-  /** Groups whose gain control shows the custom ratio field (kept across re-renders). */
-  private readonly customGainStarts = new Set<number>();
+  /** The custom gain ratio being typed, kept across re-renders; null when none is. */
+  private gainEdit: { start: number; text: string } | null = null;
+  /** True while render() detaches the old tree, so a removed field's blur is inert. */
+  private rendering = false;
   private consoleLines: string[] = [];
   private liveNote: HTMLElement | null = null;
   private lostNote: HTMLElement | null = null;
@@ -512,8 +514,19 @@ export class CapturePanel {
     const s = v.settings;
     const capture = this.host.capture;
     const cursorPage = this.host.cursors;
-    capture.replaceChildren();
-    cursorPage.replaceChildren();
+    // A ratio being typed survives a rebuild (a capture finishing mid-entry): its text is
+    // kept in gainEdit and its field takes the focus back. The old field's blur, which
+    // the removal may fire, must not apply or revert anything.
+    const focused = document.activeElement as HTMLElement | null;
+    const focusedGain = focused && capture.contains(focused) ? focused.dataset?.analogGainInput : undefined;
+    const refocusGain = focusedGain !== undefined ? Number(focusedGain) : null;
+    this.rendering = true;
+    try {
+      capture.replaceChildren();
+      cursorPage.replaceChildren();
+    } finally {
+      this.rendering = false;
+    }
     this.statusDetail = null;
     this.progressEl = null;
     this.progressBar = null;
@@ -556,6 +569,7 @@ export class CapturePanel {
     const banks = div('channel-banks');
     const activeBanks = lockedChannelBanks(v.buses, v.channels.length);
     const analogBusy = v.stopping;
+    const bankNotes: HTMLElement[] = [];
     for (const start of channelBankStarts(v.channels.length)) {
       const indices = channelBankIndices(start, v.channels.length);
       const range = channelBankRange(start, v.channels.length);
@@ -568,15 +582,20 @@ export class CapturePanel {
       if (active) {
         // The eight inputs are the converter's data bus while it is read, so the row is
         // the analog channel itself, not eight logic chips (HSync's Analog toggle).
-        const cell = div('analog-cell');
-        cell.dataset.analogCell = String(start);
         const gain = analogGainOf(v.buses.find((bus) => bus.analogGroup === group));
-        cell.dataset.analogGain = String(gain);
-        cell.textContent = t('capturePanel.analogCell', {
-          name, gain: formatAnalogGain(gain), range: formatVoltsNumber(analogHalfRangeV(gain)),
+        const editing = this.gainEdit?.start === start ? this.gainEdit.text : null;
+        const gainCell = analogGainCell({
+          start, total: v.channels.length, gain, busy: analogBusy, editing,
+          live: () => !this.rendering,
+          onEditing: (text) => {
+            this.gainEdit = text === null ? null : { start, text };
+          },
+          onGain: (next) => this.cb.onAnalogGain(start, next),
         });
-        cell.title = analogInputHint(start, v.channels.length, gain);
-        bank.appendChild(cell);
+        bank.appendChild(gainCell.cell);
+        bankNotes.push(gainCell.note);
+        // After this render has attached the tree: a detached field cannot take focus.
+        if (editing !== null && refocusGain === start) queueMicrotask(() => gainCell.focusField());
       } else {
         const grid = div('chip-grid channel-bank-grid');
         grid.dataset.bankGrid = String(start);
@@ -616,37 +635,20 @@ export class CapturePanel {
       bank.appendChild(analogButton(start, active, usable && !analogBusy, hint,
         () => this.cb.onToggleAnalog(start)));
       banks.appendChild(bank);
+      // A rejected ratio and a clamped trigger level read under the cell they concern.
+      for (const note of bankNotes.splice(0)) banks.appendChild(note);
+      const clamped = v.analogLevelClamped;
+      if (active && clamped && clamped.start === start) {
+        const note = div('panel-note');
+        note.dataset.analogLevelClamped = '';
+        note.textContent = t('capturePanel.analogLevelClamped', {
+          name, from: `${clamped.from.toFixed(3)} V`, to: `${clamped.to.toFixed(3)} V`,
+        });
+        banks.appendChild(note);
+      }
     }
     chSec.body.appendChild(banks);
 
-    // One gain control per active analog group. The gain stage sits on the module and
-    // the host cannot read or set it, so this is a declaration used to convert codes.
-    const gainStarts = [...activeBanks].sort((a, b) => a - b);
-    for (const start of gainStarts) {
-      chSec.body.appendChild(this.analogGainRow(
-        start, analogGainOf(v.buses.find((bus) => bus.analogGroup === start / CHANNEL_BANK_SIZE)),
-        analogBusy,
-      ));
-    }
-    if (gainStarts.length > 0) {
-      const gainHelp = div('panel-note help-note');
-      gainHelp.dataset.analogGainHelp = '';
-      gainHelp.textContent = t('capturePanel.analogGainHelp');
-      gainHelp.appendChild(helpTip(t('capturePanel.analogGainDetail', {
-        min: ANALOG_GAIN_MIN, max: ANALOG_GAIN_MAX,
-      })));
-      chSec.body.appendChild(gainHelp);
-    }
-    const clamped = v.analogLevelClamped;
-    if (clamped && gainStarts.includes(clamped.start)) {
-      const note = div('panel-note');
-      note.dataset.analogLevelClamped = '';
-      note.textContent = t('capturePanel.analogLevelClamped', {
-        name: `A${clamped.start / CHANNEL_BANK_SIZE}`,
-        from: `${clamped.from.toFixed(3)} V`, to: `${clamped.to.toFixed(3)} V`,
-      });
-      chSec.body.appendChild(note);
-    }
 
     // ---- rate + threshold
     const rowRT = div('field-row');
@@ -1418,85 +1420,6 @@ export class CapturePanel {
   }
 
   /** The raw USB register console (developer tools only). */
-  /**
-   * One analog group's gain: a select of the profile's presets plus "Custom", and a ratio
-   * field while Custom is chosen, then the range and resolution the gain gives. Changing
-   * it is allowed during a capture; it never restarts one.
-   */
-  private analogGainRow(start: number, gain: number, busy: boolean): HTMLDivElement {
-    const name = `A${start / CHANNEL_BANK_SIZE}`;
-    const row = div('field-row analog-gain-row');
-    row.dataset.analogGainRow = String(start);
-    const choice = analogGainChoice(gain);
-    const custom = choice === 'custom' || this.customGainStarts.has(start);
-    const options: SelectOptionTuple[] = [
-      ...ANALOG_GAIN_PRESETS.map((preset): SelectOptionTuple =>
-        [String(preset), formatAnalogGain(preset)]),
-      ['custom', t('capturePanel.analogGainCustom')],
-    ];
-    const select = selectControl(
-      `capture.analogGain.${start}`,
-      t('capturePanel.analogGain', { name }),
-      options,
-      custom ? 'custom' : choice,
-    );
-    select.disabled = busy;
-    select.el.title = t('capturePanel.analogGainHelp');
-    row.appendChild(select.el);
-
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.inputMode = 'decimal';
-    input.min = String(ANALOG_GAIN_MIN);
-    input.max = String(ANALOG_GAIN_MAX);
-    input.step = 'any';
-    input.value = String(gain);
-    input.disabled = busy;
-    input.dataset.analogGainInput = String(start);
-    input.title = t('capturePanel.analogGainRange', { min: ANALOG_GAIN_MIN, max: ANALOG_GAIN_MAX });
-    const ratio = labelled(t('capturePanel.analogGainRatio'), input);
-    ratio.hidden = !custom;
-    row.appendChild(ratio);
-
-    const readout = div('field analog-gain-readout');
-    readout.dataset.analogGainReadout = String(start);
-    readout.setAttribute('translate', 'no');
-    readout.textContent = t('capturePanel.analogGainReadout', {
-      range: formatVoltsNumber(analogHalfRangeV(gain)),
-      bits: ADC_RESOLUTION_BITS,
-      step: formatVoltsNumber(analogVoltsPerCode(gain) * 1000),
-    });
-    row.appendChild(readout);
-
-    select.addEventListener('change', () => {
-      if (select.value === 'custom') {
-        // Custom opens the ratio field; the gain changes when a valid ratio is entered.
-        this.customGainStarts.add(start);
-        ratio.hidden = false;
-        input.focus();
-        return;
-      }
-      this.customGainStarts.delete(start);
-      ratio.hidden = true;
-      const next = Number(select.value);
-      if (isAnalogGain(next)) this.cb.onAnalogGain(start, next);
-    });
-    input.addEventListener('change', () => {
-      const next = parseAnalogGain(input.value);
-      if (next === null) {
-        // Out of range or not a number: keep the declared gain and say what is allowed.
-        input.value = String(gain);
-        input.setCustomValidity(input.title);
-        input.reportValidity();
-        input.setCustomValidity('');
-        return;
-      }
-      this.customGainStarts.add(start);
-      this.cb.onAnalogGain(start, next);
-    });
-    return row;
-  }
-
   private renderUsbConsole(body: HTMLElement, v: CapturePanelView): void {
     const consoleLabel = document.createElement('label');
     consoleLabel.className = 'advanced-console-label';
@@ -1568,6 +1491,202 @@ export function analogInputHint(start: number, total: number, gain = ANALOG_GAIN
     range: channelBankRange(start, total),
     span: `±${formatVoltsNumber(analogHalfRangeV(gain))} V`,
     bits: ADC_RESOLUTION_BITS,
+  });
+}
+
+export interface AnalogGainCellOptions {
+  start: number;
+  /** The capture width, for the input hint. */
+  total: number;
+  gain: number;
+  /** Stopping: the control is shown but cannot change. */
+  busy: boolean;
+  /** The ratio being typed when the panel was rebuilt mid-entry, else null. */
+  editing: string | null;
+  /** False while the owner detaches the old tree: a blur then is not a commit. */
+  live(): boolean;
+  /** The text being typed (null when the field closes), kept by the owner. */
+  onEditing(text: string | null): void;
+  onGain(gain: number): void;
+}
+
+export interface AnalogGainCell {
+  /** `A0 [×1 ▾] ±16 V ?`: the row's cell in place of the eight D chips. */
+  cell: HTMLDivElement;
+  /** Under the bank row: says why a typed ratio was rejected (hidden until it is). */
+  note: HTMLDivElement;
+  /** Focus the ratio field, caret at the end (after a rebuild mid-entry). */
+  focusField(): void;
+}
+
+/**
+ * One analog group's cell, and its gain declaration (DESIGN §5.2 "Gain is declared, not
+ * set"). The gain stage sits on the module and the host can neither read nor set it, so
+ * the select only declares the ratio used to convert codes to volts; changing it never
+ * restarts a capture. The select holds the profile presets, the current custom ratio
+ * when it is not a preset, and "Custom…", which turns the select into a ratio field in
+ * place: Enter or leaving the field applies, Esc reverts. A ratio outside the profile's
+ * bounds is refused: Enter keeps the field with the declared ratio and the browser's
+ * validity bubble (cleared on the next keystroke, not before it can show); leaving the
+ * field reverts to the select. Both say why in the note under the row.
+ */
+export function analogGainCell(o: AnalogGainCellOptions): AnalogGainCell {
+  const { start, gain } = o;
+  const name = `A${start / CHANNEL_BANK_SIZE}`;
+  const cell = div('analog-cell');
+  cell.dataset.analogCell = String(start);
+  cell.dataset.analogGain = String(gain);
+  cell.setAttribute('role', 'group');
+  cell.setAttribute('aria-label', t('capturePanel.analogCellLabel', { name }));
+
+  const label = document.createElement('span');
+  label.className = 'analog-cell-name';
+  label.textContent = name;
+  label.title = analogInputHint(start, o.total, gain);
+  label.setAttribute('translate', 'no');
+
+  const slot = document.createElement('span');
+  slot.className = 'analog-cell-gain';
+
+  const choice = analogGainChoice(gain);
+  const options: SelectOptionTuple[] = [
+    ...ANALOG_GAIN_PRESETS.map((preset): SelectOptionTuple =>
+      [String(preset), formatAnalogGain(preset)]),
+    // A declared custom ratio reads as itself, not as "Custom…".
+    ...(choice === 'custom' ? [[String(gain), formatAnalogGain(gain)] as SelectOptionTuple] : []),
+    ['custom', t('capturePanel.analogGainCustom')],
+  ];
+  const select = selectControl(
+    `capture.analogGain.${start}`, t('capturePanel.analogGain', { name }), options, String(gain),
+  );
+  select.disabled = o.busy;
+
+  const rangeText = t('capturePanel.analogGainRange', { min: ANALOG_GAIN_MIN, max: ANALOG_GAIN_MAX });
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.inputMode = 'decimal';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.className = 'analog-gain-input';
+  input.disabled = o.busy;
+  input.dataset.analogGainInput = String(start);
+  input.title = rangeText;
+  input.setAttribute('aria-label',
+    `${t('capturePanel.analogGain', { name })}, ${t('capturePanel.analogGainRatio')}`);
+
+  const range = document.createElement('span');
+  range.className = 'analog-cell-range';
+  range.setAttribute('translate', 'no');
+  range.textContent = t('capturePanel.analogCellRange', { range: formatVoltsNumber(analogHalfRangeV(gain)) });
+
+  const tip = helpTip(`${t('capturePanel.analogGainHelp')} ${analogGainReadout(gain)}`);
+  tip.dataset.analogGainTip = String(start);
+
+  const note = div('panel-note error');
+  note.dataset.analogGainRejected = String(start);
+  note.setAttribute('role', 'alert');
+  note.hidden = true;
+  const reject = (): void => {
+    note.textContent = rangeText;
+    note.hidden = false;
+  };
+  const clearReject = (): void => {
+    note.hidden = true;
+    note.textContent = '';
+  };
+
+  let open = false;
+  const showSelect = (focus: boolean): void => {
+    open = false;
+    o.onEditing(null);
+    slot.replaceChildren(select.el);
+    if (focus) select.el.querySelector<HTMLElement>('.select-trigger')?.focus();
+  };
+  const showField = (text: string, focus: boolean): void => {
+    open = true;
+    input.value = text;
+    input.setCustomValidity('');
+    o.onEditing(text);
+    slot.replaceChildren(input);
+    if (focus) focusField();
+  };
+  const focusField = (): void => {
+    if (!open) return;
+    input.focus();
+    input.setSelectionRange?.(input.value.length, input.value.length);
+  };
+  const apply = (how: 'enter' | 'blur'): void => {
+    const next = parseAnalogGain(input.value);
+    if (next === null) {
+      reject();
+      if (how === 'blur') {
+        showSelect(false);
+        return;
+      }
+      // Keep the message until the next keystroke: clearing it right after
+      // reportValidity() would hide the bubble before it shows.
+      input.value = String(gain);
+      o.onEditing(input.value);
+      input.setCustomValidity(rangeText);
+      input.reportValidity();
+      return;
+    }
+    clearReject();
+    // The owner rebuilds the panel on a change; find the new select by its key so the
+    // keyboard stays on the control.
+    const scope = cell.closest('.side-page') ?? cell.parentElement;
+    showSelect(how === 'enter' && Math.abs(next - gain) < 1e-12);
+    if (Math.abs(next - gain) < 1e-12) return;
+    o.onGain(next);
+    if (how === 'enter' && !cell.isConnected) {
+      scope?.querySelector<HTMLElement>(
+        `.select-trigger[data-select-key="capture.analogGain.${start}"]`)?.focus();
+    }
+  };
+
+  select.addEventListener('change', () => {
+    clearReject();
+    if (select.value === 'custom') {
+      // The select keeps showing the declared gain if the entry is abandoned.
+      select.value = String(gain);
+      showField(String(gain), true);
+      return;
+    }
+    const next = Number(select.value);
+    if (isAnalogGain(next) && Math.abs(next - gain) >= 1e-12) o.onGain(next);
+  });
+  input.addEventListener('input', () => {
+    input.setCustomValidity('');
+    o.onEditing(input.value);
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      apply('enter');
+    } else if (event.key === 'Escape') {
+      // Esc belongs to the field: it reverts the entry and closes nothing else.
+      event.preventDefault();
+      event.stopPropagation();
+      clearReject();
+      showSelect(true);
+    }
+  });
+  input.addEventListener('blur', () => {
+    if (!open || !o.live() || !input.isConnected) return;
+    apply('blur');
+  });
+
+  if (o.editing !== null && !o.busy) showField(o.editing, false);
+  else showSelect(false);
+  cell.append(label, slot, range, tip);
+  return { cell, note, focusField };
+}
+
+/** Bits and volts per code at a gain: `8-bit · 125.5 mV/code` (four significant digits). */
+export function analogGainReadout(gain: number): string {
+  return t('capturePanel.analogGainReadout', {
+    bits: ADC_RESOLUTION_BITS,
+    step: String(Number((analogVoltsPerCode(gain) * 1000).toPrecision(4))),
   });
 }
 

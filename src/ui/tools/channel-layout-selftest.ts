@@ -534,7 +534,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     updateBus.includes('(current.analogGroup !== undefined || cfg.analogGroup !== undefined)') &&
     removeBus.includes('if (this.stopping && current.analogGroup !== undefined) return false;') &&
     busPanel.includes('remove.disabled = v.captureLocked && b.analogGroup !== undefined') &&
-    busPanel.includes('v.captureLocked && (editingBank || current.analogGroup !== undefined)') &&
+    busPanel.includes('(v.captureLocked && (editingBank || current?.analogGroup !== undefined))') &&
     appSrc.includes("if (this.addBus(cfg) === null) throw new DiagnosticError('ui.captureLocked')") &&
     appSrc.includes("if (b && !this.updateBus(b.id, cfg)) throw new DiagnosticError('ui.captureLocked')") &&
     appSrc.includes("if (b && !this.removeBus(b.id)) throw new DiagnosticError('ui.captureLocked')");

@@ -32,7 +32,7 @@ import type { AssistantHost, CaptureOutcome } from '../assistant/tools.js';
 import { reconcileAnalyzers } from './analyzerForm.js';
 import { AnalyzerPanel } from './analyzerPanel.js';
 import { BusBuilder, validateBusSpec } from '../data/busValue.js';
-import { BusPanel, cloneBusConfig, defaultBusConfig } from './busPanel.js';
+import { BusPanel, cloneBusConfig, defaultBusConfig, type BusPanelView } from './busPanel.js';
 import { DecodeResultsPanel } from './decodeResultsPanel.js';
 import {
   analogDisplayHeight, analogFrame, applyBusBitOrder, beginAnalogFrameBudget, busColor, busLabel, busSummary,
@@ -1283,8 +1283,8 @@ export class App {
     // An analog bank is fixed: MSB-first, A0-A3, the profile scale. Its only control is the Analog
     // button, so the generic editor (bit order included) is not offered for it.
     if (bus.analogGroup !== undefined) return;
-    this.busPanel.edit(bus);
-    this.selectPanel('analyzers');
+    // The editor is a dialog over whatever page is shown (DESIGN §5.3), not a panel form.
+    this.busPanel.edit(bus, this.busPanelView());
   }
 
   private addBus(raw: BusViewConfig): string | null {
@@ -4126,6 +4126,10 @@ export class App {
         onEdit: (id) => this.editBus(id),
         onUpdate: (id, cfg) => this.updateBus(id, cfg),
         onRemove: (id) => this.removeBus(id),
+        onOpenDialog: () => {
+          this.menuStack.closeAll('outside');
+          this.channelList.closeDialog();
+        },
       });
     }
   }
@@ -4297,6 +4301,11 @@ export class App {
   }
 
   private renderSidebarContent(): void {
+    // An open bus editor follows the buses whatever page is shown: it keeps its draft,
+    // and closes when its bus goes away.
+    if (this.busPanel?.isOpen && !(this.sidebar.visible && this.sidebar.page === 'decoders')) {
+      this.busPanel.render(this.busPanelView());
+    }
     if (!this.sidebar.visible) return;
     if (this.sidebar.page === 'capture' || this.sidebar.page === 'cursors') {
       this.capturePanel.render(this.capturePanelView());
@@ -4319,11 +4328,15 @@ export class App {
       originSample: this.displayOriginSample(),
       samplerate: this.captureStore.samplerate,
     });
-    this.busPanel.render({
+    this.busPanel.render(this.busPanelView());
+  }
+
+  private busPanelView(): BusPanelView {
+    return {
       buses: this.busViews, channelCount: this.displayChannelCount(),
       testMode: this.settings.testMode,
       captureLocked: this.stopping,
-    });
+    };
   }
 
   private capturePanelView(): CapturePanelView {

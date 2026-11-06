@@ -1556,19 +1556,36 @@ html.resizing { cursor: col-resize; user-select: none; }
 .analog-button.on { background: #4C9AFF; color: #141415; }
 .analog-button:disabled { cursor: default; opacity: .45; }
 .analog-cell {
-  flex: 1 1 auto; min-width: 0; display: flex; align-items: center;
-  height: 22px; padding: 0 8px; border-radius: 3px;
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 2px 0 8px; border-radius: 3px;
   border: 1px solid #4C9AFF; background: rgb(76 154 255 / 12%); color: var(--text);
-  font: inherit; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font: inherit; font-size: 10px; white-space: nowrap;
 }
-.analog-gain-row { align-items: flex-end; margin-top: 6px; min-width: 0; }
-.analog-gain-row > .select-field { flex: 0 1 96px; }
-.analog-gain-row > .field[hidden] { display: none; }
-.analog-gain-row > .field:not(.analog-gain-readout):not(.select-field) { flex: 0 1 72px; }
-.analog-gain-readout {
-  flex: 1 1 auto; min-width: 0; padding-bottom: 5px; font-size: 10px; color: var(--text50);
-  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+/* `A0 [×1 ▾] ±16 V ?` - the name and the gain never shrink; the range ellipsizes first. */
+.analog-cell-name { flex: none; font-variant-numeric: tabular-nums; }
+/* Sized by its value ("×10", "×0.5"): at the 240 px panel minimum the cell keeps
+   about 150 px, enough for name, gain, "±16 V" and the tip. */
+.analog-cell-gain { flex: none; display: flex; min-width: 44px; }
+.analog-cell-gain > .select-field { flex: 0 0 auto; gap: 0; width: max-content; min-width: 44px; }
+/* The select's label names the trigger for assistive tech; the cell already shows "A0". */
+.analog-cell-gain > .select-field > label {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
 }
+.analog-cell-gain .select-trigger {
+  height: 18px; min-height: 18px; padding: 0 4px; gap: 2px; font-size: 10px; line-height: 16px;
+}
+.analog-gain-input {
+  width: 6ch; min-width: 0; height: 18px; padding: 0 4px;
+  background: var(--background); color: var(--foreground);
+  border: 1px solid var(--input); border-radius: 3px; font: inherit; font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.analog-cell-range {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.analog-cell .help-tip { margin-left: 0; }
 .global-trigger-list { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
 .global-trigger-row {
   display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 4px 3px 6px;
@@ -2412,6 +2429,35 @@ html[data-theme="light"] .uictrl-card-actions .mini:hover { background: var(--mu
 }
 .bus-cell:hover .bus-height-handle, .bus-height-handle:focus-visible { opacity: 1; }
 .bus-height-handle:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* The bus editor: a native modal over the plot, the shortcuts dialog's anatomy. The
+   header Add sits at the section head's right. */
+.panel-section-head > .bus-add { margin-left: auto; font-weight: normal; }
+.bus-order-row { align-items: flex-end; }
+.bus-order-row > .bus-swap { align-self: flex-end; margin-bottom: 3px; }
+.bus-dialog {
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  overflow-y: auto;
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
+  animation: motion-pop var(--motion-fast) var(--motion-ease);
+}
+.bus-dialog::backdrop {
+  background: rgb(0 0 0 / 60%);
+  animation: motion-fade var(--motion-fast) var(--motion-ease);
+}
+html[data-theme="light"] .bus-dialog::backdrop { background: var(--backdrop); }
+.bus-dialog-form { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.bus-dialog-header h2 { margin: 0; font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
+.bus-dialog-body { display: flex; flex-direction: column; gap: 8px; }
+.bus-dialog-actions { justify-content: flex-end; }
+:is(html[data-theme="dark"], html[data-theme="light"]) .bus-dialog { box-shadow: 0 8px 24px var(--shadow); }
 
 .bus-cell-sub { font-size: 10px; line-height: 1.3; color: var(--text50); overflow-wrap: anywhere; }
 .bus-cell-edit {

@@ -176,10 +176,11 @@ check('bank start uses the absolute channel index',
   const rightSide = panel.includes('bank.appendChild(analogButton(start, active, usable && !analogBusy, hint,') &&
     panel.indexOf('bank.appendChild(grid);') >= 0 &&
     panel.indexOf('bank.appendChild(grid);') < panel.indexOf('bank.appendChild(analogButton(');
+  // The cell is the gain control (analog-gain-cell-selftest drives it).
   const analogCell = panel.includes("const cell = div('analog-cell');") &&
-    panel.includes("cell.textContent = t('capturePanel.analogCell', {") &&
-    panel.includes('name, gain: formatAnalogGain(gain), range: formatVoltsNumber(analogHalfRangeV(gain)),') &&
-    panel.includes('cell.title = analogInputHint(start, v.channels.length, gain);') &&
+    panel.includes('const gainCell = analogGainCell({') &&
+    panel.includes('bank.appendChild(gainCell.cell);') &&
+    panel.includes('label.title = analogInputHint(start, o.total, gain);') &&
     panel.includes("return t('capturePanel.analogEnable', {");
   const button = panel.includes("b.textContent = t('capturePanel.analog');") &&
     panel.includes("b.disabled = !enabled;") &&
@@ -231,7 +232,8 @@ check('bank start uses the absolute channel index',
     !busPanel.includes('BankBusDialog') && !busPanel.includes('bus.bankDialogTitle') &&
     !busPanel.includes('bus.enableBank');
   const fixedBank = app.includes('if (bus.analogGroup !== undefined) return;') &&
-    busPanel.includes("if (b.analogGroup === undefined) {\n          const edit = button(t('bus.editButton'), 'bus-btn');");
+    busPanel.includes("if (b.analogGroup === undefined) {\n      const edit = button(t('bus.editButton'), 'bus-btn');") &&
+    busPanel.includes('if (bus.analogGroup !== undefined) return;');
   check('the enable/MSB-LSB dialog is gone; an analog bank is fixed and not editable as a bus',
     retired && fixedBank, `retired=${retired}, fixed=${fixedBank}`);
 

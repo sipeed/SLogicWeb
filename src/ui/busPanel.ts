@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
- * The "Parallel bus / ADC" section of the analyzers sidebar: a list of bus views and an
- * editor for adding or changing one.
+ * The "Bus views" section of the Decoders page: a list of bus views under a header Add
+ * button, and the editor dialog Add and Edit open (DESIGN §5.3).
  *
  * It has a host of its own under the analyzers sidebar (AnalyzerPanel clears its host
- * whenever it re-renders), and keeps its draft across re-renders, so a capture finishing
- * mid-edit does not lose what was typed. Only the shared helpers are reused; the class names are its own.
+ * whenever it re-renders); the dialog lives in the document body, outside that host, and
+ * keeps its draft across re-renders, so a capture finishing mid-edit does not lose what
+ * was typed. Only the shared helpers are reused; the class names are its own.
  */
 
 import { MAX_BUS_BITS, validateBusSpec, type BusEncoding, type BusSpec } from '../data/busValue.js';
@@ -32,6 +33,8 @@ export interface BusPanelCallbacks {
   onEdit(id: string): void;
   onUpdate(id: string, cfg: BusViewConfig): void;
   onRemove(id: string): void;
+  /** The editor dialog is about to open: close menus and other dialogs (one overlay). */
+  onOpenDialog?(): void;
 }
 
 const ENCODINGS: [BusEncoding, MessageKey][] = [
@@ -273,7 +276,21 @@ function busConfigFields(d: BusViewConfig, options: BusConfigFieldsOptions): Bus
     const msb = resolveBusBitOrder(bitOrder, options.testMode) === 'msb';
     update({ bitOrder }, { bits: runBits(run.start, d.spec.bits.length, cc, msb) });
   });
-  body.appendChild(order.el);
+  // The explicit swap reverses whatever wiring the bits have (a per-bit mapping too, which
+  // the order select would regenerate as a run), and pins the order so Auto does not
+  // undo it at the next test-mode change.
+  const swap = button(t('bus.swap'), 'bus-btn bus-swap');
+  swap.type = 'button';
+  swap.dataset.busSwap = '';
+  swap.disabled = d.spec.bits.length < 2;
+  swap.addEventListener('click', () => {
+    const flipped: BusBitOrder =
+      resolveBusBitOrder(d.bitOrder ?? 'auto', options.testMode) === 'msb' ? 'lsb' : 'msb';
+    options.onRebuild({ ...d, bitOrder: flipped, spec: swapBusOrder(d.spec) }, false);
+  });
+  const orderRow = div('field-row bus-order-row');
+  orderRow.append(order.el, swap);
+  body.appendChild(orderRow);
 
   // Any wiring: one channel per bit.
   const per = document.createElement('details');
@@ -308,129 +325,301 @@ function busConfigFields(d: BusViewConfig, options: BusConfigFieldsOptions): Bus
   };
 }
 
+/** Inputs, buttons and summaries in tree order: where focus goes back after a rebuild. */
+function focusables(root: Element): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  const walk = (el: Element): void => {
+    for (const child of Array.from(el.children)) {
+      const tag = child.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'button' || tag === 'summary' || tag === 'select') {
+        out.push(child as HTMLElement);
+      }
+      walk(child);
+    }
+  };
+  walk(root);
+  return out;
+}
+
+/**
+ * The Bus views section and its editor dialog (DESIGN §5.3 "Bus views").
+ *
+ * The section header carries the one `Add` button; each listed bus has exactly `Edit` and
+ * `Remove` (an analog bank, managed by its Analog button, has `Remove` only). Add and
+ * Edit open one native modal dialog with the editor: Esc/back and Cancel close it, the
+ * primary action applies, and a re-render of the section (a capture finishing, a bus
+ * builder's progress) never rebuilds the open form, so the draft and the focus survive.
+ * The form is rebuilt only when its own draft changes, or when the channel count, the
+ * test mode or the locale it was built for changes (the typed values are read back into
+ * the draft first). The dialog closes when the bus it edits disappears.
+ */
 export class BusPanel {
   /** The bus being edited, or null when the editor adds a new one. */
   private editing: string | null = null;
   private draft: BusViewConfig | null = null;
+  private view: BusPanelView | null = null;
+  private dialog: HTMLDialogElement | null = null;
+  private dialogTitle: HTMLHeadingElement | null = null;
+  private dialogBody: HTMLDivElement | null = null;
+  private fields: BusFields | null = null;
+  private go: HTMLButtonElement | null = null;
+  /** The channel count, test mode and locale the open form was built for. */
+  private formKey = '';
+  private invoker: HTMLElement | null = null;
 
   constructor(private readonly root: HTMLElement, private readonly cb: BusPanelCallbacks) {}
 
-  /** Open the editor on an existing bus (from its channel-list cell). */
-  edit(bus: BusViewState): void {
+  /** True while the editor dialog is open. */
+  get isOpen(): boolean {
+    return this.dialog?.open === true;
+  }
+
+  /** The id of the bus the open dialog edits; null when adding or closed. */
+  get editingId(): string | null {
+    return this.isOpen ? this.editing : null;
+  }
+
+  /** Open the editor on an existing bus (its row's Edit, or its channel-list cell). */
+  edit(bus: BusViewState, view: BusPanelView | null = null, invoker: HTMLElement | null = null): void {
+    if (bus.analogGroup !== undefined) return;
+    if (view) this.view = view;
     this.editing = bus.id;
     this.draft = cloneBusConfig(bus);
+    this.openDialog(invoker);
+  }
+
+  /** Open the editor on a new bus (the section header's Add). */
+  add(invoker: HTMLElement | null = null): void {
+    if (!this.view) return;
+    this.editing = null;
+    this.draft = defaultBusConfig(this.view.channelCount, this.view.testMode);
+    this.openDialog(invoker);
+  }
+
+  /** Close the editor without applying it. */
+  close(): void {
+    const invoker = this.invoker;
+    const editing = this.editing;
+    this.invoker = null;
+    this.editing = null;
+    this.draft = null;
+    this.fields = null;
+    this.go = null;
+    this.formKey = '';
+    if (this.dialog?.open) this.dialog.close();
+    if (invoker?.isConnected) {
+      invoker.focus();
+      return;
+    }
+    // The opener was rebuilt while the dialog was open: its successor takes the focus.
+    const successor = editing !== null
+      ? this.root.querySelector<HTMLElement>(`[data-bus-edit="${CSS.escape(editing)}"]`)
+      : this.root.querySelector<HTMLElement>('[data-bus-add]');
+    if (successor?.isConnected) successor.focus();
   }
 
   render(v: BusPanelView): void {
+    this.view = v;
     this.root.replaceChildren();
-    if (this.editing && !v.buses.some((b) => b.id === this.editing)) { this.editing = null; this.draft = null; }
-    // The draft keeps Auto in step with the capture mode, even while the editor is open.
-    if (this.draft) this.draft = applyBusBitOrder(this.draft, v.testMode);
-    const draft = this.draft ??= defaultBusConfig(v.channelCount, v.testMode);
 
     const wrap = div('bus-panel');
-    const head = div('panel-head');
-    const title = div('panel-title');
-    title.textContent = t('bus.title');
-    const sub = div('panel-sub');
-    sub.textContent = t('bus.sub');
-    head.append(title, sub);
-    wrap.appendChild(head);
+    const s = section(t('bus.attached'));
+    s.el.dataset.busViews = '';
+    const add = button(t('bus.addButton'), 'bus-btn bus-add');
+    add.type = 'button';
+    add.dataset.busAdd = '';
+    add.setAttribute('aria-label', t('bus.add'));
+    add.setAttribute('aria-haspopup', 'dialog');
+    add.addEventListener('click', () => this.add(add));
+    s.header.appendChild(add);
 
-    if (v.buses.length) {
-      const s = section(t('bus.attached'));
-      for (const b of v.buses) {
-        const row = div('bus-row');
-        const sq = document.createElement('span');
-        sq.className = 'bus-sq';
-        sq.style.background = b.color;
-        const name = document.createElement('span');
-        name.className = 'bus-name';
-        name.textContent = b.name;
-        const info = document.createElement('span');
-        info.className = 'bus-info';
-        const progress = b.builder && !b.builder.done
-          ? ` · ${t('bus.building', { pct: Math.floor(b.builder.progress * 100) })}` : '';
-        info.textContent = `${busSummary(b.spec)} · ${t(ENCODINGS.find(([e]) => e === b.spec.encoding)![1])}${progress}`;
-        info.title = info.textContent;
-        row.append(sq, name, info);
-        if (b.analogGroup === undefined) {
-          const swap = button(t('bus.swapShort'), 'bus-btn');
-          swap.title = t('bus.swap');
-          swap.addEventListener('click', () => {
-            // Reversing is an explicit choice: pin the order so Auto does not undo it at
-            // the next test-mode change.
-            const flipped: BusBitOrder = resolveBusBitOrder(b.bitOrder ?? 'auto', v.testMode) === 'msb' ? 'lsb' : 'msb';
-            this.cb.onUpdate(b.id, { ...cloneBusConfig(b), bitOrder: flipped, spec: swapBusOrder(b.spec) });
-          });
-          row.appendChild(swap);
-        }
-        // An analog bank has one control, the Analog button in the Device panel; its
-        // wiring and name are the ADC module's, so it is not editable here.
-        if (b.analogGroup === undefined) {
-          const edit = button(t('bus.editButton'), 'bus-btn');
-          edit.addEventListener('click', () => this.cb.onEdit(b.id));
-          row.appendChild(edit);
-        }
-        const remove = button(t('bus.remove'), 'bus-btn bus-btn--remove');
-        remove.disabled = v.captureLocked && b.analogGroup !== undefined;
-        remove.addEventListener('click', () => this.cb.onRemove(b.id));
-        row.appendChild(remove);
-        s.body.appendChild(row);
-      }
-      wrap.appendChild(s.el);
+    if (v.buses.length === 0) {
+      const empty = div('panel-note');
+      empty.dataset.busEmpty = '';
+      empty.textContent = t('bus.sub');
+      s.body.appendChild(empty);
     }
-
-    wrap.appendChild(this.editor(draft, v));
+    for (const b of v.buses) s.body.appendChild(this.row(b, v));
+    wrap.appendChild(s.el);
     this.root.appendChild(wrap);
+
+    if (!this.isOpen) return;
+    if (this.editing !== null && !v.buses.some((b) => b.id === this.editing)) {
+      // The bus went away under the dialog (a capture load, a channel-width change).
+      this.close();
+      return;
+    }
+    if (this.formKey !== this.keyFor(v)) {
+      // Keep what was typed, then follow the new channel count / test mode / locale.
+      if (this.fields) this.draft = this.fields.read();
+      this.renderForm();
+    } else {
+      this.syncGo();
+    }
   }
 
-  /** Re-render after a draft change. */
-  private rerender(v: BusPanelView): void {
-    this.render(v);
+  private row(b: BusViewState, v: BusPanelView): HTMLElement {
+    const row = div('bus-row');
+    row.dataset.busRow = b.id;
+    const sq = document.createElement('span');
+    sq.className = 'bus-sq';
+    sq.style.background = b.color;
+    const name = document.createElement('span');
+    name.className = 'bus-name';
+    name.textContent = b.name;
+    const info = document.createElement('span');
+    info.className = 'bus-info';
+    const progress = b.builder && !b.builder.done
+      ? ` · ${t('bus.building', { pct: Math.floor(b.builder.progress * 100) })}` : '';
+    info.textContent = `${busSummary(b.spec)} · ${t(ENCODINGS.find(([e]) => e === b.spec.encoding)![1])}${progress}`;
+    info.title = info.textContent;
+    row.append(sq, name, info);
+    // An analog bank has one control, the Analog button in the Acquire panel; its wiring
+    // and name are the ADC module's, so it is not editable here.
+    if (b.analogGroup === undefined) {
+      const edit = button(t('bus.editButton'), 'bus-btn');
+      edit.type = 'button';
+      edit.dataset.busEdit = b.id;
+      edit.setAttribute('aria-label', t('bus.edit', { name: b.name }));
+      edit.setAttribute('aria-haspopup', 'dialog');
+      edit.addEventListener('click', () => this.cb.onEdit(b.id));
+      row.appendChild(edit);
+    }
+    const remove = button(t('bus.remove'), 'bus-btn bus-btn--remove');
+    remove.type = 'button';
+    remove.dataset.busRemove = b.id;
+    remove.setAttribute('aria-label', t('bus.removeNamed', { name: b.name }));
+    remove.disabled = v.captureLocked && b.analogGroup !== undefined;
+    remove.addEventListener('click', () => this.cb.onRemove(b.id));
+    row.appendChild(remove);
+    return row;
   }
 
-  private editor(d: BusViewConfig, v: BusPanelView): HTMLElement {
-    const s = section(t(this.editing ? 'bus.edit' : 'bus.add'));
-    const fields = busConfigFields(d, {
+  private keyFor(v: BusPanelView): string {
+    return `${v.channelCount}|${v.testMode}|${t('bus.addButton')}|${t('bus.name')}`;
+  }
+
+  private ensureDialog(): HTMLDialogElement {
+    if (this.dialog) return this.dialog;
+    const dialog = document.createElement('dialog');
+    dialog.className = 'bus-dialog';
+    dialog.dataset.busDialog = '';
+    const titleId = 'bus-dialog-title';
+    dialog.setAttribute('aria-labelledby', titleId);
+    const title = document.createElement('h2');
+    title.id = titleId;
+    const header = document.createElement('header');
+    header.className = 'bus-dialog-header';
+    header.appendChild(title);
+    const body = div('bus-dialog-body');
+    const form = div('bus-dialog-form');
+    form.append(header, body);
+    dialog.appendChild(form);
+    // Esc and the platform's back gesture arrive as `cancel`: close through one path so
+    // the draft is dropped and focus returns to the control that opened the dialog.
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      this.close();
+    });
+    document.body.appendChild(dialog);
+    this.dialog = dialog;
+    this.dialogTitle = title;
+    this.dialogBody = body;
+    return dialog;
+  }
+
+  private openDialog(invoker: HTMLElement | null): void {
+    if (!this.view) return;
+    const dialog = this.ensureDialog();
+    if (!dialog.open) {
+      this.invoker = invoker ?? (document.activeElement as HTMLElement | null);
+      // One overlay at a time: the owner closes menus and other dialogs first.
+      this.cb.onOpenDialog?.();
+    }
+    this.renderForm();
+    if (!dialog.open) dialog.showModal();
+    this.dialogBody?.querySelector<HTMLInputElement>('input')?.focus();
+  }
+
+  /** Build the form from the draft, keeping the focused control and the per-bit list. */
+  private renderForm(): void {
+    const v = this.view;
+    const body = this.dialogBody;
+    const title = this.dialogTitle;
+    if (!v || !body || !title) return;
+    const before = focusables(body);
+    const active = document.activeElement as HTMLElement | null;
+    const focusAt = active ? before.indexOf(active) : -1;
+    const perBitOpen = body.querySelector<HTMLDetailsElement>('.bus-perbit')?.open === true;
+
+    // The draft keeps Auto in step with the capture mode, even while the editor is open.
+    const draft = this.draft = applyBusBitOrder(
+      this.draft ?? defaultBusConfig(v.channelCount, v.testMode), v.testMode);
+    const editingName = this.editing !== null
+      ? v.buses.find((b) => b.id === this.editing)?.name ?? draft.name : null;
+    title.textContent = editingName !== null ? t('bus.edit', { name: editingName }) : t('bus.add');
+
+    const fields = busConfigFields(draft, {
       channelCount: v.channelCount,
       testMode: v.testMode,
       onRebuild: (next, keepPerBitOpen) => {
         this.draft = next;
-        this.rerender(v);
-        if (keepPerBitOpen) this.root.querySelector<HTMLDetailsElement>('.bus-perbit')?.setAttribute('open', '');
+        this.renderForm();
+        if (keepPerBitOpen) body.querySelector<HTMLDetailsElement>('.bus-perbit')?.setAttribute('open', '');
       },
     });
-    s.body.appendChild(fields.el);
-    const current = fields.read();
-    const problems = validateBusSpec(current.spec, v.channelCount);
+    this.fields = fields;
+    const nodes: HTMLElement[] = [fields.el];
+    const problems = validateBusSpec(fields.read().spec, v.channelCount);
     if (problems.length) {
       const err = div('panel-note error');
+      err.dataset.busProblems = '';
+      err.setAttribute('role', 'alert');
       err.textContent = problems.join('\n');
-      s.body.appendChild(err);
+      nodes.push(err);
     }
 
-    const actions = div('bus-actions');
+    const actions = document.createElement('footer');
+    actions.className = 'bus-actions bus-dialog-actions';
+    const cancel = button(t('bus.cancel'), 'pill');
+    cancel.type = 'button';
+    cancel.dataset.busCancel = '';
+    cancel.addEventListener('click', () => this.close());
     const go = button(t(this.editing ? 'bus.save' : 'bus.addButton'), 'pill primary');
+    go.type = 'button';
+    go.dataset.busSave = '';
+    go.dataset.busProblems = String(problems.length);
+    go.addEventListener('click', () => {
+      if (go.disabled || !this.fields) return;
+      const cfg = this.fields.read();
+      const editing = this.editing;
+      if (editing) this.cb.onUpdate(editing, cfg);
+      else this.cb.onAdd(cfg);
+      this.close();
+    });
+    actions.append(cancel, go);
+    nodes.push(actions);
+    this.go = go;
+    body.replaceChildren(...nodes);
+    if (perBitOpen) body.querySelector<HTMLDetailsElement>('.bus-perbit')?.setAttribute('open', '');
+    this.formKey = this.keyFor(v);
+    this.syncGo();
+
+    if (focusAt >= 0) {
+      const after = focusables(body);
+      after[Math.min(focusAt, after.length - 1)]?.focus();
+    }
+  }
+
+  /** The primary action follows the draft's validity and the capture lock. */
+  private syncGo(): void {
+    const v = this.view;
+    const go = this.go;
+    if (!v || !go) return;
     const editingBank = this.editing !== null && v.buses
       .some((bus) => bus.id === this.editing && bus.analogGroup !== undefined);
-    go.disabled = problems.length > 0 ||
-      (v.captureLocked && (editingBank || current.analogGroup !== undefined));
-    go.addEventListener('click', () => {
-      if (go.disabled) return;
-      const cfg = fields.read();
-      if (this.editing) this.cb.onUpdate(this.editing, cfg);
-      else this.cb.onAdd(cfg);
-      this.editing = null;
-      this.draft = null;
-    });
-    actions.appendChild(go);
-    if (this.editing) {
-      const cancel = button(t('bus.cancel'), 'pill');
-      cancel.addEventListener('click', () => { this.editing = null; this.draft = null; this.rerender(v); });
-      actions.appendChild(cancel);
-    }
-    s.body.appendChild(actions);
-    return s.el;
+    const current = this.draft;
+    go.disabled = Number(go.dataset.busProblems) > 0 ||
+      (v.captureLocked && (editingBank || current?.analogGroup !== undefined));
   }
 }
