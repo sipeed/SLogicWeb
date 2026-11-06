@@ -13,7 +13,9 @@ import {
   appendLostSamples, createSampleStore, MAX_SOFTWARE_TRIGGER_PREFIX_BYTES,
 } from '../data/index.js';
 import { DROP_FRONT_QUANTUM, type SampleStore } from '../data/types.js';
-import { bytesPerSampleForChannels, channelWidthForProbes, isChannelCount } from '../types.js';
+import {
+  bytesPerSampleForChannels, channelWidthForProbes, isChannelCount, type ChannelCount,
+} from '../types.js';
 import { DiagnosticError, diagnosticOf } from '../diagnostics.js';
 import {
   MAX_SAMPLERATE_HZ, SAMPLERATES_HZ, TransportDeadError, getGrantedDevicesOnBestThread,
@@ -60,16 +62,27 @@ import {
 import { decoderRowName } from './decoderI18n.js';
 import { computeChannelRowHeight } from './channelLayout.js';
 import {
-  MAX_SAMPLES, levelAt, loadFiles, loadLwcap, saveLwcap,
+  MAX_SAMPLES, levelAt, loadFiles, loadLwcap, planLwcap, saveLwcap, writeLwcap,
+  type LwcapPlan,
 } from './captureIO.js';
+
+/** A .lwcap save this large shows its progress in the capture panel. */
+const SAVE_PROGRESS_MIN_BYTES = 8 << 20;
 import {
   captureFileName, formatForFileName, localDateParts, saveFilePickerTypes, type CaptureFileFormat,
 } from './captureFileName.js';
 import { saveSr, srExportParts, type SrProbe } from './srSave.js';
 import { connectSamplerate } from './connectDefaults.js';
+import {
+  analogRateAfterClamp, analogRateBeforeClamp, analogRateUserEdit,
+  type AnalogRateMemory, type RateChangeNote,
+} from './analogRateMemory.js';
 import { formatCursorTimes } from './cursorTime.js';
 import { sameUsbDevice } from './deviceIdentity.js';
-import { captureAbortCause, lowerSamplerate, type CaptureAbort } from './captureAbort.js';
+import {
+  captureAbortCause, isAllocationFailure, lowerSamplerate, saveFailureNotice,
+  type CaptureAbort,
+} from './captureAbort.js';
 import {
   classifyConnectFailure, connectFailureRetryable, connectGuidanceKey, refineWithPeerTabs,
 } from './connectFailure.js';
@@ -134,7 +147,8 @@ import {
 } from './timeAxis.js';
 import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.js';
 import {
-  capturePostTriggerSamples, carryCaptureDuration, loopDurationSeconds,
+  captureMemoryReadout, capturePostTriggerSamples, captureStoreBudget, carryCaptureDuration,
+  loopDurationSeconds,
 } from './capturePolicy.js';
 import {
   captureStartHoldDue, emptyHintVisible, planCaptureStartDisplay,
@@ -259,6 +273,14 @@ export class App {
   private readonly analogGainMemory = new Map<number, number>();
   /** Set when a gain change clamped a stored analog level to the new range's edge. */
   private analogLevelClamped: { start: number; from: number; to: number } | null = null;
+  /** The rate the first analog group took away, restored with the last (analogRateMemory.ts). */
+  private analogRateMemory: AnalogRateMemory | null = null;
+  /** Whether the last channel-change clamp saw an analog group: the toggle's "before". */
+  private analogRateActive = false;
+  /** The last rate the app changed on the user's behalf, announced in the panel. */
+  private rateChange: RateChangeNote | null = null;
+  /** A big streamed save's progress (percent), or null. */
+  private savePercent: number | null = null;
   private scopeWheelPersist: number | null = null;
   private readonly channelList: ChannelList;
   private capturePanel!: CapturePanel;
@@ -403,6 +425,11 @@ export class App {
   private captureIsLoop = false;
   private startMutatedCapture = false;
   private captureLimitSamples = 0;
+  /**
+   * The memory ceiling (`captureStoreBudget`), not the request, bounds the running
+   * capture: reaching `captureLimitSamples` is then a 'memory' abort, not "Completed".
+   */
+  private captureMemoryBound = false;
   /** The running capture's requested duration; null for Unlimited and Loop. */
   private captureRequestedSeconds: number | null = null;
   /** Why the last capture ended early; null once a capture starts or one is opened. */
@@ -1871,6 +1898,21 @@ export class App {
     // Clamp first (the rate may hit a ceiling), then carry the duration across a mode or
     // rate change at the rate the capture will actually use.
     const next = carryCaptureDuration(this.settings, this.clampSettings(s));
+    if (s.samplerate !== this.settings.samplerate) {
+      // The user's own pick: it supersedes the analog memory and the last note.
+      this.analogRateMemory = analogRateUserEdit(this.analogRateMemory, next.samplerate);
+      this.rateChange = null;
+    } else if (next.samplerate !== this.settings.samplerate) {
+      // Another edit (the width) changed the rate: say so, and keep the analog memory
+      // tracking the rate the app chose.
+      const isAnalog = analogBankActive(this.busViews, next.channels);
+      const after = analogRateAfterClamp(this.analogRateMemory, {
+        wasAnalog: isAnalog, isAnalog, rateBefore: this.settings.samplerate,
+        rateAfter: next.samplerate, restoring: false,
+      });
+      this.analogRateMemory = after.memory;
+      this.rateChange = after.note;
+    }
     const testModeChanged = next.testMode !== this.settings.testMode;
     const triggerChanged = triggerSettingsChanged(this.settings, next);
     if (!this.running && !this.stopping && triggerChanged) {
@@ -2118,9 +2160,24 @@ export class App {
   }
 
   private afterChannelChange(): void {
-    // Enabling an analog bank can clamp the *pending* rate to the ADC clock; carry the
-    // duration so the next capture keeps its length.
-    const next = carryCaptureDuration(this.settings, this.clampSettings({ ...this.settings }));
+    // Enabling the first analog bank clamps the *pending* rate to the ADC clock and
+    // remembers the user's rate; disabling the last one gives it back (re-clamped)
+    // unless the user picked a rate in between. Carry the duration so the next capture
+    // keeps its length, and announce any rate that changed.
+    const transition = {
+      wasAnalog: this.analogRateActive,
+      isAnalog: analogBankActive(this.busViews, this.settings.channels),
+      rateBefore: this.settings.samplerate,
+    };
+    const before = analogRateBeforeClamp(this.analogRateMemory, transition);
+    const next = carryCaptureDuration(this.settings,
+      this.clampSettings({ ...this.settings, samplerate: before.rate }));
+    const after = analogRateAfterClamp(before.memory, {
+      ...transition, rateAfter: next.samplerate, restoring: before.restoring,
+    });
+    this.analogRateMemory = after.memory;
+    this.analogRateActive = transition.isAnalog;
+    this.rateChange = after.note;
     const triggerChanged = triggerSettingsChanged(this.settings, next);
     if (!this.running && !this.stopping && triggerChanged) {
       this.triggerState = 'off';
@@ -4366,6 +4423,12 @@ export class App {
         this.loopTriggerSlackSamples,
       ) : 0,
       targetSamples: loop || unlimited ? null : this.captureLimitSamples,
+      // Unlimited (or a request the ceiling cut) runs into the memory ceiling: the panel
+      // shows it and the time left at this rate, refreshed on the 500 ms panel clock.
+      memory: !loop && (unlimited || this.captureMemoryBound) &&
+        isChannelCount(captured.channelCount)
+        ? captureMemoryReadout(captured.length, captured.channelCount, captured.samplerate)
+        : null,
     };
   }
 
@@ -4434,6 +4497,8 @@ export class App {
       widthOptions: this.widthTiers(),
       buses: this.busViews,
       analogLevelClamped: this.analogLevelClamped,
+      rateChange: this.rateChange,
+      savePercent: this.savePercent,
       analogGroups: this.analogGroups(),
       deviceName: this.device?.name ?? null,
       developerTools: this.developerTools,
@@ -4791,6 +4856,60 @@ export class App {
     this.deviceLost(e, true, extra);
   }
 
+  /**
+   * Cap a non-Loop capture's store budget at the memory ceiling for its width. Loop keeps
+   * its own window budget (`maxLoopSamples`) and is untouched.
+   */
+  private applyCaptureMemoryCeiling(isLoop: boolean, channels: ChannelCount): void {
+    if (isLoop) { this.captureMemoryBound = false; return; }
+    const budget = captureStoreBudget(this.captureLimitSamples, channels);
+    this.captureLimitSamples = budget.samples;
+    this.captureMemoryBound = budget.memoryBound;
+  }
+
+  /**
+   * The store reached its budget. A request the memory ceiling cut short ends as a typed
+   * 'memory' abort ("Memory limit reached"), and a Repeat session does not run another
+   * wave into the same ceiling; otherwise this is the ordinary completed capture.
+   */
+  private captureFilled(): void {
+    if (!this.running || this.stopping) return;
+    if (this.captureMemoryBound && !this.captureIsLoop) {
+      this.noteMemoryAbort();
+      void this.stopCapture(this.repeatSession ? 'manual' : 'completed');
+      return;
+    }
+    void this.stopCapture('completed');
+  }
+
+  /**
+   * An allocation failure in the append path: stop the capture cleanly as a typed memory
+   * abort, with the banner's plain conclusion, instead of letting the RangeError kill the
+   * read loop (or the tab). Returns false for any other error, which the caller rethrows.
+   */
+  private captureOutOfMemory(e: unknown): boolean {
+    if (!isAllocationFailure(e)) return false;
+    if (this.captureAbort?.cause !== 'memory') {
+      this.noteMemoryAbort();
+      this.fail('error.captureMemory', e, undefined, {
+        notice: { key: 'error.captureMemoryNotice' },
+      });
+    }
+    if (this.running && !this.stopping) {
+      void this.stopCapture(this.repeatSession ? 'manual' : 'completed');
+    }
+    return true;
+  }
+
+  private noteMemoryAbort(): void {
+    this.captureAbort = {
+      cause: 'memory',
+      requestedSeconds: this.captureRequestedSeconds,
+      channels: this.lastCaptureChannels,
+      samplerate: this.lastCaptureRate,
+    };
+  }
+
   /** Record why the running capture ended, and the banner's conclusion and remedy. */
   private noteCaptureAbort(e: unknown): Pick<StatusError, 'notice' | 'action'> | undefined {
     const abort: CaptureAbort = {
@@ -4971,10 +5090,11 @@ export class App {
         const chosen = formatForFileName(handle.name, format);
         // Snapshot before the first await on the file: a live capture keeps appending.
         const parts = chosen === 'sr' ? srExportParts(store, probes, { modified }) : null;
-        const lwcap = chosen === 'lwcap' ? saveLwcap(store, names) : null;
+        const lwcap = chosen === 'lwcap' ? planLwcap(store, names) : null;
         const writable = await handle.createWritable();
         try {
-          if (lwcap) await writable.write(lwcap);
+          // Streamed: bounded parts straight to the file, never one whole-file buffer.
+          if (lwcap) await this.writeLwcapWithProgress(lwcap, (part) => writable.write(part));
           if (parts) for await (const p of parts) await writable.write(p);
           await writable.close();
         } catch (e) {
@@ -4984,17 +5104,56 @@ export class App {
         return;
       }
 
-      const blob = format === 'sr'
-        ? await saveSr(store, probes, { modified })
-        : saveLwcap(store, names);
+      let blob: Blob;
+      if (format === 'sr') {
+        blob = await saveSr(store, probes, { modified });
+      } else {
+        // The download fallback still never builds one buffer: the Blob holds the bounded
+        // parts, which the browser may keep on disk.
+        const plan = planLwcap(store, names);
+        const blobParts: BlobPart[] = [];
+        await this.writeLwcapWithProgress(plan, (part) => { blobParts.push(part); });
+        blob = new Blob(blobParts, { type: 'application/octet-stream' });
+      }
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = nameFor(format);
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
     } catch (e) {
-      this.fail('error.save', e);
+      // "Array buffer allocation failed" is not something to show raw: say the save ran
+      // out of memory and what to do, with the diagnostic collapsed under it.
+      this.fail('error.save', e, undefined, saveFailureNotice(e));
     }
+  }
+
+  /**
+   * Write a planned .lwcap part by part. Saves of SAVE_PROGRESS_MIN_BYTES and more show
+   * "Saving... x%" in the capture panel and yield between parts so it can paint.
+   */
+  private async writeLwcapWithProgress(
+    plan: LwcapPlan, write: (part: Uint8Array<ArrayBuffer>) => Promise<void> | void,
+  ): Promise<void> {
+    const show = plan.totalBytes >= SAVE_PROGRESS_MIN_BYTES;
+    let last = -1;
+    if (show) this.setSaveProgress(0);
+    try {
+      await writeLwcap(plan, async (part) => {
+        await write(part);
+        if (show) await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+      }, (written, total) => {
+        if (!show) return;
+        const percent = Math.floor(written / total * 100);
+        if (percent !== last) { last = percent; this.setSaveProgress(percent); }
+      });
+    } finally {
+      if (show) this.setSaveProgress(null);
+    }
+  }
+
+  private setSaveProgress(percent: number | null): void {
+    this.savePercent = percent;
+    if (this.capturePageShown()) this.capturePanel.updateSaveProgress(percent);
   }
 
   // ------------------------------------------------------------------ device
@@ -5299,6 +5458,7 @@ export class App {
       this.captureStart = softwareTrigger ? 0 : performance.now();
       const postTriggerSamples = capturePostTriggerSamples(this.settings);
       this.captureLimitSamples = isLoop ? MAX_SAMPLES - 1 : postTriggerSamples;
+      this.applyCaptureMemoryCeiling(isLoop, cfg.channels);
       this.captureRequestedSeconds = isLoop || (mode === 'single' && this.settings.singleUnlimited)
         ? null : postTriggerSamples / cfg.samplerate;
       this.captureAbort = null;
@@ -5407,6 +5567,7 @@ export class App {
         // In free-run mode `post` is already the store ceiling, so this clamp trims
         // the post-trigger window, not the prefix - the trigger keeps its full ring.
         this.captureLimitSamples = Math.min(MAX_SAMPLES - 1, postTriggerSamples + preTriggerSamples);
+        this.applyCaptureMemoryCeiling(isLoop, cfg.channels);
       }
       // A Repeat sweep's match window is one sweep's sample budget, after the pre-fill
       // holdoff (added to the limit): a missing trigger then reports not-found, which B1 turns into a miss + next-Interval retry. Single
@@ -5474,20 +5635,32 @@ export class App {
             const drop = loopDropSamples(store.length, this.loopRetentionLen);
             if (drop > 0) this.dropLoopFront(store, drop);
           }
+          try {
+            store.append(chunk);
+          } catch (e) {
+            if (this.captureOutOfMemory(e)) return;
+            throw e;
+          }
           this.captureBytes += chunk.length;
-          store.append(chunk);
           this.enforceLoopRetention(store);
           this.livePending = true;
           return;
         }
         const room = (this.captureLimitSamples - store.length) * bytesPerSample;
-        if (room <= 0) { void this.stopCapture('completed'); return; }
+        if (room <= 0) { this.captureFilled(); return; }
+        try {
+          store.append(room < chunk.length ? chunk.subarray(0, room) : chunk);
+        } catch (e) {
+          // An allocation the tab cannot make ends the capture as a typed memory abort;
+          // everything appended before it stays.
+          if (this.captureOutOfMemory(e)) return;
+          throw e;
+        }
         // Count what is actually kept: a truncated tail chunk must not inflate the
         // progress readout past the capture.
         this.captureBytes += Math.min(room, chunk.length);
-        store.append(room < chunk.length ? chunk.subarray(0, room) : chunk);
         this.livePending = true;
-        if (store.length >= this.captureLimitSamples) void this.stopCapture('completed');
+        if (store.length >= this.captureLimitSamples) this.captureFilled();
       }, (pos, missing) => {
         if (generation !== this.captureGeneration) return;
         // A transfer the device could not fill. Append filler for the lost samples so
@@ -5517,14 +5690,20 @@ export class App {
           this.livePending = true;
           return;
         }
-        const n = appendLostSamples(store, missing, this.captureLimitSamples);
+        let n: number;
+        try {
+          n = appendLostSamples(store, missing, this.captureLimitSamples);
+        } catch (e) {
+          if (this.captureOutOfMemory(e)) return;
+          throw e;
+        }
         if (n === 0) return;
         this.lostSamples += n;
         this.livePending = true;
         // A crossing across the gap is unknowable; restart the scan from the next chunk.
         this.analogScanner?.resetContinuity();
         if (isLoop) { this.enforceLoopRetention(store); return; }
-        if (store.length >= this.captureLimitSamples) void this.stopCapture('completed');
+        if (store.length >= this.captureLimitSamples) this.captureFilled();
       }, softwareTrigger ? {
         // A loop capture windows the triggered stream downstream of the trigger: the
         // trigger's budget is unbounded (maxSamples Infinity), the store drops the
@@ -5535,7 +5714,7 @@ export class App {
         // on this side's sample arithmetic agreeing with the transport's to the sample.
         onEnd: () => {
           if (generation !== this.captureGeneration) return;
-          if (this.running) void this.stopCapture('completed');
+          if (this.running) this.captureFilled();
         },
         softwareTrigger: {
           channels: cfg.channels,
@@ -5637,7 +5816,7 @@ export class App {
         ...(isLoop ? { loop: true } : { deviceSampleLimit: this.captureLimitSamples }),
         onEnd: () => {
           if (generation !== this.captureGeneration) return;
-          if (this.running) void this.stopCapture('completed');
+          if (this.running) this.captureFilled();
         },
       });
       this.captureArming = false;

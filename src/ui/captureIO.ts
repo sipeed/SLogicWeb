@@ -61,6 +61,22 @@ const LWCAP_MAGIC_V1 = 'LWCAP1\0\0';
 const LWCAP_MAGIC_V2 = 'LWCAP2\0\0';
 
 /**
+ * Largest part the writer emits. A save never builds the whole file in one buffer: a
+ * long capture's edge lists can be hundreds of MB, and one `new ArrayBuffer(total)` of
+ * that size is exactly what fails with "Array buffer allocation failed". Bounded parts
+ * go to the File System Access stream one by one, or into a Blob (which the browser may
+ * page to disk) for the download fallback.
+ */
+export const LWCAP_PART_BYTES = 4 << 20;
+
+/** A serialisation whose size is known and whose bytes come out in bounded parts. */
+export interface LwcapPlan {
+  totalBytes: number;
+  /** The file, in order: one header part, then edge parts of at most `partBytes`. */
+  parts(): Generator<Uint8Array<ArrayBuffer>, void, undefined>;
+}
+
+/**
  * Serialise a capture as transitions.
  *
  * Layout, little-endian: magic[8], u32 channelCount, u32 gapCount, f64 samplerate,
@@ -68,8 +84,13 @@ const LWCAP_MAGIC_V2 = 'LWCAP2\0\0';
  * then per channel { u8 initial, pad[3], u32 edgeCount } followed by all the edge
  * arrays back to back. Files written before gap support carry magic `LWCAP1` and a
  * zero in the slot that v2 uses for `gapCount`; both are readable.
+ *
+ * The edge lists are snapshotted here (fresh arrays from the store), so a capture that
+ * keeps appending while the parts are written cannot change the file.
  */
-export function saveLwcap(store: SampleStore, names: readonly string[]): Blob {
+export function planLwcap(
+  store: SampleStore, names: readonly string[], partBytes: number = LWCAP_PART_BYTES,
+): LwcapPlan {
   const n = store.channelCount;
   const len = store.length;
   const edges: Int32Array[] = [];
@@ -82,37 +103,82 @@ export function saveLwcap(store: SampleStore, names: readonly string[]): Blob {
     initials.push(ch.initial);
   }
   const gaps = store.gaps();
+  const samplerate = store.samplerate;
   const nameBlob = new TextEncoder().encode(JSON.stringify(names));
-  let bytes = 8 + 4 + 4 + 8 + 8 + 4 + nameBlob.length + gaps.length * 8 + n * 8;
-  for (const e of edges) bytes += e.length * 4;
+  const headerBytes = 8 + 4 + 4 + 8 + 8 + 4 + nameBlob.length + gaps.length * 8 + n * 8;
+  let edgeCount = 0;
+  for (const e of edges) edgeCount += e.length;
+  // Whole edges per part, so no 4-byte value straddles two parts.
+  const perPart = Math.max(1, Math.floor(partBytes / 4));
 
-  const buf = new ArrayBuffer(bytes);
-  const dv = new DataView(buf);
-  const u8 = new Uint8Array(buf);
-  for (let i = 0; i < 8; i++) dv.setUint8(i, LWCAP_MAGIC_V2.charCodeAt(i));
-  dv.setUint32(8, n, true);
-  dv.setUint32(12, gaps.length, true);
-  dv.setFloat64(16, store.samplerate, true);
-  dv.setFloat64(24, len, true);
-  dv.setUint32(32, nameBlob.length, true);
-  u8.set(nameBlob, 36);
-  let o = 36 + nameBlob.length;
-  for (const g of gaps) {
-    dv.setUint32(o, g.startSample, true);
-    dv.setUint32(o + 4, g.endSample, true);
-    o += 8;
+  function* parts(): Generator<Uint8Array<ArrayBuffer>, void, undefined> {
+    const head = new Uint8Array(headerBytes);
+    const dv = new DataView(head.buffer);
+    for (let i = 0; i < 8; i++) dv.setUint8(i, LWCAP_MAGIC_V2.charCodeAt(i));
+    dv.setUint32(8, n, true);
+    dv.setUint32(12, gaps.length, true);
+    dv.setFloat64(16, samplerate, true);
+    dv.setFloat64(24, len, true);
+    dv.setUint32(32, nameBlob.length, true);
+    head.set(nameBlob, 36);
+    let o = 36 + nameBlob.length;
+    for (const g of gaps) {
+      dv.setUint32(o, g.startSample, true);
+      dv.setUint32(o + 4, g.endSample, true);
+      o += 8;
+    }
+    for (let c = 0; c < n; c++) {
+      dv.setUint8(o, initials[c]!);
+      dv.setUint8(o + 1, 0);
+      dv.setUint16(o + 2, 0, true);
+      dv.setUint32(o + 4, edges[c]!.length, true);
+      o += 8;
+    }
+    yield head;
+    // Edge parts run across channel boundaries: a 128-channel capture with few edges per
+    // channel is still a handful of parts, not one per channel.
+    let remaining = edgeCount;
+    let c = 0;
+    let i = 0;
+    while (remaining > 0) {
+      const k = Math.min(perPart, remaining);
+      const part = new Uint8Array(k * 4);
+      const pv = new DataView(part.buffer);
+      let w = 0;
+      while (w < k) {
+        const e = edges[c]!;
+        if (i >= e.length) { c++; i = 0; continue; }
+        pv.setInt32(w * 4, e[i++]!, true);
+        w++;
+      }
+      remaining -= k;
+      yield part;
+    }
   }
-  for (let c = 0; c < n; c++) {
-    dv.setUint8(o, initials[c]!);
-    dv.setUint8(o + 1, 0);
-    dv.setUint16(o + 2, 0, true);
-    dv.setUint32(o + 4, edges[c]!.length, true);
-    o += 8;
+  return { totalBytes: headerBytes + edgeCount * 4, parts };
+}
+
+/** The whole file as a Blob of bounded parts (the download fallback and round trips). */
+export function saveLwcap(store: SampleStore, names: readonly string[]): Blob {
+  return new Blob([...planLwcap(store, names).parts()], { type: 'application/octet-stream' });
+}
+
+/**
+ * Hand each part to `write` in order and report the bytes written after each one. The
+ * caller picks the sink (a File System Access writable, or a Blob part list); a failure
+ * from the encoder or the sink propagates unchanged.
+ */
+export async function writeLwcap(
+  plan: LwcapPlan,
+  write: (part: Uint8Array<ArrayBuffer>) => Promise<void> | void,
+  onProgress?: (written: number, total: number) => void,
+): Promise<void> {
+  let written = 0;
+  for (const part of plan.parts()) {
+    await write(part);
+    written += part.byteLength;
+    onProgress?.(written, plan.totalBytes);
   }
-  for (const e of edges) {
-    for (let i = 0; i < e.length; i++) { dv.setInt32(o, e[i]!, true); o += 4; }
-  }
-  return new Blob([buf], { type: 'application/octet-stream' });
 }
 
 const LWCAP_HEADER_BYTES = 36;

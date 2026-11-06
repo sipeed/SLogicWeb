@@ -171,6 +171,9 @@ export const ru: Messages = {
   'error.hostOverloadNotice':
     'Захват прерван: USB-канал не успевает за {channels} CH @ {rate}. Снизьте частоту дискретизации или число каналов и запустите захват снова.',
   'error.details': 'Технические подробности',
+  'error.captureMemory': 'память захвата',
+  'error.captureMemoryNotice': 'Захват остановлен: недостаточно памяти. Уже записанные отсчёты сохранены. Снизьте частоту дискретизации или число каналов либо сократите длительность захвата.',
+  'error.saveOutOfMemory': 'Не удалось сохранить: недостаточно памяти. Закройте другие вкладки и повторите попытку или сохраните более короткий захват.',
   'error.lowerRate': 'Снизить до {rate}',
 
   // ---------------------------- connect failure guidance (error banner)
@@ -508,6 +511,16 @@ export const ru: Messages = {
   'capturePanel.abortHostOverload': 'Перегрузка хоста',
   'capturePanel.abortDisconnected': 'Устройство отключено',
   'capturePanel.abortDevice': 'Ошибка устройства',
+  'capturePanel.abortMemory': 'Достигнут предел памяти',
+  'capturePanel.memoryCeiling': 'Предел памяти {size} ({samples} отсчётов) ≈ {duration} при {rate}.',
+  'capturePanel.memoryRemaining': 'Предел памяти {size} ({samples} отсчётов) · при текущей частоте осталось около {duration}',
+  'capturePanel.saving': 'Сохранение… {percent}%',
+  'capturePanel.rateOptionOverAdvised': '{rate} (может превысить полосу)',
+  'capturePanel.rateOptionOverAdvisedHint': 'Частоты с пометкой «может превысить полосу» выше {advised}, которые плата выдерживает при {channels} CH; захват может прерваться из-за перегрузки хоста.',
+  'capturePanel.rateRaisedAnalog': 'Частота дискретизации повышена с {from} до {to} (требуется аналоговым входом).',
+  'capturePanel.rateLoweredAnalog': 'Частота дискретизации понижена с {from} до {to} (требуется аналоговым входом).',
+  'capturePanel.rateRestoredAnalog': 'Частота дискретизации восстановлена с {from} до {to} (аналоговый вход выключен).',
+  'capturePanel.rateClamped': 'Частота дискретизации изменена с {from} до {to} (предел для этого числа каналов).',
   'capturePanel.progress': 'Ход захвата',
   'capturePanel.unlimited': 'Без ограничений',
   'capturePanel.duration': 'Длительность',

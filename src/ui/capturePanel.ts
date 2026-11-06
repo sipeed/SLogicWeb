@@ -35,7 +35,8 @@ import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
 import type { CaptureSettings, ChannelState } from './state.js';
 import {
-  clampLoopSamples, LOOP_WINDOW_QUANTUM, maxLoopSamples, THRESHOLD_VOLT_OPTIONS,
+  clampLoopSamples, LOOP_WINDOW_QUANTUM, maxCaptureSamples, maxLoopSamples,
+  THRESHOLD_VOLT_OPTIONS,
 } from './state.js';
 import {
   maxCaptureSeconds, MIN_CAPTURE_SECONDS, REPEAT_INTERVAL_SECONDS,
@@ -47,6 +48,8 @@ import { MAX_CURSOR_EDGE_ROWS } from './cursorEdges.js';
 import { acquisitionTimeControl } from './timeControl.js';
 import { triggerPanelNotes, triggerStatusNote, type PreTriggerFill } from './triggerStatus.js';
 import { rateAdvice } from './rateAdvice.js';
+import type { CaptureMemoryReadout } from './capturePolicy.js';
+import { rateChangeMessageKey, type RateChangeNote } from './analogRateMemory.js';
 
 export interface CapturePanelCallbacks {
   onSettings(next: CaptureSettings): void;
@@ -144,7 +147,20 @@ export interface CapturePanelView {
     /** Retained length (`store.length`) and the loop limit; the limit is 0 outside loop mode. */
     kept: number; limit: number;
     /** Finite sample target; null for Unlimited and Loop captures. */
-    targetSamples: number | null } | null;
+    targetSamples: number | null;
+    /**
+     * The memory ceiling and the time left at the capture's rate, for Unlimited and for
+     * a finite request the ceiling cuts; null (or absent) otherwise.
+     */
+    memory?: CaptureMemoryReadout | null } | null;
+  /**
+   * The last rate change the app made on the user's behalf (an analog group needs the
+   * ADC clock, or turning the last group off restored the earlier rate); null once the
+   * user picks a rate.
+   */
+  rateChange?: RateChangeNote | null;
+  /** A streamed save's progress, 0..100; null when no big save is running. */
+  savePercent?: number | null;
   maxSamplerateHz: Readonly<Record<number, number>>;
   /** Per-width rate the board sustains below that ceiling (`Device.recommendedSamplerateHz`). */
   recommendedSamplerateHz?: Readonly<Record<number, number>>;
@@ -226,6 +242,8 @@ export class CapturePanel {
   /** The "Armed: ..." summary, hidden once the acquisition no longer just waits. */
   private triggerArmedEl: HTMLElement | null = null;
   private droppedNote: HTMLElement | null = null;
+  private memoryNote: HTMLElement | null = null;
+  private saveNote: HTMLElement | null = null;
   private statusDetail: HTMLElement | null = null;
   private progressEl: HTMLElement | null = null;
   private progressBar: HTMLElement | null = null;
@@ -247,6 +265,14 @@ export class CapturePanel {
   updateProgress(progress: NonNullable<CapturePanelView['progress']>): void {
     if (!this.liveNote) return;
     this.fillProgress(progress);
+  }
+
+  /** "Saving… x%" under the capture status, without a panel rebuild; null hides it. */
+  updateSaveProgress(percent: number | null): void {
+    if (!this.saveNote) return;
+    this.saveNote.hidden = percent === null;
+    this.saveNote.textContent = percent === null ? ''
+      : t('capturePanel.saving', { percent: Math.max(0, Math.min(100, Math.floor(percent))) });
   }
 
   updateCursorDistances(rows: readonly CursorDistanceRowView[]): void {
@@ -312,6 +338,20 @@ export class CapturePanel {
         limit: progress.limit.toLocaleString(),
         dropped: progress.dropped.toLocaleString(),
       });
+    }
+    const memory = progress.memory ?? null;
+    if (this.memoryNote) {
+      this.memoryNote.hidden = memory === null;
+      if (memory !== null) {
+        this.memoryNote.textContent = t('capturePanel.memoryRemaining', {
+          size: formatBytes(memory.capBytes),
+          samples: memory.capSamples.toLocaleString(),
+          duration: formatDuration(memory.remainingSeconds, 2),
+        });
+        // Within ~10% of the ceiling the readout turns warning: the capture is about to
+        // stop on its own as "Memory limit reached".
+        this.memoryNote.classList.toggle('warning', memory.warn);
+      }
     }
     const target = progress.targetSamples;
     if (this.statusDetail) {
@@ -658,8 +698,11 @@ export class CapturePanel {
     // active analog group narrows the list to that PLL's divisors from 100 MHz up.
     const analogRates = activeBanks.size > 0 ? analogSamplerates(supported) : [];
     const selectable = analogRates.length > 0 ? analogRates : supported;
-    const rateOptions: SelectOptionTuple[] = selectable
-      .map((r) => [String(r), formatRate(r)]);
+    // Rates above the profile's sustainable one for this width stay selectable, but say
+    // so in the list itself, before they are picked (the warning below only follows a
+    // choice). A width without a measured recommendation marks nothing.
+    const advisedHz = v.recommendedSamplerateHz?.[s.channels];
+    const rateOptions = samplerateOptions(selectable, advisedHz);
     const rate = selectControl(
       'capture.sampleRate',
       t('capturePanel.sampleRate'),
@@ -668,6 +711,11 @@ export class CapturePanel {
     );
     rate.addEventListener('change', () =>
       this.cb.onSettings({ ...s, samplerate: Number(rate.value) }));
+    if (advisedHz !== undefined && selectable.some((r) => r > advisedHz)) {
+      rate.el.title = t('capturePanel.rateOptionOverAdvisedHint', {
+        channels: s.channels, advised: formatRate(advisedHz),
+      });
+    }
     rowRT.appendChild(rate.el);
 
     const thresholdOptions: SelectOptionTuple[] = THRESHOLD_VOLT_OPTIONS
@@ -702,6 +750,17 @@ export class CapturePanel {
         min: formatRate(overAdvice.analogMinHz ?? overAdvice.advised),
       });
       chSec.body.appendChild(warn);
+    }
+
+    // A rate the app changed for the user is always announced, not only when it lands
+    // above the recommendation: "raised from 10 MS/s to 100 MS/s (analog input)".
+    if (v.rateChange) {
+      const changed = div('panel-note');
+      changed.dataset.rateChange = v.rateChange.reason;
+      changed.textContent = t(rateChangeMessageKey(v.rateChange), {
+        from: formatRate(v.rateChange.from), to: formatRate(v.rateChange.to),
+      });
+      chSec.body.appendChild(changed);
     }
 
     if (activeBanks.size > 0) {
@@ -909,7 +968,13 @@ export class CapturePanel {
       });
     } else {
       if (s.mode === 'single' && s.singleUnlimited) {
-        limit.textContent = t('capturePanel.singleUnlimitedNote');
+        const cap = maxCaptureSamples(s.channels);
+        limit.textContent = `${t('capturePanel.singleUnlimitedNote')} ${t('capturePanel.memoryCeiling', {
+          size: formatBytes(cap * bytesPerSampleForChannels(s.channels)),
+          samples: cap.toLocaleString(),
+          duration: formatDuration(cap / s.samplerate, 3),
+          rate: formatRate(s.samplerate),
+        })}`;
       } else if (s.mode === 'single') {
         limit.textContent = t('capturePanel.singleFiniteNote', {
           max: formatDuration(maxSeconds),
@@ -1214,12 +1279,20 @@ export class CapturePanel {
       modeSec.body.appendChild(this.lostNote);
       this.droppedNote = div('panel-note');
       modeSec.body.appendChild(this.droppedNote);
+      this.memoryNote = div('panel-note');
+      this.memoryNote.dataset.captureMemory = '';
+      modeSec.body.appendChild(this.memoryNote);
       this.fillProgress(v.progress);
     } else {
       this.liveNote = null;
       this.lostNote = null;
       this.droppedNote = null;
+      this.memoryNote = null;
     }
+    this.saveNote = div('panel-note');
+    this.saveNote.dataset.savePercent = '';
+    modeSec.body.appendChild(this.saveNote);
+    this.updateSaveProgress(v.savePercent ?? null);
     capture.appendChild(modeSec.el);
     capture.appendChild(triggerSec.el);
 
@@ -1517,6 +1590,20 @@ export interface AnalogGainCell {
   note: HTMLDivElement;
   /** Focus the ratio field, caret at the end (after a rebuild mid-entry). */
   focusField(): void;
+}
+
+
+/**
+ * The rate list: every offered rate stays selectable, and one above the profile's
+ * sustainable rate for the width (`advisedHz`) carries "(may exceed bandwidth)" in its
+ * label, so the risk shows before the choice. No recommendation marks nothing.
+ */
+export function samplerateOptions(
+  rates: readonly number[], advisedHz: number | undefined,
+): SelectOptionTuple[] {
+  return rates.map((r) => [String(r), advisedHz !== undefined && r > advisedHz
+    ? t('capturePanel.rateOptionOverAdvised', { rate: formatRate(r) })
+    : formatRate(r)]);
 }
 
 /**

@@ -175,6 +175,9 @@ export const en = {
   'error.hostOverloadNotice':
     'Capture aborted: the USB link could not keep up with {channels} CH @ {rate}. Lower the sample rate or the channel count, then capture again.',
   'error.details': 'Technical details',
+  'error.captureMemory': 'capture memory',
+  'error.captureMemoryNotice': 'Capture stopped: out of memory. The samples recorded so far are kept. Lower the sample rate or the channel count, or capture for less time.',
+  'error.saveOutOfMemory': 'Save failed: out of memory. Close other tabs and try again, or save a shorter capture.',
   'error.lowerRate': 'Lower to {rate}',
 
   // ---------------------------- connect failure guidance (error banner)
@@ -517,6 +520,16 @@ export const en = {
   'capturePanel.abortHostOverload': 'Host overload',
   'capturePanel.abortDisconnected': 'Device disconnected',
   'capturePanel.abortDevice': 'Device error',
+  'capturePanel.abortMemory': 'Memory limit reached',
+  'capturePanel.memoryCeiling': 'Memory limit {size} ({samples} samples) ≈ {duration} at {rate}.',
+  'capturePanel.memoryRemaining': 'Memory limit {size} ({samples} samples) · about {duration} left at this rate',
+  'capturePanel.saving': 'Saving… {percent}%',
+  'capturePanel.rateOptionOverAdvised': '{rate} (may exceed bandwidth)',
+  'capturePanel.rateOptionOverAdvisedHint': 'Rates marked “may exceed bandwidth” are above the {advised} this board sustains at {channels} CH; they can abort with a host overload.',
+  'capturePanel.rateRaisedAnalog': 'Sample rate raised from {from} to {to} (required by the analog input).',
+  'capturePanel.rateLoweredAnalog': 'Sample rate lowered from {from} to {to} (required by the analog input).',
+  'capturePanel.rateRestoredAnalog': 'Sample rate restored from {from} to {to} (analog input off).',
+  'capturePanel.rateClamped': 'Sample rate changed from {from} to {to} (the limit for this channel count).',
   'capturePanel.progress': 'Capture progress',
   'capturePanel.unlimited': 'Unlimited',
   'capturePanel.duration': 'Duration',

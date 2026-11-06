@@ -520,6 +520,19 @@ Rules:
   forced the rate and that fewer channels lower the load. The UI never narrows the
   channel selection to avoid it. WebUSB cannot name the link class, so a 10 Gbit/s link
   gets the same (conservative) warning.
+  The rate list marks every option above the recommendation ("200 MS/s (may exceed
+  bandwidth)") so the risk is visible before choosing; the options stay selectable.
+  Every rate the app moves on the user's behalf is announced under the rate ("Sample rate
+  raised from 10 MS/s to 100 MS/s (required by the analog input)"). Turning the last
+  analog group off restores the rate the first one replaced, re-clamped, unless the user
+  picked a rate in between.
+- **Memory ceiling:** Single/Repeat stores share the Loop window's 2 GiB packed-sample
+  budget (`maxCaptureSamples`: 8 ch 2^31 - 1, 16 ch 2^30, 32 ch 2^29 samples). Unlimited
+  shows the ceiling and, while running, "about x s left at this rate" on the 500 ms panel
+  clock, in warning style within 10% of it. Reaching it, or an allocation failure, ends
+  the capture as "Aborted · Memory limit reached" with the samples kept, never a crashed
+  tab. A big .lwcap save streams bounded parts with "Saving… x%" and fails with a plain
+  "out of memory" notice, not the raw allocation error.
 - **Retention:** the panel shows kept bytes/time, the limit and the loop window; when the
   limit binds, a warning names the consequence. It never silently trims the trigger lock.
 - **Record:** a separate state (`off/armed/recording/paused/exporting/error/full`), with

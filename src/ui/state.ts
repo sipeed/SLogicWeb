@@ -154,6 +154,23 @@ export function maxLoopSamples(channels: ChannelCount): number {
   ) / q) * q;
 }
 
+/**
+ * Single/Repeat store ceiling: the same 2 GiB of packed sample bytes as the Loop window
+ * (one budget, one tab ceiling), and the store's own 2^31 - 1 sample limit:
+ * 4ch/8ch 2^31 - 1 · 16ch 2^30 · 32ch 2^29 · 64ch 2^28 · 128ch 2^27. Unlimited, and any
+ * finite request above it, stops here as a typed 'memory' abort (`captureAbort.ts`)
+ * instead of growing until an allocation kills the tab.
+ */
+export const CAPTURE_MEMORY_MAX_BYTES = LOOP_RETENTION_MAX_BYTES;
+
+export function maxCaptureSamples(channels: ChannelCount): number {
+  return Math.min(2 ** 31 - 1,
+    Math.floor(CAPTURE_MEMORY_MAX_BYTES / bytesPerSampleForChannels(channels)));
+}
+
+/** Within this fraction of the ceiling the panel's remaining-time readout turns warning. */
+export const CAPTURE_MEMORY_WARN_FRACTION = 0.1;
+
 export function clampLoopSamples(samples: number, channels: ChannelCount): number {
   const q = LOOP_WINDOW_QUANTUM;
   const max = maxLoopSamples(channels);

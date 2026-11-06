@@ -2,7 +2,10 @@
 
 import { MAX_SAMPLES } from './captureIO.js';
 import { clampCaptureSeconds } from './captureTime.js';
-import { clampLoopSamples, type CaptureSettings } from './state.js';
+import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
+import {
+  CAPTURE_MEMORY_WARN_FRACTION, clampLoopSamples, maxCaptureSamples, type CaptureSettings,
+} from './state.js';
 
 export function capturePostTriggerSamples(settings: CaptureSettings): number {
   if (settings.mode === 'loop') return clampLoopSamples(settings.loopSamples, settings.channels);
@@ -78,4 +81,42 @@ export function loopDurationSeconds(
     }
   }
   return loopSamples / samplerate;
+}
+
+/**
+ * The store budget a non-Loop capture actually runs with: the requested samples (the
+ * post-trigger length, plus a trigger's prefix) capped by the memory ceiling for the
+ * width. `memoryBound` says the ceiling, not the request, ends the capture, so reaching
+ * it is a typed 'memory' abort rather than "Completed".
+ */
+export function captureStoreBudget(
+  requestedSamples: number, channels: ChannelCount,
+): { samples: number; memoryBound: boolean } {
+  const cap = maxCaptureSamples(channels);
+  return requestedSamples > cap
+    ? { samples: cap, memoryBound: true }
+    : { samples: requestedSamples, memoryBound: false };
+}
+
+export interface CaptureMemoryReadout {
+  capSamples: number;
+  capBytes: number;
+  /** At the capture's sample rate, how long until the ceiling; 0 once reached. */
+  remainingSeconds: number;
+  /** Within CAPTURE_MEMORY_WARN_FRACTION of the ceiling. */
+  warn: boolean;
+}
+
+/** The Unlimited readout: the ceiling, and "about x s left" at the current rate. */
+export function captureMemoryReadout(
+  keptSamples: number, channels: ChannelCount, samplerate: number,
+): CaptureMemoryReadout {
+  const capSamples = maxCaptureSamples(channels);
+  const left = Math.max(0, capSamples - Math.max(0, keptSamples));
+  return {
+    capSamples,
+    capBytes: capSamples * bytesPerSampleForChannels(channels),
+    remainingSeconds: samplerate > 0 ? left / samplerate : 0,
+    warn: left <= capSamples * CAPTURE_MEMORY_WARN_FRACTION,
+  };
 }

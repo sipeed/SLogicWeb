@@ -95,7 +95,10 @@ const panel = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
 const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
 
 {
-  const completions = (app.match(/stopCapture\('completed'\)/g) ?? []).length;
+  // Natural completions funnel through captureFilled(), the one 'completed' stop site
+  // outside the memory paths (which end a Repeat session instead of scheduling a wave).
+  const completions = (app.match(/stopCapture\('completed'\)/g) ?? []).length === 1 &&
+    (app.match(/this\.captureFilled\(\)/g) ?? []).length === 5 ? 5 : 0;
   const finish = app.split('private finishCapture(')[1]?.split('private discardDecodeState')[0] ?? '';
   const pendingStop = app.split('private async stopCapture(')[1]?.split('private async teardownDevice')[0] ?? '';
   const discard = app.split('private discardDevice()')[1]?.split('private detachDevice()')[0] ?? '';

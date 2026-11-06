@@ -171,6 +171,9 @@ export const fr: Messages = {
   'error.hostOverloadNotice':
     'Capture interrompue : le lien USB n’a pas suivi {channels} CH @ {rate}. Réduisez la fréquence d’échantillonnage ou le nombre de voies, puis relancez la capture.',
   'error.details': 'Détails techniques',
+  'error.captureMemory': 'mémoire de capture',
+  'error.captureMemoryNotice': 'Capture arrêtée : mémoire insuffisante. Les échantillons déjà enregistrés sont conservés. Baissez la fréquence d’échantillonnage ou le nombre de voies, ou capturez moins longtemps.',
+  'error.saveOutOfMemory': 'Échec de l’enregistrement : mémoire insuffisante. Fermez d’autres onglets et réessayez, ou enregistrez une capture plus courte.',
   'error.lowerRate': 'Passer à {rate}',
 
   // ---------------------------- connect failure guidance (error banner)
@@ -517,6 +520,16 @@ export const fr: Messages = {
   'capturePanel.abortHostOverload': 'Hôte surchargé',
   'capturePanel.abortDisconnected': 'Appareil déconnecté',
   'capturePanel.abortDevice': 'Erreur de l’appareil',
+  'capturePanel.abortMemory': 'Limite mémoire atteinte',
+  'capturePanel.memoryCeiling': 'Limite mémoire {size} ({samples} échantillons) ≈ {duration} à {rate}.',
+  'capturePanel.memoryRemaining': 'Limite mémoire {size} ({samples} échantillons) · encore environ {duration} à ce débit',
+  'capturePanel.saving': 'Enregistrement… {percent} %',
+  'capturePanel.rateOptionOverAdvised': '{rate} (peut dépasser la bande passante)',
+  'capturePanel.rateOptionOverAdvisedHint': 'Les fréquences marquées « peut dépasser la bande passante » dépassent les {advised} que cette carte soutient à {channels} voies ; la capture peut s’interrompre par surcharge de l’hôte.',
+  'capturePanel.rateRaisedAnalog': 'Fréquence d’échantillonnage relevée de {from} à {to} (requise par l’entrée analogique).',
+  'capturePanel.rateLoweredAnalog': 'Fréquence d’échantillonnage abaissée de {from} à {to} (requise par l’entrée analogique).',
+  'capturePanel.rateRestoredAnalog': 'Fréquence d’échantillonnage rétablie de {from} à {to} (entrée analogique désactivée).',
+  'capturePanel.rateClamped': 'Fréquence d’échantillonnage changée de {from} à {to} (limite pour ce nombre de voies).',
   'capturePanel.progress': 'Progression de l’acquisition',
   'capturePanel.unlimited': 'Illimité',
   'capturePanel.duration': 'Durée',
