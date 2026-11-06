@@ -13,7 +13,7 @@ import {
 const LEGACY_ANALOG_FULL_SCALE_V = 30;
 const LEGACY_ANALOG_OFFSET_V = -15;
 import { cloneBusConfig, defaultBusConfig, normalizeBankBusConfig } from './busPanel.js';
-import { BUS_HEIGHTS, type BusBitOrder, type BusViewConfig } from './busView.js';
+import { ANALOG_HEIGHTS, BUS_HEIGHTS, type BusBitOrder, type BusViewConfig } from './busView.js';
 import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannelName, defaultChannels,
   THRESHOLD_VOLT_OPTIONS,
@@ -253,11 +253,14 @@ function restoreBusConfig(value: unknown, capacity: number): BusViewConfig | nul
   if (value.offsetV !== undefined &&
       (typeof value.offsetV !== 'number' || !Number.isFinite(value.offsetV))) return null;
   if (value.style !== undefined && value.style !== 'line' && value.style !== 'step') return null;
+  const analogGroup = value.analogGroup;
+  // An analog row snaps to `ANALOG_HEIGHTS` (80..480 px); a generic bus keeps the Bus
+  // panel's `BUS_HEIGHTS`. Both include every height older workspaces saved.
+  const heights: readonly number[] = analogGroup !== undefined ? ANALOG_HEIGHTS : BUS_HEIGHTS;
   if (value.heightCss !== undefined &&
-      (typeof value.heightCss !== 'number' || !(BUS_HEIGHTS as readonly number[]).includes(value.heightCss))) {
+      (typeof value.heightCss !== 'number' || !heights.includes(value.heightCss))) {
     return null;
   }
-  const analogGroup = value.analogGroup;
   if (analogGroup !== undefined &&
       (typeof analogGroup !== 'number' || !Number.isInteger(analogGroup) ||
         analogGroup < 0 || analogGroup > 3)) {

@@ -76,7 +76,48 @@ export interface BusViewState extends BusViewConfig {
   cache: { key: string; frame: AnalogFrame } | null;
 }
 
+/** Height choices for a generic (non-analog) bus view, offered by the Bus panel. */
 export const BUS_HEIGHTS = [80, 120, 160, 240] as const;
+
+/**
+ * The stops an analog row's height handle snaps to (drag and arrow keys; DESIGN.md §5.4).
+ * A superset of `BUS_HEIGHTS`, so every height an older workspace saved stays valid. The
+ * graticule follows the height (`scopeRowDivisions`): 4 divisions up to 160 px, 6 at
+ * 240 px, 8 from 320 px.
+ */
+export const ANALOG_HEIGHTS = [80, 120, 160, 240, 320, 400, 480] as const;
+/** A new analog row's height: four 36 px divisions. */
+export const ANALOG_DEFAULT_HEIGHT = 160;
+/**
+ * [CHOSEN] Compact (< 760 px) layouts draw an analog row at least this tall, so its ruler
+ * and trigger handle stay touch-sized. Display-only: the saved stop is unchanged.
+ */
+export const ANALOG_COMPACT_MIN_HEIGHT = 96;
+
+/** The index of the analog height stop nearest `height` (ties go to the lower stop). */
+export function analogHeightIndex(height: number): number {
+  let best = 0;
+  for (let i = 1; i < ANALOG_HEIGHTS.length; i++) {
+    if (Math.abs(ANALOG_HEIGHTS[i]! - height) < Math.abs(ANALOG_HEIGHTS[best]! - height)) best = i;
+  }
+  return best;
+}
+
+/** The analog height stop nearest `height`; a non-finite height is the default. */
+export function snapAnalogHeight(height: number): number {
+  return Number.isFinite(height) ? ANALOG_HEIGHTS[analogHeightIndex(height)]! : ANALOG_DEFAULT_HEIGHT;
+}
+
+/** One arrow-key step through the analog height stops from `height`, clamped at the ends. */
+export function stepAnalogHeight(height: number, direction: -1 | 1): number {
+  const at = analogHeightIndex(height);
+  return ANALOG_HEIGHTS[Math.max(0, Math.min(ANALOG_HEIGHTS.length - 1, at + direction))]!;
+}
+
+/** The height an analog row is drawn at: its stop, raised to the compact minimum. */
+export function analogDisplayHeight(height: number, compact: boolean): number {
+  return compact ? Math.max(ANALOG_COMPACT_MIN_HEIGHT, height) : height;
+}
 
 /**
  * Trace colours, cycled per bus view: the vivid tones of the channel palette. The

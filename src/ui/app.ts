@@ -35,9 +35,9 @@ import { BusBuilder, validateBusSpec } from '../data/busValue.js';
 import { BusPanel, cloneBusConfig, defaultBusConfig } from './busPanel.js';
 import { DecodeResultsPanel } from './decodeResultsPanel.js';
 import {
-  analogFrame, applyBusBitOrder, beginAnalogFrameBudget, busColor, busLabel, busSummary,
+  analogDisplayHeight, analogFrame, applyBusBitOrder, beginAnalogFrameBudget, busColor, busLabel, busSummary,
   busValueAt, busYRange, endAnalogFrameBudget, type AnalogFrame,
-  type BusViewConfig, type BusViewState,
+  snapAnalogHeight, type BusViewConfig, type BusViewState,
 } from './busView.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
 import { CapturePanel, cursorDistanceSideId, cursorEdgeSideId,
@@ -166,7 +166,7 @@ import {
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
 import {
-  nextScopeVoltsPerDiv, scopeGeometry, scopeScaleAt, scopeVoltsAtY,
+  nextScopeVoltsPerDiv, scopeGeometry, scopeRowDivisions, scopeScaleAt, scopeVoltsAtY,
 } from './scopeScale.js';
 import {
   captureLocksTriggerView, clampLoopViewOffsets, loopOverviewWindow, loopPendingLimit,
@@ -871,8 +871,27 @@ export class App {
 
   /** The V/div an analog row is configured to (its gain's default when unset). */
   private scopeTargetVoltsPerDiv(bus: BusViewConfig): number {
-    return bus.voltsPerDiv ?? analogDefaultVoltsPerDiv(analogGainOf(bus));
+    return bus.voltsPerDiv ?? this.scopeDefaultVoltsPerDiv(bus);
   }
+
+  /**
+   * A gain's default V/div on the row's current division count (DESIGN.md §5.4): set when
+   * the gain changes and on Home/double-click. Resizing never calls this.
+   */
+  private scopeDefaultVoltsPerDiv(bus: BusViewConfig, gain = analogGainOf(bus)): number {
+    return analogDefaultVoltsPerDiv(gain, scopeRowDivisions(this.rowHeightOf(bus)));
+  }
+
+  /** The height a bus row is drawn at: an analog row is raised to the compact minimum. */
+  private rowHeightOf(bus: BusViewConfig): number {
+    if (bus.analogGroup === undefined) return bus.heightCss;
+    // The compact breakpoint of style.css; `resize` relayouts when it is crossed.
+    this.compactQuery ??= typeof window.matchMedia === 'function'
+      ? window.matchMedia('(max-width: 760px)') : null;
+    return analogDisplayHeight(bus.heightCss, this.compactQuery?.matches === true);
+  }
+
+  private compactQuery: MediaQueryList | null | undefined;
 
   /**
    * Declare the gain the ADC module's front-end stage is set to, on the hardware, for one
@@ -895,7 +914,7 @@ export class App {
     // Codes are unchanged, so the bus pyramid stays valid; the frame cache key carries
     // the span and refreshes on its own.
     this.busViews[index] = {
-      ...bus, analogGain: gain, ...analogSpan(gain), voltsPerDiv: analogDefaultVoltsPerDiv(gain),
+      ...bus, analogGain: gain, ...analogSpan(gain), voltsPerDiv: this.scopeDefaultVoltsPerDiv(bus, gain),
     };
     const before = this.settings.analogTriggers[start]?.volts;
     this.settings = this.clampSettings(this.settings);
@@ -922,7 +941,7 @@ export class App {
 
   private busCells(): BusCell[] {
     return this.busViews.map((b) => ({
-      id: b.id, name: b.name, summary: busSummary(b.spec), color: b.color, heightCss: b.heightCss,
+      id: b.id, name: b.name, summary: busSummary(b.spec), color: b.color, heightCss: this.rowHeightOf(b),
       ...(b.analogGroup !== undefined ? {
         analog: true,
         gain: analogGainOf(b),
@@ -1215,9 +1234,12 @@ export class App {
       next.zeroPosition = Math.min(1, Math.max(0, patch.zeroPosition));
     }
     if (patch.heightCss !== undefined && Number.isFinite(patch.heightCss)) {
-      next.heightCss = Math.max(60, Math.min(400, Math.round(patch.heightCss)));
+      next.heightCss = snapAnalogHeight(patch.heightCss);
     }
     const heightChanged = next.heightCss !== bus.heightCss;
+    // Resizing keeps V/div and zero; the division count (and so the range) follows the
+    // height. Pin an unset scale first so it is not re-derived from the new height.
+    if (heightChanged && next.voltsPerDiv == null) next.voltsPerDiv = this.scopeTargetVoltsPerDiv(bus);
     // Scope geometry is display-only: AnalogFrame contains sample codes, not volts or
     // pixels, so vertical drags must retain the expensive frame cache.
     this.busViews[index] = { ...next };
@@ -1571,7 +1593,7 @@ export class App {
     // Display-only reset: recenter 0 V and restore the gain's default scale (10 V/div at
     // 1x). The usual writer keeps the spatial zoom animation and one persisted commit.
     this.configureBusScope(bus.id, {
-      voltsPerDiv: analogDefaultVoltsPerDiv(analogGainOf(bus)), zeroPosition: 0.5,
+      voltsPerDiv: this.scopeDefaultVoltsPerDiv(bus), zeroPosition: 0.5,
     }, true);
   }
 
@@ -1869,7 +1891,7 @@ export class App {
       if (busOutOfWidth(b.spec, this.renderChannelCount())) return;
       analogRows.push({
         kind: 'analog', channel: Math.min(b.spec.bits[0] ?? 0, Math.max(0, this.store.channelCount - 1)),
-        heightCss: b.heightCss, bus: i,
+        heightCss: this.rowHeightOf(b), bus: i,
       });
     });
     const analogH = analogRows.reduce((sum, r) => sum + r.heightCss, 0);

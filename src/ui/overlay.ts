@@ -24,7 +24,7 @@ import { canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import type { ClearedCanvases } from './frameLayers.js';
 import { AXIS, BUBBLE, GRID, ROWS } from './metrics.js';
 import {
-  SCOPE_DIVISIONS, SCOPE_PAD_CSS, formatScopeVolts, scopeGeometry, scopeTickIndices,
+  SCOPE_PAD_CSS, formatScopeVolts, scopeGeometry, scopeTickIndices,
 } from './scopeScale.js';
 import type { TickSet } from './timeAxis.js';
 
@@ -367,8 +367,9 @@ export class Overlay {
     // Tick labels use the target scale while their Y positions use the animated one.
     // Thus a real voltage mark (1 V, 2 V, ...) travels away from or toward 0 V as the
     // ruler extends/contracts; recomputing labels from the animated V/Div would instead
-    // pin every tick to the same four division positions and merely change its text.
-    const perDiv = geometry ? (geometry.topV - geometry.bottomV) / SCOPE_DIVISIONS : 0;
+    // pin every tick to the same division positions and merely change its text. The
+    // division count (4..8) follows the row's band, via the geometry.
+    const perDiv = geometry ? (geometry.topV - geometry.bottomV) / geometry.divisions : 0;
     const tickStep = scope?.tickVoltsPerDiv ?? perDiv;
     const ticks = geometry ? scopeTickIndices(geometry, tickStep) : [];
     c.save();

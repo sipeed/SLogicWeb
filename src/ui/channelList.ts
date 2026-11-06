@@ -22,7 +22,7 @@
  * editable (it belongs to the channel identity), so there is no colour picker.
  */
 
-import { BUS_HEIGHTS } from './busView.js';
+import { ANALOG_HEIGHTS, analogHeightIndex, stepAnalogHeight } from './busView.js';
 import {
   ANALOG_GAIN_DEFAULT, analogHalfRangeV, analogVoltsPerCode, formatAnalogGain,
 } from './channelBanks.js';
@@ -467,16 +467,17 @@ export class ChannelList {
       body.append(head, sub);
       if (cell.analog) {
         // Scale, zero and trigger readouts live on the plot's right ruler. The left
-        // column keeps only the trigger editor and the four-stop row-height handle.
+        // column keeps only the trigger editor and the row-height handle, which snaps to
+        // the `ANALOG_HEIGHTS` stops (80..480 px; the graticule follows the height).
         const heightHandle = document.createElement('div');
         heightHandle.className = 'bus-height-handle';
         heightHandle.title = t('bus.height');
         heightHandle.setAttribute('role', 'slider');
         heightHandle.setAttribute('aria-orientation', 'vertical');
         heightHandle.setAttribute('aria-label', `${t('bus.height')} ${cell.name}`);
-        heightHandle.setAttribute('aria-valuemin', String(BUS_HEIGHTS[0]));
+        heightHandle.setAttribute('aria-valuemin', String(ANALOG_HEIGHTS[0]));
         heightHandle.setAttribute('aria-valuemax',
-          String(BUS_HEIGHTS[BUS_HEIGHTS.length - 1]));
+          String(ANALOG_HEIGHTS[ANALOG_HEIGHTS.length - 1]));
         heightHandle.setAttribute('aria-valuenow', String(cell.heightCss));
         heightHandle.setAttribute('aria-valuetext', `${cell.heightCss} px`);
         heightHandle.tabIndex = 0;
@@ -485,24 +486,14 @@ export class ChannelList {
           heightHandle.setAttribute('aria-valuetext', `${height} px`);
           this.cb.onBusScope?.(cell.id, { heightCss: height }, commit);
         };
-        const heightIndexAt = (height: number): number => {
-          let best = 0;
-          for (let i = 1; i < BUS_HEIGHTS.length; i++) {
-            if (Math.abs(BUS_HEIGHTS[i]! - height) <
-                Math.abs(BUS_HEIGHTS[best]! - height)) best = i;
-          }
-          return best;
-        };
         heightHandle.addEventListener('keydown', (event) => {
           if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
           event.preventDefault();
           // Keyboard follows slider convention: Up increases the value, Down decreases
           // it. Pointer dragging still follows the physical bottom edge.
           const direction = event.key === 'ArrowUp' ? 1 : -1;
-          const at = heightIndexAt(cell.heightCss);
-          const next = BUS_HEIGHTS[Math.max(0,
-            Math.min(BUS_HEIGHTS.length - 1, at + direction))];
-          if (next !== undefined) setHeight(next, true);
+          const next = stepAnalogHeight(cell.heightCss, direction);
+          if (next !== cell.heightCss) setHeight(next, true);
         });
         heightHandle.addEventListener('pointerdown', (event) => {
           if (event.button !== 0) return;
@@ -511,11 +502,11 @@ export class ChannelList {
           heightHandle.focus({ preventScroll: true });
           const startY = event.clientY;
           const startHeight = cell.heightCss;
-          let last: number = BUS_HEIGHTS[heightIndexAt(startHeight)]!;
+          let last: number = ANALOG_HEIGHTS[analogHeightIndex(startHeight)]!;
           const snap = (clientY: number): number => {
-            // The drag delta selects the nearest of the four documented stops.
+            // The drag delta selects the nearest of the documented stops.
             const target = startHeight + (clientY - startY);
-            return BUS_HEIGHTS[heightIndexAt(target)]!;
+            return ANALOG_HEIGHTS[analogHeightIndex(target)]!;
           };
           const move = (ev: PointerEvent): void => {
             const next = snap(ev.clientY);

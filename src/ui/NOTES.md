@@ -1253,8 +1253,12 @@ capture-trigger relayouts, re-anchoring to the replacement row button instead of
 
 **Scope display.** Analog rows share one vertical coordinate system across the trace,
 graticule, voltage ruler, 0 V line and trigger (`scopeScale.ts`). The padded row contains
-four divisions; `voltsPerDiv` walks the 1-2-5 steps around the gain's default (0.5–20 V
-and 10 V/div at 1x, scaled by 1/gain).
+an even 4–8 divisions of about 38 px, a pure function of its band (`scopeDivisions`: 4 up
+to 160 px rows, 6 at 240 px, 8 from 320 px) that `scopeGeometry` carries to every consumer.
+Resizing keeps V/div and zero, so a taller row shows a wider range. `voltsPerDiv` walks the
+1-2-5 steps around the gain's 4-division default (0.5–20 V and 10 V/div at 1x, scaled by
+1/gain); a gain change or reset picks the finest step showing the whole range on the row's
+current divisions (5 V/div at 1x on 8).
 The ruler is inside the **right** edge of the waveform row. Visible ticks are fixed
 voltages with their units (including fractional and negative values); a label that would
 be cut in half by the V/Div or trigger chip is omitted, and during the 140 ms scale
@@ -1262,10 +1266,11 @@ animation a pair closer than one label height keeps only the outer label. 0 V is
 line and the other divisions are visible fine lines. Vertical dragging moves the complete
 ruler and its 0 V-anchored divisions together. Wheel zoom changes V/Div with a 140 ms
 spatial extension/contraction animation: fixed voltage marks move farther from or closer
-to 0 V, rather than remaining at four division slots while only their labels change.
+to 0 V, rather than remaining at fixed division slots while only their labels change.
 Reduced-motion preferences disable the interpolation. The left A0–A3 control has no scale,
 trigger-level or 0 V readout/handle; its hover/focus bottom handle only snaps row height to
-the four existing 80/120/160/240 CSS px stops. The right ruler carries the bottom-right
+the `ANALOG_HEIGHTS` stops 80/120/160/240/320/400/480 CSS px (a new row starts at 160; a
+compact layout draws it at least 96 px tall). The right ruler carries the bottom-right
 V/Div label (unit from the locale) and a trigger-aligned R/F voltage chip, all on the same
 canvas geometry as the trace. When the trigger level is in the lowest division the R/F
 chip slides left instead of covering the V/Div readout, keeping its Y on the trigger line.

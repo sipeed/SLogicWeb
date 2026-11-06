@@ -2,8 +2,10 @@
 
 import { validateBusSpec, type BusSpec } from '../data/busValue.js';
 import { PROFILES } from '../device/profiles.js';
-import { DEFAULT_BUS_HEIGHT, runBits, type BusViewConfig } from './busView.js';
-import { scopeDefaultVoltsPerDiv, scopeVoltsPerDivValues } from './scopeScale.js';
+import { ANALOG_DEFAULT_HEIGHT, runBits, type BusViewConfig } from './busView.js';
+import {
+  SCOPE_DIVISIONS_MIN, scopeDefaultVoltsPerDiv, scopeRowDivisions, scopeVoltsPerDivValues,
+} from './scopeScale.js';
 
 export const CHANNEL_BANK_SIZE = 8;
 
@@ -137,11 +139,14 @@ export function analogTriggerVolts(
 }
 
 /**
- * The V/div an analog row starts at (and Home/double-click returns to) for a gain: the
- * finest 1-2-5 step whose four divisions still show the whole range (10 V at 1x).
+ * The V/div an analog row starts at (and a gain change or Home/double-click returns to)
+ * for a gain: the finest 1-2-5 step whose `divisions` (the row's current count,
+ * `scopeRowDivisions`) still show the whole range. 1x: 10 V on 4 or 6, 5 V on 8.
  */
-export function analogDefaultVoltsPerDiv(gain = ANALOG_GAIN_DEFAULT): number {
-  return scopeDefaultVoltsPerDiv(analogHalfRangeV(gain));
+export function analogDefaultVoltsPerDiv(
+  gain = ANALOG_GAIN_DEFAULT, divisions: number = SCOPE_DIVISIONS_MIN,
+): number {
+  return scopeDefaultVoltsPerDiv(analogHalfRangeV(gain), divisions);
 }
 
 /** The V/div steps the wheel and keys walk at a gain (0.5..20 V at 1x, scaled by 1/G). */
@@ -249,10 +254,10 @@ export function analogBusConfig(
     // (`busLabel`, the overlay, hover) then shows true volts.
     fullScaleV: span.fullScaleV,
     offsetV: span.offsetV,
-    voltsPerDiv: analogDefaultVoltsPerDiv(analogGain),
+    voltsPerDiv: analogDefaultVoltsPerDiv(analogGain, scopeRowDivisions(ANALOG_DEFAULT_HEIGHT)),
     zeroPosition: 0.5,
     style: 'line',
-    heightCss: DEFAULT_BUS_HEIGHT,
+    heightCss: ANALOG_DEFAULT_HEIGHT,
     hideSources: true,
   };
 }

@@ -15,7 +15,7 @@ import {
 } from '../channelBanks.js';
 import { busLabel, type BusViewConfig } from '../busView.js';
 import {
-  SCOPE_DIVISIONS, SCOPE_VDIV_VALUES, nextScopeVoltsPerDiv, scopeGeometry, scopeTickIndices,
+  SCOPE_DIVISIONS_MIN, SCOPE_VDIV_VALUES, nextScopeVoltsPerDiv, scopeGeometry, scopeTickIndices,
 } from '../scopeScale.js';
 import { parseWorkspaceSnapshot, serializeWorkspaceSnapshot } from '../workspacePreferences.js';
 import { defaultChannels } from '../state.js';
@@ -201,8 +201,8 @@ for (const gain of GAINS) {
     const values = analogVoltsPerDivValues(gain);
     const finer = SCOPE_VDIV_VALUES.filter((v) => v < vdiv).pop();
     // Four divisions centred on 0 V show the whole range; the next finer step would not.
-    const shows = vdiv * SCOPE_DIVISIONS / 2 >= half - 1e-9 &&
-      (finer === undefined || finer * SCOPE_DIVISIONS / 2 < half);
+    const shows = vdiv * SCOPE_DIVISIONS_MIN / 2 >= half - 1e-9 &&
+      (finer === undefined || finer * SCOPE_DIVISIONS_MIN / 2 < half);
     const g = scopeGeometry(0, 120, vdiv, 0.5);
     const ticks = scopeTickIndices(g, vdiv);
     const inBand = g.yVolts(half) >= 0 && g.yVolts(-half) <= 120;
@@ -288,7 +288,7 @@ function roundTrip(views: unknown[], analogTriggers?: Record<string, unknown>): 
   const gainPath = body.includes('this.clampSettings(this.settings)') &&
     body.includes("if (after !== undefined && this.settings.triggerSource === 'analog') this.syncActiveTrigger();") &&
     body.includes('this.analogLevelClamped = before !== undefined && after !== undefined &&') &&
-    body.includes('...analogSpan(gain), voltsPerDiv: analogDefaultVoltsPerDiv(gain)') &&
+    body.includes('...analogSpan(gain), voltsPerDiv: this.scopeDefaultVoltsPerDiv(bus, gain)') &&
     !body.includes('restartCapture') && !body.includes('stopCapture') &&
     !body.includes('this.device') && !body.includes('applySettings') &&
     !body.includes('clearTriggerSample');

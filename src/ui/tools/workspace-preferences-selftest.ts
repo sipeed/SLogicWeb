@@ -8,7 +8,7 @@ import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannelName, defaultChannels,
   modesToConditions, THRESHOLD_VOLT_OPTIONS,
 } from '../state.js';
-import { busChannelBank } from '../channelBanks.js';
+import { analogBusConfig, busChannelBank } from '../channelBanks.js';
 import type { BusViewConfig } from '../busView.js';
 
 interface FsLike {
@@ -544,6 +544,50 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     parsed.bankBusDrafts[0]?.fullScaleV === 3.3 && parsed.bankBusDrafts[0]?.offsetV === 0.25 &&
     parsed.bankBusDrafts[0]?.hideSources === true && parsed.bankBusDrafts[8]?.name === 'Analog waveform',
     JSON.stringify({ views: parsed?.busViews, drafts: parsed?.bankBusDrafts }));
+}
+
+{
+  // Analog rows accept every height stop up to 480 px; legacy 80/120/160/240 saves and
+  // their saved V/div keep loading unchanged. A generic bus keeps the Bus panel's heights.
+  const analogAt = (bank: number, heightCss: number, voltsPerDiv: number): BusViewConfig => ({
+    ...analogBusConfig(bank * 8, 32, '#4C9AFF', 1), heightCss, voltsPerDiv, zeroPosition: 0.25,
+  });
+  const heights = [480, 320, 400, 240];
+  const fresh = parseWorkspaceSnapshot(serializeWorkspaceSnapshot({
+    version: 1, detailedLabels: true, channels: defaultChannels(32),
+    busViews: heights.map((h, bank) => analogAt(bank, h, bank === 0 ? 5 : 10)),
+  }));
+  const tall = fresh?.busViews?.map((b) => `${b.analogGroup}:${b.heightCss}:${b.voltsPerDiv}:${b.zeroPosition}`)
+    .join(',') === '0:480:5:0.25,1:320:10:0.25,2:400:10:0.25,3:240:10:0.25';
+  let legacy = true;
+  for (const h of [80, 120, 160, 240]) {
+    // A hand-written older save: no gain, the 4-division-era V/div (0.5 V is off today's
+    // default) and an old stop.
+    const raw = { ...analogAt(0, h, 0.5) } as Record<string, unknown>;
+    delete raw.analogGain;
+    const parsed = parseWorkspaceSnapshot(JSON.stringify({
+      version: 1, channels: Array.from({ length: 32 }, () => ({})), busViews: [raw],
+    }));
+    legacy &&= parsed?.busViews?.[0]?.heightCss === h && parsed.busViews[0]?.voltsPerDiv === 0.5 &&
+      parsed.busViews[0]?.analogGroup === 0;
+  }
+  const off = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, channels: Array.from({ length: 32 }, () => ({})),
+    busViews: [analogAt(0, 481, 10), analogAt(1, 96, 10)],
+  }));
+  const rejects = (off?.busViews ?? []).length === 0;
+  const generic: BusViewConfig = {
+    name: 'Bus', spec: { bits: [3, 1], clock: null, encoding: 'unsigned' }, color: '#010203',
+    fullScaleV: null, offsetV: 0, style: 'step', heightCss: 480, hideSources: false,
+  };
+  const genericParsed = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, channels: Array.from({ length: 32 }, () => ({})),
+    busViews: [generic, { ...generic, heightCss: 240 }],
+  }));
+  const genericHeights = genericParsed?.busViews?.map((b) => b.heightCss).join(',') === '240';
+  check('analog heights up to 480 px and legacy 80..240 px saves round-trip with their V/div',
+    tall && legacy && rejects && genericHeights,
+    `tall=${tall}, legacy=${legacy}, rejects=${rejects}, generic=${genericHeights}, ${JSON.stringify(fresh?.busViews?.map((b) => b.heightCss))}`);
 }
 
 {
