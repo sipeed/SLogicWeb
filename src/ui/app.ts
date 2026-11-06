@@ -1794,13 +1794,13 @@ export class App {
       if (highRateLoop) this.renderStatus();
     }
     // Interactions (`dirty`) draw in the next frame. New samples (`livePending`) draw on
-    // a fixed cadence, like HSync telling the interface of progress every 50 ms instead
-    // of on every packet. Even the fastest loop now shows a live view, at that cadence.
+    // a cadence paced by the cost of the previous frame, instead of on every packet.
+    // Even the fastest loop now shows a live view, at that cadence.
     // A Repeat wave that is still waiting for its trigger keeps the previous frame: its
     // pre-trigger samples are arriving, but there is nothing new to show yet. A user
     // gesture (`dirty`) still draws, using the held wave and its own T.
     const liveDue = !this.dirty && !this.repeatWaveHolding &&
-      liveDrawDue(now, this.liveDrawAt, this.livePending, this.running);
+      liveDrawDue(now, this.liveDrawAt, this.lastFrameCostMs, this.livePending, this.running);
     if (!this.dirty && !liveDue) return;
     this.dirty = false;
     this.livePending = false;

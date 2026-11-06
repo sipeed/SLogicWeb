@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { LIVE_REFRESH_MS, liveDrawDue } from '../liveRefresh.js';
+import {
+  LIVE_FRAME_CEIL_MS, LIVE_FRAME_FLOOR_MS, liveDrawDue, liveFrameIntervalMs,
+} from '../liveRefresh.js';
 
 const nodeProcess = (() => {
   const p = (globalThis as {
@@ -17,26 +19,52 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 {
-  const cases: [number, number, boolean, boolean, boolean][] = [
-    // now, lastDrawnAt, pending, running, due
-    [0, 0, true, true, false],
-    [49, 0, true, true, false],
-    [50, 0, true, true, true],
-    [51, 0, true, true, true],
-    [1000, 950, true, true, true],
-    [1000, 951, true, true, false],
-    [1000, 900, true, false, false],
-    [1000, 900, false, true, false],
-    [1000, 900, false, false, false],
+  const near = (a: number, b: number): boolean => Math.abs(a - b) < 1e-9;
+  const cases: [number, number][] = [
+    [0, LIVE_FRAME_FLOOR_MS],
+    [2, LIVE_FRAME_FLOOR_MS],
+    [10, 12.5],
+    [20, 25],
+    [40, LIVE_FRAME_CEIL_MS],
+    [200, LIVE_FRAME_CEIL_MS],
+    [-5, LIVE_FRAME_FLOOR_MS],
+    [Number.NaN, LIVE_FRAME_FLOOR_MS],
   ];
-  const bad = cases.filter(([now, last, pending, running, want]) =>
-    liveDrawDue(now, last, pending, running) !== want);
-  check('liveDrawDue is due only while running, with data, 50 ms after the last draw',
-    LIVE_REFRESH_MS === 50 && bad.length === 0,
+  const bad = cases.filter(([cost, want]) => !near(liveFrameIntervalMs(cost), want));
+  check('the next live draw waits 1.25x the last frame cost, clamped to 8.33..33.33 ms',
+    near(LIVE_FRAME_FLOOR_MS, 1000 / 120) && near(LIVE_FRAME_CEIL_MS, 1000 / 30) &&
+    LIVE_FRAME_FLOOR_MS < LIVE_FRAME_CEIL_MS && bad.length === 0,
     bad.length === 0
-      ? `${cases.length} cases match (interval ${LIVE_REFRESH_MS} ms)`
-      : bad.map(([now, last, pending, running, want]) =>
-        `${now}/${last}/${pending}/${running} want ${want}`).join('; '));
+      ? `${cases.length} costs match`
+      : bad.map(([cost, want]) => `${cost}->${liveFrameIntervalMs(cost)} want ${want}`).join('; '));
+}
+
+{
+  const cases: [number, number, number, boolean, boolean, boolean][] = [
+    // now, lastDrawnAt, lastCostMs, pending, running, due
+    [0, 0, 0, true, true, false],
+    [8, 0, 2, true, true, false],
+    [10000, 0, 2, true, true, true],
+    [8.33, 0, 2, true, true, false],
+    [8.34, 0, 2, true, true, true],
+    [12.4, 0, 10, true, true, false],
+    [12.5, 0, 10, true, true, true],
+    [30, 0, 40, true, true, false],
+    [33.33, 0, 40, true, true, false],
+    [33.34, 0, 40, true, true, true],
+    [1000, 900, 2, true, true, true],
+    [1000, 900, 2, true, false, false],
+    [1000, 900, 2, false, true, false],
+    [1000, 900, 2, false, false, false],
+  ];
+  const bad = cases.filter(([now, last, cost, pending, running, want]) =>
+    liveDrawDue(now, last, cost, pending, running) !== want);
+  check('liveDrawDue is due only while running, with data, once the paced interval elapsed',
+    bad.length === 0,
+    bad.length === 0
+      ? `${cases.length} cases match`
+      : bad.map(([now, last, cost, pending, running, want]) =>
+        `${now}/${last}/${cost}/${pending}/${running} want ${want}`).join('; '));
 }
 
 {
@@ -50,15 +78,22 @@ function check(name: string, pass: boolean, detail: string): void {
   const frameStart = app.indexOf('private frame = (): void => {');
   const frameEnd = frameStart >= 0 ? app.indexOf('\n  };', frameStart) : -1;
   const frame = frameEnd > frameStart ? app.slice(frameStart, frameEnd) : '';
-  const gated = frame.includes('liveDrawDue(now, this.liveDrawAt, this.livePending, this.running)') &&
+  const gated = frame.includes(
+    'liveDrawDue(now, this.liveDrawAt, this.lastFrameCostMs, this.livePending, this.running)') &&
     frame.includes('this.dirty = false;') && frame.includes('this.livePending = false;') &&
     frame.includes('this.liveDrawAt = now;') && frame.includes('this.draw();');
   // The old high-rate branch returned before drawing: a fast loop showed no live view.
   const liveAtAnyRate = frame.length > 0 && !frame.includes('if (highRateLoop) return;') &&
     frame.includes('this.pumpBusBuilders();');
-  check('the frame loop draws interactions at once and new samples on the 50 ms clock',
+  check('the frame loop draws interactions at once and new samples on the paced clock',
     gated && liveAtAnyRate,
     `gated=${gated}, live=${liveAtAnyRate}, bytes=${frame.length}`);
+
+  const policy = fs.readFileSync('src/ui/liveRefresh.ts', 'utf8');
+  const ceilingGone = !app.includes('LIVE_REFRESH_MS') && !policy.includes('LIVE_REFRESH_MS') &&
+    !frame.includes('LIVE_REFRESH_MS') && !/\b50\b/.test(policy);
+  check('the 50 ms policy ceiling is gone from the gate and its caller',
+    ceilingGone, `app=${!app.includes('LIVE_REFRESH_MS')}, policy=${!policy.includes('LIVE_REFRESH_MS')}, literal50=${!/\b50\b/.test(policy)}`);
 
   const sinkStart = app.indexOf('await device.start(cfg, (chunk) => {');
   const sinkEnd = sinkStart >= 0 ? app.indexOf('}, (pos, missing) => {', sinkStart) : -1;
