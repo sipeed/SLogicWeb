@@ -9,7 +9,7 @@
  *     node /tmp/analog-geometry-selftest.mjs
  */
 
-import type { BusSpec } from '../../data/busValue.js';
+import { BusBuilder, type BusSpec } from '../../data/busValue.js';
 import { PlanarSampleStore } from '../../data/planarStore.js';
 import {
   SMOOTH_POINTS_MAX_SPP, catmullRomWalk, smoothBandEdges, smoothPolyline,
@@ -178,6 +178,28 @@ for (const spp of [1, 1.4, 1.5, 2, 2.5, 3, 3.9, 4, 5, 6, 7, 8, 12]) {
     check(`dense sine at ${spp} samples/column: each column is its own samples' min/max`,
       bad === '' && widest <= bound, bad || `widest band ${widest} codes, bound ${bound}`);
   }
+}
+
+// A background pyramid build must not re-stream an exact window on every frame: the
+// exact paths never read the pyramid, so its frontier is not part of their cache key.
+{
+  const len = 3_000_000;
+  const words = new Uint16Array(len);
+  for (let i = 0; i < len; i++) words[i] = (Math.round(128 + 60 * Math.sin(i / 1600)) + (i % 3)) & 0xff;
+  const big = new PlanarSampleStore({ channelCount: 16, samplerate: 100e6 });
+  big.append(new Uint8Array(words.buffer));
+  const bv = view();
+  bv.builder = new BusBuilder(big, spec);
+  bv.builder.step(2);
+  const exactA = analogFrame(big, bv, 1000, 1000 + 500 * 1000, 1000, false);
+  bv.builder.step(2);
+  const exactB = analogFrame(big, bv, 1000, 1000 + 500 * 1000, 1000, false);
+  const wideA = analogFrame(big, bv, 0, len, 1000, false);
+  bv.builder.step(2);
+  const wideB = analogFrame(big, bv, 0, len, 1000, false);
+  check('an exact window stays cached while the pyramid builds; a pyramid window refreshes',
+    exactA === exactB && exactA.kind === 'columns' && wideA !== wideB,
+    `exact cached=${exactA === exactB}, pyramid refreshed=${wideA !== wideB}`);
 }
 
 for (const r of results) console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.name}${r.detail ? `\n        ${r.detail}` : ''}`);

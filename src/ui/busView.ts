@@ -240,13 +240,26 @@ export function analogFrame(
   // frontier is part of the key: the provisional/live envelope must follow the fill.
   const visibleEnd = Math.min(store.length, Math.ceil(end));
   const frontier = (store as SampleStore & { frontier?: number }).frontier;
+  // The exact paths never read the pyramid, so its build frontier stays out of their key:
+  // a builder advancing in the background must not re-stream a fixed window every frame.
   const key = [visibleEnd, store.droppedSamples, start, end, widthPx,
-    bv.builder?.pyramid.doneUpTo ?? -1, live,
+    readsExactly(store, start, end, widthPx) ? 'exact' : bv.builder?.pyramid.doneUpTo ?? -1, live,
     frontier === undefined ? '' : frontier].join(':');
   if (bv.cache?.key === key) return bv.cache.frame;
   const frame = compute(store, bv, start, end, widthPx, live);
   bv.cache = { key, frame };
   return frame;
+}
+
+/**
+ * Whether the window is drawn from the store alone (cached steps or the streamed column
+ * envelope), never from the pyramid: few enough samples per column for a leaf to smear,
+ * and a window the streamed envelope can afford.
+ */
+function readsExactly(store: SampleStore, start: number, end: number, widthPx: number): boolean {
+  const s = Math.max(0, Math.floor(start));
+  const e = Math.min(store.length, Math.ceil(end));
+  return e > s && (end - start) / widthPx < EXACT_COLUMN_SPP && e - s <= EXACT_COLUMN_WINDOW;
 }
 
 function compute(
@@ -256,8 +269,10 @@ function compute(
   const spp = span / widthPx;
   const s = Math.max(0, Math.floor(start));
   const e = Math.min(store.length, Math.ceil(end));
-  if (e > s && spp < EXACT_COLUMN_SPP &&
-      e - s <= (spp > EXACT_SPP ? EXACT_COLUMN_WINDOW : EXACT_WINDOW)) {
+  const exact = readsExactly(store, start, end, widthPx);
+  // The cached step list also serves windows above the streamed cap (very wide canvases)
+  // while it fits; if it overflows there, the pyramid is the affordable fallback.
+  if (e > s && (exact || (spp <= EXACT_SPP && e - s <= EXACT_WINDOW))) {
     const carry = latchedBefore(store, bv.spec, s);
     if (spp > EXACT_SPP) {
       return { kind: 'columns', ...exactColumns(store, bv.spec, start, end, widthPx, carry) };
@@ -301,8 +316,10 @@ function compute(
     }
     // More steps than the cached step list may hold (a dense analog signal changes on
     // nearly every sample): stream the same in-column envelope instead of falling back
-    // to leaves wider than a column.
-    return { kind: 'columns', ...exactColumns(store, bv.spec, start, end, widthPx, carry) };
+    // to leaves wider than a column - when the window is within the streamed cap.
+    if (exact) {
+      return { kind: 'columns', ...exactColumns(store, bv.spec, start, end, widthPx, carry) };
+    }
   }
   const pyramid = bv.builder?.pyramid ?? null;
   if (pyramid) {
