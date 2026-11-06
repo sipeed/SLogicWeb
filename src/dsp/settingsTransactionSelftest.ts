@@ -149,6 +149,11 @@ function makeProfile(options: ProfileOptions = {}): DeviceProfile {
           start: 0,
           channels: 8,
           ranges: [15],
+          adcSpanV: 1.6,
+          frontEndAttenuation: 20,
+          codeDenominator: 255,
+          zeroCode: 128,
+          gains: [1],
           resolutionBits: 8,
           maxHz: { ss5: 800e6, hs: 40e6 },
         }]

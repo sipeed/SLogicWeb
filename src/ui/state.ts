@@ -91,7 +91,7 @@ export interface CaptureSettings {
 
 export interface AnalogTriggerSetting {
   kind: 'rising' | 'falling';
-  /** Crossing level in volts on the ADC module's ±15 V range. */
+  /** Crossing level in volts, inside the range the group's declared gain reads. */
   volts: number;
 }
 

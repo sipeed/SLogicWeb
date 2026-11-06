@@ -268,7 +268,13 @@ interface RateTier {
 interface AnalogGroup {
   start: number;
   channels: number;
-  ranges: readonly number[];        // bipolar range in volts, e.g. 1, 5, 15 (±1 V, ±5 V, ±15 V)
+  ranges: readonly number[];        // bipolar range in volts, e.g. 1, 5, 16 (±1 V, ±5 V, ±16 V)
+  adcSpanV: number;                 // converter input span, e.g. 1.6
+  frontEndAttenuation: number;      // fixed front-end attenuation, e.g. 20
+  codeDenominator: number;          // LSB = adcSpanV * frontEndAttenuation / codeDenominator
+  zeroCode: number;                 // code reading 0 V; volts = (code - zeroCode) * LSB / gain
+  gains: readonly number[];         // declarable hardware gain presets, ascending, include 1
+  customGain?: { min: number; max: number }; // bounds of a custom declared ratio
   resolutionBits: number;
   maxHz: Readonly<Partial<Record<LinkRate, number>>>;
 }
@@ -289,8 +295,18 @@ interface ProfileQuirk { id: string; note: string }
   link rate. `ss5` is capped by the 5 Gbit/s payload (3200 Mbit/s / channels), while
   `ss10` carries the native per-width ceiling; the 16U3 declares no `ss10` tier. The UI
   reads the same profile and renders only offered values.
-- Analog groups are hardware-defined ranges (e.g. ±15 V); vertical scale and offset are
-  view state, not profile capability.
+- Analog groups are hardware-defined ranges; vertical scale and offset are view state,
+  not profile capability. The code-to-volt mapping is profile data, converted in one
+  place (`src/ui/channelBanks.ts`): `volts = (code - zeroCode) * LSB / G` and
+  `code = clamp(round(volts * G / LSB + zeroCode), 0, 2^bits - 1)`. The 32U3 values
+  (1.6 V, 20x, /255, zero 128: 0.12549 V per code, -16.063..+15.937 V at 1x) were
+  confirmed by the hardware team on 2026-11-06; HSync and scopehal used ±15 V with zero
+  at 127.5. G is the gain the user declares for the module's front-end stage, which the
+  host cannot read or program; it lives on the analog bus view in the workspace
+  (`analogGain`, absent = 1x, invalid saved values are rejected) and the bus offset/span
+  are derived from it. `.lwcap` stores transitions only, so a file does not carry the
+  gain. Trigger levels are stored in volts and re-snapped to the gain's code grid by the
+  settings clamp; the matcher always receives a code.
 
 ### 3.3 Device commands and framing
 

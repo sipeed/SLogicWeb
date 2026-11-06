@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  ADC_CLOCK_HZ, ADC_FULL_SCALE_V, ADC_MIN_SAMPLERATE_HZ, ADC_OFFSET_V, ANALOG_GROUP_COUNT,
+  ADC_CLOCK_HZ, ADC_LSB_V, ADC_MAX_CODE, ADC_MIN_SAMPLERATE_HZ, ADC_ZERO_CODE, ANALOG_GROUP_COUNT,
   CHANNEL_BANK_SIZE, CHANNEL_WIDTH_OPTIONS, analogBankActive, analogBusConfig, analogCodeFromVolts,
   analogGroupCount, analogSamplerates, analogTriggerVolts, analogVoltsFromCode, busChannelBank,
   busOutOfWidth, captureWidthTiers,
@@ -71,22 +71,25 @@ check('bank start uses the absolute channel index',
 }
 
 {
-  const codes = [-15, 0, 15, -99, 99].map(analogCodeFromVolts);
-  const volts = [0, 128, 255].map(analogVoltsFromCode);
-  check('ADC trigger levels map the module\'s ±15 V range onto codes 0..255',
-    codes.join(',') === '0,128,255,0,255' &&
-    Math.abs(volts[0]! + 15) < 1e-9 && Math.abs(volts[1]!) < 0.06 &&
-    Math.abs(volts[2]! - 15) < 1e-9,
+  // Profile scale (hardware team, 2026-11-06): 1.6 V * 20 / 255 per code, 0 V at 128.
+  const codes = [-16.0628, 0, 15.9373, -99, 99, -15, 15].map((v) => analogCodeFromVolts(v));
+  const volts = [0, 128, 255].map((c) => analogVoltsFromCode(c));
+  check('ADC trigger levels map the module\'s -16.063..+15.937 V range onto codes 0..255',
+    codes.join(',') === '0,128,255,0,255,8,248' &&
+    Math.abs(ADC_LSB_V - 1.6 * 20 / 255) < 1e-12 && ADC_ZERO_CODE === 128 && ADC_MAX_CODE === 255 &&
+    Math.abs(volts[0]! + 128 * 32 / 255) < 1e-9 && volts[1] === 0 &&
+    Math.abs(volts[2]! - 127 * 32 / 255) < 1e-9,
     `codes=${codes.join(',')}, volts=${volts.join(',')}`);
 }
 
 {
-  const rising = analogTriggerVolts('rising', -15);
-  const falling = analogTriggerVolts('falling', 15);
+  const rising = analogTriggerVolts('rising', -99);
+  const falling = analogTriggerVolts('falling', 99);
   const mid = analogTriggerVolts('rising', 1.2);
   check('trigger levels snap to the converter grid and move the unreachable endpoints inward',
-    rising > -15 && rising < -14.8 && falling > 14.8 && falling < 15 &&
-    Math.abs(mid - 1.2353) < 0.001,
+    rising === Number(analogVoltsFromCode(1).toFixed(4)) && rising === -15.9373 &&
+    falling === Number(analogVoltsFromCode(254).toFixed(4)) && falling === 15.8118 &&
+    mid === 1.2549,
     `rising=${rising}, falling=${falling}, mid=${mid}`);
 }
 
@@ -112,29 +115,27 @@ check('bank start uses the absolute channel index',
   const fixed = atZero.name === 'A0' && atOne.name === 'A1' &&
     atZero.bitOrder === 'msb' && atZero.spec.encoding === 'unsigned' &&
     atZero.spec.clock === null && atZero.hideSources === true &&
-    atZero.fullScaleV === 30 && atZero.offsetV === -15 &&
-    ADC_FULL_SCALE_V === 30 && ADC_OFFSET_V === -15;
+    Math.abs(atZero.fullScaleV! - 32) < 1e-9 && Math.abs(atZero.offsetV + 128 * 32 / 255) < 1e-9;
   // MSB first: input 0 is the converter's MSB, so the LSB-first bit list ends with it.
   const msbFirst = atZero.spec.bits.join(',') === '7,6,5,4,3,2,1,0' &&
     atOne.spec.bits.join(',') === '15,14,13,12,11,10,9,8';
   let invalid = false;
   try { analogBusConfig(4, 8, '#fff'); } catch (e) { invalid = e instanceof RangeError; }
-  check('the Analog button creates a fixed MSB-first A0-A3 view over ±15 V',
+  check('the Analog button creates a fixed MSB-first A0-A3 view over the profile scale',
     fixed && msbFirst && invalid,
     `name=${atZero.name}/${atOne.name}, bits0=${atZero.spec.bits}, bits1=${atOne.spec.bits}, ` +
     `order=${atZero.bitOrder}, scale=${atZero.offsetV}..${atZero.fullScaleV}, invalid=${invalid}`);
 }
 
 {
-  // Code 0 is -15 V and code 255 is +15 V; the midpoint code reads ~0 V (HSync's test
-  // allows 0.06 V for 128).
+  // Code 0 is -16.063 V and code 255 +15.937 V; code 128 reads 0 V.
   const view = analogBusConfig(0, 8, '#fff');
   const low = busLabel(view, 0);
   const mid = busLabel(view, 128);
   const high = busLabel(view, 255);
   const midVolts = Number.parseFloat(mid) * (mid.includes('mV') ? 1e-3 : 1);
-  check('analog codes map onto the module\'s ±15 V range',
-    low === '-15.00 V' && high === '15.00 V' && Math.abs(midVolts) < 0.06,
+  check('analog codes map onto the module\'s profile range',
+    low === '-16.06 V' && high === '15.94 V' && Math.abs(midVolts) < 1e-9,
     `0=${low}, 128=${mid}, 255=${high}`);
 }
 
@@ -176,8 +177,9 @@ check('bank start uses the absolute channel index',
     panel.indexOf('bank.appendChild(grid);') >= 0 &&
     panel.indexOf('bank.appendChild(grid);') < panel.indexOf('bank.appendChild(analogButton(');
   const analogCell = panel.includes("const cell = div('analog-cell');") &&
-    panel.includes("cell.textContent = t('capturePanel.analogCell', { name });") &&
-    panel.includes('cell.title = analogInputHint(start, v.channels.length);') &&
+    panel.includes("cell.textContent = t('capturePanel.analogCell', {") &&
+    panel.includes('name, gain: formatAnalogGain(gain), range: formatVoltsNumber(analogHalfRangeV(gain)),') &&
+    panel.includes('cell.title = analogInputHint(start, v.channels.length, gain);') &&
     panel.includes("return t('capturePanel.analogEnable', {");
   const button = panel.includes("b.textContent = t('capturePanel.analog');") &&
     panel.includes("b.disabled = !enabled;") &&
@@ -204,7 +206,7 @@ check('bank start uses the absolute channel index',
   const toggle = app.includes('onToggleAnalog: (start) => this.toggleAnalog(start)') &&
     app.includes('private toggleAnalog(start: number): void') &&
     app.includes('if (start / CHANNEL_BANK_SIZE >= this.analogGroups()) return;') &&
-    app.includes('analogBusConfig(start, this.channels.length, color)') &&
+    app.includes('...analogBusConfig(start, this.channels.length, color,') &&
     app.includes('this.busViews = this.busViews.filter((b) => b.analogGroup !== group);') &&
     app.includes('this.afterChannelChange();');
   const groups = app.includes('private analogGroups(): number') &&

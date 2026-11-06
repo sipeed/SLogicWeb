@@ -1035,7 +1035,8 @@ its analog channel directly - no dialog:
 
 - The code is MSB-first: input 0 of the group is the code's MSB. `bitOrder` is pinned to
   `msb`, so a test pattern cannot flip the converter wiring.
-- Name `A0`–`A3`, range ±15 V (code 0 = −15 V, 255 = +15 V), unsigned, line style; the
+- Name `A0`–`A3`, range from the profile scale and the declared gain (1x: code 0 =
+  −16.063 V, 128 = 0 V, 255 = +15.937 V; see ARCHITECTURE §3.2), unsigned, line style; the
   eight source inputs are hidden from the plot because they are the converter's data bus.
 - The button is disabled on the 16U3 (no module), on a partial 4 CH row, and while a
   capture runs. An existing bank, for example one restored from an older workspace, is
@@ -1183,7 +1184,7 @@ Terminology: the primary action is **Capture** (not Start) and the Repeat contro
 Analog button, never inferred from eight bits) is an ADC group; a generic 8-bit bus and a
 16U3 therefore cannot become analog by accident. An ADC group can trigger on a rising or
 falling crossing of a voltage (`analogTriggers`, keyed by the bank start). The UI offers
-Off/R/F and a −15…15 V level, snapped to the converter code grid; rising code 0 and
+Off/R/F and a level inside the gain's range, snapped to the converter code grid; rising code 0 and
 falling code 255 are unreachable and are moved one code inward;
 the engine converts the voltage to the converter's 0…255 code and compares the
 bit-reversed group byte (`REVERSED_BYTE`) sample by sample. Digital conditions on the
@@ -1202,7 +1203,7 @@ not insert filler while waiting for a software trigger, so a future reporting pa
 shift T. Only the 32U3's four groups are
 offered; an analog trigger for a bank that is no longer displayed is ignored. The trigger
 remains host-side: the ADC module reads the inputs like any other sample, so the device
-protocol is unchanged. Level resolution is 30 V / 255 ≈ 0.118 V; the panel shows the
+protocol is unchanged. Level resolution is one code (0.1255 V / gain); the panel shows the
 requested level and the engine rounds to the nearest code. Like libsigrok's pre-fill
 gate, the host matcher holds matches off until the pre-trigger ring holds the configured
 number of complete samples (after arming, and again after a continuity reset), so a
@@ -1252,7 +1253,8 @@ capture-trigger relayouts, re-anchoring to the replacement row button instead of
 
 **Scope display.** Analog rows share one vertical coordinate system across the trace,
 graticule, voltage ruler, 0 V line and trigger (`scopeScale.ts`). The padded row contains
-four divisions; `voltsPerDiv` uses 0.5/1/2/5/10/20 V steps and defaults to 10 V/div.
+four divisions; `voltsPerDiv` walks the 1-2-5 steps around the gain's default (0.5–20 V
+and 10 V/div at 1x, scaled by 1/gain).
 The ruler is inside the **right** edge of the waveform row. Visible ticks are fixed
 voltages with their units (including fractional and negative values); a label that would
 be cut in half by the V/Div or trigger chip is omitted, and during the 140 ms scale
@@ -1270,7 +1272,7 @@ chip slides left instead of covering the V/Div readout, keeping its Y on the tri
 Double-clicking the ruler (or pressing Home while it is focused; a drag focuses it) restores
 0 V to 50% and V/Div to 10 through the normal animated, persisted scope writer; a
 browser-cancelled drag reverts its preview instead of committing it. Code values map to
-volts with the module's fixed ±15 V scale. Traces are reconstructed with
+volts with the module's profile scale divided by the declared gain. Traces are reconstructed with
 a Catmull-Rom curve (a practical band-limited interpolation for an irregular point set)
 instead of digital steps; wide windows draw a translucent min/max envelope with a smoothed
 centreline. When the exact timeline truncates or the pyramid builder is absent or behind

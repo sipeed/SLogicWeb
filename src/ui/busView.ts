@@ -51,6 +51,12 @@ export interface BusViewConfig {
   offsetV: number;
   /** Set only by the Analog button: this view is the ADC group `analogGroup` (0–3). */
   analogGroup?: number;
+  /**
+   * The gain ratio the user declared for the ADC module's front-end stage (set on the
+   * module, never programmed by the host). Only on an analog group; absent means 1x.
+   * `fullScaleV`/`offsetV` are derived from it (`analogSpan`), never set independently.
+   */
+  analogGain?: number;
   /** Analog scope vertical scale; null fits the full code range. */
   voltsPerDiv?: number | null;
   /** Where 0 V sits in the row, 0 (top) .. 1 (bottom); default 0.5. */
@@ -148,8 +154,9 @@ export function busYRange(cfg: BusViewConfig): { min: number; max: number } {
 /** A value as the row labels it: volts when a full scale is set, else the raw value. */
 export function busLabel(cfg: BusViewConfig, v: number): string {
   if (cfg.fullScaleV === null) return String(v);
-  // The code range spans 2^n - 1 steps, not 2^n: for the ADC module code 255 is +15 V
-  // exactly, and its code-128 reading is the 0 V midpoint (HSync adc.rs, step 30/255).
+  // The code range spans 2^n - 1 steps, not 2^n. An ADC group's offset and span are
+  // derived from its profile scale and gain (`analogSpan`), so this linear reading equals
+  // (code - 128) * LSB / G there.
   const steps = 2 ** cfg.spec.bits.length - 1;
   const volts = cfg.offsetV + (v / steps) * cfg.fullScaleV;
   const abs = Math.abs(volts);

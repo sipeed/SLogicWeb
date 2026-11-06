@@ -69,7 +69,7 @@ function cssRules(selector: string): string[] {
   const armed = panel.includes("s.triggerSource === 'analog'") &&
     panel.includes('digitalWhat.length > 0 || analogWhat.length > 0') &&
     panel.includes('`A${start / CHANNEL_BANK_SIZE} `') &&
-    panel.includes('analogTriggerVolts(setting.kind, setting.volts).toFixed(4)');
+    panel.includes('analogTriggerVolts(setting.kind, setting.volts, gainAt(start)).toFixed(4)');
   check('the armed note reports analog crossings when the analog source is armed',
     armed, `armed=${armed}`);
 }
@@ -82,7 +82,7 @@ function cssRules(selector: string): string[] {
   const config = app.includes('const plan = this.triggerPlan(this.settings);') &&
     app.includes('const analogTriggers = plan.analog.filter(') &&
     app.includes('analog: analogTriggers.map((a) => (') &&
-    app.includes('level: analogCodeFromVolts(a.volts)') &&
+    app.includes('level: analogCodeFromVolts(a.volts, a.gain)') &&
     app.includes('const triggerConditions = plan.digital;');
   check('the source plan arms one family and the start config carries its conditions',
     derive && config, `derive=${derive}, config=${config}`);

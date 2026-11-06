@@ -49,7 +49,7 @@ const catalogs: Array<[string, Messages]> = [['en', en], ['zh-CN', zhCN], ['ru',
 {
   const hint = analogInputHint(8, 32);
   check('the analog button names the group, its D inputs, the ADC input and its range',
-    hint.includes('A1') && hint.includes('D8–D15') && hint.includes('±15 V') && hint.includes('8-bit') &&
+    hint.includes('A1') && hint.includes('D8–D15') && hint.includes('±16 V') && hint.includes('8-bit') &&
     hint.includes("ADC module's input"), hint);
   const missing = catalogs.filter(([, dict]) =>
     !['{name}', '{range}', '{span}', '{bits}'].every((p) => dict['capturePanel.analogEnable'].includes(p)))

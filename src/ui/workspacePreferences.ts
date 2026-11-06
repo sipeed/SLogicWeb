@@ -1,7 +1,17 @@
 import { isChannelCount, type ChannelCount } from '../types.js';
 import { SAMPLERATES_HZ } from '../device/index.js';
 import { validateBusSpec } from '../data/index.js';
-import { ADC_FULL_SCALE_V, ADC_OFFSET_V, busChannelBank } from './channelBanks.js';
+import {
+  ANALOG_MAX_HALF_RANGE_V, analogGainOf, analogSpan, busChannelBank, isAnalogGain,
+} from './channelBanks.js';
+
+/**
+ * The span every analog bus was saved with before the explicit `analogGroup` marker and
+ * before the scale became profile data: the old ±15 V over /255 model. Only used to
+ * recognise those saves; it is not the current scale (`analogSpan`).
+ */
+const LEGACY_ANALOG_FULL_SCALE_V = 30;
+const LEGACY_ANALOG_OFFSET_V = -15;
 import { cloneBusConfig, defaultBusConfig, normalizeBankBusConfig } from './busPanel.js';
 import { BUS_HEIGHTS, type BusBitOrder, type BusViewConfig } from './busView.js';
 import {
@@ -205,7 +215,12 @@ function restoreCapture(value: unknown, capacity: number): PersistedCaptureSetti
       const kind = raw.kind === 'rising' || raw.kind === 'falling' ? raw.kind : null;
       const volts = typeof raw.volts === 'number' && Number.isFinite(raw.volts) ? raw.volts : null;
       if (kind === null || volts === null) continue;
-      restored[String(start)] = { kind, volts: Math.max(-15, Math.min(15, volts)) };
+      // The group's declared gain is restored with its bus view; the app re-snaps the
+      // level to that gain's range (`clampCaptureSettings`). Here only the widest range
+      // any declarable gain reads is enforced.
+      restored[String(start)] = {
+        kind, volts: Math.max(-ANALOG_MAX_HALF_RANGE_V, Math.min(ANALOG_MAX_HALF_RANGE_V, volts)),
+      };
     }
     capture.analogTriggers = restored;
   }
@@ -248,6 +263,8 @@ function restoreBusConfig(value: unknown, capacity: number): BusViewConfig | nul
         analogGroup < 0 || analogGroup > 3)) {
     return null;
   }
+  // A saved gain must be a declarable ratio; a missing one (older workspaces) is 1x.
+  if (value.analogGain !== undefined && !isAnalogGain(value.analogGain)) return null;
   if (value.voltsPerDiv !== undefined && value.voltsPerDiv !== null &&
       (typeof value.voltsPerDiv !== 'number' || !Number.isFinite(value.voltsPerDiv) || value.voltsPerDiv <= 0)) {
     return null;
@@ -288,13 +305,21 @@ function restoreBusConfig(value: unknown, capacity: number): BusViewConfig | nul
   if (bank === null) return config;
   if (typeof analogGroup === 'number') {
     // The marker is only valid on the bank it names; a mismatched one is ignored.
-    if (analogGroup === bank / 8) config.analogGroup = analogGroup;
+    if (analogGroup === bank / 8) {
+      config.analogGroup = analogGroup;
+      if (value.analogGain !== undefined) config.analogGain = value.analogGain as number;
+      // The span is derived from the gain (1x when absent, as in older saves); a saved or
+      // hand-edited span cannot disagree with the current scale.
+      Object.assign(config, analogSpan(analogGainOf(config)));
+    }
   } else if (/^A[0-3]$/.test(config.name) &&
-             config.fullScaleV === ADC_FULL_SCALE_V && config.offsetV === ADC_OFFSET_V) {
+             config.fullScaleV === LEGACY_ANALOG_FULL_SCALE_V &&
+             config.offsetV === LEGACY_ANALOG_OFFSET_V) {
     // Legacy workspace: a full-bank bus predating the explicit marker used an A0-A3 name
-    // and the ADC's ±15 V span. Either alone is only a coincidence - a user may name an
+    // and the ADC's old ±15 V span. Either alone is only a coincidence - a user may name an
     // ordinary bus "A0" or enter ±15 V as its scale - so both must agree before migrating.
     config.analogGroup = bank / 8;
+    Object.assign(config, analogSpan());
   }
   if (value.usesDefaultName === true) config.usesDefaultName = true;
   return normalizeBankBusConfig(config, capacity, bank);

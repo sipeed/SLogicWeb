@@ -149,8 +149,9 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
     app.includes('smooth: analogBank') &&
     app.includes('const scope = analogBank ? {') &&
     app.includes('zeroPosition: Math.min(1, Math.max(0, bv.zeroPosition ?? 0.5))') &&
-    banks.includes('voltsPerDiv: 10') && banks.includes('zeroPosition: 0.5');
-  check('App hands analog banks the scope scale and smooth flag, with a 10 V/div default',
+    banks.includes('voltsPerDiv: analogDefaultVoltsPerDiv(analogGain)') &&
+    banks.includes('zeroPosition: 0.5');
+  check('App hands analog banks the scope scale and smooth flag, with the gain\'s V/div default (10 V at 1x)',
     wired, `wired=${wired}`);
 }
 
@@ -160,9 +161,10 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
     app.includes('private dragScopeBar(') && app.includes('private wheelScopeBar(') &&
     app.includes("bar.addEventListener('dblclick',") &&
     app.includes('private resetScopeBar(') && app.includes("event.key === 'Home'") &&
-    app.includes('{ voltsPerDiv: 10, zeroPosition: 0.5 }, true') &&
+    app.includes('voltsPerDiv: analogDefaultVoltsPerDiv(analogGainOf(bus)), zeroPosition: 0.5,') &&
     app.includes('private scopeVoltsPerDiv(') && app.includes('scopeScaleAt(') &&
-    app.includes('tickVoltsPerDiv: bv.voltsPerDiv ?? 10') &&
+    app.includes('tickVoltsPerDiv: this.scopeTargetVoltsPerDiv(bv)') &&
+    app.includes('bus.voltsPerDiv ?? analogDefaultVoltsPerDiv(analogGainOf(bus))') &&
     sheet.includes('.scope-scale-bar {') && sheet.includes('position: absolute; right: 0; width: 48px;') &&
     sheet.includes('cursor: ns-resize') && overlay.includes('const rulerX = Math.round(this.wCss - 6) + 0.5;');
   const triggerDrag = app.includes("className = 'scope-trigger-drag'") &&

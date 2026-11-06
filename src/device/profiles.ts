@@ -100,11 +100,27 @@ const ADC_GROUP_CHANNELS = 8;
 /** Four groups cover D0-D7, D8-D15, D16-D23 and D24-D31. */
 const ADC_GROUP_STARTS = [0, 8, 16, 24] as const;
 /**
- * The converter has one fixed bipolar range: ±15 V over codes 0..255
- * (`channelBanks.ts`, HSync `adc.rs`). The value is the magnitude, matching
- * the `AnalogGroup.ranges` contract ("bipolar range in volts, e.g. 1, 5, 15").
+ * The ADC module's code-to-volt facts, confirmed by the hardware team on 2026-11-06: the
+ * 8-bit converter spans 1600 mV behind a 20x front-end attenuation, divided over 255 code
+ * steps with 0 V at code 128. One code is 1.6 * 20 / 255 = 0.12549 V; code 0 reads
+ * -16.063 V and code 255 +15.937 V. Everything else (`channelBanks.ts`) is derived from
+ * these four values. (HSync `adc.rs` and scopehal used ±15 V over /255 with zero at
+ * 127.5, about 6.7% off.)
  */
-const ADC_RANGES_V = [15] as const;
+const ADC_SPAN_V = 1.6;
+const ADC_FRONT_END_ATTENUATION = 20;
+const ADC_CODE_DENOMINATOR = 255;
+const ADC_ZERO_CODE = 128;
+/** The bipolar magnitude, per the `AnalogGroup.ranges` contract: ±16 V at 1x. */
+const ADC_RANGES_V = [ADC_SPAN_V * ADC_FRONT_END_ATTENUATION / 2] as const;
+/**
+ * The ADC module's front-end gain is set on the module (jumper/trimmer), not by any
+ * register the host can write: every code reads as its 1x volts / G. These are the
+ * presets the UI offers; any ratio inside `ADC_CUSTOM_GAIN` may be declared instead
+ * (e.g. 3x -> ±5.33 V). A wrong declaration only mis-scales the displayed volts.
+ */
+const ADC_GAINS = [1, 2, 5, 10] as const;
+const ADC_CUSTOM_GAIN = { min: 0.1, max: 100 } as const;
 const ADC_RESOLUTION_BITS = 8;
 
 /**
@@ -170,6 +186,12 @@ function analogGroup(start: number): AnalogGroup {
     start,
     channels: ADC_GROUP_CHANNELS,
     ranges: ADC_RANGES_V,
+    adcSpanV: ADC_SPAN_V,
+    frontEndAttenuation: ADC_FRONT_END_ATTENUATION,
+    codeDenominator: ADC_CODE_DENOMINATOR,
+    zeroCode: ADC_ZERO_CODE,
+    gains: ADC_GAINS,
+    customGain: ADC_CUSTOM_GAIN,
     resolutionBits: ADC_RESOLUTION_BITS,
     maxHz: {
       // One complete bank is eight inputs. The 800 MHz PLL is the native
@@ -301,7 +323,7 @@ export const SLOGIC32U3_PROFILE: DeviceProfile = {
   analog: {
     groups: ADC_GROUP_STARTS.map(analogGroup),
     // No per-unit ADC calibration data exists yet. The fixed code-to-volt
-    // mapping is the reference (`channelBanks.ts`, ±15 V over 0..255).
+    // mapping is the reference (`analogGroup`: 1.6 V * 20 / 255 per code, 0 V at 128).
     calibration: { id: 'slogic32u3-adc-fixed', version: 1 },
   },
   trigger: {

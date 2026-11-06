@@ -23,6 +23,9 @@
  */
 
 import { BUS_HEIGHTS } from './busView.js';
+import {
+  ANALOG_GAIN_DEFAULT, analogHalfRangeV, analogVoltsPerCode, formatAnalogGain,
+} from './channelBanks.js';
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { defaultChannelName,
@@ -78,6 +81,8 @@ export interface BusCell {
   heightCss: number;
   /** An ADC group's scope controls (V/Div, zero position, height). */
   analog?: boolean;
+  /** An ADC group's declared hardware gain (1 when absent); its range is ±16 V / gain. */
+  gain?: number;
   /** The analog trigger configured on this group, if any. */
   trigger?: { kind: 'rising' | 'falling'; volts: number };
   /**
@@ -284,9 +289,12 @@ export class ChannelList {
     levelLabel.textContent = t('channels.triggerLevel');
     const level = document.createElement('input');
     level.type = 'number';
-    level.min = '-15';
-    level.max = '15';
-    level.step = '0.1';
+    // The level's range and a sensible step follow the group's declared gain.
+    const gain = cell.gain ?? ANALOG_GAIN_DEFAULT;
+    const half = analogHalfRangeV(gain);
+    level.min = String(-half);
+    level.max = String(half);
+    level.step = String(Number(Math.max(0.001, analogVoltsPerCode(gain)).toPrecision(1)));
     level.value = String(cell.trigger?.volts ?? 0);
     level.setAttribute('aria-label', `${t('channels.triggerLevel')} ${cell.name}`);
     const unit = document.createElement('span');
@@ -448,8 +456,14 @@ export class ChannelList {
       }
       const sub = document.createElement('div');
       sub.className = 'bus-cell-sub';
-      sub.textContent = cell.summary;
-      sub.hidden = cell.analog === true;
+      // An analog row names its declared gain and the range it gives ("×3 · ±5 V").
+      const gain = cell.gain ?? ANALOG_GAIN_DEFAULT;
+      sub.textContent = cell.analog === true
+        ? t('channels.analogGainSub', {
+          gain: formatAnalogGain(gain), range: String(Number(analogHalfRangeV(gain).toPrecision(3))),
+        })
+        : cell.summary;
+      if (cell.analog === true) sub.dataset.analogGain = String(gain);
       body.append(head, sub);
       if (cell.analog) {
         // Scale, zero and trigger readouts live on the plot's right ruler. The left

@@ -44,6 +44,7 @@ export function cloneBusConfig(c: BusViewConfig): BusViewConfig {
     heightCss: c.heightCss, hideSources: c.hideSources,
     ...(c.bitOrder !== undefined ? { bitOrder: c.bitOrder } : {}),
     ...(c.analogGroup !== undefined ? { analogGroup: c.analogGroup } : {}),
+    ...(c.analogGain !== undefined ? { analogGain: c.analogGain } : {}),
     ...(c.voltsPerDiv !== undefined ? { voltsPerDiv: c.voltsPerDiv } : {}),
     ...(c.zeroPosition !== undefined ? { zeroPosition: c.zeroPosition } : {}),
     ...(c.usesDefaultName ? { usesDefaultName: true } : {}),

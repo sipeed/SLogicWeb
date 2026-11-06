@@ -209,9 +209,20 @@ Analog channels are not bus rows. Each analog signal has a row with:
   overload badge; trigger slot. The range/V-div/zero/overload are readouts; the only row
   actions are the trigger slot and the row entry (editor). Dragging the ruler is direct
   manipulation of the same values, not a third action.
-- **Range is hardware, scale is view.** Range (e.g. ±1 V, ±15 V) and coupling/attenuation
+- **Range is hardware, scale is view.** Range (e.g. ±1 V, ±16 V) and coupling/attenuation
   are probe settings in the channel editor and require a profile capability. `V/div` and
   zero position are view state and can be changed without affecting the device.
+- **Gain is declared, not set.** A group whose profile lists `gains` shows one gain
+  control in the Acquire panel (the profile presets plus Custom, a ratio field while
+  Custom is chosen), with one plain sentence: the gain must match the module's own
+  setting and is used to convert codes to true voltages. The group's cell and row label
+  name the gain and the range it gives ("A0 ×2 · ±8 V"); the control row shows range,
+  bits and volts per code. Changing it rescales the display, V/div (reset to the gain's
+  default, the finest 1-2-5 step showing the whole range) and trigger level, never the
+  device, and is allowed while a capture runs without restarting it. A configured trigger
+  level keeps its volts, re-snapped to the new code grid and moved to the range edge when
+  outside it (not restored if the gain is changed back); a waiting or Loop trigger is
+  retuned live, like a level drag, and a finished capture keeps its T.
 - The row's right ruler carries the graticule, `V/div` and the trigger level. Dragging
   the trigger line edits the same analog condition as the editor; it is not a second
   trigger.

@@ -1361,7 +1361,8 @@ const persistWriters = [...new Set(appMethodNames
   .filter((name) => appMethodBody(name).includes('this.persistWorkspace();')))].sort();
 const expectedWriters = [
   'adoptCapture', 'adoptDeviceChannels', 'afterChannelChange', 'applySettings', 'applySidebar',
-  'attachAnalyzer', 'configureBusScope', 'configureChannel', 'dragScopeTrigger', 'finishCapture',
+  'attachAnalyzer', 'configureAnalogGain', 'configureBusScope', 'configureChannel', 'dragScopeTrigger',
+  'finishCapture',
   'removeAnalyzer', 'reorder', 'settingsItems', 'startCapture', 'updateAnalyzer',
 ].sort();
 const quietMethods = ['runDecode', 'discardDecodeState', 'renderPanels', 'relayout', 'retranslate'];

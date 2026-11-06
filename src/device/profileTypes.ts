@@ -43,8 +43,29 @@ export interface RateTier {
 export interface AnalogGroup {
   start: number;
   channels: number;
-  /** Bipolar range in volts, e.g. 1, 5, 15 (±1 V, ±5 V, ±15 V). */
+  /** Bipolar range in volts, e.g. 1, 5, 16 (±1 V, ±5 V, ±16 V). */
   ranges: readonly number[];
+  /**
+   * The converter's own input span in volts, before the front end. With the other three
+   * scale fields it fixes the 1x code-to-volt mapping:
+   * LSB = adcSpanV * frontEndAttenuation / codeDenominator, volts = (code - zeroCode) * LSB.
+   */
+  adcSpanV: number;
+  /** Fixed attenuation of the input front end at its default hardware setting (e.g. 20). */
+  frontEndAttenuation: number;
+  /** The code steps the span divides into (255 for the 32U3 module). */
+  codeDenominator: number;
+  /** The code that reads 0 V (128 for the 32U3 module). */
+  zeroCode: number;
+  /**
+   * Gain ratios a front-end stage before the converter may be set to, on the hardware
+   * side (the host never programs it). With gain G every code reads as its 1x volts
+   * divided by G. The user declares the setting; it must include 1 (no gain),
+   * ascending. Empty when the group has no gain stage.
+   */
+  gains: readonly number[];
+  /** Bounds of a custom declared gain ratio, when the stage is continuously adjustable. */
+  customGain?: { min: number; max: number };
   resolutionBits: number;
   maxHz: Readonly<Partial<Record<LinkRate, number>>>;
 }

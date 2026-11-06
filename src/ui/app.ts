@@ -45,8 +45,10 @@ import { CapturePanel, cursorDistanceSideId, cursorEdgeSideId,
   type CursorDistanceSideView, type CursorEdgeChannelView, type CursorEdgeRowView,
   type CursorRowView, type LoopDisplayMetrics, type TriggerStatusView } from './capturePanel.js';
 import {
-  ANALOG_GROUP_COUNT, ADC_FULL_SCALE_V, ADC_OFFSET_V, CHANNEL_BANK_SIZE, analogBankActive,
-  analogBusConfig, analogCodeFromVolts, analogGroupCount, analogSamplerates, analogTriggerVolts,
+  ANALOG_GAIN_DEFAULT, ANALOG_GROUP_COUNT, CHANNEL_BANK_SIZE, analogBankActive,
+  analogBusConfig, analogCodeFromVolts, analogDefaultVoltsPerDiv, analogGainOf, analogGroupCount,
+  analogHalfRangeV, analogSamplerates, analogSpan, analogTriggerVolts, analogVoltsPerCode,
+  analogVoltsPerDivValues, clampAnalogVolts, isAnalogGain,
   busChannelBank,
   captureWidthTiers, channelBankIndices, channelBankStart, busOutOfWidth, lockedChannelBanks,
 } from './channelBanks.js';
@@ -243,6 +245,8 @@ export class App {
   private readonly scopeBars = new Map<string, HTMLDivElement>();
   private readonly scopeTriggers = new Map<string, HTMLDivElement>();
   private readonly scopeScaleAnimations = new Map<string, { from: number; to: number; startedAt: number }>();
+  /** The gain last declared per analog bank start this session (see `configureAnalogGain`). */
+  private readonly analogGainMemory = new Map<number, number>();
   private scopeWheelPersist: number | null = null;
   private readonly channelList: ChannelList;
   private capturePanel!: CapturePanel;
@@ -774,6 +778,7 @@ export class App {
       ? this.renderChannelCount() : s.channels;
     const clamped = clampCaptureSettings(
       s, this.rateCeilings, analogBankActive(this.busViews, s.channels), triggerChannels,
+      this.analogGains(),
     );
     // Analog trigger levels belong to a displayed ADC group. Removing the group drops
     // the level (so re-adding it starts off), and its source inputs are not logic
@@ -818,7 +823,7 @@ export class App {
   /** Digital conditions minus inputs hidden under analog groups, plus the analog ones. */
   private triggerPlan(s: CaptureSettings): {
     digital: CaptureSettings['triggerConditions'];
-    analog: { start: number; kind: 'rising' | 'falling'; volts: number }[];
+    analog: { start: number; kind: 'rising' | 'falling'; volts: number; gain: number }[];
   } {
     if (s.triggerSource === 'analog') {
       // An analog source fixes the time base on one crossing; a second group would only
@@ -835,17 +840,70 @@ export class App {
   /** Analog trigger entries whose bank is currently displayed as an ADC channel. */
   private activeAnalogTriggers(
     s: Pick<CaptureSettings, 'channels' | 'analogTriggers'>,
-  ): { start: number; kind: 'rising' | 'falling'; volts: number }[] {
-    const out: { start: number; kind: 'rising' | 'falling'; volts: number }[] = [];
-    const mapped = new Set(this.busViews
-      .filter((bus) => bus.analogGroup !== undefined)
-      .map((bus) => bus.analogGroup! * CHANNEL_BANK_SIZE));
-    for (const start of mapped) {
+  ): { start: number; kind: 'rising' | 'falling'; volts: number; gain: number }[] {
+    const out: { start: number; kind: 'rising' | 'falling'; volts: number; gain: number }[] = [];
+    const gains = this.analogGains();
+    for (const key of Object.keys(gains)) {
+      const start = Number(key);
       if (start + CHANNEL_BANK_SIZE > s.channels) continue;
       const trigger = s.analogTriggers?.[start];
-      if (trigger) out.push({ start, kind: trigger.kind, volts: trigger.volts });
+      // The level is volts; the code it selects depends on the group's declared gain.
+      if (trigger) out.push({ start, kind: trigger.kind, volts: trigger.volts, gain: gains[start]! });
     }
     return out.sort((a, b) => a.start - b.start);
+  }
+
+  /**
+   * The declared gain of every displayed analog group, keyed by its bank start. When a
+   * restored workspace or the assistant left two views on one bank, the first one wins.
+   */
+  private analogGains(): Record<number, number> {
+    const gains: Record<number, number> = {};
+    for (const bus of this.busViews) {
+      if (bus.analogGroup === undefined) continue;
+      const start = bus.analogGroup * CHANNEL_BANK_SIZE;
+      if (gains[start] === undefined) gains[start] = analogGainOf(bus);
+    }
+    return gains;
+  }
+
+  /** The V/div an analog row is configured to (its gain's default when unset). */
+  private scopeTargetVoltsPerDiv(bus: BusViewConfig): number {
+    return bus.voltsPerDiv ?? analogDefaultVoltsPerDiv(analogGainOf(bus));
+  }
+
+  /**
+   * Declare the gain the ADC module's front-end stage is set to, on the hardware, for one
+   * analog group. Display and conversion only: nothing is sent to the device and a
+   * running capture is neither stopped nor restarted. The row's span and V/div follow the
+   * gain. A configured trigger level keeps its volts and is re-snapped to the new code
+   * grid, clamped to the new range, by the normal settings clamp (`clampCaptureSettings`); while
+   * a capture runs the matcher (or the Loop page detector) is retuned through
+   * `syncActiveTrigger`, the same live path a level drag uses. A completed capture's T is
+   * not cleared: the condition in volts did not change, only how codes read.
+   */
+  private configureAnalogGain(start: number, gain: number): void {
+    if (this.stopping || !isAnalogGain(gain)) return;
+    const index = this.busViews.findIndex((bus) => bus.analogGroup === start / CHANNEL_BANK_SIZE);
+    if (index < 0) return;
+    const bus = this.busViews[index]!;
+    if (analogGainOf(bus) === gain) return;
+    this.analogGainMemory.set(start, gain);
+    this.scopeScaleAnimations.delete(bus.id);
+    // Codes are unchanged, so the bus pyramid stays valid; the frame cache key carries
+    // the span and refreshes on its own.
+    this.busViews[index] = {
+      ...bus, analogGain: gain, ...analogSpan(gain), voltsPerDiv: analogDefaultVoltsPerDiv(gain),
+    };
+    const hadTrigger = this.settings.analogTriggers[start] !== undefined;
+    this.settings = this.clampSettings(this.settings);
+    // Re-snapping may keep the same volts while the code they select changes, so the
+    // matcher is retuned whenever this group carries a level, not only on a volts change.
+    if (hadTrigger) this.syncActiveTrigger();
+    this.dirty = true;
+    this.persistWorkspace();
+    this.relayout();
+    this.renderPanels();
   }
 
   private channelAvailable(index: number): boolean {
@@ -859,6 +917,7 @@ export class App {
       id: b.id, name: b.name, summary: busSummary(b.spec), color: b.color, heightCss: b.heightCss,
       ...(b.analogGroup !== undefined ? {
         analog: true,
+        gain: analogGainOf(b),
         ...(this.settings.analogTriggers[b.analogGroup * CHANNEL_BANK_SIZE]
           ? {
             trigger: this.settings.analogTriggers[b.analogGroup * CHANNEL_BANK_SIZE]!,
@@ -879,11 +938,13 @@ export class App {
     const bus = this.busViews.find((candidate) => candidate.id === id);
     if (!bus || bus.analogGroup === undefined) return;
     const start = bus.analogGroup * CHANNEL_BANK_SIZE;
+    const gain = analogGainOf(bus);
     const analogTriggers = kind
       ? {
         [start]: {
           kind,
-          volts: analogTriggerVolts(kind, Math.max(-15, Math.min(15, volts))),
+          // The range is the codes 0..255 read at the group's declared gain.
+          volts: analogTriggerVolts(kind, clampAnalogVolts(volts, gain), gain),
         },
       }
       : {};
@@ -931,7 +992,7 @@ export class App {
     const analog = plan.analog
       .filter((trigger) => trigger.start + CHANNEL_BANK_SIZE <= channels)
       .map((trigger) => ({
-        start: trigger.start, kind: trigger.kind, level: analogCodeFromVolts(trigger.volts),
+        start: trigger.start, kind: trigger.kind, level: analogCodeFromVolts(trigger.volts, trigger.gain),
       }));
     const phase: TriggerReconcilePhase =
       this.triggerState === 'waiting' ? 'waiting' :
@@ -1171,7 +1232,7 @@ export class App {
   private editBus(id: string): void {
     const bus = this.busViews.find((candidate) => candidate.id === id);
     if (!bus) return;
-    // An analog bank is fixed: MSB-first, A0-A3, ±15 V. Its only control is the Analog
+    // An analog bank is fixed: MSB-first, A0-A3, the profile scale. Its only control is the Analog
     // button, so the generic editor (bit order included) is not offered for it.
     if (bus.analogGroup !== undefined) return;
     this.busPanel.edit(bus);
@@ -1218,7 +1279,7 @@ export class App {
   /**
    * The Analog button: one click turns the bank's eight inputs into the ADC module's
    * analog channel, another turns it back off. There is no dialog - the wiring (MSB
-   * first), name (A0-A3), ±15 V range and hidden sources are fixed by the module
+   * first), name (A0-A3), volt scale and hidden sources are fixed by the module
    * (HSync adc.rs) - and the sample rates follow from that choice.
    */
   private toggleAnalog(start: number): void {
@@ -1233,12 +1294,16 @@ export class App {
     if (active) {
       // Drop every view claiming this bank: a restored workspace or the assistant may
       // have left more than one, and the button's state is per bank, not per view.
+      this.analogGainMemory.set(start, analogGainOf(this.busViews.find((b) => b.analogGroup === group)));
       this.busViews = this.busViews.filter((b) => b.analogGroup !== group);
     } else {
       const color = busColor(this.nextBus);
       const id = `bus-${this.nextBus++}`;
+      // The gain is set on the module, so turning the group back on in this session
+      // keeps the ratio last declared for it.
       this.busViews.push({
-        ...analogBusConfig(start, this.channels.length, color),
+        ...analogBusConfig(start, this.channels.length, color,
+          this.analogGainMemory.get(start) ?? ANALOG_GAIN_DEFAULT),
         id, builder: null, builtFor: null, cache: null,
       });
     }
@@ -1272,7 +1337,7 @@ export class App {
 
   /**
    * A full aligned eight-channel bank is the converter's data bus, so every view claiming
-   * one is brought to the module's fixed definition: MSB first, A0-A3, ±15 V, sources
+   * one is brought to the module's fixed definition: MSB first, A0-A3, the profile volt scale at its gain, sources
    * hidden. Legacy workspaces and the assistant may have stored another order or range;
    * the Analog cell must never describe a different reading than the one drawn.
    */
@@ -1281,14 +1346,17 @@ export class App {
       if (bus.analogGroup === undefined) return bus;
       const start = bus.analogGroup * CHANNEL_BANK_SIZE;
       if (start + CHANNEL_BANK_SIZE > this.channels.length) return bus;
-      const fixed = analogBusConfig(start, this.channels.length, bus.color);
+      const fixed = analogBusConfig(start, this.channels.length, bus.color, analogGainOf(bus));
       const same = bus.name === fixed.name && bus.bitOrder === fixed.bitOrder &&
         bus.fullScaleV === fixed.fullScaleV && bus.offsetV === fixed.offsetV &&
         bus.hideSources === fixed.hideSources && bus.spec.encoding === fixed.spec.encoding &&
         bus.spec.clock === null && bus.spec.bits.join(',') === fixed.spec.bits.join(',');
       if (same) return bus;
+      // V/div and the 0 V position are view state: a scale correction keeps them.
       return {
         ...fixed, id: bus.id, heightCss: bus.heightCss, style: bus.style,
+        ...(bus.voltsPerDiv !== undefined && bus.voltsPerDiv !== null ? { voltsPerDiv: bus.voltsPerDiv } : {}),
+        ...(bus.zeroPosition !== undefined ? { zeroPosition: bus.zeroPosition } : {}),
         builder: null, builtFor: null, cache: null,
       };
     });
@@ -1343,7 +1411,7 @@ export class App {
 
   /** The displayed V/Div, easing both the trace and its ruler toward the configured value. */
   private scopeVoltsPerDiv(bus: BusViewState): number {
-    const target = bus.voltsPerDiv ?? 10;
+    const target = this.scopeTargetVoltsPerDiv(bus);
     const animation = this.scopeScaleAnimations.get(bus.id);
     if (!animation || animation.to !== target) return target;
     const frame = scopeScaleAt(animation.from, animation.to, animation.startedAt, performance.now());
@@ -1391,7 +1459,7 @@ export class App {
       if (bar.getAttribute('aria-valuenow') !== String(Math.round(zeroPosition * 100))) {
         bar.setAttribute('aria-valuenow', String(Math.round(zeroPosition * 100)));
       }
-      const valueText = `${Math.round(zeroPosition * 100)}%, ${bus.voltsPerDiv ?? 10} ${t('bus.voltsPerDiv')}`;
+      const valueText = `${Math.round(zeroPosition * 100)}%, ${this.scopeTargetVoltsPerDiv(bus)} ${t('bus.voltsPerDiv')}`;
       if (bar.getAttribute('aria-valuetext') !== valueText) {
         bar.setAttribute('aria-valuetext', valueText);
       }
@@ -1413,8 +1481,6 @@ export class App {
         drag.title = t('bus.triggerDragTip');
         drag.setAttribute('aria-label', drag.title);
         drag.setAttribute('role', 'slider');
-        drag.setAttribute('aria-valuemin', '-15');
-        drag.setAttribute('aria-valuemax', '15');
         drag.setAttribute('aria-orientation', 'vertical');
         drag.tabIndex = 0;
         drag.addEventListener('pointerdown', (event) => this.dragScopeTrigger(event, drag!));
@@ -1434,7 +1500,13 @@ export class App {
       const visible = trigger.volts >= geometry.bottomV && trigger.volts <= geometry.topV;
       drag.hidden = !visible;
       drag.style.top = `${Math.round(y) - 6}px`;
-      drag.setAttribute('aria-valuenow', trigger.volts.toFixed(2));
+      // The level's nominal range is ±16 V / G at the group's declared gain.
+      const half = String(analogHalfRangeV(analogGainOf(bus)));
+      if (drag.getAttribute('aria-valuemax') !== half) {
+        drag.setAttribute('aria-valuemin', `-${half}`);
+        drag.setAttribute('aria-valuemax', half);
+      }
+      drag.setAttribute('aria-valuenow', trigger.volts.toFixed(4));
       drag.setAttribute('aria-valuetext', `${trigger.volts.toFixed(3)} V`);
     }
     for (const [id, bar] of this.scopeBars) {
@@ -1461,7 +1533,7 @@ export class App {
     bar.focus({ preventScroll: true });
     const startY = event.clientY;
     const start = bus.zeroPosition ?? 0.5;
-    const height = scopeGeometry(0, bar.offsetHeight, bus.voltsPerDiv ?? 10, start).innerHeight;
+    const height = scopeGeometry(0, bar.offsetHeight, this.scopeTargetVoltsPerDiv(bus), start).innerHeight;
     let last = start;
     const move = (ev: PointerEvent): void => {
       last = Math.min(1, Math.max(0, start + (ev.clientY - startY) / height));
@@ -1486,9 +1558,11 @@ export class App {
     if (!bus || bus.analogGroup === undefined) return;
     event.preventDefault();
     event.stopPropagation();
-    // Display-only reset: recenter 0 V and restore the normal 10 V/div scale. The usual
-    // writer keeps the spatial zoom animation and one persisted workspace commit.
-    this.configureBusScope(bus.id, { voltsPerDiv: 10, zeroPosition: 0.5 }, true);
+    // Display-only reset: recenter 0 V and restore the gain's default scale (10 V/div at
+    // 1x). The usual writer keeps the spatial zoom animation and one persisted commit.
+    this.configureBusScope(bus.id, {
+      voltsPerDiv: analogDefaultVoltsPerDiv(analogGainOf(bus)), zeroPosition: 0.5,
+    }, true);
   }
 
   private wheelScopeBar(event: WheelEvent, bar: HTMLDivElement): void {
@@ -1498,8 +1572,9 @@ export class App {
     if (event.ctrlKey || event.shiftKey || event.deltaY === 0) return;
     event.preventDefault();
     event.stopPropagation();
-    const current = bus.voltsPerDiv ?? 10;
-    const next = nextScopeVoltsPerDiv(current, event.deltaY < 0 ? -1 : 1);
+    const current = this.scopeTargetVoltsPerDiv(bus);
+    const next = nextScopeVoltsPerDiv(current, event.deltaY < 0 ? -1 : 1,
+      analogVoltsPerDivValues(analogGainOf(bus)));
     if (next === current) return;
     this.configureBusScope(bus.id, { voltsPerDiv: next }, false);
     // Trackpad momentum may deliver dozens of events. Animate each target, but rebuild
@@ -1527,8 +1602,9 @@ export class App {
     }
     if (event.key !== '+' && event.key !== '=' && event.key !== '-') return;
     event.preventDefault();
-    const current = bus.voltsPerDiv ?? 10;
-    const next = nextScopeVoltsPerDiv(current, event.key === '-' ? 1 : -1);
+    const current = this.scopeTargetVoltsPerDiv(bus);
+    const next = nextScopeVoltsPerDiv(current, event.key === '-' ? 1 : -1,
+      analogVoltsPerDivValues(analogGainOf(bus)));
     if (next !== current) this.configureBusScope(bus.id, { voltsPerDiv: next }, true);
   }
 
@@ -1539,7 +1615,9 @@ export class App {
     const trigger = this.settings.analogTriggers[bus.analogGroup * CHANNEL_BANK_SIZE];
     if (!trigger) return;
     event.preventDefault();
-    const step = event.shiftKey ? 1 : ADC_FULL_SCALE_V / 255;
+    // One converter code (LSB / G), or with Shift 1 V / G (about 8 codes).
+    const gain = analogGainOf(bus);
+    const step = event.shiftKey ? 1 / gain : analogVoltsPerCode(gain);
     const volts = trigger.volts + (event.key === 'ArrowUp' ? step : -step);
     this.configureAnalogTrigger(bus.id, trigger.kind, volts);
   }
@@ -1555,6 +1633,7 @@ export class App {
     drag.focus({ preventScroll: true });
     const startY = event.clientY;
     const startVolts = trigger.volts;
+    const gain = analogGainOf(bus);
     // A V/div animation may still be easing when the handle is grabbed. Re-read the
     // displayed scale for every move so the drag follows the ruler the user can see,
     // instead of a stale snapshot taken at pointerdown.
@@ -1571,13 +1650,15 @@ export class App {
       const perDiv = this.scopeVoltsPerDiv(bus);
       const startTraceY = scopeGeometry(top, band, perDiv, zeroPosition).yVolts(startVolts);
       const atY = startTraceY + (ev.clientY - startY);
-      last = Math.max(-15, Math.min(15, scopeVoltsAtY(atY, top, band, perDiv, zeroPosition)));
+      last = clampAnalogVolts(scopeVoltsAtY(atY, top, band, perDiv, zeroPosition), gain);
       // Volts-only preview: bypassing applySettings avoids panel/layout churn. Do not add
       // rate/width/mode/retention edits here; those need its running-capture guards.
       const next = this.clampSettings({
         ...this.settings,
         triggerSource: 'analog',
-        analogTriggers: { [start]: { kind: trigger.kind, volts: analogTriggerVolts(trigger.kind, last) } },
+        analogTriggers: {
+          [start]: { kind: trigger.kind, volts: analogTriggerVolts(trigger.kind, last, gain) },
+        },
       });
       if (!this.running && !this.stopping && triggerSettingsChanged(this.settings, next)) {
         this.triggerState = 'off';
@@ -1644,11 +1725,11 @@ export class App {
         ? this.settings.analogTriggers?.[bv.analogGroup! * CHANNEL_BANK_SIZE] : undefined;
       const scope = analogBank ? {
         voltsPerDiv: this.scopeVoltsPerDiv(bv),
-        tickVoltsPerDiv: bv.voltsPerDiv ?? 10,
+        tickVoltsPerDiv: this.scopeTargetVoltsPerDiv(bv),
         voltsPerDivUnit: t('bus.voltsPerDiv'),
         zeroPosition: Math.min(1, Math.max(0, bv.zeroPosition ?? 0.5)),
         offsetV: bv.offsetV,
-        fullScaleV: bv.fullScaleV ?? ADC_FULL_SCALE_V,
+        fullScaleV: bv.fullScaleV ?? analogSpan(analogGainOf(bv)).fullScaleV,
         ...(analogTrigger ? {
           triggerVolts: analogTrigger.volts,
           triggerKind: analogTrigger.kind,
@@ -3944,6 +4025,7 @@ export class App {
         onSettings: (s) => this.applySettings(s),
         onToggleChannel: (i, on) => this.setChannelEnabled(i, on),
         onToggleAnalog: (start) => this.toggleAnalog(start),
+        onAnalogGain: (start, gain) => this.configureAnalogGain(start, gain),
         onChannelWidth: (n) => this.setChannelWidth(n),
         onUsbControl: (command) => this.usbControl(command),
         onRemoveCursor: (id) => this.removeCursor(id),
@@ -5085,7 +5167,7 @@ export class App {
           condition: {
             start: analogStart.start,
             kind: analogStart.kind,
-            level: analogCodeFromVolts(analogStart.volts),
+            level: analogCodeFromVolts(analogStart.volts, analogStart.gain),
           },
           // About twenty million byte reads per second at any sample rate.
           stride: Math.max(1, Math.ceil(cfg.samplerate / 20e6)),
@@ -5254,7 +5336,7 @@ export class App {
             level: triggerConditions[0].level,
           } : {}),
           analog: analogTriggers.map((a) => ({
-            start: a.start, kind: a.kind, level: analogCodeFromVolts(a.volts),
+            start: a.start, kind: a.kind, level: analogCodeFromVolts(a.volts, a.gain),
           })),
           preTriggerSamples,
           maxSamples: isLoop ? Number.POSITIVE_INFINITY : this.captureLimitSamples,
@@ -6382,6 +6464,7 @@ export class App {
 function clampCaptureSettings(
   s: CaptureSettings, ceilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ,
   analog = false, triggerChannels: number = s.channels,
+  analogGains: Readonly<Record<number, number>> = {},
 ): CaptureSettings {
   const ceiling = ceilings[s.channels] ?? 200e6;
   let samplerate = Math.min(s.samplerate, ceiling);
@@ -6413,10 +6496,11 @@ function clampCaptureSettings(
     if (value.kind !== 'rising' && value.kind !== 'falling') continue;
     const volts = Number(value.volts);
     if (!Number.isFinite(volts)) continue;
+    // Snapped to the group's code grid at its declared gain, inside what codes 0..255 read.
+    const gain = analogGains[start] ?? ANALOG_GAIN_DEFAULT;
     analogTriggers[start] = {
       kind: value.kind,
-      volts: analogTriggerVolts(value.kind,
-        Math.max(ADC_OFFSET_V, Math.min(ADC_OFFSET_V + ADC_FULL_SCALE_V, volts))),
+      volts: analogTriggerVolts(value.kind, clampAnalogVolts(volts, gain), gain),
     };
   }
   return {

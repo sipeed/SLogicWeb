@@ -1458,6 +1458,14 @@ html.resizing { cursor: col-resize; user-select: none; }
   border: 1px solid #4C9AFF; background: rgb(76 154 255 / 12%); color: var(--text);
   font: inherit; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.analog-gain-row { align-items: flex-end; margin-top: 6px; min-width: 0; }
+.analog-gain-row > .select-field { flex: 0 1 96px; }
+.analog-gain-row > .field[hidden] { display: none; }
+.analog-gain-row > .field:not(.analog-gain-readout):not(.select-field) { flex: 0 1 72px; }
+.analog-gain-readout {
+  flex: 1 1 auto; min-width: 0; padding-bottom: 5px; font-size: 10px; color: var(--text50);
+  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .global-trigger-list { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
 .global-trigger-row {
   display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 4px 3px 6px;

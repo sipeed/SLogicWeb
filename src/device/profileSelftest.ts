@@ -282,6 +282,54 @@ expectInvalid(
   'analog-ranges',
 );
 expectInvalid(
+  'an ADC code count beyond the converter resolution',
+  variant(SLOGIC32U3_PROFILE, (p) => {
+    const first = p.analog.groups[0]!;
+    p.analog = { ...p.analog, groups: [{ ...first, codeDenominator: 512 }] };
+  }),
+  'analog-scale',
+);
+expectInvalid(
+  'an ADC zero code outside the converter range',
+  variant(SLOGIC32U3_PROFILE, (p) => {
+    const first = p.analog.groups[0]!;
+    p.analog = { ...p.analog, groups: [{ ...first, zeroCode: 256 }] };
+  }),
+  'analog-scale',
+);
+expectInvalid(
+  'a zero ADC input span',
+  variant(SLOGIC32U3_PROFILE, (p) => {
+    const first = p.analog.groups[0]!;
+    p.analog = { ...p.analog, groups: [{ ...first, adcSpanV: 0 }] };
+  }),
+  'analog-scale',
+);
+expectInvalid(
+  'analog gain presets without 1x',
+  variant(SLOGIC32U3_PROFILE, (p) => {
+    const first = p.analog.groups[0]!;
+    p.analog = { ...p.analog, groups: [{ ...first, gains: [2, 5] }] };
+  }),
+  'analog-gains',
+);
+expectInvalid(
+  'descending analog gain presets',
+  variant(SLOGIC32U3_PROFILE, (p) => {
+    const first = p.analog.groups[0]!;
+    p.analog = { ...p.analog, groups: [{ ...first, gains: [1, 10, 5] }] };
+  }),
+  'analog-gains',
+);
+expectInvalid(
+  'a custom gain range that excludes a preset',
+  variant(SLOGIC32U3_PROFILE, (p) => {
+    const first = p.analog.groups[0]!;
+    p.analog = { ...p.analog, groups: [{ ...first, customGain: { min: 0.5, max: 4 } }] };
+  }),
+  'analog-gains',
+);
+expectInvalid(
   'zero ADC resolution',
   variant(SLOGIC32U3_PROFILE, (p) => {
     const first = p.analog.groups[0]!;
@@ -392,10 +440,18 @@ expectInvalid(
     starts === '0,8,16,24' &&
       total === 32 &&
       groups.every((group) => group.channels === 8 &&
-        group.ranges.includes(15) && group.resolutionBits === 8),
+        group.ranges.includes(16) && group.resolutionBits === 8 &&
+        group.adcSpanV === 1.6 && group.frontEndAttenuation === 20 &&
+        group.codeDenominator === 255 && group.zeroCode === 128),
     `starts=${starts}, total=${total}, ` +
       `ranges=${groups.map((group) => group.ranges.join('/')).join(',')}, ` +
       `resolution=${groups.map((group) => group.resolutionBits).join(',')}`,
+  );
+  check(
+    '32U3 groups declare the module gain presets 1/2/5/10 and a 0.1-100 custom ratio',
+    groups.every((group) => group.gains.join(',') === '1,2,5,10' &&
+      group.customGain?.min === 0.1 && group.customGain.max === 100),
+    groups.map((group) => `${group.gains.join('/')}@${JSON.stringify(group.customGain)}`).join(','),
   );
 }
 

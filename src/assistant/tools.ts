@@ -288,6 +288,8 @@ function busView(b: HostBus, index: number): Record<string, unknown> {
     encoding: c.spec.encoding,
     full_scale_v: c.fullScaleV,
     offset_v: c.offsetV,
+    // An ADC group reads its profile range / gain; the gain is declared, never measured.
+    ...(c.analogGroup !== undefined ? { analog_group: c.analogGroup, analog_gain: c.analogGain ?? 1 } : {}),
     style: c.style,
     hide_sources: c.hideSources,
     overview_ready: b.built,

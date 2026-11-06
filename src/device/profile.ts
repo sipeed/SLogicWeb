@@ -504,6 +504,52 @@ export function validateProfile(p: DeviceProfile): ProfileValidation {
       }
       previousRange = range;
     }
+    // The 1x code-to-volt facts: a positive span and attenuation, a code denominator the
+    // converter's resolution can reach, and a zero code inside its code range.
+    const bitsForCodes: unknown = group.resolutionBits;
+    // An invalid resolution is reported by its own check below.
+    const topCode = isInteger(bitsForCodes) && bitsForCodes >= 1 && bitsForCodes <= 32
+      ? 2 ** bitsForCodes - 1 : Number.POSITIVE_INFINITY;
+    if (!isFiniteNumber(group.adcSpanV) || group.adcSpanV <= 0 ||
+        !isFiniteNumber(group.frontEndAttenuation) || group.frontEndAttenuation <= 0 ||
+        !isFiniteNumber(group.codeDenominator) || group.codeDenominator < 1 ||
+        group.codeDenominator > topCode + 1 ||
+        !isFiniteNumber(group.zeroCode) || group.zeroCode < 0 || group.zeroCode > topCode) {
+      return fail(
+        'analog-scale',
+        `analog group at ${start} needs adcSpanV > 0, frontEndAttenuation > 0, ` +
+          `1 <= codeDenominator <= 2^resolutionBits and 0 <= zeroCode < 2^resolutionBits`,
+      );
+    }
+    // A declared gain divides the range (`AnalogGroup.gains`): 1 must be offered, the
+    // list ascends, and a custom ratio's bounds bracket every preset.
+    const gains: unknown = group.gains;
+    if (!Array.isArray(gains) || (gains.length > 0 && !gains.includes(1))) {
+      return fail('analog-gains', `analog group at ${start} must list gains including 1`);
+    }
+    let previousGain = 0;
+    for (const gain of gains) {
+      if (!isFiniteNumber(gain) || gain <= previousGain) {
+        return fail(
+          'analog-gains',
+          `analog gains at group ${start} must be positive and strictly ascending, got ${gains.join(', ')}`,
+        );
+      }
+      previousGain = gain;
+    }
+    const customGain: unknown = group.customGain;
+    if (customGain !== undefined) {
+      if (!isRecord(customGain) || !isFiniteNumber(customGain.min) ||
+          !isFiniteNumber(customGain.max) || customGain.min <= 0 ||
+          customGain.min > 1 || customGain.max < 1 ||
+          gains.some((gain) => (gain as number) < (customGain.min as number) ||
+            (gain as number) > (customGain.max as number))) {
+        return fail(
+          'analog-gains',
+          `analog customGain at group ${start} needs 0 < min <= 1 <= max bracketing every preset`,
+        );
+      }
+    }
     const bits: unknown = group.resolutionBits;
     if (!isInteger(bits) || bits < 1 || bits > 32) {
       return fail(

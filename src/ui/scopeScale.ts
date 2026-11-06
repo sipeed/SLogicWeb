@@ -3,7 +3,14 @@
 /** Shared ADC scope coordinates. The ruler, graticule, trace and trigger must agree. */
 export const SCOPE_DIVISIONS = 4;
 export const SCOPE_PAD_CSS = 6;
-export const SCOPE_VDIV_VALUES = [0.5, 1, 2, 5, 10, 20] as const;
+/**
+ * Every 1-2-5 V/div step any declared analog gain can use: 0.005 V (±0.16 V at 100x)
+ * to 200 V (±160 V at 0.1x). A row walks only the slice its range makes useful
+ * (`scopeVoltsPerDivValues`); at 1x that slice is the original 0.5..20 V.
+ */
+export const SCOPE_VDIV_VALUES = [
+  0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200,
+] as const;
 export const SCOPE_SCALE_ANIMATION_MS = 140;
 
 export interface ScopeGeometry {
@@ -62,9 +69,37 @@ export function formatScopeVolts(volts: number): string {
   return `${rounded} V`;
 }
 
-/** One wheel/key step through the supported scope scales, including restored values. */
-export function nextScopeVoltsPerDiv(current: number, direction: -1 | 1): number {
-  const values = [...new Set([...SCOPE_VDIV_VALUES, current])].sort((a, b) => a - b);
+/**
+ * The default V/div for a bipolar half-range: the finest step whose four divisions show
+ * all of it (two divisions each side of a centred 0 V). 10 V for ±16 V.
+ */
+export function scopeDefaultVoltsPerDiv(halfRangeV: number): number {
+  const need = Math.abs(halfRangeV) / (SCOPE_DIVISIONS / 2);
+  return SCOPE_VDIV_VALUES.find((value) => value >= need - 1e-9) ??
+    SCOPE_VDIV_VALUES[SCOPE_VDIV_VALUES.length - 1]!;
+}
+
+/**
+ * The steps a row with this half-range walks: from 1/20 of its default V/div (finer than
+ * one 8-bit code per division) up to twice the default (the whole range in one
+ * division). ±16 V gives 0.5..20 V.
+ */
+export function scopeVoltsPerDivValues(halfRangeV: number): number[] {
+  const half = Math.abs(halfRangeV);
+  if (!Number.isFinite(half) || half <= 0) return [...SCOPE_VDIV_VALUES];
+  const base = scopeDefaultVoltsPerDiv(half);
+  return SCOPE_VDIV_VALUES.filter((value) => value >= base / 20 - 1e-9 && value <= base * 2 + 1e-9);
+}
+
+/**
+ * One wheel/key step through a row's scope scales (`values`, default every step),
+ * including a restored value outside them.
+ */
+export function nextScopeVoltsPerDiv(
+  current: number, direction: -1 | 1,
+  values: readonly number[] = SCOPE_VDIV_VALUES,
+): number {
+  values = [...new Set([...values, current])].sort((a, b) => a - b);
   const at = Math.max(0, values.findIndex((value) => value >= current - 1e-9));
   return values[Math.min(values.length - 1, Math.max(0, at + direction))]!;
 }

@@ -683,6 +683,8 @@ check(
   ];
   const controlCalls = capture.match(/selectControl\(/g)?.length ?? 0;
   const missingKeys = controlKeys.filter((key) => !capture.includes(`'${key}'`));
+  // The per-group analog gain select is the sixth call, keyed by its bank start.
+  const gainKey = capture.includes('`capture.analogGain.${start}`');
   const oldNativeSites = [
     'const rate = select(',
     'const th = select(',
@@ -696,8 +698,8 @@ check(
     "labelled(t('capturePanel.testMode')",
   ].filter((needle) => capture.includes(needle));
   check(
-    'all four existing capture selects plus edge channels use selectControl with stable keys',
-    missingKeys.length === 0 && controlCalls === 5 && oldNativeSites.length === 0 &&
+    'all four existing capture selects plus edge channels and analog gain use selectControl with stable keys',
+    missingKeys.length === 0 && controlCalls === 6 && gainKey && oldNativeSites.length === 0 &&
       oldLabelled.length === 0,
     `missingKeys=${JSON.stringify(missingKeys)}, controlCalls=${controlCalls}, ` +
     `oldNativeSites=${JSON.stringify(oldNativeSites)}, oldLabelled=${JSON.stringify(oldLabelled)}`,
