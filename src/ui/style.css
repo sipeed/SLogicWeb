@@ -1410,6 +1410,25 @@ html[data-theme="light"] .grid-canvas { mix-blend-mode: darken; }
 .empty-hint-example:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .empty-hint-example:disabled { cursor: default; opacity: .6; }
 
+/* A file dragged over the window: the plot says where it goes. The label is sticky so a
+   tall (scrolled) plot still shows it near the top of the viewport. */
+.drop-overlay {
+  position: absolute; inset: 0; z-index: 6;
+  display: none; flex-direction: column; align-items: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg10) 75%, transparent);
+  outline: 2px dashed var(--primary); outline-offset: -8px;
+}
+#plot.drop-active > .drop-overlay { display: flex; }
+#plot.drop-active > #empty-hint { visibility: hidden; }
+.drop-overlay > span {
+  position: sticky; top: 48px; margin: 48px 16px 0;
+  padding: 8px 14px;
+  background: var(--card); color: var(--card-foreground);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 13px; line-height: 20px; text-align: center;
+}
+
 /* ---------------------------------------------------------------- side panel */
 
 #side-panel {

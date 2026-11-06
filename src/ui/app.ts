@@ -74,6 +74,7 @@ import {
   captureFileName, formatForFileName, localDateParts, saveFilePickerTypes, type CaptureFileFormat,
 } from './captureFileName.js';
 import { saveSr, srExportParts, type SrProbe } from './srSave.js';
+import { FileDragDepth } from './fileGuards.js';
 import { connectSamplerate } from './connectDefaults.js';
 import {
   analogRateAfterClamp, analogRateBeforeClamp, analogRateUserEdit,
@@ -352,6 +353,8 @@ export class App {
     window: { navigator: navigator as PlatformNavigatorLike, isSecureContext: window.isSecureContext },
   }));
   private platformNoticeDismissed = false;
+  /** Nested dragenter/dragleave depth of a file drag; drives the plot's drop overlay. */
+  private readonly fileDrag = new FileDragDepth();
   /** Info about the file just opened (e.g. probes an old .sr could not carry); null when none. */
   private fileNotice: { key: MessageKey; vars?: MessageVars } | null = null;
   private readonly shortcutsDialog: ShortcutsDialog;
@@ -3070,13 +3073,25 @@ export class App {
       }
     });
 
-    // Drag and drop a capture file straight onto the window.
+    // Drag and drop a capture file straight onto the window. While files are over the
+    // page the plot shows a drop overlay; enter/leave fire for every child crossed, so
+    // FileDragDepth counts them, and drop/dragend always clear it.
+    window.addEventListener('dragenter', (e) => {
+      this.showDropOverlay(this.fileDrag.enter(e.dataTransfer?.types));
+    });
+    window.addEventListener('dragleave', () => this.showDropOverlay(this.fileDrag.leave()));
+    window.addEventListener('dragend', () => this.showDropOverlay(this.fileDrag.reset()));
     window.addEventListener('dragover', (e) => e.preventDefault());
     window.addEventListener('drop', (e) => {
       e.preventDefault();
+      this.showDropOverlay(this.fileDrag.reset());
       const files = [...(e.dataTransfer?.files ?? [])];
       if (files.length) void this.openFiles(files);
     });
+  }
+
+  private showDropOverlay(active: boolean): void {
+    this.el.plot.classList.toggle('drop-active', active);
   }
 
   private rowAt(cssY: number): RowBox | null {

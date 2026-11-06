@@ -335,7 +335,7 @@ function check(name: string, pass: boolean, detail: string): void {
 
   const expectedText = [
     'app.title', 'connectHelp.retry',
-    'emptyHint.line1', 'emptyHint.line2', 'emptyHint.example',
+    'emptyHint.line1', 'emptyHint.line2', 'emptyHint.example', 'drop.overlay',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortOpen', 'toolbar.shortSave',
     'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage',
     'toolbar.shortTheme', 'error.details',

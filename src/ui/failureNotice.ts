@@ -27,7 +27,7 @@ const FILE_TYPE: ReadonlySet<DiagnosticCode> = new Set<DiagnosticCode>([
 /** A well-formed file using something the importer does not support. */
 const FILE_UNSUPPORTED: ReadonlySet<DiagnosticCode> = new Set<DiagnosticCode>([
   'file.sr.multiDisk', 'file.sr.compression', 'file.sr.analogCapture', 'file.sr.analogChannels',
-  'file.sr.probes', 'file.sr.unitsize', 'file.sr.unitsizeProbes', 'file.lwcap.channels',
+  'file.sr.probes', 'file.sr.unitsize', 'file.lwcap.channels',
 ]);
 /** The decode itself was too large for one pass: a shorter range is the remedy. */
 const DECODE_TOO_LARGE: ReadonlySet<DiagnosticCode> = new Set<DiagnosticCode>([

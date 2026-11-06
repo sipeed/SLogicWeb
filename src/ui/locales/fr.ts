@@ -140,10 +140,11 @@ export const fr: Messages = {
 
   // -------------------------------------------------------- empty hint
   'emptyHint.line1': 'Aucune capture chargée.',
-  'emptyHint.line2': 'Ouvrez un fichier .sr ou .lwcap, ou connectez un SLogic16/32 U3.',
-  'emptyHint.line2Connected': 'Appuyez sur Capturer pour enregistrer depuis {device}, ou ouvrez un fichier .sr ou .lwcap.',
-  'emptyHint.line2NoUsb': 'Ouvrez un fichier .sr ou .lwcap pour l’afficher et le décoder.',
+  'emptyHint.line2': 'Ouvrez un fichier .sr ou .lwcap (ou glissez-le ici), ou connectez un SLogic16/32 U3.',
+  'emptyHint.line2Connected': 'Appuyez sur Capturer pour enregistrer depuis {device}, ou ouvrez un fichier .sr ou .lwcap (ou glissez-le ici).',
+  'emptyHint.line2NoUsb': 'Ouvrez un fichier .sr ou .lwcap (ou glissez-le ici) pour l’afficher et le décoder.',
   'emptyHint.example': 'Ouvrir un exemple de capture',
+  'drop.overlay': 'Déposez un fichier .sr / .lwcap pour l’ouvrir',
 
   // ---------------------------------------------------- browser notice
   'notice.noUsb': 'Ce navigateur permet seulement d’afficher et de décoder des fichiers. Pour connecter un appareil, utilisez Chrome ou Edge.',
