@@ -638,6 +638,8 @@ Key transitions (the full table is generated in one pure module):
 - A new session starts FollowLive. A user pan/zoom stores a Fixed interval relative to
   `displayOrigin`; Fixed survives Repeat waves while it fits retention and otherwise falls
   back to the mode default, never an automatic Fit.
+- A Single that completes while still FollowLive shows the whole capture (T stays the
+  origin). A manual stop, a Fixed view, a Repeat wave and Loop keep their view.
 - Repeat never shows a vacuum: while the next wave waits or has no data at the viewport,
   the previous completed wave (with its own T) is displayed as a composite layer. A miss
   ends the wave as completed and the next Interval retries.

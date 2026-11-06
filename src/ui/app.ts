@@ -138,7 +138,8 @@ import {
 import type { CaptureStartOrigin, CaptureStopReason } from './captureViewport.js';
 import {
   beginSweep, createSession, resolveSessionView, secondsRangeToSamples,
-  sessionAfterTrigger, sessionWithManualView, triggerSearchSamples, type CaptureSession,
+  sessionAfterTrigger, sessionWithManualView, sweepEndFitsCapture, triggerSearchSamples,
+  type CaptureSession,
 } from './captureSession.js';
 import { RepeatCaptureTimer } from './repeatCapture.js';
 import {
@@ -5547,6 +5548,9 @@ export class App {
     if (!stickyWave) this.persistWorkspace();
     const captured = this.captureStore;
     const sr = captured.samplerate;
+    // A Single that completed while following shows the whole capture (see the rule).
+    const fitsCapture = this.session !== null && !this.captureIsLoop && !this.repeatSession &&
+      sweepEndFitsCapture(this.session, reason, this.viewIntent || !this.stack.followLatest);
     this.captureLabel = this.triggerState === 'not-found'
       ? { kind: 'stoppedNoTrigger', samples: captured.length }
       : { kind: 'live', samples: captured.length, rate: sr, seconds: captured.length / sr };
@@ -5595,6 +5599,10 @@ export class App {
       this.repeatWaveHolding = false;
       this.repeatMissed = false;
       this.clearRepeatLayers();
+      if (fitsCapture) {
+        this.setFollow(false);
+        this.stack.zoomToFit();
+      }
       this.relayout();
       this.renderPanels();
       this.dirty = true;

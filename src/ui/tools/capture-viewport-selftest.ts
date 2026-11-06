@@ -5,6 +5,7 @@
  *   - a new session starts in FollowLive with the default live window;
  *   - a user pan/zoom is recorded as a Fixed T-relative interval on the next draw;
  *   - the session policy is resolved per draw and falls back without any automatic Fit;
+ *   - only a completed Single that was still following fits the whole capture;
  *   - Repeat sweeps keep the session (and its policy), every other end clears it.
  *
  * The pure rules live in capture-session-selftest.ts; this file checks that the App
@@ -104,15 +105,23 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
 {
   const finish = between(app, 'private finishCapture(', 'private discardDecodeState');
   const fit = between(app, 'private fitViewport()', 'private centerOverview');
-  const noAutoFit = !finish.includes('captureFinishFits') && !finish.includes('zoomToFit') &&
+  // The one end-of-capture fit is the pure rule's answer, applied once outside the
+  // Repeat hand-over branch; nothing else in finishCapture moves the view.
+  const fitGate = between(finish, 'const fitsCapture =', 'this.captureLabel =');
+  const fitApply = between(finish, '} else {\n      this.session = null;', 'this.relayout();');
+  const noAutoFit = !finish.includes('captureFinishFits') &&
+    (finish.match(/zoomToFit/g) ?? []).length === 1 &&
+    fitGate.includes('sweepEndFitsCapture(this.session, reason, this.viewIntent || !this.stack.followLatest)') &&
+    fitGate.includes('!this.captureIsLoop && !this.repeatSession') &&
+    fitApply.includes('if (fitsCapture) {') && fitApply.includes('this.stack.zoomToFit();') &&
     !finish.includes('restoreRepeatViewport') && !finish.includes('repeatViewportAnchor') &&
     app.includes('private fitViewport()') && fit.includes('this.stack.zoomToFit();') &&
     fit.includes('this.beginViewportGesture();') &&
     // Fit is a view command: the Loop trigger lock and T survive it.
     !fit.includes('this.triggerViewLock = null;') &&
     fit.includes('this.triggerViewOffsetStart = -lock.fraction * this.loopRetentionLen;');
-  check('only the explicit Fit action fits; finishing a sweep never auto-fits',
-    noAutoFit, `noAutoFit=${noAutoFit}`);
+  check('Fit is explicit; a sweep end fits only through the completed-Single rule',
+    noAutoFit, `noAutoFit=${noAutoFit}, gate=[${fitGate}], apply=[${fitApply}]`);
 }
 
 {

@@ -368,6 +368,24 @@ export function sessionWithManualView(
   return { ...session, policy };
 }
 
+/**
+ * Whether the end of a sweep shows the whole capture. A Single that ran to completion
+ * while still FollowLive has nothing left to follow: the live window it was tracking
+ * is an arbitrary last slice, so the view becomes the whole retained range (T, when
+ * there is one, stays the origin and sits at its pre-trigger position inside it).
+ * Everything else keeps its view: a user's Fixed interval (`userView` also covers a
+ * gesture not yet folded into the policy), a manual stop, a Repeat wave (the next
+ * Interval reuses the view) and Loop (its window is the data window, not the capture).
+ * This is the end-of-capture default, not a Fixed fallback: a stale Fixed view still
+ * falls back without any automatic Fit.
+ */
+export function sweepEndFitsCapture(
+  session: CaptureSession, reason: 'manual' | 'completed', userView: boolean,
+): boolean {
+  return session.mode === 'single' && reason === 'completed' &&
+    session.policy.kind === 'follow' && !userView;
+}
+
 /** Session transition for a Loop trigger match (see `viewAfterTrigger`). */
 export function sessionAfterTrigger(session: CaptureSession, fraction: number): CaptureSession {
   return { ...session, policy: viewAfterTrigger(session.policy, session.mode, fraction) };

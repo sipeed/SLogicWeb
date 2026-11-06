@@ -8,7 +8,8 @@ import {
   RANGE_FIT_EPSILON, beginSweep, createSession, manualView, resolveSessionView, resolveView,
   samplesRangeToSeconds, samplesToSeconds, secondsRangeFits, secondsRangeToSamples,
   secondsToSamples, sessionAfterTrigger, sessionDefaultView, sessionFallbackView,
-  sessionSweepPattern, sessionWithManualView, triggerLockedView, triggerSearchSamples,
+  sessionSweepPattern, sessionWithManualView, sweepEndFitsCapture, triggerLockedView,
+  triggerSearchSamples,
   viewAfterTrigger, viewFitsRetained, viewRangeSeconds,
   type CaptureMode, type SecondsRange, type ViewPolicy,
 } from '../captureSession.js';
@@ -315,6 +316,29 @@ function kind(policy: ViewPolicy): string {
     `repeat=${repeat}, empty=${repeatEmpty}, ` +
     `single=${triggerSearchSamples('single', 2_500_000)}, ` +
     `loop=${triggerSearchSamples('loop', 2_500_000)}`);
+}
+
+// --- End of a sweep: only a completed, still-following Single fits ---------------
+{
+  const single = beginSweep(createSession('single'));
+  const fixed = sessionWithManualView(single, -0.002, 0.003);
+  const rows: [string, boolean, boolean][] = [
+    ['single completed following', sweepEndFitsCapture(single, 'completed', false), true],
+    ['single completed after a pending gesture', sweepEndFitsCapture(single, 'completed', true), false],
+    ['single completed with a Fixed view', sweepEndFitsCapture(fixed, 'completed', false), false],
+    ['single stopped manually', sweepEndFitsCapture(single, 'manual', false), false],
+    ['repeat wave completed', sweepEndFitsCapture(beginSweep(createSession('repeat')), 'completed', false), false],
+    ['loop ended', sweepEndFitsCapture(beginSweep(createSession('loop')), 'completed', false), false],
+    ['locked loop ended', sweepEndFitsCapture(
+      sessionAfterTrigger(beginSweep(createSession('loop')), 0.1), 'completed', false), false],
+  ];
+  // A triggered Single never locks on T (viewAfterTrigger keeps follow), so it fits too.
+  const triggered = sessionAfterTrigger(single, 0.25);
+  rows.push(['triggered single completed following',
+    sweepEndFitsCapture(triggered, 'completed', false), true]);
+  check('a sweep end fits the whole capture only for a completed Single still following',
+    rows.every(([, got, want]) => got === want),
+    rows.map(([name, got, want]) => `${name}: ${got}${got === want ? '' : ` (want ${want})`}`).join(', '));
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
