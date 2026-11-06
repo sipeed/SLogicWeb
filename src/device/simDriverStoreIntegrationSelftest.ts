@@ -174,7 +174,8 @@ async function main(): Promise<void> {
       statusAt(sink, 0) === COLUMN_GAP);
   }
 
-  // 2. Early match (T < preSamples): the post span extends so the total stays pre+post.
+  // 2. Pre-fill holdoff: the rising edges at 2 and 4k+2 < pre are held off; the edge
+  // exactly at the holdoff boundary (T == pre == 6) is the trigger, with the full prefix.
   {
     const prePercent = 75;
     const post = 8;
@@ -186,10 +187,10 @@ async function main(): Promise<void> {
 
     const t = driver.triggeredAt;
     const first = driver.firstSample;
-    check('early match: T is before the pre-trigger window', t !== null && t < pre,
+    check('holdoff: T lands exactly at the pre-trigger boundary', t !== null && t === pre && pre === 6,
       `T=${String(t)}, pre=${pre}`);
-    check('early match: stream starts at 0', first === 0, `first=${String(first)}`);
-    check('early match: total delivered is pre + post',
+    check('holdoff: stream starts at 0 with the full prefix', first === 0, `first=${String(first)}`);
+    check('holdoff: total delivered is pre + post',
       sink.store.newest[GROUP] === pre + post,
       `newest=${sink.store.newest[GROUP]}, expected=${pre + post}`);
   }

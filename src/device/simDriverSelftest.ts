@@ -903,8 +903,9 @@ for (const channels of WIDTHS) {
 
 {
   // CH0 of the seeded generator is the period-4 square wave 0,0,1,1,... verified above.
-  // For a plan with preSamples=2 and postSamples=4 the match-before-arm rule does not
-  // apply (no dropout), so T is the first sample satisfying the condition.
+  // For a plan with preSamples=2 and postSamples=4 the pre-fill holdoff applies: T is
+  // the first sample at or after position 2 satisfying the condition. `low` already holds
+  // at samples 0..1, but those are held off, so it fires at the next low run (4).
   const seed = 0x1234;
   const channels: ChannelCount = 8;
   const samplerate = 5e6;
@@ -921,7 +922,7 @@ for (const channels of WIDTHS) {
   }> = [
     { label: 'level high', relation: 'T = pre', condition: { signal: 'd0', kind: 'level', level: 1 }, match: 2 },
     { label: 'high', relation: 'T = pre', condition: { signal: 'd0', kind: 'high' }, match: 2 },
-    { label: 'low', relation: 'T < pre', condition: { signal: 'd0', kind: 'low' }, match: 0 },
+    { label: 'low', relation: 'held off until pre', condition: { signal: 'd0', kind: 'low' }, match: 4 },
     { label: 'rising', relation: 'T = pre', condition: { signal: 'd0', kind: 'rising' }, match: 2 },
     { label: 'falling', relation: 'T > pre', condition: { signal: 'd0', kind: 'falling' }, match: 4 },
     { label: 'edge', relation: 'T = pre', condition: { signal: 'd0', kind: 'edge' }, match: 2 },
@@ -1008,9 +1009,10 @@ for (const channels of WIDTHS) {
     'a fractional pre-trigger percent uses the exact integer sample count',
     preSamples === 21 &&
       Math.floor(plan.preTrigger.seconds * 5e6) === 20 &&
-      driver.triggeredAt === 2 &&
+      // Rising edges are at 2, 6, ..., 22; the holdoff needs 21 samples first.
+      driver.triggeredAt === 22 &&
       range !== null &&
-      range.first === 0 &&
+      range.first === 1 &&
       range.samples === 21 + 100 &&
       driver.complete &&
       steps > 0,

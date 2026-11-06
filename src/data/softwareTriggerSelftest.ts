@@ -89,7 +89,8 @@ interface ReferenceResult {
 /**
  * A deliberately naive, per-sample model of the documented trigger semantics: walk the
  * stream one sample at a time, evaluate every condition against the previous sample,
- * keep the last `pre` samples, and emit from there. It allocates and copies per sample
+ * ignore matches until `pre` samples have been seen (pre-fill holdoff), keep the last
+ * `pre` samples, and emit from there. It allocates and copies per sample
  * precisely because it is not the hot path — it is the oracle the block scanner's
  * output is compared against.
  */
@@ -144,7 +145,8 @@ function referenceRun(
       previousAnalog[analog[i]!.start >>> 3] = analogCodes[i]!;
     }
     inspected++;
-    if (matched) {
+    // Pre-fill holdoff: a match counts only once `pre` samples precede it.
+    if (matched && i >= pre) {
       trigger = i;
       break;
     }
@@ -701,7 +703,8 @@ function reconfigureResults(): SoftwareTriggerTestResult[] {
     const wrongRing = trigger.reconfigure({
       ...digital(8, 4), conditions: [{ channel: 1, kind: 'rising' }],
     });
-    const raw = bytesFor(8, [0, 2]);
+    // Two holdoff samples fill the ring first, then the rising edge on D1 matches.
+    const raw = bytesFor(8, [0, 0, 0, 2]);
     trigger.feed(raw);
     const afterMatch = trigger.reconfigure(matchedBase);
     const finished = new SoftwareTrigger({ config: digital(8, 0), emit: () => {} });
@@ -1602,11 +1605,17 @@ function continuousResults(): SoftwareTriggerTestResult[] {
         for (const c of conditions) previous[c.channel] = (sample >>> c.channel) & 1;
         return matched;
       };
+      const pre = Math.min(
+        preTriggerSamples,
+        Math.max(0, maxSamples - 1),
+        Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bps),
+      );
       let first = -1;
       let inspected = 0;
       for (let i = 0; i < sampleCount; i++) {
         inspected++;
-        if (evaluate(samples[i]!)) { first = i; break; }
+        // Pre-fill holdoff: the first match needs `pre` earlier samples.
+        if (evaluate(samples[i]!) && i >= pre) { first = i; break; }
         if (inspected >= searchLimitSamples) break;
       }
       let wantMatches: number[] = [];
@@ -1620,11 +1629,6 @@ function continuousResults(): SoftwareTriggerTestResult[] {
         // The caller finishes a stopped capture, which is not a match.
         wantNoTrigger = true;
       } else {
-        const pre = Math.min(
-          preTriggerSamples,
-          Math.max(0, maxSamples - 1),
-          Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bps),
-        );
         const start = Math.max(0, first - pre);
         const end = Number.isFinite(maxSamples)
           ? Math.min(sampleCount, start + maxSamples)
@@ -1670,6 +1674,348 @@ function continuousResults(): SoftwareTriggerTestResult[] {
   return results;
 }
 
+/**
+ * Pre-fill holdoff: after arming (and after a continuity reset) no match is accepted
+ * until `preTriggerSamples` complete samples have been observed, so a dense trigger
+ * signal still delivers the full configured prefix. Bit-level helpers here build raw
+ * samples for any width, so the trigger channel can sit in the last byte of a wide
+ * (64/128-channel) sample.
+ */
+function holdoffResults(): SoftwareTriggerTestResult[] {
+  const results: SoftwareTriggerTestResult[] = [];
+  const check = (name: string, pass: boolean, detail: string): void => {
+    results.push({ name, pass, detail });
+  };
+  /** Raw stream where `channel` follows `levels` and every other bit carries a
+   * position tag (so a retained prefix is identifiable) without touching `channel`. */
+  const rawStream = (
+    channels: ChannelCount, channel: number, levels: readonly number[],
+  ): Uint8Array => {
+    const bps = bytesPerSampleForChannels(channels);
+    const raw = new Uint8Array(levels.length * bps);
+    for (let i = 0; i < levels.length; i++) {
+      for (let b = 0; b < bps; b++) raw[i * bps + b] = (i * 37 + b * 11) & 0xff;
+      const byte = i * bps + (channel >>> 3);
+      const mask = 1 << (channel & 7);
+      raw[byte] = levels[i] ? raw[byte]! | mask : raw[byte]! & ~mask;
+    }
+    return raw;
+  };
+  const runRaw = (
+    raw: Uint8Array,
+    config: SoftwareTriggerConfig,
+    cuts: readonly number[] = [],
+  ): { out: Uint8Array; stats: SoftwareTriggerStats; matches: number[] } => {
+    const out: number[] = [];
+    const matches: number[] = [];
+    const trigger = new SoftwareTrigger({
+      config,
+      emit: (chunk) => { for (const v of chunk) out.push(v); },
+      onMatch: (m) => matches.push(m.index),
+    });
+    let p = 0;
+    for (const cut of cuts) {
+      trigger.feed(raw.subarray(p, cut));
+      p = cut;
+    }
+    trigger.feed(raw.subarray(p));
+    return { out: Uint8Array.from(out), stats: trigger.stats, matches };
+  };
+  const sameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
+    a.length === b.length && a.every((v, i) => v === b[i]);
+  const widths: ChannelCount[] = [4, 8, 16, 32, 64, 128];
+
+  {
+    // Dense edges (a rise every 2 samples, the hardware's 50 us square wave in miniature)
+    // at every width: T is the first edge at or after `pre`, the emitted stream is exactly
+    // [T - pre, T - pre + max), and the prefix is the full configured window.
+    let fail = '';
+    for (const channels of widths) {
+      const bps = bytesPerSampleForChannels(channels);
+      const channel = channels - 1;
+      const levels = Array.from({ length: 64 }, (_, i) => i & 1);
+      for (const pre of [4, 5]) {
+        const raw = rawStream(channels, channel, levels);
+        const max = pre + 8;
+        const got = runRaw(raw, {
+          channels, conditions: [{ channel, kind: 'rising' }],
+          preTriggerSamples: pre, maxSamples: max,
+        });
+        // Rises are at odd indices; the first one at or after `pre`.
+        const deviceT = pre % 2 === 1 ? pre : pre + 1;
+        const start = deviceT - pre;
+        const want = raw.subarray(start * bps, (start + max) * bps);
+        if (!(got.stats.matched && got.stats.triggerSampleIndex === pre &&
+            got.stats.complete && got.stats.inspectedSamples === deviceT + 1 &&
+            sameBytes(got.out, want))) {
+          fail = `${channels}ch pre=${pre}: T=${got.stats.triggerSampleIndex} ` +
+            `inspected=${got.stats.inspectedSamples} bytes=${got.out.length}/${want.length}`;
+          break;
+        }
+      }
+      if (fail) break;
+    }
+    check('holdoff: dense edges deliver the full pre-trigger window at every width',
+      fail === '', fail || `${widths.length} widths, pre 4 and 5`);
+  }
+
+  {
+    // Sparse edge: one rise long after the ring filled behaves as before.
+    const levels = new Array<number>(80).fill(0);
+    for (let i = 50; i < 80; i++) levels[i] = 1;
+    const raw = rawStream(16, 9, levels);
+    const got = runRaw(raw, {
+      channels: 16, conditions: [{ channel: 9, kind: 'rising' }],
+      preTriggerSamples: 10, maxSamples: 20, searchLimitSamples: Number.POSITIVE_INFINITY,
+    }, [7, 33, 61]);
+    check('holdoff: a sparse edge keeps its full prefix (T = pre)',
+      got.stats.triggerSampleIndex === 10 && got.stats.inspectedSamples === 51 &&
+        sameBytes(got.out, raw.subarray(40 * 2, 60 * 2)),
+      `T=${got.stats.triggerSampleIndex} inspected=${got.stats.inspectedSamples}`);
+  }
+
+  {
+    // An edge whose new value is the first post-holdoff sample is valid: its predecessor
+    // is the newest ring sample. Checked for every byte split of the stream (including
+    // splits inside the boundary sample and inside the last holdoff sample) at every
+    // width; all must agree with the unsplit run.
+    let fail = '';
+    let cases = 0;
+    for (const channels of widths) {
+      const bps = bytesPerSampleForChannels(channels);
+      const channel = channels - 1;
+      const pre = 3;
+      const levels = [0, 0, 0, 1, 1, 0, 1, 1];
+      const raw = rawStream(channels, channel, levels);
+      const config: SoftwareTriggerConfig = {
+        channels, conditions: [{ channel, kind: 'rising' }],
+        preTriggerSamples: pre, maxSamples: 5,
+      };
+      const whole = runRaw(raw, config);
+      if (!(whole.stats.triggerSampleIndex === pre && whole.stats.inspectedSamples === 4 &&
+          sameBytes(whole.out, raw.subarray(0, 5 * bps)))) {
+        fail = `${channels}ch whole: T=${whole.stats.triggerSampleIndex}`;
+        break;
+      }
+      for (let cut = 1; cut < raw.length; cut++) {
+        const split = runRaw(raw, config, [cut]);
+        cases++;
+        if (!(split.stats.triggerSampleIndex === pre &&
+            split.stats.inspectedSamples === whole.stats.inspectedSamples &&
+            sameBytes(split.out, whole.out))) {
+          fail = `${channels}ch cut=${cut}: T=${split.stats.triggerSampleIndex}`;
+          break;
+        }
+      }
+      // Byte-by-byte delivery: every sample, including the boundary one, is carried.
+      const bytewise = runRaw(raw, config, Array.from({ length: raw.length - 1 }, (_, i) => i + 1));
+      cases++;
+      if (!sameBytes(bytewise.out, whole.out) || bytewise.stats.triggerSampleIndex !== pre) {
+        fail = `${channels}ch bytewise`;
+      }
+      if (fail) break;
+    }
+    check('holdoff: an edge exactly at the holdoff boundary matches across any transfer split',
+      fail === '', fail || `${cases} split cases`);
+  }
+
+  {
+    // The holdoff never invents an edge: a value that was already high when the window
+    // filled is not a rising edge on the first post-holdoff sample.
+    const raw = rawStream(8, 0, [0, 0, 1, 1, 1, 0, 1, 1]);
+    const got = runRaw(raw, {
+      channels: 8, conditions: [{ channel: 0, kind: 'rising' }],
+      preTriggerSamples: 3, maxSamples: 5,
+    }, [3]);
+    check('holdoff: a level already high at the boundary is not a rising edge',
+      got.stats.triggerSampleIndex === 3 && got.stats.inspectedSamples === 7 &&
+        sameBytes(got.out, raw.subarray(3, 8)),
+      `T=${got.stats.triggerSampleIndex} inspected=${got.stats.inspectedSamples}`);
+  }
+
+  {
+    // Falling and edge kinds across the boundary use the same true predecessor.
+    const falling = runRaw(rawStream(32, 20, [1, 1, 1, 0, 0, 0]), {
+      channels: 32, conditions: [{ channel: 20, kind: 'falling' }],
+      preTriggerSamples: 3, maxSamples: 4,
+    }, [11]);
+    const edge = runRaw(rawStream(32, 20, [0, 1, 0, 1, 0, 1]), {
+      channels: 32, conditions: [{ channel: 20, kind: 'edge' }],
+      preTriggerSamples: 3, maxSamples: 4,
+    }, [5, 13]);
+    check('holdoff: falling and edge triggers match on the first eligible transition',
+      falling.stats.triggerSampleIndex === 3 && falling.stats.inspectedSamples === 4 &&
+        edge.stats.triggerSampleIndex === 3 && edge.stats.inspectedSamples === 4,
+      `falling T=${falling.stats.triggerSampleIndex}/${falling.stats.inspectedSamples} ` +
+        `edge T=${edge.stats.triggerSampleIndex}/${edge.stats.inspectedSamples}`);
+  }
+
+  {
+    // Level high / low true from sample 0 wait for the ring to fill (T == pre), with one
+    // block and with a per-sample feed.
+    let fail = '';
+    for (const level of [0, 1] as const) {
+      for (const cuts of [[], [1, 2, 3, 4, 5, 6]]) {
+        const raw = rawStream(64, 63, new Array<number>(12).fill(level));
+        const got = runRaw(raw, {
+          channels: 64, conditions: [{ channel: 63, kind: 'level', level }],
+          preTriggerSamples: 6, maxSamples: 9,
+        }, cuts.map((c) => c * 8));
+        if (!(got.stats.triggerSampleIndex === 6 && got.stats.inspectedSamples === 7 &&
+            got.stats.complete && sameBytes(got.out, raw.subarray(0, 9 * 8)))) {
+          fail = `level ${level} cuts=${cuts.length}: T=${got.stats.triggerSampleIndex}`;
+        }
+      }
+    }
+    check('holdoff: high/low level true from sample 0 waits for pre-fill', fail === '',
+      fail || 'level 0 and 1, block and per-sample feeds');
+  }
+
+  {
+    // pre = 0 has no holdoff: a level true at sample 0 is the trigger.
+    const raw = rawStream(8, 2, [1, 1, 1]);
+    const got = runRaw(raw, {
+      channels: 8, conditions: [{ channel: 2, kind: 'level', level: 1 }],
+      preTriggerSamples: 0, maxSamples: 2,
+    });
+    check('holdoff: pre-trigger 0 matches on the first sample',
+      got.stats.triggerSampleIndex === 0 && got.stats.inspectedSamples === 1 &&
+        sameBytes(got.out, raw.subarray(0, 2)),
+      `T=${got.stats.triggerSampleIndex} inspected=${got.stats.inspectedSamples}`);
+  }
+
+  {
+    // No trigger: a stream that only matches inside the holdoff never triggers; nothing is
+    // emitted and the inspected count is the search budget.
+    const raw = rawStream(16, 3, [0, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const got = runRaw(raw, {
+      channels: 16, conditions: [{ channel: 3, kind: 'rising' }],
+      preTriggerSamples: 4, maxSamples: 6,
+    });
+    check('holdoff: an edge only inside the holdoff is no trigger',
+      got.stats.noTrigger && !got.stats.matched && got.out.length === 0 &&
+        got.stats.inspectedSamples === 10 && got.matches.length === 0,
+      `noTrigger=${got.stats.noTrigger} inspected=${got.stats.inspectedSamples}`);
+  }
+
+  {
+    // Holdoff samples count toward the search limit: limit == pre can never match,
+    // limit == pre + 1 allows exactly the first eligible sample.
+    const raw = rawStream(8, 0, new Array<number>(10).fill(1));
+    const config = (limit: number): SoftwareTriggerConfig => ({
+      channels: 8, conditions: [{ channel: 0, kind: 'level', level: 1 }],
+      preTriggerSamples: 4, maxSamples: 6, searchLimitSamples: limit,
+    });
+    const tooShort = runRaw(raw, config(4));
+    const exact = runRaw(raw, config(5));
+    check('holdoff: pre-fill samples are inspected and count toward the search limit',
+      tooShort.stats.noTrigger && tooShort.stats.inspectedSamples === 4 &&
+        exact.stats.matched && exact.stats.triggerSampleIndex === 4 &&
+        exact.stats.inspectedSamples === 5,
+      `short=${tooShort.stats.noTrigger}/${tooShort.stats.inspectedSamples} ` +
+        `exact=${exact.stats.triggerSampleIndex}/${exact.stats.inspectedSamples}`);
+  }
+
+  {
+    // A continuity reset mid-holdoff empties the ring and restarts the holdoff: the
+    // prefix never spans the gap, and an edge cannot be formed across it.
+    const emitted: number[] = [];
+    const trigger = new SoftwareTrigger({
+      config: {
+        channels: 8, conditions: [{ channel: 0, kind: 'rising' }],
+        preTriggerSamples: 4, maxSamples: 6,
+      },
+      emit: (chunk) => emitted.push(...chunk),
+    });
+    trigger.feed(Uint8Array.from([0x10, 0x20])); // two of four holdoff samples, D0 low
+    trigger.resetContinuity();
+    // After the gap: D0 high at once (no edge across the gap), a rise at post-gap 2 that
+    // is still inside the restarted holdoff, then a rise at post-gap 5.
+    trigger.feed(Uint8Array.from([0x31, 0x40, 0x51, 0x60, 0x70, 0x81, 0x90]));
+    const stats = trigger.stats;
+    check('holdoff: a continuity reset mid-holdoff restarts the pre-fill',
+      stats.matched && stats.triggerSampleIndex === 4 &&
+        emitted.join(',') === [0x40, 0x51, 0x60, 0x70, 0x81, 0x90].join(','),
+      `T=${stats.triggerSampleIndex} emitted=${emitted.map((v) => v.toString(16)).join(',')}`);
+  }
+
+  {
+    // noteGap mid-holdoff: the lost samples advance the search budget but are not ring
+    // samples, so the holdoff restarts after the gap.
+    const trigger = new SoftwareTrigger({
+      config: {
+        channels: 8, conditions: [{ channel: 0, kind: 'level', level: 1 }],
+        preTriggerSamples: 3, maxSamples: 5, searchLimitSamples: 100,
+      },
+      emit: () => {},
+    });
+    trigger.feed(Uint8Array.from([1, 1]));
+    trigger.noteGap(10);
+    trigger.feed(Uint8Array.from([1, 1, 1, 1]));
+    const stats = trigger.stats;
+    check('holdoff: noteGap mid-holdoff restarts the pre-fill and keeps budget accounting',
+      stats.matched && stats.triggerSampleIndex === 3 &&
+        stats.inspectedSamples === 2 + 10 + 4,
+      `T=${stats.triggerSampleIndex} inspected=${stats.inspectedSamples}`);
+  }
+
+  {
+    // A condition edit keeps the ring, so it does not restart the holdoff.
+    const emitted: number[] = [];
+    const trigger = new SoftwareTrigger({
+      config: {
+        channels: 8, conditions: [{ channel: 1, kind: 'rising' }],
+        preTriggerSamples: 4, maxSamples: 6,
+      },
+      emit: (chunk) => emitted.push(...chunk),
+    });
+    trigger.feed(Uint8Array.from([0, 0]));
+    const applied = trigger.reconfigure({
+      channels: 8, conditions: [{ channel: 0, kind: 'level', level: 1 }],
+      preTriggerSamples: 4, maxSamples: 6,
+    });
+    trigger.feed(Uint8Array.from([1, 1, 1, 1, 1]));
+    const stats = trigger.stats;
+    check('holdoff: a retune mid-holdoff keeps the ring and the remaining holdoff',
+      applied && stats.triggerSampleIndex === 4 && stats.inspectedSamples === 5 &&
+        emitted.join(',') === '0,0,1,1,1,1',
+      `applied=${applied} T=${stats.triggerSampleIndex} emitted=${emitted.join(',')}`);
+  }
+
+  {
+    // Continuous (Loop) mode: the holdoff applies to the first match only; later dense
+    // matches are reported on the emitted stream as before.
+    const raw = rawStream(8, 0, Array.from({ length: 16 }, (_, i) => i & 1));
+    const got = runRaw(raw, {
+      channels: 8, conditions: [{ channel: 0, kind: 'rising' }], mode: 'continuous',
+      preTriggerSamples: 4, maxSamples: Number.POSITIVE_INFINITY,
+      searchLimitSamples: Number.POSITIVE_INFINITY,
+    }, [3, 6]);
+    // Rises at 1,3,5,...; first eligible is 5, emitted from 1, so stream indices 4,6,...
+    check('holdoff: continuous mode holds off only the first match',
+      got.matches.join(',') === '4,6,8,10,12,14' && got.stats.matchCount === 6 &&
+        sameBytes(got.out, raw.subarray(1)),
+      `matches=${got.matches.join(',')} bytes=${got.out.length}`);
+  }
+
+  {
+    // Analog crossing: the predecessor code comes from the last holdoff sample.
+    const codes = [100, 100, 200, 100, 140, 150];
+    const raw = Uint8Array.from(codes.map((c) => analogRaw(c)));
+    const got = runRaw(raw, {
+      channels: 8, analog: [{ start: 0, kind: 'rising', level: 128 }],
+      preTriggerSamples: 3, maxSamples: 5,
+    }, [3]);
+    // The 100->200 crossing at index 2 is held off; 100->140 at index 4 triggers.
+    check('holdoff: an analog crossing uses the true predecessor across the boundary',
+      got.stats.triggerSampleIndex === 3 && got.stats.inspectedSamples === 5 &&
+        sameBytes(got.out, raw.subarray(1, 6)),
+      `T=${got.stats.triggerSampleIndex} inspected=${got.stats.inspectedSamples}`);
+  }
+
+  return results;
+}
+
 export function runSoftwareTriggerSuite(): SoftwareTriggerTestResult[] {
   const results: SoftwareTriggerTestResult[] = [];
   for (const kind of ['level', 'rising', 'falling', 'edge'] as const) results.push(checkMode(kind));
@@ -1684,18 +2030,20 @@ export function runSoftwareTriggerSuite(): SoftwareTriggerTestResult[] {
     detail: `matched=${no.trigger.matched}, output=${no.output.length}, inspected=${no.trigger.inspectedSamples}`,
   });
 
-  // Documented early-match rule: the host matcher arms from the first complete sample,
-  // so a level already true at RUN fires before the pre-trigger ring fills. The emitted
-  // total still respects the configured pre+post budget; only the split differs.
-  const early = collect(8, [1, 1, 1, 1], {
+  // Pre-fill holdoff: a level already true at RUN does not fire before the pre-trigger
+  // ring is full. The first eligible sample is index `pre`, so T == pre and the capture
+  // carries the full configured prefix plus the post budget.
+  const early = collect(8, [1, 1, 1, 1, 1, 1], {
     kind: 'level', level: 1, channel: 0, preTriggerSamples: 2, maxSamples: 4,
   }, [1]);
   results.push({
-    name: 'an early match keeps the total pre+post budget with a short prefix',
-    pass: early.trigger.matched && early.trigger.triggerSampleIndex === 0 &&
-      early.trigger.emittedSamples === 4 && early.output.length === 4,
+    name: 'a level true from sample 0 waits for the pre-trigger ring to fill',
+    pass: early.trigger.matched && early.trigger.triggerSampleIndex === 2 &&
+      early.trigger.emittedSamples === 4 && early.output.length === 4 &&
+      early.trigger.inspectedSamples === 3,
     detail: `matched=${early.trigger.matched}, T=${early.trigger.triggerSampleIndex}, ` +
-      `emitted=${early.trigger.emittedSamples}, bytes=${early.output.length}`,
+      `emitted=${early.trigger.emittedSamples}, bytes=${early.output.length}, ` +
+      `inspected=${early.trigger.inspectedSamples}`,
   });
 
   // The trigger may land exactly at the nominal output budget. The matcher must
@@ -2090,5 +2438,6 @@ export function runSoftwareTriggerSuite(): SoftwareTriggerTestResult[] {
   results.push(...analogResults());
   results.push(...reconfigureResults());
   results.push(...continuousResults());
+  results.push(...holdoffResults());
   return results;
 }

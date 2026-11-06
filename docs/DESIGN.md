@@ -370,9 +370,11 @@ Rules:
   neutral, never falsely armed.
 - **Enable:** turning it off leaves conditions stored and neutral. Configuring a
   condition never flips the enable mask; an optional "Arm" action is explicit.
-- **Pre-trigger:** percentage/time, with the profile cap and the resulting "up to"
-  history; per-group sample counts are read-only. The panel never promises more history
-  than the ring can hold.
+- **Pre-trigger:** percentage/time, with the profile cap and the resulting history;
+  per-group sample counts are read-only. The panel never promises more history than the
+  ring can hold. The trigger waits until that window has filled (pre-fill holdoff), so a
+  triggered capture holds the full window; if it ever holds less, the status shows the
+  actual pre-trigger obtained.
 - **Retune/restart:** while waiting, edits retune and say "Retuned"; after a match they
   are pending for the next acquisition. A restart is a named "Restart to apply" action
   and never a hidden side effect. A Loop analog display detector may retune live; the

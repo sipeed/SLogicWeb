@@ -11,6 +11,15 @@
  * accumulates an unbounded search prefix. Once a match is found, the retained prefix
  * and the trigger sample are emitted, followed by post-trigger samples until
  * `maxSamples` is reached.
+ *
+ * Pre-fill holdoff: after arming, and after any reset that empties the ring
+ * (`resetContinuity()`, `noteGap()`), matches are ignored until `preTriggerSamples`
+ * complete samples have been observed. A match therefore always carries the full
+ * configured prefix (T == preTriggerSamples in the emitted stream), however dense the
+ * trigger signal is. A condition edit (`reconfigure()`) keeps the ring and so does not
+ * restart the holdoff. Continuous (Loop) mode applies it to the first match only; later
+ * matches are on the already-emitted stream and need no ring. With
+ * `preTriggerSamples === 0` there is no holdoff.
  */
 
 import { bytesPerSampleForChannels, isChannelCount, type ChannelCount } from '../types.js';
@@ -124,7 +133,11 @@ export interface SoftwareTriggerConfig {
   /** Used by `level`; rising/falling/edge use the transition between samples. */
   level?: SoftwareTriggerLevel;
   channel?: number;
-  /** Number of samples retained immediately before the trigger sample. */
+  /**
+   * Number of samples retained immediately before the trigger sample. Matching is held
+   * off until this many complete samples have been observed since arming (or since the
+   * last continuity reset), so a delivered capture always has the full prefix.
+   */
   preTriggerSamples: number;
   /**
    * Total samples emitted, including the retained prefix and trigger sample.
@@ -132,7 +145,8 @@ export interface SoftwareTriggerConfig {
    * `complete` never sets, and the capture ends only on a manual stop.
    */
   maxSamples: number;
-  /** Optional waiting budget. Infinity means keep rolling the prefix until stopped. */
+  /** Optional waiting budget. Infinity means keep rolling the prefix until stopped.
+   * Pre-fill holdoff samples are inspected and count toward it. */
   searchLimitSamples?: number;
   /**
    * One-shot (default) or continuous (Loop) matching. The mode is fixed for the life of a
@@ -754,7 +768,11 @@ export class SoftwareTrigger {
 
   /**
    * A device dropout invalidates a transition across the gap and any pre-trigger
-   * bytes spanning it. The processor remains bounded and continues searching.
+   * bytes spanning it. The processor remains bounded and continues searching. While
+   * waiting, the emptied ring restarts the pre-fill holdoff: no match is accepted until
+   * `preTriggerSamples` contiguous samples after the gap have been observed, so the
+   * delivered prefix never spans the discontinuity. After the first match the ring is
+   * unused and only scan continuity restarts.
    */
   resetContinuity(): void {
     this.previous.fill(null);
@@ -825,7 +843,30 @@ export class SoftwareTrigger {
       return -1;
     }
     const to = scanSamples * this.bytesPerSample;
-    const match = this.findMatch(bytes, 0, to);
+    // Pre-fill holdoff (oscilloscope semantics): a match is accepted only once the ring
+    // holds `preTriggerSamples` complete samples observed since arming or since the last
+    // ring reset (`resetContinuity`/`noteGap`). Without it a dense signal would trigger on
+    // its first edge after arm and deliver almost no negative time. The ring only fills
+    // while waiting, so `preTriggerSamples - ringCount` is exactly the holdoff left; no
+    // extra state is needed and nothing beyond the ring is retained.
+    //
+    // Holdoff samples are inspected (they advance `inspectedSamples` and therefore count
+    // toward `searchLimitSamples`): they consumed stream time. A finite search limit must
+    // therefore exceed `preTriggerSamples` to allow any match; the defaults (`maxSamples +
+    // preTriggerSamples`, and Repeat's `pre + post`) leave exactly the post budget for
+    // matching.
+    //
+    // Edge state is primed from the last holdoff sample, so the first post-holdoff sample
+    // is compared with its true predecessor (which is the newest ring sample): an edge
+    // whose new value lands on that sample is valid. A sample joined across transfers
+    // reaches here as a one-sample block, so it is primed or matched like any other.
+    const holdoff = Math.min(scanSamples, this.preTriggerSamples - this.ringCount);
+    let from = 0;
+    if (holdoff > 0) {
+      from = holdoff * this.bytesPerSample;
+      this.restorePrevious(bytes.subarray(from - this.bytesPerSample, from));
+    }
+    const match = from < to ? this.findMatch(bytes, from, to) : -1;
     if (match >= 0) {
       this.statsValue.inspectedSamples += match / this.bytesPerSample; // pre-trigger samples
       this.appendRing(bytes, 0, match);

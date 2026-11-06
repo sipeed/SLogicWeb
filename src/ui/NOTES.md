@@ -1203,10 +1203,13 @@ shift T. Only the 32U3's four groups are
 offered; an analog trigger for a bank that is no longer displayed is ignored. The trigger
 remains host-side: the ADC module reads the inputs like any other sample, so the device
 protocol is unchanged. Level resolution is 30 V / 255 ≈ 0.118 V; the panel shows the
-requested level and the engine rounds to the nearest code. Unlike libsigrok's pre-fill
-gate, the host matcher arms from the first complete sample: an early match can have a
-short prefix, so the configured pre-trigger duration is an upper bound (the panel says
-"up to"). This immediate-arming behavior is intentional and is not wire-protocol state.
+requested level and the engine rounds to the nearest code. Like libsigrok's pre-fill
+gate, the host matcher holds matches off until the pre-trigger ring holds the configured
+number of complete samples (after arming, and again after a continuity reset), so a
+dense trigger signal still yields the full negative-time window and T equals the
+configured pre-trigger. Holdoff samples count toward the search budget. A capture that
+nevertheless holds less pre-trigger shows `preTriggerObtained` in the trigger status.
+This is host-side behavior and is not wire-protocol state.
 The host crossing has no vendor-style hysteresis. Analog banks intentionally keep their
 fixed MSB-first live-input interpretation in device test modes 1/2; those built-in
 patterns are LSB-first in the vendor Auto rule, so analog voltage display and analog

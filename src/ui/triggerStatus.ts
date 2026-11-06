@@ -100,3 +100,29 @@ export function triggerPanelNotes(v: TriggerPanelNoteInput): TriggerPanelNotes {
     memoryReleased: v.running && v.triggerAutoDisarmed,
   };
 }
+
+export interface PreTriggerObtainedInput {
+  mode: TriggerNoteMode;
+  triggerState: TriggerNoteState;
+  /** The acquisition's effective pre-trigger window in samples; null when none armed. */
+  configuredSamples: number | null;
+  /** Store-relative T, i.e. the pre-trigger samples the capture actually holds. */
+  triggerSampleIndex: number | null;
+}
+
+/**
+ * Pre-trigger samples a triggered Single/Repeat capture actually holds, when that is less
+ * than configured; null otherwise.
+ *
+ * The host matcher's pre-fill holdoff normally makes T equal the configured window, so
+ * this is a defensive readout for paths that cannot hold off (a future device-executed
+ * trigger, or an executor whose stream started late). Loop is excluded: its retention
+ * drops the front by design and T's position is governed by the Loop window.
+ */
+export function preTriggerShortfall(v: PreTriggerObtainedInput): number | null {
+  if (v.mode === 'loop' || v.triggerState !== 'triggered') return null;
+  if (v.configuredSamples === null || v.triggerSampleIndex === null) return null;
+  if (!Number.isFinite(v.triggerSampleIndex) || !Number.isFinite(v.configuredSamples)) return null;
+  const obtained = Math.max(0, Math.floor(v.triggerSampleIndex));
+  return obtained < v.configuredSamples ? obtained : null;
+}

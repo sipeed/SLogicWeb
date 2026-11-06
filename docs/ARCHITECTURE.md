@@ -527,8 +527,23 @@ type TriggerBudget =
   Loop window for Loop; it is not a percentage of total retained bytes. A Loop plan is
   accepted only with an `unlimited` post-trigger budget, so it cannot carry a second
   finite window. A finite acquisition retires `preTrigger.samples + post-trigger samples`
-  in total even when the match is earlier than the pre-trigger window, so an early match
-  extends the post span. The UI says "up to".
+  in total.
+- **Pre-fill holdoff.** Like an oscilloscope, an executor ignores matches until
+  `preTrigger.samples` complete samples have been observed since arming, so a dense
+  trigger signal cannot fire on its first edge with an empty prefix: T is exactly
+  `preTrigger.samples` in the emitted stream and the split is pre before T, post from T.
+  Edge/crossing state at the first eligible sample is its true predecessor (the newest
+  ring sample, including one carried across a transfer boundary), so an edge landing on
+  that sample is valid. Holdoff samples are inspected and count toward the search limit
+  (Repeat's `pre + post` therefore leaves `post` samples in which a match may occur). A
+  continuity reset or gap (`resetContinuity`/`noteGap`, or a SimDriver waiting dropout)
+  empties the ring and restarts the holdoff so the prefix never spans the gap; a retune
+  keeps the ring and the remaining holdoff. Each Repeat wave and each Single starts a new
+  acquisition and so a new holdoff; Loop holds off only its first match (later matches are
+  on the already-emitted stream, which the D window owns). The ring stays the only
+  pre-trigger storage. If a triggered Single/Repeat capture still holds less pre-trigger
+  than configured, the trigger status reports the actual amount
+  (`capturePanel.preTriggerObtained`).
 - Retune: while waiting, a new plan is recompiled and sent; edge continuity restarts.
   After a match, edits are pending for the next acquisition unless the profile supports a
   live detector (analog Loop). A restart is a named transition with a typed reason; it

@@ -46,7 +46,8 @@
  * itself.
  *
  * The first emitted sample is not necessarily sample 0. A triggered acquisition starts
- * at `from = max(0, T - preSamples)` and never backfills the positions before it: the
+ * at `from = T - preSamples` (never negative: see the pre-fill holdoff below) and never
+ * backfills the positions before it: the
  * device did not deliver them. `firstSample` is null until the first byte is written,
  * then reports the absolute device sample position of that first emitted sample (also
  * derivable as `Math.floor(firstWrite.startByte / bytesPerSample)`). A sink wiring this
@@ -80,17 +81,18 @@
  * `Math.round(seconds * samplerate)` (never a bare floor of the float round-trip).
  * Nothing grows while a trigger is searched for.
  *
- * A dropout during the search delays arming: the first candidate match is accepted only
- * after `preSamples` complete samples have been generated past the gap's end. This keeps
- * the regenerated window entirely after the lost span, so the driver never writes
+ * Pre-fill holdoff: a candidate match is accepted only after `preSamples` complete
+ * samples have been generated since arming (position 0) or, after a dropout during the
+ * search, past the gap's end. A dense trigger signal therefore cannot fire on its first
+ * edge with an empty prefix: every delivered capture carries the full pre-trigger window.
+ * After a dropout this also keeps the regenerated window entirely after the lost span, so the driver never writes
  * samples into positions it has reported (or must report) as unknown. Waiting gaps are
  * therefore before the retained window by construction; only their overlap with the
  * delivered range would be reported, and a gap wholly before `firstSample` is dropped.
  *
  * For a finite plan the total delivered budget is `preSamples + postSamples` whole
- * samples regardless of where the match falls: emission starts at `from` and ends at
- * `from + preSamples + postSamples`. An early match (T < preSamples) therefore continues
- * past T + postSamples until the total is reached, as §5.1's "up to" rule requires. An
+ * samples: emission starts at `from = T - preSamples` and ends at
+ * `T + postSamples`. The holdoff rules out an early match (T < preSamples). An
  * unlimited budget keeps its open-ended post span. A finite plan whose
  * `preSamples + postSamples` exceeds `MAX_SAMPLES - 1` is refused with
  * `SimDriverError('invalid-config')`.
@@ -974,8 +976,9 @@ export class SimDriver {
         const matchPosition = position;
         this.matchPosition = matchPosition;
         this.phase = 'running';
-        // §5.1: an early match keeps the total budget. Deliver preSamples + postSamples
-        // whole samples starting at `from`, regardless of where T falls.
+        // §5.1: deliver preSamples + postSamples whole samples starting at `from`. The
+        // holdoff (matchArmed) guarantees matchPosition >= preSamples; the clamp is
+        // defensive.
         const total = trigger.preSamples + trigger.postSamples;
         const from = Math.max(0, matchPosition - trigger.preSamples);
         this.deliveryEnd = Number.isFinite(total)
@@ -995,15 +998,16 @@ export class SimDriver {
   }
 
   /**
-   * After a dropout the retained window must not contain samples the device lost.
-   * Arm a candidate match only once `preSamples` complete samples have been generated
-   * after the gap, so `[T - preSamples, T]` lies entirely after the gap's far side.
-   * A retune is evaluated with the current plan's `preSamples`.
+   * Pre-fill holdoff. Arm a candidate match only once `preSamples` complete samples have
+   * been generated since arming (position 0) or since the last waiting gap, so
+   * `[T - preSamples, T]` is entirely generated, contiguous data: the delivered prefix is
+   * always the full window and never contains samples the device lost. A retune is
+   * evaluated with the current plan's `preSamples`. Edge state is the true previous word
+   * (`previousWord`), so an edge whose new value is the first armed sample is valid.
    */
   private matchArmed(position: number): boolean {
-    const gapEnd = this.lastGapEnd;
-    if (gapEnd === null) return true;
-    return position - this.trigger!.preSamples >= gapEnd;
+    const armedFrom = this.lastGapEnd ?? 0;
+    return position - this.trigger!.preSamples >= armedFrom;
   }
 
   private async stepRunning(samples: number): Promise<number> {

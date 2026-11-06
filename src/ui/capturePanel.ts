@@ -148,6 +148,9 @@ export interface CapturePanelView {
   triggerAnalogRolling: boolean;
   /** Samples of pre-trigger history the running matcher actually retained. */
   activeTriggerPreSamples: number | undefined;
+  /** Seconds of pre-trigger a triggered capture holds when that is less than configured
+   * (see `preTriggerShortfall`); null when the full window was obtained. */
+  triggerPreObtainedSec?: number | null;
   /** Loop display matcher/swap readout; null outside a running analog Loop. */
   loopMetrics?: LoopDisplayMetrics | null;
   /** A previous Repeat Interval missed its trigger; the session is retrying. */
@@ -177,7 +180,7 @@ export interface LoopDisplayMetrics {
 export type TriggerStatusView = Pick<CapturePanelView,
   'running' | 'stopping' | 'triggerState' | 'triggerViewLost' | 'triggerViewPending' |
   'triggerLocked' | 'triggerAnalogRolling' | 'triggerArmed' | 'triggerAutoDisarmed' |
-  'settingsArmed' | 'repeatMissed'> & { mode: CaptureSettings['mode'] };
+  'settingsArmed' | 'repeatMissed' | 'triggerPreObtainedSec'> & { mode: CaptureSettings['mode'] };
 
 export class CapturePanel {
   private advancedOpen = false;
@@ -362,6 +365,7 @@ export class CapturePanel {
       triggerAutoDisarmed: v.triggerAutoDisarmed,
       settingsArmed: v.settingsArmed,
       repeatMissed: v.repeatMissed === true,
+      triggerPreObtainedSec: v.triggerPreObtainedSec ?? null,
     };
   }
 
@@ -401,6 +405,15 @@ export class CapturePanel {
       // finish() discards the rolling search prefix - nothing was recorded.
       miss.textContent = t('capturePanel.triggerNotFound');
       host.appendChild(miss);
+    }
+
+    if (v.triggerPreObtainedSec !== null && v.triggerPreObtainedSec !== undefined) {
+      // The capture holds less negative time than the armed note promised; say how much.
+      const short = div('panel-note');
+      short.textContent = t('capturePanel.preTriggerObtained', {
+        duration: formatDuration(v.triggerPreObtainedSec),
+      });
+      host.appendChild(short);
     }
 
     if (v.repeatMissed && v.mode === 'repeat') {

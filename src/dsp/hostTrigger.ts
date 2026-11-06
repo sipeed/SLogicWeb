@@ -33,8 +33,9 @@
  *   `Math.round(seconds * samplerate)`, at least one sample. `'unlimited'` is Infinity.
  *   The matcher's `maxSamples` is the total emitted stream: `preTriggerSamples +
  *   postTriggerSamples`, or Infinity for an unlimited budget. This is the §5.1 rule:
- *   a finite acquisition retires pre + post samples in total, so an early match extends
- *   the post span rather than shortening the capture.
+ *   a finite acquisition retires pre + post samples in total. Because the matcher holds
+ *   matches off until the pre-trigger window is full (below), the split is exactly
+ *   `pre` before T and `post` from T onward.
  * - A plan with `loop` maps to the matcher's `continuous` mode; without `loop` it is
  *   `one-shot` (Single and each Repeat sweep). Only a trigger-anchored Loop is
  *   executable here: the matcher always waits for the first match before emitting, so a
@@ -58,13 +59,16 @@
  *
  * T (`onMatch.index`, `triggerSampleIndex`) is a zero-based index in the **emitted**
  * stream, in complete samples, not a device-stream index and not a byte offset. The
- * emitted stream starts at the retained prefix, so on a gap-free stream T equals
- * `min(deviceT, preTrigger)` where `deviceT` is the match's index in the byte stream fed
- * to this executor. `noteGap()`/`resetContinuity()` deliberately clear the ring and
+ * emitted stream starts at the retained prefix. The matcher applies a pre-fill holdoff:
+ * a match is accepted only once `preTrigger` complete samples have been fed since arming
+ * (so `deviceT >= preTrigger`), and therefore T always equals `preTrigger` - a dense
+ * trigger signal cannot fire on the first edge after arm with an empty prefix.
+ * `noteGap()`/`resetContinuity()` deliberately clear the ring, restart the holdoff and
  * restart emitted-stream accounting at the first sample retained after the
- * discontinuity, so after such a reset T is `min(samples fed since the reset,
- * preTrigger)`; a caller that positions store chunks after a dropout must use the
- * emitted coordinate, not the absolute device coordinate. With a zero pre-trigger window
+ * discontinuity, so the delivered prefix never spans a gap; a caller that positions store
+ * chunks after a dropout must use the emitted coordinate, not the absolute device
+ * coordinate. A retune (`reconfigure()`) keeps the ring and does not restart the
+ * holdoff. Holdoff samples count toward `searchLimitSamples`. With a zero pre-trigger window
  * T is always 0 even when the match happens much later in the fed stream; use
  * `stats.inspectedSamples` to recover how many samples were searched. The caller that
  * knows the stream origin adds it to obtain an absolute position.

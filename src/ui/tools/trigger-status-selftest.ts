@@ -3,7 +3,9 @@
  * Trigger-state note precedence, independent of the panel DOM.
  */
 
-import { triggerPanelNotes, triggerStatusNote, type TriggerNoteInput } from '../triggerStatus.js';
+import {
+  preTriggerShortfall, triggerPanelNotes, triggerStatusNote, type TriggerNoteInput,
+} from '../triggerStatus.js';
 
 const nodeProcess = (() => {
   const p = (globalThis as { process?: { exit(code: number): never } }).process;
@@ -94,6 +96,27 @@ check('single and repeat show the plain triggered note',
     `freeRun=${JSON.stringify(freeRun)}, noCondition=${JSON.stringify(noCondition)}, ` +
     `memory=${JSON.stringify(memory)}, single=${single.pending}, repeat=${repeat.pending}, ` +
     `digitalLocked=${digitalLocked.pending}, analogReleased=${analogReleased.pending}`);
+}
+
+{
+  // Actual pre-trigger readout: shown only when a triggered Single/Repeat capture holds
+  // less than its configured window. The holdoff normally makes T == configured.
+  const base = {
+    mode: 'single' as const, triggerState: 'triggered' as const,
+    configuredSamples: 100, triggerSampleIndex: 100,
+  };
+  const full = preTriggerShortfall(base);
+  const short = preTriggerShortfall({ ...base, triggerSampleIndex: 25 });
+  const repeatShort = preTriggerShortfall({ ...base, mode: 'repeat', triggerSampleIndex: 0 });
+  const loop = preTriggerShortfall({ ...base, mode: 'loop', triggerSampleIndex: 3 });
+  const waiting = preTriggerShortfall({ ...base, triggerState: 'waiting', triggerSampleIndex: null });
+  const disabled = preTriggerShortfall({ ...base, configuredSamples: null, triggerSampleIndex: 5 });
+  const noPre = preTriggerShortfall({ ...base, configuredSamples: 0, triggerSampleIndex: 0 });
+  check('actual pre-trigger is reported only when a triggered capture is short of its window',
+    full === null && short === 25 && repeatShort === 0 && loop === null &&
+      waiting === null && disabled === null && noPre === null,
+    `full=${full}, short=${short}, repeat=${repeatShort}, loop=${loop}, ` +
+      `waiting=${waiting}, disabled=${disabled}, noPre=${noPre}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

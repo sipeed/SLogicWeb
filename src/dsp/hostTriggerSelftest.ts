@@ -301,26 +301,26 @@ const MODE_CASES: ReadonlyArray<{
   {
     name: 'level defaults to polarity 1',
     condition: { signal: 'd0', kind: 'level' },
-    values: [1, 0, 0, 0, 0, 0, 0, 0],
-    deviceT: 0,
+    values: [1, 1, 0, 0, 0, 0, 0, 0],
+    deviceT: 1,
   },
   {
     name: 'level 0',
     condition: { signal: 'd0', kind: 'level', level: 0 },
-    values: [0, 1, 1, 1, 1, 1, 1, 1],
-    deviceT: 0,
+    values: [0, 0, 1, 1, 1, 1, 1, 1],
+    deviceT: 1,
   },
   {
     name: 'high maps to level 1',
     condition: { signal: 'd0', kind: 'high' },
-    values: [1, 0, 0, 0, 0, 0, 0, 0],
-    deviceT: 0,
+    values: [1, 1, 0, 0, 0, 0, 0, 0],
+    deviceT: 1,
   },
   {
     name: 'low maps to level 0',
     condition: { signal: 'd0', kind: 'low' },
-    values: [0, 1, 1, 1, 1, 1, 1, 1],
-    deviceT: 0,
+    values: [0, 0, 1, 1, 1, 1, 1, 1],
+    deviceT: 1,
   },
   {
     name: 'rising',
@@ -359,8 +359,9 @@ for (const modeCase of MODE_CASES) {
   });
   feedAll(trigger, packSamples(8, modeCase.values), 2);
 
-  // preTrigger is 1 sample, so the emitted stream starts one sample before T when the
-  // match is not the first sample.
+  // preTrigger is 1 sample, so the emitted stream starts one sample before T. The level
+  // cases are true from sample 0, but the pre-fill holdoff makes sample 1 (the first with
+  // a full one-sample prefix) the trigger.
   const start = Math.max(0, modeCase.deviceT - 1);
   const expected = modeCase.values.slice(start, start + 5);
   const expectedT = Math.min(modeCase.deviceT, 1);
@@ -527,7 +528,7 @@ for (const modeCase of MODE_CASES) {
 }
 
 // ---------------------------------------------------------------------------------
-// Early match keeps the total pre + post budget
+// Pre-fill holdoff keeps the full prefix and the total pre + post budget
 // ---------------------------------------------------------------------------------
 
 {
@@ -544,7 +545,9 @@ for (const modeCase of MODE_CASES) {
     show(plan.preTrigger),
   );
 
-  const earlyValues = [0, 1, ...new Array<number>(38).fill(0)];
+  // Pre-fill holdoff: the pulse at sample 1 lies inside the unfilled 4-sample window and
+  // is ignored; the next one (sample 6) triggers with the full prefix.
+  const earlyValues = [0, 1, 0, 0, 0, 0, 1, ...new Array<number>(33).fill(0)];
   const early = new Recorder();
   const earlyTrigger = new HostTrigger({
     plan,
@@ -555,10 +558,10 @@ for (const modeCase of MODE_CASES) {
   });
   feedAll(earlyTrigger, packSamples(8, earlyValues), 7);
   check(
-    'a match inside the pre-trigger window still emits pre + post samples',
+    'a match before the pre-trigger window fills is held off; the next carries the full prefix',
     earlyTrigger.stats.emittedSamples === 20 && earlyTrigger.complete &&
-      earlyTrigger.triggerSampleIndex === 1 &&
-      sameNumbers(early.samples(1), earlyValues.slice(0, 20)),
+      earlyTrigger.triggerSampleIndex === 4 && early.matches.length === 1 &&
+      sameNumbers(early.samples(1), earlyValues.slice(2, 22)),
     `emitted=${earlyTrigger.stats.emittedSamples} T=${String(earlyTrigger.triggerSampleIndex)} ` +
       `stream=${show(early.samples(1))}`,
   );
@@ -658,12 +661,14 @@ for (const modeCase of MODE_CASES) {
     `pre=${trigger.preTriggerSamples} post=${trigger.postTriggerSamples} ` +
       `max=${trigger.maxSamples}`,
   );
-  const values = [1, ...new Array<number>(39).fill(0)];
+  const values = [0, 0, 0, 0, 1, ...new Array<number>(35).fill(0)];
   feedAll(trigger, packSamples(8, values), 5);
   check(
     'a time-budget capture retires pre + round(time * rate) samples',
-    trigger.complete && trigger.stats.emittedSamples === 20,
-    `complete=${trigger.complete} emitted=${trigger.stats.emittedSamples}`,
+    trigger.complete && trigger.stats.emittedSamples === 20 &&
+      trigger.triggerSampleIndex === 4,
+    `complete=${trigger.complete} emitted=${trigger.stats.emittedSamples} ` +
+      `T=${String(trigger.triggerSampleIndex)}`,
   );
 }
 
@@ -689,12 +694,18 @@ for (const modeCase of MODE_CASES) {
       trigger.maxSamples === Infinity && trigger.mode === 'one-shot',
     `post=${trigger.postTriggerSamples} max=${trigger.maxSamples} mode=${trigger.mode}`,
   );
-  const values = [1, ...new Array<number>(49).fill(0)];
+  // The high sample sits after the pre-fill holdoff, so T == preTriggerSamples and the
+  // emitted stream is everything from T - pre onward.
+  const highAt = 10;
+  const values = new Array<number>(50).fill(0);
+  values[highAt] = 1;
   feedAll(trigger, packSamples(8, values), 9);
+  const pre = trigger.preTriggerSamples;
   check(
     'an unlimited one-shot capture emits every post sample and never completes',
-    trigger.stats.matched && trigger.stats.emittedSamples === 50 &&
-      !trigger.complete && trigger.triggerSampleIndex === 0,
+    pre < highAt && trigger.stats.matched &&
+      trigger.stats.emittedSamples === 50 - highAt + pre &&
+      !trigger.complete && trigger.triggerSampleIndex === pre,
     `emitted=${trigger.stats.emittedSamples} complete=${trigger.complete} ` +
       `T=${String(trigger.triggerSampleIndex)}`,
   );
@@ -1034,11 +1045,14 @@ for (const modeCase of MODE_CASES) {
   });
   feedAll(trigger, packSamples(8, [0, 0, 0]), 1);
   trigger.noteGap(10);
-  feedAll(trigger, packSamples(8, [1, 0, 0, 0, 0]), 1);
+  // The gap emptied the ring, so the pre-fill holdoff restarts: the high first sample
+  // after the gap cannot trigger (its prefix would span the gap); the second one does.
+  feedAll(trigger, packSamples(8, [1, 1, 0, 0, 0, 0]), 1);
   check(
     'noteGap restarts the emitted stream and T lies in the new prefix',
-    trigger.stats.matched && trigger.triggerSampleIndex === 0 &&
-      recorder.matches.length === 1 && recorder.emittedBytes() === 5,
+    trigger.stats.matched && trigger.triggerSampleIndex === 1 &&
+      recorder.matches.length === 1 && recorder.emittedBytes() === 5 &&
+      sameNumbers(recorder.samples(1), [1, 1, 0, 0, 0]),
     `T=${String(trigger.triggerSampleIndex)} bytes=${recorder.emittedBytes()} ` +
       `matches=${show(recorder.matches)}`,
   );

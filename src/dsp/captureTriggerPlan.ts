@@ -33,7 +33,9 @@
  *  6. **Repeat search limit.** One Repeat sweep searches for `triggerSearchSamples(
  *     'repeat', captureLimitSamples)`, i.e. `min(MAX_SAMPLES - 1, post + pre)` whole
  *     samples, where `pre` is the plan's exact `preTrigger.samples`. Single and Loop
- *     wait indefinitely. The descriptor exposes that allowance for `HostTrigger`.
+ *     wait indefinitely. The descriptor exposes that allowance for `HostTrigger`. The
+ *     matcher's pre-fill holdoff inspects the first `pre` samples without matching, so
+ *     a Repeat sweep may match in the remaining `post` samples.
  *
  * ## What success means
  *

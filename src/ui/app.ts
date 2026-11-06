@@ -156,6 +156,7 @@ import {
   type TriggerReconcilePhase, type TriggerViewLock,
 } from './triggerViewport.js';
 import { AnalogCrossingScanner } from './analogCrossingScan.js';
+import { preTriggerShortfall } from './triggerStatus.js';
 import {
   RepeatCompositeStore, remapRepeatSample, repeatHoldReleased, repeatSurfacePixels,
   type RepeatLayerStore,
@@ -3737,7 +3738,24 @@ export class App {
       triggerAutoDisarmed: this.triggerAutoDisarmed,
       settingsArmed: this.triggerSettingsArmed(),
       repeatMissed: this.repeatMissed,
+      triggerPreObtainedSec: this.triggerPreObtainedSec(),
     };
+  }
+
+  /** Seconds of pre-trigger the current capture holds when short of its configured
+   * window, else null. The host matcher's pre-fill holdoff makes this null on every
+   * normal software-trigger capture; see `preTriggerShortfall`. */
+  private triggerPreObtainedSec(): number | null {
+    const sr = this.store.samplerate;
+    if (!(sr > 0)) return null;
+    const obtained = preTriggerShortfall({
+      mode: this.settings.mode,
+      triggerState: this.triggerState,
+      configuredSamples: this.captureUsesSoftwareTrigger && this.captureTriggerBase
+        ? this.captureTriggerBase.preTriggerSamples : null,
+      triggerSampleIndex: this.triggerSampleIndex,
+    });
+    return obtained === null ? null : obtained / sr;
   }
 
   /** Whether the current settings request a trigger with at least one in-width condition. */
@@ -3888,6 +3906,7 @@ export class App {
         ? this.captureTriggerBase.preTriggerSamples : undefined,
       loopMetrics: this.running && this.captureIsLoop ? this.computeLoopMetrics() : null,
       repeatMissed: this.repeatMissed,
+      triggerPreObtainedSec: this.triggerPreObtainedSec(),
     };
   }
 
