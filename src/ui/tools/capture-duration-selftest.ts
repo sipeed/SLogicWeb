@@ -22,12 +22,32 @@ const base = defaultCaptureSettings();
 {
   const single = { ...base, mode: 'single' as const, seconds: 0.0015 };
   const loop = carryCaptureDuration(single, { ...single, mode: 'loop' });
-  const entered = loop.loopSamples === 24_576 && loop.seconds === 24_576 / 16e6;
+  // The window rounds up to whole quanta (24,000 -> 24,576); the entered 1.5 ms does not.
+  const entered = loop.loopSamples === 24_576 && loop.seconds === 0.0015;
   const back = carryCaptureDuration(loop, { ...loop, mode: 'single' });
-  const left = back.seconds === 24_576 / 16e6;
+  const left = back.seconds === 0.0015;
   check('entering Loop takes the duration Single was using, and leaving Loop gives it back',
     entered && left,
     `loopSamples=${loop.loopSamples}, loopSeconds=${loop.seconds}, singleSeconds=${back.seconds}`);
+}
+
+{
+  // Reported on hardware: Single 1000 ms -> Loop -> Single came back as 1000.01 ms,
+  // because 1 s at 100 MHz is not a whole number of 1024-sample quanta.
+  const rows = [100e6, 50e6, 16e6, 12e6, 200e6].map((samplerate) => {
+    const single = { ...base, mode: 'single' as const, samplerate, seconds: 1 };
+    const loop = carryCaptureDuration(single, { ...single, mode: 'loop' });
+    const back = carryCaptureDuration(loop, { ...loop, mode: 'single' });
+    const again = carryCaptureDuration(
+      carryCaptureDuration(back, { ...back, mode: 'loop' }), { ...back, mode: 'single' });
+    return { samplerate, window: loop.loopSamples, loop: loop.seconds, back: back.seconds,
+      again: again.seconds };
+  });
+  check('Single -> Loop -> Single never rewrites the entered duration, at any rate',
+    rows.every((row) => row.loop === 1 && row.back === 1 && row.again === 1 &&
+      row.window % 1024 === 0 && row.window >= row.samplerate),
+    rows.map((row) => `${row.samplerate / 1e6}M window=${row.window} loop=${row.loop} ` +
+      `back=${row.back} again=${row.again}`).join(', '));
 }
 
 {
@@ -87,7 +107,8 @@ const base = defaultCaptureSettings();
   const applyEnd = applyStart >= 0 ? app.indexOf('\n  }', applyStart) : -1;
   const apply = applyEnd > applyStart ? app.slice(applyStart, applyEnd) : '';
   const wired = apply.includes('carryCaptureDuration(this.settings, this.clampSettings(s))');
-  const derived = app.includes('seconds: s.mode === \'loop\'\n      ? loopSamples / samplerate');
+  const derived = app.includes(
+    'seconds: s.mode === \'loop\'\n      ? loopDurationSeconds([s.seconds], loopSamples, samplerate, s.channels)');
   const adopted = app.includes('carryCaptureDuration(this.settings, adopted)');
   check('App carries the duration through its single settings commit path and device adoption',
     wired && derived && adopted, `apply=${wired}, derive=${derived}, adopt=${adopted}`);

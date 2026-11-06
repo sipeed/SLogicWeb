@@ -120,7 +120,9 @@ import {
   canvasLabelMeasure, computeTicks, drawAxis, type TickLabelMetrics, type TickSet,
 } from './timeAxis.js';
 import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.js';
-import { capturePostTriggerSamples, carryCaptureDuration } from './capturePolicy.js';
+import {
+  capturePostTriggerSamples, carryCaptureDuration, loopDurationSeconds,
+} from './capturePolicy.js';
 import {
   captureStartHoldDue, emptyHintVisible, planCaptureStartDisplay,
 } from './captureStart.js';
@@ -6171,7 +6173,7 @@ function clampCaptureSettings(
     // or changing the rate carries the same value (see carryCaptureDuration). The loop
     // window may be shorter than Single's 1 ms minimum, so it is not clamped here.
     seconds: s.mode === 'loop'
-      ? loopSamples / samplerate
+      ? loopDurationSeconds([s.seconds], loopSamples, samplerate, s.channels)
       : clampCaptureSeconds(s.seconds, samplerate),
     singleUnlimited: s.mode === 'single' && s.singleUnlimited === true,
     repeatIntervalSeconds: clampRepeatIntervalSeconds(s.repeatIntervalSeconds),
