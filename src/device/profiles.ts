@@ -77,13 +77,18 @@ const SLOGIC16U3_LINK_RATES = ['fs', 'hs', 'ss5'] as const;
 const SLOGIC32U3_LINK_RATES = ['fs', 'hs', 'ss5', 'ss10'] as const;
 
 /**
- * The 32-channel default on a 5 Gbit/s link (quirk `ss5-32ch-payload-edge`): 100 MHz
- * (400 MB/s) is exactly the link ceiling and underran on hardware, 80 MHz also underran
- * and 50 MHz (200 MB/s) was clean. Real-device review: 320 MB/s held, 400 MB/s aborted
- * after ~110 ms with a host overload.
+ * The wire load a 5 Gbit/s link has been measured to sustain for every width
+ * (quirk `ss5-payload-edge`): 1600 Mbit/s = 200 MB/s, half the 3200 Mbit/s payload.
+ * Hardware evidence on a 32U3 at 5 Gbit/s: 400 MB/s aborts at every width that reaches it
+ * (32ch@100M underran in headless acceptance and aborted after ~110 ms with a host
+ * overload; 16ch@200M aborted at ~102 ms; 8ch@400M aborted), 320 MB/s is inconsistent
+ * (32ch@80M held in one external run and underran in headless acceptance), and 200 MB/s
+ * ran clean (32ch@50M, 16ch@100M). So the recommendation at each width is the fastest
+ * offered rate whose load fits 200 MB/s: 4/8/16/32 ch = 400/200/100/50 MHz. It is a
+ * connect default and a UI warning threshold, never a ceiling: the faster rates stay
+ * offered because libsigrok declares them.
  */
-const SS5_32CH_RECOMMENDED_HZ = 50e6;
-
+const USB3_5G_SUSTAINED_PAYLOAD_BPS = 1_600_000_000;
 /** Pre-trigger history the host matcher may retain (`SoftwareTrigger` cap). */
 const PRE_TRIGGER_MAX_PERCENT = 75;
 const PRE_TRIGGER_MAX_BYTES = 64 * 1024 * 1024;
@@ -136,6 +141,7 @@ function rateTier(
   links: readonly LinkRate[],
 ): RateTier {
   const hz: Partial<Record<LinkRate, number>> = {};
+  const recommendedHz: Partial<Record<LinkRate, number>> = {};
   for (const link of links) {
     switch (link) {
       case 'ss10':
@@ -143,6 +149,10 @@ function rateTier(
         break;
       case 'ss5':
         hz.ss5 = Math.min(nativeHz, USB3_5G_LINK_PAYLOAD_BPS / channels);
+        // Only a tier whose ss5 ceiling exceeds the sustained load carries advice.
+        if (hz.ss5 > USB3_5G_SUSTAINED_PAYLOAD_BPS / channels) {
+          recommendedHz.ss5 = USB3_5G_SUSTAINED_PAYLOAD_BPS / channels;
+        }
         break;
       case 'hs':
         hz.hs = Math.min(nativeHz, USB2_LINK_PAYLOAD_BPS / channels);
@@ -152,7 +162,7 @@ function rateTier(
         break;
     }
   }
-  return { channels, hz };
+  return Object.keys(recommendedHz).length > 0 ? { channels, hz, recommendedHz } : { channels, hz };
 }
 
 function analogGroup(start: number): AnalogGroup {
@@ -184,6 +194,20 @@ const U3_COMMON_QUIRKS = [
     note: 'The U3 register protocol exposes no firmware version register, so firmware.min ' +
       'is documentation the handshake can neither parse nor enforce; the shipped 32U3 ' +
       'value is an opaque vendor hardware S/N, not a dotted version.',
+  },
+  {
+    id: 'ss5-payload-edge',
+    note: 'A 5 Gbit/s link offers 400 MB/s of payload, but a wire load at that ceiling ' +
+      'aborts: 32 channels at 100 MHz (32 x 100 MHz / 8 = 400 MB/s) triggered an underrun ' +
+      'in headless acceptance and 16 channels at 200 MHz aborted the same way; 32 channels ' +
+      'at 80 MHz (320 MB/s) also underran, while 50 MHz at 32 channels and 100 MHz at 16 ' +
+      'channels (200 MB/s) were clean. The full rates stay in the capability table because ' +
+      'libsigrok declares them. Every ss5 tier whose ceiling exceeds 200 MB/s therefore ' +
+      'recommends the rate that fits it (4/8/16/32 ch = 400/200/100/50 MHz, `recommendedHz`), ' +
+      'which the UI uses as its connect default and as the threshold of its bandwidth ' +
+      'warning. An active analog group needs an ADC rate of at least 100 MHz, so 32 channels ' +
+      'with analog cannot stay inside the recommendation; the UI warns instead of changing ' +
+      'the channel selection.',
   },
 ] as const;
 
@@ -267,11 +291,7 @@ export const SLOGIC32U3_PROFILE: DeviceProfile = {
       rateTier(4, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 4), SLOGIC32U3_LINK_RATES),
       rateTier(8, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 8), SLOGIC32U3_LINK_RATES),
       rateTier(16, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 16), SLOGIC32U3_LINK_RATES),
-      {
-        ...rateTier(32, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 32), SLOGIC32U3_LINK_RATES),
-        // The `ss5-32ch-payload-edge` quirk: 100 MHz is offered, 50 MHz is what ran clean.
-        recommendedHz: { ss5: SS5_32CH_RECOMMENDED_HZ },
-      },
+      rateTier(32, nativeRate(MAX_SAMPLERATE_HZ_SLOGIC32_U3, 32), SLOGIC32U3_LINK_RATES),
     ],
     sampleratesHz: SAMPLERATES_HZ,
     thresholdVolts: THRESHOLD_VOLTS,
@@ -314,15 +334,6 @@ export const SLOGIC32U3_PROFILE: DeviceProfile = {
       note: 'An active analog group takes its sample clock from the ADC 800 MHz PLL: ' +
         'offered rates are that PLL\'s divisors from 100 MHz up (or the slower ' +
         'divisors when the link cannot carry the minimum).',
-    },
-    {
-      id: 'ss5-32ch-payload-edge',
-      note: '32 channels at 100 MHz is exactly the 5 Gbit/s payload ceiling ' +
-        '(32 x 100 MHz / 8 = 400 MB/s) and triggered an underrun in headless ' +
-        'acceptance; a later 80 MHz run also underran, while 50 MHz was clean. ' +
-        '100 MHz stays in the capability table because libsigrok declares it. ' +
-        'Until a sustained run is clean, the 32-channel tier recommends 50 MHz on ss5 ' +
-        '(`recommendedHz`), which the UI uses as its connect default.',
     },
   ],
 };

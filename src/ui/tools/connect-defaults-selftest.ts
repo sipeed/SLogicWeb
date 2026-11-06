@@ -31,7 +31,7 @@ function check(name: string, pass: boolean, detail: string): void {
 
 const source = fs.readFileSync('src/ui/connectDefaults.ts', 'utf8');
 // The shipped 32U3 numbers: the native 200 MHz ceiling (the link class is unknown) and
-// the profile's 50 MHz recommendation for 32 channels on ss5.
+// the profile's ss5 recommendations (200 MB/s per width: 4/8/16/32 ch = 400/200/100/50 MHz).
 const ceilings32 = maxSamplerateHzForProfile(SLOGIC32U3_PROFILE);
 const advice32 = recommendedSamplerateHzFor(SLOGIC32U3_PROFILE, null);
 const advice16 = recommendedSamplerateHzFor(SLOGIC16U3_PROFILE, null);
@@ -39,9 +39,10 @@ const ceiling50: Readonly<Record<number, number>> = { 32: 50e6 };
 const ceiling40: Readonly<Record<number, number>> = { 32: 40e6 };
 const ceiling16Only: Readonly<Record<number, number>> = { 16: 200e6 };
 
-check('the 32U3 profile supplies the connect default: 200 MHz ceiling, 50 MHz recommended',
-  ceilings32[32] === 200e6 && advice32[32] === 50e6 && Object.keys(advice32).length === 1 &&
-    Object.keys(advice16).length === 0,
+check('the U3 profiles supply the connect defaults: 32U3 200 MHz ceiling, 50 MHz recommended at 32ch',
+  ceilings32[32] === 200e6 && advice32[32] === 50e6 && advice32[16] === 100e6 &&
+    advice32[8] === 200e6 && advice32[4] === 400e6 &&
+    JSON.stringify(advice16) === JSON.stringify({ 4: 400e6, 8: 200e6, 16: 100e6 }),
   `ceilings=${JSON.stringify(ceilings32)}, 32U3=${JSON.stringify(advice32)}, 16U3=${JSON.stringify(advice16)}`);
 
 const nonExplicit = [16e6, 50e6, 100e6, 200e6].map((current) => ({
@@ -86,7 +87,7 @@ const missingKey = connectSamplerate({
 check('a missing ceiling entry still takes the recommendation',
   missingKey === 50e6, `non-explicit=${missingKey}`);
 
-const otherWidths = [4, 8, 16, 64, 128].flatMap((channels) => [16e6, 200e6].flatMap((current) =>
+const otherWidths = [64, 128].flatMap((channels) => [16e6, 200e6].flatMap((current) =>
   [false, true].map((explicit) => ({
     channels,
     current,
@@ -103,8 +104,8 @@ const sixteen = [false, true].map((explicit) => connectSamplerate({
   current: 200e6, explicit, channels: 16, ceilings: maxSamplerateHzForProfile(SLOGIC16U3_PROFILE),
   recommended: advice16,
 }));
-check('the 16U3 has no recommendation, so its connect rate is untouched',
-  sixteen.every((got) => got === 200e6), sixteen.join(', '));
+check('a fresh 16U3 16ch connection lands on 100 MHz; an explicit 200 MHz is honoured',
+  sixteen[0] === 100e6 && sixteen[1] === 200e6, sixteen.join(', '));
 
 const propertyRows = [16e6, 50e6, 100e6, 200e6].flatMap((current) => [false, true].flatMap((explicit) =>
   [ceilings32, ceiling50, ceiling40].map((ceilings) => {

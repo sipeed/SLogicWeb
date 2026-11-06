@@ -44,6 +44,7 @@ import { MAX_CURSOR_DISTANCE_ROWS, type DistanceSide } from './cursorDistance.js
 import { MAX_CURSOR_EDGE_ROWS } from './cursorEdges.js';
 import { acquisitionTimeControl } from './timeControl.js';
 import { triggerPanelNotes, triggerStatusNote } from './triggerStatus.js';
+import { rateAdvice } from './rateAdvice.js';
 
 export interface CapturePanelCallbacks {
   onSettings(next: CaptureSettings): void;
@@ -608,6 +609,27 @@ export class CapturePanel {
       this.cb.onSettings({ ...s, thresholdVolts: Number(th.value) }));
     rowRT.appendChild(th.el);
     chSec.body.appendChild(rowRT);
+
+    // The effective rate above the profile's sustainable one for this width, whether the
+    // user chose it or an analog group forced it (see rateAdvice.ts): warn, never change
+    // the channel selection behind the user's back.
+    const overAdvice = rateAdvice({
+      channels: s.channels,
+      samplerate: s.samplerate,
+      recommended: v.recommendedSamplerateHz ?? {},
+      analogMinHz: analogRates.length > 0 ? Math.min(...analogRates) : undefined,
+    });
+    if (overAdvice) {
+      const warn = div('panel-note warning');
+      warn.dataset.rateAdvice = overAdvice.key;
+      warn.textContent = t(overAdvice.key, {
+        channels: s.channels,
+        rate: formatRate(s.samplerate),
+        advised: formatRate(overAdvice.advised),
+        min: formatRate(overAdvice.analogMinHz ?? overAdvice.advised),
+      });
+      chSec.body.appendChild(warn);
+    }
 
     if (activeBanks.size > 0) {
       const analogNote = div('panel-note');

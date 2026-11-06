@@ -439,6 +439,17 @@ Rules:
 - **Lifecycle:** every editable control displays Live/Next/View/Preference according to
   `ARCHITECTURE.md` §5.3. While running, the panel lists "Pending for next capture" when
   any Next edit exists. A restart action is explicit.
+- **Link bandwidth:** a profile's `RateTier.recommendedHz` is the rate the USB link was
+  measured to sustain at that width (5 Gbit/s: 200 MB/s, so 4/8/16/32 ch =
+  400/200/100/50 MS/s; 400 MB/s aborts at every width). It is the connect default, never
+  a ceiling. When the effective rate is above it — chosen by the user or forced by an
+  analog group — the Acquire panel shows a warning under the rate ("32 CH @ 100 MS/s may
+  exceed the USB link bandwidth (sustains 50 MS/s)"). **At-risk combination:** an
+  analog group needs an ADC rate of at least 100 MS/s, so 32 channels plus analog on a
+  5 Gbit/s link cannot stay inside the recommendation; the warning says the analog input
+  forced the rate and that fewer channels lower the load. The UI never narrows the
+  channel selection to avoid it. WebUSB cannot name the link class, so a 10 Gbit/s link
+  gets the same (conservative) warning.
 - **Retention:** the panel shows kept bytes/time, the limit and the loop window; when the
   limit binds, a warning names the consequence. It never silently trims the trigger lock.
 - **Record:** a separate state (`off/armed/recording/paused/exporting/error/full`), with

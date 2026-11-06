@@ -452,6 +452,9 @@ export const ru: Messages = {
   'capturePanel.dacNote': 'Фактический порог {volts} В (код DAC {code}). Чем меньше каналов, тем выше частота: для {channels} CH максимум {rate}.',
   'capturePanel.dacNoteAdvised':
     'Фактический порог {volts} В (код DAC {code}). {channels} CH устойчиво {advised}; потолок {rate} может перегрузить USB-канал. Чем меньше каналов, тем выше частота.',
+  'capturePanel.rateAboveAdvised': '{channels} CH @ {rate} может превысить пропускную способность USB-канала (устойчиво {advised}).',
+  'capturePanel.rateAnalogForced':
+    'Аналоговому входу нужно ≥{min}: {channels} CH @ {rate} может превысить пропускную способность USB-канала (устойчиво {advised}). Меньше каналов — меньше нагрузка на канал.',
   'capturePanel.capture': 'Захват',
   'capturePanel.modeSingle': 'Одиночный',
   'capturePanel.modeRepeat': 'Повтор',

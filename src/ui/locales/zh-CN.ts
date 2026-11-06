@@ -408,6 +408,9 @@ export const zhCN: Messages = {
   'capturePanel.dacNote': '实际阈值 {volts} V（DAC 码 {code}）。通道越少，最高采样率越高：{channels} CH 最高 {rate}。',
   'capturePanel.dacNoteAdvised':
     '实际阈值 {volts} V（DAC 码 {code}）。{channels} CH 稳定 {advised}；上限 {rate} 可能超出 USB 链路带宽。通道越少，最高采样率越高。',
+  'capturePanel.rateAboveAdvised': '{channels} CH @ {rate} 可能超出 USB 链路带宽（稳定 {advised}）。',
+  'capturePanel.rateAnalogForced':
+    '模拟输入需要 ≥{min}：{channels} CH @ {rate} 可能超出 USB 链路带宽（稳定 {advised}）。减少通道数可降低链路负载。',
   'capturePanel.capture': '采集',
   'capturePanel.modeSingle': '单次',
   'capturePanel.modeRepeat': '重复',

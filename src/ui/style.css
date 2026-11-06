@@ -1406,6 +1406,7 @@ html.resizing { cursor: col-resize; user-select: none; }
 .trigger-status { display: flex; flex-direction: column; gap: 8px; }
 .trigger-status:empty { display: none; }
 .panel-note.error { color: var(--negative); }
+.panel-note.warning { color: var(--warning); }
 .panel-note.live { color: var(--text80); }
 .capture-badge {
   display: inline-flex; min-height: 18px; align-items: center; gap: 5px; padding: 0 7px;
@@ -1908,6 +1909,8 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
 :is(html[data-theme="dark"], html[data-theme="light"]) .panel-note,
 :is(html[data-theme="dark"], html[data-theme="light"]) .cursor-dist-hint,
 :is(html[data-theme="dark"], html[data-theme="light"]) .cursor-edge-hint { color: var(--muted-foreground); }
+/* A link-bandwidth warning keeps its colour under the themed muted note text. */
+:is(html[data-theme="dark"], html[data-theme="light"]) .panel-note.warning { color: var(--warning); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .decoder-detail { color: var(--foreground); }
 
 /* Dark theme: panel controls take the shadcn control shape - control radius, --input

@@ -461,6 +461,9 @@ export const fr: Messages = {
   'capturePanel.dacNote': 'Seuil réel {volts} V (code DAC {code}). Moins de voies permettent une fréquence plus élevée : {channels} CH plafonne à {rate}.',
   'capturePanel.dacNoteAdvised':
     'Seuil réel {volts} V (code DAC {code}). {channels} CH tient {advised} en continu ; son plafond {rate} peut saturer le lien USB. Moins de voies permettent une fréquence plus élevée.',
+  'capturePanel.rateAboveAdvised': '{channels} CH @ {rate} peut dépasser la bande passante du lien USB (tient {advised} en continu).',
+  'capturePanel.rateAnalogForced':
+    'L’entrée analogique exige ≥{min} : {channels} CH @ {rate} peut dépasser la bande passante du lien USB (tient {advised} en continu). Moins de voies allègent la charge du lien.',
   'capturePanel.capture': 'Capture',
   'capturePanel.modeSingle': 'Unique',
   'capturePanel.modeRepeat': 'Répéter',

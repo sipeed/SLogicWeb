@@ -462,11 +462,12 @@ check(
 
 {
   const edge = SLOGIC32U3_PROFILE.quirks
-    ?.find((quirk) => quirk.id === 'ss5-32ch-payload-edge');
+    ?.find((quirk) => quirk.id === 'ss5-payload-edge');
   const note = edge?.note ?? '';
   check(
-    '32U3 documents the 5G 32ch/100MHz payload edge and keeps 100 MHz offered',
+    'both U3 profiles document the 5G payload edge and keep 100 MHz offered at 32ch',
     edge !== undefined &&
+      SLOGIC16U3_PROFILE.quirks?.some((quirk) => quirk.id === 'ss5-payload-edge') === true &&
       note.includes('400 MB/s') &&
       note.includes('underrun') &&
       note.includes('100 MHz') &&
@@ -670,18 +671,36 @@ check(
 // ---- recommended defaults ----------------------------------------------
 
 {
-  // The ss5-32ch-payload-edge quirk as data: 32ch/100M is offered on ss5 but underran.
+  // The ss5-payload-edge quirk as data: every ss5 tier above 200 MB/s recommends the rate
+  // that fits it (32ch/100M is offered on ss5 but underran, 16ch/200M aborted).
   const unknown32 = recommendedSamplerateHzFor(SLOGIC32U3_PROFILE, null);
   const ss5 = recommendedSamplerateHzFor(SLOGIC32U3_PROFILE, 'ss5');
   const ss10 = recommendedSamplerateHzFor(SLOGIC32U3_PROFILE, 'ss10');
   const none16 = recommendedSamplerateHzFor(SLOGIC16U3_PROFILE, null);
+  const ss5of16 = recommendedSamplerateHzFor(SLOGIC16U3_PROFILE, 'ss5');
+  const want32 = JSON.stringify({ 4: 400e6, 8: 200e6, 16: 100e6, 32: 50e6 });
+  const want16 = JSON.stringify({ 4: 400e6, 8: 200e6, 16: 100e6 });
   check(
-    'the 32U3 recommends 50 MHz at 32ch on ss5 and on an unknown link, nothing on ss10',
-    JSON.stringify(unknown32) === JSON.stringify({ 32: 50e6 }) &&
-      JSON.stringify(ss5) === JSON.stringify({ 32: 50e6 }) &&
-      JSON.stringify(ss10) === '{}' && JSON.stringify(none16) === '{}',
+    'every ss5 tier above 200 MB/s recommends the rate that fits it, on ss5 and an unknown link',
+    JSON.stringify(unknown32) === want32 && JSON.stringify(ss5) === want32 &&
+      JSON.stringify(ss10) === '{}' &&
+      JSON.stringify(none16) === want16 && JSON.stringify(ss5of16) === want16,
     `unknown=${JSON.stringify(unknown32)} ss5=${JSON.stringify(ss5)} ` +
       `ss10=${JSON.stringify(ss10)} 16U3=${JSON.stringify(none16)}`,
+  );
+  // The derivation: wire load at the recommendation is 200 MB/s, below the 400 MB/s ceiling.
+  check(
+    'each recommendation carries 200 MB/s and sits strictly below its ss5 ceiling',
+    PROFILES.every((profile) => profile.digital.rates.every((tier) => {
+      const advice = tier.recommendedHz?.ss5;
+      const ceiling = tier.hz.ss5!;
+      return advice === undefined
+        ? ceiling * tier.channels / 8 <= 200e6
+        : advice * tier.channels / 8 === 200e6 && advice < ceiling;
+    })),
+    PROFILES.map((profile) => `${profile.id}: ${profile.digital.rates
+      .map((tier) => `${tier.channels}ch ${tier.recommendedHz?.ss5 ?? '-'}/${tier.hz.ss5}`).join(', ')}`)
+      .join('; '),
   );
   check(
     'every shipped recommendation is an offered rate at or below its link ceiling',

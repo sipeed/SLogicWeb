@@ -461,6 +461,9 @@ export const en = {
   'capturePanel.dacNote': 'Actual threshold {volts} V (DAC code {code}). Fewer channels allow a faster rate: {channels} CH tops out at {rate}.',
   'capturePanel.dacNoteAdvised':
     'Actual threshold {volts} V (DAC code {code}). {channels} CH sustains {advised}; its {rate} ceiling may overrun the USB link. Fewer channels allow a faster rate.',
+  'capturePanel.rateAboveAdvised': '{channels} CH @ {rate} may exceed the USB link bandwidth (sustains {advised}).',
+  'capturePanel.rateAnalogForced':
+    'Analog input needs ≥{min}: {channels} CH @ {rate} may exceed the USB link bandwidth (sustains {advised}). Fewer channels lower the link load.',
   'capturePanel.capture': 'Capture',
   'capturePanel.modeSingle': 'Single',
   'capturePanel.modeRepeat': 'Repeat',

@@ -6300,6 +6300,11 @@ export class App {
  * needs a sample clock divided from its 800 MHz PLL (HSync adc.rs), so the rate moves to
  * the fastest allowed rate at or below the requested one - the same choice HSync's
  * `reconcile_channels` makes.
+ *
+ * At-risk combination: the ADC minimum (100 MS/s) can sit above the profile's sustainable
+ * rate for the width (`recommendedHz`; 50 MS/s at 32 ch on a 5 Gbit/s link), so 32 ch plus
+ * an analog group runs at 400 MB/s, which aborted on hardware. The clamp keeps the user's
+ * width; the capture panel warns instead (`rateAdvice.ts`, DESIGN.md §9).
  */
 function clampCaptureSettings(
   s: CaptureSettings, ceilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ,

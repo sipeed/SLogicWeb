@@ -1118,8 +1118,10 @@ async function main(): Promise<void> {
       `16U3 ${JSON.stringify(dev16.maxSamplerateHz)}, ` +
       `32U3 ${JSON.stringify(dev32.maxSamplerateHz)}`);
     check('the instance default rates are the profile\'s unknown-link recommendation',
-      JSON.stringify(dev16.recommendedSamplerateHz) === '{}' &&
-        JSON.stringify(dev32.recommendedSamplerateHz) === JSON.stringify({ 32: 50e6 }),
+      JSON.stringify(dev16.recommendedSamplerateHz) ===
+        JSON.stringify({ 4: 400e6, 8: 200e6, 16: 100e6 }) &&
+        JSON.stringify(dev32.recommendedSamplerateHz) ===
+          JSON.stringify({ 4: 400e6, 8: 200e6, 16: 100e6, 32: 50e6 }),
       `16U3 ${JSON.stringify(dev16.recommendedSamplerateHz)}, ` +
       `32U3 ${JSON.stringify(dev32.recommendedSamplerateHz)}`);
     const unnamed = new FakeStreamDevice(recorded32(), [], 0x3032);
