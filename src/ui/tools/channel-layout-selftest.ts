@@ -310,15 +310,19 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   check('the inline popover offers all six trigger modes and dismisses a name draft on Escape',
     popover && sixModes, `popover=${popover}, modes=${sixModes}`);
 
-  const noColor = !channelList.includes('HsvPicker') &&
-    !channelList.includes('CHANNEL_COLOR_PRESETS') &&
-    !channelList.includes('selectedColor') &&
+  // Colour is edited from the row entry's settings popover with the shared HSV picker
+  // (DESIGN §5.1), coalesced to one commit per frame, never a native input or a modal.
+  const colorEntry = channelList.includes('new HsvPicker(') &&
+    rowSource.includes('requestAnimationFrame(flushColor)') &&
+    rowSource.includes('pendingColor ?? committedColor') &&
+    rowSource.includes('picker.setColor(cell.channel.color)') &&
+    rowSource.includes('channelColor(index)') &&
     !channelList.includes('channel-settings-dialog') &&
     !channelList.includes("type = 'color'");
   const resetToNumber = rowSource.includes('nameInput.value = defaultChannelName(index)') &&
     rowSource.includes("event.key === 'Enter'");
-  check('colour editing is gone; rename resets to D{index} and commits on Enter',
-    noColor && resetToNumber, `noColor=${noColor}, reset=${resetToNumber}`);
+  check('the name popover edits colour live; rename resets to D{index} and commits on Enter',
+    colorEntry && resetToNumber, `color=${colorEntry}, reset=${resetToNumber}`);
 
   const anyEdgeGlyph = channelList.includes("mode === 'edge' ? t('trigger.anyEdge')") &&
     channelList.includes("mode === 'edge' ? 'M1 4H6L18 12H23M1 12H6L18 4H23'") &&

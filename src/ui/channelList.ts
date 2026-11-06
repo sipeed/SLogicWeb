@@ -17,9 +17,11 @@
  * `.ch-card`), all cards exactly the trace-band height thanks to the `--ch-lane-offset`
  * margin and a reserved one-line decoder strip - see src/ui/NOTES.md section 13.
  *
- * The row itself is the editor: double-click the name for a quick rename, or click the
- * trigger glyph for the edge menu, in a small popover rather than a modal. Colour is not
- * editable (it belongs to the channel identity), so there is no colour picker.
+ * The row itself is the editor: double-click the name (the row entry) for the channel's
+ * settings popover - name and colour - or click the trigger glyph for the edge menu, in a
+ * small popover rather than a modal. A colour change applies live (coalesced to one
+ * commit per frame) and persists with the workspace like a name; Esc discards only an
+ * uncommitted name draft. DESIGN §5.1 keeps the row at two inline controls.
  */
 
 import { ANALOG_HEIGHTS, analogHeightIndex, stepAnalogHeight } from './busView.js';
@@ -29,7 +31,8 @@ import {
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { isCompactRow } from './channelLayout.js';
-import { defaultChannelName,
+import { HsvPicker } from './colorPicker.js';
+import { channelColor, defaultChannelName,
   type AnalyzerState, type ChannelState, type TriggerMode } from './state.js';
 
 export interface ChannelConfiguration {
@@ -189,8 +192,11 @@ export class ChannelList {
     nameInput.autocomplete = 'off';
     nameInput.setAttribute('aria-label', t('channels.name'));
 
+    // The colour the settings popover has applied so far; a name commit must carry it.
+    let committedColor = cell.channel.color;
+    let pendingColor: string | null = null;
     const commitName = (): void => {
-      this.commitEditor(index, nameInput.value, cell.trigger.mode, cell.channel.color);
+      this.commitEditor(index, nameInput.value, cell.trigger.mode, pendingColor ?? committedColor);
     };
 
     if (focus === 'name') {
@@ -215,8 +221,43 @@ export class ChannelList {
         if (event.isComposing) return;
         if (event.key === 'Enter') { event.preventDefault(); commitName(); }
       });
-      title.textContent = t('channels.name');
-      this.editor.replaceChildren(title, nameRow, reset);
+      title.textContent = t('channels.settings', { index });
+      // Colour: the shared HSV picker, applied live but at most once per frame so a drag
+      // does not rebuild the rows on every pointer move. The name draft is left alone.
+      const flushColor = (): void => {
+        const color = pendingColor;
+        pendingColor = null;
+        if (color === null || color === committedColor || this.editorChannel !== index) return;
+        committedColor = color;
+        this.cb.onConfigure(index, { name: cell.channel.name, mode: cell.trigger.mode, color });
+      };
+      const picker = new HsvPicker((hex) => {
+        const queued = pendingColor !== null;
+        pendingColor = hex;
+        if (!queued) requestAnimationFrame(flushColor);
+      });
+      picker.setColor(cell.channel.color);
+      const colorRow = document.createElement('div');
+      colorRow.className = 'ch-editor-color';
+      colorRow.setAttribute('role', 'group');
+      colorRow.setAttribute('aria-label', t('channels.color'));
+      const colorLabel = document.createElement('span');
+      colorLabel.className = 'ch-editor-label';
+      colorLabel.textContent = t('channels.color');
+      const colorReset = document.createElement('button');
+      colorReset.type = 'button';
+      colorReset.className = 'ch-editor-reset';
+      colorReset.textContent = '↺';
+      colorReset.title = t('channels.resetColor', { index });
+      colorReset.setAttribute('aria-label', colorReset.title);
+      colorReset.addEventListener('click', () => {
+        const fallback = channelColor(index);
+        picker.setColor(fallback);
+        pendingColor = fallback;
+        flushColor();
+      });
+      colorRow.append(colorLabel, picker.element, colorReset);
+      this.editor.replaceChildren(title, nameRow, reset, colorRow);
       this.editor.setAttribute('role', 'dialog');
     } else {
       // A menu, not a grid: the picture's six options, each with its glyph, the current

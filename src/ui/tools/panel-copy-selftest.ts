@@ -92,6 +92,31 @@ const catalogs: Array<[string, Messages]> = [['en', en], ['zh-CN', zhCN], ['ru',
 }
 
 const failed = results.filter((r) => !r.pass).length;
+{
+  // Legacy UX review #18/#29: no security jargon for a waiting trigger, durations rather
+  // than raw sample counts in the Loop notes, no "draft", no worker state in the subtitle.
+  const hits: string[] = [];
+  for (const [locale, dict] of catalogs) {
+    for (const [key, text] of Object.entries(dict)) {
+      if (/布防|взвед|Взвед/.test(text)) hits.push(`${locale}:${key} arm-jargon`);
+    }
+    for (const key of ['capturePanel.loopWindow', 'capturePanel.loopWindowLimit', 'capturePanel.loopSwap'] as const) {
+      if (/\{samples\}|samples|样本|échantillons|отсчёт/.test(dict[key])) hits.push(`${locale}:${key} counts`);
+    }
+    if (/draft|草稿|brouillon|черновик/i.test(dict['capturePanel.singleUnlimitedNote'])) {
+      hits.push(`${locale}:singleUnlimitedNote draft`);
+    }
+    for (const key of ['analyzerPanel.subWarm', 'analyzerPanel.subCold'] as const) {
+      if (/worker|工作线程|Воркер|Worker/i.test(dict[key])) hits.push(`${locale}:${key} worker`);
+    }
+  }
+  check('waiting-trigger, Loop, Unlimited and decoder-subtitle copy is plain in every locale',
+    hits.length === 0 && zhCN['capturePanel.armed'].startsWith('等待触发：') &&
+      zhCN['capturePanel.triggerArmNext'].includes('即可立即开始等待触发') &&
+      zhCN['capturePanel.loopWindowLimit'] === '最长保留 {duration}（{rate}）。',
+    hits.join(', ') || 'clean');
+}
+
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 console.log(`\n${results.length - failed}/${results.length} passed`);
 nodeProcess.exit(failed === 0 ? 0 : 1);

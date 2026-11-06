@@ -170,7 +170,7 @@ Target top bar, left to right (≤ 8 commands):
 | --- | --- | --- |
 | Device | Icon + short label; connected tint; connected label is the model and `· Connected` (the state word drops on compact). Disconnected (WebUSB present) it reads `Connect device` and is the bar's highlighted primary control, while Capture stays unhighlighted and disabled; any disabled command is plain grey, never filled | Idle: opens the WebUSB chooser. Connected: opens the device menu (model, serial, USB link — `unknown`, WebUSB reports no speed and throughput is not evidence; Disconnect, Connect another device, Firmware update ↗ which releases the board and opens the public updater). Target: the Link panel. Disabled, with a reason tooltip, when WebUSB is unsupported. |
 | Capture / Stop | Primary split button; label/summary names mode and retention (`Single · 10 ms`, `Loop · 1.0 s`, `Record`) | The only start/stop action. Chevron: Single, Repeat, Loop, Autoset. Disabled with the same `canRun` guard for click, keyboard, host interface and debug. |
-| Open | Icon + label | Imports a capture; stops a running acquisition after confirmation if data would be lost. |
+| Open | Icon + label | Imports a capture; stops a running acquisition after confirmation if data would be lost. Today it opens a two-row menu: Open file… (`.sr`/`.lwcap`) and Open example (a bundled UART `.sr`, inlined in every build, that loads through the same import path and auto-decodes, so the app can be tried without a device). The empty-state hint carries the same example link. |
 | Save / Export | Icon + label | Saves the displayed capture or exports the record; opens the export sheet. Disabled without data. Today it opens a two-row format menu: `.lwcap` (first; lossless, keeps gaps) and `.sr` (sigrok session for PulseView; digital channels only). With the File System Access picker both types are offered and the picked extension decides the format; otherwise the file downloads. Default name: `<model>_<N>ch_<rate>_<local YYYYMMDD-HHMMSS>` (model = the device's reported name without spaces, `capture` without one), or the opened file's base name. |
 | Panel | Icon + label | Shows/hides the presenter and opens the panel switcher. |
 | Settings | Icon | App preferences: theme, locale, density, units, shortcuts, about/diagnostics. |
@@ -213,10 +213,13 @@ one anatomy (band or inset card, one separator token).
 
 - 5 px signal-colour strip; `D0` tag; editable name; trigger slot at the right; decoder
   lanes below; row height handle.
-- Interactions: click trigger slot → condition menu; double-click name → name editor;
+- Interactions: click trigger slot → condition menu; double-click name (the row entry;
+  Enter/F2 from the keyboard) → settings popover with the name and the signal colour;
   drag label → reorder; drag bottom edge (mouse/pen) or row menu (touch) → height; tap
   decoder lane remove.
 - A row's inline controls: trigger slot and row entry (settings/gear), at most two.
+- Colour is editable from the row entry (HSV picker plus reset to the index colour of
+  §14.2); it applies live and persists with the workspace like the name.
 - Touch: the whole row is 48 px minimum; the trigger slot has a 48 px hit area even when
   its glyph is 24 px.
 
@@ -654,6 +657,10 @@ polite live region, so assistive technology reads the area and hints when they c
   diagnostic under a collapsed "Technical details", and may offer one remedy button
   that only changes settings (e.g. lower the rate); Capture/Stop still starts the next
   capture.
+- The same plain-first-sentence rule covers a file that will not open (wrong type,
+  unsupported content, damaged), a failed or oversized decode, the decoders failing to
+  load, and a capture the board ended with no data or a dead USB transfer
+  (`failureNotice.ts`); the raw diagnostic stays under "Technical details".
 - Errors are typed (`unsupported-platform`, `permission`, `busy`, `handshake`,
   `profile`, `transfer`, `lost`, `suspended`, `memory`, `quota`, `record-full`, ...) and
   actionable; the diagnostic code stays in the console prefix.

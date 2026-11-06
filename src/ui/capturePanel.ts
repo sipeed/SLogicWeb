@@ -20,7 +20,7 @@ import { SAMPLERATES_HZ, vrefCode, vrefVolts } from '../device/index.js';
 import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
 import { bytesPerSampleForChannels } from '../types.js';
 import {
-  formatBytes, formatCount, formatDuration, formatRate, formatStatusDetail, statusDetailOf,
+  formatBytes, formatCount, formatDuration, formatFreq, formatRate, formatStatusDetail, statusDetailOf,
 } from './format.js';
 import {
   ADC_RESOLUTION_BITS, ANALOG_GAIN_DEFAULT, ANALOG_GAIN_MAX, ANALOG_GAIN_MIN, ANALOG_GAIN_PRESETS,
@@ -28,7 +28,9 @@ import {
   analogVoltsPerCode, channelBankIndices, channelBankRange, channelBankStarts, formatAnalogGain,
   isAnalogGain, lockedChannelBanks,
 } from './channelBanks.js';
-import { thresholdOptionLabel } from './thresholdOptions.js';
+import {
+  parseCustomThreshold, thresholdChoice, thresholdOptionLabel, thresholdRange,
+} from './thresholdOptions.js';
 import { t } from './i18n.js';
 import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
@@ -146,6 +148,8 @@ export interface CapturePanelView {
   progress: { seconds: number; samples: number; bytes: number; lost: number; dropped: number;
     /** Retained length (`store.length`) and the loop limit; the limit is 0 outside loop mode. */
     kept: number; limit: number;
+    /** The running capture's rate; the loop line reads kept/limit/dropped as durations. */
+    samplerateHz: number;
     /** Finite sample target; null for Unlimited and Loop captures. */
     targetSamples: number | null;
     /**
@@ -209,6 +213,8 @@ export interface CapturePanelView {
  * current frame/memory budget. Both are in samples.
  */
 export interface LoopDisplayMetrics {
+  /** The running capture's rate, so the panel can say durations instead of counts. */
+  samplerateHz: number;
   stride: number;
   scanRateHz: number;
   /** Median of adjacent reported crossings; 0 until two have been seen. */
@@ -232,6 +238,8 @@ export class CapturePanel {
   private advancedOpen = false;
   /** The custom gain ratio being typed, kept across re-renders; null when none is. */
   private gainEdit: { start: number; text: string } | null = null;
+  /** The custom threshold being typed, kept across re-renders; null when none is. */
+  private thresholdEdit: string | null = null;
   /** True while render() detaches the old tree, so a removed field's blur is inert. */
   private rendering = false;
   private consoleLines: string[] = [];
@@ -333,10 +341,12 @@ export class CapturePanel {
     // dropped: samples/limit/dropped is the loop status (HSync's LiveStatus).
     this.droppedNote!.hidden = progress.limit <= 0;
     if (progress.limit > 0) {
+      const rate = progress.samplerateHz > 0 ? progress.samplerateHz : 1;
       this.droppedNote!.textContent = t('capturePanel.loopWindow', {
-        kept: progress.kept.toLocaleString(),
-        limit: progress.limit.toLocaleString(),
-        dropped: progress.dropped.toLocaleString(),
+        kept: formatDuration(progress.kept / rate),
+        limit: formatDuration(progress.limit / rate),
+        dropped: formatDuration(progress.dropped / rate),
+        rate: formatRate(rate),
       });
     }
     const memory = progress.memory ?? null;
@@ -536,10 +546,11 @@ export class CapturePanel {
     });
     if (metrics.blockSamples > 0 && metrics.refreshHz > 0) {
       swap.hidden = false;
+      const rate = metrics.samplerateHz > 0 ? metrics.samplerateHz : 1;
       swap.textContent = t('capturePanel.loopSwap', {
-        step: formatCount(metrics.anchorStepSamples),
-        block: formatCount(metrics.blockSamples),
-        refresh: formatRate(metrics.refreshHz),
+        step: formatDuration(metrics.anchorStepSamples / rate),
+        block: formatDuration(metrics.blockSamples / rate),
+        refresh: formatFreq(metrics.refreshHz),
         retained: formatBytes(metrics.retainedBytes),
       });
     } else {
@@ -560,6 +571,8 @@ export class CapturePanel {
     const focused = document.activeElement as HTMLElement | null;
     const focusedGain = focused && capture.contains(focused) ? focused.dataset?.analogGainInput : undefined;
     const refocusGain = focusedGain !== undefined ? Number(focusedGain) : null;
+    const refocusThreshold = !!focused && capture.contains(focused) &&
+      focused.dataset?.thresholdInput !== undefined;
     this.rendering = true;
     try {
       capture.replaceChildren();
@@ -721,18 +734,17 @@ export class CapturePanel {
     }
     rowRT.appendChild(rate.el);
 
-    const thresholdOptions: SelectOptionTuple[] = THRESHOLD_VOLT_OPTIONS
-      .map((volts) => [String(volts), thresholdOptionLabel(volts)]);
-    const th = selectControl(
-      'capture.threshold',
-      t('capturePanel.threshold'),
-      thresholdOptions,
-      String(nearest(THRESHOLD_VOLT_OPTIONS, s.thresholdVolts)),
-    );
-    th.addEventListener('change', () =>
-      this.cb.onSettings({ ...s, thresholdVolts: Number(th.value) }));
+    const thresholdEditing = this.thresholdEdit;
+    const th = thresholdField({
+      volts: s.thresholdVolts,
+      editing: thresholdEditing,
+      live: () => !this.rendering,
+      onEditing: (text) => { this.thresholdEdit = text; },
+      onVolts: (volts) => this.cb.onSettings({ ...s, thresholdVolts: volts }),
+    });
     rowRT.appendChild(th.el);
     chSec.body.appendChild(rowRT);
+    if (thresholdEditing !== null && refocusThreshold) queueMicrotask(() => th.focusField());
 
     // The effective rate above the profile's sustainable one for this width, whether the
     // user chose it or an analog group forced it (see rateAdvice.ts): warn, never change
@@ -1772,6 +1784,131 @@ export function analogGainCell(o: AnalogGainCellOptions): AnalogGainCell {
   return { cell, note, focusField };
 }
 
+export interface ThresholdFieldOptions {
+  volts: number;
+  /** The custom text being typed when the panel was rebuilt, or null. */
+  editing: string | null;
+  /** False while the owner detaches the old tree, so a removed field's blur is inert. */
+  live(): boolean;
+  onEditing(text: string | null): void;
+  onVolts(volts: number): void;
+}
+
+/**
+ * The digital threshold: the family presets, the current custom value when it is not a
+ * preset, and "Custom…", which turns the select into a number field in place (the gain
+ * cell's pattern): Enter or leaving the field applies, Esc reverts. The range is the
+ * vref DAC's own span (`thresholdRange`); the entry is kept as typed except for the snap
+ * to the DAC grid, and the note under the row reads back the actual voltage. A value
+ * outside the span is refused with the range in the browser's validity bubble.
+ */
+export function thresholdField(o: ThresholdFieldOptions): { el: HTMLElement; focusField(): void } {
+  const { volts } = o;
+  const range = thresholdRange();
+  const slot = div('threshold-field');
+  const options: SelectOptionTuple[] = [
+    ...THRESHOLD_VOLT_OPTIONS.map((preset): SelectOptionTuple => [String(preset), thresholdOptionLabel(preset)]),
+    ...(thresholdChoice(volts) === 'custom'
+      ? [[String(volts), t('capturePanel.thresholdVolts', { volts: volts.toFixed(3) })] as SelectOptionTuple]
+      : []),
+    ['custom', t('capturePanel.thresholdCustom')],
+  ];
+  const select = selectControl('capture.threshold', t('capturePanel.threshold'), options, String(volts));
+
+  const rangeText = t('capturePanel.thresholdRange', {
+    min: range.min.toFixed(3), max: range.max.toFixed(3),
+  });
+  const field = div('field threshold-custom');
+  const label = document.createElement('label');
+  label.textContent = t('capturePanel.threshold');
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.inputMode = 'decimal';
+  input.min = range.min.toFixed(4);
+  input.max = range.max.toFixed(4);
+  input.step = 'any';
+  input.autocomplete = 'off';
+  input.dataset.thresholdInput = '';
+  input.id = 'capture-threshold-custom';
+  label.htmlFor = input.id;
+  input.title = rangeText;
+  input.setAttribute('aria-label', `${t('capturePanel.threshold')} (V), ${rangeText}`);
+  field.append(label, input);
+
+  let open = false;
+  const showSelect = (focus: boolean): void => {
+    open = false;
+    o.onEditing(null);
+    slot.replaceChildren(select.el);
+    if (focus) select.el.querySelector<HTMLElement>('.select-trigger')?.focus();
+  };
+  const focusField = (): void => {
+    if (!open) return;
+    input.focus();
+  };
+  const showField = (text: string, focus: boolean): void => {
+    open = true;
+    input.value = text;
+    input.setCustomValidity('');
+    o.onEditing(text);
+    slot.replaceChildren(field);
+    if (focus) focusField();
+  };
+  const apply = (how: 'enter' | 'blur'): void => {
+    const next = parseCustomThreshold(input.value);
+    if (next === null) {
+      if (how === 'blur') {
+        showSelect(false);
+        return;
+      }
+      // Keep the bubble until the next keystroke (see analogGainCell).
+      input.setCustomValidity(rangeText);
+      input.reportValidity();
+      return;
+    }
+    const scope = slot.closest('.side-page') ?? slot.parentElement;
+    const same = Math.abs(next - volts) < 1e-9;
+    showSelect(how === 'enter' && same);
+    if (same) return;
+    o.onVolts(next);
+    if (how === 'enter' && !slot.isConnected) {
+      scope?.querySelector<HTMLElement>('.select-trigger[data-select-key="capture.threshold"]')?.focus();
+    }
+  };
+
+  select.addEventListener('change', () => {
+    if (select.value === 'custom') {
+      select.value = String(volts);
+      showField(volts.toFixed(3), true);
+      return;
+    }
+    const next = Number(select.value);
+    if (Number.isFinite(next) && Math.abs(next - volts) >= 1e-9) o.onVolts(next);
+  });
+  input.addEventListener('input', () => {
+    input.setCustomValidity('');
+    o.onEditing(input.value);
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      apply('enter');
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      showSelect(true);
+    }
+  });
+  input.addEventListener('blur', () => {
+    if (!open || !o.live() || !input.isConnected) return;
+    apply('blur');
+  });
+
+  if (o.editing !== null) showField(o.editing, false);
+  else showSelect(false);
+  return { el: slot, focusField };
+}
+
 /** Bits and volts per code at a gain: `8-bit · 125.5 mV/code` (four significant digits). */
 export function analogGainReadout(gain: number): string {
   return t('capturePanel.analogGainReadout', {
@@ -2051,10 +2188,6 @@ function digitalConditionLabel(kind: 'level' | 'rising' | 'falling' | 'edge', le
   return kind === 'level' ? t(level ? 'channels.triggerHigh' : 'channels.triggerLow')
     : t(kind === 'rising' ? 'trigger.rising'
       : kind === 'falling' ? 'trigger.falling' : 'trigger.anyEdge');
-}
-
-function nearest(list: readonly number[], v: number): number {
-  return list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a), list[0]!);
 }
 
 export function div(cls: string): HTMLDivElement {

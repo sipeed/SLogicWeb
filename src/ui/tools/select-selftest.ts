@@ -729,7 +729,9 @@ check(
 
   const payloadNeedles = [
     'samplerate: Number(rate.value)',
-    'thresholdVolts: Number(th.value)',
+    // The threshold select is wrapped by thresholdField (presets + Custom…).
+    'const next = Number(select.value);',
+    'this.cb.onSettings({ ...s, thresholdVolts: volts })',
     'preTriggerPercent: Number(pre.value)',
     'testMode: Number(source.value) as 0 | 1 | 2',
   ];

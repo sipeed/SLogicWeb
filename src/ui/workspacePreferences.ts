@@ -16,10 +16,10 @@ import { cloneBusConfig, defaultBusConfig, normalizeBankBusConfig } from './busP
 import { ANALOG_HEIGHTS, BUS_HEIGHTS, type BusBitOrder, type BusViewConfig } from './busView.js';
 import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannelName, defaultChannels,
-  THRESHOLD_VOLT_OPTIONS,
   type AnalyzerState, type CaptureSettings, type TriggerMode,
 } from './state.js';
 import { parseSidebarPage, type SidebarPage } from './sidebar.js';
+import { isRestorableThreshold } from './thresholdOptions.js';
 
 export const WORKSPACE_STORAGE_KEY = 'logicweb.workspace';
 export const WORKSPACE_SCHEMA_VERSION = 1 as const;
@@ -186,8 +186,8 @@ function restoreCapture(value: unknown, capacity: number): PersistedCaptureSetti
     capture.samplerate = value.samplerate;
   }
   if (value.samplerateExplicit === true) capture.samplerateExplicit = true;
-  if (typeof value.thresholdVolts === 'number' &&
-      (THRESHOLD_VOLT_OPTIONS as readonly number[]).includes(value.thresholdVolts)) {
+  // A preset, or a custom value on the vref DAC grid (thresholdOptions.ts).
+  if (typeof value.thresholdVolts === 'number' && isRestorableThreshold(value.thresholdVolts)) {
     capture.thresholdVolts = value.thresholdVolts;
   }
   if (value.mode === 'free') {

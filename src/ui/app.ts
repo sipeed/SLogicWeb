@@ -85,6 +85,10 @@ import {
   captureAbortCause, isAllocationFailure, lowerSamplerate, saveFailureNotice,
   type CaptureAbort,
 } from './captureAbort.js';
+import { classifyFailureNotice, failureNoticeKey } from './failureNotice.js';
+import { exampleCaptureFile } from './exampleCapture.js';
+// `?url&inline`: a data: URL in every build, so the portable file:// build needs no fetch.
+import exampleCaptureUrl from '../../fixtures/uart.sr?url&inline';
 import {
   classifyConnectFailure, connectFailureRetryable, connectGuidanceKey, refineWithPeerTabs,
 } from './connectFailure.js';
@@ -333,6 +337,8 @@ export class App {
   private readonly languageMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
   private readonly saveMenu: SettingsMenu;
+  /** Open: a file from disk, or the bundled example capture (exampleCapture.ts). */
+  private readonly openMenu: SettingsMenu;
   /** The connected-device menu; the Device command opens the chooser instead when idle. */
   private readonly deviceMenu: SettingsMenu;
   /** Answers/asks "which logicweb tab holds a device" for the busy-failure guidance. */
@@ -563,7 +569,7 @@ export class App {
     errorBanner: HTMLDivElement; errorBannerText: HTMLSpanElement; errorDismiss: HTMLButtonElement;
     errorGuidance: HTMLSpanElement; errorRetry: HTMLButtonElement;
     platformNotice: HTMLDivElement; platformNoticeText: HTMLSpanElement;
-    platformNoticeDismiss: HTMLButtonElement; hintDetail: HTMLSpanElement;
+    platformNoticeDismiss: HTMLButtonElement; hintDetail: HTMLSpanElement; hintExample: HTMLButtonElement;
     errorDetails: HTMLDetailsElement; errorDetailText: HTMLSpanElement;
     errorAction: HTMLButtonElement;
     fileInput: HTMLInputElement;
@@ -609,6 +615,7 @@ export class App {
       platformNoticeText: must<HTMLSpanElement>('platform-notice-text'),
       platformNoticeDismiss: must<HTMLButtonElement>('platform-notice-dismiss'),
       hintDetail: must<HTMLSpanElement>('empty-hint-detail'),
+      hintExample: must<HTMLButtonElement>('empty-hint-example'),
       errorDetails: must<HTMLDetailsElement>('error-banner-details'),
       errorDetailText: must<HTMLSpanElement>('error-banner-detail-text'),
       errorAction: must<HTMLButtonElement>('error-banner-action'),
@@ -677,6 +684,8 @@ export class App {
     this.menuStack.register(this.themeMenu);
     this.saveMenu = new SettingsMenu(this.el.save, 'save-menu');
     this.menuStack.register(this.saveMenu);
+    this.openMenu = new SettingsMenu(this.el.open, 'open-menu');
+    this.menuStack.register(this.openMenu);
     this.shortcutsDialog = new ShortcutsDialog();
     this.aboutDialog = new AboutDialog();
     this.el.theme.dataset.mode = getMode();
@@ -4105,9 +4114,11 @@ export class App {
     });
     this.el.transport.addEventListener('click', () => this.primaryAction());
     must<HTMLButtonElement>('btn-open').addEventListener('click', () => {
-      this.el.fileInput.value = '';
-      this.el.fileInput.click();
+      this.channelList.closeDialog();
+      this.menuStack.closeOthers(this.openMenu, 'outside');
+      this.openMenu.toggle(this.openItems());
     });
+    this.el.hintExample.addEventListener('click', () => void this.openExample());
     this.el.fileInput.addEventListener('change', () => {
       const files = [...(this.el.fileInput.files ?? [])];
       if (files.length) void this.openFiles(files);
@@ -4585,6 +4596,7 @@ export class App {
     });
     const bytesPerSample = bytesPerSampleForChannels(channels);
     return {
+      samplerateHz: rate,
       stride: this.analogScanner.stride,
       scanRateHz: rate / this.analogScanner.stride,
       periodSamples: this.loopPeriodSamples,
@@ -4610,6 +4622,7 @@ export class App {
       lost: this.lostSamples,
       dropped: this.droppedTotal,
       kept: captured.length,
+      samplerateHz: captured.samplerate,
       limit: loop ? loopStoreLimit(
         this.loopRetentionLen,
         (this.triggerViewLock !== null || this.triggerViewPending) && this.analogScanner !== null,
@@ -5025,7 +5038,14 @@ export class App {
     what: MessageKey, e: unknown, vars?: MessageVars,
     extra?: Pick<StatusError, 'notice' | 'action'>,
   ): void {
-    this.statusError = { what, ...(vars ? { vars } : {}), detail: statusDetailOf(e), ...extra };
+    // A recognised non-overload failure leads with a plain sentence; its diagnostic moves
+    // under "Technical details" (failureNotice.ts). An explicit notice wins.
+    const kind = extra?.notice ? null : classifyFailureNotice(what, e);
+    const notice = kind === null ? undefined
+      : { notice: { key: failureNoticeKey(kind), ...(vars ? { vars } : {}) } };
+    this.statusError = {
+      what, ...(vars ? { vars } : {}), detail: statusDetailOf(e), ...notice, ...extra,
+    };
     // The console prefix is the stable message KEY, not the translated text -
     // greppable in every locale.
     console.error(`[ui] ${what}`, e);
@@ -5234,6 +5254,35 @@ export class App {
     this.renderPanels();
     this.dirty = true;
     this.scheduleAutoDecode();
+  }
+
+  /** The file chooser for Open (a menu pick is still a user gesture). */
+  private chooseFiles(): void {
+    this.el.fileInput.value = '';
+    this.el.fileInput.click();
+  }
+
+  /** One Open entry point: a file from disk first, then the bundled example capture. */
+  private openItems(): SettingsMenuItem[] {
+    return [
+      { label: t('open.file'), hint: t('open.fileHint'), onPick: () => this.chooseFiles() },
+      { label: t('open.example'), hint: t('open.exampleHint'), onPick: () => void this.openExample() },
+    ];
+  }
+
+  /**
+   * Open the bundled example (fixtures/uart.sr) through the ordinary file path, so it
+   * stops a running capture, replaces the view and auto-decodes like any opened file.
+   */
+  private async openExample(): Promise<void> {
+    let file: File;
+    try {
+      file = await exampleCaptureFile(exampleCaptureUrl);
+    } catch (e) {
+      this.fail('error.openCapture', e);
+      return;
+    }
+    await this.openFiles([file]);
   }
 
   /** One Save entry point: a two-row format menu (.lwcap first, .sr for sigrok). */

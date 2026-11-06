@@ -71,7 +71,7 @@
         </span>
         <span class="toolbar-item-label" aria-hidden="true" data-i18n="toolbar.shortStart">Capture</span>
       </button>
-      <button id="btn-open" class="toolbar-item" data-i18n-title="toolbar.openTitle" title="Load a sigrok .sr session or a .lwcap" aria-label="Open…">
+      <button id="btn-open" class="toolbar-item" data-i18n-title="toolbar.openTitle" title="Load a sigrok .sr session or a .lwcap" aria-label="Open…" aria-controls="open-menu" aria-expanded="false">
         <span class="toolbar-item-media">
           <svg class="toolbar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false" data-icon="inline-start">
             <path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path>
@@ -226,21 +226,25 @@
           <div id="plot" translate="no">
             <div id="wave-stack"></div>
             <div id="empty-hint" translate="yes">
-              <span data-i18n="emptyHint.line1">No capture loaded.</span><br />
-              <span id="empty-hint-detail" data-i18n="emptyHint.line2">Open a .sr or .lwcap file, or connect an SLogic16/32 U3.</span>
-              <!-- Static boot progress: a slow network shows this instead of a dead hint.
-                   main.ts removes it once App has constructed. Localized here because the
-                   catalogs are not loaded yet (same record and matching as i18n.ts). -->
-              <span id="empty-hint-starting" class="empty-hint-starting"><br />Starting…</span>
-              <script>
-                try {
-                  const tag = (localStorage.getItem('logicweb.lang') || navigator.language || '').toLowerCase();
-                  const text = tag.startsWith('zh') ? '正在启动…' : tag.startsWith('fr') ? 'Démarrage…'
-                    : tag.startsWith('ru') ? 'Запуск…' : null;
-                  if (text) document.getElementById('empty-hint-starting').lastChild.textContent = text;
-                } catch {
-                }
-              </script>
+              <div class="empty-hint-body">
+                <span data-i18n="emptyHint.line1">No capture loaded.</span><br />
+                <span id="empty-hint-detail" data-i18n="emptyHint.line2">Open a .sr or .lwcap file, or connect an SLogic16/32 U3.</span>
+                <!-- A bundled example capture: try the app (and auto-decode) without a device. -->
+                <button id="empty-hint-example" class="empty-hint-example" type="button" data-i18n="emptyHint.example">Open an example capture</button>
+                <!-- Static boot progress: a slow network shows this instead of a dead hint.
+                     main.ts removes it once App has constructed. Localized here because the
+                     catalogs are not loaded yet (same record and matching as i18n.ts). -->
+                <span id="empty-hint-starting" class="empty-hint-starting"><br />Starting…</span>
+                <script>
+                  try {
+                    const tag = (localStorage.getItem('logicweb.lang') || navigator.language || '').toLowerCase();
+                    const text = tag.startsWith('zh') ? '正在启动…' : tag.startsWith('fr') ? 'Démarrage…'
+                      : tag.startsWith('ru') ? 'Запуск…' : null;
+                    if (text) document.getElementById('empty-hint-starting').lastChild.textContent = text;
+                  } catch {
+                  }
+                </script>
+              </div>
             </div>
           </div>
         </div>
