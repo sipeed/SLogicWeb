@@ -778,6 +778,13 @@ export const ru: Messages = {
   'settings.wheelZooms': 'Колесо масштабирует (без Ctrl)',
   'settings.developerTools': 'Инструменты разработчика (консоль регистров USB)',
   'settings.shortcuts': 'Клавиши и жесты',
+  'settings.about': 'О программе',
+  'about.title': 'О программе',
+  'about.version': 'Версия {version} · сборка {build}',
+  'about.license': 'GPL-3.0-or-later · без каких-либо гарантий',
+  'about.source': 'Исходный код',
+  'about.licenseLink': 'Лицензия (GNU GPL v3)',
+  'about.notice': 'Сторонние уведомления (декодеры sigrok)',
   'settings.language': 'Язык',
   'settings.theme': 'Тема',
 

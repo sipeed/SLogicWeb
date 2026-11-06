@@ -168,7 +168,7 @@ Target top bar, left to right (≤ 8 commands):
 
 | Control | Appearance | Behaviour |
 | --- | --- | --- |
-| Device | Icon + short label; connected tint; connected label is the model and `· Connected` (the state word drops on compact) | Idle: opens the WebUSB chooser. Connected: opens the device menu (model, serial, USB link — `unknown`, WebUSB reports no speed and throughput is not evidence; Disconnect, Connect another device, Firmware update ↗ which releases the board and opens the public updater). Target: the Link panel. Disabled, with a reason tooltip, when WebUSB is unsupported. |
+| Device | Icon + short label; connected tint; connected label is the model and `· Connected` (the state word drops on compact). Disconnected (WebUSB present) it reads `Connect device` and is the bar's highlighted primary control, while Capture stays unhighlighted and disabled; any disabled command is plain grey, never filled | Idle: opens the WebUSB chooser. Connected: opens the device menu (model, serial, USB link — `unknown`, WebUSB reports no speed and throughput is not evidence; Disconnect, Connect another device, Firmware update ↗ which releases the board and opens the public updater). Target: the Link panel. Disabled, with a reason tooltip, when WebUSB is unsupported. |
 | Capture / Stop | Primary split button; label/summary names mode and retention (`Single · 10 ms`, `Loop · 1.0 s`, `Record`) | The only start/stop action. Chevron: Single, Repeat, Loop, Autoset. Disabled with the same `canRun` guard for click, keyboard, host interface and debug. |
 | Open | Icon + label | Imports a capture; stops a running acquisition after confirmation if data would be lost. |
 | Save / Export | Icon + label | Saves the displayed capture or exports the record; opens the export sheet. Disabled without data. Today it opens a two-row format menu: `.lwcap` (first; lossless, keeps gaps) and `.sr` (sigrok session for PulseView; digital channels only). With the File System Access picker both types are offered and the picked extension decides the format; otherwise the file downloads. Default name: `<model>_<N>ch_<rate>_<local YYYYMMDD-HHMMSS>` (model = the device's reported name without spaces, `capture` without one), or the opened file's base name. |
@@ -540,10 +540,14 @@ insecure context. The empty-state hint then offers files only; with a device con
 prompts Capture instead of inviting a connection.
 
 Settings › About shows the app version, PWA/update state, licenses and the storage
-clear-data action; an update is an explicit prompt, never a silent reload.
+clear-data action; an update is an explicit prompt, never a silent reload. Today it is a
+modal dialog from the Settings menu: name, version and build id (package version and
+short git hash, `dev` when absent), `GPL-3.0-or-later · no warranty`, the copyright, and
+plain links to the source repository, LICENSE and NOTICE.md.
 
 - One panel at a time; one presenter. The panel switcher opens it; the same control closes
-  it.
+  it. A collapsed panel leaves a full-height 24 px reopen strip at the right edge (in flow,
+  covering no plot; 32 px with a 48 px hit area on touch).
 - Each panel has exactly one header naming its scope; a panel never renders another
   panel's header or two headers.
 - Panels never contain the primary Capture action or a second editor for a row-owned

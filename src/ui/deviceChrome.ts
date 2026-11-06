@@ -4,7 +4,9 @@
  * the empty-state hint and the browser-support notice say for one connection state.
  * Pure (t() only), so the self-test pins every state under node.
  *
- * - Disconnected: the Device command opens the WebUSB chooser.
+ * - Disconnected: the Device command reads "Connect device" and is the toolbar's one
+ *   highlighted (primary) control - it is the only useful next step, and the Capture
+ *   button stays disabled and unhighlighted until a board is connected.
  * - Connected: the command shows the model and "Connected" (the state word drops on
  *   compact widths, CSS), and opens a menu with the identity rows plus Disconnect,
  *   Connect another device and Firmware update.
@@ -40,6 +42,8 @@ export interface DeviceToolbarView {
   readonly ariaLabel: string;
   readonly disabled: boolean;
   readonly connected: boolean;
+  /** Highlighted as the toolbar's primary call to action (disconnected, WebUSB present). */
+  readonly primary: boolean;
 }
 
 export function deviceToolbarView(deviceName: string | null, support: DeviceSupport): DeviceToolbarView {
@@ -51,16 +55,18 @@ export function deviceToolbarView(deviceName: string | null, support: DeviceSupp
       ariaLabel: t('toolbar.device'),
       disabled: true,
       connected: false,
+      primary: false,
     };
   }
   if (deviceName === null) {
     return {
-      label: t('toolbar.shortDevice'),
+      label: t('toolbar.connect'),
       state: null,
       title: t('toolbar.connectHint'),
-      ariaLabel: t('toolbar.device'),
+      ariaLabel: t('toolbar.connect'),
       disabled: false,
       connected: false,
+      primary: true,
     };
   }
   return {
@@ -70,6 +76,7 @@ export function deviceToolbarView(deviceName: string | null, support: DeviceSupp
     ariaLabel: `${t('toolbar.device')}: ${deviceName}`,
     disabled: false,
     connected: true,
+    primary: false,
   };
 }
 

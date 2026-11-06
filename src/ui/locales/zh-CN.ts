@@ -732,6 +732,13 @@ export const zhCN: Messages = {
   'settings.wheelZooms': '滚轮直接缩放',
   'settings.developerTools': '开发者工具（USB 寄存器控制台）',
   'settings.shortcuts': '快捷键与鼠标操作',
+  'settings.about': '关于',
+  'about.title': '关于',
+  'about.version': '版本 {version} · 构建 {build}',
+  'about.license': 'GPL-3.0-or-later · 不提供任何担保',
+  'about.source': '源代码',
+  'about.licenseLink': '许可证（GNU GPL v3）',
+  'about.notice': '第三方声明（sigrok 解码器）',
   'settings.language': '语言',
   'settings.theme': '主题',
 

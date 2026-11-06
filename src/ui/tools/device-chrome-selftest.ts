@@ -174,8 +174,9 @@ check('device support: WebUSB present, absent in a secure context, or hidden by 
   const none = deviceToolbarView(null, 'unsupported');
   const insecure = deviceToolbarView(null, 'insecure');
   check('the Device command: idle opens the chooser, connected shows the model and state, no WebUSB disables',
-    idle.label === en['toolbar.shortDevice'] && idle.state === null && !idle.disabled && !idle.connected &&
-      idle.title === en['toolbar.connectHint'] &&
+    idle.label === en['toolbar.connect'] && idle.ariaLabel === en['toolbar.connect'] &&
+      idle.state === null && !idle.disabled && !idle.connected && idle.primary &&
+      idle.title === en['toolbar.connectHint'] && !on.primary && !none.primary && !insecure.primary &&
       on.label === 'SLogic32 U3' && on.state === en['toolbar.deviceConnected'] && on.connected &&
       on.ariaLabel === `${en['toolbar.device']}: SLogic32 U3` &&
       on.title === en['toolbar.deviceMenuTitle'].replace('{device}', 'SLogic32 U3') &&
@@ -190,6 +191,13 @@ check('device support: WebUSB present, absent in a secure context, or hidden by 
       }),
     on.title);
 }
+
+check('disconnected, the Device command reads Connect device and every connect hint names that label',
+  (['en', 'zh-CN', 'fr', 'ru'] as const).every((l) => {
+    const m: Messages = l === 'en' ? en : l === 'zh-CN' ? zhCN : l === 'fr' ? fr : ru;
+    return m['toolbar.connectHint'].includes(m['toolbar.connect']);
+  }),
+  `${en['toolbar.connectHint']} | ${zhCN['toolbar.connectHint']}`);
 
 check('the empty hint follows the connection: connect invite, Capture prompt, or files only',
   emptyHintKey(false, 'ok') === 'emptyHint.line2' &&

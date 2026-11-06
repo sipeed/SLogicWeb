@@ -431,7 +431,7 @@ const describe = (s: SidebarState): string =>
   const hoverSurface = /\bbackground: var\(--panel\);/.test(hover) && /\bcolor: var\(--text\);/.test(hover);
   const retired = !host.includes('segmented side-pages') && !host.includes("button('seg'") &&
     !/\.side-pages/.test(css) && !/\.side-tab[^{]*\{[^}]*background: var\(--text80\)/.test(css) &&
-    !/(^|[^-])\bheight:/.test(tab) && !/\.side-expand:hover/.test(css) &&
+    !/(^|[^-])\bheight:/.test(tab) &&
     !/\[aria-selected="true"\]/.test(css);
   const themedPanel =
     /:is\(html\[data-theme="dark"\], html\[data-theme="light"\]\) #side-panel \{([^}]*)\}/.exec(css)?.[1] ?? '';
@@ -445,17 +445,23 @@ const describe = (s: SidebarState): string =>
     `ground=${tabGround}/${panelGround}, retired=${retired}, ` +
     `active=${JSON.stringify(active.trim())}, themed=${JSON.stringify(themedActive.trim())}`);
 
-  const expand = rule('.side-expand');
+  const expand = rule('#main > .side-expand');
+  const coarse = /@media \(pointer: coarse\) \{\s*#main > \.side-expand \{ width: 32px; \}\s*#main > \.side-expand::before \{[^}]*left: -16px; width: 48px; \}/.test(css);
   const iconFamily = host.includes("iconButton('side-collapse', 'right')") &&
     host.includes("iconButton('side-expand', 'left')") &&
     host.includes("button(`analyzer-act ${className}`, '')");
-  const floatingExpand = /\bposition: absolute;/.test(expand) && /\btop: 8px;/.test(expand) &&
-    /\bright: 0;/.test(expand) && /#main > \.side-expand\[hidden\] \{ display: none; \}/.test(css);
+  // The collapsed reopen control is a visible full-height edge strip like .side-collapse,
+  // in the flow of #main (it covers no plot), with a 48 px touch hit area.
+  const edgeStrip = /\bflex: none;/.test(expand) && /\balign-self: stretch;/.test(expand) &&
+    /\bwidth: 24px;/.test(expand) && /\bborder-left: 1px solid var\(--border-low\);/.test(expand) &&
+    /\bbackground: var\(--secondary\);/.test(expand) && !/\bposition: absolute;/.test(expand) &&
+    !/\btop: 8px;/.test(expand) && coarse &&
+    /#main > \.side-expand\[hidden\] \{ display: none; \}/.test(css);
   const onMirrorsAria = host.includes("node.classList.toggle('on', tab.selected)") &&
     host.includes("node.setAttribute('aria-selected', String(tab.selected))");
-  check('collapse and expand keep the shared icon-button family, the collapsed expand stays floating, and the on class mirrors aria-selected',
-    iconFamily && floatingExpand && onMirrorsAria,
-    `iconFamily=${iconFamily}, floatingExpand=${floatingExpand}, onMirrorsAria=${onMirrorsAria}`);
+  check('collapse and expand keep the shared icon-button family, the collapsed expand is a full-height edge strip, and the on class mirrors aria-selected',
+    iconFamily && edgeStrip && onMirrorsAria,
+    `iconFamily=${iconFamily}, edgeStrip=${edgeStrip}, onMirrorsAria=${onMirrorsAria}, expand=${JSON.stringify(expand)}`);
 }
 
 {

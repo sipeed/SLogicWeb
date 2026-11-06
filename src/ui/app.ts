@@ -105,6 +105,7 @@ import {
 } from './wheelGesture.js';
 import { cornerView, cornerViewEqual, type CornerView } from './cornerCell.js';
 import { ShortcutsDialog } from './shortcutsDialog.js';
+import { AboutDialog } from './aboutDialog.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
 import {
   Overlay, paintMarkerChip, type HoverMeasurement, type RegionTint,
@@ -316,6 +317,7 @@ export class App {
   }));
   private platformNoticeDismissed = false;
   private readonly shortcutsDialog: ShortcutsDialog;
+  private readonly aboutDialog: AboutDialog;
   private detailedLabels = true;
   /** "Wheel zooms without Ctrl" (PulseView habit); persisted with the workspace. */
   private wheelZooms = false;
@@ -631,6 +633,7 @@ export class App {
     this.saveMenu = new SettingsMenu(this.el.save, 'save-menu');
     this.menuStack.register(this.saveMenu);
     this.shortcutsDialog = new ShortcutsDialog();
+    this.aboutDialog = new AboutDialog();
     this.el.theme.dataset.mode = getMode();
     this.resizer = new PanelResizer(this.el.resizer, this.el.side, this.el.main);
 
@@ -3906,6 +3909,14 @@ export class App {
           this.shortcutsDialog.open(this.el.settings, this.wheelZooms);
         },
       },
+      {
+        label: t('settings.about'),
+        hint: '▸',
+        onPick: () => {
+          this.channelList.closeDialog();
+          this.aboutDialog.open(this.el.settings);
+        },
+      },
     ];
   }
 
@@ -4144,6 +4155,7 @@ export class App {
     this.menuStack.closeAll('retranslate');
     applyStaticI18n(document);
     if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings(this.wheelZooms);
+    if (this.aboutDialog.isOpen) this.aboutDialog.renderStrings();
     this.relayout();       // channel cells rebuild; an open channel dialog closes here
     this.renderPanels();   // side panels + toolbar chrome
     this.renderInteractionBar(true);  // hint text follows the locale
@@ -4447,7 +4459,8 @@ export class App {
       label.textContent = this.stopping ? t('toolbar.shortStopping')
         : showStop ? t('toolbar.shortStop') : t('toolbar.shortStart');
     }
-    btn.classList.toggle('primary', !showStop);
+    // Disconnected, the Device command is the highlighted call to action instead.
+    btn.classList.toggle('primary', !showStop && this.device !== null);
     btn.classList.toggle('danger', showStop);
     btn.disabled = (this.stopping && !this.triggerRestartPending) ||
       (this.device === null && !showStop);
@@ -4607,6 +4620,7 @@ export class App {
     button.disabled = view.disabled;
     button.title = view.title;
     button.classList.toggle('connected', view.connected);
+    button.classList.toggle('primary', view.primary);
     const label = button.querySelector<HTMLElement>('.toolbar-item-label');
     const text = view.state === null ? view.label : `${view.label} · ${view.state}`;
     if (label && label.textContent !== text) {

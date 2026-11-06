@@ -787,6 +787,13 @@ export const fr: Messages = {
   'settings.wheelZooms': 'La molette zoome (sans Ctrl)',
   'settings.developerTools': 'Outils développeur (console de registres USB)',
   'settings.shortcuts': 'Raccourcis et gestes',
+  'settings.about': 'À propos',
+  'about.title': 'À propos',
+  'about.version': 'Version {version} · build {build}',
+  'about.license': 'GPL-3.0-or-later · sans aucune garantie',
+  'about.source': 'Code source',
+  'about.licenseLink': 'Licence (GNU GPL v3)',
+  'about.notice': 'Mentions tierces (décodeurs sigrok)',
   'settings.language': 'Langue',
   'settings.theme': 'Thème',
 

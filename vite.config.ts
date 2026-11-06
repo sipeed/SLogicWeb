@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
+import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
@@ -326,6 +327,25 @@ const BANNER =
   ' */';
 
 const portable = process.env.LOGICWEB_PORTABLE === '1';
+
+/*
+ * Build identity for Settings > About (src/ui/aboutDialog.ts): package.json's version and
+ * the short commit hash. Either falls back to 'dev' (no version field, no git checkout).
+ */
+function readBuildIdentity(): { version: string; hash: string } {
+  let version = 'dev';
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as { version?: unknown };
+    if (typeof pkg.version === 'string' && pkg.version) version = pkg.version;
+  } catch { /* keep 'dev' */ }
+  let hash = 'dev';
+  try {
+    hash = execSync('git rev-parse --short HEAD',
+      { cwd: __dirname, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || 'dev';
+  } catch { /* keep 'dev' */ }
+  return { version, hash };
+}
+const identity = readBuildIdentity();
 const portableAssets = portable ? {
   pyodideMjs: readFileSync(resolve(__dirname, 'public/pyodide/pyodide.mjs')).toString('base64'),
   pyodideAsmMjs: readFileSync(resolve(__dirname, 'public/pyodide/pyodide.asm.mjs')).toString('base64'),
@@ -344,6 +364,8 @@ export default defineConfig({
 
   define: {
     __LOGICWEB_PORTABLE_ASSETS__: JSON.stringify(portableAssets),
+    __APP_VERSION__: JSON.stringify(identity.version),
+    __GIT_HASH__: JSON.stringify(identity.hash),
   },
 
   /*

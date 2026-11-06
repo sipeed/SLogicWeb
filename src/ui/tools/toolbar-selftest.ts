@@ -933,8 +933,9 @@ const shortcutsRowOpensDialog = shortcutsRowBody.includes("hint: '▸'") &&
   !shortcutsRowBody.includes('checked:');
 const settingsRowsScoped = !settingsItemsBody.includes("t('settings.language')") &&
   !settingsItemsBody.includes('LOCALES.map') && !settingsItemsBody.includes('children:') &&
-  // Detailed labels, wheel zooms, developer tools, then the shortcuts reference.
-  (settingsItemsBody.match(/onPick:/g)?.length ?? 0) === 4 &&
+  // Detailed labels, wheel zooms, developer tools, the shortcuts reference, then About.
+  (settingsItemsBody.match(/onPick:/g)?.length ?? 0) === 5 &&
+  settingsItemsBody.indexOf("t('settings.about')") > shortcutsRowAt &&
   settingsItemsBody.includes('checked: this.wheelZooms') &&
   settingsItemsBody.includes('checked: this.developerTools') &&
   detailedLabelsRowAt >= 0 && shortcutsRowAt > detailedLabelsRowAt;
@@ -945,7 +946,7 @@ const detailedLabelsReflection = app.includes("document.documentElement.removeAt
   constructorBody.includes('this.reflectDetailedLabels();') &&
   settingsItemsBody.includes('this.reflectDetailedLabels();');
 check(
-  'settings offers the checked default-on display toggle and one row that opens the shortcuts reference',
+  'settings offers the checked default-on display toggle, one row that opens the shortcuts reference, and About last',
   detailedLabelsToggle && detailedLabelsDefault && detailedLabelsReflection && settingsRowsScoped &&
     shortcutsRowOpensDialog,
   `toggle=${detailedLabelsToggle}, default=${detailedLabelsDefault}, reflection=${detailedLabelsReflection}, ` +
@@ -1016,7 +1017,7 @@ const retiredVisibleLabelTargets = [
 ].filter((needle) => app.includes(needle));
 const retiredTransportDescription = ['transportDescription', 'transport-description']
   .filter((needle) => app.includes(needle) || toolbar.includes(needle));
-const preservedClasses = app.includes("btn.classList.toggle('primary', !showStop)") &&
+const preservedClasses = app.includes("btn.classList.toggle('primary', !showStop && this.device !== null)") &&
   app.includes("btn.classList.toggle('danger', showStop)") && !app.includes('btn.className =');
 check(
   'renderToolbarState refreshes toolbar accessible names from state and t()',
@@ -1157,6 +1158,15 @@ const presentationNeedles = [
   'button:disabled { opacity: 0.45; cursor: default; }',
   '#toolbar .spacer { display: none; }',
 ];
+const disabledGrey = /#toolbar button\.toolbar-item:disabled \{[^}]*background: transparent;[^}]*color: var\(--muted-foreground\);/s.test(css) &&
+  css.indexOf('#toolbar button.toolbar-item:disabled {') > css.indexOf('#toolbar button.toolbar-item.primary {');
+const devicePrimary = app.includes("button.classList.toggle('primary', view.primary);");
+check(
+  'disconnected: the Device command is the highlighted control; a disabled command is grey, never filled',
+  disabledGrey && devicePrimary,
+  `disabledGrey=${disabledGrey}, devicePrimary=${devicePrimary}`,
+);
+
 const missingPresentation = presentationNeedles.filter((needle) => !css.includes(needle));
 check(
   'toolbar styles keep focus, connection, transport state, disabled, and compact placement contracts',
