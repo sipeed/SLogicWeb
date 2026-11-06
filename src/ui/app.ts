@@ -84,7 +84,7 @@ import { AXIS, COLORS, ROWS } from './metrics.js';
 import {
   Overlay, paintMarkerChip, type HoverMeasurement, type RegionTint,
 } from './overlay.js';
-import { OverviewStrip } from './overviewStrip.js';
+import { OverviewStrip, type OverviewState } from './overviewStrip.js';
 import { PanelResizer } from './panelResizer.js';
 import { StoreRef } from './storeRef.js';
 import {
@@ -101,7 +101,7 @@ import { stopFailureIsSilent } from './stopFailure.js';
 import { computeTicks, drawAxis, type TickSet } from './timeAxis.js';
 import { clampCaptureSeconds, clampRepeatIntervalSeconds } from './captureTime.js';
 import { capturePostTriggerSamples, carryCaptureDuration } from './capturePolicy.js';
-import { liveDrawDue } from './liveRefresh.js';
+import { liveDrawDue, liveWindowHasNewData, type LiveWindow } from './liveRefresh.js';
 import {
   FRAME_LAYERS, FrameCostRing,
   type FrameLayer, type FrameStatsSnapshot,
@@ -214,6 +214,8 @@ export class App {
   private liveFramesPermitted = 0;
   private liveFramesDrawn = 0;
   private liveFramesSkipped = 0;
+  private statusRenders = 0;
+  private drawnWindow: LiveWindow = { viewStart: 0, viewEnd: 0, dataLen: 0, dropped: 0 };
   private ingestBlocks = 0;
   private readonly layerDraws: Record<FrameLayer, number> =
     { wave: 0, axis: 0, overlay: 0, bus: 0, overview: 0 };
@@ -1789,9 +1791,9 @@ export class App {
         // text, never rebuild the panel (that would drop focus mid-edit).
         if (this.captureIsLoop) this.capturePanel.updateLoopMetrics(this.computeLoopMetrics());
       }
-      // A high-rate loop draws on the live cadence below, so the status line (which the
-      // draw pass does not own) still needs its own refresh here.
-      if (highRateLoop) this.renderStatus();
+      // The status line is not part of the draw pass, and a live frame whose window
+      // cannot change no longer reaches it, so refresh it on this clock instead.
+      this.renderStatus();
     }
     // Interactions (`dirty`) draw in the next frame. New samples (`livePending`) draw on
     // a cadence paced by the cost of the previous frame, instead of on every packet.
@@ -1799,13 +1801,22 @@ export class App {
     // A Repeat wave that is still waiting for its trigger keeps the previous frame: its
     // pre-trigger samples are arriving, but there is nothing new to show yet. A user
     // gesture (`dirty`) still draws, using the held wave and its own T.
-    const liveDue = !this.dirty && !this.repeatWaveHolding &&
-      liveDrawDue(now, this.liveDrawAt, this.lastFrameCostMs, this.livePending, this.running);
+    let liveDue = false;
+    if (!this.dirty && !this.repeatWaveHolding) {
+      liveDue = liveDrawDue(
+        now, this.liveDrawAt, this.lastFrameCostMs, this.livePending, this.running);
+      if (liveDue) {
+        this.liveFramesPermitted += 1;
+        if (!this.liveWindowRelevant()) {
+          this.skipLiveFrame(now);
+          return;
+        }
+      }
+    }
     if (!this.dirty && !liveDue) return;
     this.dirty = false;
     this.livePending = false;
     this.liveDrawAt = now;
-    if (liveDue) this.liveFramesPermitted += 1;
     const drawStartedAt = performance.now();
     try {
       this.draw();
@@ -1822,11 +1833,40 @@ export class App {
     if (live) this.liveFramesDrawn += 1;
   }
 
+  private liveWindowRelevant(): boolean {
+    const view = this.stack.view;
+    return liveWindowHasNewData(
+      this.stack.followLatest, view.start, view.end,
+      this.store.length, this.store.droppedSamples, this.drawnWindow,
+    );
+  }
+
+  private skipLiveFrame(now: number): void {
+    this.livePending = false;
+    this.liveDrawAt = now;
+    this.liveFramesSkipped += 1;
+    for (const layer of FRAME_LAYERS) {
+      if (layer !== 'overview') this.layerSkips[layer] += 1;
+    }
+    this.renderOverview();
+  }
+
+  private recordDrawnWindow(): void {
+    const view = this.stack.view;
+    this.drawnWindow = {
+      viewStart: view.start,
+      viewEnd: view.end,
+      dataLen: this.store.length,
+      dropped: this.store.droppedSamples,
+    };
+  }
+
   private frameStats(): FrameStatsSnapshot {
     return {
       permitted: this.liveFramesPermitted,
       drawn: this.liveFramesDrawn,
       skipped: this.liveFramesSkipped,
+      statusRenders: this.statusRenders,
       lastCostMs: this.lastFrameCostMs,
       drawMs: {
         p50: this.frameCost.percentile(50),
@@ -1856,6 +1896,7 @@ export class App {
     this.liveFramesPermitted = 0;
     this.liveFramesDrawn = 0;
     this.liveFramesSkipped = 0;
+    this.statusRenders = 0;
     this.ingestBlocks = 0;
     for (const layer of FRAME_LAYERS) {
       this.layerDraws[layer] = 0;
@@ -1949,33 +1990,47 @@ export class App {
     }
     for (const cursor of this.cursors) cursor.marker.draw(this.overlay, (sample) => this.toPx(sample));
     if (this.hover) this.overlay.drawHover(this.hover);
+    this.renderOverview();
+    this.renderStatus();
+    this.recordDrawnWindow();
+  }
+
+  private overviewState(): OverviewState {
     const overviewView = this.stack.viewport;
     const overviewWindow = this.overviewWindow();
     const originSample = this.displayOriginSample();
     const overviewRate = this.store.samplerate;
     const secondsAt = (sample: number): number =>
       overviewRate > 0 ? (sample - originSample) / overviewRate : 0;
-    this.overview.render({
+    const triggerSample = this.displayTriggerSample();
+    return {
       store: this.store,
       channels: this.enabledChannels().map((channel) => channel.index),
       viewport: overviewView,
       windowStart: overviewWindow.start,
       windowSpan: overviewWindow.span,
-      triggerSample: triggerAt,
+      triggerSample,
       // A Repeat composite's length includes the old wave; its density still changes as
       // the current wave's frontier advances, so key the cache on that frontier.
       dataEnd: this.captureStore.length,
-      originLabel: t(triggerAt !== null
+      originLabel: t(triggerSample !== null
         ? 'overview.originTrigger' : 'overview.originStart'),
       viewportTitle: t('overview.viewport', {
         from: formatDuration(secondsAt(overviewView.start)),
         to: formatDuration(secondsAt(overviewView.end)),
       }),
       palette: this.palette,
-    });
-    this.layerDraws.overview += 1;
+    };
+  }
 
-    this.renderStatus();
+  private renderOverview(force = false): void {
+    const state = this.overviewState();
+    if (!force && !this.overview.due(state, performance.now())) {
+      this.layerSkips.overview += 1;
+      return;
+    }
+    this.overview.render(state);
+    this.layerDraws.overview += 1;
   }
 
   private drawAxisCanvas(ticks: TickSet, wCss: number): void {
@@ -3749,6 +3804,7 @@ export class App {
   }
 
   private renderStatus(): void {
+    this.statusRenders += 1;
     // Capture statistics describe the current wave. A held previous frame is the only
     // exception: the capture is empty while the old wave is what the user sees, so report
     // that wave and say which one it is.

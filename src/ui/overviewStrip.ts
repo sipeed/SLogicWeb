@@ -157,6 +157,46 @@ interface CachedDensity extends OverviewDensity {
   channels: string;
 }
 
+/** Least time between two overview redraws: a minimap does not need the live cadence. */
+export const OVERVIEW_MIN_MS = 100;
+
+let nextOverviewStoreId = 1;
+const overviewStoreIds = new WeakMap<SampleStore, number>();
+
+function overviewStoreId(store: SampleStore): number {
+  let id = overviewStoreIds.get(store);
+  if (id === undefined) {
+    id = nextOverviewStoreId++;
+    overviewStoreIds.set(store, id);
+  }
+  return id;
+}
+
+/** Everything the strip's pixels are a function of, as one comparable string. */
+export function overviewSignature(
+  state: OverviewState, widthCss: number, heightCss: number,
+): string {
+  const length = state.store.length;
+  const palette = state.palette;
+  return [
+    overviewStoreId(state.store), length, state.store.droppedSamples, state.store.samplerate,
+    state.dataEnd ?? length, state.windowStart ?? 0, state.windowSpan ?? length,
+    state.viewport.start, state.viewport.end, state.channels.join(','),
+    state.triggerSample ?? -1, state.originLabel, state.viewportTitle,
+    Math.round(widthCss), Math.round(heightCss),
+    palette.text, palette.text50, palette.selection, palette.warning, palette.noDataColor,
+    palette.gridMinor, palette.axisTickMajor,
+  ].join('|');
+}
+
+/** The strip's redraw clock: a changed signature, at most once per OVERVIEW_MIN_MS. */
+export function overviewDue(
+  lastSignature: string, lastRenderedAt: number, signature: string, nowMs: number,
+): boolean {
+  if (nowMs - lastRenderedAt < OVERVIEW_MIN_MS) return false;
+  return signature !== lastSignature;
+}
+
 export class OverviewStrip {
   private readonly ctx: CanvasRenderingContext2D;
   private state: OverviewState | null = null;
@@ -165,6 +205,8 @@ export class OverviewStrip {
   private heightCss = 0;
   private dragging = false;
   private activePointer: number | null = null;
+  private lastSignature = '';
+  private lastRenderedAt = Number.NEGATIVE_INFINITY;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -193,10 +235,20 @@ export class OverviewStrip {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  render(state: OverviewState): void {
+  /** True when the strip's inputs changed and its clock allows another redraw. */
+  due(state: OverviewState, nowMs: number): boolean {
+    return overviewDue(
+      this.lastSignature, this.lastRenderedAt,
+      overviewSignature(state, this.widthCss, this.heightCss), nowMs,
+    );
+  }
+
+  render(state: OverviewState, nowMs = performance.now()): void {
     this.state = state;
     if (this.canvas.title !== state.viewportTitle) this.canvas.title = state.viewportTitle;
     this.syncSize();
+    this.lastSignature = overviewSignature(state, this.widthCss, this.heightCss);
+    this.lastRenderedAt = nowMs;
     const width = this.widthCss;
     const height = this.heightCss;
     const ctx = this.ctx;

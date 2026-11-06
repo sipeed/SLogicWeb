@@ -15,6 +15,7 @@ export interface FrameStatsSnapshot {
   permitted: number;
   drawn: number;
   skipped: number;
+  statusRenders: number;
   lastCostMs: number;
   drawMs: { p50: number; p95: number; max: number };
   layers: Record<FrameLayer, FrameLayerCounts>;

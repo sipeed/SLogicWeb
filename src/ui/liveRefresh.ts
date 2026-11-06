@@ -37,3 +37,31 @@ export function liveDrawDue(
 ): boolean {
   return running && pending && now - lastDrawnAt >= liveFrameIntervalMs(lastCostMs);
 }
+
+/** The store window a frame drew, in absolute capture samples. */
+export interface LiveWindow {
+  viewStart: number;
+  viewEnd: number;
+  dataLen: number;
+  dropped: number;
+}
+
+/**
+ * True when a new sample can reach the pixels of the current window. A fixed window that
+ * no new sample enters, over data that did not shift under it, is already on screen.
+ */
+export function liveWindowHasNewData(
+  follow: boolean,
+  viewStart: number, viewEnd: number, dataLen: number, dropped: number,
+  drawn: LiveWindow,
+): boolean {
+  if (follow) return true;
+  const start = dropped + viewStart;
+  const end = dropped + viewEnd;
+  const drawnStart = drawn.dropped + drawn.viewStart;
+  const drawnEnd = drawn.dropped + drawn.viewEnd;
+  if (start !== drawnStart || end !== drawnEnd) return true;
+  const drawnFrontier = drawn.dropped + drawn.dataLen;
+  const frontier = dropped + dataLen;
+  return frontier > drawnFrontier && frontier > start && drawnFrontier < end;
+}

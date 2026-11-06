@@ -2,7 +2,8 @@
 
 import { createSampleStore } from '../../data/index.js';
 import {
-  overviewDensity, overviewSampleFromPointer, overviewViewportBox,
+  OVERVIEW_MIN_MS, overviewDensity, overviewDue, overviewSampleFromPointer,
+  overviewSignature, overviewViewportBox,
 } from '../overviewStrip.js';
 
 const nodeProcess = (() => {
@@ -101,6 +102,34 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 {
+  const store = createSampleStore(4, 1e6);
+  store.append(new Uint8Array([1, 0, 1, 0, 1, 0, 1, 0]));
+  const base = {
+    store, channels: [0], viewport: { start: 0, end: 8 }, triggerSample: null,
+    originLabel: 'Start', viewportTitle: 'all', dataEnd: 8,
+    palette: {
+      text: '#fff', text50: '#888', selection: '#0af', warning: '#fa0',
+      noDataColor: '#333', gridMinor: '#222', axisTickMajor: '#444',
+    },
+  } as unknown as Parameters<typeof overviewSignature>[0];
+  const sig = overviewSignature(base, 200, 56);
+  const same = overviewSignature(base, 200, 56);
+  const moved = overviewSignature({ ...base, viewport: { start: 1, end: 9 } }, 200, 56);
+  const wider = overviewSignature(base, 201, 56);
+  const grown = overviewSignature({ ...base, dataEnd: 9 }, 200, 56);
+  check('the strip signature changes only with its inputs',
+    sig === same && sig !== moved && sig !== wider && sig !== grown,
+    `same=${sig === same}, moved=${sig !== moved}, wider=${sig !== wider}, grown=${sig !== grown}`);
+  const first = overviewDue('', Number.NEGATIVE_INFINITY, sig, 0);
+  const early = overviewDue(sig, 0, moved, OVERVIEW_MIN_MS - 1);
+  const changed = overviewDue(sig, 0, moved, OVERVIEW_MIN_MS);
+  const unchanged = overviewDue(sig, 0, sig, OVERVIEW_MIN_MS * 5);
+  check('the overview redraws on a changed signature at most once per 100 ms',
+    OVERVIEW_MIN_MS === 100 && first && !early && changed && !unchanged,
+    `first=${first}, early=${early}, changed=${changed}, unchanged=${unchanged}`);
+}
+
+{
   const fs = nodeProcess.getBuiltinModule?.('fs') as {
     readFileSync(path: string, encoding: string): string;
   } | undefined;
@@ -122,7 +151,8 @@ function check(name: string, pass: boolean, detail: string): void {
     app.includes('this.overview.syncSize();') &&
     app.includes('const overviewH = this.el.overview.offsetHeight || 56;') &&
     app.includes('this.el.scroll.clientHeight || 630) - axisH - overviewH - analogH') &&
-    app.includes('this.overview.render({') &&
+    app.includes('this.overview.render(state)') &&
+    app.includes('this.overview.due(state, performance.now())') &&
     app.includes('private overviewWindow()') &&
     app.includes('windowStart: overviewWindow.start') &&
     app.includes('windowSpan: overviewWindow.span') &&

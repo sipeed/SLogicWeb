@@ -592,7 +592,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const frameSrc = frameEnd > frameStart ? appSrc.slice(frameStart, frameEnd) : '';
   const highRateGuard = frameSrc.includes('this.running && this.captureIsLoop &&') &&
     frameSrc.includes('this.store.samplerate * bytesPerSampleForChannels(this.store.channelCount) >= LOOP_BUILD_SUSPEND_BYTES_PER_SEC');
-  const throttledLive = frameSrc.includes('liveDrawDue(now, this.liveDrawAt, this.lastFrameCostMs, this.livePending, this.running)') &&
+  const throttledLive = /liveDrawDue\(\s*now,\s*this\.liveDrawAt,\s*this\.lastFrameCostMs,\s*this\.livePending,\s*this\.running\)/.test(frameSrc) &&
     frameSrc.includes('this.liveDrawAt = now;') &&
     frameSrc.includes('now - this.runningPanelAt > 500') &&
     !frameSrc.includes('if (highRateLoop) return;');

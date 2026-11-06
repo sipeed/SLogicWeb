@@ -2,6 +2,7 @@
 
 import {
   LIVE_FRAME_CEIL_MS, LIVE_FRAME_FLOOR_MS, liveDrawDue, liveFrameIntervalMs,
+  liveWindowHasNewData, type LiveWindow,
 } from '../liveRefresh.js';
 
 const nodeProcess = (() => {
@@ -68,6 +69,31 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 {
+  const drawn = (viewStart: number, viewEnd: number, dataLen: number, dropped = 0): LiveWindow =>
+    ({ viewStart, viewEnd, dataLen, dropped });
+  const cases: [string, boolean, number, number, number, number, LiveWindow, boolean][] = [
+    // name, follow, viewStart, viewEnd, dataLen, dropped, drawn, relevant
+    ['following always sees new data', true, 100, 200, 500, 0, drawn(100, 200, 400), true],
+    ['fixed window, data grows inside it', false, 100, 200, 150, 0, drawn(100, 200, 140), true],
+    ['fixed window, data grows past it', false, 100, 200, 500, 0, drawn(100, 200, 500), false],
+    ['fixed window, data lands exactly on the right edge', false, 100, 200, 200, 0, drawn(100, 200, 199), true],
+    ['fixed window, data was already past it', false, 100, 200, 500, 0, drawn(100, 200, 600), false],
+    ['fixed window before the first sample', false, 0, 100, 500, 0, drawn(0, 100, 0), true],
+    ['front drop shifts the window under a fixed view', false, 100, 200, 500, 64, drawn(100, 200, 500), true],
+    ['front drop with the view translated by the same amount', false, 36, 136, 500, 64, drawn(100, 200, 500), false],
+    ['a pan without new data', false, 300, 400, 500, 0, drawn(100, 200, 500), true],
+    ['viewport zoom without new data', false, 100, 400, 500, 0, drawn(100, 200, 500), true],
+  ];
+  const bad = cases.filter(([, follow, start, end, len, dropped, prev, want]) =>
+    liveWindowHasNewData(follow, start, end, len, dropped, prev) !== want);
+  check('a live frame is relevant only when a new sample can reach the visible window',
+    bad.length === 0,
+    bad.length === 0
+      ? `${cases.length} cases match`
+      : bad.map(c => c[0]).join('; '));
+}
+
+{
   const fs = nodeProcess.getBuiltinModule?.('fs') as {
     readFileSync(path: string, encoding: string): string;
   } | undefined;
@@ -78,8 +104,14 @@ function check(name: string, pass: boolean, detail: string): void {
   const frameStart = app.indexOf('private frame = (): void => {');
   const frameEnd = frameStart >= 0 ? app.indexOf('\n  };', frameStart) : -1;
   const frame = frameEnd > frameStart ? app.slice(frameStart, frameEnd) : '';
-  const gated = frame.includes(
-    'liveDrawDue(now, this.liveDrawAt, this.lastFrameCostMs, this.livePending, this.running)') &&
+  const call = frame.indexOf('liveDrawDue(');
+  const callArgs = call >= 0 ? frame.slice(call, frame.indexOf(');', call)) : '';
+  const gated = ['now', 'this.liveDrawAt', 'this.lastFrameCostMs', 'this.livePending', 'this.running']
+    .every((arg, i, all) => {
+      const at = callArgs.indexOf(arg);
+      const previous = i === 0 ? -1 : callArgs.indexOf(all[i - 1]!);
+      return at > previous;
+    }) &&
     frame.includes('this.dirty = false;') && frame.includes('this.livePending = false;') &&
     frame.includes('this.liveDrawAt = now;') && frame.includes('this.draw();');
   // The old high-rate branch returned before drawing: a fast loop showed no live view.

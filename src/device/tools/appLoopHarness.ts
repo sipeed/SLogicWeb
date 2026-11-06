@@ -4,6 +4,7 @@ import { WorkerSlogicDevice } from '../workerTransport.js';
 import type { Device } from '../types.js';
 import { bytesPerSampleForChannels } from '../../types.js';
 import { FrameCostRing, framesPerSecond } from '../../ui/frameStats.js';
+import type { FrameStatsSnapshot } from '../../ui/frameStats.js';
 import type { App } from '../../ui/app.js';
 import type { StatusError } from '../../ui/state.js';
 import { fillCounter16 } from './loopWindowHarness.js';
@@ -16,6 +17,44 @@ interface ProbeProgress {
   limit: number;
 }
 
+export interface LiveFrameSnapshot {
+  atMs: number;
+  permitted: number;
+  drawn: number;
+  skipped: number;
+  statusRenders: number;
+  layers: FrameStatsSnapshot['layers'];
+  drawMs: FrameStatsSnapshot['drawMs'];
+  samples: number;
+  dropped: number;
+  kept: number;
+  storeLength: number;
+  storeDropped: number;
+  follow: boolean;
+  view: { start: number; end: number };
+}
+
+function liveFrameSnapshot(app: AppProbe, startedAt: number): LiveFrameSnapshot {
+  const stats = app.debug.frameStats();
+  const progress = app.progressView();
+  return {
+    atMs: performance.now() - startedAt,
+    permitted: stats.permitted,
+    drawn: stats.drawn,
+    skipped: stats.skipped,
+    statusRenders: stats.statusRenders,
+    layers: stats.layers,
+    drawMs: stats.drawMs,
+    samples: progress.samples,
+    dropped: progress.dropped,
+    kept: progress.kept,
+    storeLength: app.store.length,
+    storeDropped: app.store.droppedSamples,
+    follow: app.stack.followLatest,
+    view: { start: app.stack.view.start, end: app.stack.view.end },
+  };
+}
+
 interface ProbeBuilder {
   progress: number;
   done: boolean;
@@ -23,6 +62,7 @@ interface ProbeBuilder {
 }
 
 interface AppProbe {
+  stack: { followLatest: boolean; view: { start: number; end: number } };
   device: Device | null;
   deviceEpoch: number;
   running: boolean;
@@ -124,6 +164,9 @@ export interface AppLoopProbeReport {
   draws: number;
   drawHz: number;
   scheduledHz: number;
+  skipped: number;
+  statusRenders: number;
+  layers: FrameStatsSnapshot['layers'];
   frameCostMs: { p50: number; p95: number; max: number };
   envCapped: boolean;
   rafCeilingMs: number;
@@ -335,6 +378,9 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
       draws,
       drawHz,
       scheduledHz,
+      skipped: frameStats.skipped,
+      statusRenders: frameStats.statusRenders,
+      layers: frameStats.layers,
       frameCostMs,
       envCapped,
       rafCeilingMs,
@@ -368,4 +414,97 @@ export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<App
       if (report !== null) report.deviceLeak = app.device !== null;
     }
   }
+}
+
+export interface FixedWindowProbeOptions {
+  channels: 8 | 16 | 32;
+  samplerate: number;
+  viewStartSeconds: number;
+  viewEndSeconds: number;
+  settleMs?: number;
+}
+
+export interface FixedWindowProbeResult {
+  pageErrors: string[];
+  deviceLeak: boolean;
+  live: boolean;
+  final: LiveFrameSnapshot;
+}
+
+export interface FixedWindowProbe {
+  snapshot(): LiveFrameSnapshot;
+  finish(): Promise<FixedWindowProbeResult>;
+}
+
+export async function startFixedWindowProbe(
+  options: FixedWindowProbeOptions,
+): Promise<FixedWindowProbe> {
+  const app = window.logicweb as unknown as AppProbe | undefined;
+  if (!app) throw new Error('the App is not ready');
+  app.discardDevice();
+  const channels = options.channels;
+  const bytesPerMs = options.samplerate * bytesPerSampleForChannels(channels) / 1000;
+  const worker = new FakeUsbWorker({ name: String(bytesPerMs) });
+  const dev = await WorkerSlogicDevice.open(
+    { vendorId: 0x359f, productId: 0x3032, serial: 'clock' },
+    { spawn: () => worker, openTimeoutMs: 5000 },
+  ).catch((error: unknown) => {
+    worker.terminate();
+    throw error;
+  });
+  const pageErrors: string[] = [];
+  const onPageError = (event: ErrorEvent): void => { pageErrors.push(event.message); };
+  const onUnhandledRejection = (event: PromiseRejectionEvent): void => {
+    pageErrors.push(String(event.reason));
+  };
+  window.addEventListener('error', onPageError);
+  window.addEventListener('unhandledrejection', onUnhandledRejection);
+  const startedAt = performance.now();
+  let finished = false;
+  try {
+    app.installDevice(dev, app.deviceEpoch);
+    for (let i = channels; i < app.channels.length; i++) app.debug.toggleChannel(i, false);
+    if (app.busViews.length === 0) {
+      app.debug.addBus({
+        name: 'loop-probe',
+        spec: { bits: [0, 1, 2, 3, 4, 5, 6, 7], clock: null, encoding: 'unsigned' },
+        hideSources: true,
+      });
+    }
+    app.debug.setSettings({
+      mode: 'single',
+      singleUnlimited: true,
+      channels,
+      samplerate: options.samplerate,
+      testMode: 2,
+      softwareTrigger: false,
+    });
+    await app.debug.start();
+    await new Promise(resolve => setTimeout(resolve, options.settleMs ?? 400));
+    app.debug.setViewportSeconds(options.viewStartSeconds, options.viewEndSeconds);
+    await new Promise(resolve => setTimeout(resolve, 250));
+    app.debug.resetFrameStats();
+  } catch (error) {
+    window.removeEventListener('error', onPageError);
+    window.removeEventListener('unhandledrejection', onUnhandledRejection);
+    app.discardDevice();
+    throw error;
+  }
+  return {
+    snapshot: () => liveFrameSnapshot(app, startedAt),
+    finish: async () => {
+      if (finished) throw new Error('the fixed-window probe was already finished');
+      finished = true;
+      const final = liveFrameSnapshot(app, startedAt);
+      const live = app.running && app.statusError === null;
+      try {
+        await app.debug.stop();
+      } finally {
+        window.removeEventListener('error', onPageError);
+        window.removeEventListener('unhandledrejection', onUnhandledRejection);
+        app.discardDevice();
+      }
+      return { pageErrors, deviceLeak: app.device !== null, live, final };
+    },
+  };
 }
