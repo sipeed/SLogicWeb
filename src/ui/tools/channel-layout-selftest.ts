@@ -628,17 +628,19 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     triggerShift, `checkedSub=${triggerShift}`);
 
   const adcStore = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
-  const adcWords = new Uint16Array(40_000);
-  for (let i = 0; i < adcWords.length; i++) adcWords[i] = Math.floor(i / 250) & 0xff;
+  // 4000 samples per column: above the two-leaf limit of the exact envelope, so these
+  // checks exercise the pyramid and the provisional sampler they are about.
+  const adcWords = new Uint16Array(400_000);
+  for (let i = 0; i < adcWords.length; i++) adcWords[i] = Math.floor(i / 2500) & 0xff;
   adcStore.append(new Uint8Array(adcWords.buffer));
   const adcSpec: BusSpec = { bits: [0, 1, 2, 3, 4, 5, 6, 7], clock: null, encoding: 'unsigned' };
   const adcView = (): BusViewState => ({
     id: 'bus-0', name: 'bus', spec: adcSpec, color: '#fff', fullScaleV: null, offsetV: 0, bitOrder: 'lsb',
     style: 'line', heightCss: 120, hideSources: false, builder: null, builtFor: null, cache: null,
   });
-  const adcAt = (i: number): number => Math.floor(i / 250) & 0xff;
+  const adcAt = (i: number): number => Math.floor(i / 2500) & 0xff;
 
-  const adcNoBuilder = analogFrame(adcStore, adcView(), 0, 40_000, 100, true);
+  const adcNoBuilder = analogFrame(adcStore, adcView(), 0, 400_000, 100, true);
   const noBuilderFinite = adcNoBuilder.kind === 'columns' &&
     Array.from({ length: 100 }, (_, c) => adcNoBuilder.min[c]! <= adcNoBuilder.max[c]!).every(Boolean);
   check('analogFrame samples a coarse envelope when no pyramid exists (fast loop)',
@@ -652,20 +654,20 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const adcBuilt = adcView();
   adcBuilt.builder = new BusBuilder(adcStore, adcSpec);
   while (!adcBuilt.builder.step(10)) { /* build */ }
-  const adcLiveFull = analogFrame(adcStore, adcBuilt, 0, 40_000, 100, true);
+  const adcLiveFull = analogFrame(adcStore, adcBuilt, 0, 400_000, 100, true);
   check('analogFrame live draws pyramid columns once built',
     adcLiveFull.kind === 'columns' &&
-    adcLiveFull.min[0] === adcAt(0) && adcLiveFull.max[0] === adcAt(1_023) &&
-    adcLiveFull.min[99] === adcAt(38_912) && adcLiveFull.max[99] === adcAt(39_999) &&
+    adcLiveFull.min[0] === adcAt(0) && adcLiveFull.max[0] === adcAt(4_095) &&
+    adcLiveFull.min[99] === adcAt(395_264) && adcLiveFull.max[99] === adcAt(399_999) &&
     adcLiveFull.provisional !== true,
     adcLiveFull.kind === 'columns'
       ? `c0=${adcLiveFull.min[0]}..${adcLiveFull.max[0]} c99=${adcLiveFull.min[99]}..${adcLiveFull.max[99]}`
       : `kind=${adcLiveFull.kind}`);
 
   const adcPartial = adcView();
-  adcPartial.builder = new BusBuilder(adcStore, adcSpec, adcStore.length, 4096);
+  adcPartial.builder = new BusBuilder(adcStore, adcSpec, adcStore.length, 40_960);
   adcPartial.builder.step(0);
-  const adcLivePart = analogFrame(adcStore, adcPartial, 0, 40_000, 100, true);
+  const adcLivePart = analogFrame(adcStore, adcPartial, 0, 400_000, 100, true);
   const builtMatch = adcLivePart.kind === 'columns' && adcLiveFull.kind === 'columns' &&
     Array.from({ length: 10 }, (_, c) =>
       adcLivePart.min[c] === adcLiveFull.min[c] && adcLivePart.max[c] === adcLiveFull.max[c]).every(Boolean);
@@ -686,19 +688,19 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   // not the bins the stale origin still points at.
   {
     const loopStore = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
-    const words = new Uint16Array(40_000);
-    for (let i = 0; i < words.length; i++) words[i] = Math.floor(i / 250) & 0xff;
+    const words = new Uint16Array(400_000);
+    for (let i = 0; i < words.length; i++) words[i] = Math.floor(i / 2500) & 0xff;
     loopStore.append(new Uint8Array(words.buffer));
     const stale = adcView();
-    stale.builder = new BusBuilder(loopStore, adcSpec, loopStore.length, undefined, 80_000);
+    stale.builder = new BusBuilder(loopStore, adcSpec, loopStore.length, undefined, 800_000);
     while (!stale.builder.step(10)) { /* build */ }
     stale.builder.setLength(loopStore.length);
-    loopStore.dropFront(8_192); // leaf-aligned; the 32-column window slides 8 leaves
+    loopStore.dropFront(81_920); // leaf-aligned; the 32-column window slides 80 leaves
     const noRefresh = analogFrame(loopStore, stale, 0, loopStore.length, 32, true);
     const reference = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
-    reference.append(new Uint8Array(words.buffer, 8_192 * 2));
+    reference.append(new Uint8Array(words.buffer, 81_920 * 2));
     const fresh = adcView();
-    fresh.builder = new BusBuilder(reference, adcSpec, reference.length, undefined, 80_000);
+    fresh.builder = new BusBuilder(reference, adcSpec, reference.length, undefined, 800_000);
     while (!fresh.builder.step(10)) { /* build */ }
     fresh.builder.setLength(reference.length);
     const want = analogFrame(reference, fresh, 0, reference.length, 32, true);
@@ -716,7 +718,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     check('a frame drawn before the pump refreshes still reads the dropped window',
       mismatches.length === 0,
       mismatches.length === 0
-        ? `dropped 8192 with the origin stale: 32 columns match a fresh store (c0=${want.kind === 'columns' ? want.min[0] : '?'})`
+        ? `dropped 81920 with the origin stale: 32 columns match a fresh store (c0=${want.kind === 'columns' ? want.min[0] : '?'})`
         : mismatches.join('; '));
   }
 }

@@ -156,14 +156,14 @@ check('runBits and runStart round-trip', [false, true].every((m) => {
 }
 
 // Zoomed-out analog rows never fall through both paths. The fast loop suspends the
-// pyramid builder, and the exact timeline truncates above 256 samples per pixel; a
-// bounded sample of each unbuilt column keeps a coarse envelope on screen.
+// pyramid builder, and the exact envelope stops at two pyramid leaves (2048 samples)
+// per pixel; a bounded sample of each unbuilt column keeps a coarse envelope on screen.
 {
-  const len = 20_000;
+  const len = 400_000;
   const store = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
   const words = new Uint16Array(len);
   for (let i = 0; i < len; i++) {
-    const code = Math.round(128 + 90 * Math.sin(i / 97));
+    const code = Math.round(128 + 90 * Math.sin(i / 1940));
     words[i] = code & 0xff;
   }
   store.append(new Uint8Array(words.buffer));
@@ -209,7 +209,7 @@ check('runBits and runStart round-trip', [false, true].every((m) => {
     `reads=${reads}, finite=${hugeFinite}`);
 
   // A capture gap is unknown, not a value to interpolate across.
-  store.noteGap(4_000, 6_000);
+  store.noteGap(80_000, 120_000);
   const gapped = analogFrame(store, view(), 0, len, 20, true);
   const gappedAt = (c: number): boolean => gapped.kind === 'columns' &&
     !Number.isNaN(gapped.min[c]!);
@@ -233,8 +233,8 @@ check('runBits and runStart round-trip', [false, true].every((m) => {
   // buses cannot multiply the provisional cost by the number of rows.
   {
     const budgetStore = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
-    const words = new Uint16Array(40_000);
-    for (let i = 0; i < words.length; i++) words[i] = Math.round(128 + 90 * Math.sin(i / 97)) & 0xff;
+    const words = new Uint16Array(400_000);
+    for (let i = 0; i < words.length; i++) words[i] = Math.round(128 + 90 * Math.sin(i / 1940)) & 0xff;
     budgetStore.append(new Uint8Array(words.buffer));
     const budgetSpec: BusSpec = { bits: [0, 1, 2, 3, 4, 5, 6, 7], clock: null, encoding: 'unsigned' };
     const budgetView = (id: string): BusViewState => ({
@@ -242,8 +242,8 @@ check('runBits and runStart round-trip', [false, true].every((m) => {
       style: 'line', heightCss: 120, hideSources: false, builder: null, builtFor: null, cache: null,
     });
     beginAnalogFrameBudget(1_600); // 8-bit: 200 positions across the frame
-    const first = analogFrame(budgetStore, budgetView('budget-a'), 0, 40_000, 100, true);
-    const second = analogFrame(budgetStore, budgetView('budget-b'), 0, 40_000, 100, true);
+    const first = analogFrame(budgetStore, budgetView('budget-a'), 0, 400_000, 100, true);
+    const second = analogFrame(budgetStore, budgetView('budget-b'), 0, 400_000, 100, true);
     endAnalogFrameBudget();
     const firstFinite = first.kind === 'columns' && first.provisional === true &&
       first.min.every((v) => !Number.isNaN(v));

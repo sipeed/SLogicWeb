@@ -136,6 +136,50 @@ for (const spp of [1, 1.4, 1.5, 2, 2.5, 3, 3.9, 4, 5, 6, 7, 8, 12]) {
     px.map((x, k) => `${x.toFixed(2)}:${py[k]!.toFixed(2)}`).slice(10, 16).join(' '));
 }
 
+// A dense sine sampled far faster than it moves (the 30-1000 samples/column zooms of a
+// real ADC capture): every column must hold the true min/max of its own samples. The
+// old fallback drew 1024-sample pyramid leaves, ~10 px flat boxes, as a staircase.
+{
+  const len = 2_500_000;
+  const period = 10_000;
+  const dense = new Uint16Array(len);
+  for (let i = 0; i < len; i++) {
+    // +-1 LSB of deterministic dither: a real ADC changes code on nearly every sample,
+    // which is what overflowed the cached step list into the leaf fallback.
+    dense[i] = Math.round(128 + 60 * Math.sin((2 * Math.PI * i) / period)) + ((i * 7919) % 3) - 1;
+  }
+  const denseStore = new PlanarSampleStore({ channelCount: 16, samplerate: 100e6 });
+  denseStore.append(new Uint8Array(dense.buffer));
+  const width = 1000;
+  for (const spp of [50, 100, 300, 700, 1000]) {
+    const start = 1234.5;
+    const end = start + spp * width;
+    const frame = analogFrame(denseStore, view(), start, end, width, false);
+    if (frame.kind !== 'columns') {
+      check(`dense sine at ${spp} samples/column: drawn as columns`, false, `kind=${frame.kind}`);
+      continue;
+    }
+    let bad = '';
+    let widest = 0;
+    for (let c = 0; c < width && !bad; c++) {
+      const lo = Math.max(0, Math.ceil(start + c * spp));
+      const hi = Math.min(len, Math.ceil(start + (c + 1) * spp));
+      let mn = Infinity;
+      let mx = -Infinity;
+      for (let i = lo; i < hi; i++) { mn = Math.min(mn, dense[i]!); mx = Math.max(mx, dense[i]!); }
+      if (frame.min[c] !== mn || frame.max[c] !== mx) {
+        bad = `column ${c}: got [${frame.min[c]}, ${frame.max[c]}], want [${mn}, ${mx}]`;
+      }
+      widest = Math.max(widest, mx - mn);
+    }
+    // A column of spp samples on this sine spans at most 2*pi*60*spp/period codes (+3 for
+    // rounding and dither); a leaf-wide box would be several times that at the small zooms.
+    const bound = Math.ceil((2 * Math.PI * 60 * spp) / period) + 3;
+    check(`dense sine at ${spp} samples/column: each column is its own samples' min/max`,
+      bad === '' && widest <= bound, bad || `widest band ${widest} codes, bound ${bound}`);
+  }
+}
+
 for (const r of results) console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.name}${r.detail ? `\n        ${r.detail}` : ''}`);
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

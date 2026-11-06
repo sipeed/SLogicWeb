@@ -9,6 +9,10 @@
  *     as points when there are fewer values than pixels or fewer than four samples per
  *     device-pixel column, otherwise as the min/max of the samples timestamped in each
  *     pixel column;
+ *   - between that and two pyramid leaves per column: the same exact in-column min/max,
+ *     streamed through the window in bounded chunks. A pyramid leaf (BUS_LEAF samples)
+ *     wider than a column would paint one flat box over several columns - the staircase
+ *     a dense analog signal (a step on nearly every sample) used to fall back to;
  *   - zoomed out: the background-built pyramid, a min/max per pixel column - the part not
  *     built yet is simply left empty and fills in as the builder runs.
  *
@@ -16,7 +20,7 @@
  */
 
 import {
-  BusBuilder, busRange, busSteps, busValue, latchedBefore, readCode, type BusSpec,
+  BUS_LEAF, BusBuilder, busRange, busSteps, busValue, latchedBefore, readCode, type BusSpec,
 } from '../data/busValue.js';
 import type { GapSpan, SampleStore } from '../data/types.js';
 import { SMOOTH_POINTS_MAX_SPP } from './analogGeometry.js';
@@ -84,6 +88,20 @@ export const DEFAULT_BUS_HEIGHT = 120;
 const EXACT_SPP = 256;
 /** And never over a window wider than this (the steps would be too many to cache). */
 const EXACT_WINDOW = 4_000_000;
+/**
+ * Below this many samples per column the envelope is read exactly from the store: a
+ * leaf then covers at most half a column, so the pyramid could only smear it.
+ */
+const EXACT_COLUMN_SPP = 2 * BUS_LEAF;
+/** Samples per streamed chunk of the exact column envelope (bounds its step arrays). */
+const EXACT_COLUMN_CHUNK = 1 << 16;
+/**
+ * The streamed envelope reads every sample (~25 ns each on a dense 8-bit bus), so it is
+ * capped at ~25 ms per window change. A wider window at under EXACT_COLUMN_SPP samples
+ * per column only happens on very wide canvases, where a leaf is already about one
+ * device pixel or less.
+ */
+const EXACT_COLUMN_WINDOW = 1 << 20;
 
 /**
  * Sample positions one coarse frame may spend on provisional columns, per bus. The
@@ -231,8 +249,12 @@ function compute(
   const spp = span / widthPx;
   const s = Math.max(0, Math.floor(start));
   const e = Math.min(store.length, Math.ceil(end));
-  if (e > s && spp <= EXACT_SPP && e - s <= EXACT_WINDOW) {
+  if (e > s && spp < EXACT_COLUMN_SPP &&
+      e - s <= (spp > EXACT_SPP ? EXACT_COLUMN_WINDOW : EXACT_WINDOW)) {
     const carry = latchedBefore(store, bv.spec, s);
+    if (spp > EXACT_SPP) {
+      return { kind: 'columns', ...exactColumns(store, bv.spec, start, end, widthPx, carry) };
+    }
     // 16 steps per column: a signal changing on every sample keeps the exact
     // (in-column) envelope up to 16 samples per column before the pyramid takes over.
     const st = busSteps(store, bv.spec, s, e, { carry, maxSteps: widthPx * 16 });
@@ -270,6 +292,10 @@ function compute(
       }
       return { kind: 'columns', min, max };
     }
+    // More steps than the cached step list may hold (a dense analog signal changes on
+    // nearly every sample): stream the same in-column envelope instead of falling back
+    // to leaves wider than a column.
+    return { kind: 'columns', ...exactColumns(store, bv.spec, start, end, widthPx, carry) };
   }
   const pyramid = bv.builder?.pyramid ?? null;
   if (pyramid) {
@@ -336,6 +362,43 @@ function compute(
   return provisional
     ? { kind: 'columns', min, max, provisional: true }
     : { kind: 'columns', min, max };
+}
+
+/**
+ * The exact min/max of the samples timestamped in each column of [start, end), read in
+ * EXACT_COLUMN_CHUNK pieces so no step list grows with the window. Same rule as the
+ * cached exact path: a step covers the columns of its first and last sample timestamp.
+ */
+function exactColumns(
+  store: SampleStore, spec: BusSpec, start: number, end: number, widthPx: number, carry: number,
+): { min: Float64Array; max: Float64Array } {
+  const span = end - start;
+  const s = Math.max(0, Math.floor(start));
+  const e = Math.min(store.length, Math.ceil(end));
+  const first0 = Math.ceil(start);
+  const min = new Float64Array(widthPx).fill(Number.NaN);
+  const max = new Float64Array(widthPx).fill(Number.NaN);
+  const col = (sample: number) => Math.floor(((sample - start) / span) * widthPx);
+  let latched = carry;
+  for (let a = s; a < e; a += EXACT_COLUMN_CHUNK) {
+    const b = Math.min(e, a + EXACT_COLUMN_CHUNK);
+    const st = busSteps(store, spec, a, b, { carry: latched });
+    latched = st.carry;
+    for (let i = 0; i < st.count; i++) {
+      const v = st.val[i]!;
+      if (Number.isNaN(v)) continue;
+      const first = Math.max(st.pos[i]!, first0);
+      const last = (i + 1 < st.count ? st.pos[i + 1]! : b) - 1;
+      if (last < first) continue;
+      const c0 = Math.max(0, col(first));
+      const c1 = Math.min(widthPx - 1, col(last));
+      for (let c = c0; c <= c1; c++) {
+        if (!(v >= min[c]!)) min[c] = v;
+        if (!(v <= max[c]!)) max[c] = v;
+      }
+    }
+  }
+  return { min, max };
 }
 
 /**
