@@ -13,7 +13,12 @@
  * - Only `execution: 'host'` plans are executable here: a `'device'` plan is downloaded
  *   to the firmware, so passing one is a wiring bug and is refused. Only
  *   `source: 'digital'` is supported; analog and mixed plans need the M1 analog executor
- *   and are refused with a typed reason.
+ *   and are refused with a typed reason. When that mapping lands it must pass the
+ *   matcher's qualification explicitly: `analogHysteresis` = the larger of the ADC's
+ *   code hysteresis and the plan's `hysteresis` volts in codes, and
+ *   `analogPersistSamples` = `ceil(240 ns * samplerate)` (`analogTriggerQualification`
+ *   in `ui/channelBanks.ts` holds both constants). The matcher's own defaults (4 codes,
+ *   one sample) are for direct callers, not for plans.
  * - A condition's `signal` is resolved to a channel by `resolveChannel`, or by the
  *   default `d<index>` convention (the same one the SimDriver uses). An unresolved or
  *   out-of-range signal is refused.

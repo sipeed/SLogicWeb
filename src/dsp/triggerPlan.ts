@@ -74,6 +74,12 @@ export type TriggerBudget =
  * carries the polarity (default 1 / high), because the architecture's condition type
  * alone cannot express a plain level condition. `high` and `low` already carry it in
  * `mode`. `hysteresis` is in volts and defaults to zero.
+ *
+ * An analog condition is always executed qualified, never raw (docs/ARCHITECTURE.md):
+ * the executor arms with at least the ADC's own code hysteresis
+ * (`ADC_TRIGGER_HYSTERESIS_CODES`) - a larger `hysteresis` here widens it - and confirms
+ * a crossing only after `ceil(240 ns * samplerate)` samples at/past the level. The
+ * persistence window is not a plan field: it follows from the executing capture's rate.
  */
 export type TriggerCondition =
   | { kind: 'digital'; signal: string; mode: TriggerKind; level?: 0 | 1 }

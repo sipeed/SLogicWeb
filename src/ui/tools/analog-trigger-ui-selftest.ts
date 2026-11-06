@@ -302,6 +302,18 @@ function cssRules(selector: string): string[] {
     sites && catalogs, `sites=${sites}, catalogs=${catalogs}`);
 }
 
+{
+  // Every analog trigger config the app builds is qualified (docs/ARCHITECTURE.md):
+  // the device matcher's start config and its live retune, and both Loop page scanners.
+  const uses = app.split('...analogTriggerQualification(').length - 1;
+  const start = /analog: analogTriggers\.map[\s\S]{0,600}\.\.\.analogTriggerQualification\(cfg\.samplerate\)/.test(app);
+  const retune = /update\?\.\(\{[\s\S]{0,400}\.\.\.analogTriggerQualification\(this\.store\.samplerate\)/.test(app);
+  const scanners = (app.match(/new AnalogCrossingScanner\(\{[\s\S]{0,500}?\.\.\.analogTriggerQualification\(/g) ?? []).length;
+  check('the app passes hysteresis and the rate-derived persistence to every analog executor',
+    uses === 4 && start && retune && scanners === 2,
+    `uses=${uses}, start=${start}, retune=${retune}, scanners=${scanners}`);
+}
+
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

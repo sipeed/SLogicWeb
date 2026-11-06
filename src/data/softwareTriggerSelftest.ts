@@ -14,6 +14,7 @@ import {
   type SoftwareTriggerStats,
 } from './softwareTrigger.js';
 import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
+import { runQualifiedAnalogSuite } from './softwareTriggerAnalogSelftest.js';
 
 export interface SoftwareTriggerTestResult {
   name: string;
@@ -102,10 +103,12 @@ function referenceRun(
   const analog = config.analog ?? [];
   const bps = bytesPerSampleForChannels(channels);
   const maxSamples = config.maxSamples;
+  const h = config.analogHysteresis ?? 4;
+  const persist = config.analogPersistSamples ?? 1;
   const pre = Math.min(
     config.preTriggerSamples,
     Math.max(0, maxSamples - 1),
-    Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bps),
+    Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bps) - (persist - 1),
   );
   const limit = config.searchLimitSamples ?? maxSamples + pre;
   const conditions = config.conditions?.length
@@ -114,7 +117,15 @@ function referenceRun(
       ? [{ channel: config.channel, kind: config.kind, level: config.level }]
       : [];
   const previous: Array<number | null> = Array.from({ length: channels }, () => null);
-  const previousAnalog = new Int16Array(bps).fill(-1);
+  // The qualified analog rule, one sample at a time (module comment of softwareTrigger):
+  // arm after `persist` samples past `level -/+ h`; a candidate is the first armed sample
+  // at/past the level; it confirms after `persist` samples at/past it, or drops (keeping
+  // the arm) on one back.
+  const armed = analog.map(() => false);
+  const armRuns = analog.map(() => 0);
+  const runs = analog.map(() => 0);
+  const candidateAt = analog.map(() => -1);
+  const digitalAt = new Map<number, boolean>();
   let inspected = 0;
   let trigger = -1;
   for (let i = 0; i < samples.length; i++) {
@@ -130,24 +141,41 @@ function referenceRun(
       if (!ok) matched = false;
     }
     for (const c of conditions) previous[c.channel] = (sample >>> c.channel) & 1;
-    const analogCodes: number[] = [];
-    for (const a of analog) {
-      const byte = a.start >>> 3;
-      const code = analogRaw((sample >>> (byte * 8)) & 0xff);
-      analogCodes.push(code);
-      const old = previousAnalog[byte]!;
-      const ok = a.kind === 'rising'
-        ? old >= 0 && old < a.level && code >= a.level
-        : old >= 0 && old > a.level && code <= a.level;
-      if (!ok) matched = false;
-    }
-    for (let i = 0; i < analog.length; i++) {
-      previousAnalog[analog[i]!.start >>> 3] = analogCodes[i]!;
+    let at = i;
+    if (analog.length > 0) {
+      digitalAt.set(i, matched);
+      const confirmedAt: number[] = [];
+      analog.forEach((a, k) => {
+        const code = analogRaw((sample >>> ((a.start >>> 3) * 8)) & 0xff);
+        const rise = a.kind === 'rising';
+        const past = rise ? code >= a.level : code <= a.level;
+        const armAt = rise ? Math.max(0, a.level - h) : Math.min(255, a.level + h);
+        if (runs[k]! > 0) {
+          if (past) runs[k]! += 1;
+          else runs[k] = 0;
+        } else if (past) {
+          if (armed[k]) { runs[k] = 1; candidateAt[k] = i; }
+          armRuns[k] = 0;
+        } else if (!armed[k]) {
+          armRuns[k] = (rise ? code <= armAt : code >= armAt) ? armRuns[k]! + 1 : 0;
+          if (armRuns[k]! >= persist) { armed[k] = true; armRuns[k] = 0; }
+        }
+        if (runs[k]! >= persist) {
+          armed[k] = false;
+          runs[k] = 0;
+          confirmedAt.push(candidateAt[k]!);
+        }
+      });
+      // Every analog condition confirms here, on one common candidate T, and the digital
+      // conditions held on T.
+      at = confirmedAt.length === analog.length && confirmedAt.every((t) => t === confirmedAt[0])
+        ? confirmedAt[0]! : -1;
+      matched = at >= 0 && digitalAt.get(at) === true;
     }
     inspected++;
-    // Pre-fill holdoff: a match counts only once `pre` samples precede it.
-    if (matched && i >= pre) {
-      trigger = i;
+    // Pre-fill holdoff: a match counts only once `pre` samples precede T.
+    if (matched && at >= pre) {
+      trigger = at;
       break;
     }
     if (inspected >= limit) break;
@@ -173,7 +201,9 @@ function referenceRun(
     complete: emitted.length >= maxSamples,
     emittedSamples: emitted.length,
     triggerSampleIndex: trigger - start,
-    inspectedSamples: trigger + 1,
+    // Inspection runs through the deciding sample: T itself, or for an analog set the
+    // sample that confirmed T.
+    inspectedSamples: inspected,
   };
 }
 
@@ -184,16 +214,24 @@ function referenceComparison(): SoftwareTriggerTestResult[] {
     { name: 'block scanner matches the per-sample reference (finite budgets)', kind: 'finite', cases: 90 },
     { name: 'block scanner matches the per-sample reference (unbounded loop)', kind: 'loop', cases: 45 },
     { name: 'block scanner matches the per-sample reference (streams that never match)', kind: 'none', cases: 45 },
+    // Slowly walking ADC codes with OR-of-codes artifacts, random hysteresis and
+    // persistence: the qualified rule against the oracle's one-sample-at-a-time model.
+    { name: 'block scanner matches the per-sample reference (qualified analog crossings)', kind: 'analog', cases: 240 },
   ] as const;
   const results: SoftwareTriggerTestResult[] = [];
   for (const group of groups) {
     let checked = 0;
+    let matchedCases = 0;
     let firstFail = '';
     for (let seed = 1; seed <= group.cases && firstFail === ''; seed++) {
       const rng = mulberry32(Math.imul(seed, 0x9e3779b1) ^ 0x5f356495);
-      const channels = widths[Math.floor(rng() * widths.length)]!;
+      const analogGroup = group.kind === 'analog';
+      const analogWidths: ChannelCount[] = [8, 16, 32];
+      const channels = analogGroup
+        ? analogWidths[Math.floor(rng() * analogWidths.length)]!
+        : widths[Math.floor(rng() * widths.length)]!;
       const bps = bytesPerSampleForChannels(channels);
-      const sampleCount = 1 + Math.floor(rng() * 90);
+      const sampleCount = 1 + Math.floor(rng() * (analogGroup ? 300 : 90));
       // Keep this at most 32: `referenceRun` extracts a channel with `sample >>> channel`,
       // and JS shift counts are modulo 32, so a higher bit would silently read channel 0.
       // Wide samples are covered by the byte-level high-channel tests below instead.
@@ -204,6 +242,27 @@ function referenceComparison(): SoftwareTriggerTestResult[] {
         for (let b = 0; b < meaningfulBits; b++) if (rng() < 0.5) word |= 1 << b;
         samples.push(word >>> 0);
       }
+      if (analogGroup) {
+        // Every group byte walks by -3..+3 codes, and a code change reads as the OR of
+        // the old and new codes for a few samples now and then (the ADC bus artifact).
+        for (let g = 0; g < channels / 8; g++) {
+          let code = Math.floor(rng() * 256);
+          let glitch = 0;
+          let glitchCode = 0;
+          for (let i = 0; i < sampleCount; i++) {
+            const next = Math.max(0, Math.min(255, code + Math.floor(rng() * 7) - 3));
+            if (next !== code && rng() < 0.3) {
+              glitch = 1 + Math.floor(rng() * 4);
+              glitchCode = next | code;
+            }
+            code = next;
+            const shown = glitch > 0 ? glitchCode : code;
+            if (glitch > 0) glitch--;
+            const shift = g * 8;
+            samples[i] = ((samples[i]! & ~(0xff << shift)) | (analogRaw(shown) << shift)) >>> 0;
+          }
+        }
+      }
       let conditions: SoftwareTriggerCondition[];
       if (group.kind === 'none') {
         // Rising and falling on one channel cannot hold for the same sample (the AND
@@ -212,6 +271,15 @@ function referenceComparison(): SoftwareTriggerTestResult[] {
           { channel: 0, kind: 'rising' as const },
           { channel: 0, kind: 'falling' as const },
         ];
+      } else if (analogGroup) {
+        conditions = [];
+        if (rng() < 0.3) {
+          const kind = kinds[Math.floor(rng() * kinds.length)]!;
+          const channel = Math.floor(rng() * channels);
+          conditions.push(kind === 'level'
+            ? { channel, kind, level: (rng() < 0.5 ? 0 : 1) as 0 | 1 }
+            : { channel, kind });
+        }
       } else {
         conditions = [];
         const count = 1 + Math.floor(rng() * 3);
@@ -225,7 +293,7 @@ function referenceComparison(): SoftwareTriggerTestResult[] {
       }
       const maxSamples = group.kind === 'loop' || rng() < 0.2
         ? Number.POSITIVE_INFINITY
-        : 1 + Math.floor(rng() * 12);
+        : 1 + Math.floor(rng() * (analogGroup ? 40 : 12));
       const preTriggerSamples = Math.floor(rng() * 10);
       const pick = rng();
       const searchLimitSamples = group.kind === 'loop'
@@ -234,8 +302,8 @@ function referenceComparison(): SoftwareTriggerTestResult[] {
           : pick < 0.85 ? 1 + Math.floor(rng() * sampleCount)
             : Number.POSITIVE_INFINITY;
       const analog: SoftwareTriggerAnalogCondition[] = [];
-      if (channels >= 8 && channels <= 32 && group.kind !== 'none' && rng() < 0.4) {
-        const count = 1 + Math.floor(rng() * 2);
+      if (channels >= 8 && channels <= 32 && group.kind !== 'none' && (analogGroup || rng() < 0.4)) {
+        const count = analogGroup && rng() < 0.8 ? 1 : 1 + Math.floor(rng() * 2);
         for (let i = 0; i < count; i++) {
           analog.push({
             start: 8 * Math.floor(rng() * (channels / 8)),
@@ -243,15 +311,27 @@ function referenceComparison(): SoftwareTriggerTestResult[] {
             // 1..254 keeps the unreachable endpoints out of the oracle.
             level: 1 + Math.floor(rng() * 254),
           });
+          if (analogGroup) {
+            // Near the walk's start, so a crossing is likely within the stream.
+            const a = analog[analog.length - 1]!;
+            const startCode = analogRaw((samples[0]! >>> a.start) & 0xff);
+            a.level = Math.max(1, Math.min(254, startCode + Math.floor(rng() * 25) - 12));
+          }
         }
       }
       const optionalLimit = searchLimitSamples === undefined
         ? {}
         : { searchLimitSamples };
+      // The analog group draws its own hysteresis and persistence; the others keep the
+      // defaults (4 codes, one sample).
+      const qualification = analogGroup
+        ? { analogHysteresis: 1 + Math.floor(rng() * 6), analogPersistSamples: 1 + Math.floor(rng() * 5) }
+        : {};
       const config: SoftwareTriggerConfig = {
         channels,
         conditions,
         ...(analog.length > 0 ? { analog } : {}),
+        ...qualification,
         preTriggerSamples,
         maxSamples,
         ...optionalLimit,
@@ -274,7 +354,7 @@ function referenceComparison(): SoftwareTriggerTestResult[] {
       }
       const got = trigger.stats;
       const want = referenceRun(samples, channels, {
-        conditions, ...(analog.length > 0 ? { analog } : {}),
+        conditions, ...(analog.length > 0 ? { analog } : {}), ...qualification,
         preTriggerSamples, maxSamples, ...optionalLimit,
       });
       const same = output.length === want.output.length &&
@@ -293,11 +373,14 @@ function referenceComparison(): SoftwareTriggerTestResult[] {
         break;
       }
       checked++;
+      if (want.matched) matchedCases++;
     }
+    // A group whose streams never match proves nothing about the match path.
+    const vacuous = group.kind !== 'none' && matchedCases === 0;
     results.push({
       name: group.name,
-      pass: firstFail === '',
-      detail: firstFail === '' ? `${checked} randomized cases` : firstFail,
+      pass: firstFail === '' && !vacuous,
+      detail: firstFail === '' ? `${checked} randomized cases, ${matchedCases} matched` : firstFail,
     });
   }
   return results;
@@ -2536,5 +2619,6 @@ export function runSoftwareTriggerSuite(): SoftwareTriggerTestResult[] {
   results.push(...reconfigureResults());
   results.push(...continuousResults());
   results.push(...holdoffResults());
+  results.push(...runQualifiedAnalogSuite());
   return results;
 }

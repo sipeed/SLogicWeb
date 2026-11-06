@@ -12,13 +12,30 @@
  * the store: one ADC group byte per scanned sample, bit-reversed exactly as the matcher
  * does. The scan is strided so its cost is bounded by the sample rate rather than by the
  * data volume; a strided scan can miss a pulse shorter than the stride, which is the price
- * of keeping this off the ingest path. Every crossing it does report is a real one, and a
- * reported crossing is refined at sample resolution inside the scanned interval - also
- * across a chunk boundary, from a short tail of the previous chunk's codes - so a display
- * anchor does not inherit the stride. That is all the display anchor needs.
+ * of keeping this off the ingest path.
+ *
+ * Crossings are qualified exactly as the device matcher qualifies them (`SoftwareTrigger`,
+ * docs/ARCHITECTURE.md "Analog crossings are qualified, never raw"): a rising crossing
+ * arms only after `P` consecutive codes <= `level - h`, and its candidate (the first armed
+ * sample at/past the level) counts only when `P` samples, the candidate included, stay
+ * at/past the level; a sample back across the level drops the candidate and keeps the
+ * arm. The reported crossing is the candidate sample. Without this the ADC bus's
+ * carry-boundary artifact (the OR of the old and new codes for up to ~140 ns) re-anchors
+ * a Rising view on the falling slope, and arms a Falling one on the rising slope.
+ *
+ * The strided scan only reads every `stride`-th sample coarsely and never arms by itself.
+ * An unarmed code past the arming threshold, or a code at/past the level while armed,
+ * hands the interval since the previous strided sample to an exact, sample-resolution
+ * machine (from a short kept tail of the previous chunk when the interval starts there).
+ * The exact machine runs until it has passed that sample (for an arm, P - 1 samples
+ * more) with nothing pending - across chunk boundaries when the persistence window spans
+ * one - and then hands back with its arm state. Its cost is bounded by `stride + P`
+ * samples per strided sample plus the time a candidate or an arm is pending.
+ * A crossing whose whole persistence window lies between two strided samples (P < stride)
+ * can be missed; every crossing reported is real and phase-exact.
  */
 
-import { reverseAdcByte } from '../data/softwareTrigger.js';
+import { DEFAULT_ANALOG_HYSTERESIS_CODES, MAX_ANALOG_PERSIST_SAMPLES, reverseAdcByte } from '../data/softwareTrigger.js';
 import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
 
 export interface AnalogCrossingCondition {
@@ -35,6 +52,11 @@ export interface AnalogCrossingScannerOptions {
   condition: AnalogCrossingCondition;
   /** Scanned every `stride` samples; 1 reports every crossing. */
   stride: number;
+  /** Arming hysteresis in codes, 1..255; default DEFAULT_ANALOG_HYSTERESIS_CODES. */
+  analogHysteresis?: number;
+  /** Samples a candidate must stay at/past the level, 1..MAX_ANALOG_PERSIST_SAMPLES;
+   * default 1. The app passes `ceil(240 ns * samplerate)`. */
+  analogPersistSamples?: number;
 }
 
 export class AnalogCrossingScanner {
@@ -42,15 +64,34 @@ export class AnalogCrossingScanner {
   readonly bytesPerSample: number;
   private condition: AnalogCrossingCondition;
   readonly stride: number;
-  private previous = -1;
+  readonly hysteresis: number;
+  readonly persistSamples: number;
+  private rising = true;
+  private level = 0;
+  /** Arming threshold: rising arms at code <= arm, falling at code >= arm. */
+  private arm = 0;
   /** Last crossing handed to a caller, for the minimum-reporting-gap filter. */
   private lastReported = Number.NEGATIVE_INFINITY;
   /** Scan-grid phase, advanced by one sample per chunk. Without this a signal whose
    *  period divides the stride lands on the same phase at every scanned sample and is
    *  never seen as a crossing; shifting the grid guarantees every phase is sampled. */
   private phase = 0;
-  /** Absolute index of the sample `previous` was read from. */
+  /** Exact machine: armed, and the candidate's run (0 = no candidate). */
+  private armed = false;
+  private run = 0;
+  /** While unarmed: consecutive samples past the arming threshold. */
+  private armRun = 0;
+  /** The exact machine is running (always at stride 1). */
+  private exact = false;
+  /** The exact machine may hand back only at or after this absolute sample. */
+  private exactUntilAbs = 0;
+  /** The strided scan's arm. */
+  private coarseArmed = false;
+  /** Absolute index of the last sample the strided scan (or a hand-back) stopped at;
+   *  -1 when there is no continuity. */
   private previousAbs = -1;
+  /** Where the next contiguous chunk starts; another base restarts continuity. */
+  private nextAbs = Number.NaN;
   /**
    * The newest codes before the current chunk (contiguous, ending at `tailEndAbs`), so a
    * crossing between the previous chunk's last scanned sample and this chunk's first one
@@ -64,28 +105,39 @@ export class AnalogCrossingScanner {
     if (!Number.isInteger(opts.stride) || opts.stride < 1) {
       throw new Error(`scan stride must be a positive integer, got ${opts.stride}`);
     }
+    const h = opts.analogHysteresis ?? DEFAULT_ANALOG_HYSTERESIS_CODES;
+    if (!Number.isInteger(h) || h < 1 || h > 255) {
+      throw new Error(`analog scan hysteresis must be an integer code count 1..255, got ${h}`);
+    }
+    const p = opts.analogPersistSamples ?? 1;
+    if (!Number.isInteger(p) || p < 1 || p > MAX_ANALOG_PERSIST_SAMPLES) {
+      throw new Error(`analog scan persistence must be an integer 1..${MAX_ANALOG_PERSIST_SAMPLES}, got ${p}`);
+    }
     this.channels = opts.channels;
     this.bytesPerSample = bytesPerSampleForChannels(opts.channels);
     this.stride = opts.stride;
+    this.hysteresis = h;
+    this.persistSamples = p;
     this.tail = new Uint8Array(2 * opts.stride + 2);
     this.condition = { ...opts.condition };
     this.assertCondition(this.condition);
+    this.compile();
+    this.restart();
   }
 
   /** A live retune changes the level/slope/group; continuity restarts at the edit. */
   setCondition(condition: AnalogCrossingCondition): void {
     this.assertCondition(condition);
     this.condition = { ...condition };
-    this.previous = -1;
+    this.compile();
+    this.restart();
     this.lastReported = Number.NEGATIVE_INFINITY;
-    this.tailCount = 0;
   }
 
   /** A transport gap invalidates a crossing across it. */
   resetContinuity(): void {
-    this.previous = -1;
+    this.restart();
     this.lastReported = Number.NEGATIVE_INFINITY;
-    this.tailCount = 0;
   }
 
   get current(): AnalogCrossingCondition {
@@ -95,10 +147,10 @@ export class AnalogCrossingScanner {
   /**
    * Scan one sample-aligned chunk. `baseAbs` is the absolute index of its first sample
    * (the same numbering as the emitted stream). `onCrossing` is called for each detected
-   * crossing (the scanned sample where the code crossed the level); `minGap` suppresses
-   * reports closer than that many samples, so a dense signal cannot flood the caller with
-   * one entry per period. The scan grid phase advances by one sample per chunk, so a
-   * signal whose period divides the stride is still sampled at every phase.
+   * crossing (its candidate sample; it can lie up to `persistSamples - 1` samples before
+   * this chunk when the confirmation lands here); `minGap` suppresses reports closer than
+   * that many samples, so a dense signal cannot flood the caller with one entry per
+   * period. A chunk that does not start where the previous one ended restarts continuity.
    */
   scan(
     bytes: Uint8Array, baseAbs: number,
@@ -106,58 +158,128 @@ export class AnalogCrossingScanner {
   ): void {
     const bps = this.bytesPerSample;
     const whole = bytes.length - (bytes.length % bps);
+    const samples = whole / bps;
     const byte = this.condition.start >>> 3;
-    const level = this.condition.level;
-    const rising = this.condition.kind === 'rising';
-    const step = bps * this.stride;
-    const first = this.phase * bps;
-    let previousOff = -1;
-    for (let off = first; off < whole; off += step) {
-      const code = reverseAdcByte(bytes[off + byte]!);
-      let at = baseAbs + off / bps;
-      if (this.previous >= 0) {
-        const crossed = rising
-          ? this.previous < level && code >= level
-          : this.previous > level && code <= level;
-        if (crossed) {
-          // A strided scan only says a crossing happened somewhere in (previousOff, off].
-          // Refine it at sample resolution inside that interval so a re-anchor is
-          // phase-exact even at stride > 1. The interval is at most one stride long.
-          if (step > bps) {
-            let found = false;
-            // The interval starts in the previous chunk when this is its first scanned
-            // sample: walk the kept tail first (only the part after `previous`).
-            if (previousOff < 0 && this.tailEndAbs === baseAbs) {
-              const tailStart = this.tailEndAbs - this.tailCount;
-              for (let k = Math.max(0, this.previousAbs + 1 - tailStart); k < this.tailCount; k++) {
-                const c = this.tail[k]!;
-                if (rising ? c >= level : c <= level) {
-                  at = tailStart + k;
-                  found = true;
-                  break;
-                }
-              }
+    if (baseAbs !== this.nextAbs) this.restart();
+    const report = (at: number): void => {
+      if (at - this.lastReported >= minGap) {
+        this.lastReported = at;
+        onCrossing(at);
+      }
+    };
+    const stride = this.stride;
+    const rising = this.rising;
+    let i = 0; // next sample the exact machine would read
+    let k = this.phase; // next strided grid position
+    for (;;) {
+      if (this.exact) {
+        i = this.runExact(bytes, baseAbs, i, samples, byte, report);
+        if (this.exact) break;
+      }
+      while (k < i) k += stride;
+      if (k >= samples) break;
+      const code = reverseAdcByte(bytes[k * bps + byte]!);
+      const hit = this.coarseArmed && (rising ? code >= this.level : code <= this.level);
+      const arming = !this.coarseArmed && (rising ? code <= this.arm : code >= this.arm);
+      if (hit || arming) {
+        // Hand the interval since the previous strided sample to the exact machine; an
+        // arm must persist P samples, so that run lasts P - 1 samples past this one.
+        this.armed = this.coarseArmed;
+        this.run = 0;
+        this.armRun = 0;
+        this.exact = true;
+        this.exactUntilAbs = baseAbs + k + (hit ? 0 : this.persistSamples - 1);
+        let startAbs = this.previousAbs >= 0 ? this.previousAbs + 1 : baseAbs + k;
+        if (startAbs < baseAbs) {
+          const tailStart = this.tailEndAbs - this.tailCount;
+          if (this.tailEndAbs !== baseAbs || startAbs < tailStart) {
+            // Defensive: the codes are not kept; never bridge what we do not have.
+            startAbs = baseAbs;
+          } else {
+            for (let t = startAbs - tailStart; t < this.tailCount && this.exact; t++) {
+              this.stepExact(this.tail[t]!, tailStart + t, report);
             }
-            for (let o = previousOff >= 0 ? previousOff + bps : 0; !found && o <= off; o += bps) {
-              const c = reverseAdcByte(bytes[o + byte]!);
-              if (rising ? c >= level : c <= level) {
-                at = baseAbs + o / bps;
-                found = true;
-              }
+            if (!this.exact) {
+              // Handed back inside the tail: re-read this strided sample with that state.
+              i = 0;
+              continue;
             }
-          }
-          if (at - this.lastReported >= minGap) {
-            this.lastReported = at;
-            onCrossing(at);
+            startAbs = baseAbs;
           }
         }
+        i = startAbs - baseAbs;
+        continue;
       }
-      this.previous = code;
-      this.previousAbs = baseAbs + off / bps;
-      previousOff = off;
+      this.previousAbs = baseAbs + k;
+      k += stride;
     }
     this.keepTail(bytes, whole, baseAbs, byte);
-    this.phase = (this.phase + 1) % this.stride;
+    this.nextAbs = baseAbs + samples;
+    this.phase = (this.phase + 1) % stride;
+  }
+
+  /** Run the exact machine over chunk samples [from, to). Returns the sample after a
+   *  hand-back, or `to` while it is still running. */
+  private runExact(
+    bytes: Uint8Array, baseAbs: number, from: number, to: number, byte: number,
+    report: (at: number) => void,
+  ): number {
+    const bps = this.bytesPerSample;
+    for (let i = from; i < to; i++) {
+      this.stepExact(reverseAdcByte(bytes[i * bps + byte]!), baseAbs + i, report);
+      if (!this.exact) return i + 1;
+    }
+    return to;
+  }
+
+  /** One sample of the exact machine at absolute index `abs`. */
+  private stepExact(code: number, abs: number, report: (at: number) => void): void {
+    const past = this.rising ? code >= this.level : code <= this.level;
+    if (this.run > 0) this.run = past ? this.run + 1 : 0;
+    else if (past) {
+      if (this.armed) this.run = 1;
+      else this.armRun = 0;
+    } else if (!this.armed) {
+      this.armRun = (this.rising ? code <= this.arm : code >= this.arm) ? this.armRun + 1 : 0;
+      if (this.armRun >= this.persistSamples) {
+        this.armed = true;
+        this.armRun = 0;
+      }
+    }
+    if (this.run >= this.persistSamples) {
+      this.armed = false;
+      this.run = 0;
+      report(abs - (this.persistSamples - 1));
+    }
+    if (this.run === 0 && this.armRun === 0 && this.stride > 1 && abs >= this.exactUntilAbs) {
+      this.exact = false;
+      this.coarseArmed = this.armed;
+      this.previousAbs = abs;
+    }
+  }
+
+  private compile(): void {
+    this.rising = this.condition.kind === 'rising';
+    this.level = this.condition.level;
+    // A level within `h` of the range's end arms at the end code itself.
+    this.arm = this.rising
+      ? Math.max(0, this.level - this.hysteresis)
+      : Math.min(255, this.level + this.hysteresis);
+  }
+
+  /** Forget the arm, any candidate and the strided continuity. At stride 1 the exact
+   *  machine is the scan and always runs. */
+  private restart(): void {
+    this.armed = false;
+    this.run = 0;
+    this.armRun = 0;
+    this.coarseArmed = false;
+    this.exact = this.stride === 1;
+    this.exactUntilAbs = 0;
+    this.previousAbs = -1;
+    this.tailCount = 0;
+    this.tailEndAbs = -1;
+    this.nextAbs = Number.NaN;
   }
 
   /** Keep the newest codes up to this chunk's end (contiguous with the old tail or not). */

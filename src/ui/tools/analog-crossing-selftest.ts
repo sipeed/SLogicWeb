@@ -5,7 +5,13 @@
  */
 
 import { AnalogCrossingScanner } from '../analogCrossingScan.js';
+import {
+  ADC_TRIGGER_HYSTERESIS_CODES, analogTriggerPersistSamples, analogTriggerQualification,
+} from '../channelBanks.js';
 import { reverseAdcByte } from '../../data/softwareTrigger.js';
+import {
+  adcArtifactTrace, checkCrossings, cleanCrossings, cleanSlope, fixtureRng, rawCrossings,
+} from '../../data/adcArtifactFixture.js';
 import { bytesPerSampleForChannels, type ChannelCount } from '../../types.js';
 
 const nodeProcess = (() => {
@@ -230,6 +236,180 @@ const adc = (code: number): number => adcWord(0, code);
     check(`every ${kind} crossing is exact across chunk boundaries at strides 4-64`,
       bad === '' && total > 0, bad || `${total} crossings`);
   }
+}
+
+// ---------------------------------------------------------------------------------------
+// Qualified crossings on the measured ADC carry-boundary artifact (adcArtifactFixture):
+// hysteresis 4 codes, persistence 24 samples (240 ns at 100 MS/s).
+// ---------------------------------------------------------------------------------------
+
+const P = 24;
+const H = 4;
+const LEVELS = [100, 112, 128, 144, 160] as const;
+
+function encodeCodes(codes: Uint8Array, channels: ChannelCount, start: number, seed: number): Uint8Array {
+  const bps = bytesPerSampleForChannels(channels);
+  const rng = fixtureRng(seed);
+  const out = new Uint8Array(codes.length * bps);
+  for (let i = 0; i < codes.length; i++) {
+    for (let b = 0; b < bps; b++) out[i * bps + b] = Math.floor(rng() * 256);
+    out[i * bps + (start >>> 3)] = reverseAdcByte(codes[i]!);
+  }
+  return out;
+}
+
+/** Scan in seeded chunks of 1..maxSamples samples, as the page does. */
+function scanChunks(
+  scanner: AnalogCrossingScanner, raw: Uint8Array, bps: number, seed: number, maxSamples: number,
+): number[] {
+  const rng = fixtureRng(seed);
+  const out: number[] = [];
+  const samples = raw.length / bps;
+  let pos = 0;
+  while (pos < samples) {
+    const len = Math.min(samples - pos, 1 + Math.floor(rng() * maxSamples));
+    out.push(...scanner.feed(raw.subarray(pos * bps, (pos + len) * bps), pos));
+    pos += len;
+  }
+  return out;
+}
+
+{
+  const trace = adcArtifactTrace({ length: 100_000, period: 10_000, seed: 5, phase: 0.7, ditherNear: LEVELS });
+  let bad = '';
+  let total = 0;
+  let rawWrong = 0;
+  for (const kind of ['rising', 'falling'] as const) {
+    for (const level of LEVELS) {
+      const want = kind === 'rising' ? 1 : -1;
+      rawWrong += rawCrossings(trace.codes, kind, level).filter((i) => cleanSlope(trace, i) !== want).length;
+      for (const stride of [1, 4, 16, 64]) {
+        for (const [channels, start] of [[16, 8], [32, 24], [64, 40], [128, 120]] as const) {
+          const bps = bytesPerSampleForChannels(channels);
+          const raw = encodeCodes(trace.codes, channels, start, stride + level);
+          const scanner = new AnalogCrossingScanner({
+            channels, condition: { start, kind, level }, stride,
+            analogHysteresis: H, analogPersistSamples: P,
+          });
+          const found = scanChunks(scanner, raw, bps, stride * 7 + level + channels, 4000);
+          const clean = cleanCrossings(trace, kind, level).filter((c) => c > 200).length;
+          const err = checkCrossings(trace, kind, level, found);
+          const name = `${kind} ${level} stride ${stride} ${channels}ch`;
+          if (err) bad = `${name}: ${err}`;
+          else if (found.filter((c) => c > 200).length !== clean) {
+            bad = `${name}: ${found.length} found, ${clean} clean crossings`;
+          }
+          total += found.length;
+          if (bad) break;
+        }
+        if (bad) break;
+      }
+      if (bad) break;
+    }
+    if (bad) break;
+  }
+  check('the Loop scanner reports every qualified crossing on the right slope (strides 1-64)',
+    bad === '' && total > 0 && rawWrong > 0,
+    bad || `${total} crossings; a raw test would have put ${rawWrong} on the wrong slope`);
+}
+
+{
+  // Levels outside the signal: the artifact reaches 255 (127 -> 128) in short bursts only.
+  const trace = adcArtifactTrace({ length: 60_000, period: 10_000, seed: 9, ditherNear: LEVELS });
+  const raw = encodeCodes(trace.codes, 16, 0, 3);
+  const fired: string[] = [];
+  for (const [kind, level] of [['rising', 200], ['rising', 80], ['falling', 60], ['falling', 190]] as const) {
+    for (const stride of [1, 16]) {
+      const scanner = new AnalogCrossingScanner({
+        channels: 16, condition: { start: 0, kind, level }, stride,
+        analogHysteresis: H, analogPersistSamples: P,
+      });
+      const found = scanChunks(scanner, raw, 2, level + stride, 3000);
+      if (found.length > 0) fired.push(`${kind} ${level} stride ${stride}: ${found[0]}`);
+    }
+  }
+  check('the Loop scanner never fires for a level outside the signal', fired.length === 0,
+    fired.join('; ') || 'rising 200/80, falling 60/190 at strides 1 and 16');
+}
+
+{
+  // The persistence window spans a chunk boundary; the reported crossing is the
+  // candidate in the earlier chunk. A one-sample chunk splits it further.
+  const codes = new Uint8Array(200);
+  for (let i = 0; i < codes.length; i++) codes[i] = i < 70 ? 90 : 140;
+  const raw = encodeCodes(codes, 32, 16, 4);
+  const got: string[] = [];
+  let pass = true;
+  for (const stride of [1, 4, 16]) {
+    const scanner = new AnalogCrossingScanner({
+      channels: 32, condition: { start: 16, kind: 'rising', level: 128 }, stride,
+      analogHysteresis: H, analogPersistSamples: P,
+    });
+    const a = scanner.feed(raw.subarray(0, 75 * 4), 0);
+    const b = scanner.feed(raw.subarray(75 * 4, 76 * 4), 75);
+    const c = scanner.feed(raw.subarray(76 * 4), 76);
+    const ok = a.length === 0 && b.length === 0 && c.length === 1 && c[0] === 70;
+    if (!ok) pass = false;
+    got.push(`stride ${stride}: ${JSON.stringify([a, b, c])}`);
+  }
+  check('a persistence window spanning chunks reports the candidate sample', pass, got.join(' '));
+}
+
+{
+  // A gap (resetContinuity) or a discontinuous chunk mid-candidate restarts the arm.
+  const mk = (parts: Array<[number, number]>): Uint8Array => {
+    const codes: number[] = [];
+    for (const [code, n] of parts) for (let i = 0; i < n; i++) codes.push(code);
+    return encodeCodes(Uint8Array.from(codes), 8, 0, 6);
+  };
+  const run = (how: 'reset' | 'skip'): number[] => {
+    const scanner = new AnalogCrossingScanner({
+      channels: 8, condition: { start: 0, kind: 'rising', level: 128 }, stride: 4,
+      analogHysteresis: H, analogPersistSamples: P,
+    });
+    const out: number[] = [];
+    out.push(...scanner.feed(mk([[90, 40], [140, 10]]), 0));
+    if (how === 'reset') {
+      scanner.resetContinuity();
+      out.push(...scanner.feed(mk([[140, 40]]), 50));
+    } else {
+      out.push(...scanner.feed(mk([[140, 40]]), 60)); // chunk 50..59 was never scanned
+    }
+    out.push(...scanner.feed(mk([[90, 40], [140, 40]]), 100));
+    return out;
+  };
+  const reset = run('reset');
+  const skip = run('skip');
+  check('a gap or a skipped chunk mid-candidate restarts the scanner',
+    reset.length === 1 && reset[0] === 140 && skip.length === 1 && skip[0] === 140,
+    `reset=${JSON.stringify(reset)} skip=${JSON.stringify(skip)}`);
+}
+
+{
+  const refused = (opts: { analogHysteresis?: number; analogPersistSamples?: number }): boolean => {
+    try {
+      new AnalogCrossingScanner({
+        channels: 8, condition: { start: 0, kind: 'rising', level: 128 }, stride: 1, ...opts,
+      });
+      return false;
+    } catch { return true; }
+  };
+  check('the scanner validates its qualification strictly',
+    refused({ analogHysteresis: 0 }) && refused({ analogHysteresis: 300 }) &&
+    refused({ analogPersistSamples: 0 }) && refused({ analogPersistSamples: 1.5 }) &&
+    !refused({ analogHysteresis: H, analogPersistSamples: P }),
+    'hysteresis 0/300 and persistence 0/1.5 refused');
+}
+
+{
+  // P = ceil(240 ns x rate) without the float product rounding 24 up to 25.
+  const rates = [100e6, 160e6, 200e6, 400e6, 800e6, 1e6];
+  const got = rates.map((r) => analogTriggerPersistSamples(r));
+  const q = analogTriggerQualification(100e6);
+  check('the persistence window is ceil(240 ns x samplerate), 24 at 100 MS/s',
+    got.join(',') === '24,39,48,96,192,1' && q.analogHysteresis === ADC_TRIGGER_HYSTERESIS_CODES &&
+    q.analogHysteresis === 4 && q.analogPersistSamples === 24,
+    `P=${got.join(',')}, h=${q.analogHysteresis}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

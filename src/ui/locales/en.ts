@@ -469,7 +469,7 @@ export const en = {
   'capturePanel.analogUnsupported': 'The ADC module is only available on the SLogic32U3',
   'capturePanel.analogRateNote': 'Analog groups sample from 100 MS/s up (the ADC\'s 800 MHz clock); trigger conditions on their D inputs are ignored.',
   'capturePanel.noAnalogTrigger': 'No analog trigger. Turn on an analog group, then click the trigger icon on its row in the channel column.',
-  'capturePanel.analogSingleNote': 'Analog triggering locks the time base to one ADC group; choosing another moves the trigger.',
+  'capturePanel.analogSingleNote': 'Analog triggering locks the time base to one ADC group; choosing another moves the trigger. A crossing counts only after the signal stayed 4 codes on the other side, then 240 ns past the level, so the ADC’s brief carry glitches cannot fire it on the wrong slope; T is the first sample past the level.',
   'capturePanel.removeTrigger': 'Remove trigger on {channel}',
   'capturePanel.noDigitalTrigger': 'No digital trigger. Click the trigger icon at the right of a channel row to add one.',
   'capturePanel.triggerAnalog': 'Analog',

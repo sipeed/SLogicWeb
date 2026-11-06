@@ -47,7 +47,8 @@ import { CapturePanel, cursorDistanceSideId, cursorEdgeSideId,
 import {
   ANALOG_GAIN_DEFAULT, ANALOG_GROUP_COUNT, CHANNEL_BANK_SIZE, analogBankActive,
   analogBusConfig, analogCodeFromVolts, analogDefaultVoltsPerDiv, analogGainOf, analogGroupCount,
-  analogHalfRangeV, analogSamplerates, analogSpan, analogTriggerVolts, analogVoltsPerCode,
+  analogHalfRangeV, analogSamplerates, analogSpan, analogTriggerQualification, analogTriggerVolts,
+  analogVoltsPerCode,
   analogVoltsPerDivValues, clampAnalogVolts, isAnalogGain,
   busChannelBank,
   captureWidthTiers, channelBankIndices, channelBankStart, busOutOfWidth, lockedChannelBanks,
@@ -1091,6 +1092,7 @@ export class App {
           channels,
           condition: liveAnalog,
           stride: Math.max(1, Math.ceil(this.store.samplerate / 20e6)),
+          ...analogTriggerQualification(this.store.samplerate),
         });
         this.loopTriggerSlackSamples = triggerSlackSamples(
           this.loopRetentionLen, this.store.samplerate, bytesPerSampleForChannels(channels));
@@ -1127,6 +1129,9 @@ export class App {
       channels,
       conditions,
       analog,
+      // Same qualification as the start config (the persistence window is fixed by the
+      // capture rate; the matcher refuses a different one).
+      ...analogTriggerQualification(this.store.samplerate),
       preTriggerSamples: base.preTriggerSamples,
       maxSamples: base.maxSamples,
       searchLimitSamples: base.searchLimitSamples,
@@ -5291,6 +5296,8 @@ export class App {
           },
           // About twenty million byte reads per second at any sample rate.
           stride: Math.max(1, Math.ceil(cfg.samplerate / 20e6)),
+          // The same qualified crossing as the device matcher (hysteresis + persistence).
+          ...analogTriggerQualification(cfg.samplerate),
         });
         this.loopTriggerSlackSamples = triggerSlackSamples(
           this.loopRetentionLen, cfg.samplerate, bytesPerSample);
@@ -5458,6 +5465,10 @@ export class App {
           analog: analogTriggers.map((a) => ({
             start: a.start, kind: a.kind, level: analogCodeFromVolts(a.volts, a.gain),
           })),
+          // Qualified, never raw: arming hysteresis and a persistence window derived from
+          // this capture's rate. Passed even for a digital trigger, so a live retune to an
+          // analog source finds the ring already sized for it.
+          ...analogTriggerQualification(cfg.samplerate),
           preTriggerSamples,
           maxSamples: isLoop ? Number.POSITIVE_INFINITY : this.captureLimitSamples,
           searchLimitSamples: triggerSearchSamples(mode, this.captureLimitSamples, preTriggerSamples),
