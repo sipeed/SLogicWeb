@@ -1540,7 +1540,7 @@ const edgeMethodsSource = slice(app,
   const channelCallers = [
     slice(app, 'private applySettings(s: CaptureSettings): void {', 'private configureChannel('),
     slice(app, 'private afterChannelChange(): void {', 'private reorder('),
-    slice(app, 'private adoptCapture(store: SampleStore', 'private save(): void {'),
+    slice(app, 'private adoptCapture(store: SampleStore', 'private saveItems(): SettingsMenuItem[] {'),
     slice(app, 'private adoptDeviceChannels(device: Device): void {', 'private async startCapture('),
     slice(app, 'private async startCapture(', 'private enforceLoopRetention('),
   ];

@@ -7,6 +7,8 @@ export const DIAGNOSTIC_CODES = [
   'ui.axisContext',
   'ui.captureLocked',
   'io.nothingToSave',
+  'io.srProbes',
+  'io.srTooLarge',
   'file.noFiles',
   'file.unsupported',
   'file.lwcap.header',

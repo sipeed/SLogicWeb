@@ -43,7 +43,13 @@ export const ru: Messages = {
   'toolbar.stopTitle': 'Остановить текущий захват',
   'toolbar.stoppingTitle': 'Ожидание отмены ожидающих USB-передач',
   'toolbar.openTitle': 'Загрузить сессию sigrok .sr или файл .lwcap',
-  'toolbar.saveTitle': 'Сохранить этот захват как .lwcap',
+  'toolbar.saveTitle': 'Сохранить этот захват (.lwcap или .sr для PulseView)',
+  'save.lwcap': 'Сохранить как .lwcap',
+  'save.lwcapHint': 'logicweb, с пропусками',
+  'save.sr': 'Экспорт в .sr (sigrok)',
+  'save.srHint': 'PulseView, только цифровые',
+  'save.lwcapType': 'Захват logicweb',
+  'save.srType': 'Сеанс sigrok (PulseView)',
   'toolbar.fitTitle': 'Масштабировать на весь захват',
   'toolbar.enterFullscreenTitle': 'Перейти в полноэкранный режим',
   'toolbar.exitFullscreenTitle': 'Выйти из полноэкранного режима',
@@ -129,6 +135,8 @@ export const ru: Messages = {
   'diagnostic.ui.captureLocked':
     'настройки осциллографа группы заблокированы, пока идёт захват или остановка',
   'diagnostic.io.nothingToSave': 'нечего сохранять',
+  'diagnostic.io.srProbes': 'нельзя экспортировать {probes} каналов в .sr (1..{max})',
+  'diagnostic.io.srTooLarge': 'файл .sr превысит 4 ГиБ; сократите захват или сохраните как .lwcap',
   'diagnostic.file.noFiles': 'файлы не выбраны',
   'diagnostic.file.unsupported':
     'среди {names} нет загружаемого: нужен сеанс sigrok .sr или файл .lwcap',

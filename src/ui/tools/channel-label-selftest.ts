@@ -121,7 +121,7 @@ const fixture: ChannelState[] = defaultChannels(8).map((c) => ({
 
   const deviceBody = bodyBetween('private adoptDeviceChannels(', 'private async startCapture(');
   const startBody = bodyBetween('private async startCapture(', 'private enforceLoopRetention(');
-  const adoptBody = bodyBetween('private adoptCapture(', 'private save(');
+  const adoptBody = bodyBetween('private adoptCapture(', 'private saveItems(');
 
   const sanctioned = [
     'this.channels = (workspace.channels ?? defaultChannels(16)).map((channel, index) => ({ ...channel, index }));',

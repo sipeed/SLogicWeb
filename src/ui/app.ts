@@ -53,6 +53,11 @@ import { computeChannelRowHeight } from './channelLayout.js';
 import {
   MAX_SAMPLES, levelAt, loadFiles, loadLwcap, saveLwcap,
 } from './captureIO.js';
+import {
+  captureFileName, formatForFileName, localDateParts, saveFilePickerTypes, type CaptureFileFormat,
+} from './captureFileName.js';
+import { saveSr, srExportParts, type SrProbe } from './srSave.js';
+import { detectCapabilities } from '../platform/capabilities.js';
 import { connectSamplerate } from './connectDefaults.js';
 import { formatCursorTimes } from './cursorTime.js';
 import { sameUsbDevice } from './deviceIdentity.js';
@@ -252,6 +257,7 @@ export class App {
   private readonly settingsMenu: SettingsMenu;
   private readonly languageMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
+  private readonly saveMenu: SettingsMenu;
   private readonly shortcutsDialog: ShortcutsDialog;
   private detailedLabels = true;
   private lastWorkspaceSnapshot: string | null = null;
@@ -380,6 +386,8 @@ export class App {
   private loopTriggerSlackSamples = 0;
 
   private captureLabel: CaptureLabel = { kind: 'none' };
+  /** Where the displayed capture came from, for the default Save name. */
+  private captureOrigin: { model: string | null; fileName: string | null } = { model: null, fileName: null };
   private statusError: StatusError | null = null;
   /** The area under the pointer, rendered by the bottom hint bar. */
   private hoveredInteractionArea: InteractionArea = 'none';
@@ -505,6 +513,8 @@ export class App {
     this.menuStack.register(this.settingsMenu);
     this.menuStack.register(this.languageMenu);
     this.menuStack.register(this.themeMenu);
+    this.saveMenu = new SettingsMenu(this.el.save, 'save-menu');
+    this.menuStack.register(this.saveMenu);
     this.shortcutsDialog = new ShortcutsDialog();
     this.el.theme.dataset.mode = getMode();
     this.resizer = new PanelResizer(this.el.resizer, this.el.side, this.el.main);
@@ -3471,7 +3481,11 @@ export class App {
       const files = [...(this.el.fileInput.files ?? [])];
       if (files.length) void this.openFiles(files);
     });
-    must<HTMLButtonElement>('btn-save').addEventListener('click', () => this.save());
+    must<HTMLButtonElement>('btn-save').addEventListener('click', () => {
+      this.channelList.closeDialog();
+      this.menuStack.closeOthers(this.saveMenu, 'outside');
+      this.saveMenu.toggle(this.saveItems());
+    });
     must<HTMLButtonElement>('btn-fit').addEventListener('click', () => {
       this.fitViewport();
     });
@@ -4078,6 +4092,7 @@ export class App {
       this.endPendingRepeatSession();
       this.adoptCapture(cap.store, cap.channelNames,
         { kind: 'loaded', source: cap.sourceDescription, ms: Math.round(performance.now() - t0) });
+      this.captureOrigin = { model: null, fileName: cap.fileName ?? null };
     } catch (e) {
       this.fail('error.openCapture', e);
     }
@@ -4155,13 +4170,72 @@ export class App {
     this.dirty = true;
   }
 
-  private save(): void {
+  /** One Save entry point: a two-row format menu (.lwcap first, .sr for sigrok). */
+  private saveItems(): SettingsMenuItem[] {
+    return [
+      { label: t('save.lwcap'), hint: t('save.lwcapHint'), onPick: () => void this.save('lwcap') },
+      { label: t('save.sr'), hint: t('save.srHint'), onPick: () => void this.save('sr') },
+    ];
+  }
+
+  /** `.sr` probes: the enabled channels the capture holds, in channel order. */
+  private srProbes(store: SampleStore): SrProbe[] {
+    return this.enabledChannels()
+      .filter((c) => c.index < store.channelCount)
+      .sort((a, b) => a.index - b.index)
+      .map((c) => ({ index: c.index, name: c.name }));
+  }
+
+  private async save(format: CaptureFileFormat): Promise<void> {
     try {
-      if (this.captureStore.length === 0) throw new DiagnosticError('io.nothingToSave');
-      const blob = saveLwcap(this.captureStore, this.channels.map((c) => c.name));
+      const store = this.captureStore;
+      if (store.length === 0) throw new DiagnosticError('io.nothingToSave');
+      const names = this.channels.map((c) => c.name);
+      const probes = this.srProbes(store);
+      const now = new Date();
+      const nameFor = (f: CaptureFileFormat): string => captureFileName({
+        model: this.captureOrigin.model,
+        channels: f === 'sr' ? probes.length : store.channelCount,
+        samplerateHz: store.samplerate,
+        when: localDateParts(now),
+        sourceFileName: this.captureOrigin.fileName,
+      }, f);
+      const modified = localDateParts(now);
+
+      const picker = (window as unknown as { showSaveFilePicker?: SaveFilePicker }).showSaveFilePicker;
+      if (detectCapabilities().saveFilePicker && picker) {
+        let handle: SaveFileHandle;
+        try {
+          handle = await picker.call(window, {
+            suggestedName: nameFor(format),
+            types: saveFilePickerTypes(format, { lwcap: t('save.lwcapType'), sr: t('save.srType') }),
+          });
+        } catch (e) {
+          if (e instanceof DOMException && e.name === 'AbortError') return; // user cancelled
+          throw e;
+        }
+        const chosen = formatForFileName(handle.name, format);
+        // Snapshot before the first await on the file: a live capture keeps appending.
+        const parts = chosen === 'sr' ? srExportParts(store, probes, { modified }) : null;
+        const lwcap = chosen === 'lwcap' ? saveLwcap(store, names) : null;
+        const writable = await handle.createWritable();
+        try {
+          if (lwcap) await writable.write(lwcap);
+          if (parts) for await (const p of parts) await writable.write(p);
+          await writable.close();
+        } catch (e) {
+          await writable.abort().catch(() => undefined);
+          throw e;
+        }
+        return;
+      }
+
+      const blob = format === 'sr'
+        ? await saveSr(store, probes, { modified })
+        : saveLwcap(store, names);
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = `capture-${new Date().toISOString().replace(/[:.]/g, '-')}.lwcap`;
+      a.download = nameFor(format);
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
     } catch (e) {
@@ -4492,6 +4566,7 @@ export class App {
         else this.storeRef.set(store);
       }
       this.captureLabel = { kind: 'capturing', channels: cfg.channels, rate: cfg.samplerate };
+      this.captureOrigin = { model: this.device?.name ?? null, fileName: null };
       // A quiet wave does not rebuild the panel or plot, but the trigger note must
       // stop describing the previous wave's completed capture and show this interval.
       if (quietRepeat) {
@@ -5861,3 +5936,18 @@ function must<T extends HTMLElement>(id: string): T {
 }
 
 export { COLORS };
+
+/** The File System Access save picker, structurally (not in the DOM lib). */
+interface SaveFileWritable {
+  write(data: Blob | BufferSource): Promise<void>;
+  close(): Promise<void>;
+  abort(): Promise<void>;
+}
+interface SaveFileHandle {
+  readonly name: string;
+  createWritable(): Promise<SaveFileWritable>;
+}
+type SaveFilePicker = (options: {
+  suggestedName: string;
+  types: Array<{ description: string; accept: Record<string, string[]> }>;
+}) => Promise<SaveFileHandle>;

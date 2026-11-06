@@ -442,6 +442,16 @@ interface RecordController {
 - Export writes `.lwcap` v2 (signals, rates, gaps, trigger metadata, profile id) through
   the save picker/share/download. Raw CSV and VCD/FST are optional exporters; the format
   header states which signals/rates/gaps it can represent.
+- `.sr` export (`src/ui/srSave.ts`) writes a sigrok session v2 zip: `version`=2, a
+  `metadata` INI (`capturefile=logic-1`, `total probes`, `samplerate`, `total analog=0`,
+  `probeN` = channel names, `unitsize = ceil(probes/8)`) and `logic-1-K` sample members of
+  at most 4 MiB, deflated through `CompressionStream('deflate-raw')` when available. The
+  probes are the enabled channels in channel order. It represents no gaps (a probe holds
+  its level across a gap, as `.lwcap`'s `channelAcrossGaps`), no trigger position (no
+  documented metadata key) and no sigrok analog channels: an analog group is written as
+  its eight raw digital inputs. Members are generated chunk by chunk from a synchronous
+  snapshot of each probe's edge list and streamed to the picker's writable (or collected
+  as Blob parts), never concatenated; archives past 4 GiB are refused (no ZIP64).
 
 ### 4.4 Memory and quota
 

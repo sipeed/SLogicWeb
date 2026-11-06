@@ -99,7 +99,7 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
   const finish = app.split('private finishCapture(')[1]?.split('private discardDecodeState')[0] ?? '';
   const pendingStop = app.split('private async stopCapture(')[1]?.split('private async teardownDevice')[0] ?? '';
   const discard = app.split('private discardDevice()')[1]?.split('private detachDevice()')[0] ?? '';
-  const adopt = app.split('private adoptCapture(')[1]?.split('private save()')[0] ?? '';
+  const adopt = app.split('private adoptCapture(')[1]?.split('private saveItems()')[0] ?? '';
   const start = app.split('private async startCapture(')[1]?.split('private enforceLoopRetention')[0] ?? '';
   const wired = completions === 5 && finish.includes("this.repeatSession && reason === 'completed'") &&
     finish.includes("this.settings.mode === 'repeat'") &&

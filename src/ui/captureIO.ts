@@ -6,6 +6,9 @@
  * IN, from sigrok: `.sr` session files load through `src/ui/srLoad.ts` into an edge store.
  * Logic captures only; the format carries no gaps.
  *
+ * OUT, to sigrok: `src/ui/srSave.ts` exports the digital channels as a `.sr` session
+ * (no gaps, no trigger, analog groups as their raw input bits) for PulseView.
+ *
  * OUT, and back in: `.lwcap` is ours. It stores transitions, not samples, so a 5 s
  * 16-channel capture is ~400 kB instead of 200 MB, and it round-trips through
  * `SampleStore.edges()` exactly - which also means it loads straight into an edge store
@@ -31,6 +34,8 @@ export interface LoadedCapture {
   /** Seconds of wall time the capture covers. */
   duration: number;
   sourceDescription: string;
+  /** Name of the file the capture came from (Save defaults to its base name). */
+  fileName?: string;
 }
 
 /** Load whatever the user picked: a sigrok session, or our own file. */
@@ -38,10 +43,10 @@ export async function loadFiles(files: File[]): Promise<LoadedCapture> {
   if (files.length === 0) throw new DiagnosticError('file.noFiles');
 
   const lw = files.find((f) => f.name.toLowerCase().endsWith('.lwcap'));
-  if (lw) return loadLwcap(await lw.arrayBuffer(), lw.name);
+  if (lw) return { ...loadLwcap(await lw.arrayBuffer(), lw.name), fileName: lw.name };
 
   const sr = files.find((f) => f.name.toLowerCase().endsWith('.sr'));
-  if (sr) return parseSr(await sr.arrayBuffer(), sr.name);
+  if (sr) return { ...await parseSr(await sr.arrayBuffer(), sr.name), fileName: sr.name };
 
   throw new DiagnosticError('file.unsupported', {
     names: files.map((f) => f.name).join(', '),

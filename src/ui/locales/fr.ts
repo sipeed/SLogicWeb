@@ -43,7 +43,13 @@ export const fr: Messages = {
   'toolbar.stopTitle': 'Arrêter la capture en cours',
   'toolbar.stoppingTitle': 'En attente de l’annulation des transferts USB en cours',
   'toolbar.openTitle': 'Charger une session sigrok .sr ou un .lwcap',
-  'toolbar.saveTitle': 'Enregistrer cette capture en .lwcap',
+  'toolbar.saveTitle': 'Enregistrer cette capture (.lwcap, ou .sr pour PulseView)',
+  'save.lwcap': 'Enregistrer en .lwcap',
+  'save.lwcapHint': 'logicweb, conserve les trous',
+  'save.sr': 'Exporter en .sr (sigrok)',
+  'save.srHint': 'PulseView, numérique uniquement',
+  'save.lwcapType': 'Capture logicweb',
+  'save.srType': 'Session sigrok (PulseView)',
   'toolbar.fitTitle': 'Zoomer sur toute la capture',
   'toolbar.enterFullscreenTitle': 'Passer en plein écran',
   'toolbar.exitFullscreenTitle': 'Quitter le plein écran',
@@ -129,6 +135,8 @@ export const fr: Messages = {
   'diagnostic.ui.captureLocked':
     'les réglages oscilloscope du groupe sont verrouillés pendant une capture ou un arrêt',
   'diagnostic.io.nothingToSave': 'rien à enregistrer',
+  'diagnostic.io.srProbes': 'impossible d’exporter {probes} voies en .sr (1..{max})',
+  'diagnostic.io.srTooLarge': 'le fichier .sr dépasserait 4 Gio ; raccourcissez la capture ou enregistrez en .lwcap',
   'diagnostic.file.noFiles': 'aucun fichier sélectionné',
   'diagnostic.file.unsupported':
     'rien d’exploitable dans {names} ; une session sigrok .sr ou un .lwcap est attendu',

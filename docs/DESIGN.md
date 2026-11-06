@@ -151,7 +151,7 @@ Target top bar, left to right (≤ 8 commands):
 | Device | Icon + short label; connected tint | Opens the Link panel: connect/reconnect, serial, profile, link rate, busy/lost state. Disabled when WebUSB is unsupported. |
 | Capture / Stop | Primary split button; label/summary names mode and retention (`Single · 10 ms`, `Loop · 1.0 s`, `Record`) | The only start/stop action. Chevron: Single, Repeat, Loop, Autoset. Disabled with the same `canRun` guard for click, keyboard, host interface and debug. |
 | Open | Icon + label | Imports a capture; stops a running acquisition after confirmation if data would be lost. |
-| Save / Export | Icon + label | Saves the displayed capture or exports the record; opens the export sheet. Disabled without data. |
+| Save / Export | Icon + label | Saves the displayed capture or exports the record; opens the export sheet. Disabled without data. Today it opens a two-row format menu: `.lwcap` (first; lossless, keeps gaps) and `.sr` (sigrok session for PulseView; digital channels only). With the File System Access picker both types are offered and the picked extension decides the format; otherwise the file downloads. Default name: `<model>_<N>ch_<rate>_<local YYYYMMDD-HHMMSS>` (model = the device's reported name without spaces, `capture` without one), or the opened file's base name. |
 | Fit | Icon + label | Fits the viewport to retention; `F`. |
 | Panel | Icon + label | Shows/hides the presenter and opens the panel switcher. |
 | Settings | Icon | App preferences: theme, locale, density, units, shortcuts, about/diagnostics. |

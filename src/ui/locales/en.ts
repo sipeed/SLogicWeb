@@ -47,7 +47,13 @@ export const en = {
   'toolbar.stopTitle': 'Stop the running capture',
   'toolbar.stoppingTitle': 'Waiting for pending USB transfers to be cancelled',
   'toolbar.openTitle': 'Load a sigrok .sr session or a .lwcap',
-  'toolbar.saveTitle': 'Save this capture as .lwcap',
+  'toolbar.saveTitle': 'Save this capture (.lwcap, or .sr for PulseView)',
+  'save.lwcap': 'Save as .lwcap',
+  'save.lwcapHint': 'logicweb, keeps gaps',
+  'save.sr': 'Export .sr (sigrok)',
+  'save.srHint': 'PulseView, digital only',
+  'save.lwcapType': 'logicweb capture',
+  'save.srType': 'sigrok session (PulseView)',
   'toolbar.fitTitle': 'Zoom to the whole capture',
   'toolbar.enterFullscreenTitle': 'Enter fullscreen',
   'toolbar.exitFullscreenTitle': 'Exit fullscreen',
@@ -133,6 +139,8 @@ export const en = {
   'diagnostic.ui.captureLocked':
     'bank oscilloscope settings are locked while capture is running or stopping',
   'diagnostic.io.nothingToSave': 'nothing to save',
+  'diagnostic.io.srProbes': 'cannot export {probes} channels to .sr (1..{max})',
+  'diagnostic.io.srTooLarge': 'the .sr file would exceed 4 GiB; shorten the capture or save as .lwcap',
   'diagnostic.file.noFiles': 'no files selected',
   'diagnostic.file.unsupported':
     'nothing loadable in {names}; expected a sigrok .sr session or a .lwcap',

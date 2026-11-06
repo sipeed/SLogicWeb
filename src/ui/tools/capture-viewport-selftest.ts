@@ -118,7 +118,7 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
 {
   const finish = between(app, 'private finishCapture(', 'private discardDecodeState');
   const stop = between(app, 'private async stopCapture(', 'private async teardownDevice');
-  const adopt = between(app, 'private adoptCapture(', 'private save()');
+  const adopt = between(app, 'private adoptCapture(', 'private saveItems()');
   const failed = between(app, '} catch (e) {\n      this.captureArming = false;', '      const armed = this.startMutatedCapture;');
   const starts = (app.match(/createSession\(mode\)/g) ?? []).length;
   const ends = [
