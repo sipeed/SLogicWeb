@@ -202,6 +202,70 @@ for (const spp of [1, 1.4, 1.5, 2, 2.5, 3, 3.9, 4, 5, 6, 7, 8, 12]) {
     `exact cached=${exactA === exactB}, pyramid refreshed=${wideA !== wideB}`);
 }
 
+// Deep zoom (< 1 sample per pixel) over an ADC held at one code: the drawn polyline is
+// the sampled shape - flat on every hold, then a one-sample step - never a ramp between
+// two distant change points, and the last hold reaches the window's right edge.
+{
+  // Square/held code sequence: long holds, a short one, a one-sample glitch.
+  const pattern: [number, number][] = [[60, 37], [200, 13], [60, 1], [200, 3], [128, 41], [10, 29]];
+  const len = 20_000;
+  const held = new Uint8Array(len);
+  for (let i = 0, k = 0; i < len; k++) {
+    const [code, n] = pattern[k % pattern.length]!;
+    for (let j = 0; j < n && i < len; j++) held[i++] = code;
+  }
+  const heldWords = new Uint16Array(len);
+  for (let i = 0; i < len; i++) heldWords[i] = held[i]!;
+  const heldStore = new PlanarSampleStore({ channelCount: 16, samplerate: 1e6 });
+  heldStore.append(new Uint8Array(heldWords.buffer));
+  const width = 400;
+  for (const spp of [0.01, 0.1, 0.5]) {
+    const start = 1000.37;
+    const end = start + spp * width;
+    const frame = analogFrame(heldStore, view(), start, end, width, false);
+    const tag = `held codes at ${spp} samples/column`;
+    if (frame.kind !== 'points') {
+      check(`${tag}: drawn as points`, false, `kind=${frame.kind}`);
+      continue;
+    }
+    const xs = Array.from(frame.x.subarray(0, frame.count));
+    const vs = Array.from(frame.v.subarray(0, frame.count));
+    const line = smoothPolyline(xs, vs);
+    let backwards = 0;
+    let rampOnHold = 0;
+    let seg = 0;
+    for (let k = 1; k < line.x.length; k++) {
+      if (!(line.x[k]! > line.x[k - 1]!)) backwards++;
+      while (seg + 1 < xs.length && line.x[k]! > xs[seg + 1]! + 1e-9) seg++;
+      const a = vs[seg]!;
+      const b = vs[Math.min(seg + 1, vs.length - 1)]!;
+      if (a === b && line.y[k] !== a) rampOnHold++;
+    }
+    // The polyline at every visible sample's timestamp is that sample's code.
+    const at = (px: number): number => {
+      let k = 0;
+      while (k + 1 < line.x.length && line.x[k + 1]! < px) k++;
+      if (k + 1 >= line.x.length) return line.y[line.y.length - 1]!;
+      const t = (px - line.x[k]!) / (line.x[k + 1]! - line.x[k]!);
+      return line.y[k]! + Math.max(0, Math.min(1, t)) * (line.y[k + 1]! - line.y[k]!);
+    };
+    let wrong = '';
+    for (let s = Math.ceil(start); s < end && !wrong; s++) {
+      const px = ((s - start) / (end - start)) * width;
+      const got = at(px);
+      if (Math.abs(got - held[s]!) > 1e-9) wrong = `sample ${s} @${px.toFixed(2)}px: ${got} != ${held[s]}`;
+    }
+    const lastX = line.x[line.x.length - 1]!;
+    const lastSample = Math.ceil(end) - 1;
+    const edgeOk = Math.abs(lastX - width) < 1e-9 && line.y[line.y.length - 1] === held[lastSample];
+    check(`${tag}: flat on every hold (no value between two equal neighbours), steps monotone ` +
+      'in x, each visible sample drawn at its code, and the last hold reaches the right edge',
+    backwards === 0 && rampOnHold === 0 && wrong === '' && edgeOk,
+    `points=${frame.count}, backwards=${backwards}, rampOnHold=${rampOnHold}, ${wrong}` +
+      `, last x=${lastX.toFixed(3)} (edge ${width}), y=${line.y[line.y.length - 1]}`);
+  }
+}
+
 for (const r of results) console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.name}${r.detail ? `\n        ${r.detail}` : ''}`);
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

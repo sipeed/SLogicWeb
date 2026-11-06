@@ -187,6 +187,25 @@ export type AnalogFrame =
   | { kind: 'columns'; min: Float64Array; max: Float64Array; provisional?: boolean }
   | { kind: 'empty'; reason: 'no-capture' | 'live' };
 
+/**
+ * The lowest and highest code a frame draws, or null when it has no known value. This is
+ * the drawn frame (cached per window), so a vertical autoset over the visible window
+ * costs O(width) and never re-reads the store.
+ */
+export function analogFrameRange(frame: AnalogFrame): { min: number; max: number } | null {
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+  const lo = frame.kind === 'points' ? frame.v.subarray(0, frame.count)
+    : frame.kind === 'columns' ? frame.min : null;
+  const hi = frame.kind === 'points' ? lo : frame.kind === 'columns' ? frame.max : null;
+  if (!lo || !hi) return null;
+  for (let i = 0; i < lo.length; i++) {
+    if (lo[i]! < min) min = lo[i]!;
+    if (hi[i]! > max) max = hi[i]!;
+  }
+  return min <= max ? { min, max } : null;
+}
+
 /** The value range the row's height spans: full scale for the bit width. */
 export function busYRange(cfg: BusViewConfig): { min: number; max: number } {
   return busRange(cfg.spec.bits.length, cfg.spec.encoding);
@@ -303,6 +322,55 @@ function readsExactly(store: SampleStore, start: number, end: number, widthPx: n
   return e > s && (end - start) / widthPx < EXACT_COLUMN_SPP && e - s <= EXACT_COLUMN_WINDOW;
 }
 
+/**
+ * [CHOSEN] At one sample per device pixel or more, a hold this many device pixels wide
+ * still gets its hold vertex; shorter holds (the flat tops of a dense sine) keep the
+ * smooth curve exactly as before.
+ */
+export const HOLD_VERTEX_MIN_PX = 8;
+
+/**
+ * The points form of a step list, with the hold made explicit where it is visible.
+ *
+ * The step list holds change points only, and a curve through change points alone ramps
+ * across a held value: a code at 100 from sample 0 and 200 from sample 50 drew as a
+ * 50-sample slope. A sampled bus holds its code until the next sample, so the honest
+ * shape is a flat run to the last sample before the change, then the one-sample
+ * transition. Below one sample per pixel (or for a hold at least HOLD_VERTEX_MIN_PX wide)
+ * each step therefore gets a second vertex at (next step - 1 sample, same value), and the
+ * last value gets a vertex where the window (or the data) ends, so the hold reaches the
+ * right edge. Unknown (NaN) values get no hold vertex. Denser data keeps the plain change
+ * points, which the analog-geometry self-test pins as the smooth curve.
+ */
+function holdPoints(
+  pos: ArrayLike<number>, val: ArrayLike<number>, count: number, spp: number,
+  edge: number, x: (sample: number) => number,
+): AnalogFrame {
+  const hold = (from: number, to: number): boolean => {
+    const samples = to - from;
+    return spp < 1 ? samples >= 1 : samples / spp >= HOLD_VERTEX_MIN_PX;
+  };
+  const xs = new Float64Array(2 * count + 1);
+  const vs = new Float64Array(2 * count + 1);
+  let n = 0;
+  for (let i = 0; i < count; i++) {
+    const p = pos[i]!;
+    const v = val[i]!;
+    xs[n] = x(p);
+    vs[n++] = v;
+    if (Number.isNaN(v)) continue;
+    if (i + 1 < count) {
+      // The last sample still at this value: one sample before the next change.
+      const last = pos[i + 1]! - 1;
+      if (last > p && hold(p, last)) { xs[n] = x(last); vs[n++] = v; }
+    } else if (edge > p && hold(p, edge)) {
+      xs[n] = x(edge);
+      vs[n++] = v;
+    }
+  }
+  return { kind: 'points', x: xs.subarray(0, n), v: vs.subarray(0, n), count: n };
+}
+
 function compute(
   store: SampleStore, bv: BusViewState, start: number, end: number, widthPx: number, live: boolean,
 ): AnalogFrame {
@@ -329,9 +397,7 @@ function compute(
       // through the samples is exact. spp < 4 bounds the steps at four per column,
       // so the path stays O(width).
       if (st.count <= widthPx / 2 || spp < SMOOTH_POINTS_MAX_SPP) {
-        const xs = new Float64Array(st.count);
-        for (let i = 0; i < st.count; i++) xs[i] = x(st.pos[i]!);
-        return { kind: 'points', x: xs, v: st.val.slice(0, st.count), count: st.count };
+        return holdPoints(st.pos, st.val, st.count, spp, Math.min(end, e), x);
       }
       // More values than pixels: the min/max of the samples whose timestamps fall in
       // each column. A step holds its value from its position to the next step's, so it

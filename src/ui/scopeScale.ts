@@ -149,3 +149,40 @@ export function scopeScaleAt(
   const eased = 1 - (1 - progress) ** 3;
   return { value: from + (to - from) * eased, done: progress >= 1 };
 }
+
+/** [CHOSEN] Vertical autoset fits the signal's peak-to-peak into this share of the row. */
+export const SCOPE_AUTOSET_FILL = 0.8;
+
+/**
+ * Vertical autoset for one analog row (DESIGN.md §5.2): view state only.
+ *
+ * Picks the finest step of `values` whose `divisions` hold the signal's [minV, maxV] in
+ * at most SCOPE_AUTOSET_FILL of the row, and the zero position that centres the signal.
+ * The zero position is clamped to the row (0..1); when the clamp would push the signal
+ * off the row the step is too fine and the next one is tried. With nothing to fit (no
+ * finite range, or a flat line) it returns the default: `defaultVoltsPerDiv` with 0 V
+ * centred. If no step fits, the coarsest is used.
+ */
+export function scopeAutoset(
+  minV: number, maxV: number, divisions: number,
+  values: readonly number[], defaultVoltsPerDiv: number,
+): { voltsPerDiv: number; zeroPosition: number } {
+  const fallback = { voltsPerDiv: defaultVoltsPerDiv, zeroPosition: 0.5 };
+  if (!Number.isFinite(minV) || !Number.isFinite(maxV) || !(maxV > minV) || values.length === 0) {
+    return fallback;
+  }
+  const n = Math.max(1, divisions);
+  const mid = (minV + maxV) / 2;
+  const sorted = [...values].sort((a, b) => a - b);
+  for (const perDiv of sorted) {
+    const span = perDiv * n;
+    if (maxV - minV > SCOPE_AUTOSET_FILL * span + 1e-12) continue;
+    // `scopeGeometry`: the row middle shows (zero - 0.5) * span volts.
+    const zeroPosition = Math.min(1, Math.max(0, 0.5 + mid / span));
+    const centre = (zeroPosition - 0.5) * span;
+    if (minV < centre - span / 2 - 1e-12 || maxV > centre + span / 2 + 1e-12) continue;
+    return { voltsPerDiv: perDiv, zeroPosition };
+  }
+  const perDiv = sorted[sorted.length - 1]!;
+  return { voltsPerDiv: perDiv, zeroPosition: Math.min(1, Math.max(0, 0.5 + mid / (perDiv * n))) };
+}

@@ -247,7 +247,15 @@ Analog channels are not bus rows. Each analog signal has a row with:
   the trigger line edits the same analog condition as the editor; it is not a second
   trigger.
 - An overload badge (amber/red, with text) appears when the ADC clips; it never auto-ranges
-  silently. Autoset may choose a new range once, with the change shown.
+  silently. Autoset may choose a new range once, with the change shown. The row's own
+  vertical autoset (`A` on the focused ruler, or the ruler's context menu, which also
+  holds Reset = double-click/`Home`) is view state only, allowed while running: it fits
+  the visible window's min..max into about 80% of the row's divisions with the finest
+  1-2-5 V/div of the gain's steps and centres it (zero clamped to the row); a flat or
+  empty window gets the gain's default. The ruler animates to and labels the new V/div.
+- The trace is drawn as sampled: below one sample per pixel (and for holds at least
+  8 px wide) a held code is a flat line to its last sample, then the one-sample step,
+  never a ramp across the hold; denser data is the smooth curve through the samples.
 - The analog trace uses the channel colour; the grid is a shared graticule token; 0 V is
   a solid line, other divisions dashed.
 - No analog row exists without a profile analog group; the panel says why the control is

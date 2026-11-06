@@ -35,7 +35,7 @@ import { BusBuilder, validateBusSpec } from '../data/busValue.js';
 import { BusPanel, cloneBusConfig, defaultBusConfig, type BusPanelView } from './busPanel.js';
 import { DecodeResultsPanel } from './decodeResultsPanel.js';
 import {
-  analogDisplayHeight, analogFrame, applyBusBitOrder, beginAnalogFrameBudget, busColor, busLabel, busSummary,
+  analogDisplayHeight, analogFrame, analogFrameRange, applyBusBitOrder, beginAnalogFrameBudget, busColor, busLabel, busSummary,
   busValueAt, busYRange, endAnalogFrameBudget, type AnalogFrame,
   snapAnalogHeight, type BusViewConfig, type BusViewState,
 } from './busView.js';
@@ -171,8 +171,9 @@ import {
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
 import {
-  nextScopeVoltsPerDiv, scopeGeometry, scopeRowDivisions, scopeScaleAt, scopeVoltsAtY,
+  nextScopeVoltsPerDiv, scopeAutoset, scopeGeometry, scopeRowDivisions, scopeScaleAt, scopeVoltsAtY,
 } from './scopeScale.js';
+import { openScopeMenu } from './scopeMenu.js';
 import {
   captureLocksTriggerView, clampLoopViewOffsets, loopOverviewWindow, loopPendingLimit,
   loopStoreLimit, mayReanchor, medianOfRecent, planLocalTriggerStep, reconcileTrigger,
@@ -1501,6 +1502,7 @@ export class App {
         bar.addEventListener('pointerdown', (event) => this.dragScopeBar(event, bar!));
         bar.addEventListener('wheel', (event) => this.wheelScopeBar(event, bar!), { passive: false });
         bar.addEventListener('dblclick', (event) => this.resetScopeBar(event, bar!));
+        bar.addEventListener('contextmenu', (event) => this.scopeBarMenu(event, bar!));
         bar.addEventListener('keydown', (event) => this.keyScopeBar(event, bar!));
         this.scopeHost.appendChild(bar);
         this.scopeBars.set(bus.id, bar);
@@ -1583,6 +1585,8 @@ export class App {
   private dragScopeBar(event: PointerEvent, bar: HTMLDivElement): void {
     const bus = this.busViews.find((candidate) => candidate.id === bar.dataset.busId);
     if (!bus || bus.analogGroup === undefined) return;
+    // A secondary button opens the ruler's menu (`contextmenu`), never a zero drag.
+    if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
     // Home only works on a focused ruler; a drag is the natural way to focus it.
@@ -1621,6 +1625,54 @@ export class App {
     }, true);
   }
 
+  /**
+   * Vertical autoset (DESIGN.md §5.2): fit the visible window's codes into ~80% of the
+   * row's divisions with the finest 1-2-5 step and centre them. View state only - never
+   * the device - so it is allowed while a capture runs. It reads the frame the row draws
+   * (cached per window), so its cost is O(width). Nothing visible: the gain's default.
+   */
+  private autosetScope(bus: BusViewState): void {
+    const view = this.stack.view;
+    const store = this.store;
+    const valid = store.length > 0 && validateBusSpec(bus.spec, store.channelCount).length === 0;
+    const range = valid
+      ? analogFrameRange(analogFrame(store, bus, view.start, view.end, view.widthPx, this.running))
+      : null;
+    const gain = analogGainOf(bus);
+    const fullScaleV = bus.fullScaleV ?? analogSpan(gain).fullScaleV;
+    const steps = 2 ** bus.spec.bits.length - 1;
+    const volts = (code: number): number => bus.offsetV + (code / steps) * fullScaleV;
+    const next = scopeAutoset(
+      range ? volts(range.min) : Number.NaN, range ? volts(range.max) : Number.NaN,
+      scopeRowDivisions(this.rowHeightOf(bus)), analogVoltsPerDivValues(gain),
+      this.scopeDefaultVoltsPerDiv(bus),
+    );
+    // The usual writer: the scale change animates and the ruler shows the new V/div.
+    this.configureBusScope(bus.id, next, true);
+  }
+
+  private scopeBarMenu(event: MouseEvent, bar: HTMLDivElement): void {
+    const bus = this.busViews.find((candidate) => candidate.id === bar.dataset.busId);
+    if (!bus || bus.analogGroup === undefined) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const id = bus.id;
+    const current = (): BusViewState | undefined => this.busViews.find((candidate) => candidate.id === id);
+    openScopeMenu(event.clientX, event.clientY, bar, [
+      {
+        label: t('bus.autoset'), hint: 'A',
+        onPick: () => { const b = current(); if (b) this.autosetScope(b); },
+      },
+      {
+        label: t('bus.resetScale'), hint: 'Home',
+        onPick: () => {
+          const b = current();
+          if (b) this.configureBusScope(b.id, { voltsPerDiv: this.scopeDefaultVoltsPerDiv(b), zeroPosition: 0.5 }, true);
+        },
+      },
+    ]);
+  }
+
   private wheelScopeBar(event: WheelEvent, bar: HTMLDivElement): void {
     const bus = this.busViews.find((candidate) => candidate.id === bar.dataset.busId);
     if (!bus || bus.analogGroup === undefined) return;
@@ -1647,6 +1699,12 @@ export class App {
     if (!bus || bus.analogGroup === undefined) return;
     if (event.key === 'Home') {
       this.resetScopeBar(event, bar);
+      return;
+    }
+    if ((event.key === 'a' || event.key === 'A') && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.autosetScope(bus);
       return;
     }
     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
