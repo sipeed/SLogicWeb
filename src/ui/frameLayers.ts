@@ -24,7 +24,18 @@ export interface FrameLayerPlan {
   bus: boolean;
 }
 
+export interface LayerInvalidation {
+  wave: boolean;
+  axis: boolean;
+  overlay: boolean;
+  bus: boolean;
+}
+
 const DRAW_ALL: FrameLayerPlan = { wave: true, axis: true, overlay: true, bus: true };
+
+export const NO_INVALIDATION: LayerInvalidation = Object.freeze({
+  wave: false, axis: false, overlay: false, bus: false,
+});
 
 let nextStoreSignature = 1;
 const storeSignatures = new WeakMap<object, number>();
@@ -58,6 +69,7 @@ export function fingerprintOf(
 
 export function planLayers(
   prev: FrameFingerprint | null, next: FrameFingerprint, force: boolean,
+  invalidated: LayerInvalidation = NO_INVALIDATION,
 ): FrameLayerPlan {
   if (force || prev === null) return { ...DRAW_ALL };
   const view = prev.viewStart !== next.viewStart || prev.viewEnd !== next.viewEnd;
@@ -68,11 +80,12 @@ export function planLayers(
     prev.storeSig !== next.storeSig;
   const overlay = view || size || rows || theme || data ||
     prev.frontier !== next.frontier || prev.triggerSample !== next.triggerSample ||
-    prev.tintSig !== next.tintSig || prev.tickSig !== next.tickSig;
+    prev.tintSig !== next.tintSig || prev.tickSig !== next.tickSig || invalidated.overlay;
   return {
-    wave: view || size || rows || theme || data || prev.frontier !== next.frontier,
-    axis: size || prev.tickSig !== next.tickSig,
+    wave: view || size || rows || theme || data || prev.frontier !== next.frontier ||
+      invalidated.wave,
+    axis: size || prev.tickSig !== next.tickSig || invalidated.axis,
     overlay,
-    bus: overlay || prev.busSig !== next.busSig,
+    bus: overlay || prev.busSig !== next.busSig || invalidated.bus,
   };
 }

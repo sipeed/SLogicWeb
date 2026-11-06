@@ -106,7 +106,7 @@ import {
 } from './captureStart.js';
 import { liveDrawDue, liveWindowHasNewData, type LiveWindow } from './liveRefresh.js';
 import {
-  fingerprintOf, planLayers, storeSignature, type FrameFingerprint,
+  fingerprintOf, planLayers, storeSignature, type FrameFingerprint, type LayerInvalidation,
 } from './frameLayers.js';
 import {
   FRAME_LAYERS, FrameCostRing,
@@ -1931,7 +1931,7 @@ export class App {
     this.pendingToolbarViewport = null;
     const restorePending = pendingViewport !== null &&
       this.stack.view.start === pendingViewport.start && this.stack.view.end === pendingViewport.end;
-    const rescaled = this.stack.syncSize();
+    const rescaled = this.stack.syncSize().rescaled;
     if (restorePending && pendingViewport) {
       this.stack.setViewport(pendingViewport.start, pendingViewport.end);
       this.stack.setFollowLatest(pendingViewport.follow);
@@ -1948,6 +1948,13 @@ export class App {
     const wCss = this.el.plot.clientWidth;
     const hCss = this.el.plot.clientHeight;
     this.overlay.syncSize(wCss, hCss);
+    const overlayInvalidation = this.overlay.consumeInvalidation();
+    const invalidated: LayerInvalidation = {
+      wave: this.stack.consumeInvalidation(),
+      axis: false,
+      overlay: overlayInvalidation.overlay,
+      bus: overlayInvalidation.bus,
+    };
     this.el.hint.style.display = emptyHintVisible({
       displayedSamples: this.store.length,
       running: this.running,
@@ -1958,7 +1965,7 @@ export class App {
     const repeatTints = this.repeatTintRegions();
     const before = this.stack.view;
     const wavePlan = planLayers(this.layerFingerprint, this.frameFingerprint(
-      before.start, before.end, boxes, repeatTints, hCss, 0), force);
+      before.start, before.end, boxes, repeatTints, hCss, 0), force, invalidated);
     if (wavePlan.wave) {
       this.stack.render();
       this.layerDraws.wave += 1;
@@ -1976,7 +1983,7 @@ export class App {
     );
     const fingerprint = this.frameFingerprint(
       view.start, view.end, boxes, repeatTints, hCss, this.tickSignature(ticks, wCss));
-    const plan = planLayers(this.layerFingerprint, fingerprint, force);
+    const plan = planLayers(this.layerFingerprint, fingerprint, force, invalidated);
 
     if (plan.axis) {
       this.drawAxisCanvas(ticks, wCss);
@@ -3381,7 +3388,7 @@ export class App {
    * already see the new width and report no rescale.
    */
   private syncPlotSize(): void {
-    if (this.stack.syncSize()) this.applyTriggerViewAnchor(true);
+    if (this.stack.syncSize().rescaled) this.applyTriggerViewAnchor(true);
   }
 
   private syncMarkerCursor(pointerCssX: number | null): void {

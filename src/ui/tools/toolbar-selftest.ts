@@ -1006,7 +1006,7 @@ const drawBody = methodBody('private draw(');
 const frameRestoreOrder = [
   'this.pendingToolbarViewport = null;',
   'this.stack.view.start === pendingViewport.start',
-  'this.stack.syncSize();',
+  'this.stack.syncSize().rescaled;',
   'this.stack.setViewport(pendingViewport.start, pendingViewport.end);',
   'this.stack.setFollowLatest(pendingViewport.follow);',
 ].map((needle) => drawBody.indexOf(needle));

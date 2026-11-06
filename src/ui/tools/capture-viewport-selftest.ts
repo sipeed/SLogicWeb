@@ -251,7 +251,7 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
 
 {
   const draw = between(app, 'private draw(', 'private drawLaneSurfaces');
-  const syncAt = draw.indexOf('this.stack.syncSize();');
+  const syncAt = draw.indexOf('this.stack.syncSize().rescaled;');
   const pendingAt = draw.indexOf('this.stack.setViewport(pendingViewport.start, pendingViewport.end);');
   check('draw applies width adaptation before the pending toolbar viewport',
     syncAt >= 0 && pendingAt > syncAt,

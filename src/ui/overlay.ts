@@ -151,7 +151,11 @@ export class Overlay {
   private ctx: CanvasRenderingContext2D;
   private wCss = 0;
   private hCss = 0;
+  private widthDevice = 0;
+  private heightDevice = 0;
   private dpr = 1;
+  private gridCleared = false;
+  private topCleared = false;
   private palette: CanvasPalette = canvasPalette('dark');
 
   constructor(container: HTMLElement) {
@@ -180,17 +184,36 @@ export class Overlay {
 
   syncSize(wCss: number, hCss: number): void {
     const dpr = globalThis.devicePixelRatio || 1;
-    if (wCss === this.wCss && hCss === this.hCss && dpr === this.dpr) return;
+    const w = Math.max(1, Math.round(wCss * dpr));
+    const h = Math.max(1, Math.round(hCss * dpr));
+    if (w === this.widthDevice && h === this.heightDevice && dpr === this.dpr &&
+      wCss === this.wCss && hCss === this.hCss) return;
+    const reallocated = w !== this.widthDevice || h !== this.heightDevice;
     this.wCss = wCss;
     this.hCss = hCss;
+    this.widthDevice = w;
+    this.heightDevice = h;
     this.dpr = dpr;
     for (const [el, ctx] of [[this.grid, this.gridCtx], [this.top, this.ctx]] as const) {
-      el.width = Math.max(1, Math.round(wCss * dpr));
-      el.height = Math.max(1, Math.round(hCss * dpr));
+      if (reallocated) {
+        el.width = w;
+        el.height = h;
+      }
       el.style.width = `${wCss}px`;
       el.style.height = `${hCss}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
+    if (!reallocated) return;
+    this.gridCleared = true;
+    this.topCleared = true;
+  }
+
+  consumeInvalidation(): { overlay: boolean; bus: boolean } {
+    const grid = this.gridCleared;
+    const top = this.topCleared;
+    this.gridCleared = false;
+    this.topCleared = false;
+    return { overlay: grid || top, bus: top };
   }
 
   beginFrame(): void {

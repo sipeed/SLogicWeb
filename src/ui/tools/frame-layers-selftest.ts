@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  fingerprintOf, planLayers, storeSignature, type FrameFingerprint, type FrameLayerPlan,
+  NO_INVALIDATION, fingerprintOf, planLayers, storeSignature,
+  type FrameFingerprint, type FrameLayerPlan, type LayerInvalidation,
 } from '../frameLayers.js';
 
 const nodeProcess = (() => {
@@ -61,6 +62,48 @@ const base: FrameFingerprint = {
 }
 
 {
+  const invalidate = (patch: Partial<LayerInvalidation>): LayerInvalidation =>
+    ({ ...NO_INVALIDATION, ...patch });
+  const quiet = planLayers(base, { ...base }, false);
+  const cases: [string, FrameLayerPlan, [boolean, boolean, boolean, boolean]][] = [
+    ['no invalidation', quiet, [false, false, false, false]],
+    ['the default argument', planLayers(base, { ...base }, false, NO_INVALIDATION),
+      [false, false, false, false]],
+    ['a wave buffer reallocation', planLayers(base, { ...base }, false, invalidate({ wave: true })),
+      [true, false, false, false]],
+    ['an axis buffer reallocation', planLayers(base, { ...base }, false, invalidate({ axis: true })),
+      [false, true, false, false]],
+    ['an annotation buffer reallocation',
+      planLayers(base, { ...base }, false, invalidate({ overlay: true })),
+      [false, false, true, true]],
+    ['a bus-only reallocation', planLayers(base, { ...base }, false, invalidate({ bus: true })),
+      [false, false, false, true]],
+    ['every buffer reallocated',
+      planLayers(base, { ...base }, false,
+        invalidate({ wave: true, axis: true, overlay: true, bus: true })),
+      [true, true, true, true]],
+  ];
+  const bad = cases.filter(([, plan, want]) =>
+    plan.wave !== want[0] || plan.axis !== want[1] ||
+    plan.overlay !== want[2] || plan.bus !== want[3]);
+  check('a canvas invalidation forces exactly the layers that paint on it',
+    bad.length === 0,
+    bad.length === 0
+      ? `${cases.length} cases match`
+      : bad.map(([name, plan]) => `${name}->${JSON.stringify(plan)}`).join('; '));
+
+  const forcedWithInvalidation = planLayers(base, { ...base }, true, invalidate({ wave: true }));
+  const firstWithInvalidation = planLayers(null, { ...base }, false, invalidate({ axis: true }));
+  const unchanged = planLayers(base, { ...base, busSig: 34 }, false, invalidate({ wave: true }));
+  check('an invalidation cannot mask a changed input, a force or an unknown frame',
+    forcedWithInvalidation.wave && forcedWithInvalidation.axis &&
+      firstWithInvalidation.axis && firstWithInvalidation.overlay &&
+      unchanged.wave && unchanged.bus && !unchanged.axis,
+    `forced=${JSON.stringify(forcedWithInvalidation)}, ` +
+      `first=${JSON.stringify(firstWithInvalidation)}, changed=${JSON.stringify(unchanged)}`);
+}
+
+{
   const equal = fingerprintOf(['a', 1, true, null]) === fingerprintOf(['a', 1, true, null]);
   const changed = fingerprintOf(['a', 1]) !== fingerprintOf(['a', 2]);
   const separated = fingerprintOf(['a', 'b']) !== fingerprintOf(['ab']);
@@ -96,6 +139,54 @@ const base: FrameFingerprint = {
   check('draw() plans every layer, counts each decision, and clears the overlay once',
     consulted && counted && overlayClearsOnce,
     `consulted=${consulted}, counted=${counted}, beginFrame=${overlayClearsOnce}`);
+}
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as {
+    readFileSync(path: string, encoding: string): string;
+  } | undefined;
+  if (!fs) throw new Error('node fs module unavailable');
+  const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const start = app.indexOf('private draw(force = true): void {');
+  const end = start >= 0 ? app.indexOf('private frameFingerprint(', start) : -1;
+  const draw = end > start ? app.slice(start, end) : '';
+  const calls: string[] = [];
+  let at = draw.indexOf('planLayers(');
+  while (at >= 0) {
+    const stop = draw.indexOf(';', at);
+    calls.push(stop > at ? draw.slice(at, stop) : draw.slice(at));
+    at = draw.indexOf('planLayers(', stop > at ? stop : at + 1);
+  }
+  const planned = calls.length === 2 && calls.every((call) => call.includes('invalidated'));
+  const consumed = draw.includes('this.stack.consumeInvalidation()') &&
+    draw.includes('this.overlay.consumeInvalidation()');
+  check('both layer plans take the frame invalidation set, which the frame consumes',
+    planned && consumed,
+    `calls=${calls.length}, planned=${planned}, consumed=${consumed}`);
+
+  const overlaySrc = fs.readFileSync('src/ui/overlay.ts', 'utf8');
+  const syncStart = overlaySrc.indexOf('syncSize(wCss: number, hCss: number): void {');
+  const syncEnd = syncStart >= 0 ? overlaySrc.indexOf('beginFrame()', syncStart) : -1;
+  const syncBody = syncEnd > syncStart ? overlaySrc.slice(syncStart, syncEnd) : '';
+  const deviceRounded = syncBody.includes('const w = Math.max(1, Math.round(wCss * dpr));') &&
+    syncBody.includes('const h = Math.max(1, Math.round(hCss * dpr));') &&
+    syncBody.includes('if (w === this.widthDevice && h === this.heightDevice && dpr === this.dpr') &&
+    syncBody.includes('const reallocated = w !== this.widthDevice || h !== this.heightDevice;') &&
+    syncBody.indexOf('const reallocated') < syncBody.indexOf('this.widthDevice = w;') &&
+    syncBody.includes('this.gridCleared = true;') && syncBody.includes('this.topCleared = true;');
+  const reports = overlaySrc.includes(
+    'consumeInvalidation(): { overlay: boolean; bus: boolean }') &&
+    overlaySrc.includes('return { overlay: grid || top, bus: top };');
+  check('the overlay reallocates on device size and reports the buffers it cleared',
+    deviceRounded && reports, `rounded=${deviceRounded}, reports=${reports}`);
+
+  const stackSrc = fs.readFileSync('src/ui/waveformStack.ts', 'utf8');
+  const stackConsumes = stackSrc.includes('syncSize(): { rescaled: boolean }') &&
+    stackSrc.includes('consumeInvalidation(): boolean') &&
+    stackSrc.includes('if (r.syncCanvasSize()) this.reallocated = true;') &&
+    stackSrc.includes('r.setDevicePixelRatio(dpr);\n        this.reallocated = true;');
+  check('the stack reports a drawing-buffer reallocation beside the viewport rescale',
+    stackConsumes, `consumes=${stackConsumes}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

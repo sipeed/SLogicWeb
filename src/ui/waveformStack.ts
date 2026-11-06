@@ -36,8 +36,8 @@ import { ROWS } from './metrics.js';
 export type StackRenderer = Pick<
   WaveformRenderer,
   | 'widthDevicePx' | 'setTheme' | 'setChannels' | 'setRowHeights' | 'setDevicePixelRatio'
-  | 'syncCanvasSize' | 'setViewport' | 'viewport' | 'transform' | 'setFollowLatest' | 'followLatest'
-  | 'dispose'
+  | 'syncCanvasSize' | 'setViewport' | 'viewport' | 'transform' | 'setFollowLatest'
+  | 'followLatest' | 'dispose'
 > & { render(): FrameStats };
 
 /** Cached one-canvas probe: WebGL2 either works on this page or it does not. */
@@ -97,6 +97,7 @@ export class WaveformStack {
   private dpr: number;
   /** Plot width in CSS px at the last syncSize; 0 until the first real measurement. */
   private cssWidth = 0;
+  private reallocated = false;
 
   constructor(
     private readonly container: HTMLElement,
@@ -198,20 +199,21 @@ export class WaveformStack {
     }
   }
 
-  /** Match the drawing buffers to the elements. Idempotent and cheap; called per frame.
-   *  Returns true when a plot-width change rescaled the sample range (the App re-places a
-   *  trigger-anchored viewport in that case). */
-  syncSize(): boolean {
+  /** Match the drawing buffers to the elements. Idempotent and cheap; called per frame. */
+  syncSize(): { rescaled: boolean } {
     const dpr = globalThis.devicePixelRatio || 1;
     for (let i = 0; i < this.renderers.length; i++) {
       if (!this.groups[i]?.length) continue;
       const r = this.renderers[i]!;
-      if (dpr !== this.dpr) r.setDevicePixelRatio(dpr);
-      r.syncCanvasSize();
+      if (dpr !== this.dpr) {
+        r.setDevicePixelRatio(dpr);
+        this.reallocated = true;
+      }
+      if (r.syncCanvasSize()) this.reallocated = true;
     }
     this.dpr = dpr;
     const w = this.widthDevicePx;
-    if (!(w > 0)) return false;
+    if (!(w > 0)) return { rescaled: false };
     this.view.widthPx = w;
     // Keep the time scale when the plot changes width (sidebar opened, closed or dragged,
     // window resized): the same time per pixel, more or less of it on screen. Keeping the
@@ -225,9 +227,15 @@ export class WaveformStack {
       const span = (this.view.end - this.view.start) * (css / prev);
       if (this.followLatest) this.setViewport(this.view.end - span, this.view.end);
       else this.setViewport(this.view.start, this.view.start + span);
-      return true;
+      return { rescaled: true };
     }
-    return false;
+    return { rescaled: false };
+  }
+
+  consumeInvalidation(): boolean {
+    const pending = this.reallocated;
+    this.reallocated = false;
+    return pending;
   }
 
   get viewport(): { start: number; end: number } {
