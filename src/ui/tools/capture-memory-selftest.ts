@@ -345,7 +345,8 @@ function toggle(
       app.includes("cause: 'memory',"),
     `filled=${(sink.match(/this\.captureFilled\(\)/g) ?? []).length}`);
   check('both save paths stream bounded parts with progress and the typed failure notice',
-    save.includes('planLwcap(store, names)') && !save.includes('saveLwcap(store, names)') &&
+    save.includes('planLwcap(store, this.channels.map((c) => c.name))') &&
+    !save.includes('saveLwcap(store,') &&
       (save.match(/this\.writeLwcapWithProgress\(/g) ?? []).length === 2 &&
       save.includes("this.fail('error.save', e, undefined, saveFailureNotice(e));"),
     'save()');

@@ -180,7 +180,10 @@ async function confirmDialogChecks(): Promise<void> {
     ?.split('\n  }\n')[0] ?? '';
   const openGuard = openBody.trimStart().startsWith(
     'if (!confirmed && !(await this.confirmDiscardCapture())) return;');
-  const button = app.includes("must<HTMLButtonElement>('btn-open').addEventListener('click', () => void this.pickFiles());") &&
+  // Open is a two-row menu now; its "Open file..." entry routes through pickFiles, which
+  // asks before the chooser opens. The example entry is guarded inside openFiles instead.
+  const button = app.includes('this.openMenu.toggle(this.openItems());') &&
+    app.includes("{ label: t('open.file'), hint: t('open.fileHint'), onPick: () => void this.pickFiles() },") &&
     app.includes('if (files.length) void this.openFiles(files, true);');
   const pickBody = app.split('private async pickFiles(): Promise<void> {')[1]?.split('\n  }\n')[0] ?? '';
   const pick = pickBody.indexOf('this.confirmDiscardCapture()') >= 0 &&
