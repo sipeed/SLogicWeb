@@ -4,8 +4,11 @@
  */
 
 import {
-  preTriggerShortfall, triggerPanelNotes, triggerStatusNote, type TriggerNoteInput,
+  autoArmDefersToNextCapture, preTriggerFill, preTriggerShortfall, triggerPanelNotes,
+  triggerStatusNote, type TriggerNoteInput,
 } from '../triggerStatus.js';
+import { reconcileTrigger } from '../triggerViewport.js';
+import { analogTriggerAutoArms, edgeTriggerAutoArms } from '../state.js';
 
 const nodeProcess = (() => {
   const p = (globalThis as { process?: { exit(code: number): never } }).process;
@@ -117,6 +120,100 @@ check('single and repeat show the plain triggered note',
       waiting === null && disabled === null && noPre === null,
     `full=${full}, short=${short}, repeat=${repeatShort}, loop=${loop}, ` +
       `waiting=${waiting}, disabled=${disabled}, noPre=${noPre}`);
+}
+
+{
+  // Pre-fill holdoff readout: shown only while an armed matcher waits and its effective
+  // window has not been observed yet; it then gives way to the plain waiting note.
+  const base = {
+    triggerState: 'waiting' as const, triggerArmed: true,
+    preTriggerSamples: 3_000_000, samplerate: 1e6, streamMs: 1250,
+  };
+  const filling = preTriggerFill(base);
+  const start = preTriggerFill({ ...base, streamMs: 0 });
+  const done = preTriggerFill({ ...base, streamMs: 3000 });
+  const notArmedYet = preTriggerFill({ ...base, streamMs: null });
+  const freeRun = preTriggerFill({ ...base, triggerArmed: false });
+  const triggered = preTriggerFill({ ...base, triggerState: 'triggered' });
+  const notFound = preTriggerFill({ ...base, triggerState: 'not-found' });
+  const noPre = preTriggerFill({ ...base, preTriggerSamples: 0 });
+  const noRate = preTriggerFill({ ...base, samplerate: 0 });
+  const clockSkew = preTriggerFill({ ...base, streamMs: -5 });
+  check('pre-fill readout spans [0, total) of the effective window and only while waiting',
+    filling?.elapsedSec === 1.25 && filling.totalSec === 3 &&
+      start?.elapsedSec === 0 && start.totalSec === 3 &&
+      done === null && notArmedYet === null && freeRun === null && triggered === null &&
+      notFound === null && noPre === null && noRate === null && clockSkew?.elapsedSec === 0,
+    `filling=${JSON.stringify(filling)}, start=${JSON.stringify(start)}, done=${done}, ` +
+      `notArmed=${notArmedYet}, free=${freeRun}, triggered=${triggered}, ` +
+      `notFound=${notFound}, noPre=${noPre}, noRate=${noRate}, skew=${JSON.stringify(clockSkew)}`);
+
+  const fill = { elapsedSec: 1, totalSec: 3 };
+  const filled = note({ triggerState: 'waiting', triggerPreFill: fill });
+  const loopFilled = note({ mode: 'loop', triggerState: 'waiting', triggerPreFill: fill });
+  const afterFill = note({ triggerState: 'waiting', triggerPreFill: null });
+  // A stale fill must never mask a match or a miss.
+  const matched = note({ triggerState: 'triggered', triggerPreFill: fill });
+  const missed = note({ triggerState: 'not-found', triggerPreFill: fill });
+  check('the pre-fill note replaces "waiting" during the holdoff, then waiting resumes',
+    filled === 'preFilling' && loopFilled === 'preFilling' && afterFill === 'waiting' &&
+      matched === 'triggered' && missed === 'notFound',
+    `filled=${filled}, loop=${loopFilled}, after=${afterFill}, matched=${matched}, missed=${missed}`);
+}
+
+{
+  // Auto-arm during a running free-run capture: the first condition turns the mask on,
+  // the running capture is not restarted, and the panel says the trigger arms the next
+  // capture. An explicit enable (no deferral) keeps the documented restart-to-arm rule.
+  const running = { running: true, stopping: false, captureArmed: false };
+  const autoDigital = edgeTriggerAutoArms('dont-care', 'rising', false);
+  const autoAnalog = analogTriggerAutoArms('rising', false);
+  const deferDigital = autoArmDefersToNextCapture({ autoArms: autoDigital, ...running });
+  const deferAnalog = autoArmDefersToNextCapture({ autoArms: autoAnalog, ...running });
+  const idle = autoArmDefersToNextCapture({
+    autoArms: true, running: false, stopping: false, captureArmed: false,
+  });
+  const stopping = autoArmDefersToNextCapture({ autoArms: true, ...running, stopping: true });
+  const notAuto = autoArmDefersToNextCapture({ autoArms: false, ...running });
+  const reconcile = (armDeferred: boolean) => reconcileTrigger({
+    running: true, stopping: false, loop: false, captureArmed: false, phase: 'off',
+    settingsArmed: true, armDeferred,
+  });
+  const deferredAction = reconcile(deferDigital);
+  const explicitAction = reconcile(false);
+  const loopDeferred = reconcileTrigger({
+    running: true, stopping: false, loop: true, captureArmed: false, phase: 'off',
+    settingsArmed: true, armDeferred: true,
+  });
+  // The deferral never blocks the armed-capture paths.
+  const waitingRetune = reconcileTrigger({
+    running: true, stopping: false, loop: false, captureArmed: true, phase: 'waiting',
+    settingsArmed: true, armDeferred: true,
+  });
+  const panel = (deferred: boolean, patch: Partial<Parameters<typeof triggerPanelNotes>[0]> = {}) =>
+    triggerPanelNotes({
+      running: true, stopping: false, mode: 'single', triggerState: 'off',
+      settingsArmed: true, triggerArmed: false, triggerLocked: false,
+      triggerAnalogRolling: false, triggerViewPending: false, triggerAutoDisarmed: false,
+      triggerArmDeferred: deferred, ...patch,
+    });
+  const deferredNotes = panel(true);
+  const explicitNotes = panel(false);
+  const nextCapture = panel(true, { running: false });
+  const armedNow = panel(true, { triggerArmed: true, triggerState: 'waiting' });
+  check('auto-arm during a running free-run capture defers to the next capture, visibly',
+    autoDigital && autoAnalog && deferDigital && deferAnalog && !idle && !stopping &&
+      !notAuto && deferredAction === 'none' && explicitAction === 'restart' &&
+      loopDeferred === 'none' && waitingRetune === 'retune' &&
+      deferredNotes.armNext && !deferredNotes.arming &&
+      !explicitNotes.armNext && explicitNotes.arming &&
+      !nextCapture.armNext && !nextCapture.arming && nextCapture.armedSummary &&
+      !armedNow.armNext && armedNow.armedSummary,
+    `defer=${deferDigital}/${deferAnalog} idle=${idle} stopping=${stopping} ` +
+      `notAuto=${notAuto} actions=${deferredAction}/${explicitAction}/${loopDeferred}/` +
+      `${waitingRetune} deferred=${JSON.stringify(deferredNotes)} ` +
+      `explicit=${JSON.stringify(explicitNotes)} next=${JSON.stringify(nextCapture)} ` +
+      `armed=${JSON.stringify(armedNow)}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

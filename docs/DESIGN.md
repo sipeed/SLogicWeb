@@ -412,16 +412,27 @@ Rules:
   choice is shown; switching retains the other family's stored conditions but they are
   not armed. For `mixed: true`, both families' conditions are ANDed and no family switch
   is shown.
-- **States:** configured (neutral), armed (warning), waiting, triggered, released,
-  pending (Next badge), not-found. Only one family/state is bright; the other family is
-  neutral, never falsely armed.
-- **Enable:** turning it off leaves conditions stored and neutral. Configuring a
-  condition never flips the enable mask; an optional "Arm" action is explicit.
+- **States:** configured (neutral), armed (warning), filling (pre-fill holdoff), waiting,
+  triggered, released, pending (Next badge), not-found. Only one family/state is bright;
+  the other family is neutral, never falsely armed.
+- **Enable:** turning it off leaves conditions stored and neutral; removing a condition
+  never turns it off. Configuring the *first* condition while the trigger is off (a
+  digital edge mode, or an analog rising/falling crossing) turns it on: that is the
+  user's intent to arm (`edgeTriggerAutoArms`, `analogTriggerAutoArms`). Level and
+  don't-care modes do not auto-arm. While a capture is running, this auto-arm never
+  restarts it: the capture keeps free-running, the panel says the trigger arms the next
+  capture (Repeat: the next interval), and Stop → Capture arms it now
+  (`autoArmDefersToNextCapture`). Turning the enable on explicitly during a free-running
+  capture is the named restart-to-arm transition and says "Restarting…".
 - **Pre-trigger:** percentage/time, with the profile cap and the resulting history;
   per-group sample counts are read-only. The panel never promises more history than the
   ring can hold. The trigger waits until that window has filled (pre-fill holdoff), so a
   triggered capture holds the full window; if it ever holds less, the status shows the
-  actual pre-trigger obtained.
+  actual pre-trigger obtained. During the holdoff the status says "Filling the
+  pre-trigger window (elapsed / total)… the trigger cannot fire" instead of "Waiting";
+  the elapsed time is estimated from wall time since the stream armed at the capture
+  rate (the page receives nothing from the matcher while it waits). Loop shows it only
+  before its first match.
 - **Retune/restart:** while waiting, edits retune and say "Retuned"; after a match they
   are pending for the next acquisition. A restart is a named "Restart to apply" action
   and never a hidden side effect. A Loop analog display detector may retune live; the

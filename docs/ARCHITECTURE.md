@@ -545,11 +545,18 @@ type TriggerBudget =
   on the already-emitted stream, which the D window owns). The ring stays the only
   pre-trigger storage. If a triggered Single/Repeat capture still holds less pre-trigger
   than configured, the trigger status reports the actual amount
-  (`capturePanel.preTriggerObtained`).
+  (`capturePanel.preTriggerObtained`). While the holdoff runs the status shows its
+  progress (`preTriggerFill`, `capturePanel.preTriggerFilling`): elapsed is wall time
+  since `device.start()` resolved at the capture rate, total is the effective
+  `preTrigger.samples`. It is an estimate (the matcher sends nothing while waiting) that
+  can end up to the RUN-to-first-byte latency early, never noticeably late.
 - Retune: while waiting, a new plan is recompiled and sent; edge continuity restarts.
   After a match, edits are pending for the next acquisition unless the profile supports a
   live detector (analog Loop). A restart is a named transition with a typed reason; it
-  never reuses the user Stop path.
+  never reuses the user Stop path. Explicitly enabling the trigger during a free-running
+  capture restarts it to arm (with a visible "Restarting" note); an auto-arm from
+  configuring the first condition does not restart (`armDeferred` in `reconcileTrigger`),
+  and arms the next acquisition instead.
 - Loop: D is the fixed data window, V the user viewport. A digital Lock is one-shot and
   releases when T leaves retention; an analog detector can re-lock when edges return. The
   plan owns the anchor, not the UI. The acquisition executor enforces D by calling

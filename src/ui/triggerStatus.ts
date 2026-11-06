@@ -23,9 +23,13 @@ export interface TriggerNoteInput {
   triggerLocked: boolean;
   /** The loop lock rolls on scanned analog crossings (not a one-shot digital lock). */
   triggerAnalogRolling: boolean;
+  /** The matcher is still in its pre-fill holdoff (see `preTriggerFill`); null/absent
+   * once the window has filled or when there is no holdoff. */
+  triggerPreFill?: PreTriggerFill | null;
 }
 
 export type TriggerNote =
+  | 'preFilling'
   | 'waiting'
   | 'viewLost'
   | 'loopAnalog'
@@ -38,7 +42,7 @@ export type TriggerNote =
 
 /** The single applicable note, or null when the trigger section should stay quiet. */
 export function triggerStatusNote(v: TriggerNoteInput): TriggerNote {
-  if (v.triggerState === 'waiting') return 'waiting';
+  if (v.triggerState === 'waiting') return v.triggerPreFill ? 'preFilling' : 'waiting';
   if (v.triggerState === 'not-found') return 'notFound';
   if (v.triggerState !== 'triggered' || !v.running) return null;
   if (v.triggerViewLost) return 'viewLost';
@@ -66,6 +70,9 @@ export interface TriggerPanelNoteInput {
   triggerViewPending: boolean;
   /** The trigger was disarmed by the Loop store's hard memory cap. */
   triggerAutoDisarmed: boolean;
+  /** Configuring a condition auto-enabled the trigger during this free-running capture;
+   * it applies from the next acquisition (see `autoArmDefersToNextCapture`). */
+  triggerArmDeferred?: boolean;
 }
 
 export interface TriggerPanelNotes {
@@ -77,6 +84,9 @@ export interface TriggerPanelNotes {
   armedSummary: boolean;
   /** Show "released to keep the loop store bounded". */
   memoryReleased: boolean;
+  /** Show "the trigger was turned on by configuring a condition; it arms the next
+   * capture" (instead of `arming`: the running capture is not restarted). */
+  armNext: boolean;
 }
 
 /**
@@ -91,13 +101,18 @@ export function triggerPanelNotes(v: TriggerPanelNoteInput): TriggerPanelNotes {
   const liveAnalog = v.mode === 'loop' && v.triggerAnalogRolling;
   const releasedOneShot = v.mode === 'loop' && v.running && v.triggerState === 'triggered' &&
     !v.triggerLocked && !v.triggerAnalogRolling && !v.triggerViewPending;
+  // A deferred auto-arm only exists on a running capture that did not arm a matcher.
+  const deferred = v.triggerArmDeferred === true && v.running && !v.stopping &&
+    !v.triggerArmed;
   return {
     pending: v.running && !v.stopping && v.triggerState === 'triggered' &&
       !liveAnalog && !releasedOneShot,
-    arming: v.running && v.settingsArmed && !v.triggerArmed && !v.triggerAutoDisarmed,
+    arming: v.running && v.settingsArmed && !v.triggerArmed && !v.triggerAutoDisarmed &&
+      !deferred,
     armedSummary: v.settingsArmed && !v.triggerAutoDisarmed &&
       (!v.running || v.triggerState === 'waiting'),
     memoryReleased: v.running && v.triggerAutoDisarmed,
+    armNext: deferred && v.settingsArmed,
   };
 }
 
@@ -125,4 +140,76 @@ export function preTriggerShortfall(v: PreTriggerObtainedInput): number | null {
   if (!Number.isFinite(v.triggerSampleIndex) || !Number.isFinite(v.configuredSamples)) return null;
   const obtained = Math.max(0, Math.floor(v.triggerSampleIndex));
   return obtained < v.configuredSamples ? obtained : null;
+}
+
+export interface PreTriggerFill {
+  /** Stream time observed since the matcher armed, seconds (0 <= elapsed < total). */
+  elapsedSec: number;
+  /** The effective (already capped) pre-trigger window, seconds. */
+  totalSec: number;
+}
+
+export interface PreTriggerFillInput {
+  triggerState: TriggerNoteState;
+  /** The running acquisition armed a host-side matcher. */
+  triggerArmed: boolean;
+  /** The acquisition's effective pre-trigger samples (after the percentage, post-budget
+   * and prefix-byte caps), exactly as sent to the matcher. */
+  preTriggerSamples: number;
+  /** The acquisition's sample rate, Hz. */
+  samplerate: number;
+  /** Wall time since the device stream was armed, ms; null before it is armed. */
+  streamMs: number | null;
+}
+
+/**
+ * Progress of the matcher's pre-fill holdoff, or null when it is over (or there is none).
+ *
+ * After arming, the matcher ignores every match until `preTriggerSamples` complete samples
+ * have been observed (ARCHITECTURE §5.1 "Pre-fill holdoff"). With a long window at a low
+ * rate that lasts seconds, during which a trigger cannot fire, so the panel says so
+ * instead of the plain "waiting" note.
+ *
+ * Assumption: the page receives nothing from the matcher while it waits, so the observed
+ * count is estimated from wall time since the stream was armed, at the capture rate. A
+ * real device streams at that rate or overflows; the error is the RUN-to-first-byte
+ * latency and transfer queueing, so the note can end slightly before the matcher's own
+ * holdoff does (never noticeably later). A retune keeps the remaining holdoff, so it does
+ * not restart this clock; each Single/Repeat wave and each restart is a new acquisition
+ * with a new clock. Loop holds off only its first match and is only `waiting` before it,
+ * so the same rule covers it. The transport does not restart the matcher's holdoff on a
+ * dropout (it does not call `noteGap`), so neither does this estimate.
+ */
+export function preTriggerFill(v: PreTriggerFillInput): PreTriggerFill | null {
+  if (!v.triggerArmed || v.triggerState !== 'waiting') return null;
+  if (v.streamMs === null || !Number.isFinite(v.streamMs)) return null;
+  if (!(v.samplerate > 0) || !(v.preTriggerSamples > 0)) return null;
+  const totalSec = v.preTriggerSamples / v.samplerate;
+  const elapsedSec = Math.max(0, v.streamMs / 1000);
+  return elapsedSec < totalSec ? { elapsedSec, totalSec } : null;
+}
+
+export interface AutoArmInput {
+  /** The edit turns the global trigger on (`edgeTriggerAutoArms`/`analogTriggerAutoArms`). */
+  autoArms: boolean;
+  running: boolean;
+  stopping: boolean;
+  /** The running acquisition armed a matcher (it cannot have while the mask was off). */
+  captureArmed: boolean;
+}
+
+/**
+ * Whether an auto-arm (configuring the first condition while the global trigger is off)
+ * applies to the next acquisition instead of restarting the running one.
+ *
+ * An explicit enable while a capture free-runs restarts it to arm, with the visible
+ * "restarting" note. An auto-arm is a side effect of configuring a condition; restarting
+ * there would discard the running capture's data behind the user's back (DESIGN §8: a
+ * restart is never a hidden side effect). So the running capture keeps free-running, the
+ * panel says the trigger applies from the next capture, and the existing Stop → Capture
+ * path arms it now. Repeat picks it up at its next interval. While stopping there is
+ * nothing to defer: the next start reads the enabled mask.
+ */
+export function autoArmDefersToNextCapture(v: AutoArmInput): boolean {
+  return v.autoArms && v.running && !v.stopping && !v.captureArmed;
 }

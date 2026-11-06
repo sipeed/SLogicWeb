@@ -1983,6 +1983,103 @@ function holdoffResults(): SoftwareTriggerTestResult[] {
   }
 
   {
+    // No trigger: level, falling and any-edge conditions that are true only inside the
+    // holdoff never fire, under one block and under per-sample feeds. Nothing is emitted
+    // and the whole default search budget (max + pre) is inspected.
+    let fail = '';
+    const cases: { kind: 'level' | 'falling' | 'edge'; levels: number[] }[] = [
+      { kind: 'level', levels: [1, 1, 1, 1, 0, 0, 0, 0, 0, 0] },
+      { kind: 'falling', levels: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+      { kind: 'edge', levels: [0, 1, 0, 1, 1, 1, 1, 1, 1, 1] },
+    ];
+    for (const { kind, levels } of cases) {
+      for (const cuts of [[], [1, 2, 3, 4, 5, 6, 7, 8, 9]]) {
+        const raw = rawStream(16, 3, levels);
+        const got = runRaw(raw, {
+          channels: 16,
+          conditions: [{ channel: 3, kind, ...(kind === 'level' ? { level: 1 as const } : {}) }],
+          preTriggerSamples: 4, maxSamples: 6,
+        }, cuts.map((c) => c * 2));
+        if (!(got.stats.noTrigger && !got.stats.matched && got.out.length === 0 &&
+            got.stats.inspectedSamples === 10 && got.matches.length === 0)) {
+          fail = `${kind} cuts=${cuts.length}: noTrigger=${got.stats.noTrigger} ` +
+            `T=${got.stats.triggerSampleIndex} inspected=${got.stats.inspectedSamples}`;
+        }
+      }
+    }
+    check('holdoff: level/falling/any-edge true only inside the holdoff is no trigger',
+      fail === '', fail || 'level, falling, edge; block and per-sample feeds');
+  }
+
+  {
+    // An edge-condition retune mid-holdoff keeps the remaining holdoff: an edge inside
+    // the rest of the holdoff is still ignored, and the predecessor of the first eligible
+    // sample is the last holdoff sample observed after the retune.
+    const run = (tail: number[]) => {
+      const emitted: number[] = [];
+      const trigger = new SoftwareTrigger({
+        config: {
+          channels: 8, conditions: [{ channel: 1, kind: 'rising' }],
+          preTriggerSamples: 4, maxSamples: 6,
+        },
+        emit: (chunk) => emitted.push(...chunk),
+      });
+      trigger.feed(Uint8Array.from([0x10, 0x20])); // two holdoff samples, D0 low
+      const applied = trigger.reconfigure({
+        channels: 8, conditions: [{ channel: 0, kind: 'edge' }],
+        preTriggerSamples: 4, maxSamples: 6,
+      });
+      trigger.feed(Uint8Array.from(tail));
+      return {
+        applied, stats: trigger.stats, emitted: emitted.map((v) => v.toString(16)).join(','),
+      };
+    };
+    // Edge at 2 (held off); 3 -> 4 is a falling edge on the first eligible sample.
+    const atBoundary = run([0x31, 0x41, 0x50, 0x60, 0x70, 0x80]);
+    // Edge at 2 (held off); 4 keeps the level, so the next edge is 4 -> 5.
+    const later = run([0x31, 0x41, 0x51, 0x60, 0x70, 0x80, 0x90]);
+    check('holdoff: an edge retune mid-holdoff ignores held-off edges and keeps the boundary',
+      atBoundary.applied && atBoundary.stats.triggerSampleIndex === 4 &&
+        atBoundary.stats.inspectedSamples === 5 && atBoundary.emitted === '10,20,31,41,50,60' &&
+        later.applied && later.stats.triggerSampleIndex === 4 &&
+        later.stats.inspectedSamples === 6 && later.emitted === '20,31,41,51,60,70',
+      `boundary T=${atBoundary.stats.triggerSampleIndex} emitted=${atBoundary.emitted}; ` +
+        `later T=${later.stats.triggerSampleIndex} emitted=${later.emitted}`);
+  }
+
+  {
+    // Repeat-style finite search: limit = pre + (pre + post), i.e. the holdoff plus one
+    // sweep's sample budget (see `triggerSearchSamples`). An edge only in the first `pre`
+    // samples is no trigger; an edge on the last inspectable sample (pre + post - 1 after
+    // the holdoff) still matches; one sample later it is out of the budget.
+    const pre = 4;
+    const post = 6;
+    const sweep = pre + post;
+    const limit = pre + sweep;
+    const config: SoftwareTriggerConfig = {
+      channels: 32, conditions: [{ channel: 17, kind: 'rising' }],
+      preTriggerSamples: pre, maxSamples: sweep, searchLimitSamples: limit,
+    };
+    const riseAt = (index: number): number[] =>
+      Array.from({ length: limit + sweep }, (_, i) => (i >= index ? 1 : 0));
+    const lastIndex = pre + (pre + post - 1);
+    const early = runRaw(rawStream(32, 17, riseAt(1)), config, [12, 40]);
+    const lastRaw = rawStream(32, 17, riseAt(lastIndex));
+    const last = runRaw(lastRaw, config, [24]);
+    const beyond = runRaw(rawStream(32, 17, riseAt(limit)), config);
+    const start = lastIndex - pre;
+    check('holdoff: a Repeat search limit pre + (pre + post) ignores holdoff edges, keeps the last sample',
+      early.stats.noTrigger && early.out.length === 0 && early.stats.inspectedSamples === limit &&
+        last.stats.matched && last.stats.triggerSampleIndex === pre &&
+        last.stats.inspectedSamples === limit && last.stats.complete &&
+        sameBytes(last.out, lastRaw.subarray(start * 4, (start + sweep) * 4)) &&
+        beyond.stats.noTrigger && beyond.out.length === 0,
+      `early=${early.stats.noTrigger}/${early.stats.inspectedSamples}, ` +
+        `last T=${last.stats.triggerSampleIndex}/${last.stats.inspectedSamples}, ` +
+        `beyond=${beyond.stats.noTrigger}`);
+  }
+
+  {
     // Continuous (Loop) mode: the holdoff applies to the first match only; later dense
     // matches are reported on the emitted stream as before.
     const raw = rawStream(8, 0, Array.from({ length: 16 }, (_, i) => i & 1));

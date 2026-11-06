@@ -173,7 +173,9 @@ import {
   type TriggerReconcilePhase, type TriggerViewLock,
 } from './triggerViewport.js';
 import { AnalogCrossingScanner } from './analogCrossingScan.js';
-import { preTriggerShortfall } from './triggerStatus.js';
+import {
+  autoArmDefersToNextCapture, preTriggerFill, preTriggerShortfall, type PreTriggerFill,
+} from './triggerStatus.js';
 import {
   RepeatCompositeStore, remapRepeatSample, repeatHoldReleased, repeatSurfacePixels,
   type RepeatLayerStore,
@@ -410,6 +412,14 @@ export class App {
   private captureTriggerBase: {
     preTriggerSamples: number; maxSamples: number; searchLimitSamples: number;
   } | null = null;
+  /** The mode the capture in flight (or last finished) was started with. */
+  private captureMode: CaptureSettings['mode'] = 'single';
+  /** When the armed matcher's stream started (performance.now()); null when no matcher
+   * is armed. The pre-fill holdoff readout counts from here (`preTriggerFill`). */
+  private triggerStreamArmedAt: number | null = null;
+  /** Configuring a condition auto-enabled the trigger during this free-running capture;
+   * it arms the next acquisition instead of restarting this one. */
+  private triggerArmDeferred = false;
   /** A settings change removed every condition; the capture is restarting free-run. */
   private triggerRestartPending = false;
   /** A user Stop during an automatic trigger restart cancels the pending start. */
@@ -877,12 +887,13 @@ export class App {
         },
       }
       : {};
+    // Setting a crossing is user intent to arm, like committing a digital edge mode.
+    // Removing one leaves the mask as the user set it.
+    const autoArms = analogTriggerAutoArms(kind, this.settings.triggerEnableMask);
+    this.noteAutoArm(autoArms);
     this.applySettings({
       ...this.settings,
-      // Setting a crossing is user intent to arm, like committing a digital edge mode.
-      // Removing one leaves the mask as the user set it.
-      ...(analogTriggerAutoArms(kind, this.settings.triggerEnableMask)
-        ? { triggerEnableMask: true } : {}),
+      ...(autoArms ? { triggerEnableMask: true } : {}),
       ...(kind ? { triggerSource: 'analog' as const } : {}),
       analogTriggers,
     });
@@ -905,6 +916,9 @@ export class App {
    * condition the matcher never armed.
    */
   private syncActiveTrigger(): void {
+    // Turning the mask off ends a deferred auto-arm; enabling it again is an explicit
+    // enable, which keeps the restart-to-arm rule.
+    if (!this.settings.triggerEnableMask) this.triggerArmDeferred = false;
     if (!this.running || this.stopping) return;
     const channels = this.store.channelCount;
     if (!isChannelCount(channels)) return;
@@ -931,6 +945,7 @@ export class App {
       phase,
       settingsArmed: this.settings.triggerEnableMask &&
         (conditions.length > 0 || analog.length > 0),
+      armDeferred: this.triggerArmDeferred,
     });
     if (action === 'none') return;
     if (this.captureArming) {
@@ -1086,6 +1101,23 @@ export class App {
         }
       }
     })();
+  }
+
+  /**
+   * Record an auto-arm (the first condition turned the global trigger on). On a running
+   * free-run capture it applies to the next acquisition rather than restarting this one
+   * (`autoArmDefersToNextCapture`); the trigger panel says so. Call before applying the
+   * settings, so the reconcile they trigger sees the deferral.
+   */
+  private noteAutoArm(autoArms: boolean): void {
+    if (autoArmDefersToNextCapture({
+      autoArms,
+      running: this.running,
+      stopping: this.stopping,
+      captureArmed: this.captureUsesSoftwareTrigger,
+    })) {
+      this.triggerArmDeferred = true;
+    }
   }
 
   /** Live scope controls on an analog bank: V/Div, row height and the 0 V position. */
@@ -1708,17 +1740,18 @@ export class App {
       const first = triggerConditions[0] ?? {
         channel, kind: 'level' as const, level: 1 as const,
       };
+      const autoArms = edgeTriggerAutoArms(previous, config.mode, this.settings.triggerEnableMask);
       const next = this.clampSettings({
         ...this.settings, triggerModes, triggerConditions,
         triggerChannel: first.channel, triggerKind: first.kind, triggerLevel: first.level,
-        ...(edgeTriggerAutoArms(previous, config.mode, this.settings.triggerEnableMask)
-          ? { triggerEnableMask: true } : {}),
+        ...(autoArms ? { triggerEnableMask: true } : {}),
       });
       const triggerChanged = triggerSettingsChanged(this.settings, next);
       if (!this.running && triggerChanged) {
         this.triggerState = 'off';
         this.clearTriggerSample();
       }
+      if (triggerChanged) this.noteAutoArm(autoArms);
       this.settings = next;
       if (triggerChanged) this.syncActiveTrigger();
     }
@@ -1921,7 +1954,15 @@ export class App {
     // Bus overviews are background work: skip them on the fastest loop streams so the
     // ingest path keeps the link, and let them finish after the capture stops.
     if (!highRateLoop) this.pumpBusBuilders();
-    if (this.running && !this.repeatWaveHolding && now - this.runningPanelAt > 500) {
+    if (this.running && this.repeatWaveHolding && now - this.runningPanelAt > 500) {
+      // A quiet Repeat wave holds the previous frame and progress until its data arrives,
+      // but its own trigger state (the pre-fill countdown, then "waiting") is current:
+      // refresh only that text.
+      this.runningPanelAt = now;
+      if (this.capturePageShown()) {
+        this.capturePanel.updateTriggerStatus(this.triggerStatusView());
+      }
+    } else if (this.running && !this.repeatWaveHolding && now - this.runningPanelAt > 500) {
       this.runningPanelAt = now;
       if (this.capturePageShown()) {
         this.capturePanel.updateProgress(this.progressView());
@@ -3987,7 +4028,24 @@ export class App {
       settingsArmed: this.triggerSettingsArmed(),
       repeatMissed: this.repeatMissed,
       triggerPreObtainedSec: this.triggerPreObtainedSec(),
+      triggerPreFill: this.triggerPreFillView(),
+      triggerArmDeferred: this.triggerArmDeferred,
     };
+  }
+
+  /** The running matcher's pre-fill holdoff progress, or null once it can fire. */
+  private triggerPreFillView(): PreTriggerFill | null {
+    const base = this.captureTriggerBase;
+    const armedAt = this.triggerStreamArmedAt;
+    return preTriggerFill({
+      triggerState: this.triggerState,
+      triggerArmed: this.captureUsesSoftwareTrigger && this.running && !this.stopping &&
+        base !== null,
+      // The effective (already capped) window sent to the matcher, not the percentage.
+      preTriggerSamples: base?.preTriggerSamples ?? 0,
+      samplerate: this.lastCaptureRate,
+      streamMs: armedAt === null ? null : performance.now() - armedAt,
+    });
   }
 
   /** Seconds of pre-trigger the current capture holds when short of its configured
@@ -3997,8 +4055,12 @@ export class App {
     const sr = this.store.samplerate;
     if (!(sr > 0)) return null;
     const obtained = preTriggerShortfall({
-      mode: this.settings.mode,
+      // The mode this capture ran with: a mode edit after it is pending configuration
+      // and must not re-classify the held capture (Loop is excluded by design).
+      mode: this.captureMode,
       triggerState: this.triggerState,
+      // Compared against the effective window the matcher was armed with, which is
+      // already capped (post budget - 1, the prefix-byte cap), not the raw percentage.
       configuredSamples: this.captureUsesSoftwareTrigger && this.captureTriggerBase
         ? this.captureTriggerBase.preTriggerSamples : null,
       triggerSampleIndex: this.triggerSampleIndex,
@@ -4171,6 +4233,8 @@ export class App {
       loopMetrics: this.running && this.captureIsLoop ? this.computeLoopMetrics() : null,
       repeatMissed: this.repeatMissed,
       triggerPreObtainedSec: this.triggerPreObtainedSec(),
+      triggerPreFill: this.triggerPreFillView(),
+      triggerArmDeferred: this.triggerArmDeferred,
     };
   }
 
@@ -4918,6 +4982,10 @@ export class App {
       this.lostSamples = 0;
       this.droppedTotal = 0;
       this.captureIsLoop = isLoop;
+      this.captureMode = mode;
+      this.triggerStreamArmedAt = null;
+      // A new acquisition reads the current mask: a deferred auto-arm is now applied.
+      this.triggerArmDeferred = false;
       this.clearTriggerSample();
       this.captureUsesSoftwareTrigger = false;
       this.captureTriggerBase = null;
@@ -5275,6 +5343,11 @@ export class App {
         },
       });
       this.captureArming = false;
+      // start() resolves once the read loop is armed: the matcher observes the stream from
+      // about here, so the pre-fill holdoff readout counts from now.
+      if (softwareTrigger && generation === this.captureGeneration) {
+        this.triggerStreamArmedAt = performance.now();
+      }
       // An edit made while the device was still arming could not reach its matcher.
       // Re-evaluate the current settings and trigger state, not a stored action: the
       // user may have changed it back, and the matcher may have fired meanwhile.
