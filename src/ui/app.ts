@@ -1290,7 +1290,7 @@ export class App {
       channels,
       conditions,
       analog,
-      // Same qualification as the start config (the persistence window is fixed by the
+      // Same qualification as the start config (the artifact window is fixed by the
       // capture rate; the matcher refuses a different one).
       ...analogTriggerQualification(this.store.samplerate),
       preTriggerSamples: base.preTriggerSamples,

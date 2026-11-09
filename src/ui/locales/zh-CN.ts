@@ -450,7 +450,7 @@ export const zhCN: Messages = {
   'capturePanel.analogUnsupported': 'ADC 模块仅 SLogic32U3 提供',
   'capturePanel.analogRateNote': '模拟组的采样率从 100 MS/s 起（取自 ADC 的 800 MHz 时钟）；其 D 输入上的触发条件会被忽略。',
   'capturePanel.noAnalogTrigger': '未设置模拟触发。先开启一个模拟组，再点击左侧通道栏中该行的触发图标。',
-  'capturePanel.analogSingleNote': '模拟触发将时基锁定在一个 ADC 组上；选择另一组会移动触发。信号须先在另一侧越过 4 个码值，再越过电平持续 240 ns 才算一次穿越，因此 ADC 短暂的进位毛刺不会在错误的斜率上触发；T 为越过电平的第一个采样点。',
+  'capturePanel.analogSingleNote': '模拟触发将时基锁定在一个 ADC 组上；选择另一组会移动触发。信号须先在另一侧越过 4 个码值才算一次穿越；ADC 短暂的进位毛刺会被识别并忽略，因此快信号照常触发，毛刺也不会在错误的斜率上触发。T 为越过电平的第一个采样点。',
   'capturePanel.removeTrigger': '移除 {channel} 的触发',
   'capturePanel.noDigitalTrigger': '未设置数字触发。点击通道行右侧的触发图标即可添加。',
   'capturePanel.triggerAnalog': '模拟',

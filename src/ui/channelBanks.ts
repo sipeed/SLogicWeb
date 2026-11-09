@@ -55,9 +55,10 @@ export const ADC_MAX_CODE = 2 ** PROFILE_ANALOG_GROUP.resolutionBits - 1;
  * a carry boundary the host reads the OR of the old and new codes (143 -> 144 reads 159,
  * 127 -> 128 reads 255) for 1-14 samples at 100 MS/s, measured on a 32U3 on 2026-11-06.
  * A crossing therefore arms only after a code `ADC_TRIGGER_HYSTERESIS_CODES` before the
- * level, and must stay at/past the level for `ADC_TRIGGER_ARTIFACT_SECONDS` (longer than
- * the ~140 ns worst artifact) before it counts. In codes, not volts: the artifact and the
- * dither are code-domain effects whatever gain is declared.
+ * level, and a run past a threshold shorter than `ADC_TRIGGER_ARTIFACT_SECONDS` (longer
+ * than the ~140 ns worst artifact) whose codes have the OR shape is ignored; any other run
+ * counts at once, so fast real signals still trigger. In codes, not volts: the artifact
+ * and the dither are code-domain effects whatever gain is declared.
  */
 export const ADC_TRIGGER_HYSTERESIS_CODES = 4;
 export const ADC_TRIGGER_ARTIFACT_SECONDS = 240e-9;

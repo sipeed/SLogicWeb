@@ -14,25 +14,29 @@
  * `far`); while armed, for a candidate run (a `past` sample whose predecessor is not
  * `past`). Each run is judged once, from its first sample, with `a` = the sample before it
  * and `b` = the sample after it. It is an ARTIFACT - neither arms nor fires - when
- *   - it is at most W samples long and it ends (`b` is back on the other side), and
+ *   - it is shorter than W samples and it ends (`b` is back on the other side), and
  *   - every code g in it has `(g & a) === a`, `(g & b) === b` and `g > max(a, b)`.
  * Any other run is real: an arm run arms, a candidate run fires with T = its first sample
  * and disarms (one fire per arm).
  *
  * No codes are buffered: the run keeps the AND and the minimum of its codes, which is all
  * the `b` test needs ((AND & b) === b, min > b). The decision lands at the latest on the
- * (W+1)-th sample of the run (it is then longer than W) or on `b`, i.e. at most W samples
- * after T; a run that fails the `a` test is decided real on the sample that fails it.
+ * W-th sample of the run (it is then W long, so real) or on `b`, i.e. at most W - 1
+ * samples after T; a run that fails the `a` test is decided real on the sample that fails
+ * it.
  *
  * Streaming definitions (assumptions the oracle over a flat array leaves open):
- *  - The first sample after `reset()` has no predecessor. If it is `far` while unarmed it
- *    starts an arm run that is judged real at once (there is no `a` to be an OR of): a
- *    stream that begins below a Rising level arms immediately. A candidate run needs a
- *    predecessor on the other side, so the first sample never fires.
+ *  - The first sample after `reset()` (or a hand-off with no predecessor) has no `a`. If
+ *    it is `far` while unarmed it starts an arm run judged against `b` alone (every code
+ *    carries b's bits and exceeds it, and the run is shorter than W, then it is an
+ *    artifact): a stream that begins below a Rising level arms at once, but one that
+ *    begins on a carry glitch (111→112 reads 127) does not arm Falling 112. A candidate run
+ *    needs a predecessor on the other side, so the first sample never fires. This is the
+ *    same start rule `SoftwareTrigger` applies.
  *  - `enter(armed, prev)` resumes at a known state with a known predecessor (the Loop
  *    scanner's hand-off from its strided scan); `prev` < 0 means "no predecessor".
- *  - Degenerate W: W = 0 makes every run real (hysteresis only, no artifact rejection,
- *    decisions are immediate); W = 1 rejects single-sample OR runs only.
+ *  - Degenerate W: W = 0 and W = 1 make every run real (hysteresis only, no artifact
+ *    rejection, decisions are immediate); W = 2 rejects single-sample OR runs only.
  */
 
 export const ANALOG_RUN_NONE = 0;
@@ -113,7 +117,7 @@ export class AnalogRunQualifier {
         this.runLen++;
         this.runAnd &= code;
         if (code < this.runMin) this.runMin = code;
-        if (this.runLen > this.window || (code & this.runA) !== this.runA || code <= this.runA) {
+        if (this.runLen >= this.window || (code & this.runA) !== this.runA || code <= this.runA) {
           fired = this.decideReal();
         }
       } else if ((this.runAnd & code) === code && this.runMin > code) {
@@ -143,10 +147,13 @@ export class AnalogRunQualifier {
     this.pending = kind;
     this.pendingStart = abs;
     this.runLen = 1;
-    this.runA = a;
+    // No predecessor: judge the run against `b` only (an `a` of 0 makes the `a` half pass
+    // for every code above 0).
+    const before = a < 0 ? 0 : a;
+    this.runA = before;
     this.runAnd = code;
     this.runMin = code;
-    if (a < 0 || this.window < 1 || (code & a) !== a || code <= a) return this.decideReal();
+    if (this.window <= 1 || (code & before) !== before || code <= before) return this.decideReal();
     return -1;
   }
 
@@ -173,11 +180,14 @@ export function qualifiedCrossings(
   const far = (c: number): boolean => q.isFar(c);
   const past = (c: number): boolean => q.isPast(c);
   const artifact = (i: number, side: (c: number) => boolean): boolean => {
-    if (i === 0) return false;
     let j = i;
-    while (j < codes.length && side(codes[j]!) && j - i <= window) j++;
-    if (j - i > window || j >= codes.length) return false;
-    const a = codes[i - 1]!;
+    while (j < codes.length && side(codes[j]!) && j - i < window) j++;
+    if (j - i >= window) return false;
+    // Cut off by the end of the array before reaching W: undecided, so it neither arms nor
+    // fires (a stream would still be waiting for its next sample).
+    if (j >= codes.length) return true;
+    // The first sample has no predecessor: judge it against `b` alone.
+    const a = i === 0 ? 0 : codes[i - 1]!;
     const b = codes[j]!;
     for (let k = i; k < j; k++) {
       const g = codes[k]!;

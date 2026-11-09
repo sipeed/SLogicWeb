@@ -502,7 +502,7 @@ export const fr: Messages = {
   'capturePanel.analogUnsupported': 'Le module ADC n’est disponible que sur le SLogic32U3',
   'capturePanel.analogRateNote': 'Les groupes analogiques échantillonnent à partir de 100 MS/s (horloge ADC de 800 MHz) ; les conditions de déclenchement sur leurs entrées D sont ignorées.',
   'capturePanel.noAnalogTrigger': 'Aucun déclenchement analogique. Activez un groupe analogique, puis cliquez l’icône de déclenchement de sa ligne dans la colonne des voies.',
-  'capturePanel.analogSingleNote': 'Le déclenchement analogique verrouille la base de temps sur un groupe ADC ; en choisir un autre déplace le déclenchement. Un franchissement ne compte qu’après 4 codes de l’autre côté puis 240 ns au-delà du niveau, pour que les brefs parasites de retenue de l’ADC ne déclenchent pas sur la mauvaise pente ; T est le premier échantillon au-delà du niveau.',
+  'capturePanel.analogSingleNote': 'Le déclenchement analogique verrouille la base de temps sur un groupe ADC ; en choisir un autre déplace le déclenchement. Un franchissement ne compte qu’après 4 codes de l’autre côté ; les brefs parasites de retenue de l’ADC sont reconnus et ignorés, donc les signaux rapides déclenchent toujours et les parasites ne déclenchent pas sur la mauvaise pente. T est le premier échantillon au-delà du niveau.',
   'capturePanel.removeTrigger': 'Supprimer le déclenchement sur {channel}',
   'capturePanel.noDigitalTrigger': 'Aucun déclenchement numérique. Cliquez l’icône de déclenchement à droite d’une ligne de voie pour en ajouter un.',
   'capturePanel.triggerAnalog': 'Analogique',

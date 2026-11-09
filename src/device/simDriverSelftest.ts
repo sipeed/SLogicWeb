@@ -1452,11 +1452,11 @@ function stepsCode(steps: ReadonlyArray<readonly [number, number]>): (n: number)
 
 {
   // Search limit accounting includes the look-ahead samples. T = 100 (64 -> 192, OR-
-  // shaped) is decided real at sample 124, the 125th inspected sample.
+  // shaped) is decided real at sample 123 (the run's W-th), the 124th inspected sample.
   const code = stepsCode([[0, 64], [100, 192]]);
   const plan = compiledAnalogPlan('rising', 128, 100e6, 0, 30);
-  const enough = await runAnalog(plan, code, { searchLimitSamples: 125 });
-  const short = await runAnalog(plan, code, { searchLimitSamples: 124 });
+  const enough = await runAnalog(plan, code, { searchLimitSamples: 124 });
+  const short = await runAnalog(plan, code, { searchLimitSamples: 123 });
   check(
     'a search limit that covers the decision matches',
     enough.driver.triggeredAt === 100 && enough.driver.complete &&
@@ -1467,7 +1467,7 @@ function stepsCode(steps: ReadonlyArray<readonly [number, number]>): (n: number)
     'a search limit that ends inside the look-ahead finds nothing',
     short.driver.triggeredAt === null && short.driver.searchExhausted &&
       short.driver.state === 'stopped' && short.sink.writes.length === 0 &&
-      short.driver.position === 124,
+      short.driver.position === 123,
     `T=${String(short.driver.triggeredAt)} exhausted=${short.driver.searchExhausted} ` +
       `state=${short.driver.state} writes=${short.sink.writes.length} pos=${short.driver.position}`,
   );

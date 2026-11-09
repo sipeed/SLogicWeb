@@ -359,7 +359,7 @@ function scanChunks(
   // A run that straddles chunk boundaries is judged across them. 64 -> 192 has the OR
   // shape (192 & 64 === 64, 192 > 64): the run at 70..79 ends on 64 within W, an
   // artifact, and is never reported although it is split by two boundaries; the run from
-  // 120 outlasts W and is real, decided at 144 in a later chunk, reported as T = 120.
+  // 120 reaches W and is real, decided at 143 in a later chunk, reported as T = 120.
   const codes = new Uint8Array(260);
   for (let i = 0; i < codes.length; i++) codes[i] = i >= 70 && i < 80 ? 192 : i < 120 ? 64 : 192;
   const raw = encodeCodes(codes, 32, 16, 4);
@@ -378,8 +378,8 @@ function scanChunks(
         from = to;
       }
       const flat = out.flat();
-      // Reported in the chunk holding the deciding sample 144 (the run's (W+1)-th).
-      const at = [...cuts, codes.length].findIndex((to) => to > 144);
+      // Reported in the chunk holding the deciding sample 143 (the run's W-th).
+      const at = [...cuts, codes.length].findIndex((to) => to > 143);
       const ok = flat.length === 1 && flat[0] === 120 && out[at]!.length === 1;
       if (!ok) pass = false;
       got.push(`stride ${stride} cuts ${cuts.join('/')}: ${JSON.stringify(out)}`);
@@ -447,18 +447,19 @@ function scanChunks(
 }
 
 {
-  // Degenerate windows. W = 0: no artifact rejection (hysteresis only) - the one-sample
-  // OR run 127 -> 255 -> 128 is a crossing. W = 1 rejects exactly that single-sample run
-  // but not a two-sample one; W = 24 rejects both.
+  // Degenerate windows. W = 0 and W = 1: no artifact rejection (hysteresis only) - the
+  // one-sample OR run 127 -> 255 -> 127 is a crossing. W = 2 rejects exactly that
+  // single-sample run but not a two-sample one (a run of W samples is real); W = 24
+  // rejects both.
   const one = [100, 127, 255, 127, 100, 100];
   const two = [100, 127, 255, 255, 127, 100];
   const scan = (codes: number[], w: number): number[] => new AnalogCrossingScanner({
     channels: 8, condition: { start: 0, kind: 'rising', level: 128 }, stride: 1,
     analogHysteresis: H, analogArtifactSamples: w,
   }).feed(encode(8, codes.map(adc)), 0);
-  const got = [0, 1, 24].map((w) => `${JSON.stringify(scan(one, w))}/${JSON.stringify(scan(two, w))}`);
-  check('W = 0 disables artifact rejection; W = 1 rejects one-sample OR runs only',
-    got.join(' ') === '[2]/[2] []/[2] []/[]', got.join(' '));
+  const got = [0, 1, 2, 24].map((w) => `${JSON.stringify(scan(one, w))}/${JSON.stringify(scan(two, w))}`);
+  check('W = 0 and 1 disable artifact rejection; W = 2 rejects one-sample OR runs only',
+    got.join(' ') === '[2]/[2] [2]/[2] []/[2] []/[]', got.join(' '));
 }
 
 // ---------------------------------------------------------------------------------------
@@ -565,6 +566,28 @@ const TRACES: readonly AdcTraceName[] = ['sine', 'am3', 'am33'];
     got.join(',') === '24,39,48,96,192,1' && q.analogHysteresis === ADC_TRIGGER_HYSTERESIS_CODES &&
     q.analogHysteresis === 4 && q.analogArtifactSamples === 24,
     `W=${got.join(',')}, h=${q.analogHysteresis}`);
+}
+
+// Regression (independent verifier, 2026-11-09): a stream that starts on carry glitches
+// must not arm a Falling condition. The real sine at offset 147060 begins with 159, the OR
+// of 143 and 144; judging that first run against the next sample keeps Falling 144 from
+// arming on it and firing on the rising slope.
+{
+  const fs = (globalThis as { process?: { getBuiltinModule?(m: string): unknown } }).process
+    ?.getBuiltinModule?.('node:fs') as { readFileSync(p: string): Uint8Array } | undefined;
+  if (fs) {
+    const sine = new Uint8Array(fs.readFileSync('fixtures/adc-sine-carry-glitches-100MSps.bin')).subarray(147060);
+    const scanner = new AnalogCrossingScanner({
+      channels: 8, condition: { start: 0, kind: 'falling', level: 144 }, stride: 1,
+      analogHysteresis: H, analogArtifactSamples: W,
+    });
+    const got = scanner.feed(encode(8, Array.from(sine.subarray(0, 20000), adc)), 0);
+    const slopeAt = (t: number): number => sine[Math.min(sine.length - 1, t + 300)]! - sine[Math.max(0, t - 300)]!;
+    check('a stream that starts on carry glitches does not arm Falling on them',
+      got.length > 0 && got[0] !== 5 && got.every((t) => slopeAt(t) < 0), JSON.stringify(got));
+  } else {
+    check('a stream that starts on carry glitches does not arm Falling on them', true, 'skipped: no node:fs');
+  }
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
