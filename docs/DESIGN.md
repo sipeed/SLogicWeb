@@ -1,4 +1,4 @@
-# logicweb MSO - interface design
+# slogicweb MSO - interface design
 
 **Status: v2 target.** This document specifies what the user sees and does: layout,
 controls, interaction, visible lifecycle, visual tokens, copy, accessibility and the
@@ -666,7 +666,7 @@ polite live region, so assistive technology reads the area and hints when they c
   actionable; the diagnostic code stays in the console prefix.
 - A failed device acquisition (Connect, the silent re-acquire, Retry) is classified as
   busy (another tab or program such as PulseView/DSView holds the interface; narrowed to
-  "another logicweb tab" when one answers a same-origin presence probe), permission
+  "another slogicweb tab" when one answers a same-origin presence probe), permission
   (udev rule / exclusive holder), lost or unsupported. The banner shows the diagnostic,
   then the remedy on its own line, and a Retry action (granted device first, then the
   chooser) for every kind except unsupported. There is no forced takeover.

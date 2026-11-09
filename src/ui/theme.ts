@@ -23,7 +23,7 @@ export const THEME_MODE_LABEL_KEYS: Record<ThemeMode, MessageKey> = {
   system: 'theme.system',
 };
 
-export const THEME_STORAGE_KEY = 'logicweb.theme';
+export const THEME_STORAGE_KEY = 'slogicweb.theme';
 
 let mode: ThemeMode = DEFAULT_MODE;
 let systemDark = true;

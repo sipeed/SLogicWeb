@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
- * "Is another logicweb tab holding a device?" over a same-origin BroadcastChannel.
+ * "Is another slogicweb tab holding a device?" over a same-origin BroadcastChannel.
  *
- * Used only to sharpen a `busy` connect failure into "another logicweb tab has it"
+ * Used only to sharpen a `busy` connect failure into "another slogicweb tab has it"
  * (connectFailure.ts). It is a question, not a lock: there is no takeover, no election
  * and no persistent registry - a probe asks, every live tab that holds a device answers
- * within the timeout, and silence means "no logicweb tab here" (the holder may still be
+ * within the timeout, and silence means "no slogicweb tab here" (the holder may still be
  * PulseView/DSView, the firmware updater or another origin). A crashed tab cannot leave
  * a stale claim behind because nothing is remembered between probes.
  *
@@ -13,7 +13,7 @@
  * browsers without BroadcastChannel (the probe then resolves to no peers).
  */
 
-export const TAB_PRESENCE_CHANNEL = 'logicweb.device-presence';
+export const TAB_PRESENCE_CHANNEL = 'slogicweb.device-presence';
 
 export type PresenceMessage =
   | { readonly kind: 'query'; readonly from: string; readonly nonce: string }
@@ -67,7 +67,7 @@ export class DeviceTabPresence {
     if (reply) this.channel?.postMessage(reply);
   };
 
-  /** Device names other logicweb tabs report holding, collected for `timeoutMs`. */
+  /** Device names other slogicweb tabs report holding, collected for `timeoutMs`. */
   probe(timeoutMs = 200): Promise<string[]> {
     const channel = this.channel;
     if (!channel) return Promise.resolve([]);

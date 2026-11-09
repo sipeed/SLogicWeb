@@ -51,7 +51,7 @@ function webgl2Available(): boolean {
     }
     if (!webgl2Probe) {
       console.info(
-        '[logicweb] WebGL2 is unavailable here; drawing waveforms with the slower Canvas 2D fallback',
+        '[slogicweb] WebGL2 is unavailable here; drawing waveforms with the slower Canvas 2D fallback',
       );
     }
   }

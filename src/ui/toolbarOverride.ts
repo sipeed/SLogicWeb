@@ -4,7 +4,7 @@ export interface ToolbarOverride {
   minRatio: number | null;
 }
 
-export const TOOLBAR_OVERRIDE_STORAGE_KEY = 'logicweb.toolbar';
+export const TOOLBAR_OVERRIDE_STORAGE_KEY = 'slogicweb.toolbar';
 
 export const TOOLBAR_OVERRIDE_LIMITS = {
   height: { min: 24, max: 240 },

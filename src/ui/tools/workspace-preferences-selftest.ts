@@ -40,8 +40,8 @@ function defineStorage(value: unknown): void {
   Object.defineProperty(globalThis, 'localStorage', { value, configurable: true, writable: true });
 }
 
-check('workspace storage uses the exact logicweb.workspace key and schema version 1',
-  WORKSPACE_STORAGE_KEY === 'logicweb.workspace' && WORKSPACE_SCHEMA_VERSION === 1,
+check('workspace storage uses the exact slogicweb.workspace key and schema version 1',
+  WORKSPACE_STORAGE_KEY === 'slogicweb.workspace' && WORKSPACE_SCHEMA_VERSION === 1,
   `${WORKSPACE_STORAGE_KEY} / ${WORKSPACE_SCHEMA_VERSION}`);
 
 const rejected = [null, '', '{', 'null', '[]', '1', '"text"',
@@ -1609,12 +1609,12 @@ check('restored views get fresh IDs/null runtime and all generic/bank mutations 
 
 const html = fs.readFileSync('index.html', 'utf8');
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
-const probe = scripts.find((script) => script.includes("localStorage.getItem('logicweb.workspace')")) ?? '';
-const themeAt = html.indexOf("localStorage.getItem('logicweb.theme')");
-const panelAt = html.indexOf("localStorage.getItem('logicweb.panelWidth')");
-const workspaceAt = html.indexOf("localStorage.getItem('logicweb.workspace')");
+const probe = scripts.find((script) => script.includes("localStorage.getItem('slogicweb.workspace')")) ?? '';
+const themeAt = html.indexOf("localStorage.getItem('slogicweb.theme')");
+const panelAt = html.indexOf("localStorage.getItem('slogicweb.panelWidth')");
+const workspaceAt = html.indexOf("localStorage.getItem('slogicweb.workspace')");
 const stylesheetAt = html.indexOf('<link rel="stylesheet"');
-const probeGuard = probe.includes("try {\n      const workspace = JSON.parse(localStorage.getItem('logicweb.workspace') ?? 'null');") &&
+const probeGuard = probe.includes("try {\n      const workspace = JSON.parse(localStorage.getItem('slogicweb.workspace') ?? 'null');") &&
   probe.includes('if (workspace?.version === 1 && workspace.detailedLabels === false)') &&
   probe.includes("document.documentElement.setAttribute('data-toolbar-labels', 'off');") &&
   !probe.includes('setItem') && !probe.includes('removeItem') && !probe.includes('innerHTML');

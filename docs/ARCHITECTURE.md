@@ -1,4 +1,4 @@
-# logicweb MSO - system architecture and module contracts
+# slogicweb MSO - system architecture and module contracts
 
 **Status: v2 target.** This document specifies the engine and platform contracts for the
 MSO application (digital + analog + decode on one time axis). The current code implements
@@ -771,9 +771,9 @@ Key transitions (the full table is generated in one pure module):
     `pyodide/<hash>/` file and `decoders/decoders-<hash>.zip`. Source maps, licences,
     host files and the entry JS/CSS already inlined into `index.html` are never listed.
     The version hashes every listed byte plus the worker template, and `index.html` is
-    stamped with it (`<meta name="logicweb-build">`).
-  - Caches are `logicweb:<scope>:shell-<version>` (one per version; activation deletes
-    every other version of the scope) and `logicweb:<scope>:runtime` (name-stable, pruned to
+    stamped with it (`<meta name="slogicweb-build">`).
+  - Caches are `slogicweb:<scope>:shell-<version>` (one per version; activation deletes
+    every other version of the scope) and `slogicweb:<scope>:runtime` (name-stable, pruned to
     the URLs the active build lists, so an unchanged Pyodide survives a shell update).
   - Install fetches `index.html` with `cache: 'reload'` and a version query, and refuses a
     copy without the matching stamp (a stale CDN copy fails the install; it retries later).
@@ -788,7 +788,7 @@ Key transitions (the full table is generated in one pure module):
     lazy, so a phone that never decodes never pays for it.
   - No `skipWaiting` on install. A waiting version raises a localized notice with Reload;
     only that click posts `SKIP_WAITING`, and the page reloads on `controllerchange`.
-    Registration happens after App constructs, only when `__LOGICWEB_PWA__` (false for
+    Registration happens after App constructs, only when `__SLOGICWEB_PWA__` (false for
     `vite` dev and for the portable build), `navigator.serviceWorker`, a secure context and
     an http(s) URL all hold — never from `file://`. The portable build also emits no
     manifest, icons or worker file.

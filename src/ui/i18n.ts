@@ -19,7 +19,7 @@
  * - Locale state is module-level with a subscriber set; panels do NOT subscribe -
  *   they call t() while rebuilding in render(), and App runs one re-render pass on
  *   change (re-render = clear and rebuild, so nothing stale survives).
- * - Persistence is localStorage['logicweb.lang'] [CHOSEN]. An explicit pick owns that
+ * - Persistence is localStorage['slogicweb.lang'] [CHOSEN]. An explicit pick owns that
  *   record and a stored shipping locale wins; without one the browser's language
  *   preferences are matched (exactly equal tag, then primary subtag) and 'en' is the
  *   last resort. initLocale() reads the record at boot (never at module evaluation)
@@ -155,7 +155,7 @@ export function loadCatalog(locale: Locale): Promise<Messages> {
 }
 
 /** [CHOSEN] localStorage key holding the persisted locale. */
-const STORAGE_KEY = 'logicweb.lang';
+const STORAGE_KEY = 'slogicweb.lang';
 
 /**
  * Replace `{name}` placeholders with `String(vars[name])`. An unknown name keeps

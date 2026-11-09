@@ -17,7 +17,7 @@ import { initTooltip } from './tooltip.js';
 import '../device/usbWorkerSpawn.js';
 
 declare global {
-  interface Window { logicweb?: App }
+  interface Window { slogicweb?: App }
 }
 
 /**
@@ -33,22 +33,22 @@ async function boot(): Promise<void> {
     initToolbarOverride();
     initPanelWidth();
     await initLocale();
-    window.logicweb = new App();
+    window.slogicweb = new App();
     document.getElementById('empty-hint-starting')?.remove();
     // After App: the offline shell must never delay or break the first paint.
     initServiceWorker();
     try {
       initTooltip();
     } catch (e) {
-      console.warn('[logicweb] tooltip layer failed to start', e);
+      console.warn('[slogicweb] tooltip layer failed to start', e);
     }
   } catch (e) {
-    console.error('[logicweb] failed to start', e);
+    console.error('[slogicweb] failed to start', e);
     document.getElementById('empty-hint-starting')?.remove();
     const pre = document.createElement('pre');
     pre.style.cssText = 'position:fixed;inset:0;margin:0;padding:24px;background:#1B1B1C;'
       + 'color:#f52a66;font:13px ui-monospace,monospace;white-space:pre-wrap;z-index:99';
-    pre.textContent = `logicweb failed to start\n\n${e instanceof Error ? (e.stack ?? e.message) : String(e)}`;
+    pre.textContent = `slogicweb failed to start\n\n${e instanceof Error ? (e.stack ?? e.message) : String(e)}`;
     document.body.appendChild(pre);
     throw e;
   }

@@ -124,7 +124,7 @@ let storageListener: StorageListener | null = null;
 
 {
   const ordered = PANEL_WIDTH_MIN < PANEL_WIDTH_DEFAULT && PANEL_WIDTH_DEFAULT < PANEL_WIDTH_MAX;
-  const pass = PANEL_WIDTH_STORAGE_KEY === 'logicweb.panelWidth' &&
+  const pass = PANEL_WIDTH_STORAGE_KEY === 'slogicweb.panelWidth' &&
     PANEL_WIDTH_DEFAULT === 296 && PANEL_WIDTH_MIN === 240 && PANEL_WIDTH_MAX === 560 &&
     PANEL_WIDTH_RESERVE === 320 && PANEL_WIDTH_STEP === 16 && ordered;
   check('storage key and width constants are the exact agreed literals', pass,
@@ -426,7 +426,7 @@ let storageListener: StorageListener | null = null;
   storage.data.set(PANEL_WIDTH_STORAGE_KEY, '500');
   log.length = 0;
   notified = 0;
-  storageListener?.(storageEvent('logicweb.theme'));
+  storageListener?.(storageEvent('slogicweb.theme'));
   const afterUnrelated = getPanelWidth();
   const unrelatedOps = formatOps(log);
   const unrelatedNotified = notified;

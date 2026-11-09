@@ -7,8 +7,8 @@
  * not verifiable here rather than as a pass.
  *
  *   node_modules/.bin/esbuild src/data/bench/runbench.ts --bundle --format=esm \
- *     --platform=node --outfile=/tmp/logicweb-bench.mjs
- *   node --max-old-space-size=8000 --expose-gc /tmp/logicweb-bench.mjs
+ *     --platform=node --outfile=/tmp/slogicweb-bench.mjs
+ *   node --max-old-space-size=8000 --expose-gc /tmp/slogicweb-bench.mjs
  */
 
 import { runBench, type MemSample } from './bench.js';

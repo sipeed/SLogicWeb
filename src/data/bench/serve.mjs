@@ -7,9 +7,9 @@
  *
  * Bundle first, then run:
  *   node_modules/.bin/esbuild src/data/bench/main.ts --bundle --format=esm \
- *     --outfile=/tmp/logicweb-bench/main.js
- *   cp src/data/bench/index.html /tmp/logicweb-bench/
- *   node src/data/bench/serve.mjs /tmp/logicweb-bench /tmp/logicweb-bench/result.json 5297
+ *     --outfile=/tmp/slogicweb-bench/main.js
+ *   cp src/data/bench/index.html /tmp/slogicweb-bench/
+ *   node src/data/bench/serve.mjs /tmp/slogicweb-bench /tmp/slogicweb-bench/result.json 5297
  *
  * Then open http://127.0.0.1:5297/ in Brave, or let run-browser.sh drive it headless.
  */

@@ -1,11 +1,11 @@
 ---
-name: logicweb
-description: Operate the logicweb logic analyzer page from an AI agent over CDP. Use when asked to connect a SLogic board, start/stop a capture, configure channels, triggers or decoders, inspect samples, drive the viewport/cursors, or summarize the current capture. logicweb has no AI chat column; this skill is the agent interface.
+name: slogicweb
+description: Operate the slogicweb logic analyzer page from an AI agent over CDP. Use when asked to connect a SLogic board, start/stop a capture, configure channels, triggers or decoders, inspect samples, drive the viewport/cursors, or summarize the current capture. slogicweb has no AI chat column; this skill is the agent interface.
 ---
 
-# Operating logicweb as an AI agent
+# Operating slogicweb as an AI agent
 
-logicweb is a browser-based logic analyzer for the SLogic16U3/32U3. The page is the
+slogicweb is a browser-based logic analyzer for the SLogic16U3/32U3. The page is the
 application. There is **no AI chat column and no network service**: an agent drives the
 running page directly, and reads compact summaries through the same host object the
 tool library was written against.
@@ -46,10 +46,10 @@ connect click.
 
 ```js
 // Wait for boot: main.ts sets this after the first render.
-window.logicweb && window.logicweb.debug.snapshot()
+window.slogicweb && window.slogicweb.debug.snapshot()
 ```
 
-If `window.logicweb` is undefined, the app failed to start; read the console and the
+If `window.slogicweb` is undefined, the app failed to start; read the console and the
 full-page error overlay that `main.ts` installs.
 
 ## 3. Connect the board (user gesture required)
@@ -66,12 +66,12 @@ or dispatch `Input.dispatchMouseEvent` at the button's center. The chooser is na
 and cannot be automated. After the user picks the device, poll:
 
 ```js
-window.logicweb.debug.snapshot().device   // non-null once connected
+window.slogicweb.debug.snapshot().device   // non-null once connected
 ```
 
 ## 4. The debug surface
 
-`window.logicweb.debug` is the supported control surface (the same methods the buttons
+`window.slogicweb.debug` is the supported control surface (the same methods the buttons
 call). Useful entry points:
 
 | Call | Effect |
@@ -92,7 +92,7 @@ call). Useful entry points:
 A typical capture:
 
 ```js
-const d = window.logicweb.debug;
+const d = window.slogicweb.debug;
 d.setSettings({ channels: 16, samplerate: 100e6, mode: 'single', seconds: 0.05 });
 await d.start();
 // start() returns when the acquisition has been requested; poll while running.
@@ -113,7 +113,7 @@ The tool library lives in the source tree:
 ```js
 const { TOOLS, toolByName } = await import('/src/assistant/tools.ts');
 const stateTool = toolByName('get_state');
-const out = await stateTool.run({}, window.logicweb.debug.agentHost(), new AbortController().signal);
+const out = await stateTool.run({}, window.slogicweb.debug.agentHost(), new AbortController().signal);
 ```
 
 `TOOLS` covers: `get_state`, `get_channel_stats`, `get_edges`, `list_decoders`,

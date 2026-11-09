@@ -11,7 +11,7 @@
  *
  * It writes manifest.webmanifest and icons/ into dist/, enumerates what the page loads,
  * stamps index.html with the build version, and writes sw.js from src/pwa/sw.js with the
- * enumerated list in place of its __LOGICWEB_SHELL__ token.
+ * enumerated list in place of its __SLOGICWEB_SHELL__ token.
  */
 
 import { createHash } from 'node:crypto';
@@ -97,24 +97,24 @@ export function shellVersion(dist, shell, template = '') {
   return h.digest('hex').slice(0, 12);
 }
 
-/** The head tags a hosted index.html gains. `logicweb-build` is what sw.js verifies. */
+/** The head tags a hosted index.html gains. `slogicweb-build` is what sw.js verifies. */
 export function headTags(version) {
   return [
-    `<meta name="logicweb-build" content="${version}">`,
+    `<meta name="slogicweb-build" content="${version}">`,
     '<link rel="manifest" href="manifest.webmanifest">',
     '<link rel="apple-touch-icon" href="icons/icon-192.png">',
   ].join('\n  ');
 }
 
 export function stampIndex(html, version) {
-  if (html.includes('name="logicweb-build"')) throw new Error('pwa shell: index.html already stamped');
+  if (html.includes('name="slogicweb-build"')) throw new Error('pwa shell: index.html already stamped');
   const at = html.indexOf('</title>');
   if (at < 0) throw new Error('pwa shell: index.html has no </title> to anchor the head tags');
   const end = at + '</title>'.length;
   return `${html.slice(0, end)}\n  ${headTags(version)}${html.slice(end)}`;
 }
 
-export const SHELL_TOKEN = '__LOGICWEB_SHELL__';
+export const SHELL_TOKEN = '__SLOGICWEB_SHELL__';
 
 export function renderServiceWorker(template, shell, version) {
   const parts = template.split(SHELL_TOKEN);

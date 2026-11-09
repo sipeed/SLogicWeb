@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   const totalSamples = Number(params.get('samples') ?? 100_000_000);
   const bins = Number(params.get('bins') ?? 1000);
 
-  log(`logicweb sample store benchmark`);
+  log(`slogicweb sample store benchmark`);
   log(`userAgent: ${navigator.userAgent}`);
   log(`crossOriginIsolated: ${crossOriginIsolated}` +
       `, measureUserAgentSpecificMemory: ${performance.measureUserAgentSpecificMemory ? 'yes' : 'no'}`);

@@ -158,7 +158,7 @@ Bulk IN on `0x82`, continuous once running.
   counts are 4, 8, 16 and 32 (`api.c:129`, SLogic32U3).
 - Transfer sizing (`protocol.c:400`): libsigrok trains a 32 KiB-aligned buffer to roughly
   62.5 ms of data and keeps up to 16 transfers in flight. WebUSB currently rejects requests
-  above 32 MiB, so logicweb uses the smaller of that trained size and 32 MiB (32ch@100M is
+  above 32 MiB, so slogicweb uses the smaller of that trained size and 32 MiB (32ch@100M is
   about 25 MiB; 32ch@200M is capped at 32 MiB). Replacements are submitted before completed
   buffers enter the synchronous consumer path.
 

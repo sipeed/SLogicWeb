@@ -42,7 +42,7 @@ export function classifyConnectFailure(error: unknown): ConnectFailureKind | nul
 }
 
 /**
- * A `busy` failure is narrowed to `busy-tab` when another logicweb tab answered that it
+ * A `busy` failure is narrowed to `busy-tab` when another slogicweb tab answered that it
  * holds a device (deviceTabPresence.ts); every other kind is kept.
  */
 export function refineWithPeerTabs(kind: ConnectFailureKind | null, peerHolds: boolean): ConnectFailureKind | null {

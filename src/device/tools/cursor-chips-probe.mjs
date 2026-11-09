@@ -78,7 +78,7 @@ async function waitForBoot(previous, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const state = await evaluate(`({ origin: performance.timeOrigin,
-      ready: document.readyState === 'complete' && !!window.logicweb &&
+      ready: document.readyState === 'complete' && !!window.slogicweb &&
         (document.getElementById('plot')?.clientWidth ?? 0) > 0 })`);
     if (state && state.ready && state.origin !== previous) return state.origin;
     await new Promise((ok) => setTimeout(ok, 100));

@@ -63,7 +63,7 @@ const tsconfig = JSON.parse(fs.readFileSync('tsconfig.json', 'utf8')) as { inclu
 
 const documentNeedles = [
   '<html lang="en" data-theme="dark">',
-  '<title>logicweb uictrl</title>',
+  '<title>slogicweb uictrl</title>',
   '<link rel="stylesheet" href="/src/ui/style.css" />',
   '<main id="uictrl" aria-labelledby="uictrl-title">',
   '<h1 id="uictrl-title">UI Controls</h1>',
@@ -178,7 +178,7 @@ check(
 );
 
 const routeNeedles = [
-  "name: 'logicweb:uictrl-entry'",
+  "name: 'slogicweb:uictrl-entry'",
   "apply: 'serve'",
   "if (url === '/uictrl') request.url = '/uictrl/';",
 ];

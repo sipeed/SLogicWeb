@@ -4,7 +4,7 @@
  * Node entry point for the .lwcap round-trip suite.
  *
  *   node_modules/.bin/esbuild src/ui/tools/lwcap-selftest.ts --bundle --format=esm \
- *     --platform=node --outfile=/tmp/logicweb-lwcap-tests.mjs && node /tmp/logicweb-lwcap-tests.mjs
+ *     --platform=node --outfile=/tmp/slogicweb-lwcap-tests.mjs && node /tmp/slogicweb-lwcap-tests.mjs
  *
  * Exits non-zero on the first failure. The format is ours (src/ui/captureIO.ts), so a
  * bug here is a silent data-loss bug for every user who saves a capture: the suite pins

@@ -478,7 +478,7 @@ power cycle is still the only recovery.
 
 ### 8.3 How much of the main thread the page's own pipeline costs, 2026-09-10
 
-Measured without hardware by injecting a device into `window.logicweb.device` that produces
+Measured without hardware by injecting a device into `window.slogicweb.device` that produces
 one 3,129,344-byte chunk every 3.911 ms regardless of what the main thread is doing - the
 board's behaviour at 32ch/200 MHz - and letting the real capture path (the store the app
 chooses for 32 channels, the rAF plot, the panels) consume it. `/tmp/lwcdp/pipeline2.js`.
@@ -1143,7 +1143,7 @@ measured. Recorded here so the observations are not lost:
 * **The depth this transport uses is the driver's own.** `usbfs_memory_mb` is 16 on this host, and
   the driver's allocation probe reports `Choose: receive 3129344 bytes per 3ms` followed by
   `Submited 5 transfers` - 5 x 3,129,344 B = 15.6 MB, i.e. the usbfs budget, not `NUM_MAX_TRANSFERS`
-  (16). logicweb's `depth = 5`, `transferBytes = 3129344` is the same geometry for the same reason.
+  (16). slogicweb's `depth = 5`, `transferBytes = 3129344` is the same geometry for the same reason.
   Raising the budget is the lever that would allow more depth on both paths; it is untested here.
 
 ### 8.17 The consumer has two times the headroom the 200M line rate needs, 2026-09-10
@@ -1223,7 +1223,7 @@ would mean raising `usbfs_memory_mb` on every user's machine.
   to say which of the two it used.
 
 The stall probe from this change is what makes the next hardware run decisive: the abort message now
-carries the worst thread stall and the queue window it was measured against, so "logicweb failed at
+carries the worst thread stall and the queue window it was measured against, so "slogicweb failed at
 200M" comes with either "the page blocked for 22 ms against a 19.6 ms window" or "the page never
 blocked, the device did".
 
@@ -1693,7 +1693,7 @@ to the model, not to the first transfer:
 | SLogic16U3 | 4 |
 | SLogic32U3 (firmware S/N 202610120954+) | 0 |
 
-logicweb used to drop 4 bytes unconditionally. On a 32U3 that removed one whole sample (32ch),
+slogicweb used to drop 4 bytes unconditionally. On a 32U3 that removed one whole sample (32ch),
 two samples (16ch) or four (8ch), so the Emulation counter started at 1, 2 or 4 instead of 0.
 That is the real explanation for the "intrinsic glitches near sample 14283" noted earlier in
 this file: the pattern is clean from counter 0 on both models. `headDropBytesForProductId`

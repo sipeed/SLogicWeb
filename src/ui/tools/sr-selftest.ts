@@ -4,7 +4,7 @@
  * Node entry point for the .sr loader suite.
  *
  *   node_modules/.bin/esbuild src/ui/tools/sr-selftest.ts --bundle --format=esm \
- *     --platform=node --outfile=/tmp/logicweb-sr-tests.mjs && node /tmp/logicweb-sr-tests.mjs
+ *     --platform=node --outfile=/tmp/slogicweb-sr-tests.mjs && node /tmp/slogicweb-sr-tests.mjs
  *
  * Exits non-zero on the first failure. The loader (src/ui/srLoad.ts) is pinned three ways:
  *

@@ -187,7 +187,7 @@ export interface AppLoopProbeReport {
 }
 
 export async function runAppLoopProbe(options: AppLoopProbeOptions): Promise<AppLoopProbeReport> {
-  const app = window.logicweb as unknown as AppProbe | undefined;
+  const app = window.slogicweb as unknown as AppProbe | undefined;
   if (!app) throw new Error('the App is not ready');
   const channels = options.channels ?? 16;
   app.discardDevice();
@@ -439,7 +439,7 @@ export interface FixedWindowProbe {
 export async function startFixedWindowProbe(
   options: FixedWindowProbeOptions,
 ): Promise<FixedWindowProbe> {
-  const app = window.logicweb as unknown as AppProbe | undefined;
+  const app = window.slogicweb as unknown as AppProbe | undefined;
   if (!app) throw new Error('the App is not ready');
   app.discardDevice();
   const channels = options.channels;

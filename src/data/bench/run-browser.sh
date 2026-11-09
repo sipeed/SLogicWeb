@@ -9,7 +9,7 @@
 # Brave is used because it is the only WebUSB-capable browser on this machine, so it is
 # the browser this project will actually run in. It is Chromium, so the numbers transfer.
 #
-# Every run writes into its own timestamped directory under /tmp/logicweb-bench and this
+# Every run writes into its own timestamped directory under /tmp/slogicweb-bench and this
 # script DELETES NOTHING - not the output directory, not the browser profile. An earlier
 # version started with `rm -rf` on its output directory, which meant no run's artifact
 # survived the next one and not one number in NOTES.md could be audited afterwards. If you
@@ -18,7 +18,7 @@ set -eu
 
 repo=$(cd "$(dirname "$0")/../../.." && pwd)
 stamp=$(date +%Y%m%d-%H%M%S)
-outdir=/tmp/logicweb-bench/$stamp
+outdir=/tmp/slogicweb-bench/$stamp
 result=$outdir/result.json
 samples=${SAMPLES:-100000000}
 bins=${BINS:-1000}

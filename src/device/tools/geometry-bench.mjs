@@ -75,7 +75,7 @@ const plan = geometries.map(([label, depth, transferBytes]) => {
 });
 
 const expression = `(async () => {
-  const app = window.logicweb;
+  const app = window.slogicweb;
   const dev = app.device;
   if (!dev) return { error: 'no device' };
   const plan = ${JSON.stringify(plan)};

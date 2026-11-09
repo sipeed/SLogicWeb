@@ -5,7 +5,7 @@
  * src/data/bench/main.ts; node is here because the edit-run loop is faster.
  *
  *   node_modules/.bin/esbuild src/data/bench/runtests.ts --bundle --format=esm \
- *     --platform=node --outfile=/tmp/logicweb-tests.mjs && node /tmp/logicweb-tests.mjs
+ *     --platform=node --outfile=/tmp/slogicweb-tests.mjs && node /tmp/slogicweb-tests.mjs
  */
 
 import { runFastSuite, testNarrowGlitch, formatResults, type TestResult } from '../selftest.js';

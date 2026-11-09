@@ -102,8 +102,8 @@ function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia
 {
   const ids = [...THEMES].join(',');
   const modes = [...THEME_MODES].join(',');
-  check('THEMES is default,dark,light; THEME_MODES is light,dark,system; key is logicweb.theme',
-    ids === 'default,dark,light' && modes === 'light,dark,system' && THEME_STORAGE_KEY === 'logicweb.theme',
+  check('THEMES is default,dark,light; THEME_MODES is light,dark,system; key is slogicweb.theme',
+    ids === 'default,dark,light' && modes === 'light,dark,system' && THEME_STORAGE_KEY === 'slogicweb.theme',
     `themes=[${ids}], modes=[${modes}], key=${THEME_STORAGE_KEY}`);
 }
 
@@ -272,7 +272,7 @@ function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia
   const fireStorage = (key: string | null, newValue: string | null) => {
     storageListeners[0]?.({ key, newValue });
   };
-  fireStorage('logicweb.panelWidth', '420'); // unrelated key: ignored
+  fireStorage('slogicweb.panelWidth', '420'); // unrelated key: ignored
   const afterUnrelated = notified;
   fireStorage(THEME_STORAGE_KEY, 'dark'); // same mode as current: no-op
   const afterSameMode = notified;
@@ -364,8 +364,8 @@ function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia
   const html = fs.readFileSync('index.html', 'utf8');
   // The needle is built from the constant's VALUE as the exact quoted storage read:
   // renaming THEME_STORAGE_KEY without touching the inline script (or vice versa)
-  // fails here. A quoted-literal match, not a substring - 'logicweb.themex' still
-  // contains 'logicweb.theme', so a looser match would not catch that drift.
+  // fails here. A quoted-literal match, not a substring - 'slogicweb.themex' still
+  // contains 'slogicweb.theme', so a looser match would not catch that drift.
   const needle = `getItem('${THEME_STORAGE_KEY}')`;
   const keyIdx = html.indexOf(needle);
   const cssIdx = html.indexOf('<link rel="stylesheet"');
@@ -381,7 +381,7 @@ function defineGlobal(name: 'localStorage' | 'document' | 'window' | 'matchMedia
     head.includes('data-theme') && modesPresent && mqlPresent && pickExpr,
     `storageKey@${keyIdx}, stylesheet@${cssIdx}, modes=${modesPresent}, mql=${mqlPresent}, pickExpr=${pickExpr}`);
 }
-// (no assert against a second hardcoded 'logicweb.theme' literal: THEME_STORAGE_KEY IS the needle)
+// (no assert against a second hardcoded 'slogicweb.theme' literal: THEME_STORAGE_KEY IS the needle)
 
 // ------------------------------------------- style.css theme-scope guards (check 13)
 

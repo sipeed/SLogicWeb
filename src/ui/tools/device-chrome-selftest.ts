@@ -73,7 +73,7 @@ const wrong = cases.filter(([, error, want]) => classifyConnectFailure(error) !=
 check('connect failures map to busy / permission / lost / unsupported from code, DOMException name, then text',
   wrong.length === 0, wrong.length === 0 ? `${cases.length} cases` : wrong.join('; '));
 
-check('a busy failure narrows to busy-tab only when a logicweb peer answered',
+check('a busy failure narrows to busy-tab only when a slogicweb peer answered',
   refineWithPeerTabs('busy', true) === 'busy-tab' && refineWithPeerTabs('busy', false) === 'busy' &&
     refineWithPeerTabs('permission', true) === 'permission' && refineWithPeerTabs(null, true) === null,
   'busy+peer=busy-tab; others unchanged');

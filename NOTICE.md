@@ -1,6 +1,6 @@
 # Licence and third-party components
 
-logicweb is licensed under the **GNU General Public License, version 3 or later**
+slogicweb is licensed under the **GNU General Public License, version 3 or later**
 (`GPL-3.0-or-later`). The full text is in [LICENSE](LICENSE); every source file carries an
 SPDX identifier.
 

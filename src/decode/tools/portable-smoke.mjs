@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 const ROOT = path.resolve(import.meta.dirname, '../../..');
 const CHROMIUM = process.env.CHROMIUM || '/usr/bin/chromium';
 const PORT = 30000 + Math.floor(Math.random() * 20000);
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'logicweb-portable-'));
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'slogicweb-portable-'));
 const urlOption = process.argv.find(arg => arg.startsWith('--url='));
 const pageURL = urlOption?.slice('--url='.length) ||
   pathToFileURL(path.join(ROOT, 'dist/index.html')).href;
@@ -93,9 +93,9 @@ try {
 
   const result = await waitFor(async () => {
     const evaluated = await cdp('Runtime.evaluate', {
-      expression: `window.logicweb?.decodeWarm ? 'ready' :
-        window.logicweb?.debug.snapshot().error ?
-          'error:' + window.logicweb.debug.snapshot().error : ''`,
+      expression: `window.slogicweb?.decodeWarm ? 'ready' :
+        window.slogicweb?.debug.snapshot().error ?
+          'error:' + window.slogicweb.debug.snapshot().error : ''`,
       returnByValue: true,
     });
     const value = evaluated.result.value;
@@ -117,7 +117,7 @@ try {
         sample = next;
       }
       if (level !== 1) edges.push(sample);
-      const response = await window.logicweb.decodeClient.decode({
+      const response = await window.slogicweb.decodeClient.decode({
         samplerate, length: sample + 400,
         channels: [{edges: Int32Array.from(edges), initial: 1}],
         stack: [{id: 'uart', channels: {0: 0}, options: {baudrate}}],
@@ -144,7 +144,7 @@ try {
       awaitPromise: true, returnByValue: true,
       expression: `(async () => ({
         manifest: !!document.querySelector('link[rel="manifest"]'),
-        stamp: !!document.querySelector('meta[name="logicweb-build"]'),
+        stamp: !!document.querySelector('meta[name="slogicweb-build"]'),
         controller: !!navigator.serviceWorker?.controller,
         registrations: navigator.serviceWorker?.getRegistrations
           ? (await navigator.serviceWorker.getRegistrations().catch(() => [])).length : 0,
@@ -165,10 +165,10 @@ try {
     try {
       const state = await cdp('Runtime.evaluate', {
         expression: `JSON.stringify({ready: document.readyState,
-          hasApp: !!window.logicweb, warm: window.logicweb?.decodeWarm,
-          status: window.logicweb?.debug.snapshot().error,
-          pending: window.logicweb?.decodeClient?.pending?.size,
-          worker: !!window.logicweb?.decodeClient?.worker})`,
+          hasApp: !!window.slogicweb, warm: window.slogicweb?.decodeWarm,
+          status: window.slogicweb?.debug.snapshot().error,
+          pending: window.slogicweb?.decodeClient?.pending?.size,
+          worker: !!window.slogicweb?.decodeClient?.worker})`,
         returnByValue: true,
       });
       console.error('page state:', state.result.value);

@@ -1,7 +1,7 @@
 # src/data - design, measurements, and where the numbers and predictions missed
 
 **Every number in this file comes from one run, in one environment**, kept at
-`/tmp/logicweb-bench/20260827-144252/` (`result.json` raw, `bench.log` transcript).
+`/tmp/slogicweb-bench/20260827-144252/` (`result.json` raw, `bench.log` transcript).
 Environment: Brave 151 (Chromium), headed, cross-origin isolated so
 `performance.measureUserAgentSpecificMemory()` is genuinely available. 100,000,000 samples
 x 16 channels throughout.
@@ -17,8 +17,8 @@ The 32U3 ingest path has a focused throughput check:
 
 ```
 node_modules/.bin/esbuild src/data/bench/stream32.ts --bundle --format=esm \
-  --platform=node --outfile=/tmp/logicweb-stream32.mjs && \
-node --max-old-space-size=4096 /tmp/logicweb-stream32.mjs
+  --platform=node --outfile=/tmp/slogicweb-stream32.mjs && \
+node --max-old-space-size=4096 /tmp/slogicweb-stream32.mjs
 ```
 
 It compares planar and native interleaved 32-bit storage on 32 MiB chunks. The shipping

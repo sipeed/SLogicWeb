@@ -352,7 +352,7 @@ async function openScriptedDevice(channels: ChannelCount, samplerate: number): P
 }
 
 export async function runFlickerProbe(options: FlickerProbeOptions): Promise<FlickerProbeReport> {
-  const app = window.logicweb as unknown as FlickerAppProbe | undefined;
+  const app = window.slogicweb as unknown as FlickerAppProbe | undefined;
   if (!app) throw new Error('the App is not ready');
   const mode = options.mode;
   const channels = options.channels ?? 32;
@@ -676,7 +676,7 @@ async function drainIdlePresentations(readings: readonly IdlePresentedFrame[]): 
 export async function runIdleFlickerProbe(
   options: IdleFlickerProbeOptions,
 ): Promise<IdleFlickerProbeReport> {
-  const app = window.logicweb as unknown as FlickerAppProbe | undefined;
+  const app = window.slogicweb as unknown as FlickerAppProbe | undefined;
   if (!app) throw new Error('the App is not ready');
   const seconds = options.seconds;
   if (!(seconds > 0)) throw new Error('the idle flicker probe needs a positive --idle');

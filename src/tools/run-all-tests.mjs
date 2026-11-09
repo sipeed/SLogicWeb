@@ -66,7 +66,7 @@ if (selected.length === 0) {
   process.exit(1);
 }
 
-const scratch = mkdtempSync(join(tmpdir(), 'logicweb-test-'));
+const scratch = mkdtempSync(join(tmpdir(), 'slogicweb-test-'));
 const failures = [];
 let passed = 0;
 

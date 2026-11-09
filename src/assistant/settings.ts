@@ -52,8 +52,8 @@ export const DEFAULT_SETTINGS: AssistantSettings = {
   noticeAccepted: false,
 };
 
-export const SETTINGS_KEY = 'logicweb.assistant';
-export const KEYS_KEY = 'logicweb.assistant.keys';
+export const SETTINGS_KEY = 'slogicweb.assistant';
+export const KEYS_KEY = 'slogicweb.assistant.keys';
 
 let current: AssistantSettings = clone(DEFAULT_SETTINGS);
 const listeners = new Set<() => void>();

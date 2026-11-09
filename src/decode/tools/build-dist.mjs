@@ -29,7 +29,7 @@ const run = (file, args, env = {}) => execFileSync(file, args, {
 });
 run(process.execPath, [path.join(ROOT, 'src/decode/tools/vendor-assets.mjs'), path.resolve(decoders)]);
 run(path.join(ROOT, 'node_modules/.bin/tsc'), ['--noEmit']);
-run(path.join(ROOT, 'node_modules/.bin/vite'), ['build'], { LOGICWEB_PORTABLE: '1' });
+run(path.join(ROOT, 'node_modules/.bin/vite'), ['build'], { SLOGICWEB_PORTABLE: '1' });
 
 console.log(`\nStatic distribution ready: ${path.join(ROOT, 'dist')}`);
 console.log('Node/npm are not required to run the generated files.');

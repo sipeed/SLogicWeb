@@ -4,7 +4,7 @@
  * Service-worker registration and the explicit update prompt (docs/ARCHITECTURE.md
  * section 7.2; the worker itself is src/pwa/sw.js).
  *
- * Registered only by a hosted production build (`__LOGICWEB_PWA__`, false for the dev
+ * Registered only by a hosted production build (`__SLOGICWEB_PWA__`, false for the dev
  * server and for the portable single-file build, so both minify this to nothing), only
  * where `navigator.serviceWorker` exists, and only in a secure http(s) context - never
  * from file://.
@@ -18,7 +18,7 @@
 
 import { onLocaleChange, t } from './i18n.js';
 
-declare const __LOGICWEB_PWA__: boolean;
+declare const __SLOGICWEB_PWA__: boolean;
 
 /** 'off': no service worker here; 'idle': registered, current; 'ready': update waiting. */
 export type UpdateState = 'off' | 'idle' | 'ready';
@@ -117,9 +117,9 @@ const UPDATE_CHECK_MS = 60 * 60 * 1000;
 
 /** Register the shell worker when this build and page allow it. Never throws. */
 export function initServiceWorker(): void {
-  if (!__LOGICWEB_PWA__) return;
+  if (!__SLOGICWEB_PWA__) return;
   if (!shouldRegister({
-    pwaBuild: __LOGICWEB_PWA__,
+    pwaBuild: __SLOGICWEB_PWA__,
     hasServiceWorker: 'serviceWorker' in navigator,
     secureContext: window.isSecureContext,
     protocol: location.protocol,
@@ -141,6 +141,6 @@ export function initServiceWorker(): void {
       reg.update().catch(() => { /* offline: try again next time */ });
     });
   }).catch((e: unknown) => {
-    console.warn('[logicweb] service worker registration failed', e);
+    console.warn('[slogicweb] service worker registration failed', e);
   });
 }

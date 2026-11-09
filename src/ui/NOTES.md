@@ -20,7 +20,7 @@ node src/ui/tools/run-ui.mjs all      # the whole evidence run, headed Brave, re
 python3 src/ui/tools/measure-chrome.py --selftest    # the measuring tool's own controls
 ```
 
-`run-ui.mjs` writes screenshots and `report.json` to `/tmp/logicweb-ui/`. It deletes
+`run-ui.mjs` writes screenshots and `report.json` to `/tmp/slogicweb-ui/`. It deletes
 nothing - not its output, not the throwaway Brave profile, whose path it prints.
 
 ---
@@ -123,7 +123,7 @@ drawing bubbles into it. Whatever the renderer drew there is hidden, separator i
 and the *real* channel row underneath is a plain base-height row - so its band, gutter and
 both idle lines are what a plain row gets, by construction.
 
-Verified on our own output: in `/tmp/logicweb-ui/05-annotations.png` the D0 lane occupies
+Verified on our own output: in `/tmp/slogicweb-ui/05-annotations.png` the D0 lane occupies
 device y 122..161 and the row's band runs 162..253, giving a 92 device px band identical
 to every other row's.
 
@@ -364,7 +364,7 @@ for i18next in a tree whose only runtime dependency is pyodide.
   ```
 
 - **The default locale follows the browser unless the user has picked one.** With no
-  usable localStorage['logicweb.lang'] [CHOSEN] record, the boot locale is the first
+  usable localStorage['slogicweb.lang'] [CHOSEN] record, the boot locale is the first
   entry of the browser's preference chain (`navigator.languages`, falling back to
   `navigator.language`) that matches a shipping locale - an exactly equal tag first,
   then its primary subtag (`fr-FR` -> `fr`, `en-GB` -> `en`, `zh-TW` -> `zh-CN` because
@@ -399,7 +399,7 @@ for i18next in a tree whose only runtime dependency is pyodide.
   crashes the inline plugin independently - pre-existing). Sub-path hosting needs a
   coordinated fix (base-aware plugin, co-located entry/chunks, worker map
   placement), not yet scheduled.
-- **`LOGICWEB_PORTABLE=1` folds every dynamic import back into the entry** via
+- **`SLOGICWEB_PORTABLE=1` folds every dynamic import back into the entry** via
   `inlineDynamicImports`, so the single-file `index.html` performs no sibling
   `file://` import. Laziness is lost there by design, and the setting is not
   locale-specific: any FUTURE dynamic import is silently folded too. Locale
@@ -418,7 +418,7 @@ for i18next in a tree whose only runtime dependency is pyodide.
   `initLocale()` preloads the stored-or-detected catalog before `new App()` so the
   first render paints in it; `main.ts` boots through an async IIFE because Vite's
   default target rejects top-level await. `App.debug.setLocale` returns that promise
-  now, so scripts must `await logicweb.debug.setLocale('fr')`.
+  now, so scripts must `await slogicweb.debug.setLocale('fr')`.
 - **A failed catalog load is visible, not fatal.** The switch keeps the current
   locale, warns to the console, and leaves the persisted choice intact so a transient
   error retries next session; a menu pick surfaces it as `error.localeLoad` through
@@ -498,7 +498,7 @@ the catalog entries and `debug.setTheme` all stay live, so re-showing the row is
 one-item revert in `settingsItems()`.
 
 - **`src/ui/theme.ts` is `i18n.ts` shrunk to fit a synchronous problem.** Same module
-  shape (module state, guarded `localStorage['logicweb.theme']`, subscribers, node-safe
+  shape (module state, guarded `localStorage['slogicweb.theme']`, subscribers, node-safe
   top level), but `setTheme` is sync: there is no catalog to fetch, so no Promise, no
   request race, no 'superseded'. `pickTheme` resolves absent or garbage storage - AND
   a stored legacy `default` pick - to the dark fallback (`DEFAULT_THEME`): the old
@@ -524,7 +524,7 @@ one-item revert in `settingsItems()`.
   adopting a token cannot change the default render either. Layer C is one
   `html[data-theme="dark"]` block with the shadcn dark palette in oklch plus a legacy
   remap, so rules not yet migrated to semantic tokens still follow the theme.
-- **The `--accent` collision is settled by never introducing shadcn's.** logicweb's
+- **The `--accent` collision is settled by never introducing shadcn's.** slogicweb's
   `--accent` is the brand violet; shadcn's `--accent` is a hover surface. Brand maps to
   `--primary`, hover surfaces to `--muted`/`--secondary`, `--accent` keeps its legacy
   meaning everywhere.
@@ -884,7 +884,7 @@ The assistant chat column and its toolbar button have been removed from the UI. 
 provider-neutral library under `src/assistant/` and the view in
 `src/ui/assistantPanel.ts` remain in the source tree, and App keeps the private
 `assistantHost()` exposed as `debug.agentHost()` so an AI agent can drive the page over
-CDP (see `.claude/skills/logicweb/SKILL.md`). The rest of this section describes the
+CDP (see `.claude/skills/slogicweb/SKILL.md`). The rest of this section describes the
 removed panel and the surviving tool library.
 
 A fourth sidebar choice (after Device, Analyzers) opens a chat with a model the user
@@ -1048,7 +1048,7 @@ its analog channel directly - no dialog:
   not logic levels. The panel says so.
 
 **Gap.** The vendor's ADC module reads codes from its converter; it does not make the
-eight inputs digital channels while they are read. logicweb has no device command for
+eight inputs digital channels while they are read. slogicweb has no device command for
 that takeover, because the module's bytes are captured like any other input, so the
 analog view is host-side interpretation and the digital rows are only hidden.
 

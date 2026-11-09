@@ -1197,7 +1197,7 @@ const baseSettings: CaptureSettings = {
       locale = await initLocale();
       text = t('toolbar.start');
       writes = fake.writes();
-      persisted = fake.store.get('logicweb.lang') ?? null;
+      persisted = fake.store.get('slogicweb.lang') ?? null;
     } finally {
       restoreGlobals();
       await setLocale('en');
@@ -1227,7 +1227,7 @@ const baseSettings: CaptureSettings = {
   }
 
   {
-    const fake = fakeStorage(['logicweb.lang', 'ru']);
+    const fake = fakeStorage(['slogicweb.lang', 'ru']);
     let locale: Locale = 'en';
     let text = '';
     let writes = -1;
@@ -1258,7 +1258,7 @@ const baseSettings: CaptureSettings = {
       restoreGlobals();
       await setLocale('en');
     }
-    const persisted = fake.store.get('logicweb.lang') ?? null;
+    const persisted = fake.store.get('slogicweb.lang') ?? null;
     check('an explicit pick still persists exactly once',
       result === 'committed' && fake.writes() === 1 && persisted === 'fr',
       `result=${result}, writes=${fake.writes()}, stored=${JSON.stringify(persisted)}`);

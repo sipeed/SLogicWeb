@@ -16,8 +16,26 @@
   -->
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <script>
+    // The app was renamed logicweb -> slogicweb (0.1.0). Carry every stored preference
+    // (theme, language, panel width, workspace...) to the new keys before anything below
+    // reads them; a key already written under the new name wins. Runs once per key.
     try {
-      const stored = localStorage.getItem('logicweb.theme');
+      for (const store of [localStorage, sessionStorage]) {
+        for (let i = store.length - 1; i >= 0; i--) {
+          const key = store.key(i);
+          if (!key || !key.startsWith('logicweb.')) continue;
+          const next = 's' + key;
+          if (store.getItem(next) === null) store.setItem(next, store.getItem(key));
+          store.removeItem(key);
+        }
+      }
+    } catch {
+      // Storage blocked (private mode, policy): start from defaults.
+    }
+  </script>
+  <script>
+    try {
+      const stored = localStorage.getItem('slogicweb.theme');
       const mode = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'dark';
       const dark = mode === 'dark' || (mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
       document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
@@ -27,7 +45,7 @@
   </script>
   <script>
     try {
-      const raw = localStorage.getItem('logicweb.panelWidth');
+      const raw = localStorage.getItem('slogicweb.panelWidth');
       const n = raw === null ? NaN : Number(raw);
       if (Number.isFinite(n) && n > 0) {
         document.documentElement.style.setProperty('--side-panel-w',
@@ -38,7 +56,7 @@
   </script>
   <script>
     try {
-      const workspace = JSON.parse(localStorage.getItem('logicweb.workspace') ?? 'null');
+      const workspace = JSON.parse(localStorage.getItem('slogicweb.workspace') ?? 'null');
       if (workspace?.version === 1 && workspace.detailedLabels === false) {
         document.documentElement.setAttribute('data-toolbar-labels', 'off');
       }
@@ -254,7 +272,7 @@
                 <span id="empty-hint-starting" class="empty-hint-starting"><br />Starting…</span>
                 <script>
                   try {
-                    const tag = (localStorage.getItem('logicweb.lang') || navigator.language || '').toLowerCase();
+                    const tag = (localStorage.getItem('slogicweb.lang') || navigator.language || '').toLowerCase();
                     const text = tag.startsWith('zh') ? '正在启动…' : tag.startsWith('fr') ? 'Démarrage…'
                       : tag.startsWith('ru') ? 'Запуск…' : null;
                     if (text) document.getElementById('empty-hint-starting').lastChild.textContent = text;

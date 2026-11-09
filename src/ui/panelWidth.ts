@@ -1,4 +1,4 @@
-export const PANEL_WIDTH_STORAGE_KEY = 'logicweb.panelWidth';
+export const PANEL_WIDTH_STORAGE_KEY = 'slogicweb.panelWidth';
 
 export const PANEL_WIDTH_DEFAULT = 296;
 export const PANEL_WIDTH_MIN = 240;

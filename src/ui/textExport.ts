@@ -238,11 +238,11 @@ function* vcdParts(snap: Snapshot, options: VcdExportOptions): Generator<Uint8Ar
   const ids = snap.names.map((_, j) => vcdIdentifier(j));
   const head: string[] = [];
   if (options.date !== undefined) head.push(`$date\n  ${options.date.replace(/\$end/g, '')}\n$end`);
-  head.push('$version logicweb $end');
+  head.push('$version slogicweb $end');
   head.push(`$comment samplerate ${snap.samplerate} Hz, ${snap.length} samples` +
     `${ts.exact ? '' : ', times rounded to 1 ps'} $end`);
   head.push(`$timescale ${ts.label} $end`);
-  head.push('$scope module logicweb $end');
+  head.push('$scope module slogicweb $end');
   for (let j = 0; j < ids.length; j++) {
     head.push(`$var wire 1 ${ids[j]} ${vcdName(snap.names[j]!, snap.indices[j]!)} $end`);
   }

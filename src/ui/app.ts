@@ -219,7 +219,7 @@ import {
 import { planLoopSwap } from './displaySwap.js';
 
 /** Where Pyodide and the decoder zip live; content-hashed in hosted builds (vite.config.ts). */
-declare const __LOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
+declare const __SLOGICWEB_RUNTIME_PATHS__: { pyodide: string; decoders: string };
 
 /** A store that can also count edges without materialising them (native live stores do). */
 type CountingStore = SampleStore & { edgeCount?(c: number, s: number, e: number): number };
@@ -254,7 +254,7 @@ async function partsBlob(
 }
 
 /** sessionStorage flag: this tab's user dismissed the browser-support notice. */
-const PLATFORM_NOTICE_DISMISSED_KEY = 'logicweb.platformNoticeDismissed';
+const PLATFORM_NOTICE_DISMISSED_KEY = 'slogicweb.platformNoticeDismissed';
 
 /** Create one SVG node with constant attributes; the hint glyph has no other DOM needs. */
 function svgNode(tag: string, attrs: Readonly<Record<string, string>>): SVGElement {
@@ -358,7 +358,7 @@ export class App {
   private readonly openMenu: SettingsMenu;
   /** The connected-device menu; the Device command opens the chooser instead when idle. */
   private readonly deviceMenu: SettingsMenu;
-  /** Answers/asks "which logicweb tab holds a device" for the busy-failure guidance. */
+  /** Answers/asks "which slogicweb tab holds a device" for the busy-failure guidance. */
   private readonly tabPresence = new DeviceTabPresence(() => this.device?.name ?? null);
   /**
    * Whether this browser can connect devices at all (probed once; it cannot change). Only
@@ -407,8 +407,8 @@ export class App {
     // Resolve from the document, not from the worker script. This supports static sites
     // hosted below a subdirectory and keeps all runtime files together in dist/. Hosted
     // builds put a content hash in both paths (versionRuntimeAssets in vite.config.ts).
-    pyodideIndexURL: new URL(`./${__LOGICWEB_RUNTIME_PATHS__.pyodide}`, document.baseURI).href,
-    decodersURL: new URL(`./${__LOGICWEB_RUNTIME_PATHS__.decoders}`, document.baseURI).href,
+    pyodideIndexURL: new URL(`./${__SLOGICWEB_RUNTIME_PATHS__.pyodide}`, document.baseURI).href,
+    decodersURL: new URL(`./${__SLOGICWEB_RUNTIME_PATHS__.decoders}`, document.baseURI).href,
   });
 
   private channels: ChannelState[] = defaultChannels(16);
@@ -5091,7 +5091,7 @@ export class App {
   /**
    * A failed device acquisition: the ordinary banner error plus the typed remedy
    * (connectFailure.ts) and Retry. A busy interface is then narrowed to "another
-   * logicweb tab" if one answers the presence probe while the banner still shows it.
+   * slogicweb tab" if one answers the presence probe while the banner still shows it.
    */
   private failAcquire(what: MessageKey, e: unknown): void {
     this.fail(what, e);

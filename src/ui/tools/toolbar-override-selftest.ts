@@ -109,7 +109,7 @@ let storageListener: ((event: StorageEvent) => void) | null = null;
   const limits = TOOLBAR_OVERRIDE_LIMITS;
   const keys = Object.keys(limits).sort().join(',');
   const pass =
-    TOOLBAR_OVERRIDE_STORAGE_KEY === 'logicweb.toolbar' &&
+    TOOLBAR_OVERRIDE_STORAGE_KEY === 'slogicweb.toolbar' &&
     keys === 'height,minHeight,minRatio' &&
     limits.height.min === 24 && limits.height.max === 240 &&
     limits.minHeight.min === 0 && limits.minHeight.max === 240 &&
@@ -396,7 +396,7 @@ let storageListener: ((event: StorageEvent) => void) | null = null;
   storage.data.set(TOOLBAR_OVERRIDE_STORAGE_KEY, '{"height":200,"minHeight":10,"minRatio":30}');
   log.length = 0;
   notified = 0;
-  storageListener?.(storageEvent('logicweb.theme'));
+  storageListener?.(storageEvent('slogicweb.theme'));
   const afterUnrelatedEvent = getToolbarOverride();
   const unrelatedOps = formatOps(log);
   const unrelatedNotified = notified;

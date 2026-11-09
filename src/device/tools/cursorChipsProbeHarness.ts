@@ -82,7 +82,7 @@ function describe(chips: ReturnType<App['debug']['cursorChips']>): string {
 export async function runCursorChipsProbe(
   set: CursorChipsProbeSet = 'default',
 ): Promise<CursorChipsProbeReport> {
-  const app = window.logicweb as unknown as ProbeApp | undefined;
+  const app = window.slogicweb as unknown as ProbeApp | undefined;
   if (!app) throw new Error('the App is not ready');
   app.discardDevice();
   const worker = new FakeUsbWorker({ name: String(6000) });

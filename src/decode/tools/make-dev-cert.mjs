@@ -43,7 +43,7 @@ try {
   execFileSync('openssl', [
     'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
     '-keyout', key, '-out', cert, '-days', '825',
-    '-subj', '/CN=logicweb-dev',
+    '-subj', '/CN=slogicweb-dev',
     '-addext', `subjectAltName=${san}`,
   ], { stdio: ['ignore', 'ignore', 'inherit'] });
 } catch (e) {

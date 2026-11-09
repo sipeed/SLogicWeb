@@ -88,7 +88,7 @@ const shotBefore = await shot();
 await new Promise(resolve => setTimeout(resolve, seconds * 1000));
 const after = await evalInPage('window.__lwFixedWindowProbe.snapshot()');
 const shotAfter = await shot();
-await evalInPage(`window.logicweb.debug.setViewportSeconds(${viewStartSeconds + 0.02}, ${viewEndSeconds + 0.02})`);
+await evalInPage(`window.slogicweb.debug.setViewportSeconds(${viewStartSeconds + 0.02}, ${viewEndSeconds + 0.02})`);
 await new Promise(resolve => setTimeout(resolve, 300));
 const shotPanned = await shot();
 const finished = await evalInPage(

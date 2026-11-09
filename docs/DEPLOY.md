@@ -44,7 +44,7 @@ and gets a plain `/`, which is also the default when you build locally.
 To reproduce a project-page build by hand:
 
 ```
-npm run build -- --base=/logicweb/
+npm run build -- --base=/slogicweb/
 ```
 
 ## The firmware-update pages under `/ota/`
@@ -101,7 +101,7 @@ Every file it serves has a content-hashed name except `index.html`, `sw.js`, the
 and the icons, and the worker refetches the last three itself on each new version. After a
 deploy, purge exactly **`index.html` and `sw.js`** from the CDN; a stale `sw.js` only delays
 the update, and a stale `index.html` makes the new worker's install fail (it checks the
-`logicweb-build` stamp) until the purge lands. Open tabs then show "A new version is ready"
+`slogicweb-build` stamp) until the purge lands. Open tabs then show "A new version is ready"
 and reload only when the user clicks.
 
 The worker's scope is the site root, so it also sees `/ota/` requests, but it answers only
@@ -110,7 +110,7 @@ the network untouched. The portable single-file build has no worker and no manif
 
 ## What was verified, and the one thing that will break it
 
-Measured against a build served from a `/logicweb/` subdirectory in headless Brave:
+Measured against a build served from a `/slogicweb/` subdirectory in headless Brave:
 
 | | |
 |---|---|

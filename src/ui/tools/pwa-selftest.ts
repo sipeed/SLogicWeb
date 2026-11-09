@@ -80,7 +80,7 @@ const SYNTHETIC: Record<string, string> = {
 const INLINED = ['assets/index-AAAAAAAA.js', 'assets/index-BBBBBBBB.css'];
 
 function makeDist(overrides: Record<string, string> = {}): string {
-  const dir = fs!.mkdtempSync(`${os!.tmpdir()}/logicweb-pwa-`);
+  const dir = fs!.mkdtempSync(`${os!.tmpdir()}/slogicweb-pwa-`);
   for (const [rel, body] of Object.entries({ ...SYNTHETIC, ...overrides })) {
     const at = rel.lastIndexOf('/');
     if (at > 0) fs!.mkdirSync(`${dir}/${rel.slice(0, at)}`, { recursive: true });
@@ -143,10 +143,10 @@ try {
   let restampThrows = false;
   try { stampIndex(html, version); } catch { restampThrows = true; }
   check('index.html: stamped once with the build version and the manifest link',
-    html.includes(`<meta name="logicweb-build" content="${version}">`) &&
+    html.includes(`<meta name="slogicweb-build" content="${version}">`) &&
       html.includes('<link rel="manifest" href="manifest.webmanifest">') &&
-      html.indexOf('logicweb-build') > html.indexOf('</title>') && restampThrows &&
-      template.includes('<meta name="logicweb-build" content="${VERSION}">'),
+      html.indexOf('slogicweb-build') > html.indexOf('</title>') && restampThrows &&
+      template.includes('<meta name="slogicweb-build" content="${VERSION}">'),
     'sw.js verifies the same meta at install');
 
   const again = makeDist();
@@ -172,7 +172,7 @@ try {
   const installBody = s.slice(s.indexOf("addEventListener('install'"), s.indexOf("addEventListener('activate'"));
   const navigateBody = s.slice(s.indexOf('async function navigate'), s.indexOf('async function cacheFirst'));
   check('sw: cache names are scoped and versioned; activation deletes other versions',
-    s.includes('const PREFIX = `logicweb:${SCOPE}:`;') &&
+    s.includes('const PREFIX = `slogicweb:${SCOPE}:`;') &&
       s.includes('const SHELL_CACHE = `${PREFIX}shell-${VERSION}`;') &&
       /name\.startsWith\(PREFIX\) && name !== SHELL_CACHE && name !== RUNTIME_CACHE/.test(s) &&
       s.includes('caches.delete(name)') && s.includes('if (!RUNTIME_URLS.has(request.url)) await runtime.delete(request);'),
@@ -215,17 +215,17 @@ try {
 
   const config = fs.readFileSync('vite.config.ts', 'utf8');
   const update = fs.readFileSync('src/ui/pwaUpdate.ts', 'utf8');
-  check('build flag: __LOGICWEB_PWA__ is false for dev and portable, and gates registration',
+  check('build flag: __SLOGICWEB_PWA__ is false for dev and portable, and gates registration',
     config.includes("enabled = env.command === 'build' && !portable;") &&
-      config.includes('__LOGICWEB_PWA__: JSON.stringify(enabled)') &&
+      config.includes('__SLOGICWEB_PWA__: JSON.stringify(enabled)') &&
       /inlineEntryForFileOpen\(\), hostedWorkerFiles\(\), pwaShell\(\),/.test(config) &&
-      update.includes('if (!__LOGICWEB_PWA__) return;') &&
+      update.includes('if (!__SLOGICWEB_PWA__) return;') &&
       update.includes("navigator.serviceWorker.register('./sw.js')"),
     'pwaShell runs after the inline step');
 
   const main = fs.readFileSync('src/ui/main.ts', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
-  const afterApp = main.indexOf('window.logicweb = new App();');
+  const afterApp = main.indexOf('window.slogicweb = new App();');
   const hint = html.slice(html.indexOf('<div id="empty-hint"'), html.indexOf('</div>', html.indexOf('<div id="empty-hint"')));
   check('boot: "Starting…" sits in #empty-hint and main.ts removes it, then registers',
     hint.includes('id="empty-hint-starting"') && hint.includes('Starting…') &&

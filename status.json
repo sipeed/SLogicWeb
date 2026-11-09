@@ -400,7 +400,7 @@
     },
     {
       "t": "03:31",
-      "m": "open-time re-benchmarked in real Brave over CDP: 11 ms median at 5 s, 30 ms at 120 s (app-side performance.now), against a mature commercial tool's 146/151. The bar is beaten 5-13x and the 3.2x size-growth loss is dead. Report: /tmp/logicweb-ui/report.json"
+      "m": "open-time re-benchmarked in real Brave over CDP: 11 ms median at 5 s, 30 ms at 120 s (app-side performance.now), against a mature commercial tool's 146/151. The bar is beaten 5-13x and the 3.2x size-growth loss is dead. Report: /tmp/slogicweb-ui/report.json"
     },
     {
       "t": "03:31",

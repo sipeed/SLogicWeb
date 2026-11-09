@@ -50,7 +50,7 @@ SRD_INITIAL_PIN_LOW = 0
 SRD_INITIAL_PIN_HIGH = 1
 SRD_INITIAL_PIN_SAME_AS_SAMPLE0 = 2
 
-__version__ = '0.6.0-logicweb'
+__version__ = '0.6.0-slogicweb'
 
 
 class Signal:

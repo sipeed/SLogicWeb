@@ -280,7 +280,7 @@ verifies a UART known answer from `file://` and rejects any non-Blob side reques
 
 `npm run dev` keeps the large assets external for faster rebuilds, but uses the
 same worker code and evaluation path. Only the portable build sets
-`LOGICWEB_PORTABLE=1` and injects the base64 payloads.
+`SLOGICWEB_PORTABLE=1` and injects the base64 payloads.
 
 ## What is still unverified
 

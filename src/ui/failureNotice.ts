@@ -20,7 +20,7 @@ export type FailureNoticeKind =
   | 'decodeTooLarge' | 'decodeFailed' | 'decodeUnavailable'
   | 'noData' | 'linkFailed';
 
-/** Not a file logicweb opens at all (wrong type, or nothing chosen). */
+/** Not a file slogicweb opens at all (wrong type, or nothing chosen). */
 const FILE_TYPE: ReadonlySet<DiagnosticCode> = new Set<DiagnosticCode>([
   'file.noFiles', 'file.unsupported', 'file.sr.notZip', 'file.lwcap.magic',
 ]);

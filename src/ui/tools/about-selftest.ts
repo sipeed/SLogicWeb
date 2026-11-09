@@ -44,7 +44,7 @@ function check(name: string, pass: boolean, detail: string): void {
 {
   const view = aboutView({ version: '1.2.3', hash: 'abc1234' });
   check('the About view names the app, version and build, the GPL line and the copyright',
-    view.title === en['about.title'] && view.name === 'logicweb' && view.subtitle === en['app.title'] &&
+    view.title === en['about.title'] && view.name === 'slogicweb' && view.subtitle === en['app.title'] &&
       view.version === 'Version 1.2.3 · build abc1234' &&
       view.license === 'GPL-3.0-or-later · no warranty' &&
       view.copyright === '© 2026 Daniel Tralamazza' && COPYRIGHT === view.copyright &&
@@ -52,7 +52,7 @@ function check(name: string, pass: boolean, detail: string): void {
     JSON.stringify(view));
   check('the About links are the source repository, its LICENSE and NOTICE.md (third-party decoders)',
     view.links.length === 3 &&
-      view.links[0]!.href === 'https://github.com/tralamazza/logicweb' && view.links[0]!.href === SOURCE_URL &&
+      view.links[0]!.href === 'https://github.com/sipeed/slogicweb' && view.links[0]!.href === SOURCE_URL &&
       view.links[1]!.href === LICENSE_URL && LICENSE_URL.endsWith('/LICENSE') &&
       view.links[2]!.href === NOTICE_URL && NOTICE_URL.endsWith('/NOTICE.md') &&
       view.links.every((l) => l.href.startsWith('https://') && l.label.length > 0),

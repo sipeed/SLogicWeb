@@ -21,7 +21,7 @@ import {
 import { parseSidebarPage, type SidebarPage } from './sidebar.js';
 import { isRestorableThreshold } from './thresholdOptions.js';
 
-export const WORKSPACE_STORAGE_KEY = 'logicweb.workspace';
+export const WORKSPACE_STORAGE_KEY = 'slogicweb.workspace';
 export const WORKSPACE_SCHEMA_VERSION = 1 as const;
 export const MAX_PERSISTED_ANALYZERS = 64;
 

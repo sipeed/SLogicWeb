@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
 /*
- * logicweb service worker: the offline shell for the hosted build (docs/ARCHITECTURE.md
+ * slogicweb service worker: the offline shell for the hosted build (docs/ARCHITECTURE.md
  * section 7.2). Hand-written on purpose - no workbox; the whole policy fits on a page.
  *
  * The build (src/pwa/shell.mjs, run from vite.config.ts) replaces the SHELL token
@@ -38,11 +38,11 @@
  *   is never swapped to a different shell underneath the user.
  */
 
-const SHELL = __LOGICWEB_SHELL__;
+const SHELL = __SLOGICWEB_SHELL__;
 
 const VERSION = SHELL.version;
 const SCOPE = self.registration.scope;
-const PREFIX = `logicweb:${SCOPE}:`;
+const PREFIX = `slogicweb:${SCOPE}:`;
 const SHELL_CACHE = `${PREFIX}shell-${VERSION}`;
 const RUNTIME_CACHE = `${PREFIX}runtime`;
 const NAV_TIMEOUT_MS = 4000;
@@ -64,7 +64,7 @@ async function precache() {
   const index = await fetch(`${INDEX_URL}?sw=${VERSION}`, { cache: 'reload' });
   if (!storable(index)) throw new Error(`shell index fetch failed: ${index.status}`);
   const html = await index.clone().text();
-  if (!html.includes(`<meta name="logicweb-build" content="${VERSION}">`)) {
+  if (!html.includes(`<meta name="slogicweb-build" content="${VERSION}">`)) {
     throw new Error('shell index.html is not this build (stale CDN copy?)');
   }
   await cache.put(INDEX_URL, index);
@@ -96,7 +96,9 @@ async function fillRuntime() {
 
 async function rotate() {
   for (const name of await caches.keys()) {
-    if (name.startsWith(PREFIX) && name !== SHELL_CACHE && name !== RUNTIME_CACHE) {
+    // `logicweb:` is the pre-rename (before 0.1.0) prefix: nothing reads those caches now.
+    const legacy = name.startsWith('logicweb:');
+    if (legacy || (name.startsWith(PREFIX) && name !== SHELL_CACHE && name !== RUNTIME_CACHE)) {
       await caches.delete(name);
     }
   }

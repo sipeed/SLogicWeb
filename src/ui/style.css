@@ -49,7 +49,7 @@
  *
  * Dark overrides are scoped to html[data-theme="dark"].
  *
- * Naming collision, settled: logicweb's --accent is the BRAND violet (checks, primary
+ * Naming collision, settled: slogicweb's --accent is the BRAND violet (checks, primary
  * action, focus); shadcn's --accent is a HOVER SURFACE. shadcn's --accent is never
  * introduced here - the brand role maps to --primary, hover surfaces to --muted /
  * --secondary, and --accent keeps its legacy meaning.
@@ -97,7 +97,7 @@ html[data-theme="dark"] {
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
   --muted-foreground: oklch(0.708 0 0);
-  /* [CHOSEN] shadcn's violet ramp keeps logicweb's brand hue instead of the neutral
+  /* [CHOSEN] shadcn's violet ramp keeps slogicweb's brand hue instead of the neutral
      near-white default primary. */
   --primary: oklch(0.606 0.25 292.7);
   --primary-foreground: oklch(0.969 0.016 293.756);
