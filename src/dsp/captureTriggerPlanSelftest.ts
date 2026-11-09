@@ -35,7 +35,7 @@ import {
 } from './captureTriggerPlan.js';
 import {
   ADC_TRIGGER_HYSTERESIS_CODES,
-  analogTriggerPersistSamples,
+  analogTriggerArtifactSamples,
 } from '../ui/channelBanks.js';
 
 interface TestResult {
@@ -873,8 +873,8 @@ for (const sample of [
         result.plan?.source === 'analog' && host !== undefined && host !== null &&
         host.analogHysteresis === ADC_TRIGGER_HYSTERESIS_CODES &&
         host.analogHysteresis === 4 &&
-        host.analogPersistSamples === persist &&
-        host.analogPersistSamples === analogTriggerPersistSamples(samplerate) &&
+        host.analogArtifactSamples === persist &&
+        host.analogArtifactSamples === analogTriggerArtifactSamples(samplerate) &&
         host.samplerate === samplerate,
       showRefusal(result) + ` host=${JSON.stringify(host)}`,
     );
@@ -935,7 +935,7 @@ for (const sample of [
   check(
     'a digital descriptor carries the qualification too (ignored by digital matching)',
     armed(digitalResult)?.host.analogHysteresis === 4 &&
-      armed(digitalResult)?.host.analogPersistSamples === 24,
+      armed(digitalResult)?.host.analogArtifactSamples === 24,
     show(digitalResult),
   );
   const other = captureTriggerPlan(makeInput({ digital: [{ channel: 9, kind: 'rising' }] }));

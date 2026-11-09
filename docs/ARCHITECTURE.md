@@ -532,24 +532,35 @@ type TriggerBudget =
   of the old and new codes (143→144 reads 159, 127→128 reads 255) for up to ~140 ns —
   measured 2026-11-06 on a 32U3 at 100 MS/s: 1338 such runs in 10 ms, every one at a carry
   boundary, 1–14 samples long. A raw "previous < level ≤ current" test therefore fires on
-  the falling slope of a Rising condition. Every analog executor (the `SoftwareTrigger`
-  matcher behind Single/Repeat and the host plan, and the Loop page scanner) applies one
-  rule: **hysteresis** — rising arms only after a code ≤ `level − h`, falling after a code
-  ≥ `level + h`, h = 4 codes — and **persistence** — a candidate (the first armed sample
-  at or past the level) is confirmed only when the code stays at or past the level for
-  `P = ceil(240 ns × samplerate)` samples (24 at 100 MS/s); a sample back across the level
-  drops the candidate and keeps the arm. The arm persists too: it needs P consecutive
-  codes past `level ∓ h`. The OR only ever raises a code, so it fakes a rising candidate
-  and a *falling arm* (111→112 reads 127, arming Falling 112 on the rising slope); with
-  P = 1 both rules are one sample. T is the candidate sample, not the confirming one.
-  Candidate state carries across transfers and gaps reset it; the matcher keeps at most
-  P − 1 samples beyond the pre-trigger ring so the emitted prefix still ends at T, the
-  persistence samples count toward the search limit, and a candidate inside the pre-fill
-  holdoff is consumed. Mixed digital + analog: the digital part must hold on T. On the
-  measured trace this confirms 1000/1000 crossings on the right slope (raw: 8651 of 17985
-  detections on the wrong one) with T −0.2…+0.7 µs from the smoothed crossing. h and the
-  240 ns window are constants beside the ADC scale data; displayed and saved samples are
-  not filtered.
+  the falling slope of a Rising condition. Rejecting short runs by *duration* is wrong
+  too: a real AM wave with a ~3.3 MHz carrier crosses for ~15 samples per half period and
+  one with a ~33 MHz carrier for one or two; a 240 ns persistence rule never triggered on
+  either (measured 2026-11-09). Every analog executor (the `SoftwareTrigger` matcher behind
+  Single/Repeat and the host plan, the Loop page scanner and the SimDriver) applies one
+  rule:
+  - **Hysteresis**: Rising arms only on a code ≤ `level − h`, Falling on a code ≥
+    `level + h`, h = 4 codes. A crossing fires once per arm.
+  - **OR-artifact rejection**: a *run* is the maximal stretch of consecutive samples on one
+    side of a threshold (past the level for a candidate, past `level ∓ h` for an arm). A run
+    is an artifact when it is at most `W = ceil(240 ns × samplerate)` samples long (24 at
+    100 MS/s), it ends (the next sample is back on the other side), and every code `g` in
+    it carries every 1-bit of both neighbours and is larger than both
+    (`(g & a) === a`, `(g & b) === b`, `g > max(a, b)`, with `a` the sample before the run
+    and `b` the one after). The OR only ever raises a code, so it can fake a Rising
+    candidate and a Falling arm; an artifact run neither fires nor arms. A run is judged
+    once, from its first sample (inside a glitch run the neighbour is the glitch itself).
+    Any other run - longer than W, or with codes of any other shape - is real.
+  - **T is the first sample of the candidate run.** Deciding needs at most W samples of
+    look-ahead; the state carries across transfers (including a sample split across
+    transfers), gaps reset it, the matcher keeps at most W samples beyond the pre-trigger
+    ring so the emitted prefix still ends at T, look-ahead samples count toward the search
+    limit, and a candidate inside the pre-fill holdoff is consumed. Mixed digital + analog:
+    the digital part must hold on T.
+  - Pinned to the real traces in `fixtures/` (`fixtures/ADC-TRACES.md`): the glitchy sine
+    gives one trigger per period on the configured slope (1999/2000 over ten levels × both
+    slopes, 0 on the wrong slope; raw: 16148 of 34428 wrong), and both AM waves trigger on
+    every real crossing (the 240 ns persistence rule gave 0). h and the 240 ns window are
+    constants beside the ADC scale data; displayed and saved samples are not filtered.
 - **P0 keeps the single-family rule** (digital *or* analog) to preserve current
   behaviour. **P1 allows mixed digital + analog** when `profile.trigger.mixed` is true.
   The UI does not offer mixed conditions on a profile that cannot execute them.

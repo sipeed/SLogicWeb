@@ -93,9 +93,9 @@
  *
  *  - hysteresis `analogHysteresis` (h codes, default `ADC_TRIGGER_HYSTERESIS_CODES`, or
  *    the plan's volt hysteresis in codes when that is larger): a rising condition arms
- *    after `analogPersistSamples` consecutive codes <= level - h (falling: >= level + h,
+ *    after `analogArtifactSamples` consecutive codes <= level - h (falling: >= level + h,
  *    clamped to the code range);
- *  - persistence `analogPersistSamples` (P, default `analogTriggerPersistSamples(rate)`,
+ *  - persistence `analogArtifactSamples` (P, default `analogTriggerArtifactSamples(rate)`,
  *    i.e. ceil(240 ns * rate)): the first armed sample at/past the level is the
  *    candidate; it is confirmed when P consecutive samples, the candidate included, stay
  *    at/past the level. A sample back across the level drops the candidate and keeps
@@ -170,7 +170,7 @@ import {
   ADC_LSB_V,
   ADC_TRIGGER_HYSTERESIS_CODES,
   analogTriggerCode,
-  analogTriggerPersistSamples,
+  analogTriggerArtifactSamples,
 } from '../ui/channelBanks.js';
 import { emulationRules } from './emulationPattern.js';
 import { sampleRatesFor } from './profile.js';
@@ -199,7 +199,7 @@ const DEFAULT_DROPOUT_SAMPLES = 32;
 /** Inputs of one ADC bank. */
 const SIM_ANALOG_BANK = 8;
 /** Bounds of the qualification fields; the same ranges `SoftwareTrigger` validates
- * (`analogHysteresis` 1..255, `analogPersistSamples` 1..MAX_ANALOG_PERSIST_SAMPLES). */
+ * (`analogHysteresis` 1..255, `analogArtifactSamples` 1..MAX_ANALOG_ARTIFACT_SAMPLES). */
 const SIM_ANALOG_HYSTERESIS_MAX = 255;
 const SIM_ANALOG_PERSIST_MAX = 4096;
 
@@ -300,9 +300,9 @@ export interface SimDriverOptions {
   readonly analogHysteresis?: number;
   /**
    * Samples an analog candidate (and an arm) must persist, an integer 1..4096. Default
-   * `analogTriggerPersistSamples(samplerate)` = ceil(240 ns * rate), 24 at 100 MS/s.
+   * `analogTriggerArtifactSamples(samplerate)` = ceil(240 ns * rate), 24 at 100 MS/s.
    */
-  readonly analogPersistSamples?: number;
+  readonly analogArtifactSamples?: number;
   /**
    * Samples one search may inspect before the driver gives up (`searchExhausted`), a
    * positive integer or Infinity. Default Infinity.
@@ -354,7 +354,7 @@ interface ResolvedOptions {
   readonly analog: SimAnalogSource | null;
   /** Null: use the default for the resolved rate. */
   readonly analogHysteresis: number | null;
-  readonly analogPersistSamples: number | null;
+  readonly analogArtifactSamples: number | null;
   readonly searchLimitSamples: number;
 }
 
@@ -367,7 +367,7 @@ interface ResolvedConfig {
   readonly groupId: string;
   readonly analog: SimAnalogSource | null;
   readonly analogHysteresis: number;
-  readonly analogPersistSamples: number;
+  readonly analogArtifactSamples: number;
   readonly searchLimitSamples: number;
 }
 
@@ -579,7 +579,7 @@ function compileSimAnalog(
   }
   // A level within h of the code range's end arms at the end code itself.
   const arm = rise ? Math.max(0, level - h) : Math.min(255, level + h);
-  return { rise, level, arm, persist: config.analogPersistSamples };
+  return { rise, level, arm, persist: config.analogArtifactSamples };
 }
 
 function validateFaults(faults: readonly SimFault[]): FaultState[] {
@@ -668,12 +668,12 @@ function resolveOptions(
         analogHysteresis > SIM_ANALOG_HYSTERESIS_MAX)) {
     throw invalid(`analogHysteresis must be an integer code count 1..255, got ${String(analogHysteresis)}`);
   }
-  const analogPersistSamples = source.analogPersistSamples ?? defaults.analogPersistSamples ?? null;
-  if (analogPersistSamples !== null &&
-      (!Number.isInteger(analogPersistSamples) || analogPersistSamples < 1 ||
-        analogPersistSamples > SIM_ANALOG_PERSIST_MAX)) {
+  const analogArtifactSamples = source.analogArtifactSamples ?? defaults.analogArtifactSamples ?? null;
+  if (analogArtifactSamples !== null &&
+      (!Number.isInteger(analogArtifactSamples) || analogArtifactSamples < 1 ||
+        analogArtifactSamples > SIM_ANALOG_PERSIST_MAX)) {
     throw invalid(
-      `analogPersistSamples must be an integer 1..${SIM_ANALOG_PERSIST_MAX}, got ${String(analogPersistSamples)}`,
+      `analogArtifactSamples must be an integer 1..${SIM_ANALOG_PERSIST_MAX}, got ${String(analogArtifactSamples)}`,
     );
   }
   const searchLimitSamples = source.searchLimitSamples ?? defaults.searchLimitSamples ??
@@ -685,7 +685,7 @@ function resolveOptions(
 
   return {
     seed, linkRate, groupId, transferBytes, faults, trigger, onEnd,
-    analog, analogHysteresis, analogPersistSamples, searchLimitSamples,
+    analog, analogHysteresis, analogArtifactSamples, searchLimitSamples,
   };
 }
 
@@ -1032,7 +1032,7 @@ export class SimDriver {
       groupId: options.groupId,
       analog: options.analog,
       analogHysteresis: options.analogHysteresis ?? ADC_TRIGGER_HYSTERESIS_CODES,
-      analogPersistSamples: options.analogPersistSamples ?? analogTriggerPersistSamples(samplerate),
+      analogArtifactSamples: options.analogArtifactSamples ?? analogTriggerArtifactSamples(samplerate),
       searchLimitSamples: options.searchLimitSamples,
     };
   }

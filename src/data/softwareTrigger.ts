@@ -30,7 +30,7 @@
  *  - hysteresis `h` (`analogHysteresis`): a rising condition arms only after P
  *    consecutive codes <= `level - h` (falling: >= `level + h`, both clamped to the code
  *    range);
- *  - persistence `P` (`analogPersistSamples`): the first armed sample at/past the level
+ *  - persistence `P` (`analogArtifactSamples`): the first armed sample at/past the level
  *    is a *candidate*; it is confirmed only when P consecutive samples, the candidate
  *    included, stay at/past the level. A sample back across the level drops the
  *    candidate and keeps the arm; confirmation disarms.
@@ -43,7 +43,7 @@
  *
  * T is the candidate sample, confirmed P - 1 samples later. To still emit exactly
  * `preTriggerSamples` before T, the waiting ring holds `preTriggerSamples + P - 1`
- * samples (bounded by MAX_ANALOG_PERSIST_SAMPLES); the persistence samples are inspected
+ * samples (bounded by MAX_ANALOG_ARTIFACT_SAMPLES); the persistence samples are inspected
  * and count toward `searchLimitSamples`. The pre-fill holdoff then applies to T: a
  * confirmation whose candidate lies inside the holdoff is consumed without a match.
  * Candidate state carries across transfers (complete samples only); a gap,
@@ -77,10 +77,10 @@ export const MAX_SOFTWARE_TRIGGER_PREFIX_BYTES = 64 * 1024 * 1024;
  */
 export const DEFAULT_ANALOG_HYSTERESIS_CODES = 4;
 /**
- * Upper bound on `analogPersistSamples`. 240 ns at the ADC's 800 MS/s ceiling is 192
+ * Upper bound on `analogArtifactSamples`. 240 ns at the ADC's 800 MS/s ceiling is 192
  * samples; the bound only keeps a mistyped value from growing the waiting ring.
  */
-export const MAX_ANALOG_PERSIST_SAMPLES = 4096;
+export const MAX_ANALOG_ARTIFACT_SAMPLES = 4096;
 
 /**
  * Bounded-cost scanning for repeated (continuous-mode) matches.
@@ -177,17 +177,17 @@ export interface SoftwareTriggerConfig {
   /**
    * Analog arming hysteresis in codes, an integer 1..255; default
    * DEFAULT_ANALOG_HYSTERESIS_CODES. 1 arms on any code before the level, which with
-   * `analogPersistSamples: 1` is the old raw crossing test. May change on `reconfigure()`
+   * `analogArtifactSamples: 1` is the old raw crossing test. May change on `reconfigure()`
    * (omitted there: keep the running value).
    */
   analogHysteresis?: number;
   /**
    * Samples an analog candidate must stay at/past the level, the candidate included,
-   * an integer 1..MAX_ANALOG_PERSIST_SAMPLES; default 1 (no persistence). The app passes
+   * an integer 1..MAX_ANALOG_ARTIFACT_SAMPLES; default 1 (no persistence). The app passes
    * `ceil(240 ns * samplerate)`. Fixed for a matcher, because it sizes the waiting ring:
    * `reconfigure()` refuses a different value (omitted there: keep the running value).
    */
-  analogPersistSamples?: number;
+  analogArtifactSamples?: number;
   /** Legacy single-condition fields; retained for callers upgrading from v1. */
   kind?: SoftwareTriggerKind;
   /** Used by `level`; rising/falling/edge use the transition between samples. */
@@ -445,11 +445,11 @@ function assertConfig(c: SoftwareTriggerConfig): void {
       (!Number.isInteger(c.analogHysteresis) || c.analogHysteresis < 1 || c.analogHysteresis > 255)) {
     throw new Error(`analogHysteresis must be an integer code count 1..255, got ${c.analogHysteresis}`);
   }
-  if (c.analogPersistSamples !== undefined &&
-      (!Number.isInteger(c.analogPersistSamples) || c.analogPersistSamples < 1 ||
-        c.analogPersistSamples > MAX_ANALOG_PERSIST_SAMPLES)) {
+  if (c.analogArtifactSamples !== undefined &&
+      (!Number.isInteger(c.analogArtifactSamples) || c.analogArtifactSamples < 1 ||
+        c.analogArtifactSamples > MAX_ANALOG_ARTIFACT_SAMPLES)) {
     throw new Error(
-      `analogPersistSamples must be an integer 1..${MAX_ANALOG_PERSIST_SAMPLES}, got ${c.analogPersistSamples}`,
+      `analogArtifactSamples must be an integer 1..${MAX_ANALOG_ARTIFACT_SAMPLES}, got ${c.analogArtifactSamples}`,
     );
   }
   normalizeScanOptions(c.scan);
@@ -485,7 +485,7 @@ export class SoftwareTrigger {
   /** Analog arming hysteresis in codes; updated by reconfigure(). */
   analogHysteresis: number;
   /** Analog persistence in samples; fixed (it sizes the ring). */
-  readonly analogPersistSamples: number;
+  readonly analogArtifactSamples: number;
 
   private readonly emit: (chunk: Uint8Array) => void;
   private readonly onMatch: ((match: SoftwareTriggerMatch) => void) | null;
@@ -515,7 +515,7 @@ export class SoftwareTrigger {
   private exactIdleAfterAbs = 0;
   /** Offset of the sample at which `stepQualified` last stopped for being idle. */
   private qualifiedStopOff = 0;
-  /** Pre-trigger ring capacity: `preTriggerSamples + analogPersistSamples - 1`. */
+  /** Pre-trigger ring capacity: `preTriggerSamples + analogArtifactSamples - 1`. */
   private readonly ringCapacity: number;
   private ringStart = 0;
   private ringCount = 0;
@@ -587,10 +587,10 @@ export class SoftwareTrigger {
       throw new Error('software trigger requires at least one condition');
     }
     this.analogHysteresis = opts.config.analogHysteresis ?? DEFAULT_ANALOG_HYSTERESIS_CODES;
-    this.analogPersistSamples = opts.config.analogPersistSamples ?? 1;
+    this.analogArtifactSamples = opts.config.analogArtifactSamples ?? 1;
     this.installConditions(conditions, analog);
     this.preTriggerSamples = this.clampPreTrigger(opts.config.preTriggerSamples);
-    this.ringCapacity = this.preTriggerSamples + this.analogPersistSamples - 1;
+    this.ringCapacity = this.preTriggerSamples + this.analogArtifactSamples - 1;
     this.searchLimitSamples = opts.config.searchLimitSamples ?? this.maxSamples + this.preTriggerSamples;
     this.emit = opts.emit;
     // Validate the scan-buffer cap before allocating anything, so a rejected configuration
@@ -624,7 +624,7 @@ export class SoftwareTrigger {
       requested,
       Math.max(0, this.maxSamples - 1),
       Math.max(0, Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / this.bytesPerSample) -
-        (this.analogPersistSamples - 1)),
+        (this.analogArtifactSamples - 1)),
     );
   }
 
@@ -655,8 +655,8 @@ export class SoftwareTrigger {
     }
     if (config.channels !== this.channels) return false;
     // The persistence window sizes the ring like the prefix does; omitted keeps it.
-    if (config.analogPersistSamples !== undefined &&
-        config.analogPersistSamples !== this.analogPersistSamples) return false;
+    if (config.analogArtifactSamples !== undefined &&
+        config.analogArtifactSamples !== this.analogArtifactSamples) return false;
     // The constructor clamps the requested prefix to the capture budget and the prefix
     // byte bound; a caller repeating its original request must still be accepted.
     const effectivePreTrigger = this.clampPreTrigger(config.preTriggerSamples);
@@ -1030,7 +1030,7 @@ export class SoftwareTrigger {
   private consumeAlignedAnalog(bytes: Uint8Array, scanSamples: number): number {
     const bps = this.bytesPerSample;
     const to = scanSamples * bps;
-    const lag = this.analogPersistSamples - 1;
+    const lag = this.analogArtifactSamples - 1;
     // `ringCount` is the samples observed since the last ring reset, exact below the
     // ring's capacity - and the capacity is exactly the `pre + lag` a match needs.
     const need = this.preTriggerSamples + lag;
@@ -1311,7 +1311,7 @@ export class SoftwareTrigger {
         continue;
       }
       if (coarse === COARSE_ARM) {
-        pos = this.enterExact(baseAbs, candAbs, candAbs + this.analogPersistSamples - 1);
+        pos = this.enterExact(baseAbs, candAbs, candAbs + this.analogArtifactSamples - 1);
         continue;
       }
       this.lastScannedSample.set(region.subarray(off, off + bps));
@@ -1390,7 +1390,7 @@ export class SoftwareTrigger {
    */
   private runExact(buf: Uint8Array, bufBaseAbs: number, fromAbs: number, toAbs: number): number {
     const bps = this.bytesPerSample;
-    const lag = this.analogPersistSamples - 1;
+    const lag = this.analogArtifactSamples - 1;
     let abs = fromAbs;
     while (abs < toAbs) {
       // At stride 1 the machine never hands back: it is the scan.
@@ -1429,14 +1429,14 @@ export class SoftwareTrigger {
   /**
    * Advance the qualified analog machine (and the digital edge state) over whole samples
    * `[from, to)` of `bytes`. Returns the offset of the sample that confirms a match (T is
-   * `analogPersistSamples - 1` samples earlier), -1 at `to`, or -2 when, at a sample at
+   * `analogArtifactSamples - 1` samples earlier), -1 at `to`, or -2 when, at a sample at
    * or after `idleFrom`, no candidate is pending (`qualifiedStopOff` is that sample).
    * See the module comment for the rule; state lives in the fields, so a call may stop
    * and resume anywhere, including across transfers.
    */
   private stepQualified(bytes: Uint8Array, from: number, to: number, idleFrom: number): number {
     const bps = this.bytesPerSample;
-    const persist = this.analogPersistSamples;
+    const persist = this.analogArtifactSamples;
     const an = this.analogCompiled;
     const conds = this.compiled;
     const armed = this.analogArmed;

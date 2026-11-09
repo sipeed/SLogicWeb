@@ -6,7 +6,7 @@
 
 import { AnalogCrossingScanner } from '../analogCrossingScan.js';
 import {
-  ADC_TRIGGER_HYSTERESIS_CODES, analogTriggerPersistSamples, analogTriggerQualification,
+  ADC_TRIGGER_HYSTERESIS_CODES, analogTriggerArtifactSamples, analogTriggerQualification,
 } from '../channelBanks.js';
 import { reverseAdcByte } from '../../data/softwareTrigger.js';
 import {
@@ -289,7 +289,7 @@ function scanChunks(
           const raw = encodeCodes(trace.codes, channels, start, stride + level);
           const scanner = new AnalogCrossingScanner({
             channels, condition: { start, kind, level }, stride,
-            analogHysteresis: H, analogPersistSamples: P,
+            analogHysteresis: H, analogArtifactSamples: P,
           });
           const found = scanChunks(scanner, raw, bps, stride * 7 + level + channels, 4000);
           const clean = cleanCrossings(trace, kind, level).filter((c) => c > 200).length;
@@ -322,7 +322,7 @@ function scanChunks(
     for (const stride of [1, 16]) {
       const scanner = new AnalogCrossingScanner({
         channels: 16, condition: { start: 0, kind, level }, stride,
-        analogHysteresis: H, analogPersistSamples: P,
+        analogHysteresis: H, analogArtifactSamples: P,
       });
       const found = scanChunks(scanner, raw, 2, level + stride, 3000);
       if (found.length > 0) fired.push(`${kind} ${level} stride ${stride}: ${found[0]}`);
@@ -343,7 +343,7 @@ function scanChunks(
   for (const stride of [1, 4, 16]) {
     const scanner = new AnalogCrossingScanner({
       channels: 32, condition: { start: 16, kind: 'rising', level: 128 }, stride,
-      analogHysteresis: H, analogPersistSamples: P,
+      analogHysteresis: H, analogArtifactSamples: P,
     });
     const a = scanner.feed(raw.subarray(0, 75 * 4), 0);
     const b = scanner.feed(raw.subarray(75 * 4, 76 * 4), 75);
@@ -365,7 +365,7 @@ function scanChunks(
   const run = (how: 'reset' | 'skip'): number[] => {
     const scanner = new AnalogCrossingScanner({
       channels: 8, condition: { start: 0, kind: 'rising', level: 128 }, stride: 4,
-      analogHysteresis: H, analogPersistSamples: P,
+      analogHysteresis: H, analogArtifactSamples: P,
     });
     const out: number[] = [];
     out.push(...scanner.feed(mk([[90, 40], [140, 10]]), 0));
@@ -386,7 +386,7 @@ function scanChunks(
 }
 
 {
-  const refused = (opts: { analogHysteresis?: number; analogPersistSamples?: number }): boolean => {
+  const refused = (opts: { analogHysteresis?: number; analogArtifactSamples?: number }): boolean => {
     try {
       new AnalogCrossingScanner({
         channels: 8, condition: { start: 0, kind: 'rising', level: 128 }, stride: 1, ...opts,
@@ -396,19 +396,19 @@ function scanChunks(
   };
   check('the scanner validates its qualification strictly',
     refused({ analogHysteresis: 0 }) && refused({ analogHysteresis: 300 }) &&
-    refused({ analogPersistSamples: 0 }) && refused({ analogPersistSamples: 1.5 }) &&
-    !refused({ analogHysteresis: H, analogPersistSamples: P }),
+    refused({ analogArtifactSamples: 0 }) && refused({ analogArtifactSamples: 1.5 }) &&
+    !refused({ analogHysteresis: H, analogArtifactSamples: P }),
     'hysteresis 0/300 and persistence 0/1.5 refused');
 }
 
 {
   // P = ceil(240 ns x rate) without the float product rounding 24 up to 25.
   const rates = [100e6, 160e6, 200e6, 400e6, 800e6, 1e6];
-  const got = rates.map((r) => analogTriggerPersistSamples(r));
+  const got = rates.map((r) => analogTriggerArtifactSamples(r));
   const q = analogTriggerQualification(100e6);
   check('the persistence window is ceil(240 ns x samplerate), 24 at 100 MS/s',
     got.join(',') === '24,39,48,96,192,1' && q.analogHysteresis === ADC_TRIGGER_HYSTERESIS_CODES &&
-    q.analogHysteresis === 4 && q.analogPersistSamples === 24,
+    q.analogHysteresis === 4 && q.analogArtifactSamples === 24,
     `P=${got.join(',')}, h=${q.analogHysteresis}`);
 }
 

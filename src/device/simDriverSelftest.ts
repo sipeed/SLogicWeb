@@ -1297,7 +1297,7 @@ await expectReject(
 await expectReject(
   'an out-of-range persistence window is refused',
   () => new SimDriver(SLOGIC32U3_PROFILE, {
-    analog: { start: 0, code: () => 0 }, analogPersistSamples: 0,
+    analog: { start: 0, code: () => 0 }, analogArtifactSamples: 0,
   }).start(startConfig(8), new RecordingSink()),
   'invalid-config',
 );
@@ -1311,7 +1311,7 @@ await expectReject(
     for (const level of [60, 96, 112, 128, 144, 160, 200]) {
       const plan = compiledAnalogPlan(kind, level, 100e6, 0, 64);
       const { driver } = await runAnalog(plan, glitchedSineCode, {
-        analogHysteresis: 1, analogPersistSamples: 1,
+        analogHysteresis: 1, analogArtifactSamples: 1,
       });
       const t = driver.triggeredAt;
       if (t !== null && sineRising(t) !== (kind === 'rising')) {
@@ -1475,7 +1475,7 @@ function stepsCode(steps: ReadonlyArray<readonly [number, number]>): (n: number)
   // unmatched; the analog plan also needs a source on its bank.
   const code = stepsCode([[0, 50], [30, 200], [100, 50], [200, 200]]);
   const plan = compiledAnalogPlan('rising', 128, 100e6, 50, 120);
-  const { driver } = await runAnalog(plan, code, { analogPersistSamples: 8 });
+  const { driver } = await runAnalog(plan, code, { analogArtifactSamples: 8 });
   check(
     'a candidate inside the holdoff is consumed; the next qualified crossing is T',
     plan.preTrigger.samples === 60 && driver.triggeredAt === 200,

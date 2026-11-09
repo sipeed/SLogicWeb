@@ -75,8 +75,8 @@
  * Analog crossings are qualified, never raw (docs/ARCHITECTURE.md trigger section). The
  * descriptor carries the two numbers every analog executor takes, with the
  * `SoftwareTriggerConfig` field names: `analogHysteresis` (h, the module's
- * `ADC_TRIGGER_HYSTERESIS_CODES` = 4 codes) and `analogPersistSamples` (P,
- * `analogTriggerPersistSamples(samplerate)` = ceil(240 ns * rate), 24 at 100 MS/s), both
+ * `ADC_TRIGGER_HYSTERESIS_CODES` = 4 codes) and `analogArtifactSamples` (P,
+ * `analogTriggerArtifactSamples(samplerate)` = ceil(240 ns * rate), 24 at 100 MS/s), both
  * from `analogTriggerQualification`. They are in codes and samples, not part of the
  * plan: the plan stays in volts, and its optional volt `hysteresis` is still only set
  * when the legacy input supplies one (the legacy default is none). A digital plan
@@ -189,9 +189,9 @@ export interface CaptureHostTriggerDescriptor {
   readonly analogHysteresis: number;
   /**
    * Samples an analog candidate must persist, `ceil(240 ns * samplerate)`
-   * (`SoftwareTriggerConfig.analogPersistSamples`).
+   * (`SoftwareTriggerConfig.analogArtifactSamples`).
    */
-  readonly analogPersistSamples: number;
+  readonly analogArtifactSamples: number;
 }
 
 export type CaptureTriggerRefusalReason =

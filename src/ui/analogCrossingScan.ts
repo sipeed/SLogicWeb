@@ -35,7 +35,7 @@
  * can be missed; every crossing reported is real and phase-exact.
  */
 
-import { DEFAULT_ANALOG_HYSTERESIS_CODES, MAX_ANALOG_PERSIST_SAMPLES, reverseAdcByte } from '../data/softwareTrigger.js';
+import { DEFAULT_ANALOG_HYSTERESIS_CODES, MAX_ANALOG_ARTIFACT_SAMPLES, reverseAdcByte } from '../data/softwareTrigger.js';
 import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
 
 export interface AnalogCrossingCondition {
@@ -54,9 +54,9 @@ export interface AnalogCrossingScannerOptions {
   stride: number;
   /** Arming hysteresis in codes, 1..255; default DEFAULT_ANALOG_HYSTERESIS_CODES. */
   analogHysteresis?: number;
-  /** Samples a candidate must stay at/past the level, 1..MAX_ANALOG_PERSIST_SAMPLES;
+  /** Samples a candidate must stay at/past the level, 1..MAX_ANALOG_ARTIFACT_SAMPLES;
    * default 1. The app passes `ceil(240 ns * samplerate)`. */
-  analogPersistSamples?: number;
+  analogArtifactSamples?: number;
 }
 
 export class AnalogCrossingScanner {
@@ -109,9 +109,9 @@ export class AnalogCrossingScanner {
     if (!Number.isInteger(h) || h < 1 || h > 255) {
       throw new Error(`analog scan hysteresis must be an integer code count 1..255, got ${h}`);
     }
-    const p = opts.analogPersistSamples ?? 1;
-    if (!Number.isInteger(p) || p < 1 || p > MAX_ANALOG_PERSIST_SAMPLES) {
-      throw new Error(`analog scan persistence must be an integer 1..${MAX_ANALOG_PERSIST_SAMPLES}, got ${p}`);
+    const p = opts.analogArtifactSamples ?? 1;
+    if (!Number.isInteger(p) || p < 1 || p > MAX_ANALOG_ARTIFACT_SAMPLES) {
+      throw new Error(`analog scan persistence must be an integer 1..${MAX_ANALOG_ARTIFACT_SAMPLES}, got ${p}`);
     }
     this.channels = opts.channels;
     this.bytesPerSample = bytesPerSampleForChannels(opts.channels);

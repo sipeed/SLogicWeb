@@ -16,7 +16,7 @@
  *   and are refused with a typed reason. When that mapping lands it must pass the
  *   matcher's qualification explicitly: `analogHysteresis` = the larger of the ADC's
  *   code hysteresis and the plan's `hysteresis` volts in codes, and
- *   `analogPersistSamples` = `ceil(240 ns * samplerate)` (`analogTriggerQualification`
+ *   `analogArtifactSamples` = `ceil(240 ns * samplerate)` (`analogTriggerQualification`
  *   in `ui/channelBanks.ts` holds both constants). The matcher's own defaults (4 codes,
  *   one sample) are for direct callers, not for plans.
  * - A condition's `signal` is resolved to a channel by `resolveChannel`, or by the

@@ -104,7 +104,7 @@ function referenceRun(
   const bps = bytesPerSampleForChannels(channels);
   const maxSamples = config.maxSamples;
   const h = config.analogHysteresis ?? 4;
-  const persist = config.analogPersistSamples ?? 1;
+  const persist = config.analogArtifactSamples ?? 1;
   const pre = Math.min(
     config.preTriggerSamples,
     Math.max(0, maxSamples - 1),
@@ -325,7 +325,7 @@ function referenceComparison(): SoftwareTriggerTestResult[] {
       // The analog group draws its own hysteresis and persistence; the others keep the
       // defaults (4 codes, one sample).
       const qualification = analogGroup
-        ? { analogHysteresis: 1 + Math.floor(rng() * 6), analogPersistSamples: 1 + Math.floor(rng() * 5) }
+        ? { analogHysteresis: 1 + Math.floor(rng() * 6), analogArtifactSamples: 1 + Math.floor(rng() * 5) }
         : {};
       const config: SoftwareTriggerConfig = {
         channels,

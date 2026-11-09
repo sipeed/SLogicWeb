@@ -8,7 +8,7 @@
  */
 
 import {
-  MAX_ANALOG_PERSIST_SAMPLES,
+  MAX_ANALOG_ARTIFACT_SAMPLES,
   SoftwareTrigger,
   reverseAdcByte,
   type SoftwareTriggerConfig,
@@ -86,7 +86,7 @@ function oneShot(
   feedRandom(trigger, raw, seed, maxBytes);
   trigger.finish();
   const s = trigger.stats;
-  const persist = config.analogPersistSamples ?? 1;
+  const persist = config.analogArtifactSamples ?? 1;
   return {
     matched: s.matched, noTrigger: s.noTrigger, complete: s.complete,
     t: s.triggerSampleIndex, tAbs: s.inspectedSamples - persist,
@@ -108,7 +108,7 @@ export function runQualifiedAnalogSuite(): SoftwareTriggerTestResult[] {
     channels,
     analog: [{ start, kind, level }],
     analogHysteresis: H,
-    analogPersistSamples: P,
+    analogArtifactSamples: P,
   });
 
   // The fixture must actually be adversarial, or the checks below prove nothing: a raw
@@ -222,7 +222,7 @@ export function runQualifiedAnalogSuite(): SoftwareTriggerTestResult[] {
     const cfg = { ...base(8, 0, 'falling', 112), preTriggerSamples: 10, maxSamples: 50,
       searchLimitSamples: Number.POSITIVE_INFINITY };
     const qualified = oneShot(raw, cfg, 1, 5);
-    const singleSampleArm = oneShot(raw, { ...cfg, analogPersistSamples: 1 }, 2, 5);
+    const singleSampleArm = oneShot(raw, { ...cfg, analogArtifactSamples: 1 }, 2, 5);
     check('qualified analog: a faked falling arm on the rising slope does not trigger',
       !qualified.matched && qualified.noTrigger && singleSampleArm.matched,
       `qualified matched=${qualified.matched}, one-sample arm matched=${singleSampleArm.matched}`);
@@ -444,22 +444,22 @@ export function runQualifiedAnalogSuite(): SoftwareTriggerTestResult[] {
     };
     const refused = [
       invalid({ analogHysteresis: 0 }), invalid({ analogHysteresis: 256 }),
-      invalid({ analogHysteresis: 1.5 }), invalid({ analogPersistSamples: 0 }),
-      invalid({ analogPersistSamples: MAX_ANALOG_PERSIST_SAMPLES + 1 }),
-      invalid({ analogPersistSamples: 2.5 }),
+      invalid({ analogHysteresis: 1.5 }), invalid({ analogArtifactSamples: 0 }),
+      invalid({ analogArtifactSamples: MAX_ANALOG_ARTIFACT_SAMPLES + 1 }),
+      invalid({ analogArtifactSamples: 2.5 }),
     ];
     const trigger = new SoftwareTrigger({
       config: { ...base(8, 0, 'rising', 128), preTriggerSamples: 0, maxSamples: 10 },
       emit: () => {},
     });
     const cfg = { ...base(8, 0, 'rising', 130), preTriggerSamples: 0, maxSamples: 10 };
-    const otherP = trigger.reconfigure({ ...cfg, analogPersistSamples: P + 1 });
+    const otherP = trigger.reconfigure({ ...cfg, analogArtifactSamples: P + 1 });
     const sameP = trigger.reconfigure(cfg);
-    const { analogPersistSamples: _omit, ...omitted } = cfg;
+    const { analogArtifactSamples: _omit, ...omitted } = cfg;
     const omittedP = trigger.reconfigure({ ...omitted, analogHysteresis: 6 });
     check('qualified analog: strict validation, and a retune keeps the persistence window',
       refused.every(Boolean) && !otherP && sameP && omittedP && trigger.analogHysteresis === 6 &&
-      trigger.analogPersistSamples === P,
+      trigger.analogArtifactSamples === P,
       `refused=${refused.join(',')}, otherP=${otherP}, sameP=${sameP}, omitted=${omittedP}`);
   }
 
@@ -469,7 +469,7 @@ export function runQualifiedAnalogSuite(): SoftwareTriggerTestResult[] {
     const raw = encode(trace.codes, 8, 0, 2);
     const firstRaw = rawCrossings(trace.codes, 'rising', 144).find((i) => i >= 50)!;
     const r = oneShot(raw, { channels: 8, analog: [{ start: 0, kind: 'rising', level: 144 }],
-      analogHysteresis: 1, analogPersistSamples: 1, preTriggerSamples: 50, maxSamples: 100,
+      analogHysteresis: 1, analogArtifactSamples: 1, preTriggerSamples: 50, maxSamples: 100,
       searchLimitSamples: Number.POSITIVE_INFINITY }, 4);
     check('qualified analog: hysteresis 1 with persistence 1 is the raw crossing test',
       r.matched && r.tAbs === firstRaw && r.t === 50,
