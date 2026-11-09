@@ -855,9 +855,9 @@ for (const sample of [
 // ---------------------------------------------------------------------------------
 
 {
-  // P = ceil(240 ns * rate), from the plan's samplerate; h is the module's 4 codes.
+  // P = ceil(500 ns * rate), from the plan's samplerate; h is the module's 4 codes.
   const cases: Array<[number, number]> = [
-    [100e6, 24], [200e6, 48], [400e6, 96], [800e6, 192], [1000, 1], [12.5e6, 3],
+    [100e6, 50], [200e6, 100], [400e6, 200], [800e6, 400], [1000, 1], [12.5e6, 7],
   ];
   for (const [samplerate, persist] of cases) {
     const result = captureTriggerPlan(makeInput({
@@ -935,7 +935,7 @@ for (const sample of [
   check(
     'a digital descriptor carries the qualification too (ignored by digital matching)',
     armed(digitalResult)?.host.analogHysteresis === 4 &&
-      armed(digitalResult)?.host.analogArtifactSamples === 24,
+      armed(digitalResult)?.host.analogArtifactSamples === 50,
     show(digitalResult),
   );
   const other = captureTriggerPlan(makeInput({ digital: [{ channel: 9, kind: 'rising' }] }));

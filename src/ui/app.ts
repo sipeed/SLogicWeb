@@ -6141,7 +6141,7 @@ export class App {
           analog: analogTriggers.map((a) => ({
             start: a.start, kind: a.kind, level: analogCodeFromVolts(a.volts, a.gain),
           })),
-          // Qualified, never raw: arming hysteresis and an OR-artifact window derived from
+          // Qualified, never raw: arming hysteresis and a transition-glitch window derived from
           // this capture's rate. Passed even for a digital trigger, so a live retune to an
           // analog source finds the ring already sized for it.
           ...analogTriggerQualification(cfg.samplerate),

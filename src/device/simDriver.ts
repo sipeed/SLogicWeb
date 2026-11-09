@@ -96,11 +96,11 @@
  *    the plan's volt hysteresis in codes when that is larger): a rising condition arms
  *    only on a code <= level - h (falling: >= level + h, clamped to the code range); one
  *    fire per arm;
- *  - OR-artifact rejection with window `analogArtifactSamples` (W, default
- *    `analogTriggerArtifactSamples(rate)`, i.e. ceil(240 ns * rate), 24 at 100 MS/s): a
- *    run past a threshold that is at most W samples long, ends, and whose every code g
- *    has `(g & a) === a`, `(g & b) === b`, `g > max(a, b)` (a/b the samples before/after
- *    it) neither arms nor fires. Any other run is real. W = 0 disables the rejection.
+ *  - transition-glitch rejection with window `analogArtifactSamples` (W, default
+ *    `analogTriggerArtifactSamples(rate)`, i.e. ceil(500 ns * rate), 50 at 100 MS/s): a
+ *    run past a threshold that is shorter than W samples, ends, and whose every code is
+ *    a transition glitch of the samples before/after it (`isAdcTransitionGlitch`)
+ *    neither arms nor fires. Any other run is real. W of 0 or 1 disables the rejection.
  *
  * T is the first sample of a real candidate run, decided at most W samples later. The
  * delivered range is still exactly [T - preSamples, T + postSamples): the window up to the
@@ -302,9 +302,10 @@ export interface SimDriverOptions {
    */
   readonly analogHysteresis?: number;
   /**
-   * OR-artifact window W in samples, an integer 0..4096 (module header): a run at most
-   * W samples long with the OR shape neither arms nor fires; 0 disables the rejection.
-   * Default `analogTriggerArtifactSamples(samplerate)` = ceil(240 ns * rate), 24 at
+   * Transition-glitch window W in samples, an integer 0..4096 (module header): a run
+   * shorter than W samples of glitch codes neither arms nor fires; 0 or 1 disables the
+   * rejection.
+   * Default `analogTriggerArtifactSamples(samplerate)` = ceil(500 ns * rate), 50 at
    * 100 MS/s.
    */
   readonly analogArtifactSamples?: number;
@@ -396,7 +397,7 @@ interface SimAnalogCondition {
   readonly level: number;
   /** Hysteresis h in codes (the arming threshold is level -/+ h, clamped). */
   readonly hysteresis: number;
-  /** OR-artifact window W in samples. */
+  /** Transition-glitch window W in samples. */
   readonly window: number;
 }
 

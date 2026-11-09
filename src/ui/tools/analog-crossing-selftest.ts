@@ -2,7 +2,7 @@
 /**
  * The Loop display's continuous ADC crossing scanner: group byte, bit order, stride,
  * chunk boundaries, continuity across a retune/gap, wide-sample layouts, and the
- * OR-artifact qualification on synthetic and real (fixtures/) ADC traces.
+ * Transition-glitch qualification on synthetic and real (fixtures/) ADC traces.
  */
 
 import { AnalogCrossingScanner } from '../analogCrossingScan.js';
@@ -11,9 +11,10 @@ import {
 } from '../channelBanks.js';
 import { MAX_ANALOG_ARTIFACT_SAMPLES, reverseAdcByte } from '../../data/softwareTrigger.js';
 import { AnalogRunQualifier } from '../../data/analogRunQualifier.js';
+import { isAdcTransitionGlitch } from '../../data/adcArtifactShape.js';
 import {
-  ADC_TRACE_LEVELS, crossingProblem, loadAdcTrace, traceCrossings, traceSlope,
-  type AdcTraceName,
+  ADC_TRACE_LEVELS, ADC_TRACE_SLOPE_SPAN, TRACE_WINDOW, crossingProblem, loadAdcTrace,
+  traceCrossings, traceSlope, type AdcTraceName,
 } from '../../data/adcTraceFiles.js';
 import {
   adcArtifactTrace, cleanSlope, fixtureRng, rawCrossings,
@@ -245,11 +246,58 @@ const adc = (code: number): number => adcWord(0, code);
 }
 
 // ---------------------------------------------------------------------------------------
+// The transition-glitch shape (src/data/adcArtifactShape.ts).
+// ---------------------------------------------------------------------------------------
+
+{
+  // Measured glitches (a, g, b) are glitches - including 129 -> [254] -> 129, which hides
+  // 128 -> 127 -> 128; noise, real steps, any code below a neighbour, a real +3.3 V pulse
+  // from 0 V (154, which carries every bit of 128) and the 33 MHz trace's isolated codes
+  // are not.
+  const glitch: Array<[number, number, number]> = [
+    [143, 159, 144], [127, 255, 128], [127, 254, 128], [112, 126, 111], [96, 126, 95],
+    [96, 127, 95], [128, 254, 128], [111, 127, 112], [129, 254, 129], [126, 254, 126],
+  ];
+  const real: Array<[number, number, number]> = [
+    [117, 116, 117], [126, 120, 127], [121, 120, 126], [138, 163, 130], [100, 130, 100],
+    [127, 135, 128], [128, 154, 128], [128, 1, 127], [96, 64, 95], [130, 254, 130],
+  ];
+  const wrong = [
+    ...glitch.filter(([a, g, b]) => !isAdcTransitionGlitch(g, a, b, 4)).map((x) => `${x} missed`),
+    ...real.filter(([a, g, b]) => isAdcTransitionGlitch(g, a, b, 4)).map((x) => `${x} taken`),
+  ];
+  // The block form against the definition, pair by pair.
+  const slow = (g: number, a: number, b: number, h: number): boolean => {
+    const hi = Math.max(a, b);
+    if (g - hi <= h) return false;
+    for (let x = Math.max(0, Math.min(a, b) - 2); x <= Math.min(254, hi + 1); x++) {
+      const or = x | (x + 1);
+      if (g === or || g === (or & ~1)) return true;
+    }
+    return false;
+  };
+  const rng = fixtureRng(20261109);
+  let differ = '';
+  for (let n = 0; n < 200_000 && !differ; n++) {
+    const a = Math.floor(rng() * 256);
+    const b = rng() < 0.5 ? a : Math.floor(rng() * 256);
+    const g = Math.floor(rng() * 256);
+    const h = 1 + Math.floor(rng() * 8);
+    if (slow(g, a, b, h) !== isAdcTransitionGlitch(g, a, b, h)) differ = `g=${g} a=${a} b=${b} h=${h}`;
+  }
+  check('the transition-glitch shape: measured glitches in, noise and real steps out, = definition',
+    wrong.length === 0 && differ === '', [...wrong, differ].filter(Boolean).join('; ') ||
+      `${glitch.length} glitches, ${real.length} non-glitches, 200000 random triples agree`);
+}
+
+// ---------------------------------------------------------------------------------------
 // Qualified crossings on the measured ADC carry-boundary artifact (adcArtifactFixture):
-// hysteresis 4 codes, artifact window W = 24 samples (240 ns at 100 MS/s).
+// hysteresis 4 codes, artifact window W = 24 samples (any W works; the app's is 50).
 // ---------------------------------------------------------------------------------------
 
 const W = 24;
+/** The app's window at the real traces' 100 MS/s. */
+const TW = TRACE_WINDOW;
 const H = 4;
 const LEVELS = [100, 112, 128, 144, 160] as const;
 
@@ -332,19 +380,19 @@ function scanChunks(
 }
 
 {
-  // Levels outside the measured sine (84..175) and the 3.3 MHz AM wave (~95..161): the OR
-  // artifact reaches 255 (127 -> 128) and dips nowhere, in short OR-shaped runs only, so
-  // nothing fires. (The 33 MHz AM trace is not used here: at ~3 samples per carrier
-  // period its bus reads arbitrary old/new bit mixes - 1, 32, 211 - that are not OR-shaped
-  // and do cross far levels; see ADC-TRACES.md.)
+  // Levels outside the measured sine (84..175), the 3.3 MHz AM wave (~95..161) and the
+  // multitone (~95..161): the transition glitches reach 255 (127 -> 128 reads 255 / 254)
+  // in short glitch runs only, so nothing fires. (The 33 MHz AM trace is not used here:
+  // at ~3 samples per carrier period it reads isolated codes - 1, 32, 211 - that are no
+  // mix of the codes crossed and do cross far levels; see ADC-TRACES.md.)
   const fired: string[] = [];
-  for (const name of ['sine', 'am3'] as const) {
+  for (const name of ['sine', 'am3', 'multitone'] as const) {
     const raw = encodeCodes(loadAdcTrace(name), 16, 0, 3);
     for (const [kind, level] of [['rising', 200], ['rising', 80], ['falling', 60], ['falling', 190]] as const) {
       for (const stride of [1, 16]) {
         const scanner = new AnalogCrossingScanner({
           channels: 16, condition: { start: 0, kind, level }, stride,
-          analogHysteresis: H, analogArtifactSamples: W,
+          analogHysteresis: H, analogArtifactSamples: TW,
         });
         const found = scanChunks(scanner, raw, 2, level + stride, 3000);
         if (found.length > 0) fired.push(`${name} ${kind} ${level} stride ${stride}: ${found[0]}`);
@@ -352,16 +400,19 @@ function scanChunks(
     }
   }
   check('the Loop scanner never fires for a level outside the measured signal', fired.length === 0,
-    fired.join('; ') || 'sine and 3.3 MHz AM: rising 200/80, falling 60/190 at strides 1 and 16');
+    fired.join('; ') || 'sine, 3.3 MHz AM, multitone: rising 200/80, falling 60/190 at strides 1 and 16');
 }
 
 {
-  // A run that straddles chunk boundaries is judged across them. 64 -> 192 has the OR
-  // shape (192 & 64 === 64, 192 > 64): the run at 70..79 ends on 64 within W, an
-  // artifact, and is never reported although it is split by two boundaries; the run from
-  // 120 reaches W and is real, decided at 143 in a later chunk, reported as T = 120.
+  // A run that straddles chunk boundaries is judged across them. After the 64s arm, the
+  // signal sits on 127, and 127 -> [255 x 10] -> 127 at 70..79 is the 127/128 glitch: the
+  // run ends within W, an artifact, never reported although it is split by two
+  // boundaries; the run from 120 (192) reaches W and is real, decided at 143 in a later
+  // chunk, reported as T = 120.
   const codes = new Uint8Array(260);
-  for (let i = 0; i < codes.length; i++) codes[i] = i >= 70 && i < 80 ? 192 : i < 120 ? 64 : 192;
+  for (let i = 0; i < codes.length; i++) {
+    codes[i] = i < 60 ? 64 : i >= 70 && i < 80 ? 255 : i < 120 ? 127 : 192;
+  }
   const raw = encodeCodes(codes, 32, 16, 4);
   const got: string[] = [];
   let pass = true;
@@ -391,7 +442,7 @@ function scanChunks(
 
 {
   // A gap (resetContinuity) or a discontinuous chunk with a run pending drops it and the
-  // arm: the pending OR-shaped run at 40 (192 after 64) never reports, the first sample
+  // arm: the pending run at 40 (192 after 64) never reports, the first sample
   // after the gap cannot fire, and the next armed crossing is T.
   const mk = (parts: Array<[number, number]>): Uint8Array => {
     const codes: number[] = [];
@@ -450,23 +501,25 @@ function scanChunks(
   // Degenerate windows. W = 0 and W = 1: no artifact rejection (hysteresis only) - the
   // one-sample OR run 127 -> 255 -> 127 is a crossing. W = 2 rejects exactly that
   // single-sample run but not a two-sample one (a run of W samples is real); W = 24
-  // rejects both.
-  const one = [100, 127, 255, 127, 100, 100];
-  const two = [100, 127, 255, 255, 127, 100];
+  // rejects both. The 30-sample lead arms for every W (a short leading 100 next to 127
+  // could itself be a 127/128 glitch).
+  const lead = Array<number>(30).fill(100);
+  const one = [...lead, 127, 255, 127, 100, 100];
+  const two = [...lead, 127, 255, 255, 127, 100];
   const scan = (codes: number[], w: number): number[] => new AnalogCrossingScanner({
     channels: 8, condition: { start: 0, kind: 'rising', level: 128 }, stride: 1,
     analogHysteresis: H, analogArtifactSamples: w,
   }).feed(encode(8, codes.map(adc)), 0);
   const got = [0, 1, 2, 24].map((w) => `${JSON.stringify(scan(one, w))}/${JSON.stringify(scan(two, w))}`);
-  check('W = 0 and 1 disable artifact rejection; W = 2 rejects one-sample OR runs only',
-    got.join(' ') === '[2]/[2] [2]/[2] []/[2] []/[]', got.join(' '));
+  check('W = 0 and 1 disable artifact rejection; W = 2 rejects one-sample glitch runs only',
+    got.join(' ') === '[31]/[31] [31]/[31] []/[31] []/[]', got.join(' '));
 }
 
 // ---------------------------------------------------------------------------------------
 // The real ADC traces (fixtures/ADC-TRACES.md), fed as MSB-first bus bytes.
 // ---------------------------------------------------------------------------------------
 
-const TRACES: readonly AdcTraceName[] = ['sine', 'am3', 'am33'];
+const TRACES: readonly AdcTraceName[] = ['sine', 'am3', 'am33', 'multitone'];
 
 {
   // The streaming qualifier against the flat-array rule, sample for sample (a run still
@@ -477,12 +530,12 @@ const TRACES: readonly AdcTraceName[] = ['sine', 'am3', 'am33'];
     const codes = loadAdcTrace(name);
     for (const level of ADC_TRACE_LEVELS[name]) {
       for (const rising of [true, false]) {
-        const want = traceCrossings(codes, rising, level).filter((t) => t < codes.length - W - 1);
-        const q = new AnalogRunQualifier({ rising, level, hysteresis: H, window: W });
+        const want = traceCrossings(codes, rising, level).filter((t) => t < codes.length - TW - 1);
+        const q = new AnalogRunQualifier({ rising, level, hysteresis: H, window: TW });
         const got: number[] = [];
         for (let i = 0; i < codes.length; i++) {
           const t = q.step(codes[i]!, i);
-          if (t >= 0 && t < codes.length - W - 1) got.push(t);
+          if (t >= 0 && t < codes.length - TW - 1) got.push(t);
         }
         total += got.length;
         if (got.join() !== want.join()) {
@@ -491,16 +544,19 @@ const TRACES: readonly AdcTraceName[] = ['sine', 'am3', 'am33'];
       }
     }
   }
-  check('the streaming qualifier equals the flat-array rule on the three real traces',
+  check('the streaming qualifier equals the flat-array rule on the four real traces',
     bad === '' && total > 0, bad || `${total} crossings`);
 }
 
 {
   // The Loop scanner on the real traces at strides 1/4/16/64, seeded chunk sizes and
   // several sample layouts: every reported T is a real crossing (predecessor on the other
-  // side, T past the level, not an OR-artifact run), the sine reports one per period on
-  // the configured slope and none on the other, and both AM traces report crossings at
-  // every stride. At stride 1 the reports are exactly the rule's crossings.
+  // side, T past the level, not a glitch run), the sine reports one per period on the
+  // configured slope and none on the other, the multitone stays on the configured slope
+  // at stride 1, and the AM traces report crossings at every stride. (At stride > 1 the
+  // multitone, which dwells on a level in 4-6 sample runs between 126/127 glitches, can
+  // have its crossing skipped and a later one reported from a glitch predecessor, where
+  // the trend has already turned - see the scanner's module comment.) At stride 1 the reports are exactly the rule's crossings.
   const layouts = [[8, 0], [16, 8], [32, 24], [64, 40], [128, 120]] as const;
   const lines: string[] = [];
   let bad = '';
@@ -522,7 +578,7 @@ const TRACES: readonly AdcTraceName[] = ['sine', 'am3', 'am33'];
           const raw = encodeCodes(codes, channels, start, stride + level);
           const scanner = new AnalogCrossingScanner({
             channels, condition: { start, kind, level }, stride,
-            analogHysteresis: H, analogArtifactSamples: W,
+            analogHysteresis: H, analogArtifactSamples: TW,
           });
           const found = scanChunks(scanner, raw, bps, stride * 7 + level + channels, 5000);
           counts.push(found.length);
@@ -530,13 +586,14 @@ const TRACES: readonly AdcTraceName[] = ['sine', 'am3', 'am33'];
           for (const t of found) {
             const problem = crossingProblem(codes, t, rising, level);
             if (problem) { bad = `${tag}: ${problem}`; break; }
-            if (name === 'sine' && (traceSlope(codes, t) > 0) !== rising) {
+            const span = name === 'multitone' && stride > 1 ? 0 : ADC_TRACE_SLOPE_SPAN[name];
+            if (span > 0 && (traceSlope(codes, t, span) > 0) !== rising) {
               bad = `${tag}: T=${t} is on the wrong slope`;
               break;
             }
           }
-          if (!bad && stride === 1 && found.filter((t) => t < codes.length - W - 1).join() !==
-            want.filter((t) => t < codes.length - W - 1).join()) {
+          if (!bad && stride === 1 && found.filter((t) => t < codes.length - TW - 1).join() !==
+            want.filter((t) => t < codes.length - TW - 1).join()) {
             bad = `${tag}: ${found.length} reports, the rule gives ${want.length}`;
           }
           if (!bad && found.length === 0) bad = `${tag}: no crossing reported`;
@@ -558,13 +615,13 @@ const TRACES: readonly AdcTraceName[] = ['sine', 'am3', 'am33'];
 }
 
 {
-  // W = ceil(240 ns x rate) without the float product rounding 24 up to 25.
+  // W = ceil(500 ns x rate) without the float product rounding 80 up to 81.
   const rates = [100e6, 160e6, 200e6, 400e6, 800e6, 1e6];
   const got = rates.map((r) => analogTriggerArtifactSamples(r));
   const q = analogTriggerQualification(100e6);
-  check('the artifact window W is ceil(240 ns x samplerate), 24 at 100 MS/s',
-    got.join(',') === '24,39,48,96,192,1' && q.analogHysteresis === ADC_TRIGGER_HYSTERESIS_CODES &&
-    q.analogHysteresis === 4 && q.analogArtifactSamples === 24,
+  check('the artifact window W is ceil(500 ns x samplerate), 50 at 100 MS/s',
+    got.join(',') === '50,80,100,200,400,1' && q.analogHysteresis === ADC_TRIGGER_HYSTERESIS_CODES &&
+    q.analogHysteresis === 4 && q.analogArtifactSamples === 50,
     `W=${got.join(',')}, h=${q.analogHysteresis}`);
 }
 

@@ -5,25 +5,37 @@
  * plus the checks every analog-trigger self-test applies to a reported crossing.
  */
 
+import { isAdcGlitchRun } from './adcArtifactShape.js';
 import { qualifiedCrossings } from './analogRunQualifier.js';
 
 export const ADC_TRACE_FILES = {
   sine: 'fixtures/adc-sine-carry-glitches-100MSps.bin',
   am3: 'fixtures/adc-am-3MHz-carrier-100MSps.bin',
   am33: 'fixtures/adc-am-33MHz-carrier-100MSps.bin',
+  multitone: 'fixtures/adc-multitone-100kHz-100MSps.bin',
 } as const;
 
 export type AdcTraceName = keyof typeof ADC_TRACE_FILES;
 
-/** The measured qualification at 100 MS/s: h = 4 codes, W = ceil(240 ns * rate) = 24. */
+/** The measured qualification at 100 MS/s: h = 4 codes, W = ceil(500 ns * rate) = 50. */
 export const TRACE_HYSTERESIS = 4;
-export const TRACE_WINDOW = 24;
+export const TRACE_WINDOW = 50;
 
 /** Levels inside each trace's code range (per ADC-TRACES.md). */
 export const ADC_TRACE_LEVELS: Readonly<Record<AdcTraceName, readonly number[]>> = {
   sine: [100, 112, 128, 144, 160],
   am3: [110, 128, 145],
   am33: [120, 128, 136],
+  multitone: [110, 120, 128, 136, 145],
+};
+
+/** Half-width of the slope test per trace (`traceSlope`); 0: no slope (AM carriers cross
+ * on both slopes every period). */
+export const ADC_TRACE_SLOPE_SPAN: Readonly<Record<AdcTraceName, number>> = {
+  sine: 300,
+  am3: 0,
+  am33: 0,
+  multitone: 30,
 };
 
 interface FsLike { readFileSync(path: string): Uint8Array }
@@ -51,16 +63,16 @@ export function medianCode(codes: Uint8Array, i: number): number {
   return window[window.length >> 1]!;
 }
 
-/** The slow trend's slope at `i`: median-of-31 at i + 300 minus at i - 300. */
-export function traceSlope(codes: Uint8Array, i: number): number {
-  return medianCode(codes, i + 300) - medianCode(codes, i - 300);
+/** The slow trend's slope at `i`: median-of-31 at i + span minus at i - span. */
+export function traceSlope(codes: Uint8Array, i: number, span = 300): number {
+  return medianCode(codes, i + span) - medianCode(codes, i - span);
 }
 
 /**
  * Why `t` is not a real crossing of `level` on `codes`, or '' when it is: the sample
  * before it is on the other side, T is at/past the level, and the run starting at T is
- * not an OR artifact (at most `window` samples, ends, every code the OR-shape of both
- * neighbours).
+ * not a glitch run (shorter than `window` samples, ends, every code a transition glitch
+ * of both neighbours).
  */
 export function crossingProblem(
   codes: Uint8Array, t: number, rising: boolean, level: number, window = TRACE_WINDOW,
@@ -70,16 +82,13 @@ export function crossingProblem(
   if (!past(codes[t]!)) return `T=${t} code ${codes[t]} is not past ${level}`;
   if (past(codes[t - 1]!)) return `T=${t} predecessor ${codes[t - 1]} is already past ${level}`;
   let j = t;
-  while (j < codes.length && past(codes[j]!) && j - t <= window) j++;
-  if (j - t <= window && j < codes.length) {
+  while (j < codes.length && past(codes[j]!) && j - t < window) j++;
+  if (j - t < window && j < codes.length) {
     const a = codes[t - 1]!;
     const b = codes[j]!;
-    let artifact = true;
-    for (let k = t; k < j && artifact; k++) {
-      const g = codes[k]!;
-      if ((g & a) !== a || (g & b) !== b || g <= Math.max(a, b)) artifact = false;
+    if (isAdcGlitchRun(codes, t, j - t, a, b, TRACE_HYSTERESIS)) {
+      return `T=${t} starts a glitch run ${a} [${Array.from(codes.subarray(t, j)).join(',')}] ${b}`;
     }
-    if (artifact) return `T=${t} starts an OR-artifact run ${a} [${Array.from(codes.subarray(t, j)).join(',')}] ${b}`;
   }
   return '';
 }

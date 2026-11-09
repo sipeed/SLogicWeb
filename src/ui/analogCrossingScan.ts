@@ -16,11 +16,11 @@
  *
  * Crossings are qualified by the shared rule (`AnalogRunQualifier`, docs/ARCHITECTURE.md
  * "Analog crossings are qualified, never raw"): hysteresis h (a Rising condition arms only
- * on a code <= level - h) and OR-artifact rejection (a run past a threshold that is at most
- * W samples long, ends, and whose every code is the OR-shape of both neighbours - the ADC
- * bus's carry-boundary artifact - neither arms nor fires). The reported crossing is T, the
- * first sample of a real candidate run: its predecessor is on the other side of the level
- * and T is at/past it. Without this the artifact re-anchors a Rising view on the falling
+ * on a code <= level - h) and transition-glitch rejection (a run past a threshold that is
+ * shorter than W samples, ends, and whose every code is a transition glitch of both
+ * neighbours - the ADC bus reading the OR of the old and new codes - neither arms nor
+ * fires). The reported crossing is T, the first sample of a real candidate run: its
+ * predecessor is on the other side of the level and T is at/past it. Without this the artifact re-anchors a Rising view on the falling
  * slope, and arms a Falling one on the rising slope.
  *
  * The strided scan only reads every `stride`-th sample coarsely and never arms by itself.
@@ -29,9 +29,9 @@
  * machine (from a short kept tail of the previous chunk when the interval starts there),
  * entered with the strided scan's arm and the previous strided sample as predecessor. The
  * exact machine runs until it has passed that sample with no run pending - a pending run
- * carries across chunk boundaries as O(1) state (first sample, `a`, length, AND and
- * minimum of its codes), so no codes beyond the tail are kept - and then hands back with
- * its arm state. Its cost is bounded by `stride + W` samples per strided sample.
+ * carries across chunk boundaries in the qualifier (first sample, `a`, and its fewer than
+ * W codes), so no codes beyond the tail are kept - and then hands back with its arm
+ * state. Its cost is bounded by `stride + W` samples per strided sample.
  *
  * Cross-chunk: a run that straddles a chunk boundary is decided in the later chunk, so T
  * can lie up to W samples before the chunk that reports it. A gap (`resetContinuity`), a
@@ -41,7 +41,11 @@
  *
  * A strided scan can miss a crossing whose whole candidate run lies between two strided
  * samples (shorter than the stride: e.g. a ~33 MHz carrier at 100 MS/s), and an arm run
- * shorter than the stride; whatever it reports is a real, phase-exact crossing.
+ * shorter than the stride; whatever it reports is a real, phase-exact crossing. A missed
+ * crossing leaves the strided scan armed, so on a signal that dwells on the level in
+ * runs shorter than the stride between transition glitches (the 100 kHz multitone at
+ * 126/127 around 120), a later run can be reported from a glitch predecessor, where the
+ * trend may already have turned. The app's stride is 50 ns of samples (5 at 100 MS/s).
  */
 
 import { DEFAULT_ANALOG_HYSTERESIS_CODES, MAX_ANALOG_ARTIFACT_SAMPLES, reverseAdcByte } from '../data/softwareTrigger.js';
@@ -64,10 +68,10 @@ export interface AnalogCrossingScannerOptions {
   stride: number;
   /** Arming hysteresis in codes, 1..255; default DEFAULT_ANALOG_HYSTERESIS_CODES. */
   analogHysteresis?: number;
-  /** OR-artifact window W in samples, 0..MAX_ANALOG_ARTIFACT_SAMPLES: a run at most W
-   * samples long with the OR shape neither arms nor fires. Default 0 (no artifact
-   * rejection, hysteresis only); 1 rejects single-sample OR runs only. The app passes
-   * `ceil(240 ns * samplerate)` (`analogTriggerQualification`). */
+  /** Transition-glitch window W in samples, 0..MAX_ANALOG_ARTIFACT_SAMPLES: a run shorter
+   * than W samples of glitch codes neither arms nor fires. Default 0 (no artifact
+   * rejection, hysteresis only); 1 is also off, 2 rejects single-sample glitch runs only. The app passes
+   * `ceil(500 ns * samplerate)` (`analogTriggerQualification`). */
   analogArtifactSamples?: number;
 }
 

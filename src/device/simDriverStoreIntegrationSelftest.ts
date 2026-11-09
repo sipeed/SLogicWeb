@@ -304,8 +304,8 @@ async function main(): Promise<void> {
       `T=${readCode(300)} T-1=${readCode(299)}`);
   }
 
-  // 6. A run whose decision straddles transfers: 64 -> 192 is OR-shaped, so the run from
-  // 205 is decided real only at its (W+1)-th sample, 229, several 7-sample transfers
+  // 6. A run whose decision straddles transfers: the run from 205 (64 -> 192) never ends,
+  // so it is decided real only at its (W+1)-th sample, 229, several 7-sample transfers
   // after T. The store still starts exactly pre samples before T, holds pre + post
   // samples, and reads 192 at T and 64 just before it.
   {

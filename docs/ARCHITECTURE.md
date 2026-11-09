@@ -528,45 +528,54 @@ type TriggerBudget =
   profile supports it. Conditions are ANDed. (P0/P1 here are trigger phases; platform
   rules are P1–P10 in §1.3.)
 - **Analog crossings are qualified, never raw.** The ADC module's bus is sampled
-  asynchronously to its code transitions, so at a carry boundary the host can read the OR
-  of the old and new codes (143→144 reads 159, 127→128 reads 255) for up to ~140 ns —
-  measured 2026-11-06 on a 32U3 at 100 MS/s: 1338 such runs in 10 ms, every one at a carry
-  boundary, 1–14 samples long. A raw "previous < level ≤ current" test therefore fires on
-  the falling slope of a Rising condition. Rejecting short runs by *duration* is wrong
-  too: a real AM wave with a ~3.3 MHz carrier crosses for ~15 samples per half period and
-  one with a ~33 MHz carrier for one or two; a 240 ns persistence rule never triggered on
-  either (measured 2026-11-09). Every analog executor (the `SoftwareTrigger` matcher behind
-  Single/Repeat and the host plan, the Loop page scanner and the SimDriver) applies one
-  rule:
+  asynchronously to its code transitions, so a transition x→x+1 (or back) is read for a
+  few samples as the OR of the two codes, or that OR with bit 0 clear: 143→144 reads 159,
+  127→128 reads 255 or 254, 112→111 reads 126, 96→95 reads 127 or 126. Measured on a
+  32U3 at 100 MS/s on 2026-11-06 and 2026-11-09: of ~520 000 glitch samples on a sine, a
+  100 kHz multitone and a signal parked on the 127/128 boundary, every one was such a
+  code and every one read above the codes around it; runs last 1-15 samples, and up to
+  33 (330 ns) while the signal sits on 127/128. A raw "previous < level ≤ current" test
+  therefore fires on the falling slope of a Rising condition, and fires a Rising +12 V
+  that the signal never reaches. Rejecting short runs by *duration* is wrong too: a real
+  AM wave with a ~3.3 MHz carrier crosses for ~15 samples per half period and one with a
+  ~33 MHz carrier for one or two; a 240 ns persistence rule never triggered on either.
+  Every analog executor (the `SoftwareTrigger` matcher behind Single/Repeat and the host
+  plan, the Loop page scanner and the SimDriver) applies one rule, with one shared
+  predicate (`src/data/adcArtifactShape.ts`):
   - **Hysteresis**: Rising arms only on a code ≤ `level − h`, Falling on a code ≥
     `level + h`, h = 4 codes. A crossing fires once per arm.
-  - **OR-artifact rejection**: a *run* is the maximal stretch of consecutive samples on one
-    side of a threshold (past the level for a candidate, past `level ∓ h` for an arm). A run
-    is an artifact when it is shorter than `W = ceil(240 ns × samplerate)` samples (at
-    most 23 at 100 MS/s; measured glitch runs are 1-14), it ends (the next sample is back
-    on the other side), and every code `g` in
-    it carries every 1-bit of both neighbours and is larger than both
-    (`(g & a) === a`, `(g & b) === b`, `g > max(a, b)`, with `a` the sample before the run
-    and `b` the one after). The OR only ever raises a code, so it can fake a Rising
-    candidate and a Falling arm; an artifact run neither fires nor arms. A run is judged
-    once, from its first sample (inside a glitch run the neighbour is the glitch itself).
-    Any other run - W samples or longer, or with codes of any other shape - is real. The
-    first sample after arming, a gap or a condition edit has no predecessor: it never
-    starts a candidate, and an arm run starting there is judged against `b` alone (so a
-    level already past `level ∓ h` arms at once, but a stream that starts on a carry
-    glitch does not arm on it). W of 0 or 1 turns artifact rejection off (hysteresis
-    only).
+  - **Transition-glitch rejection**: a *run* is the maximal stretch of consecutive samples
+    on one side of a threshold (past the level for a candidate, past `level ∓ h` for an
+    arm). A run is an artifact when it is shorter than `W = ceil(500 ns × samplerate)`
+    samples (50 at 100 MS/s), it ends (the next sample is back on the other side), and
+    every code `g` in it is a *transition glitch* of `a`, the sample before the run, and
+    `b`, the one after it: g is more than h codes above both, and g is `x | (x + 1)` or
+    that with bit 0 clear for some x with `min(a, b) − 2 ≤ x ≤ max(a, b) + 1` (the code
+    under a glitch can sit one beyond either neighbour: 129 → [254 255] → 129 hides
+    128 → 127 → 128). An artifact run neither fires nor arms; any other run - W samples
+    or longer, or with any other code - is real; a glitch within h codes of its neighbours
+    is left to the hysteresis, so T can sit up to h codes off the level (123 → 127 → 124
+    fires Rising 127). The rule reads only the run's codes and
+    its two neighbours, never the kind of signal. Glitches only read high, so a downward
+    excursion is never rejected; the price is that a real upward excursion shorter than
+    500 ns whose every code is exactly such an OR (from 0 V straight to 255/254, i.e.
+    full scale) is taken for a glitch. The first sample after arming, a gap or a
+    condition edit has no predecessor: it never starts a candidate, and an arm run
+    starting there is judged against `b` alone (`a = b`), so a level already past
+    `level ∓ h` arms at once, but a stream that starts on a glitch does not arm on it. W
+    of 0 or 1 turns artifact rejection off (hysteresis only).
   - **T is the first sample of the candidate run.** Deciding needs at most W - 1 samples
-    of look-ahead; the state carries across transfers (including a sample split across
-    transfers), gaps reset it, the matcher keeps at most W samples beyond the pre-trigger
-    ring so the emitted prefix still ends at T, look-ahead samples count toward the search
-    limit, and a candidate inside the pre-fill holdoff is consumed. Mixed digital + analog:
-    the digital part must hold on T.
+    of look-ahead (the run's codes are kept until `b` arrives); the state carries across
+    transfers (including a sample split across transfers), gaps reset it, the matcher
+    keeps at most W samples beyond the pre-trigger ring so the emitted prefix still ends
+    at T, look-ahead samples count toward the search limit, and a candidate inside the
+    pre-fill holdoff is consumed. Mixed digital + analog: the digital part must hold on T.
   - Pinned to the real traces in `fixtures/` (`fixtures/ADC-TRACES.md`): the glitchy sine
-    gives one trigger per period on the configured slope (1999/2000 over ten levels × both
-    slopes, 0 on the wrong slope; raw: 16148 of 34428 wrong), and both AM waves trigger on
-    every real crossing (the 240 ns persistence rule gave 0). h and the 240 ns window are
-    constants beside the ADC scale data; displayed and saved samples are not filtered.
+    gives one trigger per period on the configured slope (raw: 16148 of 34428 wrong), both
+    AM waves trigger on their real crossings, and the multitone triggers on the configured
+    slope at every reachable level and never at 200 or 230 (an OR-only shape fired 18280
+    times on Rising 200 over 20 ms of it). h and the 500 ns window are constants beside
+    the ADC scale data; displayed and saved samples are not filtered.
 - **Analog triggers sweep in Auto, digital ones in Normal.** A digital condition waits as
   long as the mode allows (Single waits indefinitely; Repeat misses a sweep and retries at
   the next interval). An analog condition behaves like a scope's Auto sweep: if no

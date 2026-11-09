@@ -23,46 +23,37 @@
  *
  * Analog (ADC) crossings are qualified, never raw (docs/ARCHITECTURE.md, trigger
  * section). The ADC module's bus is sampled asynchronously to its code transitions, so
- * at a carry boundary the host reads the OR of the old and new codes for up to ~140 ns;
- * a raw "previous < level <= current" test fires a Rising condition on the falling
- * slope. Rejecting short runs by duration is wrong too: a real AM wave with a 33 MHz
- * carrier is past the level for one or two samples per half period. Every analog
- * condition therefore runs a small state machine on the code sequence:
+ * a transition reads as the OR of the old and new codes, or that OR with bit 0 clear,
+ * for up to ~330 ns (127 -> 128 reads 255 or 254, 143 -> 144 reads 159); a raw "previous < level <=
+ * current" test fires a Rising condition on the falling slope, and on a level the
+ * signal never reaches. Rejecting short runs by duration is wrong too: a real AM wave
+ * with a 33 MHz carrier is past the level for one or two samples per half period. Every
+ * analog condition therefore runs a small state machine on the code sequence:
  *
  *  - hysteresis `h` (`analogHysteresis`): a rising condition arms only on a code
  *    <= `level - h` (falling: >= `level + h`, both clamped to the code range), and fires
  *    at most once per arm;
- *  - OR-artifact rejection with window `W` (`analogArtifactSamples`): a *run* is a
+ *  - transition-glitch rejection with window `W` (`analogArtifactSamples`): a *run* is a
  *    maximal stretch of consecutive samples past a threshold (past the level: a
  *    candidate run, only looked for while armed; past the arming threshold: an arm run,
  *    only looked for while unarmed). A run is an *artifact* when it is shorter than W
  *    samples, it ends (the next sample is back on the other side), and every code `g` in
- *    it satisfies `(g & a) === a && (g & b) === b && g > max(a, b)`, where `a` is the
- *    sample just before the run and `b` the one just after it. An artifact run neither
- *    arms nor fires; any other run arms / fires at its first sample. A run is judged
- *    once, from its first sample: a run still past on its W-th sample is real there;
- *    otherwise its end sample `b` decides. So the decision needs at most W - 1 samples of
- *    look-ahead past the run's start.
- *
- *    The boundary follows the reference oracle the fixtures were measured with (a run of
- *    exactly W samples is real); docs/ARCHITECTURE.md words it as "at most W", which
- *    differs by one sample. The measured artifacts are 1-14 samples and W is 24 at
- *    100 MS/s, so the two readings only differ for a 24-sample OR-shaped run.
- *
- * The OR only ever raises a code, so it can fake a rising candidate (127 -> 128 reads
- * 255) and a falling arm (111 -> 112 reads 127, which would arm a Falling 112 trigger on
- * the rising slope); both have exactly the artifact shape. A genuine fast crossing does
- * not: its codes do not carry every 1-bit of both neighbours.
+ *    it is a transition glitch of `a` and `b` (`isAdcTransitionGlitch`), where `a` is
+ *    the sample just before the run and `b` the one just after it. An artifact run
+ *    neither arms nor fires; any other run arms / fires at its first sample. A run is
+ *    judged once: a run still past on its W-th sample is real there; otherwise its end
+ *    sample `b` decides, so the run's codes are kept until then. The decision needs at
+ *    most W - 1 samples of look-ahead past the run's start.
  *
  * Degenerate windows: W = 0 and W = 1 both judge every run real at its first sample
  * (hysteresis only, no artifact rejection, no look-ahead; with h = 1 that is the raw
  * crossing test). W = 2 rejects only one-sample artifacts. The app passes
- * `ceil(240 ns * samplerate)`, 24 at 100 MS/s.
+ * `ceil(500 ns * samplerate)`, 50 at 100 MS/s.
  *
  * Start of a stream: the first sample after arming, a gap, `resetContinuity()` or a
  * condition edit has no predecessor. It never starts a candidate (no crossing was seen),
  * but it may start an arm run, which is judged like any other except that its missing
- * `a` is left out of the artifact test (only `b` is checked): a run already in progress
+ * `a` is taken to be `b` (the run is judged against `b` alone): a run already in progress
  * is judged from the first sample seen, and a glitch that happens to be that first
  * sample cannot arm.
  *
@@ -100,6 +91,7 @@
  * rejects a finite value; Loop already shows live data while it is unlocked.
  */
 
+import { isAdcGlitchRun } from './adcArtifactShape.js';
 import { bytesPerSampleForChannels, isChannelCount, type ChannelCount } from '../types.js';
 
 export type SoftwareTriggerKind = 'level' | 'rising' | 'falling' | 'edge';
@@ -121,7 +113,7 @@ export const MAX_SOFTWARE_TRIGGER_PREFIX_BYTES = 64 * 1024 * 1024;
  */
 export const DEFAULT_ANALOG_HYSTERESIS_CODES = 4;
 /**
- * Upper bound on `analogArtifactSamples` (W). 240 ns at the ADC's 800 MS/s ceiling is 192
+ * Upper bound on `analogArtifactSamples` (W). 500 ns at the ADC's 800 MS/s ceiling is 400
  * samples; the bound only keeps a mistyped value from growing the waiting ring.
  */
 export const MAX_ANALOG_ARTIFACT_SAMPLES = 4096;
@@ -226,9 +218,9 @@ export interface SoftwareTriggerConfig {
    */
   analogHysteresis?: number;
   /**
-   * The OR-artifact window W in samples, an integer 0..MAX_ANALOG_ARTIFACT_SAMPLES: a run
-   * shorter than W samples of the OR-artifact shape neither arms nor fires (module
-   * comment). 0 and 1 admit no artifact. Default 1. The app passes `ceil(240 ns *
+   * The transition-glitch window W in samples, an integer 0..MAX_ANALOG_ARTIFACT_SAMPLES:
+   * a run shorter than W samples of glitch codes neither arms nor fires (module
+   * comment). 0 and 1 admit no artifact. Default 1. The app passes `ceil(500 ns *
    * samplerate)`. Fixed for a matcher, because it sizes the waiting ring (W - 1
    * look-ahead samples): `reconfigure()` refuses a different value (omitted there: keep
    * the running value).
@@ -349,14 +341,6 @@ const Q_ARM_RUN = 1;
 const Q_ARMED = 2;
 /** Armed, judging a candidate run; T is its first sample. */
 const Q_CAND_RUN = 3;
-
-/** Whether an ended run (fewer than W samples) has the OR-artifact shape: `and` and `min`
- * are the AND and the minimum of its codes, `a` / `b` its neighbours. `a` < 0 (a run
- * that began on the first sample after a reset) leaves `a` out of the test. */
-function orArtifact(a: number, b: number, and: number, min: number): boolean {
-  if ((and & b) !== b || min <= b) return false;
-  return a < 0 || ((and & a) === a && min > a);
-}
 
 interface CompiledAnalogCondition {
   /** Byte inside one sample holding the group's inputs. */
@@ -572,7 +556,7 @@ export class SoftwareTrigger {
   autoAfterSamples: number;
   /** Samples inspected outside the pre-fill holdoff, toward `autoAfterSamples`. */
   private autoInspected = 0;
-  /** Analog OR-artifact window W in samples; fixed (it sizes the ring). */
+  /** Analog transition-glitch window W in samples; fixed (it sizes the ring). */
   readonly analogArtifactSamples: number;
   /** Look-ahead samples beyond T: `max(0, W - 1)`. */
   private readonly analogLookahead: number;
@@ -591,11 +575,11 @@ export class SoftwareTrigger {
   private qState!: Uint8Array;
   /** Per analog condition: code of the previous machine sample, -1 = none. */
   private qPrev!: Int32Array;
-  /** Per analog condition, while a run is judged: its length, the AND and the minimum of
-   * its codes, and the code before it (-1 = none). */
+  /** Per analog condition, while a run is judged: its length, its codes (condition `i`
+   * at `i * qRunStride`, fewer than W of them) and the code before it (-1 = none). */
   private qRunLength!: Int32Array;
-  private qRunAnd!: Int32Array;
-  private qRunMin!: Int32Array;
+  private qRunCodes!: Uint8Array;
+  private qRunStride = 1;
   private qRunBefore!: Int32Array;
   /** Per analog condition: machine index of the candidate T being judged / last fired. */
   private qCandT!: Float64Array;
@@ -919,8 +903,8 @@ export class SoftwareTrigger {
     this.qState = new Uint8Array(n);
     this.qPrev = new Int32Array(n).fill(-1);
     this.qRunLength = new Int32Array(n);
-    this.qRunAnd = new Int32Array(n);
-    this.qRunMin = new Int32Array(n);
+    this.qRunStride = Math.max(1, this.analogArtifactSamples);
+    this.qRunCodes = new Uint8Array(n * this.qRunStride);
     this.qRunBefore = new Int32Array(n).fill(-1);
     this.qCandT = new Float64Array(n);
     this.qGate = new Uint8Array(n);
@@ -1651,8 +1635,9 @@ export class SoftwareTrigger {
     const st = this.qState;
     const qp = this.qPrev;
     const rLen = this.qRunLength;
-    const rAnd = this.qRunAnd;
-    const rMin = this.qRunMin;
+    const rCodes = this.qRunCodes;
+    const stride = this.qRunStride;
+    const h = this.analogHysteresis;
     const rBefore = this.qRunBefore;
     const candT = this.qCandT;
     const gates = this.qGate;
@@ -1673,8 +1658,6 @@ export class SoftwareTrigger {
       let s = st[0]!;
       let p = qp[0]!;
       let n = rLen[0]!;
-      let and = rAnd[0]!;
-      let mn = rMin[0]!;
       let before = rBefore[0]!;
       let t = candT[0]!;
       let gate = gates[0]!;
@@ -1697,16 +1680,16 @@ export class SoftwareTrigger {
         // here with `g` as its after-neighbour.
         if (s === Q_ARM_RUN) {
           if (far) {
-            n++; and &= g; if (g < mn) mn = g;
+            rCodes[n++] = g;
             if (n >= W) s = Q_ARMED;
           } else {
-            s = orArtifact(before, g, and, mn) ? Q_UNARMED : Q_ARMED;
+            s = isAdcGlitchRun(rCodes, 0, n, before, g, h) ? Q_UNARMED : Q_ARMED;
           }
         } else if (s === Q_CAND_RUN) {
           if (past) {
-            n++; and &= g; if (g < mn) mn = g;
+            rCodes[n++] = g;
             if (n >= W) { s = Q_UNARMED; fired = true; }
-          } else if (orArtifact(before, g, and, mn)) {
+          } else if (isAdcGlitchRun(rCodes, 0, n, before, g, h)) {
             s = Q_ARMED;
           } else {
             s = Q_UNARMED; fired = true;
@@ -1718,14 +1701,14 @@ export class SoftwareTrigger {
         if (s === Q_UNARMED) {
           if (far && !(p >= 0 && (rise ? p <= arm : p >= arm))) {
             if (W <= 1) s = Q_ARMED;
-            else { s = Q_ARM_RUN; n = 1; and = g; mn = g; before = p; }
+            else { s = Q_ARM_RUN; n = 1; rCodes[0] = g; before = p; }
           }
         } else if (s === Q_ARMED) {
           if (past && p >= 0 && !(rise ? p >= level : p <= level)) {
             t = baseAbs + off / bps;
             gate = digitalOk ? 1 : 0;
             if (W <= 1) { s = Q_UNARMED; fired = true; }
-            else { s = Q_CAND_RUN; n = 1; and = g; mn = g; before = p; }
+            else { s = Q_CAND_RUN; n = 1; rCodes[0] = g; before = p; }
           }
         }
         p = g;
@@ -1737,7 +1720,7 @@ export class SoftwareTrigger {
         }
       }
       if (d !== null) prev[d.channel] = digital;
-      st[0] = s; qp[0] = p; rLen[0] = n; rAnd[0] = and; rMin[0] = mn; rBefore[0] = before;
+      st[0] = s; qp[0] = p; rLen[0] = n; rBefore[0] = before;
       candT[0] = t; gates[0] = gate;
       if (result >= 0) this.qualifiedT = t;
       return result;
@@ -1775,18 +1758,19 @@ export class SoftwareTrigger {
         const p = qp[i]!;
         let s = st[i]!;
         let fired = false;
+        const base = i * stride;
         if (s === Q_ARM_RUN) {
           if (far) {
-            rLen[i] += 1; rAnd[i] &= g; if (g < rMin[i]!) rMin[i] = g;
+            rCodes[base + rLen[i]!] = g; rLen[i] += 1;
             if (rLen[i]! >= W) s = Q_ARMED;
           } else {
-            s = orArtifact(rBefore[i]!, g, rAnd[i]!, rMin[i]!) ? Q_UNARMED : Q_ARMED;
+            s = isAdcGlitchRun(rCodes, base, rLen[i]!, rBefore[i]!, g, h) ? Q_UNARMED : Q_ARMED;
           }
         } else if (s === Q_CAND_RUN) {
           if (past) {
-            rLen[i] += 1; rAnd[i] &= g; if (g < rMin[i]!) rMin[i] = g;
+            rCodes[base + rLen[i]!] = g; rLen[i] += 1;
             if (rLen[i]! >= W) { s = Q_UNARMED; fired = true; }
-          } else if (orArtifact(rBefore[i]!, g, rAnd[i]!, rMin[i]!)) {
+          } else if (isAdcGlitchRun(rCodes, base, rLen[i]!, rBefore[i]!, g, h)) {
             s = Q_ARMED;
           } else {
             s = Q_UNARMED; fired = true;
@@ -1795,14 +1779,14 @@ export class SoftwareTrigger {
         if (s === Q_UNARMED) {
           if (far && !(p >= 0 && (a.rise ? p <= a.arm : p >= a.arm))) {
             if (W <= 1) s = Q_ARMED;
-            else { s = Q_ARM_RUN; rLen[i] = 1; rAnd[i] = g; rMin[i] = g; rBefore[i] = p; }
+            else { s = Q_ARM_RUN; rLen[i] = 1; rCodes[base] = g; rBefore[i] = p; }
           }
         } else if (s === Q_ARMED) {
           if (past && p >= 0 && !(a.rise ? p >= a.level : p <= a.level)) {
             candT[i] = abs;
             gates[i] = digitalOk ? 1 : 0;
             if (W <= 1) { s = Q_UNARMED; fired = true; }
-            else { s = Q_CAND_RUN; rLen[i] = 1; rAnd[i] = g; rMin[i] = g; rBefore[i] = p; }
+            else { s = Q_CAND_RUN; rLen[i] = 1; rCodes[base] = g; rBefore[i] = p; }
           }
         }
         qp[i] = g;

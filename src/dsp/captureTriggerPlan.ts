@@ -76,8 +76,8 @@
  * descriptor carries the two numbers every analog executor takes, with the
  * `SoftwareTriggerConfig` field names: `analogHysteresis` (h, the module's
  * `ADC_TRIGGER_HYSTERESIS_CODES` = 4 codes) and `analogArtifactSamples` (W, the
- * OR-artifact window, `analogTriggerArtifactSamples(samplerate)` = ceil(240 ns * rate),
- * 24 at 100 MS/s), both
+ * transition-glitch window, `analogTriggerArtifactSamples(samplerate)` = ceil(500 ns * rate),
+ * 50 at 100 MS/s), both
  * from `analogTriggerQualification`. They are in codes and samples, not part of the
  * plan: the plan stays in volts, and its optional volt `hysteresis` is still only set
  * when the legacy input supplies one (the legacy default is none). A digital plan
@@ -190,8 +190,8 @@ export interface CaptureHostTriggerDescriptor {
   /** Analog arming hysteresis in ADC codes (`SoftwareTriggerConfig.analogHysteresis`). */
   readonly analogHysteresis: number;
   /**
-   * The analog OR-artifact window W, `ceil(240 ns * samplerate)`: a shorter run of the
-   * artifact's shape neither arms nor fires (`SoftwareTriggerConfig.analogArtifactSamples`).
+   * The analog transition-glitch window W, `ceil(500 ns * samplerate)`: a shorter run of
+   * glitch codes neither arms nor fires (`SoftwareTriggerConfig.analogArtifactSamples`).
    */
   readonly analogArtifactSamples: number;
 }

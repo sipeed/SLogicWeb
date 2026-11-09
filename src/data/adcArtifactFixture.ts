@@ -10,6 +10,8 @@
  * code dither while the clean code is near one of the given levels.
  */
 
+import { isAdcTransitionGlitch } from './adcArtifactShape.js';
+
 export interface AdcArtifactOptions {
   /** Samples in the trace. */
   length: number;
@@ -148,9 +150,10 @@ export interface QualifiedFire {
  * Reference model of the qualified analog crossing (docs/ARCHITECTURE.md, "Analog
  * crossings are qualified, never raw"; SoftwareTrigger module comment), written over a
  * whole code array with unlimited look-ahead, as the oracle the streaming matchers are
- * compared against. A run is real when it reaches `w` samples or ends without the
- * OR-artifact shape. Index 0 is the first sample after a reset: it may start an arm run
- * (judged without `a`), never a candidate. A run whose judgement needs samples past the
+ * compared against. A run is real when it reaches `w` samples or ends with a code that is
+ * not a transition glitch of its neighbours (`isAdcTransitionGlitch`). Index 0 is the
+ * first sample after a reset: it may start an arm run (judged against `b` alone), never a
+ * candidate. A run whose judgement needs samples past the
  * end is undecided and does not fire. `w` <= 1 rejects nothing.
  */
 export function qualifiedFires(
@@ -168,12 +171,9 @@ export function qualifiedFires(
     while (j < n && inRun(codes[j]!) && j - i < w) j++;
     if (j - i >= w) return [true, i + w - 1];
     if (j >= n) return null;
-    const a = i > 0 ? codes[i - 1]! : -1;
     const b = codes[j]!;
-    for (let k = i; k < j; k++) {
-      const g = codes[k]!;
-      if ((g & b) !== b || g <= b || (a >= 0 && ((g & a) !== a || g <= a))) return [true, j];
-    }
+    const a = i > 0 ? codes[i - 1]! : b;
+    for (let k = i; k < j; k++) if (!isAdcTransitionGlitch(codes[k]!, a, b, h)) return [true, j];
     return [false, j];
   };
   const fires: QualifiedFire[] = [];

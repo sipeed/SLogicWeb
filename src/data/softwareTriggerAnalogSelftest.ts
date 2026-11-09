@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
- * Qualified analog crossings (hysteresis + OR-artifact rejection) in SoftwareTrigger.
+ * Qualified analog crossings (hysteresis + transition-glitch rejection) in SoftwareTrigger.
  *
  * Every capture here is checked against `qualifiedFires`, the whole-array reference model
  * of the rule (adcArtifactFixture.ts): the matcher must report the same T, inspect
@@ -29,7 +29,9 @@ import {
 import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
 import type { SoftwareTriggerTestResult } from './softwareTriggerSelftest.js';
 
-/** W = ceil(240 ns * 100 MS/s), and the ADC module's code hysteresis. */
+/** A window for the hand-built cases (any W exercises the rule; the app's is
+ * ceil(500 ns * 100 MS/s) = 50, used for the real traces), and the ADC module's code
+ * hysteresis. */
 const W = 24;
 const H = 4;
 const LEVELS = [100, 112, 128, 144, 160] as const;
@@ -177,8 +179,11 @@ interface RealTrace {
   name: string;
   codes: Uint8Array;
   levels: readonly number[];
-  /** The sine's slope is judged from its median 300 samples either side of T. */
-  sine: boolean;
+  /** Levels the wave never reaches (only glitches do): they must stay silent. */
+  silent: readonly number[];
+  /** A slow wave's slope is judged from its median this many samples either side of T
+   * (0: not judged - an AM carrier crosses on both slopes every period). */
+  slopeSpan: number;
 }
 
 /** Read the fixtures from the repo root (self-tests run there under node). null when no
@@ -192,9 +197,17 @@ function loadRealTraces(): RealTrace[] | null {
   if (!fs) return null;
   const read = (file: string): Uint8Array => new Uint8Array(fs.readFileSync(`fixtures/${file}`));
   return [
-    { name: 'sine', codes: read('adc-sine-carry-glitches-100MSps.bin'), levels: LEVELS, sine: true },
-    { name: 'AM 3.3 MHz', codes: read('adc-am-3MHz-carrier-100MSps.bin'), levels: [100, 112, 128, 144, 160], sine: false },
-    { name: 'AM 33 MHz', codes: read('adc-am-33MHz-carrier-100MSps.bin'), levels: [116, 120, 128, 136, 140], sine: false },
+    { name: 'sine', codes: read('adc-sine-carry-glitches-100MSps.bin'), levels: LEVELS, silent: [],
+      slopeSpan: 300 },
+    { name: 'AM 3.3 MHz', codes: read('adc-am-3MHz-carrier-100MSps.bin'), levels: [100, 112, 128, 144, 160],
+      silent: [165], slopeSpan: 0 },
+    { name: 'AM 33 MHz', codes: read('adc-am-33MHz-carrier-100MSps.bin'), levels: [116, 120, 128, 136, 140],
+      // No silent level: at ~3 samples per carrier period it reads isolated 160-211 codes
+      // (138 -> 163 -> 130) that are no mix of the codes crossed, so they may fire.
+      silent: [], slopeSpan: 0 },
+    // 127 -> 128 reads 255 / 254 here, far beyond the wave: Rising 200 / 230 must stay silent.
+    { name: 'multitone 100 kHz', codes: read('adc-multitone-100kHz-100MSps.bin'),
+      levels: [110, 120, 128, 136, 145], silent: [200, 230], slopeSpan: 30 },
   ];
 }
 
@@ -206,16 +219,17 @@ function median31(codes: Uint8Array, at: number): number {
 /**
  * Whether a reported T is a legitimate crossing of `level` on the configured slope, in
  * the trace's own codes: the sample before T is on the other side and T is past the
- * level (a touch at an AM carrier's peak is legitimate), and for the slow sine the
- * median-of-31 300 samples after T is beyond the one 300 samples before.
+ * level (a touch at an AM carrier's peak is legitimate), and for a slow wave the
+ * median-of-31 `slopeSpan` samples after T is beyond the one `slopeSpan` before.
  */
 function slopeError(trace: RealTrace, kind: Kind, level: number, t: number): string {
   const c = trace.codes;
   const past = (g: number): boolean => (kind === 'rising' ? g >= level : g <= level);
   if (t < 1 || t >= c.length) return `T=${t} outside the trace`;
   if (!past(c[t]!) || past(c[t - 1]!)) return `T=${t} (${c[t - 1]} -> ${c[t]}) does not cross ${level}`;
-  if (trace.sine && t >= 315 && t + 316 <= c.length) {
-    const d = median31(c, t + 300) - median31(c, t - 300);
+  const span = trace.slopeSpan;
+  if (span > 0 && t >= span + 15 && t + span + 16 <= c.length) {
+    const d = median31(c, t + span) - median31(c, t - span);
     if (kind === 'rising' ? d <= 0 : d >= 0) return `T=${t} is on the wrong slope (median step ${d})`;
   }
   return '';
@@ -228,6 +242,8 @@ const REAL_LAYOUTS: ReadonlyArray<readonly [ChannelCount, number]> = [
 ];
 
 function realTraceTests(check: (name: string, pass: boolean, detail: string) => void): void {
+  // The app's window at the traces' 100 MS/s (analogTriggerArtifactSamples).
+  const W = 50;
   const traces = loadRealTraces();
   if (traces === null) {
     check('real ADC traces: skipped (no filesystem)', true, 'browser run');
@@ -256,13 +272,28 @@ function realTraceTests(check: (name: string, pass: boolean, detail: string) => 
         }
       }
     }
-    const am = traces.slice(1).map((t) =>
-      t.levels.reduce((n, level) => n + qualifiedFires(t.codes, 'rising', level, H, W).length +
-        qualifiedFires(t.codes, 'falling', level, H, W).length, 0));
-    check('real ADC traces: the rule fires once per sine period on the right slope; AM fires',
-      bad === '' && rawWrong > 1000 && am.every((n) => n > 1000),
+    const others = traces.slice(1).map((t) => {
+      let n = 0;
+      for (const kind of KINDS) {
+        for (const level of t.levels) {
+          const fires = qualifiedFires(t.codes, kind, level, H, W);
+          n += fires.length;
+          for (const f of fires) {
+            const e = slopeError(t, kind, level, f.t);
+            if (e) bad ||= `${t.name} ${kind} ${level}: ${e}`;
+          }
+        }
+        for (const level of t.silent) {
+          const fires = qualifiedFires(t.codes, kind, level, H, W);
+          if (fires.length > 0) bad ||= `${t.name} ${kind} ${level} (never reached): fires at ${fires[0]!.t}`;
+        }
+      }
+      return `${t.name} ${n}`;
+    });
+    check('real ADC traces: the rule fires once per sine period on the right slope; AM and multitone fire, never on unreached levels',
+      bad === '' && rawWrong > 1000 && others.every((x) => Number(x.split(' ').pop()) > 1000),
       bad || `sine ${qualified} fires over 10 conditions (raw rule: ${rawWrong} on the wrong ` +
-        `slope), AM 3.3 MHz ${am[0]} fires, AM 33 MHz ${am[1]} fires`);
+        `slope); ${others.join(', ')} fires`);
   }
 
   // Continuous (Loop) mode, stride 1: every fire after the first match is reported at the
@@ -277,7 +308,7 @@ function realTraceTests(check: (name: string, pass: boolean, detail: string) => 
       const trace = traces[ti]!;
       let total = 0;
       for (const kind of KINDS) {
-        for (const level of [...trace.levels, ...(trace.sine ? [] : [trace.name === 'AM 3.3 MHz' ? 165 : 150])]) {
+        for (const level of [...trace.levels, ...trace.silent]) {
           if (bad) break;
           const [channels, start] = REAL_LAYOUTS[combos % REAL_LAYOUTS.length]!;
           combos++;
@@ -524,7 +555,7 @@ export function runQualifiedAnalogSuite(): SoftwareTriggerTestResult[] {
       bad === '', bad || `${layouts.length} layouts x rising/falling`);
   }
 
-  // Levels outside the signal never trigger, although the OR artifact reaches 255 (from
+  // Levels outside the signal never trigger, although the glitch reaches 255 (from
   // 127 -> 128): Rising 200 sees short candidates, Falling 190 short faked arms.
   {
     let bad = '';
@@ -546,9 +577,9 @@ export function runQualifiedAnalogSuite(): SoftwareTriggerTestResult[] {
 
   // The artifact only raises codes, so on the rising slope it fakes a *falling* arm:
   // 111 -> 112 reads 127 >= 112 + h, then the genuine 112s are past the level. The 127
-  // run has the OR shape (127 carries every bit of 111 and of 112), so it never arms; with
-  // W = 1 (no artifact rejection) it would. A genuine arm of the same length - 120, which
-  // does not carry 111's bits - arms and fires.
+  // run is a transition glitch (127 = 111 | 112, more than h above both), so it never arms;
+  // with W = 1 (no artifact rejection) it would. A genuine arm of the same length - 130,
+  // which is no such OR - arms and fires.
   {
     const codes: number[] = [];
     const push = (code: number, n: number) => { for (let i = 0; i < n; i++) codes.push(code); };
@@ -559,7 +590,7 @@ export function runQualifiedAnalogSuite(): SoftwareTriggerTestResult[] {
       searchLimitSamples: Number.POSITIVE_INFINITY };
     const qualified = oneShot(raw, c, cfg, 1, 5);
     const noRejection = oneShot(raw, c, { ...cfg, analogArtifactSamples: 1 }, 2, 5);
-    const genuine = Uint8Array.from(codes.map((g) => (g === 127 ? 120 : g)));
+    const genuine = Uint8Array.from(codes.map((g) => (g === 127 ? 130 : g)));
     const real = oneShot(encode(genuine, 8, 0, 13), genuine, cfg, 3, 5);
     check('qualified analog: a faked falling arm on the rising slope does not trigger',
       !qualified.matched && qualified.noTrigger && !qualified.err && noRejection.matched &&
@@ -569,7 +600,7 @@ export function runQualifiedAnalogSuite(): SoftwareTriggerTestResult[] {
   }
 
   // Short real runs are not artifacts: a 3-sample crossing (the shape of a 33 MHz carrier)
-  // fires, while a 3-sample OR-shaped run (127 -> 128 reads 255) does not.
+  // fires, while a 3-sample glitch run (127 -> 128 reads 255) does not.
   {
     const mk = (mid: readonly number[]): Uint8Array => {
       const codes: number[] = [];
@@ -582,7 +613,7 @@ export function runQualifiedAnalogSuite(): SoftwareTriggerTestResult[] {
       searchLimitSamples: Number.POSITIVE_INFINITY };
     const r1 = oneShot(encode(realRun, 8, 0, 1), realRun, cfg, 1, 3);
     const r2 = oneShot(encode(orRun, 8, 0, 2), orRun, cfg, 2, 3);
-    check('qualified analog: a short genuine crossing fires, a short OR-shaped run does not',
+    check('qualified analog: a short genuine crossing fires, a short glitch run does not',
       r1.matched && r1.tAbs === 5 && !r1.err && !r2.matched && !r2.err,
       `genuine T=${r1.tAbs} ${r1.err}, OR run matched=${r2.matched} ${r2.err}`);
   }
@@ -596,8 +627,8 @@ export function runQualifiedAnalogSuite(): SoftwareTriggerTestResult[] {
     const cases: Array<[string, number[], number]> = [
       ['glitch', [127, ...Array<number>(60).fill(112), 113, 113], -1],
       ['long arm', [...Array<number>(30).fill(140), ...Array<number>(40).fill(112)], 30],
-      // 120 does not carry 111's bits, so this short run is not OR-shaped.
-      ['short arm', [120, 120, 111, ...Array<number>(40).fill(112)], 2],
+      // 130 is no mix of 111 and its neighbours, so this short run is no glitch.
+      ['short arm', [130, 130, 111, ...Array<number>(40).fill(112)], 2],
     ];
     for (const [name, list, wantT] of cases) {
       const c = Uint8Array.from(list);

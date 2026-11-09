@@ -51,21 +51,24 @@ export const ADC_MAX_CODE = 2 ** PROFILE_ANALOG_GROUP.resolutionBits - 1;
 
 /**
  * Analog trigger qualification (docs/ARCHITECTURE.md, "Analog crossings are qualified,
- * never raw"). The module's bus is sampled asynchronously to its code transitions, so at
- * a carry boundary the host reads the OR of the old and new codes (143 -> 144 reads 159,
- * 127 -> 128 reads 255) for 1-14 samples at 100 MS/s, measured on a 32U3 on 2026-11-06.
- * A crossing therefore arms only after a code `ADC_TRIGGER_HYSTERESIS_CODES` before the
- * level, and a run past a threshold shorter than `ADC_TRIGGER_ARTIFACT_SECONDS` (longer
- * than the ~140 ns worst artifact) whose codes have the OR shape is ignored; any other run
- * counts at once, so fast real signals still trigger. In codes, not volts: the artifact
+ * never raw"). The module's bus is sampled asynchronously to its code transitions, so a
+ * transition reads as the OR of the old and new codes, or that OR with bit 0 clear
+ * (143 -> 144 reads 159, 127 -> 128 reads 255 or 254), measured on a 32U3 on 2026-11-06
+ * and 2026-11-09. A crossing therefore arms only after a code
+ * `ADC_TRIGGER_HYSTERESIS_CODES` before the level, and a run past a threshold shorter than
+ * `ADC_TRIGGER_ARTIFACT_SECONDS` whose codes are all transition glitches of its
+ * neighbours (src/data/adcArtifactShape.ts) is ignored; any other run counts at once, so
+ * fast real signals still trigger. The window covers the longest glitch run measured,
+ * 330 ns, on a signal parked on the 127/128 boundary. In codes, not volts: the artifact
  * and the dither are code-domain effects whatever gain is declared.
  */
 export const ADC_TRIGGER_HYSTERESIS_CODES = 4;
-export const ADC_TRIGGER_ARTIFACT_SECONDS = 240e-9;
+export const ADC_TRIGGER_ARTIFACT_SECONDS = 500e-9;
 
-/** The persistence window in samples at a capture rate: `ceil(240 ns * rate)`, at least
- * one (24 at 100 MS/s, 192 at 800 MS/s). The product is rounded to a millionth of a
- * sample first, so 240e-9 * 100e6 = 24.000000000000004 is 24, not 25. */
+/** The artifact window in samples at a capture rate: `ceil(500 ns * rate)`, at least
+ * one (50 at 100 MS/s, 400 at 800 MS/s). The product is rounded to a millionth of a
+ * sample first, so a float product such as 500e-9 * 160e6 = 80.00000000000001 is 80,
+ * not 81. */
 export function analogTriggerArtifactSamples(samplerate: number): number {
   if (!Number.isFinite(samplerate) || samplerate <= 0) return 1;
   const exact = Math.round(ADC_TRIGGER_ARTIFACT_SECONDS * samplerate * 1e6) / 1e6;
