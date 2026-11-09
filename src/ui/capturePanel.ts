@@ -29,6 +29,9 @@ import {
   isAnalogGain, lockedChannelBanks,
 } from './channelBanks.js';
 import {
+  chipLabel, chipRowFit, widestChipBox,
+} from './channelChipLayout.js';
+import {
   parseCustomThreshold, thresholdChoice, thresholdOptionLabel, thresholdRange,
 } from './thresholdOptions.js';
 import { t } from './i18n.js';
@@ -262,11 +265,41 @@ export class CapturePanel {
   private triggerStatusEl: HTMLElement | null = null;
   private loopMatcherEl: HTMLElement | null = null;
   private loopSwapEl: HTMLElement | null = null;
+  private readonly chipRows = new Map<Element, () => void>();
+  private chipObserver: ResizeObserver | null = null;
 
   constructor(
     private readonly host: CapturePanelHost,
     private readonly cb: CapturePanelCallbacks,
   ) {}
+
+  dispose(): void {
+    this.chipObserver?.disconnect();
+    this.chipObserver = null;
+    this.chipRows.clear();
+  }
+
+  private watchChipRow(
+    grid: HTMLElement, chips: readonly HTMLButtonElement[], indices: readonly number[],
+  ): void {
+    const apply = (): void => {
+      const sample = chips[0];
+      if (sample === undefined) return;
+      const full = widestChipBox(sample, indices.map((index) => chipLabel(index, 'full')));
+      const short = widestChipBox(sample, indices.map((index) => chipLabel(index, 'short')));
+      const fit = chipRowFit(grid.clientWidth, CHANNEL_BANK_SIZE, full, short);
+      grid.dataset.chipForm = fit.form;
+      grid.style.setProperty('--chip-min-w', `${Math.round(fit.chipCss * 100) / 100}px`);
+    };
+    if (this.chipObserver === null && typeof ResizeObserver !== 'undefined') {
+      this.chipObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) this.chipRows.get(entry.target)?.();
+      });
+    }
+    if (this.chipObserver === null) return;
+    this.chipRows.set(grid, apply);
+    this.chipObserver.observe(grid);
+  }
 
   private *roots(): Generator<HTMLElement, void, undefined> {
     yield this.host.capture;
@@ -585,6 +618,8 @@ export class CapturePanel {
     const refocusThreshold = !!focused && capture.contains(focused) &&
       focused.dataset?.thresholdInput !== undefined;
     this.rendering = true;
+    this.chipObserver?.disconnect();
+    this.chipRows.clear();
     try {
       capture.replaceChildren();
       cursorPage.replaceChildren();
@@ -665,11 +700,17 @@ export class CapturePanel {
         grid.dataset.bankGrid = String(start);
         grid.setAttribute('role', 'group');
         grid.setAttribute('aria-label', range);
+        const chips: HTMLButtonElement[] = [];
         for (const index of indices) {
           const c = v.channels[index]!;
           const chip = document.createElement('button');
           chip.className = 'chip' + (c.enabled ? ' on' : '');
-          chip.textContent = `D${c.index}`;
+          const prefix = document.createElement('span');
+          prefix.className = 'chip-d';
+          prefix.textContent = 'D';
+          const number = document.createElement('span');
+          number.textContent = String(c.index);
+          chip.append(prefix, number);
           // The chip shows/hides the row only; what is acquired is the channel width.
           const id = c.name === defaultChannelName(c.index) ? `D${c.index}` : `D${c.index} ${c.name}`;
           chip.title = t('capturePanel.chipToggle', { id });
@@ -684,8 +725,10 @@ export class CapturePanel {
           }
           chip.addEventListener('click', () => this.cb.onToggleChannel(c.index, !c.enabled));
           grid.appendChild(chip);
+          chips.push(chip);
         }
         bank.appendChild(grid);
+        this.watchChipRow(grid, chips, indices);
       }
 
       // One button per row, always in the same place: at the right of the eight slots.

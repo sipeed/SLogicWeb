@@ -1872,8 +1872,9 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 .global-trigger-remove:hover:not(:disabled) { background: var(--bg30); color: var(--text); }
 .global-trigger-remove:disabled { opacity: .35; cursor: default; }
-.chip-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; }
+.chip-grid { display: grid; grid-template-columns: repeat(8, minmax(var(--chip-min-w, 0px), 1fr)); gap: 4px; }
 .channel-bank-grid { flex: 1 1 auto; position: relative; min-width: 0; }
+.channel-bank-grid[data-chip-form="short"] .chip-d { display: none; }
 .channel-bank-grid .chip { min-width: 0; padding: 0; font-size: 10px; }
 /* A hidden row's chip: dashed outline in the channel colour (inline), muted struck-through
    label - hidden from the plot, still acquired (the chip's tooltip says so). */

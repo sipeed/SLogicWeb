@@ -9,6 +9,7 @@ import {
   channelBankRange, channelBankStart, channelBankStarts, channelWidthOptions, lockedChannelBanks,
 } from '../channelBanks.js';
 import { busLabel } from '../busView.js';
+import { CHIP_GAP_PX, chipLabel, chipRowFit } from '../channelChipLayout.js';
 import { SAMPLERATES_HZ } from '../../device/index.js';
 
 const nodeProcess = (() => {
@@ -20,6 +21,7 @@ const nodeProcess = (() => {
 })();
 
 interface TestResult { name: string; pass: boolean; detail: string }
+interface FsLike { readFileSync(path: string, encoding: 'utf8'): string }
 const results: TestResult[] = [];
 function check(name: string, pass: boolean, detail: string): void {
   results.push({ name, pass, detail });
@@ -312,6 +314,66 @@ check('bank start uses the absolute channel index',
     clock20 && !clock20Wide && bank8 && !bank8Wide && descending && !plain && genericOut,
     `clock20@16=${clock20}, clock20@32=${clock20Wide}, bank8@8=${bank8}, bank8@16=${bank8Wide}, ` +
     `desc@8=${descending}, plain@4=${plain}, genericOut@8=${genericOut}`);
+}
+
+{
+  const labels = Array.from(
+    { length: 32 }, (_, index) => `${chipLabel(index, 'full')}/${chipLabel(index, 'short')}`);
+  check('a chip label drops only the D prefix in the short form',
+    labels[0] === 'D0/0' && labels[7] === 'D7/7' && labels[15] === 'D15/15' &&
+    labels[31] === 'D31/31' && labels.length === 32,
+    `first=${labels[0]}, 7=${labels[7]}, 15=${labels[15]}, 31=${labels[31]}`);
+
+  const full = 14.78;
+  const short = 13.12;
+  const needed = 8 * full + 7 * CHIP_GAP_PX;
+  const exact = chipRowFit(needed, 8, full, short);
+  const tight = chipRowFit(needed - 0.01, 8, full, short);
+  check('the full labels claim the row exactly at their width and a hundredth less abbreviates',
+    CHIP_GAP_PX === 4 && needed === 146.24 && exact.form === 'full' && exact.chipCss === full &&
+    tight.form === 'short' && tight.chipCss === short,
+    `needed=${needed}, exact=${exact.form}/${exact.chipCss}, tight=${tight.form}/${tight.chipCss}`);
+
+  const narrow = chipRowFit(120, 8, full, short);
+  const tiny = chipRowFit(1, 8, full, short);
+  check('the short form keeps every chip as wide as the widest displayed label',
+    narrow.chipCss === short && tiny.chipCss === short && narrow.chipCss > 0,
+    `narrow=${narrow.form}/${narrow.chipCss}, tiny=${tiny.form}/${tiny.chipCss}`);
+
+  const perChip = chipRowFit(8 * 12.78 + 28 + 1, 8, 18.34, 11.12);
+  const widest = chipRowFit(8 * 18.34 + 28, 8, 18.34, 11.12);
+  check('sizing the row by the first chip instead of the widest one would clip D15',
+    perChip.form === 'short' && perChip.chipCss === 11.12 &&
+    widest.form === 'full' && widest.chipCss === 18.34,
+    `perChip=${perChip.form}/${perChip.chipCss}, widest=${widest.form}/${widest.chipCss}`);
+
+  const degenerate = [
+    chipRowFit(100, 0, full, short), chipRowFit(Number.NaN, 8, full, short),
+    chipRowFit(100, 8, Number.NaN, short), chipRowFit(100, 8, full, Number.NaN),
+  ];
+  check('an unmeasurable row falls back to the full labels and a zero-width floor',
+    degenerate[0]!.form === 'full' && degenerate[0]!.chipCss === full &&
+    degenerate[1]!.form === 'full' && degenerate[2]!.chipCss === 0 &&
+    degenerate[3]!.chipCss === 0,
+    degenerate.map((fit) => `${fit.form}/${fit.chipCss}`).join(', '));
+
+  const chipFs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!chipFs || typeof chipFs.readFileSync !== 'function') {
+    throw new Error('node fs module unavailable');
+  }
+  const chipPanel = chipFs.readFileSync('src/ui/capturePanel.ts', 'utf8');
+  const chipSheet = chipFs.readFileSync('src/ui/style.css', 'utf8');
+  const markUp = chipPanel.includes("prefix.className = 'chip-d'") &&
+    chipPanel.includes('chip.append(prefix, number)') &&
+    chipPanel.includes('this.watchChipRow(grid, chips, indices)') &&
+    chipPanel.includes("grid.style.setProperty('--chip-min-w'") &&
+    chipPanel.includes('grid.dataset.chipForm = fit.form') &&
+    chipPanel.includes('this.chipObserver?.disconnect()');
+  const sheetChips = chipSheet.includes(
+    'grid-template-columns: repeat(8, minmax(var(--chip-min-w, 0px), 1fr));') &&
+    chipSheet.includes('.channel-bank-grid[data-chip-form="short"] .chip-d { display: none; }');
+  check('the panel measures each bank grid and the sheet reserves the measured chip width',
+    markUp && sheetChips, `markup=${markUp}, sheet=${sheetChips}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
