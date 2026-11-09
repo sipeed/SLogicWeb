@@ -504,7 +504,9 @@ Rules:
   not armed. For `mixed: true`, both families' conditions are ANDed and no family switch
   is shown.
 - **States:** configured (neutral), armed (warning), filling (pre-fill holdoff), waiting,
-  triggered, released, pending (Next badge), not-found. Only one family/state is bright;
+  triggered, auto (an analog sweep that forced after one window without a crossing: shows
+  the untriggered data, labelled "Auto (not triggered)", no T marker), released, pending
+  (Next badge), not-found (digital only: analog never ends as not-found). Only one family/state is bright;
   the other family is neutral, never falsely armed.
 - **Enable:** turning it off leaves conditions stored and neutral; removing a condition
   never turns it off. Configuring the *first* condition while the trigger is off (a

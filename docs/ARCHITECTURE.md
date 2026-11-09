@@ -567,6 +567,20 @@ type TriggerBudget =
     slopes, 0 on the wrong slope; raw: 16148 of 34428 wrong), and both AM waves trigger on
     every real crossing (the 240 ns persistence rule gave 0). h and the 240 ns window are
     constants beside the ADC scale data; displayed and saved samples are not filtered.
+- **Analog triggers sweep in Auto, digital ones in Normal.** A digital condition waits as
+  long as the mode allows (Single waits indefinitely; Repeat misses a sweep and retries at
+  the next interval). An analog condition behaves like a scope's Auto sweep: if no
+  qualified crossing is decided within `autoAfterSamples` inspected samples counted from
+  the end of the pre-fill holdoff (one capture window: `pre + post`), the matcher
+  **forces** the capture at the current sample F, exactly as if T were F (the pre-trigger
+  ring `[F − pre, F)` then `post` samples from F; same budget and byte-exact prefix rules),
+  and reports `forced` instead of `triggered`: `stats.forced = true`, `matched = false`,
+  no T. The device reports the state `'forced'` (`onTriggerState`), the store keeps the
+  real untriggered data, the view has no T marker and the panel says "Auto (not
+  triggered)", never "no capture". In Repeat a forced sweep is a wave like any other, not
+  a miss. Loop already shows live data while it is unlocked and is unchanged. A forced
+  capture never sets T, so nothing downstream (viewport lock, cursors relative to T)
+  treats it as triggered.
 - **P0 keeps the single-family rule** (digital *or* analog) to preserve current
   behaviour. **P1 allows mixed digital + analog** when `profile.trigger.mixed` is true.
   The UI does not offer mixed conditions on a profile that cannot execute them.
