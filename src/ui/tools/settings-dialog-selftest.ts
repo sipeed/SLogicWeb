@@ -64,7 +64,9 @@ const DIALOG_NEEDLES: readonly string[] = [
   '[data-settings-key]',
   "focus({ preventScroll: true })",
   'this.body.replaceChildren(',
-  "this.rowLabel('settings.detailedLabels', input.id)",
+  'private toggleRow(',
+  'const text = this.rowLabel(label, input.id);',
+  'input.dataset.settingsKey = camelKey(key);',
   "this.rowLabel('settings.shortcuts')",
   "this.closeButton.setAttribute('aria-label', t('settings.close'));",
   'this.host.setDetailedLabels(',
@@ -365,17 +367,40 @@ const NAV_NEEDLES: readonly string[] = [
 }
 
 const TOGGLE_NEEDLES: readonly string[] = [
+  'private toggleRow(',
+  'key: string,',
+  'label: MessageKey,',
+  'checked: boolean,',
+  'onChange: (on: boolean) => void,',
   "row.className = 'settings-row';",
-  "input.id = 'settings-detailed-labels';",
-  "const label = this.rowLabel('settings.detailedLabels', input.id);",
-  "label.id = 'settings-row-detailed-labels';",
   "toggle.className = 'settings-toggle';",
   "input.type = 'checkbox';",
-  "input.dataset.settingsKey = 'detailedLabels';",
-  "input.setAttribute('aria-labelledby', label.id);",
-  'input.checked = this.host.detailedLabels();',
-  "input.addEventListener('change', () => this.host.setDetailedLabels(input.checked));",
+  'input.id = `settings-${key}`;',
+  'input.dataset.settingsKey = camelKey(key);',
+  'const text = this.rowLabel(label, input.id);',
+  'text.id = `settings-row-${key}`;',
+  "input.setAttribute('aria-labelledby', text.id);",
+  'input.checked = checked;',
+  "input.addEventListener('change', () => onChange(input.checked));",
   'toggle.appendChild(input);',
+  'row.append(text, toggle);',
+];
+
+interface ToggleRow {
+  row: string;
+  kebab: string;
+  label: MessageKey;
+  getter: string;
+  field: string;
+  setter: string;
+}
+
+const TOGGLE_ROWS: readonly ToggleRow[] = [
+  { row: 'labelsRow', kebab: 'detailed-labels', label: 'settings.detailedLabels', getter: 'detailedLabels', field: 'detailedLabels', setter: 'setDetailedLabels' },
+  { row: 'wheelZoomsRow', kebab: 'wheel-zooms', label: 'settings.wheelZooms', getter: 'wheelZooms', field: 'wheelZooms', setter: 'setWheelZooms' },
+  { row: 'compactRowsRow', kebab: 'compact-rows', label: 'settings.compactRows', getter: 'compactRows', field: 'compactRows', setter: 'setCompactRows' },
+  { row: 'hideIdleRow', kebab: 'hide-idle', label: 'settings.hideIdle', getter: 'hideIdle', field: 'hideIdleChannels', setter: 'setHideIdle' },
+  { row: 'developerToolsRow', kebab: 'developer-tools', label: 'settings.developerTools', getter: 'developerTools', field: 'developerTools', setter: 'setDeveloperTools' },
 ];
 
 const ACTION_ROW_NEEDLES: readonly string[] = [
@@ -390,37 +415,47 @@ const ACTION_ROW_NEEDLES: readonly string[] = [
 
 function paneComposition(source: string): boolean {
   const body = methodBody(source, 'private paneContent(section: SettingsSectionId): HTMLElement[] {');
-  const appearanceAt = body.indexOf("if (section === 'appearance') return [this.labelsRow(), this.shortcutsRow()];");
-  const generalAt = body.indexOf('    return [];');
+  const appearanceAt = body.indexOf(
+    'return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];');
+  const generalAt = body.indexOf('return [this.developerToolsRow(), this.shortcutsRow()];');
   return appearanceAt >= 0 && generalAt > appearanceAt &&
     !body.includes('settings-item') && !body.includes('new SettingsMenu');
 }
 
 {
-  check('the appearance pane is exactly the display toggle row and the shortcuts row, and the general pane is still empty',
+  check('the appearance pane is the four upstream toggles in order and the general pane opens with developer tools then shortcuts',
     paneComposition(dialogSource),
     `ok=${paneComposition(dialogSource)}, ` +
     `body=${JSON.stringify(methodBody(dialogSource, 'private paneContent(section: SettingsSectionId): HTMLElement[] {').replace(/\s+/g, ' '))}`);
 }
 
 {
-  const mutated = dialogSource.replace(
-    "if (section === 'appearance') return [this.labelsRow(), this.shortcutsRow()];",
-    "if (section === 'appearance') return [this.shortcutsRow()];");
-  const filledGeneral = dialogSource.replace(
-    '    return [];',
-    '    return [this.shortcutsRow()];');
-  check('control: dropping a row from the appearance pane or filling the general pane early is detected by the same composition predicate',
-    mutated !== dialogSource && !paneComposition(mutated) &&
-    filledGeneral !== dialogSource && !paneComposition(filledGeneral) &&
+  const dropped = dialogSource.replace(
+    '      return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];',
+    '      return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];');
+  const swapped = dialogSource.replace(
+    'this.wheelZoomsRow(), this.compactRowsRow(),',
+    'this.compactRowsRow(), this.wheelZoomsRow(),');
+  const misplacedShortcuts = dialogSource.replace(
+    '    return [this.developerToolsRow(), this.shortcutsRow()];',
+    '    return [this.shortcutsRow(), this.developerToolsRow()];');
+  const emptiedGeneral = dialogSource.replace(
+    '    return [this.developerToolsRow(), this.shortcutsRow()];',
+    '    return [this.developerToolsRow()];');
+  check('control: dropping a row from the appearance list, swapping two toggles, reordering the general rows or dropping the shortcuts row fails the same composition predicate',
+    dropped !== dialogSource && !paneComposition(dropped) &&
+    swapped !== dialogSource && !paneComposition(swapped) &&
+    misplacedShortcuts !== dialogSource && !paneComposition(misplacedShortcuts) &&
+    emptiedGeneral !== dialogSource && !paneComposition(emptiedGeneral) &&
     paneComposition(dialogSource),
-    `mutated=${paneComposition(mutated)}, filled=${paneComposition(filledGeneral)}, ` +
+    `dropped=${paneComposition(dropped)}, swapped=${paneComposition(swapped)}, ` +
+    `misplaced=${paneComposition(misplacedShortcuts)}, emptied=${paneComposition(emptiedGeneral)}, ` +
     `real=${paneComposition(dialogSource)}`);
 }
 
 {
   const missing = TOGGLE_NEEDLES.filter((needle) => !dialogSource.includes(needle));
-  check('the display toggle is a row-level checkbox labelled by its row label and writing only through the host',
+  check('the shared toggle builder is a row-level checkbox labelled by its row label and writing only through its change callback',
     missing.length === 0,
     `missing=${JSON.stringify(missing)}`);
 }
@@ -429,13 +464,17 @@ function rowLabelBody(source: string): string {
   return methodBody(source, 'private rowLabel(key: MessageKey, controlId?: string): HTMLElement {');
 }
 
+function toggleRowBody(source: string): string {
+  return methodBody(source, 'private toggleRow(');
+}
+
 function rowLabelBindsControl(source: string): boolean {
   const body = rowLabelBody(source);
   const labelAt = body.indexOf("const label = document.createElement('label');");
   const forAt = body.indexOf('label.htmlFor = controlId;');
-  const rowBody = methodBody(source, 'private labelsRow(): HTMLDivElement {');
-  const idAt = rowBody.indexOf("input.id = 'settings-detailed-labels';");
-  const callAt = rowBody.indexOf("const label = this.rowLabel('settings.detailedLabels', input.id);");
+  const toggleBody = toggleRowBody(source);
+  const idAt = toggleBody.indexOf('input.id = `settings-${key}`;');
+  const callAt = toggleBody.indexOf('const text = this.rowLabel(label, input.id);');
   return labelAt >= 0 && forAt > labelAt &&
     body.includes("const span = document.createElement('span');") &&
     !body.includes('instanceof HTMLLabelElement') &&
@@ -458,11 +497,11 @@ function rowLabelBindsControl(source: string): boolean {
     '    label.htmlFor = controlId;\n',
     '    if (controlId !== undefined) label.htmlFor = controlId;\n');
   const unkeyed = dialogSource.replace(
-    "    const label = this.rowLabel('settings.detailedLabels', input.id);\n",
-    "    const label = this.rowLabel('settings.detailedLabels');\n");
+    '    const text = this.rowLabel(label, input.id);\n',
+    '    const text = this.rowLabel(label);\n');
   const lateId = dialogSource.replace(
-    "    input.id = 'settings-detailed-labels';\n    input.dataset.settingsKey = 'detailedLabels';\n    const label = this.rowLabel('settings.detailedLabels', input.id);\n",
-    "    input.dataset.settingsKey = 'detailedLabels';\n    const label = this.rowLabel('settings.detailedLabels', input.id);\n    input.id = 'settings-detailed-labels';\n");
+    '    input.id = `settings-${key}`;\n    input.dataset.settingsKey = camelKey(key);\n    const text = this.rowLabel(label, input.id);\n',
+    '    input.dataset.settingsKey = camelKey(key);\n    const text = this.rowLabel(label, input.id);\n    input.id = `settings-${key}`;\n');
   check('control: reverting the row label to a plain span, dropping the for binding, guarding it behind a conditional, not handing over the control id or assigning that id after the binding fails the same predicate',
     spanLabel !== dialogSource && !rowLabelBindsControl(spanLabel) &&
     noFor !== dialogSource && !rowLabelBindsControl(noFor) &&
@@ -476,22 +515,25 @@ function rowLabelBindsControl(source: string): boolean {
 }
 
 {
-  const noState = dialogSource.replace('    input.checked = this.host.detailedLabels();\n', '');
-  const noName = dialogSource.replace("    input.setAttribute('aria-labelledby', label.id);\n", '');
-  const noLabel = dialogSource.replace(
-    "    const label = this.rowLabel('settings.detailedLabels', input.id);\n",
-    "    const label = this.rowLabel('settings.detailedLabels');\n");
+  const noState = dialogSource.replace('    input.checked = checked;\n', '');
+  const noName = dialogSource.replace("    input.setAttribute('aria-labelledby', text.id);\n", '');
+  const noKey = dialogSource.replace('    input.dataset.settingsKey = camelKey(key);\n', '    input.dataset.settingsKey = key;\n');
   const noWrap = dialogSource.replace('    toggle.appendChild(input);\n', '    row.append(input);\n');
-  check('control: a cached toggle state, an unnamed checkbox, an unbound row label or an unlabelled row is detected by the same predicate',
+  const cachedWrite = dialogSource.replace(
+    '    input.addEventListener(\'change\', () => onChange(input.checked));\n',
+    '    input.addEventListener(\'change\', () => {});\n');
+  check('control: a cached toggle state, an unnamed checkbox, a kebab-only key, an unlabelled row or a change handler that skips the callback is detected by the same predicate',
     noState !== dialogSource && !TOGGLE_NEEDLES.every((needle) => noState.includes(needle)) &&
     noName !== dialogSource && !TOGGLE_NEEDLES.every((needle) => noName.includes(needle)) &&
-    noLabel !== dialogSource && !TOGGLE_NEEDLES.every((needle) => noLabel.includes(needle)) &&
+    noKey !== dialogSource && !TOGGLE_NEEDLES.every((needle) => noKey.includes(needle)) &&
     noWrap !== dialogSource && !TOGGLE_NEEDLES.every((needle) => noWrap.includes(needle)) &&
+    cachedWrite !== dialogSource && !TOGGLE_NEEDLES.every((needle) => cachedWrite.includes(needle)) &&
     TOGGLE_NEEDLES.every((needle) => dialogSource.includes(needle)),
     `noState=${TOGGLE_NEEDLES.filter((n) => !noState.includes(n)).length}, ` +
     `noName=${TOGGLE_NEEDLES.filter((n) => !noName.includes(n)).length}, ` +
-    `noLabel=${TOGGLE_NEEDLES.filter((n) => !noLabel.includes(n)).length}, ` +
+    `noKey=${TOGGLE_NEEDLES.filter((n) => !noKey.includes(n)).length}, ` +
     `noWrap=${TOGGLE_NEEDLES.filter((n) => !noWrap.includes(n)).length}, ` +
+    `cachedWrite=${TOGGLE_NEEDLES.filter((n) => !cachedWrite.includes(n)).length}, ` +
     `real=${TOGGLE_NEEDLES.filter((n) => !dialogSource.includes(n)).length}`);
 }
 
@@ -517,6 +559,195 @@ function rowLabelBindsControl(source: string): boolean {
     `foreign=${ACTION_ROW_NEEDLES.filter((n) => !foreignInvoker.includes(n)).length}, ` +
     `namedHint=${ACTION_ROW_NEEDLES.filter((n) => !namedHint.includes(n)).length}, ` +
     `real=${ACTION_ROW_NEEDLES.filter((n) => !dialogSource.includes(n)).length}`);
+}
+
+const camelOf = (kebab: string): string => kebab
+  .split('-')
+  .map((part, index) => (index === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+  .join('');
+
+{
+  const wrong = TOGGLE_ROWS.filter((entry) => camelOf(entry.kebab) !== entry.getter);
+  check('every toggle row spells one key twice: a kebab id and its camelCase settings key',
+    TOGGLE_ROWS.length === 5 && wrong.length === 0 &&
+    dialogSource.includes('function camelKey(kebab: string): string {') &&
+    dialogSource.includes('return kebab.replace(/-([a-z0-9])/g, (_match: string, letter: string) => letter.toUpperCase());'),
+    `rows=${TOGGLE_ROWS.length}, wrong=${JSON.stringify(wrong.map((entry) => entry.kebab))}`);
+}
+
+function rowWiredToHost(source: string, entry: ToggleRow): boolean {
+  const body = methodBody(source, `private ${entry.row}(): HTMLDivElement {`);
+  return body.includes(
+    `this.toggleRow('${entry.kebab}', '${entry.label}', this.host.${entry.getter}(),`) &&
+    body.includes(`(on) => this.host.${entry.setter}(on));`);
+}
+
+{
+  const broken = TOGGLE_ROWS.filter((entry) => !rowWiredToHost(dialogSource, entry))
+    .map((entry) => entry.row);
+  check('each toggle row renders from its own host state and writes back through its own host pair',
+    broken.length === 0 && TOGGLE_ROWS.length === 5,
+    `broken=${JSON.stringify(broken)}`);
+}
+
+{
+  const swappedGetter = dialogSource.replace(
+    "this.toggleRow('wheel-zooms', 'settings.wheelZooms', this.host.wheelZooms(),",
+    "this.toggleRow('wheel-zooms', 'settings.wheelZooms', this.host.compactRows(),");
+  const droppedSetter = dialogSource.replace(
+    '      (on) => this.host.setDeveloperTools(on));',
+    '      (on) => {});');
+  const wrongLabel = dialogSource.replace(
+    "this.toggleRow('hide-idle', 'settings.hideIdle', this.host.hideIdle(),",
+    "this.toggleRow('hide-idle', 'settings.compactRows', this.host.hideIdle(),");
+  const wired = (source: string): boolean => TOGGLE_ROWS.every((entry) => rowWiredToHost(source, entry));
+  check('control: reading another row\'s state, dropping the write-back or reusing another row\'s label fails the same wiring predicate',
+    swappedGetter !== dialogSource && !wired(swappedGetter) &&
+    droppedSetter !== dialogSource && !wired(droppedSetter) &&
+    wrongLabel !== dialogSource && !wired(wrongLabel) &&
+    wired(dialogSource),
+    `getter=${wired(swappedGetter)}, setter=${wired(droppedSetter)}, ` +
+    `label=${wired(wrongLabel)}, real=${wired(dialogSource)}`);
+}
+
+{
+  const missing = TOGGLE_ROWS.flatMap((entry) => [
+    ...(dialogSource.includes(`${entry.getter}(): boolean;`) ? [] : [`host:${entry.getter}`]),
+    ...(dialogSource.includes(`${entry.setter}(on: boolean): void;`) ? [] : [`host:${entry.setter}`]),
+    ...(appSource.includes(`${entry.getter}: () => this.${entry.field},`) ? [] : [`app:${entry.getter}`]),
+    ...(appSource.includes(`${entry.setter}: (on) => this.${entry.setter}(on),`) ? [] : [`app:${entry.setter}`]),
+  ]);
+  check('the host contract and the App host literal carry one read/write pair per toggle',
+    missing.length === 0,
+    `missing=${JSON.stringify(missing)}`);
+}
+
+{
+  const droppedPair = dialogSource.replace('  setWheelZooms(on: boolean): void;\n', '');
+  const wrongField = appSource.replace('      hideIdle: () => this.hideIdleChannels,', '      hideIdle: () => this.developerTools,');
+  const pairs = (source: string): boolean => TOGGLE_ROWS.every((entry) =>
+    source.includes(`${entry.getter}(): boolean;`) &&
+    source.includes(`${entry.setter}(on: boolean): void;`));
+  const appPairs = (source: string): boolean => TOGGLE_ROWS.every((entry) =>
+    source.includes(`${entry.getter}: () => this.${entry.field},`) &&
+    source.includes(`${entry.setter}: (on) => this.${entry.setter}(on),`));
+  check('control: dropping a host pair or pointing a getter at another field fails the same pair predicate',
+    droppedPair !== dialogSource && !pairs(droppedPair) && pairs(dialogSource) &&
+    wrongField !== appSource && !appPairs(wrongField) && appPairs(appSource),
+    `dropped=${pairs(droppedPair)}, wrongField=${appPairs(wrongField)}, ` +
+    `realHost=${pairs(dialogSource)}, realApp=${appPairs(appSource)}`);
+}
+
+{
+  const toggleCalls = (source: string): number => source.match(/this\.toggleRow\(/g)?.length ?? 0;
+  const actionRows = (source: string): number => source.match(/row\.dataset\.settingsKey = /g)?.length ?? 0;
+  const keyed = SETTINGS_SECTIONS.length + toggleCalls(dialogSource) + actionRows(dialogSource);
+  check('the window keeps one keyed control per tab plus one per row: eight today',
+    keyed === 8 && SETTINGS_SECTIONS.length === 2 && toggleCalls(dialogSource) === 5 &&
+    actionRows(dialogSource) === 1,
+    `keyed=${keyed}, tabs=${SETTINGS_SECTIONS.length}, toggles=${toggleCalls(dialogSource)}, ` +
+    `actions=${actionRows(dialogSource)}`);
+}
+
+{
+  const extraToggle = dialogSource.replace(
+    '    return [this.developerToolsRow(), this.shortcutsRow()];',
+    '    return [this.developerToolsRow(), this.toggleRow(\'extra\', \'settings.about\', false, () => {}), this.shortcutsRow()];');
+  const droppedAction = dialogSource.replace("    row.dataset.settingsKey = 'shortcuts';\n", '');
+  const countOf = (source: string): number => SETTINGS_SECTIONS.length +
+    (source.match(/this\.toggleRow\(/g)?.length ?? 0) +
+    (source.match(/row\.dataset\.settingsKey = /g)?.length ?? 0);
+  check('control: a sixth toggle or a row without its settings key moves the keyed-control count',
+    extraToggle !== dialogSource && countOf(extraToggle) === 9 &&
+    droppedAction !== dialogSource && countOf(droppedAction) === 7 && countOf(dialogSource) === 8,
+    `extra=${countOf(extraToggle)}, dropped=${countOf(droppedAction)}, real=${countOf(dialogSource)}`);
+}
+
+function appSetterFollows(source: string, name: string, order: readonly string[]): boolean {
+  const body = methodBody(source, `private ${name}(on: boolean): void {`);
+  const at = order.map((needle) => body.indexOf(needle));
+  return body.length > 0 && at.every((index, i) => index >= 0 && (i === 0 || index > at[i - 1]!));
+}
+
+const SETTER_EFFECTS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['setWheelZooms', ['this.wheelZooms = on;', 'this.persistWorkspace();', 'this.renderInteractionBar(true);',
+    'if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings(this.wheelZooms);']],
+  ['setCompactRows', ['this.compactRows = on;', 'this.persistWorkspace();', 'this.relayout();']],
+  ['setHideIdle', ['this.hideIdleChannels = on;', 'this.persistWorkspace();', 'this.relayout();', 'this.renderPanels();']],
+  ['setDeveloperTools', ['this.developerTools = on;', 'this.persistWorkspace();', 'this.renderPanels();']],
+];
+
+const SETTER_REFRESH_CALLS: readonly string[] = [
+  'this.relayout();',
+  'this.renderPanels();',
+  'this.renderInteractionBar();',
+  'this.renderInteractionBar(true);',
+  'this.shortcutsDialog.renderStrings(this.wheelZooms);',
+  'this.renderSidebarContent();',
+  'this.reflectDetailedLabels();',
+];
+
+function occurrences(body: string, needle: string): number {
+  return body.split(needle).length - 1;
+}
+
+function setterEffectBound(source: string, name: string, order: readonly string[]): boolean {
+  const body = methodBody(source, `private ${name}(on: boolean): void {`);
+  return body.length > 0 && occurrences(body, 'this.persistWorkspace();') === 1 &&
+    SETTER_REFRESH_CALLS.every((needle) =>
+      occurrences(body, needle) === (order.some((entry) => entry.includes(needle)) ? 1 : 0));
+}
+
+{
+  const broken = SETTER_EFFECTS.filter(([name, order]) => !appSetterFollows(appSource, name, order))
+    .map(([name]) => name);
+  const unbounded = SETTER_EFFECTS.filter(([name, order]) => !setterEffectBound(appSource, name, order))
+    .map(([name]) => name);
+  check('each App setter keeps the workspace write and the refresh upstream ran for its menu entry',
+    broken.length === 0 && unbounded.length === 0 && SETTER_EFFECTS.length === 4,
+    `broken=${JSON.stringify(broken)}, unbounded=${JSON.stringify(unbounded)}`);
+}
+
+{
+  const noPersist = appSource.replace(
+    '    this.compactRows = on;\n    this.persistWorkspace();\n',
+    '    this.compactRows = on;\n');
+  const swappedPanels = appSource.replace(
+    '    this.relayout();\n    this.renderPanels();\n  }\n\n  private setDeveloperTools',
+    '    this.renderPanels();\n    this.relayout();\n  }\n\n  private setDeveloperTools');
+  const noHintRefresh = appSource.replace(
+    '    this.renderInteractionBar(true);\n',
+    '');
+  const intact = (source: string): boolean =>
+    SETTER_EFFECTS.every(([name, order]) => appSetterFollows(source, name, order));
+  check('control: a setter without its workspace write, with the refresh pair reversed or without the interaction-bar refresh fails the same predicate',
+    noPersist !== appSource && !intact(noPersist) &&
+    swappedPanels !== appSource && !intact(swappedPanels) &&
+    noHintRefresh !== appSource && !intact(noHintRefresh) &&
+    intact(appSource),
+    `persist=${intact(noPersist)}, panels=${intact(swappedPanels)}, ` +
+    `hint=${intact(noHintRefresh)}, real=${intact(appSource)}`);
+}
+
+{
+  const doubleWrite = appSource.replace(
+    '    this.compactRows = on;\n    this.persistWorkspace();\n',
+    '    this.compactRows = on;\n    this.persistWorkspace();\n    this.persistWorkspace();\n');
+  const strayPanels = appSource.replace(
+    '    this.persistWorkspace();\n    this.relayout();\n  }\n\n  private setHideIdle',
+    '    this.persistWorkspace();\n    this.relayout();\n    this.renderPanels();\n  }\n\n  private setHideIdle');
+  const strayHint = appSource.replace(
+    '    this.persistWorkspace();\n    this.renderPanels();\n  }\n\n  private deviceMenuItems',
+    '    this.persistWorkspace();\n    this.renderInteractionBar(true);\n    this.renderPanels();\n  }\n\n  private deviceMenuItems');
+  const bound = (source: string): boolean =>
+    SETTER_EFFECTS.every(([name, order]) => setterEffectBound(source, name, order));
+  check('control: a duplicated workspace write or an undeclared refresh call in a setter fails the same bound',
+    doubleWrite !== appSource && !bound(doubleWrite) &&
+    strayPanels !== appSource && !bound(strayPanels) &&
+    strayHint !== appSource && !bound(strayHint) &&
+    bound(appSource),
+    `double=${bound(doubleWrite)}, panels=${bound(strayPanels)}, ` +
+    `hint=${bound(strayHint)}, real=${bound(appSource)}`);
 }
 
 {

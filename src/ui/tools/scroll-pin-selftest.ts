@@ -44,6 +44,7 @@ function check(name: string, pass: boolean, detail: string): void {
 const css = fs.readFileSync('src/ui/style.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 const html = fs.readFileSync('index.html', 'utf8').replace(/<!--[\s\S]*?-->/g, '');
 const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+const dialog = fs.readFileSync('src/ui/settingsDialog.ts', 'utf8');
 const channelList = fs.readFileSync('src/ui/channelList.ts', 'utf8');
 const panel = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
 
@@ -223,22 +224,23 @@ function mediaOverrides(selector: string, prop: string): string[] {
 }
 
 {
-  const items = (() => {
-    const start = app.indexOf('  private settingsItems(): SettingsMenuItem[] {');
-    const end = app.indexOf('\n  private ', start + 1);
-    return start >= 0 && end > start ? app.slice(start, end) : '';
+  const paneBody = (() => {
+    const start = dialog.indexOf('private paneContent(section: SettingsSectionId): HTMLElement[] {');
+    const end = start >= 0 ? dialog.indexOf('\n  }', start) : -1;
+    return start >= 0 && end > start ? dialog.slice(start, end) : '';
   })();
-  const order = ["t('settings.wheelZooms')", "t('settings.compactRows')", "t('settings.hideIdle')",
-    "t('settings.developerTools')"].map((key) => items.indexOf(key));
+  const order = ['labelsRow', 'wheelZoomsRow', 'compactRowsRow', 'hideIdleRow']
+    .map((row) => paneBody.indexOf(`this.${row}()`));
   const ordered = order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1]!));
+  const generalPane = paneBody.indexOf('this.developerToolsRow()');
   const defaults = app.includes('  private compactRows = false;') &&
     app.includes('  private hideIdleChannels = false;');
   const restored = app.includes('this.compactRows = workspace.compactRows === true;') &&
     app.includes('this.hideIdleChannels = workspace.hideIdleChannels === true;');
   const atRest = app.includes('if (!this.hideIdleChannels || this.running || this.stopping || this.store.length === 0) {');
-  check('both density toggles sit next to "wheel zooms", default off, restore, and idle-hiding waits for rest',
-    ordered && defaults && restored && atRest,
-    `order=${order.join(',')}, defaults=${defaults}, restored=${restored}, atRest=${atRest}`);
+  check('both density toggles sit next to "wheel zooms" in the settings window, default off, restore, and idle-hiding waits for rest',
+    ordered && generalPane > order[order.length - 1]! && defaults && restored && atRest,
+    `order=${order.join(',')}, general=${generalPane}, defaults=${defaults}, restored=${restored}, atRest=${atRest}`);
 }
 
 const failed = results.filter((r) => !r.pass).length;

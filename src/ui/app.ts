@@ -715,6 +715,14 @@ export class App {
     this.settingsDialog = new SettingsDialog({
       detailedLabels: () => this.detailedLabels,
       setDetailedLabels: (on) => this.setDetailedLabels(on),
+      wheelZooms: () => this.wheelZooms,
+      setWheelZooms: (on) => this.setWheelZooms(on),
+      compactRows: () => this.compactRows,
+      setCompactRows: (on) => this.setCompactRows(on),
+      hideIdle: () => this.hideIdleChannels,
+      setHideIdle: (on) => this.setHideIdle(on),
+      developerTools: () => this.developerTools,
+      setDeveloperTools: (on) => this.setDeveloperTools(on),
       openShortcuts: (invoker) => {
         this.channelList.closeDialog();
         this.shortcutsDialog.open(invoker);
@@ -4254,6 +4262,32 @@ export class App {
     this.reflectDetailedLabels();
     this.persistWorkspace();
     this.relayout();
+  }
+
+  private setWheelZooms(on: boolean): void {
+    this.wheelZooms = on;
+    this.persistWorkspace();
+    this.renderInteractionBar(true);
+    if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings(this.wheelZooms);
+  }
+
+  private setCompactRows(on: boolean): void {
+    this.compactRows = on;
+    this.persistWorkspace();
+    this.relayout();
+  }
+
+  private setHideIdle(on: boolean): void {
+    this.hideIdleChannels = on;
+    this.persistWorkspace();
+    this.relayout();
+    this.renderPanels();
+  }
+
+  private setDeveloperTools(on: boolean): void {
+    this.developerTools = on;
+    this.persistWorkspace();
+    this.renderPanels();
   }
 
   private deviceMenuItems(): SettingsMenuItem[] {

@@ -36,7 +36,19 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 export interface SettingsDialogHost {
   detailedLabels(): boolean;
   setDetailedLabels(on: boolean): void;
+  wheelZooms(): boolean;
+  setWheelZooms(on: boolean): void;
+  compactRows(): boolean;
+  setCompactRows(on: boolean): void;
+  hideIdle(): boolean;
+  setHideIdle(on: boolean): void;
+  developerTools(): boolean;
+  setDeveloperTools(on: boolean): void;
   openShortcuts(invoker: HTMLElement): void;
+}
+
+function camelKey(kebab: string): string {
+  return kebab.replace(/-([a-z0-9])/g, (_match: string, letter: string) => letter.toUpperCase());
 }
 
 function closeIcon(): SVGSVGElement {
@@ -172,8 +184,10 @@ export class SettingsDialog {
   }
 
   private paneContent(section: SettingsSectionId): HTMLElement[] {
-    if (section === 'appearance') return [this.labelsRow(), this.shortcutsRow()];
-    return [];
+    if (section === 'appearance') {
+      return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];
+    }
+    return [this.developerToolsRow(), this.shortcutsRow()];
   }
 
   private onNavKey(event: KeyboardEvent): void {
@@ -217,23 +231,53 @@ export class SettingsDialog {
     return label;
   }
 
-  private labelsRow(): HTMLDivElement {
+  private toggleRow(
+    key: string,
+    label: MessageKey,
+    checked: boolean,
+    onChange: (on: boolean) => void,
+  ): HTMLDivElement {
     const row = document.createElement('div');
     row.className = 'settings-row';
     const toggle = document.createElement('label');
     toggle.className = 'settings-toggle';
     const input = document.createElement('input');
     input.type = 'checkbox';
-    input.id = 'settings-detailed-labels';
-    input.dataset.settingsKey = 'detailedLabels';
-    const label = this.rowLabel('settings.detailedLabels', input.id);
-    label.id = 'settings-row-detailed-labels';
-    input.setAttribute('aria-labelledby', label.id);
-    input.checked = this.host.detailedLabels();
-    input.addEventListener('change', () => this.host.setDetailedLabels(input.checked));
+    input.id = `settings-${key}`;
+    input.dataset.settingsKey = camelKey(key);
+    const text = this.rowLabel(label, input.id);
+    text.id = `settings-row-${key}`;
+    input.setAttribute('aria-labelledby', text.id);
+    input.checked = checked;
+    input.addEventListener('change', () => onChange(input.checked));
     toggle.appendChild(input);
-    row.append(label, toggle);
+    row.append(text, toggle);
     return row;
+  }
+
+  private labelsRow(): HTMLDivElement {
+    return this.toggleRow('detailed-labels', 'settings.detailedLabels', this.host.detailedLabels(),
+      (on) => this.host.setDetailedLabels(on));
+  }
+
+  private wheelZoomsRow(): HTMLDivElement {
+    return this.toggleRow('wheel-zooms', 'settings.wheelZooms', this.host.wheelZooms(),
+      (on) => this.host.setWheelZooms(on));
+  }
+
+  private compactRowsRow(): HTMLDivElement {
+    return this.toggleRow('compact-rows', 'settings.compactRows', this.host.compactRows(),
+      (on) => this.host.setCompactRows(on));
+  }
+
+  private hideIdleRow(): HTMLDivElement {
+    return this.toggleRow('hide-idle', 'settings.hideIdle', this.host.hideIdle(),
+      (on) => this.host.setHideIdle(on));
+  }
+
+  private developerToolsRow(): HTMLDivElement {
+    return this.toggleRow('developer-tools', 'settings.developerTools', this.host.developerTools(),
+      (on) => this.host.setDeveloperTools(on));
   }
 
   private shortcutsRow(): HTMLButtonElement {

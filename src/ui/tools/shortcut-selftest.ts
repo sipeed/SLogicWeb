@@ -392,18 +392,37 @@ function dialogConstructions(source: string): number {
 
 {
   const settingsDialogSource = fs.readFileSync('src/ui/settingsDialog.ts', 'utf8');
-  const rows = settingsDialogSource.indexOf('this.labelsRow(), this.shortcutsRow()');
-  const labelsRow = methodBody(settingsDialogSource, 'private labelsRow(): HTMLDivElement {');
-  const shortcutsRow = methodBody(settingsDialogSource, 'private shortcutsRow(): HTMLButtonElement {');
-  const displayToggle = labelsRow.includes("this.rowLabel('settings.detailedLabels', input.id)") &&
-    labelsRow.includes('this.host.setDetailedLabels(') &&
-    labelsRow.includes('this.host.detailedLabels()');
-  const shortcutsEntry = shortcutsRow.includes("this.rowLabel('settings.shortcuts')") &&
-    shortcutsRow.includes("hint.textContent = '▸';") &&
-    shortcutsRow.includes('this.host.openShortcuts(row)');
+  const pane = methodBody(settingsDialogSource, 'private paneContent(section: SettingsSectionId): HTMLElement[] {');
+  const paneLists = pane.includes('this.labelsRow()') && pane.includes('this.shortcutsRow()');
+  const displayToggleCheck = (source: string): boolean => {
+    const body = methodBody(source, 'private labelsRow(): HTMLDivElement {');
+    return body.includes(
+      "this.toggleRow('detailed-labels', 'settings.detailedLabels', this.host.detailedLabels(),") &&
+      body.includes('(on) => this.host.setDetailedLabels(on)');
+  };
+  const shortcutsCheck = (source: string): boolean => {
+    const body = methodBody(source, 'private shortcutsRow(): HTMLButtonElement {');
+    return body.includes("this.rowLabel('settings.shortcuts')") &&
+      body.includes("hint.textContent = '▸';") &&
+      body.includes('this.host.openShortcuts(row)');
+  };
   check('the settings window keeps the display toggle and hands the shortcuts row to the dialog through the host',
-    displayToggle && shortcutsEntry && rows >= 0,
-    `displayToggle=${displayToggle}, shortcutsEntry=${shortcutsEntry}, order=${rows}`);
+    displayToggleCheck(settingsDialogSource) && shortcutsCheck(settingsDialogSource) && paneLists,
+    `displayToggle=${displayToggleCheck(settingsDialogSource)}, ` +
+    `shortcutsEntry=${shortcutsCheck(settingsDialogSource)}, paneLists=${paneLists}`);
+  const inlined = settingsDialogSource.replace(
+    '      (on) => this.host.setDetailedLabels(on));',
+    '      () => {});');
+  const strayHandOff = settingsDialogSource.replace(
+    '    row.addEventListener(\'click\', () => this.host.openShortcuts(row));',
+    '    row.addEventListener(\'click\', () => this.host.openShortcuts(this.closeButton));');
+  check('control: an inlined display toggle without its host write or a shortcuts row handing off another element fails the same needles',
+    inlined !== settingsDialogSource && !displayToggleCheck(inlined) &&
+    displayToggleCheck(settingsDialogSource) &&
+    strayHandOff !== settingsDialogSource && !shortcutsCheck(strayHandOff) &&
+    shortcutsCheck(settingsDialogSource),
+    `inlined=${displayToggleCheck(inlined)}, strayHandOff=${shortcutsCheck(strayHandOff)}, ` +
+    `real=${displayToggleCheck(settingsDialogSource)}/${shortcutsCheck(settingsDialogSource)}`);
 }
 
 {
