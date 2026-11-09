@@ -254,11 +254,21 @@ check('bank start uses the absolute channel index',
     app.includes('widthOptions: this.widthTiers()') &&
     app.includes('if (!this.widthTiers().includes(channels)) return;') &&
     app.includes('this.applySettings({ ...this.settings, channels });');
-  const widthSheet = sheet.includes('.digital-section .panel-section-head > .channel-widths { flex: none; }') &&
+  const widthSheet = sheet.includes('.digital-section .panel-section-head > .channel-widths { flex: none; margin-left: auto; }') &&
     sheet.includes('.channel-widths .seg { padding: 1px 6px; font-size: 10px; }');
   check('the Device panel renders the channel-width selector through the App width setter',
     widthPanel && widthApp && widthSheet,
     `panel=${widthPanel}, app=${widthApp}, sheet=${widthSheet}`);
+
+  const headRule = /\.digital-section \.panel-section-head \{[^}]*\}/.exec(sheet)?.[0] ?? '';
+  const titleRule = /\.digital-section \.panel-section-head > span:first-child \{[^}]*\}/.exec(sheet)?.[0] ?? '';
+  const narrowHead = headRule.includes('flex-wrap: wrap;') &&
+    titleRule.includes('min-width: max-content;') &&
+    titleRule.includes('flex: 1 1 max-content;') &&
+    titleRule.includes('text-overflow: clip;') && !titleRule.includes('text-overflow: ellipsis') &&
+    !titleRule.includes('min-width: 0;');
+  check('the digital section title never truncates: the selector wraps onto its own line instead',
+    narrowHead, `head=${headRule.replace(/\s+/g, ' ')}, title=${titleRule.replace(/\s+/g, ' ')}`);
 
   const busGuards = app.includes('this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, channels));') &&
     app.includes('if (busOutOfWidth(cfg.spec, this.renderChannelCount())) return null;') &&
