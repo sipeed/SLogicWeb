@@ -786,6 +786,8 @@ export const zhCN: Messages = {
   'settings.compactRows': '紧凑行高（数字通道最低 24 px）',
   'settings.hideIdle': '隐藏无跳变通道（本次采集中没有边沿）',
   'settings.developerTools': 'USB 寄存器控制台',
+  'settings.developerToolsNote': '已启用：右侧栏 › 采集 › 高级 中新增了 USB 寄存器控制台。',
+  'settings.developerToolsOpen': '打开',
   'about.version': '版本 {version} · 构建 {build}',
   'about.license': 'GPL-3.0-or-later · 不提供任何担保',
   'about.source': '源代码',

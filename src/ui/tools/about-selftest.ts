@@ -131,8 +131,8 @@ function aboutPane(settingsWindow: string, app: string, about: string): boolean 
     inline, `pane=${inline}`);
 
   const movedFirst = settingsWindow.replace(
-    "      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'developer':\n        return [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutBlock()];",
-    "      case 'about':\n        return [this.aboutBlock()];\n      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'developer':\n        return [this.developerToolsRow()];");
+    "      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'developer':\n        return this.host.developerTools()\n          ? [this.developerToolsRow(), this.developerNote()]\n          : [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutBlock()];",
+    "      case 'about':\n        return [this.aboutBlock()];\n      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'developer':\n        return this.host.developerTools()\n          ? [this.developerToolsRow(), this.developerNote()]\n          : [this.developerToolsRow()];");
   const shortcutsPaneDropped = settingsWindow.replace(
     "        return this.shortcutBlocks();",
     "        return [];");
@@ -140,8 +140,8 @@ function aboutPane(settingsWindow: string, app: string, about: string): boolean 
   const noTarget = settingsWindow.replace("      anchor.target = '_blank';\n", '');
   const unlabelled = settingsWindow.replace("      anchor.textContent = link.label;\n", '');
   const reopened = settingsWindow.replace(
-    '  setDeveloperTools(on: boolean): void;\n}',
-    '  setDeveloperTools(on: boolean): void;\n  openAbout(invoker: HTMLElement): void;\n}');
+    '  revealDeveloperTools(): void;\n}',
+    '  revealDeveloperTools(): void;\n  openAbout(invoker: HTMLElement): void;\n}');
   const dialogBack = `${about}\nexport class AboutDialog {\n  open(anchor: HTMLElement): void { this.dialog.showModal(); }\n}\n`;
   check('control: About listed before Shortcuts, an emptied shortcuts pane, a bare link, an unlabelled anchor, an opener bridge or a reintroduced dialog class fails the same inline predicate',
     movedFirst !== settingsWindow && !aboutPane(movedFirst, app, about) &&

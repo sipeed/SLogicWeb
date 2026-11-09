@@ -53,6 +53,7 @@ export interface SettingsDialogHost {
   setHideIdle(on: boolean): void;
   developerTools(): boolean;
   setDeveloperTools(on: boolean): void;
+  revealDeveloperTools(): void;
 }
 
 function camelKey(kebab: string): string {
@@ -198,7 +199,9 @@ export class SettingsDialog {
       case 'shortcuts':
         return this.shortcutBlocks();
       case 'developer':
-        return [this.developerToolsRow()];
+        return this.host.developerTools()
+          ? [this.developerToolsRow(), this.developerNote()]
+          : [this.developerToolsRow()];
       case 'about':
         return [this.aboutBlock()];
     }
@@ -335,7 +338,25 @@ export class SettingsDialog {
 
   private developerToolsRow(): HTMLDivElement {
     return this.toggleRow('developer-tools', 'settings.developerTools', this.host.developerTools(),
-      (on) => this.host.setDeveloperTools(on));
+      (on) => {
+        this.host.setDeveloperTools(on);
+        this.renderStrings();
+      });
+  }
+
+  private developerNote(): HTMLElement {
+    const note = document.createElement('div');
+    note.className = 'settings-note';
+    const text = document.createElement('p');
+    text.className = 'settings-note-text';
+    text.textContent = t('settings.developerToolsNote');
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'mini settings-note-action';
+    action.textContent = t('settings.developerToolsOpen');
+    action.addEventListener('click', () => this.host.revealDeveloperTools());
+    note.append(text, action);
+    return note;
   }
 
   private aboutBlock(): HTMLElement {

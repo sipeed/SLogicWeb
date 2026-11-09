@@ -840,6 +840,9 @@ export const fr: Messages = {
   'settings.compactRows': 'Lignes compactes (voies logiques jusqu’à 24 px)',
   'settings.hideIdle': 'Masquer les voies inactives (aucun front dans l’acquisition)',
   'settings.developerTools': 'Console de registres USB',
+  'settings.developerToolsNote':
+    'Activé : la console de registres USB se trouve dans Panneau latéral › Capture › Avancé.',
+  'settings.developerToolsOpen': 'Ouvrir',
   'about.version': 'Version {version} · build {build}',
   'about.license': 'GPL-3.0-or-later · sans aucune garantie',
   'about.source': 'Code source',

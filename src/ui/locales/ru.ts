@@ -831,6 +831,9 @@ export const ru: Messages = {
   'settings.compactRows': 'Компактные строки (цифровые до 24 px)',
   'settings.hideIdle': 'Скрыть неактивные каналы (без фронтов в захвате)',
   'settings.developerTools': 'Консоль регистров USB',
+  'settings.developerToolsNote':
+    'Включено: консоль регистров USB добавлена в раздел Боковая панель › Захват › Расширенные.',
+  'settings.developerToolsOpen': 'Открыть',
   'about.version': 'Версия {version} · сборка {build}',
   'about.license': 'GPL-3.0-or-later · без каких-либо гарантий',
   'about.source': 'Исходный код',

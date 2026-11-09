@@ -49,6 +49,7 @@ const dialogSource = fs.readFileSync('src/ui/settingsDialog.ts', 'utf8');
 const appSource = fs.readFileSync('src/ui/app.ts', 'utf8');
 const html = fs.readFileSync('index.html', 'utf8');
 const css = fs.readFileSync('src/ui/style.css', 'utf8');
+const capturePanelSource = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
 
 const DIALOG_NEEDLES: readonly string[] = [
   "document.createElement('dialog')",
@@ -453,7 +454,7 @@ const REFERENCE_NEEDLES: readonly string[] = [
 const PANE_CASES: ReadonlyArray<readonly [string, string]> = [
   ['appearance', 'return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];'],
   ['shortcuts', 'return this.shortcutBlocks();'],
-  ['developer', 'return [this.developerToolsRow()];'],
+  ['developer', 'return this.host.developerTools()'],
   ['about', 'return [this.aboutBlock()];'],
 ];
 
@@ -488,8 +489,8 @@ function paneComposition(source: string): boolean {
     'this.wheelZoomsRow(), this.compactRowsRow(),',
     'this.compactRowsRow(), this.wheelZoomsRow(),');
   const merged = dialogSource.replace(
-    "      case 'developer':\n        return [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutBlock()];",
-    "      case 'developer':\n        return [this.developerToolsRow(), this.aboutBlock()];\n      case 'about':\n        return [this.aboutBlock()];");
+    "      case 'developer':\n        return this.host.developerTools()\n          ? [this.developerToolsRow(), this.developerNote()]\n          : [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutBlock()];",
+    "      case 'developer':\n        return [this.aboutBlock()];\n      case 'about':\n        return [this.aboutBlock()];");
   const missingCase = dialogSource.replace(
     "      case 'about':\n        return [this.aboutBlock()];\n",
     '');
@@ -748,8 +749,8 @@ function aboutPaneIntact(source: string): boolean {
   const bare = dialogSource.replace("      anchor.rel = 'noopener noreferrer';\n", '');
   const unlabelled = dialogSource.replace('      anchor.textContent = link.label;\n', '');
   const opened = dialogSource.replace(
-    '  setDeveloperTools(on: boolean): void;\n}',
-    '  setDeveloperTools(on: boolean): void;\n  openAbout(invoker: HTMLElement): void;\n}');
+    '  revealDeveloperTools(): void;\n}',
+    '  revealDeveloperTools(): void;\n  openAbout(invoker: HTMLElement): void;\n}');
   check('control: a mislabelled name line, a dropped link list, a bare anchor, a link without text or a reintroduced opener bridge fails the same pane predicate',
     plainName !== dialogSource && !aboutPaneIntact(plainName) &&
     noLinks !== dialogSource && !aboutPaneIntact(noLinks) &&
@@ -780,7 +781,7 @@ function rowWiredToHost(source: string, entry: ToggleRow): boolean {
   const body = methodBody(source, `private ${entry.row}(): HTMLDivElement {`);
   return body.includes(
     `this.toggleRow('${entry.kebab}', '${entry.label}', this.host.${entry.getter}(),`) &&
-    body.includes(`(on) => this.host.${entry.setter}(on));`);
+    body.includes(`this.host.${entry.setter}(on)`);
 }
 
 {
@@ -796,8 +797,8 @@ function rowWiredToHost(source: string, entry: ToggleRow): boolean {
     "this.toggleRow('wheel-zooms', 'settings.wheelZooms', this.host.wheelZooms(),",
     "this.toggleRow('wheel-zooms', 'settings.wheelZooms', this.host.compactRows(),");
   const droppedSetter = dialogSource.replace(
-    '      (on) => this.host.setDeveloperTools(on));',
-    '      (on) => {});');
+    '        this.host.setDeveloperTools(on);\n        this.renderStrings();',
+    '        void on;\n        this.renderStrings();');
   const wrongLabel = dialogSource.replace(
     "this.toggleRow('hide-idle', 'settings.hideIdle', this.host.hideIdle(),",
     "this.toggleRow('hide-idle', 'settings.compactRows', this.host.hideIdle(),");
@@ -854,8 +855,8 @@ function rowWiredToHost(source: string, entry: ToggleRow): boolean {
 
 {
   const extraToggle = dialogSource.replace(
-    "      case 'developer':\n        return [this.developerToolsRow()];",
-    "      case 'developer':\n        return [this.developerToolsRow(), this.toggleRow('extra', 'settings.detailedLabels', false, () => {})];");
+    "      case 'developer':\n        return this.host.developerTools()",
+    "      case 'developer':\n        return [this.toggleRow('extra', 'settings.detailedLabels', false, () => {}), ...this.host.developerTools()");
   const droppedAction = dialogSource.replace('    row.dataset.settingsKey = key;\n', '');
   const countOf = (source: string): number => SETTINGS_SECTIONS.length +
     (source.match(/this\.toggleRow\(/g)?.length ?? 0) +
@@ -939,8 +940,8 @@ function setterEffectBound(source: string, name: string, order: readonly string[
     '    this.persistWorkspace();\n    this.relayout();\n  }\n\n  private setHideIdle',
     '    this.persistWorkspace();\n    this.relayout();\n    this.renderPanels();\n  }\n\n  private setHideIdle');
   const strayHint = appSource.replace(
-    '    this.persistWorkspace();\n    this.renderPanels();\n  }\n\n  private deviceMenuItems',
-    '    this.persistWorkspace();\n    this.renderInteractionBar(true);\n    this.renderPanels();\n  }\n\n  private deviceMenuItems');
+    '    this.persistWorkspace();\n    this.renderPanels();\n  }\n\n  private revealDeveloperConsole',
+    '    this.persistWorkspace();\n    this.renderInteractionBar(true);\n    this.renderPanels();\n  }\n\n  private revealDeveloperConsole');
   const bound = (source: string): boolean =>
     SETTER_EFFECTS.every(([name, order]) => setterEffectBound(source, name, order));
   check('control: a duplicated workspace write or an undeclared refresh call in a setter fails the same bound',
@@ -2120,6 +2121,271 @@ function developerRowLabelDrift(rows: readonly DeveloperRowLabel[]): string[] {
     developerRowLabelDrift(relocated).length === 1 &&
     developerRowLabelDrift(developerRowLabels(CATALOGS.map(([locale, lookup]) => [locale, lookup] as const))).length === 0,
     `parenthetical=${developerRowLabelDrift(withParenthetical).length}, relocated=${developerRowLabelDrift(relocated).length}`);
+}
+
+function developerCase(source: string): string {
+  const pane = methodBody(source, 'private paneContent(section: SettingsSectionId): HTMLElement[] {');
+  const start = pane.indexOf("case 'developer':");
+  const end = start >= 0 ? pane.indexOf("case 'about':", start) : -1;
+  return start >= 0 && end > start ? pane.slice(start, end) : '';
+}
+
+function developerNoteGated(source: string): boolean {
+  const body = developerCase(source);
+  const gate = body.indexOf('this.host.developerTools()');
+  const note = body.indexOf('this.developerNote()');
+  return gate >= 0 && note > gate &&
+    body.includes('? [this.developerToolsRow(), this.developerNote()]') &&
+    body.includes(': [this.developerToolsRow()];');
+}
+
+{
+  check('the developer pane appends its pointer only while the host reports the switch on',
+    developerNoteGated(dialogSource),
+    `case=${JSON.stringify(developerCase(dialogSource).replace(/\s+/g, ' '))}`);
+}
+
+{
+  const always = dialogSource.replace(
+    '        return this.host.developerTools()\n' +
+    '          ? [this.developerToolsRow(), this.developerNote()]\n' +
+    '          : [this.developerToolsRow()];',
+    '        return [this.developerToolsRow(), this.developerNote()];');
+  const inverted = dialogSource.replace(
+    '          ? [this.developerToolsRow(), this.developerNote()]\n' +
+    '          : [this.developerToolsRow()];',
+    '          ? [this.developerToolsRow()]\n' +
+    '          : [this.developerToolsRow(), this.developerNote()];');
+  check('control: an unconditional note or an inverted branch fails the same gate predicate',
+    always !== dialogSource && !developerNoteGated(always) &&
+    inverted !== dialogSource && !developerNoteGated(inverted) &&
+    developerNoteGated(dialogSource),
+    `always=${developerNoteGated(always)}, inverted=${developerNoteGated(inverted)}, ` +
+    `real=${developerNoteGated(dialogSource)}`);
+}
+
+const DEVELOPER_NOTE_NEEDLES: readonly string[] = [
+  "note.className = 'settings-note';",
+  "text.className = 'settings-note-text';",
+  "text.textContent = t('settings.developerToolsNote');",
+  "action.type = 'button';",
+  "action.className = 'mini settings-note-action';",
+  "action.textContent = t('settings.developerToolsOpen');",
+  "action.addEventListener('click', () => this.host.revealDeveloperTools());",
+  'note.append(text, action);',
+];
+
+function developerNoteBuilt(source: string): boolean {
+  const body = methodBody(source, 'private developerNote(): HTMLElement {');
+  return body.length > 0 && DEVELOPER_NOTE_NEEDLES.every((needle) => body.includes(needle));
+}
+
+{
+  check('the note is translated text plus one compact action that asks the host to reveal the console',
+    DEVELOPER_NOTE_NEEDLES.filter((needle) => !dialogSource.includes(needle)).length === 0 &&
+    developerNoteBuilt(dialogSource),
+    `missing=${JSON.stringify(DEVELOPER_NOTE_NEEDLES.filter((needle) => !dialogSource.includes(needle)))}`);
+}
+
+{
+  const literal = dialogSource.replace("action.textContent = t('settings.developerToolsOpen');",
+    "action.textContent = 'Open';");
+  const silent = dialogSource.replace(
+    "    action.addEventListener('click', () => this.host.revealDeveloperTools());\n", '');
+  const ownGeometry = dialogSource.replace("action.className = 'mini settings-note-action';",
+    "action.className = 'settings-note-action';");
+  check('control: a hard-coded action label, a note with no host call or an action without the compact recipe fails the same predicate',
+    literal !== dialogSource && !developerNoteBuilt(literal) &&
+    silent !== dialogSource && !developerNoteBuilt(silent) &&
+    ownGeometry !== dialogSource && !developerNoteBuilt(ownGeometry) &&
+    developerNoteBuilt(dialogSource),
+    `literal=${developerNoteBuilt(literal)}, silent=${developerNoteBuilt(silent)}, ` +
+    `geometry=${developerNoteBuilt(ownGeometry)}, real=${developerNoteBuilt(dialogSource)}`);
+}
+
+function developerToggleOrder(source: string): boolean {
+  const body = methodBody(source, 'private developerToolsRow(): HTMLDivElement {');
+  const setAt = body.indexOf('this.host.setDeveloperTools(on);');
+  const renderAt = body.indexOf('this.renderStrings();');
+  return body.length > 0 && setAt >= 0 && renderAt > setAt;
+}
+
+{
+  check('flipping the developer switch writes through the host and then rebuilds the pane in place',
+    developerToggleOrder(dialogSource),
+    `ok=${developerToggleOrder(dialogSource)}`);
+}
+
+{
+  const unrendered = dialogSource.replace('        this.renderStrings();\n', '');
+  const reordered = dialogSource.replace(
+    '        this.host.setDeveloperTools(on);\n        this.renderStrings();',
+    '        this.renderStrings();\n        this.host.setDeveloperTools(on);');
+  check('control: a toggle that skips the rebuild or rebuilds before the host write fails the same order predicate',
+    unrendered !== dialogSource && !developerToggleOrder(unrendered) &&
+    reordered !== dialogSource && !developerToggleOrder(reordered) &&
+    developerToggleOrder(dialogSource),
+    `unrendered=${developerToggleOrder(unrendered)}, reordered=${developerToggleOrder(reordered)}, ` +
+    `real=${developerToggleOrder(dialogSource)}`);
+}
+
+function revealChain(source: string): boolean {
+  const body = methodBody(source, 'private revealDeveloperConsole(): void {');
+  const at = [
+    'this.capturePanel.setAdvancedOpen(true);',
+    "this.selectPage('capture');",
+    'this.capturePanel.focusAdvanced();',
+  ].map((needle) => body.indexOf(needle));
+  return body.length > 0 && at.every((index) => index >= 0) &&
+    at.every((index, i) => i === 0 || index > at[i - 1]!);
+}
+
+function revealBridge(source: string): boolean {
+  const start = source.indexOf('      revealDeveloperTools: () => {');
+  const end = start >= 0 ? source.indexOf('\n      },', start) : -1;
+  const body = start >= 0 && end > start ? source.slice(start, end) : '';
+  const closeAt = body.indexOf('this.settingsDialog.close();');
+  const revealAt = body.indexOf('this.revealDeveloperConsole();');
+  return closeAt >= 0 && revealAt > closeAt;
+}
+
+{
+  check('the action unfolds Advanced, lands on the Capture page and only then moves focus to the summary',
+    revealChain(appSource) && appSource.includes('      revealDeveloperTools: () => {') &&
+    dialogSource.includes('revealDeveloperTools(): void;'),
+    `chain=${revealChain(appSource)}, bridge=${appSource.includes('revealDeveloperTools: () => {')}`);
+}
+
+{
+  const focusedEarly = appSource.replace(
+    '    this.capturePanel.setAdvancedOpen(true);\n    this.selectPage(\'capture\');\n    this.capturePanel.focusAdvanced();',
+    '    this.capturePanel.focusAdvanced();\n    this.capturePanel.setAdvancedOpen(true);\n    this.selectPage(\'capture\');');
+  const unopened = appSource.replace(
+    '    this.capturePanel.setAdvancedOpen(true);\n', '');
+  check('control: a chain that focuses before unfolding, or never unfolds, fails the same predicate',
+    focusedEarly !== appSource && !revealChain(focusedEarly) &&
+    unopened !== appSource && !revealChain(unopened) && revealChain(appSource),
+    `focusedEarly=${revealChain(focusedEarly)}, unopened=${revealChain(unopened)}, ` +
+    `real=${revealChain(appSource)}`);
+}
+
+function advancedRevealState(source: string): boolean {
+  const rebuiltWith = source.indexOf('advanced.open = this.advancedOpen;');
+  const summaryKept = source.indexOf('this.advancedSummary = summary;');
+  const setter = source.indexOf('this.advancedOpen = open;');
+  const focused = source.indexOf('summary.focus();');
+  return rebuiltWith >= 0 && summaryKept > rebuiltWith && setter > summaryKept && focused > setter;
+}
+
+{
+  check('a rebuild re-applies the reveal state and keeps the summary, and the panel exposes both halves of the reveal',
+    advancedRevealState(capturePanelSource),
+    `ok=${advancedRevealState(capturePanelSource)}`);
+}
+
+{
+  const forgetful = capturePanelSource.replace('    advanced.open = this.advancedOpen;\n', '');
+  const droppedSummary = capturePanelSource.replace('    this.advancedSummary = summary;\n', '');
+  check('control: a rebuild that forgets the reveal state or drops the summary handle fails the same panel predicate',
+    forgetful !== capturePanelSource && !advancedRevealState(forgetful) &&
+    droppedSummary !== capturePanelSource && !advancedRevealState(droppedSummary) &&
+    advancedRevealState(capturePanelSource),
+    `forgetful=${advancedRevealState(forgetful)}, droppedSummary=${advancedRevealState(droppedSummary)}, ` +
+    `real=${advancedRevealState(capturePanelSource)}`);
+}
+
+{
+  check('the host bridge closes the window before revealing the console',
+    revealBridge(appSource), `ok=${revealBridge(appSource)}`);
+}
+
+{
+  const revealedFirst = appSource.replace(
+    '        this.settingsDialog.close();\n        this.revealDeveloperConsole();',
+    '        this.revealDeveloperConsole();\n        this.settingsDialog.close();');
+  const leftOpen = appSource.replace(
+    '        this.settingsDialog.close();\n        this.revealDeveloperConsole();',
+    '        this.revealDeveloperConsole();');
+  check('control: revealing before closing, or never closing the window, fails the same bridge predicate',
+    revealedFirst !== appSource && !revealBridge(revealedFirst) &&
+    leftOpen !== appSource && !revealBridge(leftOpen) && revealBridge(appSource),
+    `revealedFirst=${revealBridge(revealedFirst)}, leftOpen=${revealBridge(leftOpen)}, ` +
+    `real=${revealBridge(appSource)}`);
+}
+
+function settingsNoteCss(source: string): boolean {
+  const rule = source.match(/\.settings-note \{[\s\S]*?\n\}/)?.[0] ?? '';
+  const textRule = source.match(/\.settings-note-text \{[^}]*\}/)?.[0] ?? '';
+  return rule.includes('padding: 0 8px 6px;') && rule.includes('font-size: 12px;') &&
+    rule.includes('color: var(--muted-foreground);') && rule.includes('align-items: flex-start;') &&
+    textRule.includes('margin: 0;') && !/\.settings-note-action\s*\{/.test(source);
+}
+
+{
+  check('the note reuses the row inset and the muted 12 px step, and its action keeps the shared compact recipe',
+    settingsNoteCss(css), `ok=${settingsNoteCss(css)}`);
+}
+
+{
+  const padded = css.replace(
+    '.settings-note-text { margin: 0; }',
+    '.settings-note-text { margin: 0; }\n.settings-note-action { padding: 1px 6px; }');
+  const loud = css.replace('  color: var(--muted-foreground);\n}\n.settings-note-text',
+    '  color: var(--foreground);\n}\n.settings-note-text');
+  check('control: a copied action geometry block or a note that drops its muted colour fails the same CSS predicate',
+    padded !== css && !settingsNoteCss(padded) &&
+    loud !== css && !settingsNoteCss(loud) && settingsNoteCss(css),
+    `padded=${settingsNoteCss(padded)}, loud=${settingsNoteCss(loud)}, real=${settingsNoteCss(css)}`);
+}
+
+interface PointerRow { locale: string; note: string; open: string }
+
+const POINTER_WORDS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['Capture', ['Capture', '采集', 'Захват', 'Capture']],
+  ['Advanced', ['Advanced', '高级', 'Расширенные', 'Avancé']],
+];
+
+function pointerDrift(rows: readonly PointerRow[]): string[] {
+  const blank = rows
+    .filter((row) => row.note.trim() === '' || row.open.trim() === '')
+    .map((row) => `${row.locale}:blank`);
+  const copied = rows
+    .filter((row, index) => index > 0 && (row.note === rows[0]!.note || row.open === rows[0]!.open))
+    .map((row) => `${row.locale}:english`);
+  const unnamed = POINTER_WORDS.flatMap(([label, words]) => rows
+    .filter((row, index) => !row.note.includes(words[index]!))
+    .map((row) => `${row.locale}:${label}`));
+  return [...blank, ...copied, ...unnamed];
+}
+
+{
+  const rows = CATALOGS.map(([locale, lookup]) => ({
+    locale,
+    note: lookup('settings.developerToolsNote'),
+    open: lookup('settings.developerToolsOpen'),
+  }));
+  check('the pointer note names the Capture page and its Advanced section in every catalog',
+    rows.length === CATALOGS.length && pointerDrift(rows).length === 0,
+    pointerDrift(rows).length === 0
+      ? rows.map((row) => `${row.locale}=${row.note}`).join('; ')
+      : pointerDrift(rows).join('; '));
+}
+
+{
+  const rows = CATALOGS.map(([locale, lookup]) => ({
+    locale,
+    note: lookup('settings.developerToolsNote'),
+    open: lookup('settings.developerToolsOpen'),
+  }));
+  const englishCopy = rows.map((row, index) => (index > 0
+    ? { ...row, note: en['settings.developerToolsNote'], open: en['settings.developerToolsOpen'] }
+    : row));
+  const emptied = rows.map((row, index) => (index === 2 ? { ...row, open: '' } : row));
+  check('control: a copied English note or an emptied action label fails the same locale predicate',
+    pointerDrift(englishCopy).length > 0 && pointerDrift(emptied).length > 0 &&
+    pointerDrift(rows).length === 0,
+    `english=${JSON.stringify(pointerDrift(englishCopy).slice(0, 2))}, ` +
+    `emptied=${JSON.stringify(pointerDrift(emptied).slice(0, 2))}, real=${pointerDrift(rows).length}`);
 }
 
 const SECTION_LABELS_WANT: ReadonlyArray<readonly [string, readonly string[]]> = [

@@ -238,6 +238,8 @@ export type TriggerStatusView = Pick<CapturePanelView,
 
 export class CapturePanel {
   private advancedOpen = false;
+  private advancedEl: HTMLDetailsElement | null = null;
+  private advancedSummary: HTMLElement | null = null;
   /** The custom gain ratio being typed, kept across re-renders; null when none is. */
   private gainEdit: { start: number; text: string } | null = null;
   /** The custom threshold being typed, kept across re-renders; null when none is. */
@@ -1484,6 +1486,8 @@ export class CapturePanel {
     const summary = document.createElement('summary');
     summary.textContent = t('capturePanel.advanced');
     advanced.appendChild(summary);
+    this.advancedEl = advanced;
+    this.advancedSummary = summary;
     const body = div('advanced-body');
 
     const testModeOptions: SelectOptionTuple[] = [
@@ -1515,6 +1519,18 @@ export class CapturePanel {
     if (v.developerTools === true) this.renderUsbConsole(body, v);
     advanced.appendChild(body);
     capture.appendChild(advanced);
+  }
+
+  setAdvancedOpen(open: boolean): void {
+    this.advancedOpen = open;
+    if (this.advancedEl !== null) this.advancedEl.open = open;
+  }
+
+  focusAdvanced(): void {
+    const summary = this.advancedSummary;
+    if (summary === null || !summary.isConnected) return;
+    summary.scrollIntoView({ block: 'nearest' });
+    summary.focus();
   }
 
   /** The raw USB register console (developer tools only). */
