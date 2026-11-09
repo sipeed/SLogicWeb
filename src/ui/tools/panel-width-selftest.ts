@@ -17,6 +17,10 @@ import {
   widthFromPointer,
 } from '../panelWidth.js';
 
+import {
+  currentPanelMinWidth, PANEL_MIN_FLOOR, publishPanelMinWidth, resetPanelMinWidthForTest,
+} from '../panelMinWidth.js';
+
 interface TestResult {
   name: string;
   pass: boolean;
@@ -125,7 +129,7 @@ let storageListener: StorageListener | null = null;
 {
   const ordered = PANEL_WIDTH_MIN < PANEL_WIDTH_DEFAULT && PANEL_WIDTH_DEFAULT < PANEL_WIDTH_MAX;
   const pass = PANEL_WIDTH_STORAGE_KEY === 'slogicweb.panelWidth' &&
-    PANEL_WIDTH_DEFAULT === 296 && PANEL_WIDTH_MIN === 240 && PANEL_WIDTH_MAX === 560 &&
+    PANEL_WIDTH_DEFAULT === 296 && PANEL_WIDTH_MIN === 200 && PANEL_WIDTH_MAX === 560 &&
     PANEL_WIDTH_RESERVE === 320 && PANEL_WIDTH_STEP === 16 && ordered;
   check('storage key and width constants are the exact agreed literals', pass,
     `key=${PANEL_WIDTH_STORAGE_KEY}, default=${PANEL_WIDTH_DEFAULT}, min=${PANEL_WIDTH_MIN}, ` +
@@ -165,7 +169,7 @@ let storageListener: StorageListener | null = null;
     ['infinity', 'Infinity', null],
     ['round', '420.7', 421],
     ['clamp high', '9999', 560],
-    ['clamp low', '100', 240],
+    ['clamp low', '100', 200],
     ['padded', ' 420 ', 420],
     ['factory default', '296', 296],
   ];
@@ -178,13 +182,14 @@ let storageListener: StorageListener | null = null;
 
 {
   const clampCases: [number, number][] = [
-    [0, PANEL_WIDTH_MIN], [-5, PANEL_WIDTH_MIN], [240, 240], [296, 296], [420.4, 420],
+    [0, PANEL_WIDTH_MIN], [-5, PANEL_WIDTH_MIN], [199, PANEL_WIDTH_MIN], [240, 240],
+    [296, 296], [420.4, 420],
     [559.6, 560], [9999, PANEL_WIDTH_MAX], [Number.NaN, PANEL_WIDTH_DEFAULT],
     [Number.POSITIVE_INFINITY, PANEL_WIDTH_DEFAULT],
   ];
   const clampFailures = clampCases.filter(([input, want]) => clampPanelWidth(input) !== want);
   const maxCases: [number, number][] = [
-    [1200, 560], [800, 480], [761, 441], [600, 280], [500, 240], [320, 240], [100, 240],
+    [1200, 560], [800, 480], [761, 441], [600, 280], [500, 200], [320, 200], [100, 200],
   ];
   const maxFailures = maxCases.filter(([rowWidth, want]) => maxPanelWidth(rowWidth) !== want);
   check('clampPanelWidth rounds+clamps and maxPanelWidth keeps the reserve on the row',
@@ -218,10 +223,10 @@ let storageListener: StorageListener | null = null;
     ['arrow left', 300, 'ArrowLeft', false, 560, 316],
     ['arrow right', 300, 'ArrowRight', false, 560, 284],
     ['shift left', 300, 'ArrowLeft', true, 560, 364],
-    ['shift right at floor', 300, 'ArrowRight', true, 560, 240],
+    ['shift right at floor', 260, 'ArrowRight', true, 560, 200],
     ['left past ceiling', 550, 'ArrowLeft', true, 560, 560],
-    ['right below floor', 250, 'ArrowRight', false, 560, 240],
-    ['home', 420, 'Home', false, 560, 240],
+    ['right below floor', 210, 'ArrowRight', false, 560, 200],
+    ['home', 420, 'Home', false, 560, 200],
     ['end', 300, 'End', false, 560, 560],
     ['end on a narrow row', 300, 'End', false, 480, 480],
     ['enter resets', 420, 'Enter', false, 560, PANEL_WIDTH_DEFAULT],
@@ -238,6 +243,40 @@ let storageListener: StorageListener | null = null;
       ? `${cases.length} key cases matched`
       : `failed=${failures.map(([label, width, key, shift, maxWidth]) =>
         `${label}=${widthFromKey(width, key, shift, maxWidth)}`).join(',')}`);
+}
+
+{
+  resetPanelMinWidthForTest();
+  const atFloor = [clampPanelWidth(100), maxPanelWidth(400), widthFromKey(300, 'Home', false, 560)];
+  publishPanelMinWidth(260);
+  const raised = [
+    clampPanelWidth(100), maxPanelWidth(400), maxPanelWidth(1000),
+    widthFromKey(300, 'ArrowRight', true, 560), widthFromKey(300, 'Home', false, 560),
+  ];
+  setPanelWidth(210);
+  const grown = getPanelWidth();
+  setPanelWidth(300);
+  publishPanelMinWidth(360);
+  const pushed = getPanelWidth();
+  publishPanelMinWidth(220);
+  const keptWide = getPanelWidth();
+  setPanelWidth(400);
+  publishPanelMinWidth(300);
+  const neverShrinks = getPanelWidth();
+  const ignored = [
+    publishPanelMinWidth(Number.NaN), publishPanelMinWidth(-40), publishPanelMinWidth(0),
+  ];
+  const keptAfterIgnored = currentPanelMinWidth();
+  resetPanelMinWidthForTest();
+  const reset = currentPanelMinWidth();
+  const floorAgrees = PANEL_WIDTH_MIN === PANEL_MIN_FLOOR && PANEL_MIN_FLOOR === 200;
+  check('the measured minimum raises every clamp and grows the panel, never shrinking it',
+    floorAgrees && atFloor.join(',') === '200,200,200' && raised.join(',') === '260,260,560,260,260' &&
+    grown === 260 && pushed === 360 && keptWide === 360 && neverShrinks === 400 &&
+    ignored.join(',') === '300,300,300' && keptAfterIgnored === 300 && reset === 200,
+    `floorAgrees=${floorAgrees}, atFloor=${atFloor}, raised=${raised}, grown=${grown}, ` +
+    `pushed=${pushed}, keptWide=${keptWide}, neverShrinks=${neverShrinks}, ` +
+    `ignored=${ignored}, kept=${keptAfterIgnored}, reset=${reset}`);
 }
 
 {
@@ -728,9 +767,11 @@ function readIndexHtml(): string {
     "must<HTMLDivElement>('panel-resizer')",
     'new PanelResizer(',
     'setHidden(!this.sidebar.visible)',
+    'this.renderSidebarPage();',
+    'if (this.sidebar.visible) refreshPanelMinWidth(this.el.side);',
   ];
   const missing = needles.filter((needle) => !app.includes(needle));
-  check('app.ts owns the handle element, constructs the resizer, and hides it with the same panel source of truth',
+  check('app.ts owns the handle element, re-measures the minimum after each sidebar render, and hides the handle with the same source of truth',
     missing.length === 0,
     `missing=${JSON.stringify(missing)}`);
 }
@@ -745,6 +786,8 @@ function readIndexHtml(): string {
     'stopPropagation()',
     'onPanelWidthChange(',
     'setHidden(',
+    "setAttribute('aria-valuemin'",
+    'currentPanelMinWidth()',
   ];
   const missing = needles.filter((needle) => !resizer.includes(needle));
   check('panelResizer.ts exists and wires capture, a cancellable drag, consumed keys, and the width-change subscription',

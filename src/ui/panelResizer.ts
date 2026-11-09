@@ -3,6 +3,7 @@ import {
   PANEL_WIDTH_DEFAULT, PANEL_WIDTH_MAX, PANEL_WIDTH_MIN, setPanelWidth,
   widthFromKey, widthFromPointer,
 } from './panelWidth.js';
+import { currentPanelMinWidth } from './panelMinWidth.js';
 
 interface DragState {
   pointerId: number;
@@ -41,6 +42,8 @@ export class PanelResizer {
 
   private syncValue(): void {
     this.handle.setAttribute('aria-valuenow', String(getPanelWidth() ?? PANEL_WIDTH_DEFAULT));
+    this.handle.setAttribute('aria-valuemin',
+      String(Math.max(PANEL_WIDTH_MIN, currentPanelMinWidth())));
   }
 
   private currentMaxWidth(): number {

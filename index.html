@@ -49,7 +49,7 @@
       const n = raw === null ? NaN : Number(raw);
       if (Number.isFinite(n) && n > 0) {
         document.documentElement.style.setProperty('--side-panel-w',
-          Math.min(560, Math.max(240, Math.round(n))) + 'px');
+          Math.min(560, Math.max(200, Math.round(n))) + 'px');
       }
     } catch {
     }

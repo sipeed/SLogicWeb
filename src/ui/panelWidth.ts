@@ -1,7 +1,11 @@
+import {
+  currentPanelMinWidth, onPanelMinWidthChange,
+} from './panelMinWidth.js';
+
 export const PANEL_WIDTH_STORAGE_KEY = 'slogicweb.panelWidth';
 
 export const PANEL_WIDTH_DEFAULT = 296;
-export const PANEL_WIDTH_MIN = 240;
+export const PANEL_WIDTH_MIN = 200;
 export const PANEL_WIDTH_MAX = 560;
 export const PANEL_WIDTH_RESERVE = 320;
 export const PANEL_WIDTH_STEP = 16;
@@ -10,6 +14,7 @@ const WIDTH_PROPERTY = '--side-panel-w';
 
 let current: number | null = null;
 let listening = false;
+let minimumListening = false;
 
 const listeners = new Set<() => void>();
 
@@ -46,15 +51,19 @@ function notify(): void {
   for (const cb of listeners) cb();
 }
 
+function narrowest(): number {
+  return Math.max(PANEL_WIDTH_MIN, currentPanelMinWidth());
+}
+
 function upperBound(maxWidth: number): number {
   if (!Number.isFinite(maxWidth)) return PANEL_WIDTH_MAX;
   const rounded = Math.round(maxWidth);
-  return Math.min(PANEL_WIDTH_MAX, Math.max(PANEL_WIDTH_MIN, rounded));
+  return Math.min(PANEL_WIDTH_MAX, Math.max(narrowest(), rounded));
 }
 
 function clampWidth(value: number, maxWidth: number): number {
   const rounded = Number.isFinite(value) ? Math.round(value) : PANEL_WIDTH_DEFAULT;
-  return Math.min(upperBound(maxWidth), Math.max(PANEL_WIDTH_MIN, rounded));
+  return Math.min(upperBound(maxWidth), Math.max(narrowest(), rounded));
 }
 
 export function clampPanelWidth(width: number): number {
@@ -62,9 +71,9 @@ export function clampPanelWidth(width: number): number {
 }
 
 export function maxPanelWidth(rowWidthPx: number): number {
-  if (!Number.isFinite(rowWidthPx)) return PANEL_WIDTH_MIN;
+  if (!Number.isFinite(rowWidthPx)) return narrowest();
   const available = Math.round(rowWidthPx) - PANEL_WIDTH_RESERVE;
-  return Math.min(PANEL_WIDTH_MAX, Math.max(PANEL_WIDTH_MIN, available));
+  return Math.min(PANEL_WIDTH_MAX, Math.max(narrowest(), available));
 }
 
 export function sanitizePanelWidth(raw: string | null): number | null {
@@ -106,12 +115,25 @@ function onStorage(event: StorageEvent): void {
   notify();
 }
 
+function onNarrowestChange(): void {
+  const floor = narrowest();
+  if (current !== null && current < floor) {
+    setPanelWidth(floor);
+    return;
+  }
+  notify();
+}
+
 export function initPanelWidth(): number | null {
   current = sanitizePanelWidth(readStored());
   applyPanelWidth(current);
   if (!listening && typeof window !== 'undefined') {
     window.addEventListener('storage', onStorage);
     listening = true;
+  }
+  if (!minimumListening) {
+    onPanelMinWidthChange(onNarrowestChange);
+    minimumListening = true;
   }
   return current;
 }
@@ -140,7 +162,7 @@ export function widthFromKey(
   switch (key) {
     case 'ArrowLeft': return clampWidth(currentWidth + step, maxWidth);
     case 'ArrowRight': return clampWidth(currentWidth - step, maxWidth);
-    case 'Home': return clampWidth(PANEL_WIDTH_MIN, maxWidth);
+    case 'Home': return clampWidth(narrowest(), maxWidth);
     case 'End': return clampWidth(upperBound(maxWidth), maxWidth);
     case 'Enter': return clampWidth(PANEL_WIDTH_DEFAULT, maxWidth);
     case ' ': return clampWidth(PANEL_WIDTH_DEFAULT, maxWidth);

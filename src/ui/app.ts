@@ -139,6 +139,7 @@ import {
 } from './overlay.js';
 import { OverviewStrip, type OverviewState } from './overviewStrip.js';
 import { PanelResizer } from './panelResizer.js';
+import { refreshPanelMinWidth } from './panelMinWidth.js';
 import { StoreRef } from './storeRef.js';
 import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannels, defaultChannelName, channelColor,
@@ -4778,6 +4779,11 @@ export class App {
   }
 
   private renderSidebarContent(): void {
+    this.renderSidebarPage();
+    if (this.sidebar.visible) refreshPanelMinWidth(this.el.side);
+  }
+
+  private renderSidebarPage(): void {
     // An open bus editor follows the buses whatever page is shown: it keeps its draft,
     // and closes when its bus goes away.
     if (this.busPanel?.isOpen && !(this.sidebar.visible && this.sidebar.page === 'decoders')) {
