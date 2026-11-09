@@ -841,7 +841,6 @@ export const en = {
   'settings.compactRows': 'Compact rows (digital rows down to 24 px)',
   'settings.hideIdle': 'Hide idle channels (no edges in the capture)',
   'settings.developerTools': 'Developer tools (USB register console)',
-  'settings.shortcuts': 'Shortcuts and gestures',
   'settings.about': 'About',
   'about.title': 'About',
   'about.version': 'Version {version} · build {build}',
@@ -858,7 +857,6 @@ export const en = {
   'settings.sections.about': 'About',
 
   // ----------------------------------------------------------- shortcuts
-  'shortcuts.title': 'Shortcuts and gestures',
   'shortcuts.close': 'Close',
   'shortcuts.clearCursors': 'Clear cursors',
   'shortcuts.keyboard': 'Keyboard',

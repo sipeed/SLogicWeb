@@ -944,20 +944,20 @@ const detailedLabelsToggle = setDetailedLabelsBody.includes('this.detailedLabels
 const detailedLabelsDefault = app.includes('private detailedLabels = true;');
 const detailedLabelsRowAt = settingsDialogSrc.indexOf(
   "this.toggleRow('detailed-labels', 'settings.detailedLabels'");
-const shortcutsRowAt = settingsDialogSrc.indexOf("row.dataset.settingsKey = 'shortcuts';");
-const shortcutsRowBody = shortcutsRowAt >= 0 ? settingsDialogSrc.slice(shortcutsRowAt) : '';
-const shortcutsRowOpensDialog = shortcutsRowBody.includes("hint.textContent = '▸';") &&
-  shortcutsRowBody.includes('this.host.openShortcuts(row)') &&
-  !shortcutsRowBody.includes('this.shortcutsDialog.open(');
-const windowRowsComposed = ['labelsRow', 'shortcutsRow'].every((row) =>
+const shortcutBlocksAt = settingsDialogSrc.indexOf('this.shortcutBlocks()');
+const shortcutBlocksBody = shortcutBlocksAt >= 0 ? settingsDialogSrc.slice(shortcutBlocksAt) : '';
+const referenceInPane = shortcutBlocksBody.includes("this.groupTitle('shortcuts.keyboard'),") &&
+  shortcutBlocksBody.includes('referenceGestures(this.host.wheelZooms())');
+const windowRowsComposed = ['labelsRow', 'shortcutBlocks'].every((row) =>
   settingsDialogSrc.includes(`private ${row}(): `) &&
   settingsDialogSrc.includes(`this.${row}()`));
 const settingsRowsScoped = !settingsDialogSrc.includes("t('settings.language')") &&
   !settingsDialogSrc.includes("t('settings.theme')") &&
   !settingsDialogSrc.includes('LOCALES.map') &&
   !settingsDialogSrc.includes('settingsMenu') &&
+  !settingsDialogSrc.includes('openShortcuts') &&
   (settingsDialogSrc.match(/data-settings-key/g)?.length ?? 0) === 2 &&
-  detailedLabelsRowAt >= 0 && shortcutsRowAt >= 0 && windowRowsComposed;
+  detailedLabelsRowAt >= 0 && shortcutBlocksAt >= 0 && windowRowsComposed;
 const constructorBody = methodBody('constructor() {');
 const detailedLabelsReflection = app.includes("document.documentElement.removeAttribute('data-toolbar-labels')") &&
   app.includes("document.documentElement.setAttribute('data-toolbar-labels', 'off')") &&
@@ -965,11 +965,11 @@ const detailedLabelsReflection = app.includes("document.documentElement.removeAt
   constructorBody.includes('this.reflectDetailedLabels();') &&
   setDetailedLabelsBody.includes('this.reflectDetailedLabels();');
 check(
-  'settings offers the checked default-on display toggle and one row that opens the shortcuts reference, both composed into the window',
+  'settings offers the checked default-on display toggle and renders the shortcut reference in its own pane, both composed into the window',
   detailedLabelsToggle && detailedLabelsDefault && detailedLabelsReflection && settingsRowsScoped &&
-    shortcutsRowOpensDialog,
+    referenceInPane,
   `toggle=${detailedLabelsToggle}, default=${detailedLabelsDefault}, reflection=${detailedLabelsReflection}, ` +
-  `rows=${settingsRowsScoped}, shortcuts=${shortcutsRowOpensDialog}`,
+  `rows=${settingsRowsScoped}, reference=${referenceInPane}`,
 );
 
 const viewportRestoreOrder = [

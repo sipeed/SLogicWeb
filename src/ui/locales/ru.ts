@@ -831,7 +831,6 @@ export const ru: Messages = {
   'settings.compactRows': 'Компактные строки (цифровые до 24 px)',
   'settings.hideIdle': 'Скрыть неактивные каналы (без фронтов в захвате)',
   'settings.developerTools': 'Инструменты разработчика (консоль регистров USB)',
-  'settings.shortcuts': 'Клавиши и жесты',
   'settings.about': 'О программе',
   'about.title': 'О программе',
   'about.version': 'Версия {version} · сборка {build}',
@@ -848,7 +847,6 @@ export const ru: Messages = {
   'settings.sections.about': 'О программе',
 
   // ----------------------------------------------------------- shortcuts
-  'shortcuts.title': 'Клавиши и жесты',
   'shortcuts.close': 'Закрыть',
   'shortcuts.clearCursors': 'Сбросить курсоры',
   'shortcuts.keyboard': 'Клавиатура',

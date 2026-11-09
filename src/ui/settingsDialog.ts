@@ -1,5 +1,8 @@
 import { t } from './i18n.js';
 import type { MessageKey } from './i18n.js';
+import {
+  SHORTCUTS, gestureNotation, referenceGestures, shortcutActionText,
+} from './shortcuts.js';
 
 export const SETTINGS_DIALOG_ID = 'settings-dialog';
 export const SETTINGS_DIALOG_WIDTH = 560;
@@ -46,7 +49,6 @@ export interface SettingsDialogHost {
   setHideIdle(on: boolean): void;
   developerTools(): boolean;
   setDeveloperTools(on: boolean): void;
-  openShortcuts(invoker: HTMLElement): void;
   openAbout(invoker: HTMLElement): void;
 }
 
@@ -191,12 +193,52 @@ export class SettingsDialog {
       case 'appearance':
         return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];
       case 'shortcuts':
-        return [this.shortcutsRow()];
+        return this.shortcutBlocks();
       case 'developer':
         return [this.developerToolsRow()];
       case 'about':
         return [this.aboutRow()];
     }
+  }
+
+  private shortcutBlocks(): HTMLElement[] {
+    return [
+      this.groupTitle('shortcuts.keyboard'),
+      this.shortcutList(SHORTCUTS.map((entry) => this.keyRow(
+        shortcutActionText(entry), entry.notation, `shortcut:${entry.id}`))),
+      this.groupTitle('shortcuts.mouse'),
+      this.shortcutList(referenceGestures(this.host.wheelZooms()).map((entry, index) => this.keyRow(
+        shortcutActionText(entry), gestureNotation(entry), `gesture:${index}`))),
+    ];
+  }
+
+  private groupTitle(key: MessageKey): HTMLHeadingElement {
+    const heading = document.createElement('h3');
+    heading.className = 'shortcuts-section';
+    heading.textContent = t(key);
+    return heading;
+  }
+
+  private shortcutList(rows: readonly HTMLLIElement[]): HTMLUListElement {
+    const list = document.createElement('ul');
+    list.className = 'shortcuts-list';
+    list.append(...rows);
+    return list;
+  }
+
+  private keyRow(actionText: string, notation: string, key: string): HTMLLIElement {
+    const row = document.createElement('li');
+    row.className = 'shortcuts-row';
+    row.dataset.settingsKey = key;
+    row.tabIndex = -1;
+    const action = document.createElement('span');
+    action.className = 'shortcuts-action';
+    action.textContent = actionText;
+    const chord = document.createElement('kbd');
+    chord.className = 'shortcuts-key';
+    chord.textContent = notation;
+    row.append(action, chord);
+    return row;
   }
 
   private onNavKey(event: KeyboardEvent): void {
@@ -287,20 +329,6 @@ export class SettingsDialog {
   private developerToolsRow(): HTMLDivElement {
     return this.toggleRow('developer-tools', 'settings.developerTools', this.host.developerTools(),
       (on) => this.host.setDeveloperTools(on));
-  }
-
-  private shortcutsRow(): HTMLButtonElement {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'settings-row settings-row--action';
-    row.dataset.settingsKey = 'shortcuts';
-    const hint = document.createElement('span');
-    hint.className = 'settings-row-hint';
-    hint.setAttribute('aria-hidden', 'true');
-    hint.textContent = '▸';
-    row.append(this.rowLabel('settings.shortcuts'), hint);
-    row.addEventListener('click', () => this.host.openShortcuts(row));
-    return row;
   }
 
   private aboutRow(): HTMLButtonElement {

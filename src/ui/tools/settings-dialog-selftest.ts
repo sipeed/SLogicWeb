@@ -67,11 +67,10 @@ const DIALOG_NEEDLES: readonly string[] = [
   'private toggleRow(',
   'const text = this.rowLabel(label, input.id);',
   'input.dataset.settingsKey = camelKey(key);',
-  "this.rowLabel('settings.shortcuts')",
   "this.rowLabel('settings.about')",
+  'this.shortcutBlocks()',
   "this.closeButton.setAttribute('aria-label', t('settings.close'));",
   'this.host.setDetailedLabels(',
-  'this.host.openShortcuts(row)',
 ];
 
 const DIALOG_FORBIDDEN: readonly string[] = [
@@ -433,19 +432,24 @@ const TOGGLE_ROWS: readonly ToggleRow[] = [
   { row: 'developerToolsRow', kebab: 'developer-tools', label: 'settings.developerTools', getter: 'developerTools', field: 'developerTools', setter: 'setDeveloperTools' },
 ];
 
-const ACTION_ROW_NEEDLES: readonly string[] = [
-  "row.className = 'settings-row settings-row--action';",
-  "row.dataset.settingsKey = 'shortcuts';",
-  "hint.className = 'settings-row-hint';",
-  "hint.setAttribute('aria-hidden', 'true');",
-  "hint.textContent = '▸';",
-  "row.append(this.rowLabel('settings.shortcuts'), hint);",
-  'this.host.openShortcuts(row)',
+const REFERENCE_NEEDLES: readonly string[] = [
+  "this.groupTitle('shortcuts.keyboard'),",
+  "this.groupTitle('shortcuts.mouse'),",
+  'this.shortcutList(SHORTCUTS.map((entry) => this.keyRow(',
+  'shortcutActionText(entry), entry.notation, `shortcut:${entry.id}`',
+  'this.shortcutList(referenceGestures(this.host.wheelZooms()).map((entry, index) => this.keyRow(',
+  'shortcutActionText(entry), gestureNotation(entry), `gesture:${index}`',
+  "list.className = 'shortcuts-list';",
+  "row.className = 'shortcuts-row';",
+  "action.className = 'shortcuts-action';",
+  "chord.className = 'shortcuts-key';",
+  'row.dataset.settingsKey = key;',
+  'row.tabIndex = -1;',
 ];
 
 const PANE_CASES: ReadonlyArray<readonly [string, string]> = [
   ['appearance', 'return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];'],
-  ['shortcuts', 'return [this.shortcutsRow()];'],
+  ['shortcuts', 'return this.shortcutBlocks();'],
   ['developer', 'return [this.developerToolsRow()];'],
   ['about', 'return [this.aboutRow()];'],
 ];
@@ -466,7 +470,7 @@ function paneComposition(source: string): boolean {
 }
 
 {
-  check('the appearance pane is the four upstream toggles in order and each flattened section holds only its own row',
+  check('the appearance pane is the four upstream toggles in order, the shortcuts pane is the reference and each remaining section holds its own row',
     SETTINGS_SECTIONS.join(',') === PANE_CASES.map(([section]) => section).join(',') &&
     paneComposition(dialogSource),
     `ok=${paneComposition(dialogSource)}, ` +
@@ -487,8 +491,8 @@ function paneComposition(source: string): boolean {
     "      case 'about':\n        return [this.aboutRow()];\n",
     '');
   const generalAgain = dialogSource.replace(
-    "      case 'shortcuts':\n        return [this.shortcutsRow()];",
-    "      case 'shortcuts':\n        return [this.shortcutsRow()];\n      case 'general':\n        return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];");
+    "      case 'shortcuts':\n        return this.shortcutBlocks();",
+    "      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'general':\n        return [this.developerToolsRow(), this.aboutRow()];");
   check('control: dropping an appearance row, swapping two toggles, merging two sections, dropping a case or re-nesting a general case fails the same composition predicate',
     dropped !== dialogSource && !paneComposition(dropped) &&
     swapped !== dialogSource && !paneComposition(swapped) &&
@@ -586,30 +590,58 @@ function rowLabelBindsControl(source: string): boolean {
 }
 
 {
-  const body = shortcutsRowBody(dialogSource);
-  const missing = ACTION_ROW_NEEDLES.filter((needle) => !body.includes(needle));
-  check('the shortcuts row is a row-level button that hands its own frame to the host bridge',
-    missing.length === 0,
-    `missing=${JSON.stringify(missing)}`);
+  const body = shortcutBlocksBody(dialogSource);
+  const missing = REFERENCE_NEEDLES.filter((needle) => !dialogSource.includes(needle));
+  check('the shortcuts pane builds the keyboard list and the gesture list, every row keyed for the locale rebuild',
+    body.length > 0 && missing.length === 0,
+    `missing=${JSON.stringify(missing)}, body=${body.length}`);
 }
 
 {
-  const body = shortcutsRowBody(dialogSource);
-  const plainButton = dialogSource.replace(
-    "    row.className = 'settings-row settings-row--action';\n    row.dataset.settingsKey = 'shortcuts';",
-    "    row.className = 'settings-row';\n    row.dataset.settingsKey = 'shortcuts';");
-  const foreignInvoker = dialogSource.replace('this.host.openShortcuts(row)', 'this.host.openShortcuts(this.closeButton)');
-  const namedHint = dialogSource.replace(
-    "    hint.setAttribute('aria-hidden', 'true');\n    hint.textContent = '▸';\n    row.append(this.rowLabel('settings.shortcuts')",
-    "    hint.textContent = '▸';\n    row.append(this.rowLabel('settings.shortcuts')");
+  const handWritten = dialogSource.replace(
+    'this.shortcutList(SHORTCUTS.map((entry) => this.keyRow(',
+    "this.shortcutList([{ labels: [], notation: 'F' }].map((entry) => this.keyRow(");
+  const frozenZooms = dialogSource.replace(
+    'referenceGestures(this.host.wheelZooms())',
+    'referenceGestures(false)');
+  const unkeyed = dialogSource.replace('    row.dataset.settingsKey = key;\n', '');
+  const parallelClass = dialogSource.replace(
+    "row.className = 'shortcuts-row';",
+    "row.className = 'settings-key-row';");
   const intact = (source: string): boolean =>
-    ACTION_ROW_NEEDLES.every((needle) => shortcutsRowBody(source).includes(needle));
-  check('control: a shortcuts row without the action variant, a foreign frame, or a hint inside the accessible name is detected by the same predicate',
-    plainButton !== dialogSource && !intact(plainButton) &&
-    foreignInvoker !== dialogSource && !intact(foreignInvoker) &&
-    namedHint !== dialogSource && !intact(namedHint) && intact(dialogSource),
-    `plain=${intact(plainButton)}, foreign=${intact(foreignInvoker)}, ` +
-    `namedHint=${intact(namedHint)}, real=${intact(dialogSource)}, body=${body.length}`);
+    shortcutBlocksBody(source).length > 0 &&
+    REFERENCE_NEEDLES.every((needle) => source.includes(needle));
+  check('control: a hand-written key list, a frozen wheel-zoom capture, an unkeyed row or a parallel row class fails the same predicate',
+    handWritten !== dialogSource && !intact(handWritten) &&
+    frozenZooms !== dialogSource && !intact(frozenZooms) &&
+    unkeyed !== dialogSource && !intact(unkeyed) &&
+    parallelClass !== dialogSource && !intact(parallelClass) && intact(dialogSource),
+    `handWritten=${intact(handWritten)}, frozen=${intact(frozenZooms)}, ` +
+    `unkeyed=${intact(unkeyed)}, parallel=${intact(parallelClass)}, real=${intact(dialogSource)}`);
+}
+
+function paneOpensNoDialog(source: string): boolean {
+  const pane = methodBody(source, 'private paneContent(section: SettingsSectionId): HTMLElement[] {');
+  const blocks = shortcutBlocksBody(source);
+  const build = `${pane}${blocks}`;
+  return pane.length > 0 && blocks.length > 0 &&
+    !build.includes('showModal') && !build.includes("createElement('dialog')") &&
+    (source.match(/showModal\(\)/g)?.length ?? 0) === 1;
+}
+
+{
+  const extraModal = dialogSource.replace(
+    '  private shortcutBlocks(): HTMLElement[] {',
+    '  private shortcutBlocks(): HTMLElement[] {\n    this.dialog.showModal();');
+  const secondDialog = dialogSource.replace(
+    '  private shortcutBlocks(): HTMLElement[] {',
+    "  private shortcutBlocks(): HTMLElement[] {\n    document.body.appendChild(document.createElement('dialog'));");
+  check('the reference pane builds elements only, so the window remains the one dialog the settings reference can open',
+    paneOpensNoDialog(dialogSource) &&
+    extraModal !== dialogSource && !paneOpensNoDialog(extraModal) &&
+    secondDialog !== dialogSource && !paneOpensNoDialog(secondDialog),
+    `real=${paneOpensNoDialog(dialogSource)}, modal=${paneOpensNoDialog(extraModal)}, ` +
+    `dialog=${paneOpensNoDialog(secondDialog)}`);
 }
 
 const ABOUT_ROW_NEEDLES: readonly string[] = [
@@ -626,16 +658,17 @@ function aboutRowBody(source: string): string {
   return methodBody(source, 'private aboutRow(): HTMLButtonElement {');
 }
 
-function shortcutsRowBody(source: string): string {
-  return methodBody(source, 'private shortcutsRow(): HTMLButtonElement {');
+function shortcutBlocksBody(source: string): string {
+  return methodBody(source, 'private shortcutBlocks(): HTMLElement[] {');
 }
 
 {
   const body = aboutRowBody(dialogSource);
   const missing = ABOUT_ROW_NEEDLES.filter((needle) => !body.includes(needle));
-  check('the About row is the same action frame as the shortcuts row, keyed about and handed to its own host bridge',
+  check('the About row is the shared action frame, keyed about and handed to its own host bridge',
     body.length > 0 && missing.length === 0 &&
-    !body.includes('settings-item') && !body.includes("rowLabel('settings.shortcuts')"),
+    !body.includes('settings-item') && !body.includes("rowLabel('settings.shortcuts')") &&
+    !body.includes('shortcutsRow'),
     `missing=${JSON.stringify(missing)}, body=${JSON.stringify(body.replace(/\s+/g, ' '))}`);
 }
 
@@ -783,22 +816,22 @@ function rowWiredToHost(source: string, entry: ToggleRow): boolean {
   const toggleCalls = (source: string): number => source.match(/this\.toggleRow\(/g)?.length ?? 0;
   const actionRows = (source: string): number => source.match(/row\.dataset\.settingsKey = /g)?.length ?? 0;
   const keyed = SETTINGS_SECTIONS.length + toggleCalls(dialogSource) + actionRows(dialogSource);
-  check('the window keeps one keyed control per tab plus one per row: eleven today',
+  check('the window keys one control per tab, five toggles, the About row and the shared reference row: eleven today',
     keyed === 11 && SETTINGS_SECTIONS.length === 4 && toggleCalls(dialogSource) === 5 &&
     actionRows(dialogSource) === 2,
     `keyed=${keyed}, tabs=${SETTINGS_SECTIONS.length}, toggles=${toggleCalls(dialogSource)}, ` +
-    `actions=${actionRows(dialogSource)}`);
+    `keyedRows=${actionRows(dialogSource)}`);
 }
 
 {
   const extraToggle = dialogSource.replace(
     "      case 'developer':\n        return [this.developerToolsRow()];",
     "      case 'developer':\n        return [this.developerToolsRow(), this.toggleRow('extra', 'settings.about', false, () => {})];");
-  const droppedAction = dialogSource.replace("    row.dataset.settingsKey = 'shortcuts';\n", '');
+  const droppedAction = dialogSource.replace('    row.dataset.settingsKey = key;\n', '');
   const countOf = (source: string): number => SETTINGS_SECTIONS.length +
     (source.match(/this\.toggleRow\(/g)?.length ?? 0) +
     (source.match(/row\.dataset\.settingsKey = /g)?.length ?? 0);
-  check('control: a sixth toggle or a row without its settings key moves the keyed-control count',
+  check('control: a sixth toggle or a reference row without its settings key moves the keyed-control count',
     extraToggle !== dialogSource && countOf(extraToggle) === 12 &&
     droppedAction !== dialogSource && countOf(droppedAction) === 10 && countOf(dialogSource) === 11,
     `extra=${countOf(extraToggle)}, dropped=${countOf(droppedAction)}, real=${countOf(dialogSource)}`);
@@ -811,8 +844,7 @@ function appSetterFollows(source: string, name: string, order: readonly string[]
 }
 
 const SETTER_EFFECTS: ReadonlyArray<readonly [string, readonly string[]]> = [
-  ['setWheelZooms', ['this.wheelZooms = on;', 'this.persistWorkspace();', 'this.renderInteractionBar(true);',
-    'if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings(this.wheelZooms);']],
+  ['setWheelZooms', ['this.wheelZooms = on;', 'this.persistWorkspace();', 'this.renderInteractionBar(true);']],
   ['setCompactRows', ['this.compactRows = on;', 'this.persistWorkspace();', 'this.relayout();']],
   ['setHideIdle', ['this.hideIdleChannels = on;', 'this.persistWorkspace();', 'this.relayout();', 'this.renderPanels();']],
   ['setDeveloperTools', ['this.developerTools = on;', 'this.persistWorkspace();', 'this.renderPanels();']],
@@ -823,7 +855,6 @@ const SETTER_REFRESH_CALLS: readonly string[] = [
   'this.renderPanels();',
   'this.renderInteractionBar();',
   'this.renderInteractionBar(true);',
-  'this.shortcutsDialog.renderStrings(this.wheelZooms);',
   'this.renderSidebarContent();',
   'this.reflectDetailedLabels();',
 ];
@@ -977,11 +1008,9 @@ function settingsHandlerOpensDialog(source: string): boolean {
   const end = start >= 0 ? appSource.indexOf('\n  }', start) : -1;
   const body = start >= 0 && end > start ? appSource.slice(start, end) : '';
   const guard = 'if (this.settingsDialog.isOpen) this.settingsDialog.renderStrings();';
-  check('retranslate refreshes the window strings only while the window is open',
-    body.includes(guard) &&
-    body.includes('if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings(this.wheelZooms);') &&
-    body.indexOf('this.shortcutsDialog.renderStrings(this.wheelZooms);') < body.indexOf(guard),
-    `guard=${body.includes(guard)}, body=${body.length}`);
+  check('retranslate refreshes the window strings, which now carry the reference, only while the window is open',
+    body.includes(guard) && !body.includes('shortcutsDialog'),
+    `guard=${body.includes(guard)}, dialog=${body.includes('shortcutsDialog')}, body=${body.length}`);
 }
 
 {
@@ -996,33 +1025,33 @@ function settingsHandlerOpensDialog(source: string): boolean {
     `mutated=${mutated.includes('if (this.settingsDialog.isOpen)')}`);
 }
 
-function openShortcutsBody(source: string): string {
-  const start = source.indexOf('openShortcuts: (invoker) => {');
-  const end = start >= 0 ? source.indexOf('\n      },', start) : -1;
-  return start >= 0 && end > start ? source.slice(start, end) : '';
-}
+const RETIRED_REFERENCE_TOKENS: readonly string[] = ['openShortcuts', 'shortcutsDialog', 'ShortcutsDialog'];
 
-function shortcutsOpenOrder(body: string): boolean {
-  const closeAt = body.indexOf('this.channelList.closeDialog();');
-  const openAt = body.indexOf('this.shortcutsDialog.open(invoker, this.wheelZooms);');
-  return closeAt >= 0 && openAt > closeAt && !body.includes('this.el.settings');
+function referenceInPane(settings: string, app: string): boolean {
+  const pane = methodBody(settings, 'private paneContent(section: SettingsSectionId): HTMLElement[] {');
+  return /case 'shortcuts':\r?\n\s*return this\.shortcutBlocks\(\);/.test(pane) &&
+    RETIRED_REFERENCE_TOKENS.every((token) => !`${settings}\n${app}`.includes(token));
 }
 
 {
-  const body = openShortcutsBody(appSource);
-  check('the shortcuts row hands its own frame to the existing dialog through the host bridge',
-    shortcutsOpenOrder(body),
-    `body=${JSON.stringify(body.replace(/\s+/g, ' '))}`);
+  check('the reference opens inside the pane, so neither the host bridge nor a second dialog survives',
+    referenceInPane(dialogSource, appSource),
+    `retired=${JSON.stringify(RETIRED_REFERENCE_TOKENS
+      .filter((token) => `${dialogSource}\n${appSource}`.includes(token)))}, ` +
+    `pane=${referenceInPane(dialogSource, appSource)}`);
 }
 
 {
-  const body = openShortcutsBody(appSource);
-  const mutated = body.replace(
-    '        this.channelList.closeDialog();\n        this.shortcutsDialog.open(invoker, this.wheelZooms);',
-    '        this.shortcutsDialog.open(invoker, this.wheelZooms);\n        this.channelList.closeDialog();');
-  check('control: reversing the close-then-open order is detected by the same predicate',
-    mutated !== body && !shortcutsOpenOrder(mutated) && shortcutsOpenOrder(body),
-    `mutated=${shortcutsOpenOrder(mutated)}, real=${shortcutsOpenOrder(body)}`);
+  const bridge = appSource.replace(
+    '      openAbout: (invoker) => {',
+    '      openShortcuts: (invoker) => this.settingsDialog.open(invoker),\n      openAbout: (invoker) => {');
+  const paneless = dialogSource.replace('        return this.shortcutBlocks();', '        return [];');
+  check('control: a restored host bridge or a pane that no longer returns the reference blocks fails the same predicate',
+    bridge !== appSource && !referenceInPane(dialogSource, bridge) &&
+    paneless !== dialogSource && !referenceInPane(paneless, appSource) &&
+    referenceInPane(dialogSource, appSource),
+    `bridge=${referenceInPane(dialogSource, bridge)}, paneless=${referenceInPane(paneless, appSource)}, ` +
+    `real=${referenceInPane(dialogSource, appSource)}`);
 }
 
 function toggleSequenceHolds(body: string): boolean {
@@ -1180,6 +1209,46 @@ function forcedOrRawHex(block: string): boolean {
     forcedOrRawHex(injectedHex) && forcedOrRawHex(injectedImportant) && !forcedOrRawHex(dialogCss),
     `hex=${forcedOrRawHex(injectedHex)}, important=${forcedOrRawHex(injectedImportant)}, ` +
     `real=${forcedOrRawHex(dialogCss)}`);
+}
+
+const SHORTCUT_CLASSES: readonly string[] = [
+  'shortcuts-dialog', 'shortcuts-form', 'shortcuts-header', 'shortcuts-actions', 'shortcuts-close',
+  'shortcuts-section', 'shortcuts-list', 'shortcuts-row', 'shortcuts-action', 'shortcuts-key',
+];
+
+const shortcutConsumers: string = ['confirmDialog', 'aboutDialog', 'settingsDialog']
+  .map((name) => fs.readFileSync(`src/ui/${name}.ts`, 'utf8')).join('\n');
+
+function classRuleIn(sheet: string, name: string): boolean {
+  return new RegExp(`\\.${name}(?![\\w-])`).test(sheet);
+}
+
+function shortcutClassesIntact(sheet: string, consumers: string): boolean {
+  const margin = /\n\.shortcuts-section \{\n  margin: ([^;]+);/.exec(sheet)?.[1];
+  return SHORTCUT_CLASSES.every((name) => classRuleIn(sheet, name) && consumers.includes(name)) &&
+    margin === '4px 0';
+}
+
+{
+  check('every shortcuts-* rule still has a consumer and the reference headings follow the pane gap',
+    shortcutClassesIntact(css, shortcutConsumers) &&
+    effectiveGaps(paneBlock(dialogCss)).row === SETTINGS_PANE_GAP,
+    `orphaned=${JSON.stringify(SHORTCUT_CLASSES.filter((name) =>
+      !classRuleIn(css, name) || !shortcutConsumers.includes(name)))}, ` +
+    `margin=${/\n\.shortcuts-section \{\n  margin: ([^;]+);/.exec(css)?.[1]}, ` +
+    `paneGap=${effectiveGaps(paneBlock(dialogCss)).row}`);
+}
+
+{
+  const widened = css.replace('.shortcuts-section {\n  margin: 4px 0;', '.shortcuts-section {\n  margin: 0 0 -8px;');
+  const renamed = css.replaceAll('.shortcuts-close', '.shortcuts-close-retired');
+  check('control: the dialog-era margin or a rule retired while a consumer still asks for it fails the same predicate',
+    widened !== css && !shortcutClassesIntact(widened, shortcutConsumers) &&
+    renamed !== css && !shortcutClassesIntact(renamed, shortcutConsumers) &&
+    shortcutClassesIntact(css, shortcutConsumers),
+    `widened=${shortcutClassesIntact(widened, shortcutConsumers)}, ` +
+    `renamed=${shortcutClassesIntact(renamed, shortcutConsumers)}, ` +
+    `real=${shortcutClassesIntact(css, shortcutConsumers)}`);
 }
 
 {

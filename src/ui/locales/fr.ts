@@ -840,7 +840,6 @@ export const fr: Messages = {
   'settings.compactRows': 'Lignes compactes (voies logiques jusqu’à 24 px)',
   'settings.hideIdle': 'Masquer les voies inactives (aucun front dans l’acquisition)',
   'settings.developerTools': 'Outils développeur (console de registres USB)',
-  'settings.shortcuts': 'Raccourcis et gestes',
   'settings.about': 'À propos',
   'about.title': 'À propos',
   'about.version': 'Version {version} · build {build}',
@@ -857,7 +856,6 @@ export const fr: Messages = {
   'settings.sections.about': 'À propos',
 
   // ----------------------------------------------------------- shortcuts
-  'shortcuts.title': 'Raccourcis et gestes',
   'shortcuts.close': 'Fermer',
   'shortcuts.clearCursors': 'Effacer les curseurs',
   'shortcuts.keyboard': 'Clavier',

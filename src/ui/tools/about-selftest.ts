@@ -43,19 +43,16 @@ function sourceSlice(source: string, from: string, to: string): string {
 }
 
 function aboutEntry(settingsWindow: string, app: string): boolean {
-  const pane = sourceSlice(settingsWindow, 'private paneContent(section: SettingsSectionId)', 'private onNavKey(');
+  const pane = sourceSlice(settingsWindow, 'private paneContent(section: SettingsSectionId)', 'private shortcutBlocks(');
   const row = sourceSlice(settingsWindow, 'private aboutRow()', '}\n');
   const shortcutsAt = pane.indexOf("case 'shortcuts':");
   const aboutAt = pane.indexOf("case 'about':");
-  const afterShortcuts = settingsWindow.indexOf("this.rowLabel('settings.about')") >
-    settingsWindow.indexOf("this.rowLabel('settings.shortcuts')");
   return row.includes("this.rowLabel('settings.about')") &&
     row.includes("row.dataset.settingsKey = 'about';") &&
     row.includes('this.host.openAbout(row)') &&
     shortcutsAt >= 0 && aboutAt > shortcutsAt &&
-    pane.includes('return [this.shortcutsRow()];') &&
+    pane.includes('return this.shortcutBlocks();') &&
     pane.includes('return [this.aboutRow()];') &&
-    afterShortcuts &&
     app.includes('if (this.aboutDialog.isOpen) this.aboutDialog.renderStrings();') &&
     sourceSlice(app, 'openAbout: (invoker) => {', '\n      },').includes('this.aboutDialog.open(invoker);') &&
     !app.includes('settingsItems');
@@ -124,18 +121,23 @@ function aboutEntry(settingsWindow: string, app: string): boolean {
     entry && modal, `entry=${entry}, modal=${modal}`);
 
   const movedFirst = settingsWindow.replace(
-    "      case 'shortcuts':\n        return [this.shortcutsRow()];\n      case 'developer':\n        return [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutRow()];",
-    "      case 'about':\n        return [this.aboutRow()];\n      case 'shortcuts':\n        return [this.shortcutsRow()];\n      case 'developer':\n        return [this.developerToolsRow()];");
+    "      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'developer':\n        return [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutRow()];",
+    "      case 'about':\n        return [this.aboutRow()];\n      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'developer':\n        return [this.developerToolsRow()];");
+  const shortcutsPaneDropped = settingsWindow.replace(
+    "        return this.shortcutBlocks();",
+    "        return [];");
   const strayHandOff = settingsWindow.replace('this.host.openAbout(row)', 'this.host.openAbout(this.closeButton)');
   const unlocalized = app.replace(
     'if (this.aboutDialog.isOpen) this.aboutDialog.renderStrings();',
     '');
-  check('control: About listed before Shortcuts, a row handing off another frame or a modal left unlocalized fails the same entry predicate',
+  check('control: About listed before Shortcuts, an emptied shortcuts pane, a row handing off another frame or a modal left unlocalized fails the same entry predicate',
     movedFirst !== settingsWindow && !aboutEntry(movedFirst, app) &&
+    shortcutsPaneDropped !== settingsWindow && !aboutEntry(shortcutsPaneDropped, app) &&
     strayHandOff !== settingsWindow && !aboutEntry(strayHandOff, app) &&
     unlocalized !== app && !aboutEntry(settingsWindow, unlocalized) &&
     aboutEntry(settingsWindow, app),
-    `moved=${aboutEntry(movedFirst, app)}, stray=${aboutEntry(strayHandOff, app)}, ` +
+    `moved=${aboutEntry(movedFirst, app)}, dropped=${aboutEntry(shortcutsPaneDropped, app)}, ` +
+    `stray=${aboutEntry(strayHandOff, app)}, ` +
     `unlocalized=${aboutEntry(settingsWindow, unlocalized)}, real=${aboutEntry(settingsWindow, app)}`);
 }
 

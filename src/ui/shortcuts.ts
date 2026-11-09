@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 import type { MessageKey } from './i18n.js';
 
 export type ShortcutId =
@@ -46,6 +47,14 @@ export function referenceGestures(wheelZooms: boolean): readonly GestureEntry[] 
     { modifiers: [], input: 'shortcuts.input.doubleClick', labels: ['shortcuts.addCursor'] },
     { modifiers: [], input: 'shortcuts.input.pinch', labels: ['shortcuts.zoomTime'] },
   ];
+}
+
+export function shortcutActionText(entry: ShortcutEntry | GestureEntry): string {
+  return entry.labels.map((key) => t(key)).join(' / ');
+}
+
+export function gestureNotation(entry: GestureEntry): string {
+  return [...entry.modifiers, t(entry.input)].join(' + ');
 }
 
 export function shortcutIdFor(key: string): ShortcutId | null {

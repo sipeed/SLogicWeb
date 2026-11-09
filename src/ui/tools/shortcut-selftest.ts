@@ -1,5 +1,7 @@
-import { SHORTCUTS, referenceGestures, shortcutIdFor, type ShortcutEntry, type ShortcutId } from '../shortcuts.js';
-import { gestureNotation, shortcutActionText } from '../shortcutsDialog.js';
+import {
+  SHORTCUTS, gestureNotation, referenceGestures, shortcutActionText, shortcutIdFor,
+  type ShortcutEntry, type ShortcutId,
+} from '../shortcuts.js';
 import { t, type MessageKey } from '../i18n.js';
 import { en } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
@@ -8,6 +10,7 @@ import { fr } from '../locales/fr.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
+  existsSync(path: string): boolean;
 }
 
 interface TestResult {
@@ -199,12 +202,26 @@ const body = keydownBody(appSource);
   const source = fs.readFileSync('src/ui/shortcuts.ts', 'utf8');
   const forbidden = ['document', 'window', 'addEventListener', '//', '/*'];
   const hits = forbidden.filter((token) => source.includes(token));
-  const typeImport = "import type { MessageKey } from './i18n.js';";
-  const bodySource = source.replace(typeImport, '');
-  check('the catalogue touches no DOM or browser state and carries no comments',
-    hits.length === 0 && source.startsWith(typeImport) &&
+  const imports = [...source.matchAll(/^import .*$/gm)].map((match) => match[0]);
+  const bodySource = source.replace(/^import .*$/gm, '');
+  check('the catalogue imports only the message catalog and touches no DOM or browser state',
+    hits.length === 0 && imports.length === 2 &&
+    imports.every((line) => line.endsWith("from './i18n.js';")) &&
     bodySource.trimStart().startsWith('export type ShortcutId'),
-    `hits=${JSON.stringify(hits)}, typeOnlyImport=${source.startsWith(typeImport)}`);
+    `hits=${JSON.stringify(hits)}, imports=${JSON.stringify(imports)}`);
+}
+
+{
+  const source = fs.readFileSync('src/ui/shortcuts.ts', 'utf8');
+  const mutated = source.replace(
+    "import { t } from './i18n.js';",
+    "import { t } from './i18n.js';\nimport { zoomToFit } from './view.js';");
+  const imports = (text: string): string[] => [...text.matchAll(/^import .*$/gm)].map((match) => match[0]);
+  check('control: a third import from another module is detected by the same predicate',
+    mutated !== source && imports(mutated).length === 3 &&
+    !imports(mutated).every((line) => line.endsWith("from './i18n.js';")) &&
+    imports(source).every((line) => line.endsWith("from './i18n.js';")),
+    `mutated=${imports(mutated).length}, real=${imports(source).length}`);
 }
 
 {
@@ -254,8 +271,8 @@ const body = keydownBody(appSource);
 }
 
 const SHORTCUT_KEY_VALUES: ReadonlyArray<readonly [MessageKey, readonly [string, string, string, string]]> = [
-  ['settings.shortcuts', ['Shortcuts and gestures', '快捷键与鼠标操作', 'Клавиши и жесты', 'Raccourcis et gestes']],
-  ['shortcuts.title', ['Shortcuts and gestures', '快捷键与鼠标操作', 'Клавиши и жесты', 'Raccourcis et gestes']],
+  ['shortcuts.keyboard', ['Keyboard', '键盘', 'Клавиатура', 'Clavier']],
+  ['shortcuts.mouse', ['Mouse and touch', '鼠标与触控', 'Мышь и касание', 'Souris et tactile']],
   ['settings.wheelZooms', ['Wheel zooms (no Ctrl needed)', '滚轮直接缩放', 'Колесо масштабирует (без Ctrl)',
     'La molette zoome (sans Ctrl)']],
   ['shortcuts.close', ['Close', '关闭', 'Закрыть', 'Fermer']],
@@ -279,7 +296,7 @@ const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = 
       if (actual !== values[index]) drift.push(`${locale}:${key}=${JSON.stringify(actual)}`);
     }
   }
-  check('all four catalogs carry the four reference keys with their pinned values',
+  check('all four catalogs carry the five reference keys with their pinned values',
     drift.length === 0 && SHORTCUT_KEY_VALUES.every(([key]) => en[key] !== undefined),
     drift.length === 0 ? `${CATALOGS.length} catalogs x ${SHORTCUT_KEY_VALUES.length} keys match`
       : drift.join('; '));
@@ -287,7 +304,7 @@ const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = 
 
 {
   const texts = SHORTCUTS.map((entry) => shortcutActionText(entry));
-  check('the dialog action text joins the labeled catalog keys with the two-label separator',
+  check('the reference action text joins the labeled catalog keys with the two-label separator',
     texts.join(' | ') === 'Capture / Stop | Fit | Clear cursors | Zoom in | Zoom out | ' +
       'Pan left (earlier) | Pan right (later)' &&
     SHORTCUTS[0]!.labels.length === 2 && t('toolbar.start') === 'Capture',
@@ -302,67 +319,6 @@ const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = 
     `swapped=${shortcutActionText(swapped)}, real=${shortcutActionText(SHORTCUTS[0]!)}`);
 }
 
-const DIALOG_NEEDLES: readonly string[] = [
-  "document.createElement('dialog')",
-  "'shortcuts-dialog'",
-  "'aria-labelledby'",
-  "'shortcuts-title'",
-  'showModal()',
-  "addEventListener('cancel'",
-  'event.target !== this.dialog',
-  'preventDefault()',
-  'focus({ preventScroll: true })',
-  'this.invoker',
-  "t('shortcuts.title')",
-  "t('shortcuts.close')",
-  'shortcutActionText(entry)',
-  "createElement('kbd')",
-  "createElement('li')",
-];
-
-const DIALOG_FORBIDDEN: readonly string[] = [
-  'document.addEventListener',
-  'window.addEventListener',
-  'innerHTML',
-];
-
-function missingDialogNeedles(source: string): string[] {
-  return DIALOG_NEEDLES.filter((needle) => !source.includes(needle));
-}
-
-function forbiddenDialogTokens(source: string): string[] {
-  return DIALOG_FORBIDDEN.filter((needle) => source.includes(needle));
-}
-
-{
-  const source = fs.readFileSync('src/ui/shortcutsDialog.ts', 'utf8');
-  const missing = missingDialogNeedles(source);
-  const forbidden = forbiddenDialogTokens(source);
-  const comments = ['//', '/*'].filter((token) => source.includes(token));
-  check('the dialog is one persistent native modal with its listeners bound in the constructor',
-    missing.length === 0 && forbidden.length === 0 && comments.length === 0,
-    `missing=${JSON.stringify(missing)}, forbidden=${JSON.stringify(forbidden)}, ` +
-    `comments=${JSON.stringify(comments)}`);
-}
-
-{
-  const source = fs.readFileSync('src/ui/shortcutsDialog.ts', 'utf8');
-  const mutated = `${source}\ndocument.addEventListener('keydown', () => {});\n`;
-  check('control: a document-level listener is detected by the same negative predicate',
-    mutated !== source && forbiddenDialogTokens(mutated).length === 1 &&
-    forbiddenDialogTokens(source).length === 0,
-    `mutated=${forbiddenDialogTokens(mutated).length}, real=${forbiddenDialogTokens(source).length}`);
-}
-
-{
-  const source = fs.readFileSync('src/ui/shortcutsDialog.ts', 'utf8');
-  const mutated = source.replace('showModal()', 'show()');
-  check('control: dropping showModal() is detected by the same needle predicate',
-    mutated !== source && missingDialogNeedles(mutated).includes('showModal()') &&
-    missingDialogNeedles(source).length === 0,
-    `mutatedMissing=${missingDialogNeedles(mutated).length}, realMissing=${missingDialogNeedles(source).length}`);
-}
-
 function methodBody(source: string, marker: string): string {
   const start = source.indexOf(marker);
   if (start < 0) return '';
@@ -370,90 +326,63 @@ function methodBody(source: string, marker: string): string {
   return end < 0 ? source.slice(start) : source.slice(start, end);
 }
 
-function dialogConstructions(source: string): number {
-  return source.match(/new ShortcutsDialog\(/g)?.length ?? 0;
+const REFERENCE_NEEDLES: readonly string[] = [
+  "      case 'shortcuts':\n        return this.shortcutBlocks();",
+  "this.groupTitle('shortcuts.keyboard'),",
+  "this.groupTitle('shortcuts.mouse'),",
+  'this.shortcutList(SHORTCUTS.map((entry) => this.keyRow(',
+  'shortcutActionText(entry), entry.notation, `shortcut:${entry.id}`',
+  'this.shortcutList(referenceGestures(this.host.wheelZooms()).map((entry, index) => this.keyRow(',
+  'shortcutActionText(entry), gestureNotation(entry), `gesture:${index}`',
+  "list.className = 'shortcuts-list';",
+  "row.className = 'shortcuts-row';",
+  "action.className = 'shortcuts-action';",
+  "chord.className = 'shortcuts-key';",
+  'row.tabIndex = -1;',
+];
+
+const REFERENCE_RETIRED: readonly string[] = [
+  'ShortcutsDialog', 'shortcutsDialog', 'openShortcuts', 'shortcuts-dialog', 'settings.shortcuts',
+];
+
+const REFERENCE_DIALOG_GONE = !fs.existsSync('src/ui/shortcutsDialog.ts');
+
+function referenceInPane(settings: string, app: string): boolean {
+  const joined = `${settings}\n${app}`;
+  return REFERENCE_NEEDLES.every((needle) => settings.includes(needle)) &&
+    REFERENCE_RETIRED.every((token) => !joined.includes(token)) &&
+    REFERENCE_DIALOG_GONE;
 }
 
 {
-  check('App constructs exactly one reference dialog and keeps it in one field',
-    dialogConstructions(appSource) === 1 &&
-    appSource.includes('private readonly shortcutsDialog: ShortcutsDialog;') &&
-    methodBody(appSource, 'constructor() {').includes('this.shortcutsDialog = new ShortcutsDialog();'),
-    `constructions=${dialogConstructions(appSource)}, ` +
-    `field=${appSource.includes('private readonly shortcutsDialog: ShortcutsDialog;')}`);
+  const settings = fs.readFileSync('src/ui/settingsDialog.ts', 'utf8');
+  check('the settings pane renders both reference lists from the model module and no dialog owns them',
+    referenceInPane(settings, appSource) && settings.includes("} from './shortcuts.js';"),
+    `missing=${JSON.stringify(REFERENCE_NEEDLES.filter((needle) => !settings.includes(needle)))}, ` +
+    `retired=${JSON.stringify(REFERENCE_RETIRED.filter((token) => `${settings}\n${appSource}`.includes(token)))}`);
 }
 
 {
-  const mutated = `${appSource}\nconst extra = new ShortcutsDialog();\n`;
-  check('control: a second construction is detected by the same count predicate',
-    mutated !== appSource && dialogConstructions(mutated) === 2 && dialogConstructions(appSource) === 1,
-    `mutated=${dialogConstructions(mutated)}, real=${dialogConstructions(appSource)}`);
-}
-
-{
-  const settingsDialogSource = fs.readFileSync('src/ui/settingsDialog.ts', 'utf8');
-  const pane = methodBody(settingsDialogSource, 'private paneContent(section: SettingsSectionId): HTMLElement[] {');
-  const paneLists = pane.includes('this.labelsRow()') && pane.includes('this.shortcutsRow()');
-  const displayToggleCheck = (source: string): boolean => {
-    const body = methodBody(source, 'private labelsRow(): HTMLDivElement {');
-    return body.includes(
-      "this.toggleRow('detailed-labels', 'settings.detailedLabels', this.host.detailedLabels(),") &&
-      body.includes('(on) => this.host.setDetailedLabels(on)');
-  };
-  const shortcutsCheck = (source: string): boolean => {
-    const body = methodBody(source, 'private shortcutsRow(): HTMLButtonElement {');
-    return body.includes("this.rowLabel('settings.shortcuts')") &&
-      body.includes("hint.textContent = '▸';") &&
-      body.includes('this.host.openShortcuts(row)');
-  };
-  check('the settings window keeps the display toggle and hands the shortcuts row to the dialog through the host',
-    displayToggleCheck(settingsDialogSource) && shortcutsCheck(settingsDialogSource) && paneLists,
-    `displayToggle=${displayToggleCheck(settingsDialogSource)}, ` +
-    `shortcutsEntry=${shortcutsCheck(settingsDialogSource)}, paneLists=${paneLists}`);
-  const inlined = settingsDialogSource.replace(
-    '      (on) => this.host.setDetailedLabels(on));',
-    '      () => {});');
-  const strayHandOff = settingsDialogSource.replace(
-    '    row.addEventListener(\'click\', () => this.host.openShortcuts(row));',
-    '    row.addEventListener(\'click\', () => this.host.openShortcuts(this.closeButton));');
-  check('control: an inlined display toggle without its host write or a shortcuts row handing off another element fails the same needles',
-    inlined !== settingsDialogSource && !displayToggleCheck(inlined) &&
-    displayToggleCheck(settingsDialogSource) &&
-    strayHandOff !== settingsDialogSource && !shortcutsCheck(strayHandOff) &&
-    shortcutsCheck(settingsDialogSource),
-    `inlined=${displayToggleCheck(inlined)}, strayHandOff=${shortcutsCheck(strayHandOff)}, ` +
-    `real=${displayToggleCheck(settingsDialogSource)}/${shortcutsCheck(settingsDialogSource)}`);
-}
-
-function openShortcutsBridge(source: string): string {
-  const start = source.indexOf('openShortcuts: (invoker) => {');
-  const end = start >= 0 ? source.indexOf('\n      },', start) : -1;
-  return start >= 0 && end > start ? source.slice(start, end) : '';
-}
-
-function openShortcutsCarriesWheelZooms(source: string): boolean {
-  const body = openShortcutsBridge(source);
-  return body.includes('this.shortcutsDialog.open(invoker, this.wheelZooms);') &&
-    !body.includes('this.shortcutsDialog.open(invoker);');
-}
-
-{
-  const bridge = openShortcutsBridge(appSource);
-  const openAt = bridge.indexOf('this.shortcutsDialog.open(invoker, this.wheelZooms);');
-  const closeAt = bridge.indexOf('this.channelList.closeDialog();');
-  check('the settings window opens the reference dialog with the current wheel-zoom state',
-    openShortcutsCarriesWheelZooms(appSource) && closeAt >= 0 && openAt > closeAt,
-    `body=${JSON.stringify(bridge.replace(/\s+/g, ' '))}`);
-}
-
-{
-  const mutated = appSource.replace(
-    'this.shortcutsDialog.open(invoker, this.wheelZooms);',
-    'this.shortcutsDialog.open(invoker);');
-  check('control: dropping the wheel-zoom argument is detected by the same predicate',
-    mutated !== appSource && !openShortcutsCarriesWheelZooms(mutated) &&
-    openShortcutsCarriesWheelZooms(appSource),
-    `mutated=${openShortcutsCarriesWheelZooms(mutated)}, real=${openShortcutsCarriesWheelZooms(appSource)}`);
+  const settings = fs.readFileSync('src/ui/settingsDialog.ts', 'utf8');
+  const staleDialog = `${appSource}\n  private readonly shortcutsDialog = new ShortcutsDialog();\n`;
+  const staleBridge = appSource.replace(
+    '      openAbout: (invoker) => {',
+    '      openShortcuts: (invoker) => this.shortcutsDialog.open(invoker),\n      openAbout: (invoker) => {');
+  const handWritten = settings.replace(
+    'this.shortcutList(SHORTCUTS.map((entry) => this.keyRow(',
+    'this.shortcutList([{ labels: [], notation: \'F\' }].map((entry) => this.keyRow(');
+  const frozenZooms = settings.replace(
+    'referenceGestures(this.host.wheelZooms())',
+    'referenceGestures(false)');
+  check('control: a second dialog, a restored host bridge, a hand-written key list or a frozen wheel-zoom capture fails the same predicate',
+    !referenceInPane(settings, staleDialog) &&
+    !referenceInPane(settings, staleBridge) &&
+    !referenceInPane(handWritten, appSource) &&
+    !referenceInPane(frozenZooms, appSource) &&
+    referenceInPane(settings, appSource),
+    `dialog=${referenceInPane(settings, staleDialog)}, bridge=${referenceInPane(settings, staleBridge)}, ` +
+    `handWritten=${referenceInPane(handWritten, appSource)}, frozen=${referenceInPane(frozenZooms, appSource)}, ` +
+    `real=${referenceInPane(settings, appSource)}`);
 }
 
 {
@@ -472,12 +401,20 @@ function openShortcutsCarriesWheelZooms(source: string): boolean {
 
 {
   const body = methodBody(appSource, 'private retranslate(): void {');
-  const guard = 'if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings(this.wheelZooms);';
-  const renderBody = methodBody(appSource, 'private renderPanels(');
-  check('retranslate refreshes the reference strings only while the dialog is open',
-    body.includes(guard) && !body.includes('this.shortcutsDialog.open(') &&
-    renderBody.length > 0 && !renderBody.includes('shortcutsDialog'),
-    `guard=${body.includes(guard)}, retranslate=${body.length}, renderPanels=${renderBody.length}`);
+  const guard = 'if (this.settingsDialog.isOpen) this.settingsDialog.renderStrings();';
+  check('retranslate refreshes the window strings, which now carry the reference, and no second dialog',
+    body.includes(guard) && !body.includes('shortcutsDialog') && body.includes('this.relayout();'),
+    `guard=${body.includes(guard)}, dialog=${body.includes('shortcutsDialog')}, body=${body.length}`);
+}
+
+{
+  const body = methodBody(appSource, 'private retranslate(): void {');
+  const mutated = body.replace(
+    '    applyStaticI18n(document);\n',
+    '    applyStaticI18n(document);\n    if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings();\n');
+  check('control: a re-inserted reference-dialog refresh is detected by the same predicate',
+    mutated !== body && mutated.includes('shortcutsDialog') && !body.includes('shortcutsDialog'),
+    `mutated=${mutated.includes('shortcutsDialog')}, real=${body.includes('shortcutsDialog')}`);
 }
 
 {
