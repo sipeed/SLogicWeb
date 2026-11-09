@@ -725,7 +725,11 @@ export class App {
       setDeveloperTools: (on) => this.setDeveloperTools(on),
       openShortcuts: (invoker) => {
         this.channelList.closeDialog();
-        this.shortcutsDialog.open(invoker);
+        this.shortcutsDialog.open(invoker, this.wheelZooms);
+      },
+      openAbout: (invoker) => {
+        this.channelList.closeDialog();
+        this.aboutDialog.open(invoker);
       },
     });
     this.languageMenu = new SettingsMenu(this.el.language, 'language-menu');

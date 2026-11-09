@@ -68,6 +68,7 @@ const DIALOG_NEEDLES: readonly string[] = [
   'const text = this.rowLabel(label, input.id);',
   'input.dataset.settingsKey = camelKey(key);',
   "this.rowLabel('settings.shortcuts')",
+  "this.rowLabel('settings.about')",
   "this.closeButton.setAttribute('aria-label', t('settings.close'));",
   'this.host.setDetailedLabels(',
   'this.host.openShortcuts(row)',
@@ -417,13 +418,14 @@ function paneComposition(source: string): boolean {
   const body = methodBody(source, 'private paneContent(section: SettingsSectionId): HTMLElement[] {');
   const appearanceAt = body.indexOf(
     'return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];');
-  const generalAt = body.indexOf('return [this.developerToolsRow(), this.shortcutsRow()];');
+  const generalAt = body.indexOf(
+    'return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];');
   return appearanceAt >= 0 && generalAt > appearanceAt &&
     !body.includes('settings-item') && !body.includes('new SettingsMenu');
 }
 
 {
-  check('the appearance pane is the four upstream toggles in order and the general pane opens with developer tools then shortcuts',
+  check('the appearance pane is the four upstream toggles in order and the general pane runs developer tools, shortcuts, then About',
     paneComposition(dialogSource),
     `ok=${paneComposition(dialogSource)}, ` +
     `body=${JSON.stringify(methodBody(dialogSource, 'private paneContent(section: SettingsSectionId): HTMLElement[] {').replace(/\s+/g, ' '))}`);
@@ -437,20 +439,24 @@ function paneComposition(source: string): boolean {
     'this.wheelZoomsRow(), this.compactRowsRow(),',
     'this.compactRowsRow(), this.wheelZoomsRow(),');
   const misplacedShortcuts = dialogSource.replace(
-    '    return [this.developerToolsRow(), this.shortcutsRow()];',
-    '    return [this.shortcutsRow(), this.developerToolsRow()];');
+    '    return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];',
+    '    return [this.shortcutsRow(), this.developerToolsRow(), this.aboutRow()];');
   const emptiedGeneral = dialogSource.replace(
-    '    return [this.developerToolsRow(), this.shortcutsRow()];',
-    '    return [this.developerToolsRow()];');
-  check('control: dropping a row from the appearance list, swapping two toggles, reordering the general rows or dropping the shortcuts row fails the same composition predicate',
+    '    return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];',
+    '    return [this.developerToolsRow(), this.shortcutsRow()];');
+  const aboutFirst = dialogSource.replace(
+    '    return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];',
+    '    return [this.developerToolsRow(), this.aboutRow(), this.shortcutsRow()];');
+  check('control: dropping a row from the appearance list, swapping two toggles, reordering the general rows or dropping the About row fails the same composition predicate',
     dropped !== dialogSource && !paneComposition(dropped) &&
     swapped !== dialogSource && !paneComposition(swapped) &&
     misplacedShortcuts !== dialogSource && !paneComposition(misplacedShortcuts) &&
     emptiedGeneral !== dialogSource && !paneComposition(emptiedGeneral) &&
+    aboutFirst !== dialogSource && !paneComposition(aboutFirst) &&
     paneComposition(dialogSource),
     `dropped=${paneComposition(dropped)}, swapped=${paneComposition(swapped)}, ` +
     `misplaced=${paneComposition(misplacedShortcuts)}, emptied=${paneComposition(emptiedGeneral)}, ` +
-    `real=${paneComposition(dialogSource)}`);
+    `aboutFirst=${paneComposition(aboutFirst)}, real=${paneComposition(dialogSource)}`);
 }
 
 {
@@ -538,27 +544,120 @@ function rowLabelBindsControl(source: string): boolean {
 }
 
 {
-  const missing = ACTION_ROW_NEEDLES.filter((needle) => !dialogSource.includes(needle));
+  const body = shortcutsRowBody(dialogSource);
+  const missing = ACTION_ROW_NEEDLES.filter((needle) => !body.includes(needle));
   check('the shortcuts row is a row-level button that hands its own frame to the host bridge',
     missing.length === 0,
     `missing=${JSON.stringify(missing)}`);
 }
 
 {
+  const body = shortcutsRowBody(dialogSource);
   const plainButton = dialogSource.replace(
-    "    row.className = 'settings-row settings-row--action';\n",
-    "    row.className = 'settings-row';\n");
+    "    row.className = 'settings-row settings-row--action';\n    row.dataset.settingsKey = 'shortcuts';",
+    "    row.className = 'settings-row';\n    row.dataset.settingsKey = 'shortcuts';");
   const foreignInvoker = dialogSource.replace('this.host.openShortcuts(row)', 'this.host.openShortcuts(this.closeButton)');
-  const namedHint = dialogSource.replace("    hint.setAttribute('aria-hidden', 'true');\n", '');
+  const namedHint = dialogSource.replace(
+    "    hint.setAttribute('aria-hidden', 'true');\n    hint.textContent = '▸';\n    row.append(this.rowLabel('settings.shortcuts')",
+    "    hint.textContent = '▸';\n    row.append(this.rowLabel('settings.shortcuts')");
+  const intact = (source: string): boolean =>
+    ACTION_ROW_NEEDLES.every((needle) => shortcutsRowBody(source).includes(needle));
   check('control: a shortcuts row without the action variant, a foreign frame, or a hint inside the accessible name is detected by the same predicate',
-    plainButton !== dialogSource && !ACTION_ROW_NEEDLES.every((needle) => plainButton.includes(needle)) &&
-    foreignInvoker !== dialogSource && !ACTION_ROW_NEEDLES.every((needle) => foreignInvoker.includes(needle)) &&
-    namedHint !== dialogSource && !ACTION_ROW_NEEDLES.every((needle) => namedHint.includes(needle)) &&
-    ACTION_ROW_NEEDLES.every((needle) => dialogSource.includes(needle)),
-    `plain=${ACTION_ROW_NEEDLES.filter((n) => !plainButton.includes(n)).length}, ` +
-    `foreign=${ACTION_ROW_NEEDLES.filter((n) => !foreignInvoker.includes(n)).length}, ` +
-    `namedHint=${ACTION_ROW_NEEDLES.filter((n) => !namedHint.includes(n)).length}, ` +
-    `real=${ACTION_ROW_NEEDLES.filter((n) => !dialogSource.includes(n)).length}`);
+    plainButton !== dialogSource && !intact(plainButton) &&
+    foreignInvoker !== dialogSource && !intact(foreignInvoker) &&
+    namedHint !== dialogSource && !intact(namedHint) && intact(dialogSource),
+    `plain=${intact(plainButton)}, foreign=${intact(foreignInvoker)}, ` +
+    `namedHint=${intact(namedHint)}, real=${intact(dialogSource)}, body=${body.length}`);
+}
+
+const ABOUT_ROW_NEEDLES: readonly string[] = [
+  "row.className = 'settings-row settings-row--action';",
+  "row.dataset.settingsKey = 'about';",
+  "hint.className = 'settings-row-hint';",
+  "hint.setAttribute('aria-hidden', 'true');",
+  "hint.textContent = '▸';",
+  "row.append(this.rowLabel('settings.about'), hint);",
+  'this.host.openAbout(row)',
+];
+
+function aboutRowBody(source: string): string {
+  return methodBody(source, 'private aboutRow(): HTMLButtonElement {');
+}
+
+function shortcutsRowBody(source: string): string {
+  return methodBody(source, 'private shortcutsRow(): HTMLButtonElement {');
+}
+
+{
+  const body = aboutRowBody(dialogSource);
+  const missing = ABOUT_ROW_NEEDLES.filter((needle) => !body.includes(needle));
+  check('the About row is the same action frame as the shortcuts row, keyed about and handed to its own host bridge',
+    body.length > 0 && missing.length === 0 &&
+    !body.includes('settings-item') && !body.includes("rowLabel('settings.shortcuts')"),
+    `missing=${JSON.stringify(missing)}, body=${JSON.stringify(body.replace(/\s+/g, ' '))}`);
+}
+
+{
+  const plainButton = dialogSource.replace(
+    "    row.className = 'settings-row settings-row--action';\n    row.dataset.settingsKey = 'about';",
+    "    row.className = 'settings-row';\n    row.dataset.settingsKey = 'about';");
+  const foreignInvoker = dialogSource.replace(
+    'row.addEventListener(\'click\', () => this.host.openAbout(row));',
+    'row.addEventListener(\'click\', () => this.host.openAbout(this.closeButton));');
+  const mislabelled = dialogSource.replace(
+    "    row.append(this.rowLabel('settings.about'), hint);",
+    "    row.append(this.rowLabel('settings.shortcuts'), hint);");
+  const namedHint = dialogSource.replace('    hint.setAttribute(\'aria-hidden\', \'true\');\n    hint.textContent = \'▸\';\n    row.append(this.rowLabel(\'settings.about\')',
+    '    hint.textContent = \'▸\';\n    row.append(this.rowLabel(\'settings.about\')');
+  const intact = (source: string): boolean =>
+    ABOUT_ROW_NEEDLES.every((needle) => aboutRowBody(source).includes(needle));
+  check('control: an About row without the action variant, with a foreign frame, another row label or a named hint fails the same predicate',
+    plainButton !== dialogSource && !intact(plainButton) &&
+    foreignInvoker !== dialogSource && !intact(foreignInvoker) &&
+    mislabelled !== dialogSource && !intact(mislabelled) &&
+    namedHint !== dialogSource && !intact(namedHint) &&
+    intact(dialogSource),
+    `plain=${intact(plainButton)}, foreign=${intact(foreignInvoker)}, ` +
+    `label=${intact(mislabelled)}, namedHint=${intact(namedHint)}, real=${intact(dialogSource)}`);
+}
+
+{
+  const contract = dialogSource.includes('openAbout(invoker: HTMLElement): void;');
+  const wiring = appSource.includes('openAbout: (invoker) => {');
+  const start = appSource.indexOf('openAbout: (invoker) => {');
+  const end = start >= 0 ? appSource.indexOf('\n      },', start) : -1;
+  const body = start >= 0 && end > start ? appSource.slice(start, end) : '';
+  const order = body.indexOf('this.channelList.closeDialog();');
+  const openAt = body.indexOf('this.aboutDialog.open(invoker);');
+  check('the host contract carries the About opener and App wires it to the About dialog after closing the channel dialog',
+    contract && wiring && order >= 0 && openAt > order,
+    `contract=${contract}, wiring=${wiring}, body=${JSON.stringify(body.replace(/\s+/g, ' '))}`);
+}
+
+{
+  const droppedContract = dialogSource.replace('  openAbout(invoker: HTMLElement): void;\n', '');
+  const staleMenu = appSource.replace(
+    '        this.aboutDialog.open(invoker);',
+    '        this.aboutDialog.open(this.el.settings);');
+  const noClose = appSource.replace(
+    '      openAbout: (invoker) => {\n        this.channelList.closeDialog();\n        this.aboutDialog.open(invoker);',
+    '      openAbout: (invoker) => {\n        this.aboutDialog.open(invoker);');
+  const wired = (dialog: string, app: string): boolean => {
+    const start = app.indexOf('openAbout: (invoker) => {');
+    const end = start >= 0 ? app.indexOf('\n      },', start) : -1;
+    const body = start >= 0 && end > start ? app.slice(start, end) : '';
+    return dialog.includes('openAbout(invoker: HTMLElement): void;') &&
+      body.includes('this.aboutDialog.open(invoker);') &&
+      body.indexOf('this.channelList.closeDialog();') >= 0 &&
+      body.indexOf('this.channelList.closeDialog();') < body.indexOf('this.aboutDialog.open(invoker);');
+  };
+  check('control: a dropped host declaration, a stale menu invoker or a missing channel-dialog close fails the same wiring predicate',
+    droppedContract !== dialogSource && !wired(droppedContract, appSource) &&
+    staleMenu !== appSource && !wired(dialogSource, staleMenu) &&
+    noClose !== appSource && !wired(dialogSource, noClose) &&
+    wired(dialogSource, appSource),
+    `contract=${wired(droppedContract, appSource)}, stale=${wired(dialogSource, staleMenu)}, ` +
+    `noClose=${wired(dialogSource, noClose)}, real=${wired(dialogSource, appSource)}`);
 }
 
 const camelOf = (kebab: string): string => kebab
@@ -642,24 +741,24 @@ function rowWiredToHost(source: string, entry: ToggleRow): boolean {
   const toggleCalls = (source: string): number => source.match(/this\.toggleRow\(/g)?.length ?? 0;
   const actionRows = (source: string): number => source.match(/row\.dataset\.settingsKey = /g)?.length ?? 0;
   const keyed = SETTINGS_SECTIONS.length + toggleCalls(dialogSource) + actionRows(dialogSource);
-  check('the window keeps one keyed control per tab plus one per row: eight today',
-    keyed === 8 && SETTINGS_SECTIONS.length === 2 && toggleCalls(dialogSource) === 5 &&
-    actionRows(dialogSource) === 1,
+  check('the window keeps one keyed control per tab plus one per row: nine today',
+    keyed === 9 && SETTINGS_SECTIONS.length === 2 && toggleCalls(dialogSource) === 5 &&
+    actionRows(dialogSource) === 2,
     `keyed=${keyed}, tabs=${SETTINGS_SECTIONS.length}, toggles=${toggleCalls(dialogSource)}, ` +
     `actions=${actionRows(dialogSource)}`);
 }
 
 {
   const extraToggle = dialogSource.replace(
-    '    return [this.developerToolsRow(), this.shortcutsRow()];',
-    '    return [this.developerToolsRow(), this.toggleRow(\'extra\', \'settings.about\', false, () => {}), this.shortcutsRow()];');
+    '    return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];',
+    '    return [this.developerToolsRow(), this.toggleRow(\'extra\', \'settings.about\', false, () => {}), this.shortcutsRow(), this.aboutRow()];');
   const droppedAction = dialogSource.replace("    row.dataset.settingsKey = 'shortcuts';\n", '');
   const countOf = (source: string): number => SETTINGS_SECTIONS.length +
     (source.match(/this\.toggleRow\(/g)?.length ?? 0) +
     (source.match(/row\.dataset\.settingsKey = /g)?.length ?? 0);
   check('control: a sixth toggle or a row without its settings key moves the keyed-control count',
-    extraToggle !== dialogSource && countOf(extraToggle) === 9 &&
-    droppedAction !== dialogSource && countOf(droppedAction) === 7 && countOf(dialogSource) === 8,
+    extraToggle !== dialogSource && countOf(extraToggle) === 10 &&
+    droppedAction !== dialogSource && countOf(droppedAction) === 8 && countOf(dialogSource) === 9,
     `extra=${countOf(extraToggle)}, dropped=${countOf(droppedAction)}, real=${countOf(dialogSource)}`);
 }
 
@@ -863,7 +962,7 @@ function openShortcutsBody(source: string): string {
 
 function shortcutsOpenOrder(body: string): boolean {
   const closeAt = body.indexOf('this.channelList.closeDialog();');
-  const openAt = body.indexOf('this.shortcutsDialog.open(invoker);');
+  const openAt = body.indexOf('this.shortcutsDialog.open(invoker, this.wheelZooms);');
   return closeAt >= 0 && openAt > closeAt && !body.includes('this.el.settings');
 }
 
@@ -877,8 +976,8 @@ function shortcutsOpenOrder(body: string): boolean {
 {
   const body = openShortcutsBody(appSource);
   const mutated = body.replace(
-    '        this.channelList.closeDialog();\n        this.shortcutsDialog.open(invoker);',
-    '        this.shortcutsDialog.open(invoker);\n        this.channelList.closeDialog();');
+    '        this.channelList.closeDialog();\n        this.shortcutsDialog.open(invoker, this.wheelZooms);',
+    '        this.shortcutsDialog.open(invoker, this.wheelZooms);\n        this.channelList.closeDialog();');
   check('control: reversing the close-then-open order is detected by the same predicate',
     mutated !== body && !shortcutsOpenOrder(mutated) && shortcutsOpenOrder(body),
     `mutated=${shortcutsOpenOrder(mutated)}, real=${shortcutsOpenOrder(body)}`);

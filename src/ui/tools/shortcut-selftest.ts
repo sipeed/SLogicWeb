@@ -425,6 +425,37 @@ function dialogConstructions(source: string): number {
     `real=${displayToggleCheck(settingsDialogSource)}/${shortcutsCheck(settingsDialogSource)}`);
 }
 
+function openShortcutsBridge(source: string): string {
+  const start = source.indexOf('openShortcuts: (invoker) => {');
+  const end = start >= 0 ? source.indexOf('\n      },', start) : -1;
+  return start >= 0 && end > start ? source.slice(start, end) : '';
+}
+
+function openShortcutsCarriesWheelZooms(source: string): boolean {
+  const body = openShortcutsBridge(source);
+  return body.includes('this.shortcutsDialog.open(invoker, this.wheelZooms);') &&
+    !body.includes('this.shortcutsDialog.open(invoker);');
+}
+
+{
+  const bridge = openShortcutsBridge(appSource);
+  const openAt = bridge.indexOf('this.shortcutsDialog.open(invoker, this.wheelZooms);');
+  const closeAt = bridge.indexOf('this.channelList.closeDialog();');
+  check('the settings window opens the reference dialog with the current wheel-zoom state',
+    openShortcutsCarriesWheelZooms(appSource) && closeAt >= 0 && openAt > closeAt,
+    `body=${JSON.stringify(bridge.replace(/\s+/g, ' '))}`);
+}
+
+{
+  const mutated = appSource.replace(
+    'this.shortcutsDialog.open(invoker, this.wheelZooms);',
+    'this.shortcutsDialog.open(invoker);');
+  check('control: dropping the wheel-zoom argument is detected by the same predicate',
+    mutated !== appSource && !openShortcutsCarriesWheelZooms(mutated) &&
+    openShortcutsCarriesWheelZooms(appSource),
+    `mutated=${openShortcutsCarriesWheelZooms(mutated)}, real=${openShortcutsCarriesWheelZooms(appSource)}`);
+}
+
 {
   const start = appSource.indexOf("must<HTMLButtonElement>('btn-settings').addEventListener('click'");
   const end = start >= 0 ? appSource.indexOf('\n    });', start) : -1;

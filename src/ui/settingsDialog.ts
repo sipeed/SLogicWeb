@@ -45,6 +45,7 @@ export interface SettingsDialogHost {
   developerTools(): boolean;
   setDeveloperTools(on: boolean): void;
   openShortcuts(invoker: HTMLElement): void;
+  openAbout(invoker: HTMLElement): void;
 }
 
 function camelKey(kebab: string): string {
@@ -187,7 +188,7 @@ export class SettingsDialog {
     if (section === 'appearance') {
       return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];
     }
-    return [this.developerToolsRow(), this.shortcutsRow()];
+    return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];
   }
 
   private onNavKey(event: KeyboardEvent): void {
@@ -291,6 +292,20 @@ export class SettingsDialog {
     hint.textContent = '▸';
     row.append(this.rowLabel('settings.shortcuts'), hint);
     row.addEventListener('click', () => this.host.openShortcuts(row));
+    return row;
+  }
+
+  private aboutRow(): HTMLButtonElement {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'settings-row settings-row--action';
+    row.dataset.settingsKey = 'about';
+    const hint = document.createElement('span');
+    hint.className = 'settings-row-hint';
+    hint.setAttribute('aria-hidden', 'true');
+    hint.textContent = '▸';
+    row.append(this.rowLabel('settings.about'), hint);
+    row.addEventListener('click', () => this.host.openAbout(row));
     return row;
   }
 }

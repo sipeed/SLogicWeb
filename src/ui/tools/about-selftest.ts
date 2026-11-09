@@ -35,6 +35,28 @@ function check(name: string, pass: boolean, detail: string): void {
   results.push({ name, pass, detail });
 }
 
+function sourceSlice(source: string, from: string, to: string): string {
+  const start = source.indexOf(from);
+  if (start < 0) return '';
+  const end = source.indexOf(to, start + from.length);
+  return end < 0 ? source.slice(start) : source.slice(start, end);
+}
+
+function aboutEntry(settingsWindow: string, app: string): boolean {
+  const pane = sourceSlice(settingsWindow, 'private paneContent(section: SettingsSectionId)', 'private onNavKey(');
+  const row = sourceSlice(settingsWindow, 'private aboutRow()', '}\n');
+  const afterShortcuts = settingsWindow.indexOf("this.rowLabel('settings.about')") >
+    settingsWindow.indexOf("this.rowLabel('settings.shortcuts')");
+  return row.includes("this.rowLabel('settings.about')") &&
+    row.includes("row.dataset.settingsKey = 'about';") &&
+    row.includes('this.host.openAbout(row)') &&
+    pane.includes('this.shortcutsRow(), this.aboutRow()') &&
+    afterShortcuts &&
+    app.includes('if (this.aboutDialog.isOpen) this.aboutDialog.renderStrings();') &&
+    sourceSlice(app, 'openAbout: (invoker) => {', '\n      },').includes('this.aboutDialog.open(invoker);') &&
+    !app.includes('settingsItems');
+}
+
 {
   const id = buildIdentity();
   check('without a vite define (this bundle) the build identity falls back to dev',
@@ -85,12 +107,8 @@ function check(name: string, pass: boolean, detail: string): void {
 
 {
   const app = read('src/ui/app.ts');
-  const items = app.slice(app.indexOf('private settingsItems(): SettingsMenuItem[] {'),
-    app.indexOf('private deviceMenuItems(): SettingsMenuItem[] {'));
-  const entry = items.includes("label: t('settings.about'),") &&
-    items.includes('this.aboutDialog.open(this.el.settings);') &&
-    items.indexOf("t('settings.about')") > items.indexOf("t('settings.shortcuts')");
-  const relocalized = app.includes('if (this.aboutDialog.isOpen) this.aboutDialog.renderStrings();');
+  const settingsWindow = read('src/ui/settingsDialog.ts');
+  const entry = aboutEntry(settingsWindow, app);
   const dialog = read('src/ui/aboutDialog.ts');
   const modal = dialog.includes('this.dialog.showModal();') &&
     dialog.includes("this.dialog.addEventListener('cancel', (event) => {") &&
@@ -99,8 +117,25 @@ function check(name: string, pass: boolean, detail: string): void {
     dialog.includes("this.dialog.setAttribute('aria-labelledby', 'about-title');") &&
     dialog.includes("a.rel = 'noopener noreferrer';") && !dialog.includes('innerHTML');
   check('Settings lists About after Shortcuts; it opens a modal dialog (focus trap, Esc closes, focus returns)',
-    entry && relocalized && modal, `entry=${entry}, relocalized=${relocalized}, modal=${modal}`);
+    entry && modal, `entry=${entry}, modal=${modal}`);
 
+  const movedFirst = settingsWindow.replace(
+    'return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];',
+    'return [this.developerToolsRow(), this.aboutRow(), this.shortcutsRow()];');
+  const strayHandOff = settingsWindow.replace('this.host.openAbout(row)', 'this.host.openAbout(this.closeButton)');
+  const unlocalized = app.replace(
+    'if (this.aboutDialog.isOpen) this.aboutDialog.renderStrings();',
+    '');
+  check('control: About listed before Shortcuts, a row handing off another frame or a modal left unlocalized fails the same entry predicate',
+    movedFirst !== settingsWindow && !aboutEntry(movedFirst, app) &&
+    strayHandOff !== settingsWindow && !aboutEntry(strayHandOff, app) &&
+    unlocalized !== app && !aboutEntry(settingsWindow, unlocalized) &&
+    aboutEntry(settingsWindow, app),
+    `moved=${aboutEntry(movedFirst, app)}, stray=${aboutEntry(strayHandOff, app)}, ` +
+    `unlocalized=${aboutEntry(settingsWindow, unlocalized)}, real=${aboutEntry(settingsWindow, app)}`);
+}
+
+{
   const vite = read('vite.config.ts');
   const env = read('src/env.d.ts');
   const define = vite.includes('__APP_VERSION__: JSON.stringify(identity.version),') &&
