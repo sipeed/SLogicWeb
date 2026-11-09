@@ -433,14 +433,15 @@ const TOGGLE_ROWS: readonly ToggleRow[] = [
 ];
 
 const REFERENCE_NEEDLES: readonly string[] = [
-  "this.groupTitle('shortcuts.keyboard'),",
-  "this.groupTitle('shortcuts.mouse'),",
-  'this.shortcutList(SHORTCUTS.map((entry) => this.keyRow(',
+  'for (const group of referenceGroups()) {',
+  'this.groupTitle(shortcutGroupLabel(group))',
+  "this.groupTitle(t('shortcuts.mouse'))",
+  'this.shortcutList(shortcutsIn(group).map((entry) => this.keyRow(',
   'shortcutActionText(entry),',
   "entry.chords.map((chord) => formatChord(chord)).join(' / '),",
   '`shortcut:${entry.id}`',
-  'this.shortcutList(referenceGestures(this.host.wheelZooms()).map((entry, index) => this.keyRow(',
-  'shortcutActionText(entry), gestureNotation(entry), `gesture:${index}`',
+  'this.shortcutList(referenceGestures(this.host.wheelZooms()).map((entry, index) =>',
+  'this.keyRow(shortcutActionText(entry), gestureNotation(entry), `gesture:${index}`)',
   "list.className = 'shortcuts-list';",
   "row.className = 'shortcuts-row';",
   "action.className = 'shortcuts-action';",
@@ -599,9 +600,57 @@ function rowLabelBindsControl(source: string): boolean {
     `missing=${JSON.stringify(missing)}, body=${body.length}`);
 }
 
+const MOUSE_BLOCK = [
+  "    blocks.push(this.groupTitle(t('shortcuts.mouse')));\n",
+  '    blocks.push(this.shortcutList(referenceGestures(this.host.wheelZooms()).map((entry, index) =>\n',
+  '      this.keyRow(shortcutActionText(entry), gestureNotation(entry), `gesture:${index}`))));\n',
+].join('');
+
+function shortcutGroupBlocks(source: string): boolean {
+  const body = shortcutBlocksBody(source);
+  if (body.length === 0) return false;
+  const loopAt = body.indexOf('for (const group of referenceGroups()) {');
+  const labelAt = body.indexOf('this.groupTitle(shortcutGroupLabel(group))', loopAt);
+  const rowsAt = body.indexOf('this.shortcutList(shortcutsIn(group).map((entry) => this.keyRow(', loopAt);
+  const mouseAt = body.indexOf("this.groupTitle(t('shortcuts.mouse'))", loopAt);
+  const gesturesAt = body.indexOf('referenceGestures(this.host.wheelZooms())', mouseAt);
+  const headings = body.match(/this\.groupTitle\(/g)?.length ?? 0;
+  return loopAt >= 0 && labelAt > loopAt && rowsAt > labelAt && mouseAt > rowsAt &&
+    gesturesAt > mouseAt && headings === 2 &&
+    !body.includes('SHORTCUTS.map(') && !body.includes("shortcutsIn('");
+}
+
+{
+  check('the keyboard reference is one heading plus one list per catalog group, and the gesture block follows them',
+    shortcutGroupBlocks(dialogSource), `body=${JSON.stringify(shortcutBlocksBody(dialogSource).replace(/\s+/g, ' '))}`);
+}
+
+{
+  const hardCoded = dialogSource.replace(
+    'for (const group of referenceGroups()) {',
+    "for (const group of ['view', 'file', 'navigation']) {");
+  const unfiltered = dialogSource.replace(
+    'for (const group of referenceGroups()) {',
+    'for (const group of SHORTCUT_GROUPS) {');
+  const duplicated = dialogSource.replace(MOUSE_BLOCK,
+    `${MOUSE_BLOCK}    blocks.push(this.groupTitle(shortcutGroupLabel('view')));\n`);
+  const mouseFirst = dialogSource.replace(MOUSE_BLOCK, '').replace(
+    '    const blocks: HTMLElement[] = [];\n',
+    `    const blocks: HTMLElement[] = [];\n${MOUSE_BLOCK}`);
+  check('control: a hard-coded group order, an unfiltered group list, a second copy of a group or a gesture block ahead of the keyboard list fails the same predicate',
+    hardCoded !== dialogSource && !shortcutGroupBlocks(hardCoded) &&
+    unfiltered !== dialogSource && !shortcutGroupBlocks(unfiltered) &&
+    duplicated !== dialogSource && !shortcutGroupBlocks(duplicated) &&
+    mouseFirst !== dialogSource && !shortcutGroupBlocks(mouseFirst) &&
+    shortcutGroupBlocks(dialogSource),
+    `hardCoded=${shortcutGroupBlocks(hardCoded)}, unfiltered=${shortcutGroupBlocks(unfiltered)}, ` +
+    `duplicated=${shortcutGroupBlocks(duplicated)}, mouseFirst=${shortcutGroupBlocks(mouseFirst)}, ` +
+    `real=${shortcutGroupBlocks(dialogSource)}`);
+}
+
 {
   const handWritten = dialogSource.replace(
-    'this.shortcutList(SHORTCUTS.map((entry) => this.keyRow(',
+    'this.shortcutList(shortcutsIn(group).map((entry) => this.keyRow(',
     "this.shortcutList([{ labels: [], notation: 'F' }].map((entry) => this.keyRow(");
   const frozenZooms = dialogSource.replace(
     'referenceGestures(this.host.wheelZooms())',

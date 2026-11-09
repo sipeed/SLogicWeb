@@ -2,7 +2,8 @@ import { t } from './i18n.js';
 import type { MessageKey } from './i18n.js';
 import { formatChord } from './chords.js';
 import {
-  SHORTCUTS, gestureNotation, referenceGestures, shortcutActionText,
+  gestureNotation, referenceGestures, referenceGroups, shortcutActionText,
+  shortcutGroupLabel, shortcutsIn,
 } from './shortcuts.js';
 
 export const SETTINGS_DIALOG_ID = 'settings-dialog';
@@ -203,22 +204,24 @@ export class SettingsDialog {
   }
 
   private shortcutBlocks(): HTMLElement[] {
-    return [
-      this.groupTitle('shortcuts.keyboard'),
-      this.shortcutList(SHORTCUTS.map((entry) => this.keyRow(
+    const blocks: HTMLElement[] = [];
+    for (const group of referenceGroups()) {
+      blocks.push(this.groupTitle(shortcutGroupLabel(group)));
+      blocks.push(this.shortcutList(shortcutsIn(group).map((entry) => this.keyRow(
         shortcutActionText(entry),
         entry.chords.map((chord) => formatChord(chord)).join(' / '),
-        `shortcut:${entry.id}`))),
-      this.groupTitle('shortcuts.mouse'),
-      this.shortcutList(referenceGestures(this.host.wheelZooms()).map((entry, index) => this.keyRow(
-        shortcutActionText(entry), gestureNotation(entry), `gesture:${index}`))),
-    ];
+        `shortcut:${entry.id}`))));
+    }
+    blocks.push(this.groupTitle(t('shortcuts.mouse')));
+    blocks.push(this.shortcutList(referenceGestures(this.host.wheelZooms()).map((entry, index) =>
+      this.keyRow(shortcutActionText(entry), gestureNotation(entry), `gesture:${index}`))));
+    return blocks;
   }
 
-  private groupTitle(key: MessageKey): HTMLHeadingElement {
+  private groupTitle(text: string): HTMLHeadingElement {
     const heading = document.createElement('h3');
     heading.className = 'shortcuts-section';
-    heading.textContent = t(key);
+    heading.textContent = text;
     return heading;
   }
 

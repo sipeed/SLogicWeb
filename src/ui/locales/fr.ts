@@ -858,7 +858,9 @@ export const fr: Messages = {
   // ----------------------------------------------------------- shortcuts
   'shortcuts.close': 'Fermer',
   'shortcuts.clearCursors': 'Effacer les curseurs',
-  'shortcuts.keyboard': 'Clavier',
+  'shortcuts.group.file': 'Fichier',
+  'shortcuts.group.view': 'Affichage',
+  'shortcuts.group.navigation': 'Navigation',
   'shortcuts.mouse': 'Souris et tactile',
   'shortcuts.zoomIn': 'Zoom avant',
   'shortcuts.zoomOut': 'Zoom arrière',

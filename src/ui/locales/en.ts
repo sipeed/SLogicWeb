@@ -859,7 +859,9 @@ export const en = {
   // ----------------------------------------------------------- shortcuts
   'shortcuts.close': 'Close',
   'shortcuts.clearCursors': 'Clear cursors',
-  'shortcuts.keyboard': 'Keyboard',
+  'shortcuts.group.file': 'File',
+  'shortcuts.group.view': 'View',
+  'shortcuts.group.navigation': 'Navigation',
   'shortcuts.mouse': 'Mouse and touch',
   'shortcuts.zoomIn': 'Zoom in',
   'shortcuts.zoomOut': 'Zoom out',

@@ -8,6 +8,14 @@ export type ShortcutId =
 
 export type ShortcutGroup = 'file' | 'view' | 'navigation';
 
+export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = ['file', 'view', 'navigation'];
+
+const GROUP_LABELS: Record<ShortcutGroup, MessageKey> = {
+  file: 'shortcuts.group.file',
+  view: 'shortcuts.group.view',
+  navigation: 'shortcuts.group.navigation',
+};
+
 export interface ShortcutEntry {
   readonly id: ShortcutId;
   readonly group: ShortcutGroup;
@@ -43,6 +51,14 @@ export function actionOf(chord: string): ShortcutId | null {
 
 export function shortcutsIn(group: ShortcutGroup): readonly ShortcutEntry[] {
   return SHORTCUTS.filter((entry) => entry.group === group);
+}
+
+export function shortcutGroupLabel(group: ShortcutGroup): string {
+  return t(GROUP_LABELS[group]);
+}
+
+export function referenceGroups(): readonly ShortcutGroup[] {
+  return SHORTCUT_GROUPS.filter((group) => shortcutsIn(group).length > 0);
 }
 
 export interface GestureEntry {

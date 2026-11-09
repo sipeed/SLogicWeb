@@ -804,7 +804,9 @@ export const zhCN: Messages = {
   // ----------------------------------------------------------- shortcuts
   'shortcuts.close': '关闭',
   'shortcuts.clearCursors': '清除光标',
-  'shortcuts.keyboard': '键盘',
+  'shortcuts.group.file': '文件',
+  'shortcuts.group.view': '视图',
+  'shortcuts.group.navigation': '导航',
   'shortcuts.mouse': '鼠标与触控',
   'shortcuts.zoomIn': '放大',
   'shortcuts.zoomOut': '缩小',

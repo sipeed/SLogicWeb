@@ -1,6 +1,7 @@
 import {
-  SHORTCUTS, actionOf, gestureNotation, referenceGestures, shortcutActionText, shortcutsIn,
-  type ShortcutEntry, type ShortcutId,
+  SHORTCUTS, SHORTCUT_GROUPS, actionOf, gestureNotation, referenceGestures, referenceGroups,
+  shortcutActionText, shortcutGroupLabel, shortcutsIn,
+  type ShortcutEntry, type ShortcutGroup, type ShortcutId,
 } from '../shortcuts.js';
 import { formatChord } from '../chords.js';
 import { t, type MessageKey } from '../i18n.js';
@@ -97,6 +98,60 @@ const body = keydownBody(appSource);
   check('every reference row prints its chords through formatChord, aliases included',
     shown === 'Space|F|Esc|+ / =|- / _|←|→',
     `shown=${shown}`);
+}
+
+function groupListProblem(
+  listed: readonly ShortcutGroup[],
+  entries: readonly ShortcutEntry[] = SHORTCUTS,
+): string | null {
+  const empty = listed.filter((group) => !entries.some((entry) => entry.group === group));
+  if (empty.length > 0) return `empty:${empty.join(',')}`;
+  const repeated = listed.filter((group, index) => listed.indexOf(group) !== index);
+  if (repeated.length > 0) return `repeated:${repeated.join(',')}`;
+  const printed = listed
+    .flatMap((group) => entries.filter((entry) => entry.group === group).map((entry) => entry.id))
+    .join(',');
+  const dispatch = entries.map((entry) => entry.id).join(',');
+  return printed === dispatch ? null : `order:${printed}`;
+}
+
+{
+  const listed = referenceGroups();
+  const ascending = listed.every((group, index) => index === 0 ||
+    SHORTCUT_GROUPS.indexOf(listed[index - 1]!) < SHORTCUT_GROUPS.indexOf(group));
+  const unreachable = SHORTCUTS.filter((entry) => !SHORTCUT_GROUPS.includes(entry.group));
+  check('the reference prints one block per non-empty group in file/view/navigation order and every catalog entry stays reachable',
+    SHORTCUT_GROUPS.join(',') === 'file,view,navigation' && listed.length > 0 &&
+    ascending && groupListProblem(listed) === null && unreachable.length === 0,
+    `groups=${SHORTCUT_GROUPS.join(',')}, listed=${listed.join(',')}, ` +
+    `problem=${String(groupListProblem(listed))}, unreachable=${unreachable.length}`);
+}
+
+{
+  const synthetic: readonly ShortcutEntry[] = [
+    { ...SHORTCUTS[0]!, group: 'file' },
+    { ...SHORTCUTS[1]!, group: 'navigation' },
+  ];
+  const contradicted = `order:${synthetic[1]!.id},${synthetic[0]!.id}`;
+  check('control: an empty, repeated or catalog-contradicting group list fails the same predicate',
+    groupListProblem(['file', 'view'], synthetic) === 'empty:view' &&
+    groupListProblem(['file', 'file'], synthetic) === 'repeated:file' &&
+    groupListProblem(['navigation', 'file'], synthetic) === contradicted &&
+    groupListProblem(['file', 'navigation'], synthetic) === null &&
+    groupListProblem(referenceGroups()) === null,
+    `empty=${String(groupListProblem(['file', 'view'], synthetic))}, ` +
+    `repeated=${String(groupListProblem(['file', 'file'], synthetic))}, ` +
+    `contradicted=${String(groupListProblem(['navigation', 'file'], synthetic))}, ` +
+    `real=${String(groupListProblem(referenceGroups()))}`);
+}
+
+{
+  const labels = SHORTCUT_GROUPS.map((group) => shortcutGroupLabel(group)).join('|');
+  check('each group heading reads its own catalog key',
+    labels === 'File|View|Navigation' &&
+    labels === [en['shortcuts.group.file'], en['shortcuts.group.view'],
+      en['shortcuts.group.navigation']].join('|'),
+    `labels=${labels}`);
 }
 
 {
@@ -321,7 +376,9 @@ const body = keydownBody(appSource);
 }
 
 const SHORTCUT_KEY_VALUES: ReadonlyArray<readonly [MessageKey, readonly [string, string, string, string]]> = [
-  ['shortcuts.keyboard', ['Keyboard', '键盘', 'Клавиатура', 'Clavier']],
+  ['shortcuts.group.file', ['File', '文件', 'Файл', 'Fichier']],
+  ['shortcuts.group.view', ['View', '视图', 'Вид', 'Affichage']],
+  ['shortcuts.group.navigation', ['Navigation', '导航', 'Навигация', 'Navigation']],
   ['shortcuts.mouse', ['Mouse and touch', '鼠标与触控', 'Мышь и касание', 'Souris et tactile']],
   ['settings.wheelZooms', ['Wheel zooms (no Ctrl needed)', '滚轮直接缩放', 'Колесо масштабирует (без Ctrl)',
     'La molette zoome (sans Ctrl)']],
@@ -346,7 +403,7 @@ const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = 
       if (actual !== values[index]) drift.push(`${locale}:${key}=${JSON.stringify(actual)}`);
     }
   }
-  check('all four catalogs carry the five reference keys with their pinned values',
+  check('all four catalogs carry the reference keys with their pinned values',
     drift.length === 0 && SHORTCUT_KEY_VALUES.every(([key]) => en[key] !== undefined),
     drift.length === 0 ? `${CATALOGS.length} catalogs x ${SHORTCUT_KEY_VALUES.length} keys match`
       : drift.join('; '));
@@ -378,14 +435,14 @@ function methodBody(source: string, marker: string): string {
 
 const REFERENCE_NEEDLES: readonly string[] = [
   "      case 'shortcuts':\n        return this.shortcutBlocks();",
-  "this.groupTitle('shortcuts.keyboard'),",
-  "this.groupTitle('shortcuts.mouse'),",
-  'this.shortcutList(SHORTCUTS.map((entry) => this.keyRow(',
+  'for (const group of referenceGroups()) {',
+  'this.groupTitle(shortcutGroupLabel(group))',
+  'this.shortcutList(shortcutsIn(group).map((entry) => this.keyRow(',
   'shortcutActionText(entry),',
   "entry.chords.map((chord) => formatChord(chord)).join(' / '),",
   '`shortcut:${entry.id}`',
-  'this.shortcutList(referenceGestures(this.host.wheelZooms()).map((entry, index) => this.keyRow(',
-  'shortcutActionText(entry), gestureNotation(entry), `gesture:${index}`',
+  "this.groupTitle(t('shortcuts.mouse'))",
+  'referenceGestures(this.host.wheelZooms())',
   "list.className = 'shortcuts-list';",
   "row.className = 'shortcuts-row';",
   "action.className = 'shortcuts-action';",
@@ -421,7 +478,7 @@ function referenceInPane(settings: string, app: string): boolean {
     '      openAbout: (invoker) => {',
     '      openShortcuts: (invoker) => this.shortcutsDialog.open(invoker),\n      openAbout: (invoker) => {');
   const handWritten = settings.replace(
-    'this.shortcutList(SHORTCUTS.map((entry) => this.keyRow(',
+    'this.shortcutList(shortcutsIn(group).map((entry) => this.keyRow(',
     'this.shortcutList([{ labels: [], notation: \'F\' }].map((entry) => this.keyRow(');
   const frozenZooms = settings.replace(
     'referenceGestures(this.host.wheelZooms())',

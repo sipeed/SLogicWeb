@@ -947,7 +947,8 @@ const detailedLabelsRowAt = settingsDialogSrc.indexOf(
   "this.toggleRow('detailed-labels', 'settings.detailedLabels'");
 const shortcutBlocksAt = settingsDialogSrc.indexOf('this.shortcutBlocks()');
 const shortcutBlocksBody = shortcutBlocksAt >= 0 ? settingsDialogSrc.slice(shortcutBlocksAt) : '';
-const referenceInPane = shortcutBlocksBody.includes("this.groupTitle('shortcuts.keyboard'),") &&
+const referenceInPane = shortcutBlocksBody.includes('this.groupTitle(shortcutGroupLabel(group))') &&
+  shortcutBlocksBody.includes('shortcutGroupLabel') &&
   shortcutBlocksBody.includes('referenceGestures(this.host.wheelZooms())');
 const windowRowsComposed = ['labelsRow', 'shortcutBlocks'].every((row) =>
   settingsDialogSrc.includes(`private ${row}(): `) &&
