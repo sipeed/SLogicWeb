@@ -1222,6 +1222,13 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
   align-items: center;
   cursor: pointer;
 }
+.settings-row-label-cell {
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+.settings-row-label-cell .settings-row-label { flex: 1 1 auto; }
 .settings-toggle {
   justify-self: start;
   display: flex;
@@ -1229,17 +1236,6 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
   cursor: pointer;
 }
 .settings-toggle input { margin: 0; accent-color: var(--primary); }
-.settings-note {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 0 8px 6px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--muted-foreground);
-}
-.settings-note-text { margin: 0; }
 
 @media (max-width: 760px) {
   .settings-dialog { width: calc(100vw - 16px); max-width: calc(100vw - 16px); min-height: min(360px, calc(100dvh - 16px)); max-height: calc(100dvh - 16px); }

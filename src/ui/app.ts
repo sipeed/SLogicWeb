@@ -723,10 +723,6 @@ export class App {
       setHideIdle: (on) => this.setHideIdle(on),
       developerTools: () => this.developerTools,
       setDeveloperTools: (on) => this.setDeveloperTools(on),
-      revealDeveloperTools: () => {
-        this.settingsDialog.close();
-        this.revealDeveloperConsole();
-      },
     });
     this.languageMenu = new SettingsMenu(this.el.language, 'language-menu');
     this.themeMenu = new SettingsMenu(this.el.theme, 'theme-menu');
@@ -4357,12 +4353,6 @@ export class App {
     this.developerTools = on;
     this.persistWorkspace();
     this.renderPanels();
-  }
-
-  private revealDeveloperConsole(): void {
-    this.capturePanel.setAdvancedOpen(true);
-    this.selectPage('capture');
-    this.capturePanel.focusAdvanced();
   }
 
   private deviceMenuItems(): SettingsMenuItem[] {

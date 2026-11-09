@@ -32,6 +32,7 @@ import {
   parseCustomThreshold, thresholdChoice, thresholdOptionLabel, thresholdRange,
 } from './thresholdOptions.js';
 import { t } from './i18n.js';
+import { helpTip } from './helpTip.js';
 import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
@@ -238,8 +239,6 @@ export type TriggerStatusView = Pick<CapturePanelView,
 
 export class CapturePanel {
   private advancedOpen = false;
-  private advancedEl: HTMLDetailsElement | null = null;
-  private advancedSummary: HTMLElement | null = null;
   /** The custom gain ratio being typed, kept across re-renders; null when none is. */
   private gainEdit: { start: number; text: string } | null = null;
   /** The custom threshold being typed, kept across re-renders; null when none is. */
@@ -1486,8 +1485,6 @@ export class CapturePanel {
     const summary = document.createElement('summary');
     summary.textContent = t('capturePanel.advanced');
     advanced.appendChild(summary);
-    this.advancedEl = advanced;
-    this.advancedSummary = summary;
     const body = div('advanced-body');
 
     const testModeOptions: SelectOptionTuple[] = [
@@ -1519,18 +1516,6 @@ export class CapturePanel {
     if (v.developerTools === true) this.renderUsbConsole(body, v);
     advanced.appendChild(body);
     capture.appendChild(advanced);
-  }
-
-  setAdvancedOpen(open: boolean): void {
-    this.advancedOpen = open;
-    if (this.advancedEl !== null) this.advancedEl.open = open;
-  }
-
-  focusAdvanced(): void {
-    const summary = this.advancedSummary;
-    if (summary === null || !summary.isConnected) return;
-    summary.scrollIntoView({ block: 'nearest' });
-    summary.focus();
   }
 
   /** The raw USB register console (developer tools only). */
@@ -1960,17 +1945,6 @@ export function parseAnalogGain(text: string): number | null {
   if (trimmed === '') return null;
   const value = Number(trimmed);
   return isAnalogGain(value) ? value : null;
-}
-
-/** A "?" button whose tooltip (hover, focus or tap) carries a longer explanation. */
-function helpTip(text: string): HTMLButtonElement {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'help-tip';
-  b.textContent = '?';
-  b.title = text;
-  b.setAttribute('aria-label', `${t('capturePanel.moreInfo')}: ${text}`);
-  return b;
 }
 
 function analogButton(

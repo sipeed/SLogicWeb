@@ -841,9 +841,7 @@ export const en = {
   'settings.compactRows': 'Compact rows (digital rows down to 24 px)',
   'settings.hideIdle': 'Hide idle channels (no edges in the capture)',
   'settings.developerTools': 'USB register console',
-  'settings.developerToolsNote':
-    'Enabled: the USB register console is now under Sidebar › Capture › Advanced.',
-  'settings.developerToolsOpen': 'Open',
+  'settings.developerToolsWhere': 'right sidebar › Capture › Advanced',
   'about.version': 'Version {version} · build {build}',
   'about.license': 'GPL-3.0-or-later · no warranty',
   'about.source': 'Source code',

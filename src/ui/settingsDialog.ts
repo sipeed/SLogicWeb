@@ -2,6 +2,7 @@ import { t } from './i18n.js';
 import type { MessageKey } from './i18n.js';
 import { aboutView } from './about.js';
 import type { AboutLink } from './about.js';
+import { helpTip } from './helpTip.js';
 import { formatChord } from './chords.js';
 import {
   gestureNotation, referenceGestures, referenceGroups, shortcutActionText,
@@ -53,7 +54,6 @@ export interface SettingsDialogHost {
   setHideIdle(on: boolean): void;
   developerTools(): boolean;
   setDeveloperTools(on: boolean): void;
-  revealDeveloperTools(): void;
 }
 
 function camelKey(kebab: string): string {
@@ -199,9 +199,7 @@ export class SettingsDialog {
       case 'shortcuts':
         return this.shortcutBlocks();
       case 'developer':
-        return this.host.developerTools()
-          ? [this.developerToolsRow(), this.developerNote()]
-          : [this.developerToolsRow()];
+        return [this.developerToolsRow()];
       case 'about':
         return [this.aboutBlock()];
     }
@@ -297,6 +295,7 @@ export class SettingsDialog {
     label: MessageKey,
     checked: boolean,
     onChange: (on: boolean) => void,
+    hint?: MessageKey,
   ): HTMLDivElement {
     const row = document.createElement('div');
     row.className = 'settings-row';
@@ -312,7 +311,14 @@ export class SettingsDialog {
     input.checked = checked;
     input.addEventListener('change', () => onChange(input.checked));
     toggle.appendChild(input);
-    row.append(text, toggle);
+    if (hint === undefined) {
+      row.append(text, toggle);
+    } else {
+      const cell = document.createElement('div');
+      cell.className = 'settings-row-label-cell';
+      cell.append(text, helpTip(t(hint)));
+      row.append(cell, toggle);
+    }
     return row;
   }
 
@@ -338,25 +344,7 @@ export class SettingsDialog {
 
   private developerToolsRow(): HTMLDivElement {
     return this.toggleRow('developer-tools', 'settings.developerTools', this.host.developerTools(),
-      (on) => {
-        this.host.setDeveloperTools(on);
-        this.renderStrings();
-      });
-  }
-
-  private developerNote(): HTMLElement {
-    const note = document.createElement('div');
-    note.className = 'settings-note';
-    const text = document.createElement('p');
-    text.className = 'settings-note-text';
-    text.textContent = t('settings.developerToolsNote');
-    const action = document.createElement('button');
-    action.type = 'button';
-    action.className = 'mini settings-note-action';
-    action.textContent = t('settings.developerToolsOpen');
-    action.addEventListener('click', () => this.host.revealDeveloperTools());
-    note.append(text, action);
-    return note;
+      (on) => this.host.setDeveloperTools(on), 'settings.developerToolsWhere');
   }
 
   private aboutBlock(): HTMLElement {
