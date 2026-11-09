@@ -4,6 +4,7 @@ import {
   type ShortcutEntry, type ShortcutGroup, type ShortcutId,
 } from '../shortcuts.js';
 import { formatChord } from '../chords.js';
+import { THEME_MODES } from '../theme.js';
 import { t, type MessageKey } from '../i18n.js';
 import { en } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
@@ -92,7 +93,7 @@ function exhaustiveSwitch(source: string): boolean {
 }
 
 const ANYWHERE_BLOCK = '      if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {\n' +
-  '        if (this.runShortcut(id, e.shiftKey)) e.preventDefault();\n' +
+  '        if (this.runShortcut(id)) e.preventDefault();\n' +
   '        return;\n      }\n';
 
 const OVERLAY_SCOPE = [
@@ -114,7 +115,7 @@ function anywhereBeforeGuards(source: string): boolean {
   const inputGuard = listener.indexOf('target instanceof HTMLInputElement');
   const dialogGuard = listener.indexOf("closest('dialog[open]')");
   const dispatch = listener.lastIndexOf(
-    'if (this.runShortcut(id, e.shiftKey)) e.preventDefault();');
+    'if (this.runShortcut(id)) e.preventDefault();');
   return listener.length > 0 && anywhere >= 0 && inputGuard > anywhere &&
     dialogGuard > anywhere && dispatch > dialogGuard &&
     listener.indexOf('const id = actionOf(chord)') < anywhere;
@@ -126,15 +127,17 @@ const body = keydownBody(appSource);
 {
   const rows = SHORTCUTS.map((entry) =>
     `${entry.id}|${entry.group}|${entry.chords.join(',')}`).join(';');
-  check('the catalogue is exactly fourteen rows in dispatch order with pinned groups and chords',
-    SHORTCUTS.length === 14 &&
+  check('the catalogue is exactly eighteen rows in dispatch order with pinned groups and chords',
+    SHORTCUTS.length === 18 &&
     rows === 'file.open|file|Mod+O;file.save|file|Mod+S;settings.open|file|Mod+,;' +
-      'capture.toggle|view|Space;view.fit|view|F;cursors.clear|view|Escape;' +
+      'capture.toggle|view|Space;view.fit|view|F,Home;cursors.clear|view|Escape;' +
       'view.zoomIn|view|+,=;view.zoomOut|view|-,_;view.panLeft|view|ArrowLeft;' +
-      'view.panRight|view|ArrowRight;sidebar.capture|navigation|1;' +
-      'sidebar.cursors|navigation|2;sidebar.decoders|navigation|3;sidebar.toggle|navigation|\\' &&
-    shortcutsIn('view').length === 7 && shortcutsIn('file').length === 3 &&
-    shortcutsIn('navigation').length === 4,
+      'view.panRight|view|ArrowRight;view.panLeftPage|view|Shift+ArrowLeft;' +
+      'view.panRightPage|view|Shift+ArrowRight;theme.next|view|T;sidebar.capture|navigation|1;' +
+      'sidebar.cursors|navigation|2;sidebar.decoders|navigation|3;sidebar.toggle|navigation|\\;' +
+      'decoders.add|navigation|D' &&
+    shortcutsIn('view').length === 10 && shortcutsIn('file').length === 3 &&
+    shortcutsIn('navigation').length === 5,
     `rows=${rows}`);
 }
 
@@ -142,7 +145,8 @@ const body = keydownBody(appSource);
   const shown = SHORTCUTS.map((entry) =>
     entry.chords.map((chord) => formatChord(chord, false)).join(' / ')).join('|');
   check('every reference row prints its chords through formatChord, aliases included',
-    shown === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F|Esc|+ / =|- / _|←|→|1|2|3|\\',
+    shown === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F / Home|Esc|+ / =|- / _|←|→|Shift+←|Shift+→|T|' +
+      '1|2|3|\\|D',
     `shown=${shown}`);
 }
 
@@ -206,8 +210,9 @@ function groupListProblem(
   const mutated = SHORTCUTS.map((entry) => ({ ...entry, chords: [...entry.chords].reverse() }))
     .map((entry) => entry.chords.map((chord) => formatChord(chord, true)).join(' / ')).join('|');
   check('control: a reordered chord list changes the rendered notation',
-    mutated !== single && single === '⌘O|⌘S|⌘,|Space|F|Esc|+ / =|- / _|←|→|1|2|3|\\' &&
-    mutated === '⌘O|⌘S|⌘,|Space|F|Esc|= / +|_ / -|←|→|1|2|3|\\',
+    mutated !== single &&
+    single === '⌘O|⌘S|⌘,|Space|F / Home|Esc|+ / =|- / _|←|→|⇧←|⇧→|T|1|2|3|\\|D' &&
+    mutated === '⌘O|⌘S|⌘,|Space|Home / F|Esc|= / +|_ / -|←|→|⇧←|⇧→|T|1|2|3|\\|D',
     `real=${single}, mutated=${mutated}`);
 }
 
@@ -218,6 +223,7 @@ function groupListProblem(
     ['Mod+,', actionOf('Mod+,')],
     ['Space', actionOf('Space')],
     ['F', actionOf('F')],
+    ['Home', actionOf('Home')],
     ['Escape', actionOf('Escape')],
     ['+', actionOf('+')],
     ['=', actionOf('=')],
@@ -225,15 +231,19 @@ function groupListProblem(
     ['_', actionOf('_')],
     ['ArrowLeft', actionOf('ArrowLeft')],
     ['ArrowRight', actionOf('ArrowRight')],
+    ['Shift+ArrowLeft', actionOf('Shift+ArrowLeft')],
+    ['Shift+ArrowRight', actionOf('Shift+ArrowRight')],
+    ['T', actionOf('T')],
     ['1', actionOf('1')],
     ['2', actionOf('2')],
     ['3', actionOf('3')],
     ['\\', actionOf('\\')],
+    ['D', actionOf('D')],
   ];
   const want = ['file.open', 'file.save', 'settings.open', 'capture.toggle', 'view.fit',
-    'cursors.clear', 'view.zoomIn', 'view.zoomIn', 'view.zoomOut', 'view.zoomOut',
-    'view.panLeft', 'view.panRight', 'sidebar.capture', 'sidebar.cursors',
-    'sidebar.decoders', 'sidebar.toggle'];
+    'view.fit', 'cursors.clear', 'view.zoomIn', 'view.zoomIn', 'view.zoomOut', 'view.zoomOut',
+    'view.panLeft', 'view.panRight', 'view.panLeftPage', 'view.panRightPage', 'theme.next',
+    'sidebar.capture', 'sidebar.cursors', 'sidebar.decoders', 'sidebar.toggle', 'decoders.add'];
   check('actionOf maps every live chord and alias to its id',
     mapped.every(([, id], index) => id === want[index]),
     `mapped=${mapped.map(([key, id]) => `${JSON.stringify(key)}:${String(id)}`).join(',')}`);
@@ -241,7 +251,8 @@ function groupListProblem(
 
 {
   const misses = ['', 'F ', 'Enter', 'Return', 'f ', 'ArrowUp', 'ArrowDown', 'Add',
-    'Shift+ArrowLeft', 'Mod++', 'Mod+=', 'Mod+Space', 'Mod+F', 'Alt+Escape'];
+    'Shift+F', 'Shift+D', 'Shift+T', 'Shift+1', 'Mod++', 'Mod+=', 'Mod+Space', 'Mod+F',
+    'Alt+Escape'];
   const answers = misses.map((key) => actionOf(key));
   check('actionOf answers null for unmatched and modifier-held chords',
     answers.every((answer) => answer === null) && actionOf('+') === 'view.zoomIn',
@@ -254,7 +265,7 @@ function groupListProblem(
     ['chord === null', body.includes('if (chord === null) return;')],
     ['actionOf(chord)', body.includes('const id = actionOf(chord)')],
     ['WORK_ANYWHERE', body.includes('if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {')],
-    ['runShortcut(shift)', body.includes('this.runShortcut(id, e.shiftKey)')],
+    ['runShortcut(id)', body.includes('this.runShortcut(id)')],
     ['HTMLInputElement', body.includes('HTMLInputElement')],
     ['.select-field', body.includes('.select-field')],
     ['dialog[open]', body.includes('dialog[open]')],
@@ -401,8 +412,11 @@ function groupListProblem(
       'capture.toggle|toolbar.start,toolbar.stop;view.fit|toolbar.fit;' +
       'cursors.clear|shortcuts.clearCursors;view.zoomIn|shortcuts.zoomIn;' +
       'view.zoomOut|shortcuts.zoomOut;view.panLeft|shortcuts.panLeft;view.panRight|shortcuts.panRight;' +
+      'view.panLeftPage|shortcuts.panPage;view.panRightPage|shortcuts.panPage;' +
+      'theme.next|shortcuts.theme;' +
       'sidebar.capture|shortcuts.sidebarCapture;sidebar.cursors|shortcuts.sidebarCursors;' +
-      'sidebar.decoders|shortcuts.sidebarDecoders;sidebar.toggle|shortcuts.sidebarToggle',
+      'sidebar.decoders|shortcuts.sidebarDecoders;sidebar.toggle|shortcuts.sidebarToggle;' +
+      'decoders.add|shortcuts.addDecoder',
     `rows=${rows}`);
 }
 
@@ -421,7 +435,7 @@ function groupListProblem(
   check('the mouse reference lists the wheel, Shift+wheel, Shift+arrows, drag, double-click and pinch',
     off.startsWith('shortcuts.input.wheel=shortcuts.scrollRows;Ctrl+shortcuts.input.wheel=shortcuts.zoomTime;') &&
     on.startsWith('shortcuts.input.wheel=shortcuts.zoomTime;Ctrl+shortcuts.input.wheel=shortcuts.scrollRows;') &&
-    off.endsWith('Shift+shortcuts.input.wheel=shortcuts.panTime;Shift+shortcuts.input.arrows=shortcuts.panPage;' +
+    off.endsWith('Shift+shortcuts.input.wheel=shortcuts.panTime;' +
       'shortcuts.input.drag=shortcuts.panTime;shortcuts.input.doubleClick=shortcuts.addCursor;' +
       'shortcuts.input.pinch=shortcuts.zoomTime') &&
     gestureNotation(referenceGestures(false)[1]!) === 'Ctrl + Wheel' && missing.length === 0,
@@ -431,19 +445,36 @@ function groupListProblem(
 {
   const shortcuts = runShortcutBody(appSource);
   const listener = body;
-  check('the zoom and pan keys dispatch to keyZoom/keyPan and never see a modifier flag',
+  check('the zoom and pan keys dispatch to keyZoom/keyPan with a fixed span and never see a modifier flag',
     shortcuts.includes("      case 'view.zoomIn':\n        this.keyZoom(1);\n        return true;") &&
     shortcuts.includes("      case 'view.zoomOut':\n        this.keyZoom(-1);\n        return true;") &&
-    shortcuts.includes("      case 'view.panLeft':\n        this.keyPan(-1, shiftKey);\n        return true;") &&
-    shortcuts.includes('this.keyPan(1, shiftKey);') &&
-    shortcuts.includes('return true;') &&
+    shortcuts.includes("      case 'view.panLeft':\n        this.keyPan(-1, false);\n        return true;") &&
+    shortcuts.includes("      case 'view.panRight':\n        this.keyPan(1, false);\n        return true;") &&
+    shortcuts.includes("      case 'view.panLeftPage':\n        this.keyPan(-1, true);\n        return true;") &&
+    shortcuts.includes("      case 'view.panRightPage':\n        this.keyPan(1, true);\n        return true;") &&
+    !shortcuts.includes('shiftKey') &&
     !shortcuts.includes('ctrlKey') && !shortcuts.includes('metaKey') &&
     !shortcuts.includes('altKey') &&
+    !listener.includes('shiftKey') &&
     !listener.includes('ctrlKey') && !listener.includes('metaKey') &&
     !listener.includes('altKey') &&
     appSource.includes('this.stack.zoomAt(this.stack.widthDevicePx / 2, direction > 0 ? Math.SQRT1_2 : Math.SQRT2);') &&
     appSource.includes('this.stack.panPixels(direction * this.stack.widthDevicePx * (big ? 0.5 : 0.1));'),
     `shortcuts=${shortcuts.length}, listener=${listener.length}`);
+}
+
+{
+  const shortcuts = runShortcutBody(appSource);
+  const swapped = shortcuts.replace(
+    "      case 'view.panLeftPage':\n        this.keyPan(-1, true);\n        return true;",
+    "      case 'view.panLeftPage':\n        this.keyPan(-1, false);\n        return true;");
+  const pagePans = (source: string): boolean =>
+    source.includes("      case 'view.panLeftPage':\n        this.keyPan(-1, true);\n        return true;") &&
+    source.includes("      case 'view.panRightPage':\n        this.keyPan(1, true);\n        return true;") &&
+    source.includes("      case 'view.panLeft':\n        this.keyPan(-1, false);\n        return true;");
+  check('control: a page pan sharing the one-arrow span fails the same predicate',
+    swapped !== shortcuts && !pagePans(swapped) && pagePans(shortcuts),
+    `swapped=${pagePans(swapped)}, real=${pagePans(shortcuts)}`);
 }
 
 {
@@ -460,28 +491,24 @@ function groupListProblem(
 }
 
 {
-  const resolve = (chord: string, guardLetters: boolean): ShortcutId | null => {
-    const direct = actionOf(chord);
-    if (direct !== null) return direct;
-    const unshifted = chord.startsWith('Shift+') ? chord.slice('Shift+'.length) : '';
-    return guardLetters && /^[A-Z0-9]$/.test(unshifted) ? null : actionOf(unshifted);
-  };
-  const fallback = body.includes("const unshifted = chord.startsWith('Shift+') ? " +
-    "chord.slice('Shift+'.length) : '';") &&
-    body.includes('actionOf(chord) ?? (/^[A-Z0-9]$/.test(unshifted) ? null : actionOf(unshifted))') &&
-    actionOf('F') === 'view.fit' && actionOf('ArrowLeft') === 'view.panLeft';
-  const broadened = body
-    .replace('(/^[A-Z0-9]$/.test(unshifted) ? null : actionOf(unshifted))', 'actionOf(unshifted)');
-  check('a shifted non-letter keeps its unmodified chord while a shifted letter or digit resolves nothing',
-    fallback && broadened !== body &&
-    resolve('Shift+F', false) === 'view.fit' && resolve('Shift+F', true) === null &&
-    resolve('Shift+D', true) === null &&
-    resolve('Shift+ArrowLeft', true) === 'view.panLeft' &&
-    resolve('Shift+Escape', true) === 'cursors.clear' &&
-    resolve('Shift+1', false) === 'sidebar.capture' && resolve('Shift+1', true) === null &&
-    resolve('Shift+2', true) === null && resolve('Shift+3', true) === null,
-    `fallback=${fallback}, widened=${String(resolve('Shift+F', false))}, ` +
-    `narrowed=${String(resolve('Shift+F', true))}, digit=${String(resolve('Shift+1', true))}`);
+  const fallbackLine = "const unshifted = chord.startsWith('Shift+') ? " +
+    "chord.slice('Shift+'.length) : '';";
+  const guard = '(/^[A-Z0-9]$/.test(unshifted) ? null : actionOf(unshifted))';
+  const modifierFree = (source: string): boolean =>
+    source.length > 0 && !source.includes('unshifted') && !source.includes(guard) &&
+    source.includes('const id = actionOf(chord);');
+  const reinstated = body.replace(
+    'const id = actionOf(chord);',
+    `${fallbackLine}\n      const id = actionOf(chord) ?? ${guard};`);
+  check('a shifted letter, digit or named key resolves nothing and no unmodified chord is retried behind it',
+    modifierFree(body) && reinstated !== body && !modifierFree(reinstated) &&
+    actionOf('Shift+F') === null && actionOf('Shift+D') === null &&
+    actionOf('Shift+T') === null && actionOf('Shift+1') === null &&
+    actionOf('Shift+Escape') === null && actionOf('Shift+ArrowLeft') === 'view.panLeftPage' &&
+    actionOf('Shift+ArrowRight') === 'view.panRightPage' &&
+    actionOf('F') === 'view.fit' && actionOf('ArrowLeft') === 'view.panLeft',
+    `real=${modifierFree(body)}, reinstated=${!modifierFree(reinstated)}, ` +
+    `pageLeft=${String(actionOf('Shift+ArrowLeft'))}, shifted=${String(actionOf('Shift+F'))}`);
 }
 
 {
@@ -496,6 +523,68 @@ function groupListProblem(
     shortcuts.includes("      case 'sidebar.toggle':\n" +
       '        if (this.sidebar.visible) this.handleCollapse();\n        else this.handleExpand();\n'),
     `mapping=${mapping.length}, body=${shortcuts.length}`);
+}
+
+{
+  const shortcuts = runShortcutBody(appSource);
+  const branch = branchBody(shortcuts, 'decoders.add');
+  const mountsBeforeFocus = (text: string): boolean => {
+    const page = text.indexOf("this.selectPage('decoders');");
+    const picker = text.indexOf('this.openAddDecoder();');
+    return page >= 0 && picker > page;
+  };
+  check('the decoder chord mounts the Decoders page before the picker asks for focus',
+    mountsBeforeFocus(branch) &&
+    branch.includes("        this.selectPage('decoders');\n        this.openAddDecoder();\n") &&
+    actionOf('D') === 'decoders.add',
+    `branch=${branch.length}, action=${String(actionOf('D'))}`);
+  const reversed = branch.replace(
+    "        this.selectPage('decoders');\n        this.openAddDecoder();\n",
+    "        this.openAddDecoder();\n        this.selectPage('decoders');\n");
+  check('control: focusing the picker before the page is mounted fails the same predicate',
+    reversed !== branch && !mountsBeforeFocus(reversed) && mountsBeforeFocus(branch),
+    `reversed=${mountsBeforeFocus(reversed)}, real=${mountsBeforeFocus(branch)}`);
+}
+
+{
+  const fit = SHORTCUTS.find((entry) => entry.id === 'view.fit')!;
+  const owners = SHORTCUTS.filter((entry) => entry.chords.includes('Home')).map((entry) => entry.id);
+  check('the fit action answers both F and Home, and Home is claimed by nothing else',
+    fit.chords.join(',') === 'F,Home' && owners.join(',') === 'view.fit' &&
+    actionOf('Home') === 'view.fit' && actionOf('F') === 'view.fit',
+    `chords=${fit.chords.join(',')}, owners=${owners.join(',')}`);
+  const withoutHome: ShortcutEntry = { ...fit, chords: ['F'] };
+  check('control: dropping the Home alias fails the same predicate',
+    !SHORTCUTS.map((entry) => (entry.id === 'view.fit' ? withoutHome : entry))
+      .some((entry) => entry.chords.includes('Home')) &&
+    withoutHome.chords.join(',') !== fit.chords.join(','),
+    `real=${fit.chords.join(',')}, without=${withoutHome.chords.join(',')}`);
+}
+
+{
+  const shortcuts = runShortcutBody(appSource);
+  const nextMode = (mode: string): string =>
+    THEME_MODES[(THEME_MODES.indexOf(mode as (typeof THEME_MODES)[number]) + 1) %
+      THEME_MODES.length]!;
+  const cycle = THEME_MODES.map(nextMode).join(',');
+  const followed = (order: readonly string[], source: string): boolean =>
+    source.includes("      case 'theme.next': {\n" +
+      '        const index = THEME_MODES.indexOf(getMode());\n' +
+      '        setMode(THEME_MODES[(index + 1) % THEME_MODES.length]!);\n' +
+      '        return true;\n      }') &&
+    order.join(',') === 'light,dark,system';
+  check('the theme chord advances one step through THEME_MODES and wraps to the first',
+    followed(THEME_MODES, shortcuts) && cycle === 'dark,system,light' &&
+    actionOf('T') === 'theme.next' &&
+    appSource.includes("import { getMode, getTheme, onThemeChange, setMode, THEME_MODES,"),
+    `order=${THEME_MODES.join(',')}, cycle=${cycle}`);
+  const hardCoded = shortcuts.replace(
+    'setMode(THEME_MODES[(index + 1) % THEME_MODES.length]!);',
+    "setMode(THEME_MODES[index] === 'light' ? 'system' : 'dark');");
+  check('control: a hand-written theme order fails the same predicate',
+    hardCoded !== shortcuts && !followed(THEME_MODES, hardCoded) &&
+    followed(THEME_MODES, shortcuts),
+    `hardCoded=${followed(THEME_MODES, hardCoded)}, real=${followed(THEME_MODES, shortcuts)}`);
 }
 
 {
@@ -538,6 +627,9 @@ const SHORTCUT_KEY_VALUES: ReadonlyArray<readonly [MessageKey, readonly [string,
     'La molette zoome (sans Ctrl)']],
   ['shortcuts.close', ['Close', '关闭', 'Закрыть', 'Fermer']],
   ['shortcuts.clearCursors', ['Clear cursors', '清除光标', 'Сбросить курсоры', 'Effacer les curseurs']],
+  ['shortcuts.addDecoder', ['Add a protocol decoder', '添加解码器',
+    'Добавить декодер протокола', 'Ajouter un décodeur de protocole']],
+  ['shortcuts.theme', ['Switch theme', '切换主题', 'Сменить тему', 'Changer de thème']],
   ['shortcuts.sidebarCapture', ['Capture panel', '采集面板', 'Панель захвата', 'Panneau Capture']],
   ['shortcuts.sidebarCursors', ['Cursors panel', '光标面板', 'Панель курсоров', 'Panneau Curseurs']],
   ['shortcuts.sidebarDecoders', ['Decoders panel', '解码器面板', 'Панель декодеров',
@@ -574,8 +666,9 @@ const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = 
   const capture = SHORTCUTS.find((entry) => entry.id === 'capture.toggle')!;
   check('the reference action text joins the labeled catalog keys with the two-label separator',
     texts.join(' | ') === 'Open… | Save… | Settings | Capture / Stop | Fit | Clear cursors | ' +
-      'Zoom in | Zoom out | Pan left (earlier) | Pan right (later) | Capture panel | ' +
-      'Cursors panel | Decoders panel | Show or hide the sidebar' &&
+      'Zoom in | Zoom out | Pan left (earlier) | Pan right (later) | Pan by half a screen | ' +
+      'Pan by half a screen | Switch theme | Capture panel | Cursors panel | Decoders panel | ' +
+      'Show or hide the sidebar | Add a protocol decoder' &&
     capture.labels.length === 2 && t('toolbar.start') === 'Capture',
     `texts=${texts.join(' | ')}`);
 }

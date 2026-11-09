@@ -266,13 +266,13 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const shortcutBody = shortcutEnd > shortcutStart
     ? app.slice(shortcutStart, shortcutEnd) : '';
   const dialogGuardIndex = shortcutBody.indexOf("closest('dialog[open]') !== null");
-  const plotDispatch = shortcutBody.indexOf('this.runShortcut(id, e.shiftKey)', dialogGuardIndex);
+  const plotDispatch = shortcutBody.indexOf('this.runShortcut(id)', dialogGuardIndex);
   const anywhereIndex = shortcutBody.indexOf('if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {');
   const resolveIndex = shortcutBody.indexOf('const id = actionOf(chord)');
   const dialogGuard = dialogGuardIndex >= 0 && anywhereIndex > resolveIndex &&
     dialogGuardIndex > anywhereIndex && plotDispatch > dialogGuardIndex;
   const anywhereBlock = '      if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {\n' +
-    '        if (this.runShortcut(id, e.shiftKey)) e.preventDefault();\n' +
+    '        if (this.runShortcut(id)) e.preventDefault();\n' +
     '        return;\n      }\n';
   const movedBelowGuard = app.replace(anywhereBlock, '').replace(
     "      if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;\n",

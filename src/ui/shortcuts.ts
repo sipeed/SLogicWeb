@@ -6,7 +6,9 @@ export type ShortcutId =
   | 'file.open' | 'file.save' | 'settings.open'
   | 'capture.toggle' | 'view.fit' | 'cursors.clear'
   | 'view.zoomIn' | 'view.zoomOut' | 'view.panLeft' | 'view.panRight'
-  | 'sidebar.capture' | 'sidebar.cursors' | 'sidebar.decoders' | 'sidebar.toggle';
+  | 'view.panLeftPage' | 'view.panRightPage' | 'theme.next'
+  | 'sidebar.capture' | 'sidebar.cursors' | 'sidebar.decoders' | 'sidebar.toggle'
+  | 'decoders.add';
 
 export type ShortcutGroup = 'file' | 'view' | 'navigation';
 
@@ -41,12 +43,21 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
     id: 'capture.toggle', group: 'view', chords: ['Space'],
     labels: ['toolbar.start', 'toolbar.stop'],
   },
-  { id: 'view.fit', group: 'view', chords: ['F'], labels: ['toolbar.fit'] },
+  { id: 'view.fit', group: 'view', chords: ['F', 'Home'], labels: ['toolbar.fit'] },
   { id: 'cursors.clear', group: 'view', chords: ['Escape'], labels: ['shortcuts.clearCursors'] },
   { id: 'view.zoomIn', group: 'view', chords: ['+', '='], labels: ['shortcuts.zoomIn'] },
   { id: 'view.zoomOut', group: 'view', chords: ['-', '_'], labels: ['shortcuts.zoomOut'] },
   { id: 'view.panLeft', group: 'view', chords: ['ArrowLeft'], labels: ['shortcuts.panLeft'] },
   { id: 'view.panRight', group: 'view', chords: ['ArrowRight'], labels: ['shortcuts.panRight'] },
+  {
+    id: 'view.panLeftPage', group: 'view', chords: ['Shift+ArrowLeft'],
+    labels: ['shortcuts.panPage'],
+  },
+  {
+    id: 'view.panRightPage', group: 'view', chords: ['Shift+ArrowRight'],
+    labels: ['shortcuts.panPage'],
+  },
+  { id: 'theme.next', group: 'view', chords: ['T'], labels: ['shortcuts.theme'] },
   {
     id: 'sidebar.capture', group: 'navigation', chords: ['1'],
     labels: ['shortcuts.sidebarCapture'],
@@ -63,6 +74,7 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
     id: 'sidebar.toggle', group: 'navigation', chords: ['\\'],
     labels: ['shortcuts.sidebarToggle'],
   },
+  { id: 'decoders.add', group: 'navigation', chords: ['D'], labels: ['shortcuts.addDecoder'] },
 ];
 
 export const WORK_ANYWHERE: ReadonlySet<ShortcutId> = new Set(
@@ -108,7 +120,6 @@ export function referenceGestures(wheelZooms: boolean): readonly GestureEntry[] 
   return [
     ...wheel,
     { modifiers: ['Shift'], input: 'shortcuts.input.wheel', labels: ['shortcuts.panTime'] },
-    { modifiers: ['Shift'], input: 'shortcuts.input.arrows', labels: ['shortcuts.panPage'] },
     { modifiers: [], input: 'shortcuts.input.drag', labels: ['shortcuts.panTime'] },
     { modifiers: [], input: 'shortcuts.input.doubleClick', labels: ['shortcuts.addCursor'] },
     { modifiers: [], input: 'shortcuts.input.pinch', labels: ['shortcuts.zoomTime'] },

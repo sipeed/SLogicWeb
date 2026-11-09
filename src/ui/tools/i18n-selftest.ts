@@ -876,6 +876,7 @@ const baseSettings: CaptureSettings = {
     'capture.demo',
     'status.previousWave', 'status.summary', 'status.total', 'status.loop', 'status.view',
     'settings.sections.general', 'settings.shortcuts', 'shortcuts.title', 'shortcuts.keyboard',
+    'shortcuts.input.arrows',
   ];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const present = Object.entries(dicts).filter(([, dict]) =>

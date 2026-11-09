@@ -902,11 +902,11 @@ const edgeMethodsSource = slice(app,
     const listener = listenerBody(source);
     const anywhere = listener.indexOf('if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {');
     const guard = listener.indexOf("closest('.select-field");
-    const dispatch = listener.indexOf('this.runShortcut(id, e.shiftKey)', guard);
+    const dispatch = listener.indexOf('this.runShortcut(id)', guard);
     return anywhere >= 0 && guard > anywhere && dispatch > guard;
   };
   const anywhereBlock = '      if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {\n' +
-    '        if (this.runShortcut(id, e.shiftKey)) e.preventDefault();\n' +
+    '        if (this.runShortcut(id)) e.preventDefault();\n' +
     '        return;\n      }\n';
   const movedBelowGuard = app.replace(anywhereBlock, '').replace(
     "            target.closest('.ch-editor-popover, button, [role=\"button\"], [role=\"slider\"]') !== null)) return;\n",

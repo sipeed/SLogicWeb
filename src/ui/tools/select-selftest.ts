@@ -839,12 +839,12 @@ check(
   const anywhereIndex = listener.indexOf('if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {');
   const inputGuard = listener.indexOf('target instanceof HTMLInputElement');
   const textareaGuard = listener.indexOf('target instanceof HTMLTextAreaElement');
-  const plotDispatch = listener.indexOf('this.runShortcut(id, e.shiftKey)', guardIndex);
+  const plotDispatch = listener.indexOf('this.runShortcut(id)', guardIndex);
   const shortcutGuard = guardIndex >= 0 && chordIndex >= 0 && anywhereIndex > chordIndex &&
     inputGuard > anywhereIndex && inputGuard < guardIndex && guardIndex < plotDispatch &&
     textareaGuard > anywhereIndex && textareaGuard < plotDispatch;
   const anywhereBlock = '      if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {\n' +
-    '        if (this.runShortcut(id, e.shiftKey)) e.preventDefault();\n' +
+    '        if (this.runShortcut(id)) e.preventDefault();\n' +
     '        return;\n      }\n';
   const movedBelowGuards = app.replace(anywhereBlock, '').replace(
     "      if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;\n",

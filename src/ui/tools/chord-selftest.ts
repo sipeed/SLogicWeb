@@ -193,7 +193,7 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const ids = SHORTCUTS.map((entry) => entry.id);
   check('every id appears once and every chord is claimed once across the catalogue',
     new Set(ids).size === ids.length && new Set(chords).size === chords.length &&
-    SHORTCUTS.length === 14 && chords.length === 16,
+    SHORTCUTS.length === 18 && chords.length === 21,
     `ids=${ids.join(',')}, chords=${chords.join(',')}`);
 }
 
@@ -214,8 +214,8 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const every = SHORTCUTS.map((entry) =>
     entry.chords.map((chord) => actionOf(chord) === entry.id).join(',')).join(';');
   check('actionOf resolves every catalogued chord to its own row',
-    every === 'true;true;true;true;true;true;true,true;true,true;true;true;' +
-      'true;true;true;true',
+    every === 'true;true;true;true;true,true;true;true,true;true,true;' +
+      'true;true;true;true;true;true;true;true;true;true',
     `every=${every}`);
 }
 
@@ -252,13 +252,36 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
 }
 
 {
-  const unmapped = ['', 'F ', 'Enter', 'Return', 'Add', 'Shift+F', 'Shift+ArrowLeft',
-    'Shift+1', 'Ctrl+1', 'Mod+1', 'Mod+2', 'Alt+2',
+  const unmapped = ['', 'F ', 'Enter', 'Return', 'Add', 'Shift+F', 'Shift+D', 'Shift+T',
+    'Shift+1', 'Shift+Escape', 'Ctrl+1', 'Mod+1', 'Mod+2', 'Alt+2',
     'Ctrl+O', 'Alt+O', 'Unknown+Key'];
   const answers = unmapped.map((chord) => actionOf(chord));
   check('actionOf answers null for chords the catalogue does not own yet',
-    answers.every((answer) => answer === null) && actionOf('Space') === 'capture.toggle',
+    answers.every((answer) => answer === null) && actionOf('Space') === 'capture.toggle' &&
+    actionOf('Shift+ArrowLeft') === 'view.panLeftPage' &&
+    actionOf('Shift+ArrowRight') === 'view.panRightPage',
     `answers=${answers.map((answer) => String(answer)).join(',')}`);
+}
+
+{
+  const pageWords = ['Shift+ArrowLeft', 'Shift+ArrowRight'] as const;
+  const owners = pageWords.map((chord) => actionOf(chord));
+  const catalogOnly = owners.join(',') === 'view.panLeftPage,view.panRightPage' &&
+    SHORTCUTS.filter((entry) => entry.id === 'view.panLeftPage')
+      .every((entry) => entry.chords.join(',') === 'Shift+ArrowLeft') &&
+    SHORTCUTS.filter((entry) => entry.id === 'view.panRightPage')
+      .every((entry) => entry.chords.join(',') === 'Shift+ArrowRight');
+  check('the page pans are their own catalog rows keyed on the Shift chords, not event modifiers',
+    catalogOnly && actionOf('ArrowLeft') === 'view.panLeft' &&
+    actionOf('ArrowRight') === 'view.panRight',
+    `owners=${owners.join(',')}`);
+  const collapsed = SHORTCUTS.filter((entry) => !entry.id.endsWith('Page'));
+  const resolve = (rows: readonly { readonly id: string; readonly chords: readonly string[] }[],
+    chord: string): string | null => rows.find((entry) => entry.chords.includes(chord))?.id ?? null;
+  check('control: without the page rows the Shift chords resolve nothing, so no fallback hides the split',
+    resolve(collapsed, 'Shift+ArrowLeft') === null &&
+    resolve(collapsed, 'Shift+ArrowRight') === null && catalogOnly,
+    `collapsed=${String(resolve(collapsed, 'Shift+ArrowLeft'))}`);
 }
 
 {
@@ -266,7 +289,7 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const counts = groups.map((group) => shortcutsIn(group).length).join(',');
   const ids = groups.flatMap((group) => shortcutsIn(group).map((entry) => entry.id));
   check('the three groups partition the catalogue without losing or repeating a row',
-    counts === '3,7,4' && new Set(ids).size === ids.length &&
+    counts === '3,10,5' && new Set(ids).size === ids.length &&
     ids.length === SHORTCUTS.length,
     `counts=${counts}, ids=${ids.join(',')}`);
 }
@@ -354,8 +377,9 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const mac: string = apple;
   check('every catalogued chord prints a non-empty distinct notation on both platforms',
     mac !== text &&
-    text === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F|Esc|+ / =|- / _|←|→|1|2|3|\\' &&
-    mac === '⌘O|⌘S|⌘,|Space|F|Esc|+ / =|- / _|←|→|1|2|3|\\',
+    text === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F / Home|Esc|+ / =|- / _|←|→|Shift+←|Shift+→|T|' +
+      '1|2|3|\\|D' &&
+    mac === '⌘O|⌘S|⌘,|Space|F / Home|Esc|+ / =|- / _|←|→|⇧←|⇧→|T|1|2|3|\\|D',
     `text=${rendered}, apple=${apple}`);
 }
 
@@ -389,8 +413,9 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   check('the keydown listener hands the resolved chord to the catalogue and one handler',
     body.includes('const chord = chordOf(e);') &&
     body.includes('if (chord === null) return;') &&
-    body.includes('actionOf(chord)') &&
-    body.includes('this.runShortcut(id, e.shiftKey)') &&
+    body.includes('const id = actionOf(chord);') &&
+    body.includes('this.runShortcut(id)') &&
+    !body.includes('shiftKey') &&
     !body.includes('shortcutIdFor') &&
     !body.includes('e.key ==='),
     `body=${body.length}`);

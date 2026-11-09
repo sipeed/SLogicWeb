@@ -3101,11 +3101,10 @@ export class App {
     window.addEventListener('keydown', (e) => {
       const chord = chordOf(e);
       if (chord === null) return;
-      const unshifted = chord.startsWith('Shift+') ? chord.slice('Shift+'.length) : '';
-      const id = actionOf(chord) ?? (/^[A-Z0-9]$/.test(unshifted) ? null : actionOf(unshifted));
+      const id = actionOf(chord);
       if (id === null) return;
       if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {
-        if (this.runShortcut(id, e.shiftKey)) e.preventDefault();
+        if (this.runShortcut(id)) e.preventDefault();
         return;
       }
       // The rest belong to the plot. Typing anywhere else - a text field, the chat box,
@@ -3119,7 +3118,7 @@ export class App {
             target.closest('.select-field, .assistant-panel, .cursor-dist-popover') !== null ||
             target.closest('.ch-editor-popover, button, [role="button"], [role="slider"]') !== null)) return;
       if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;
-      if (this.runShortcut(id, e.shiftKey)) e.preventDefault();
+      if (this.runShortcut(id)) e.preventDefault();
     });
 
     // Drag and drop a capture file straight onto the window. While files are over the
@@ -3144,7 +3143,7 @@ export class App {
     return target instanceof Element && target.closest('[role="dialog"]') !== null;
   }
 
-  private runShortcut(id: ShortcutId, shiftKey: boolean): boolean {
+  private runShortcut(id: ShortcutId): boolean {
     switch (id) {
       case 'capture.toggle':
         this.primaryAction();
@@ -3168,11 +3167,22 @@ export class App {
         this.keyZoom(-1);
         return true;
       case 'view.panLeft':
-        this.keyPan(-1, shiftKey);
+        this.keyPan(-1, false);
         return true;
       case 'view.panRight':
-        this.keyPan(1, shiftKey);
+        this.keyPan(1, false);
         return true;
+      case 'view.panLeftPage':
+        this.keyPan(-1, true);
+        return true;
+      case 'view.panRightPage':
+        this.keyPan(1, true);
+        return true;
+      case 'theme.next': {
+        const index = THEME_MODES.indexOf(getMode());
+        setMode(THEME_MODES[(index + 1) % THEME_MODES.length]!);
+        return true;
+      }
       case 'file.open':
         if (this.settingsDialog.isOpen) this.settingsDialog.close();
         this.channelList.closeDialog();
@@ -3206,6 +3216,10 @@ export class App {
       case 'sidebar.toggle':
         if (this.sidebar.visible) this.handleCollapse();
         else this.handleExpand();
+        return true;
+      case 'decoders.add':
+        this.selectPage('decoders');
+        this.openAddDecoder();
         return true;
       default: {
         const unreachable: never = id;

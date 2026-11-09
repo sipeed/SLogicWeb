@@ -132,7 +132,7 @@ const spaceEnd = spaceStart >= 0 ? app.indexOf('\n      case ', spaceStart + 1) 
 const spaceBody = spaceStart >= 0 && spaceEnd > spaceStart ? app.slice(spaceStart, spaceEnd) : '';
 const spaceDispatch = spaceBody.includes('this.primaryAction();') &&
   spaceBody.includes('return true;') &&
-  app.includes('if (this.runShortcut(id, e.shiftKey)) e.preventDefault();') &&
+  app.includes('if (this.runShortcut(id)) e.preventDefault();') &&
   !spaceBody.includes('startCapture') && !spaceBody.includes('stopCapture');
 check(
   'toolbar click and Space share one primary action preferring Stop, then Start',
