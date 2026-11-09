@@ -853,7 +853,9 @@ export const en = {
   'settings.theme': 'Theme',
   'settings.close': 'Close',
   'settings.sections.appearance': 'Appearance',
-  'settings.sections.general': 'General',
+  'settings.sections.shortcuts': 'Shortcuts and gestures',
+  'settings.sections.developer': 'Developer tools',
+  'settings.sections.about': 'About',
 
   // ----------------------------------------------------------- shortcuts
   'shortcuts.title': 'Shortcuts and gestures',

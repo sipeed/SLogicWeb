@@ -875,11 +875,12 @@ const baseSettings: CaptureSettings = {
     'toolbar.demo', 'toolbar.shortDemo', 'toolbar.demoTitle', 'toolbar.demoLoading', 'error.demo',
     'capture.demo',
     'status.previousWave', 'status.summary', 'status.total', 'status.loop', 'status.view',
+    'settings.sections.general',
   ];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const present = Object.entries(dicts).filter(([, dict]) =>
     retired.some((key) => Object.keys(dict).includes(key)));
-  check('the retired channel, bank, capture, capture-panel and toolbar keys stay absent from every catalog',
+  check('the retired channel, bank, capture, capture-panel, toolbar and settings keys stay absent from every catalog',
     present.length === 0,
     present.length === 0 ? `4 catalogs omit ${retired.length} keys` : present.map(([locale]) => locale).join(', '));
 }
@@ -900,7 +901,7 @@ const baseSettings: CaptureSettings = {
     'toolbar.start', 'settings.language', 'settings.theme',
     'settings.detailedLabels', 'settings.compactRows', 'settings.hideIdle',
     'settings.developerTools', 'settings.close', 'settings.sections.appearance',
-    'settings.sections.general',
+    'settings.sections.shortcuts', 'settings.sections.developer', 'settings.sections.about',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortStop',
     'toolbar.shortStopping', 'toolbar.shortOpen', 'toolbar.shortSave',
     'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage', 'toolbar.shortTheme',

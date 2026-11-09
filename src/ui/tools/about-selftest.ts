@@ -45,12 +45,16 @@ function sourceSlice(source: string, from: string, to: string): string {
 function aboutEntry(settingsWindow: string, app: string): boolean {
   const pane = sourceSlice(settingsWindow, 'private paneContent(section: SettingsSectionId)', 'private onNavKey(');
   const row = sourceSlice(settingsWindow, 'private aboutRow()', '}\n');
+  const shortcutsAt = pane.indexOf("case 'shortcuts':");
+  const aboutAt = pane.indexOf("case 'about':");
   const afterShortcuts = settingsWindow.indexOf("this.rowLabel('settings.about')") >
     settingsWindow.indexOf("this.rowLabel('settings.shortcuts')");
   return row.includes("this.rowLabel('settings.about')") &&
     row.includes("row.dataset.settingsKey = 'about';") &&
     row.includes('this.host.openAbout(row)') &&
-    pane.includes('this.shortcutsRow(), this.aboutRow()') &&
+    shortcutsAt >= 0 && aboutAt > shortcutsAt &&
+    pane.includes('return [this.shortcutsRow()];') &&
+    pane.includes('return [this.aboutRow()];') &&
     afterShortcuts &&
     app.includes('if (this.aboutDialog.isOpen) this.aboutDialog.renderStrings();') &&
     sourceSlice(app, 'openAbout: (invoker) => {', '\n      },').includes('this.aboutDialog.open(invoker);') &&
@@ -120,8 +124,8 @@ function aboutEntry(settingsWindow: string, app: string): boolean {
     entry && modal, `entry=${entry}, modal=${modal}`);
 
   const movedFirst = settingsWindow.replace(
-    'return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];',
-    'return [this.developerToolsRow(), this.aboutRow(), this.shortcutsRow()];');
+    "      case 'shortcuts':\n        return [this.shortcutsRow()];\n      case 'developer':\n        return [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutRow()];",
+    "      case 'about':\n        return [this.aboutRow()];\n      case 'shortcuts':\n        return [this.shortcutsRow()];\n      case 'developer':\n        return [this.developerToolsRow()];");
   const strayHandOff = settingsWindow.replace('this.host.openAbout(row)', 'this.host.openAbout(this.closeButton)');
   const unlocalized = app.replace(
     'if (this.aboutDialog.isOpen) this.aboutDialog.renderStrings();',

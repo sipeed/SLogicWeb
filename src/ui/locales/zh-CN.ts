@@ -798,7 +798,9 @@ export const zhCN: Messages = {
   'settings.theme': '主题',
   'settings.close': '关闭',
   'settings.sections.appearance': '外观',
-  'settings.sections.general': '通用',
+  'settings.sections.shortcuts': '快捷键与鼠标操作',
+  'settings.sections.developer': '开发者工具',
+  'settings.sections.about': '关于',
 
   // ----------------------------------------------------------- shortcuts
   'shortcuts.title': '快捷键与鼠标操作',

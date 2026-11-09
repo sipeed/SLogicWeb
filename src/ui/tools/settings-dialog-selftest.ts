@@ -231,6 +231,14 @@ function focusFallsBackToActiveTab(source: string): boolean {
 const SECTION = SETTINGS_SECTIONS[0];
 const SECTION_LABEL_KEY = `settings.sections.${SECTION}`;
 
+const SHIPPED_SECTION_ORDER: readonly string[] = ['appearance', 'shortcuts', 'developer', 'about'];
+
+function shippedSectionOrder(sections: readonly string[]): boolean {
+  return sections.length === SHIPPED_SECTION_ORDER.length &&
+    sections.every((section, index) => section === SHIPPED_SECTION_ORDER[index]) &&
+    !sections.includes('general');
+}
+
 const NAV_NEEDLES: readonly string[] = [
   "nav.className = 'settings-nav';",
   "nav.setAttribute('role', 'tablist');",
@@ -251,24 +259,45 @@ const NAV_NEEDLES: readonly string[] = [
 {
   const keys = ['ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter', 'Tab', ' ', 'a', 'Escape'];
   const rows = keys.map((key) => ({ key, next: settingsSectionAfter(key, SECTION) }));
-  const moving = ['ArrowUp', 'ArrowDown', 'End'];
-  const changed = rows.filter((row) => row.next !== null);
-  check('the shipped section table is the appearance-then-general pair and only the roving keys that leave the first section resolve',
-    SETTINGS_SECTIONS.length === 2 && SECTION === 'appearance' && SETTINGS_SECTIONS[1] === 'general' &&
-    changed.length === moving.length &&
-    changed.every((row) => moving.includes(row.key) && row.next === 'general'),
-    `sections=${JSON.stringify(SETTINGS_SECTIONS)}, changed=${JSON.stringify(changed)}`);
+  const roving: ReadonlyArray<readonly [string, string | null]> = [
+    ['ArrowUp', 'about'], ['ArrowDown', 'shortcuts'], ['Home', null], ['End', 'about'],
+  ];
+  const resolved = rows.filter((row) => row.next !== null).map((row) => row.key);
+  check('the shipped section table is appearance, shortcuts, developer, about and the first section roves into that ring',
+    shippedSectionOrder(SETTINGS_SECTIONS) && SECTION === 'appearance' &&
+    roving.every(([key, next]) => settingsSectionAfter(key, SECTION) === next) &&
+    resolved.join(',') === 'ArrowUp,ArrowDown,End',
+    `sections=${JSON.stringify(SETTINGS_SECTIONS)}, resolved=${JSON.stringify(resolved)}`);
 }
 
 {
-  const fromGeneral = ['ArrowUp', 'ArrowDown', 'Home', 'End']
-    .map((key) => settingsSectionAfter(key, 'general'));
+  const forward = SETTINGS_SECTIONS.map((section) => settingsSectionAfter('ArrowDown', section));
+  const backward = SETTINGS_SECTIONS.map((section) => settingsSectionAfter('ArrowUp', section));
   check('every roving key lands on another shipped section, wraps at either end and never throws',
-    fromGeneral[0] === 'appearance' && fromGeneral[1] === 'appearance' &&
-    fromGeneral[2] === 'appearance' && fromGeneral[3] === null &&
-    settingsSectionAfter('', 'general') === null &&
-    fromGeneral.every((next) => next === null || SETTINGS_SECTIONS.includes(next)),
-    `fromGeneral=${JSON.stringify(fromGeneral)}`);
+    forward.join(',') === 'shortcuts,developer,about,appearance' &&
+    backward.join(',') === 'about,appearance,shortcuts,developer' &&
+    settingsSectionAfter('Home', 'appearance') === null &&
+    settingsSectionAfter('End', 'about') === null &&
+    settingsSectionAfter('', 'about') === null &&
+    [...forward, ...backward].every((next) => next !== null && SETTINGS_SECTIONS.includes(next)),
+    `forward=${JSON.stringify(forward)}, backward=${JSON.stringify(backward)}`);
+}
+
+{
+  const renested = ['appearance', 'general'];
+  const swapped = ['appearance', 'developer', 'shortcuts', 'about'];
+  check('control: a re-nested general section or two sections out of order fails the same order predicate',
+    !shippedSectionOrder(renested) && !shippedSectionOrder(swapped) && shippedSectionOrder(SETTINGS_SECTIONS),
+    `renested=${shippedSectionOrder(renested)}, swapped=${shippedSectionOrder(swapped)}, ` +
+    `real=${shippedSectionOrder(SETTINGS_SECTIONS)}`);
+}
+
+{
+  const dropped = [...SHIPPED_SECTION_ORDER].filter((section) => section !== 'about');
+  const renamed = ['appearance', 'shortcuts', 'developer', 'general'];
+  check('control: a dropped section or a renamed last section fails the same order predicate',
+    !shippedSectionOrder(dropped) && !shippedSectionOrder(renamed) && shippedSectionOrder(SETTINGS_SECTIONS),
+    `dropped=${shippedSectionOrder(dropped)}, renamed=${shippedSectionOrder(renamed)}`);
 }
 
 {
@@ -414,18 +443,31 @@ const ACTION_ROW_NEEDLES: readonly string[] = [
   'this.host.openShortcuts(row)',
 ];
 
+const PANE_CASES: ReadonlyArray<readonly [string, string]> = [
+  ['appearance', 'return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];'],
+  ['shortcuts', 'return [this.shortcutsRow()];'],
+  ['developer', 'return [this.developerToolsRow()];'],
+  ['about', 'return [this.aboutRow()];'],
+];
+
 function paneComposition(source: string): boolean {
   const body = methodBody(source, 'private paneContent(section: SettingsSectionId): HTMLElement[] {');
-  const appearanceAt = body.indexOf(
-    'return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];');
-  const generalAt = body.indexOf(
-    'return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];');
-  return appearanceAt >= 0 && generalAt > appearanceAt &&
+  if (!body.includes('    switch (section) {')) return false;
+  const cases = body.match(/case '/g)?.length ?? 0;
+  let cursor = 0;
+  const ordered = PANE_CASES.every(([section, rows]) => {
+    const caseAt = body.indexOf(`case '${section}':`, cursor);
+    const rowsAt = caseAt >= 0 ? body.indexOf(rows, caseAt) : -1;
+    if (caseAt >= 0) cursor = rowsAt >= 0 ? rowsAt + rows.length : caseAt;
+    return caseAt >= 0 && rowsAt > caseAt;
+  });
+  return ordered && cases === PANE_CASES.length &&
     !body.includes('settings-item') && !body.includes('new SettingsMenu');
 }
 
 {
-  check('the appearance pane is the four upstream toggles in order and the general pane runs developer tools, shortcuts, then About',
+  check('the appearance pane is the four upstream toggles in order and each flattened section holds only its own row',
+    SETTINGS_SECTIONS.join(',') === PANE_CASES.map(([section]) => section).join(',') &&
     paneComposition(dialogSource),
     `ok=${paneComposition(dialogSource)}, ` +
     `body=${JSON.stringify(methodBody(dialogSource, 'private paneContent(section: SettingsSectionId): HTMLElement[] {').replace(/\s+/g, ' '))}`);
@@ -433,30 +475,30 @@ function paneComposition(source: string): boolean {
 
 {
   const dropped = dialogSource.replace(
-    '      return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];',
-    '      return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];');
+    '        return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];',
+    '        return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];');
   const swapped = dialogSource.replace(
     'this.wheelZoomsRow(), this.compactRowsRow(),',
     'this.compactRowsRow(), this.wheelZoomsRow(),');
-  const misplacedShortcuts = dialogSource.replace(
-    '    return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];',
-    '    return [this.shortcutsRow(), this.developerToolsRow(), this.aboutRow()];');
-  const emptiedGeneral = dialogSource.replace(
-    '    return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];',
-    '    return [this.developerToolsRow(), this.shortcutsRow()];');
-  const aboutFirst = dialogSource.replace(
-    '    return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];',
-    '    return [this.developerToolsRow(), this.aboutRow(), this.shortcutsRow()];');
-  check('control: dropping a row from the appearance list, swapping two toggles, reordering the general rows or dropping the About row fails the same composition predicate',
+  const merged = dialogSource.replace(
+    "      case 'developer':\n        return [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutRow()];",
+    "      case 'developer':\n        return [this.developerToolsRow(), this.aboutRow()];\n      case 'about':\n        return [this.aboutRow()];");
+  const missingCase = dialogSource.replace(
+    "      case 'about':\n        return [this.aboutRow()];\n",
+    '');
+  const generalAgain = dialogSource.replace(
+    "      case 'shortcuts':\n        return [this.shortcutsRow()];",
+    "      case 'shortcuts':\n        return [this.shortcutsRow()];\n      case 'general':\n        return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];");
+  check('control: dropping an appearance row, swapping two toggles, merging two sections, dropping a case or re-nesting a general case fails the same composition predicate',
     dropped !== dialogSource && !paneComposition(dropped) &&
     swapped !== dialogSource && !paneComposition(swapped) &&
-    misplacedShortcuts !== dialogSource && !paneComposition(misplacedShortcuts) &&
-    emptiedGeneral !== dialogSource && !paneComposition(emptiedGeneral) &&
-    aboutFirst !== dialogSource && !paneComposition(aboutFirst) &&
+    merged !== dialogSource && !paneComposition(merged) &&
+    missingCase !== dialogSource && !paneComposition(missingCase) &&
+    generalAgain !== dialogSource && !paneComposition(generalAgain) &&
     paneComposition(dialogSource),
     `dropped=${paneComposition(dropped)}, swapped=${paneComposition(swapped)}, ` +
-    `misplaced=${paneComposition(misplacedShortcuts)}, emptied=${paneComposition(emptiedGeneral)}, ` +
-    `aboutFirst=${paneComposition(aboutFirst)}, real=${paneComposition(dialogSource)}`);
+    `merged=${paneComposition(merged)}, missing=${paneComposition(missingCase)}, ` +
+    `general=${paneComposition(generalAgain)}, real=${paneComposition(dialogSource)}`);
 }
 
 {
@@ -741,8 +783,8 @@ function rowWiredToHost(source: string, entry: ToggleRow): boolean {
   const toggleCalls = (source: string): number => source.match(/this\.toggleRow\(/g)?.length ?? 0;
   const actionRows = (source: string): number => source.match(/row\.dataset\.settingsKey = /g)?.length ?? 0;
   const keyed = SETTINGS_SECTIONS.length + toggleCalls(dialogSource) + actionRows(dialogSource);
-  check('the window keeps one keyed control per tab plus one per row: nine today',
-    keyed === 9 && SETTINGS_SECTIONS.length === 2 && toggleCalls(dialogSource) === 5 &&
+  check('the window keeps one keyed control per tab plus one per row: eleven today',
+    keyed === 11 && SETTINGS_SECTIONS.length === 4 && toggleCalls(dialogSource) === 5 &&
     actionRows(dialogSource) === 2,
     `keyed=${keyed}, tabs=${SETTINGS_SECTIONS.length}, toggles=${toggleCalls(dialogSource)}, ` +
     `actions=${actionRows(dialogSource)}`);
@@ -750,15 +792,15 @@ function rowWiredToHost(source: string, entry: ToggleRow): boolean {
 
 {
   const extraToggle = dialogSource.replace(
-    '    return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];',
-    '    return [this.developerToolsRow(), this.toggleRow(\'extra\', \'settings.about\', false, () => {}), this.shortcutsRow(), this.aboutRow()];');
+    "      case 'developer':\n        return [this.developerToolsRow()];",
+    "      case 'developer':\n        return [this.developerToolsRow(), this.toggleRow('extra', 'settings.about', false, () => {})];");
   const droppedAction = dialogSource.replace("    row.dataset.settingsKey = 'shortcuts';\n", '');
   const countOf = (source: string): number => SETTINGS_SECTIONS.length +
     (source.match(/this\.toggleRow\(/g)?.length ?? 0) +
     (source.match(/row\.dataset\.settingsKey = /g)?.length ?? 0);
   check('control: a sixth toggle or a row without its settings key moves the keyed-control count',
-    extraToggle !== dialogSource && countOf(extraToggle) === 10 &&
-    droppedAction !== dialogSource && countOf(droppedAction) === 8 && countOf(dialogSource) === 9,
+    extraToggle !== dialogSource && countOf(extraToggle) === 12 &&
+    droppedAction !== dialogSource && countOf(droppedAction) === 10 && countOf(dialogSource) === 11,
     `extra=${countOf(extraToggle)}, dropped=${countOf(droppedAction)}, real=${countOf(dialogSource)}`);
 }
 
@@ -1952,15 +1994,73 @@ const EN_SETTINGS_KEYS = Object.keys(en).filter((key) => key.startsWith('setting
     `mutatedKeys=${missingKeys.length}, realKeys=${EN_SETTINGS_KEYS.length}`);
 }
 
+const SECTION_LABELS_WANT: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ['appearance', ['Appearance', '外观', 'Внешний вид', 'Apparence']],
+  ['shortcuts', ['Shortcuts and gestures', '快捷键与鼠标操作', 'Клавиши и жесты', 'Raccourcis et gestes']],
+  ['developer', ['Developer tools', '开发者工具', 'Для разработчиков', 'Outils développeur']],
+  ['about', ['About', '关于', 'О программе', 'À propos']],
+];
+
+function sectionLabelMap(source: string): boolean {
+  const start = source.indexOf('const SECTION_LABELS: Record<SettingsSectionId, MessageKey> = {');
+  const end = start >= 0 ? source.indexOf('\n};', start) : -1;
+  const body = start >= 0 && end > start ? source.slice(start, end) : '';
+  const entries = [...body.matchAll(/^ {2}(\w+): 'settings\.sections\.(\w+)',$/gm)];
+  return entries.length === SETTINGS_SECTIONS.length &&
+    entries.every(([, section, label], index) => section === SETTINGS_SECTIONS[index] && label === section);
+}
+
+function sectionLabelDrift(
+  lookups: ReadonlyArray<readonly [string, (key: MessageKey) => string]>,
+): string[] {
+  return SECTION_LABELS_WANT.flatMap(([section, labels]) => lookups
+    .map(([locale, lookup], index) => ({
+      locale, section, actual: lookup(`settings.sections.${section}` as MessageKey), want: labels[index]!,
+    }))
+    .filter((row) => row.actual !== row.want)
+    .map((row) => `${row.locale}:${row.section}=${JSON.stringify(row.actual)}`));
+}
+
 {
-  const want = ['Appearance', '外观', 'Внешний вид', 'Apparence'];
-  const drift = CATALOGS
-    .map(([locale, lookup], index) => ({ locale, actual: lookup(SECTION_LABEL_KEY as MessageKey), want: want[index]! }))
-    .filter((row) => row.actual !== row.want);
-  check('all four catalogs carry the appearance section label with its pinned value',
-    drift.length === 0,
-    drift.length === 0 ? want.join(' | ')
-      : drift.map((row) => `${row.locale}=${JSON.stringify(row.actual)}`).join('; '));
+  check('each shipped section reads the catalog key that carries its own id',
+    sectionLabelMap(dialogSource),
+    `ok=${sectionLabelMap(dialogSource)}`);
+}
+
+{
+  const duplicated = dialogSource.replace("  developer: 'settings.sections.developer',",
+    "  developer: 'settings.sections.about',");
+  const swapped = dialogSource.replace("  shortcuts: 'settings.sections.shortcuts',",
+    "  shortcuts: 'settings.sections.appearance',");
+  check('control: a section label key duplicated from another section or swapped with one fails the same map predicate',
+    duplicated !== dialogSource && !sectionLabelMap(duplicated) &&
+    swapped !== dialogSource && !sectionLabelMap(swapped) &&
+    sectionLabelMap(dialogSource),
+    `duplicated=${sectionLabelMap(duplicated)}, swapped=${sectionLabelMap(swapped)}, ` +
+    `real=${sectionLabelMap(dialogSource)}`);
+}
+
+{
+  const lookups = CATALOGS.map(([locale, lookup]) => [locale, lookup] as const);
+  const drift = sectionLabelDrift(lookups);
+  check('all four catalogs carry the four section labels with their pinned values',
+    drift.length === 0 && SECTION_LABELS_WANT.length === SETTINGS_SECTIONS.length &&
+    SECTION_LABELS_WANT.every(([section], index) => SETTINGS_SECTIONS[index] === section),
+    drift.length === 0 ? `${SECTION_LABELS_WANT.length} sections × ${CATALOGS.length} catalogs` : drift.join('; '));
+}
+
+{
+  const lookups = CATALOGS.map(([locale, lookup]) => [locale, lookup] as const);
+  const renamed = lookups.map(([locale, lookup]) => [locale, (key: MessageKey): string =>
+    (key === 'settings.sections.developer' ? 'General' : lookup(key))] as const);
+  const removed = lookups.map(([locale, lookup]) => [locale, (key: MessageKey): string =>
+    (key === 'settings.sections.about' ? '' : lookup(key))] as const);
+  check('control: a section label copied from another section or an emptied one fails the same drift predicate',
+    sectionLabelDrift(lookups).length === 0 &&
+    sectionLabelDrift(renamed).length > 0 && sectionLabelDrift(removed).length > 0,
+    `renamed=${JSON.stringify(sectionLabelDrift(renamed).slice(0, 2))}, ` +
+    `removed=${JSON.stringify(sectionLabelDrift(removed).slice(0, 2))}, ` +
+    `real=${sectionLabelDrift(lookups).length}`);
 }
 
 {

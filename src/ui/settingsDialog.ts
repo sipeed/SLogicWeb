@@ -12,12 +12,14 @@ export const SETTINGS_ROW_PADDING_Y = 3;
 export const SETTINGS_PANE_GAP = 4;
 export const SETTINGS_DIALOG_NARROW_MARGIN = 16;
 
-export const SETTINGS_SECTIONS = ['appearance', 'general'] as const;
+export const SETTINGS_SECTIONS = ['appearance', 'shortcuts', 'developer', 'about'] as const;
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number];
 
 const SECTION_LABELS: Record<SettingsSectionId, MessageKey> = {
   appearance: 'settings.sections.appearance',
-  general: 'settings.sections.general',
+  shortcuts: 'settings.sections.shortcuts',
+  developer: 'settings.sections.developer',
+  about: 'settings.sections.about',
 };
 
 export function settingsSectionAfter(key: string, current: SettingsSectionId): SettingsSectionId | null {
@@ -185,10 +187,16 @@ export class SettingsDialog {
   }
 
   private paneContent(section: SettingsSectionId): HTMLElement[] {
-    if (section === 'appearance') {
-      return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];
+    switch (section) {
+      case 'appearance':
+        return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];
+      case 'shortcuts':
+        return [this.shortcutsRow()];
+      case 'developer':
+        return [this.developerToolsRow()];
+      case 'about':
+        return [this.aboutRow()];
     }
-    return [this.developerToolsRow(), this.shortcutsRow(), this.aboutRow()];
   }
 
   private onNavKey(event: KeyboardEvent): void {

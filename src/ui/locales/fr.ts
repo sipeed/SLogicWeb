@@ -852,7 +852,9 @@ export const fr: Messages = {
   'settings.theme': 'Thème',
   'settings.close': 'Fermer',
   'settings.sections.appearance': 'Apparence',
-  'settings.sections.general': 'Général',
+  'settings.sections.shortcuts': 'Raccourcis et gestes',
+  'settings.sections.developer': 'Outils développeur',
+  'settings.sections.about': 'À propos',
 
   // ----------------------------------------------------------- shortcuts
   'shortcuts.title': 'Raccourcis et gestes',
