@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Row geometry in whole device pixels.
  *

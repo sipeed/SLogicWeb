@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
@@ -251,6 +252,32 @@ function emitLicense(): Plugin {
  * dist/index.html. The portable build also bundles the decode worker and all of its
  * runtime data, so the result does not perform a neighbouring file:// import or fetch.
  */
+/**
+ * The shipped page names only Sipeed. Source files that predate Sipeed's work keep their
+ * original author's copyright line in the repository (GPL-3.0 keeps notices intact in the
+ * source; README.md credits the author). That line is dropped from what reaches the page:
+ * the index.html header comment and the Python engine files embedded as `?raw` text.
+ */
+const ORIGINAL_AUTHOR_NOTICE = /^[ \t]*(?:<!--|#|\/\/)[ \t]*Copyright \(C\) 2026 Daniel Tralamazza[ \t]*(?:-->)?[ \t]*\r?\n/gm;
+
+function pageNotices(): Plugin {
+  return {
+    name: 'slogicweb:page-notices',
+    enforce: 'pre',
+    // Owns the `?raw` load of the embedded Python (before Vite's asset plugin): by the
+    // transform hook the text is already a JS string literal with escaped newlines.
+    load(id) {
+      if (!id.endsWith('.py?raw')) return null;
+      const text = readFileSync(id.slice(0, -'?raw'.length), 'utf8');
+      return `export default ${JSON.stringify(text.replace(ORIGINAL_AUTHOR_NOTICE, ''))};`;
+    },
+    transformIndexHtml: {
+      order: 'pre',
+      handler: (html) => html.replace(ORIGINAL_AUTHOR_NOTICE, ''),
+    },
+  };
+}
+
 function inlineEntryForFileOpen(): Plugin {
   return {
     name: 'slogicweb:inline-entry-for-file-open',
@@ -370,7 +397,7 @@ function pwaShell(): Plugin {
  */
 const BANNER =
   '/*! SPDX-License-Identifier: GPL-3.0-or-later\n' +
-  ' * slogicweb - Copyright (C) 2026 Daniel Tralamazza\n' +
+  ' * slogicweb - Copyright (C) 2026 Sipeed Co., Ltd. and contributors\n' +
   ' * Free software with NO WARRANTY, under GNU GPL v3 or later.\n' +
   ' * Source: https://github.com/sipeed/slogicweb\n' +
   ' */';
@@ -425,6 +452,8 @@ export default defineConfig({
    */
   worker: {
     format: 'iife',
+    // Workers are bundled by their own pipeline: the decode worker embeds the .py engine.
+    plugins: () => [pageNotices()],
     rollupOptions: { output: { banner: BANNER } },
   },
 
@@ -469,7 +498,7 @@ export default defineConfig({
   },
 
   plugins: [
-    serveUiControlEntry(), requireRuntimeAssets(), versionRuntimeAssets(), emitLicense(),
+    pageNotices(), serveUiControlEntry(), requireRuntimeAssets(), versionRuntimeAssets(), emitLicense(),
     inlineEntryForFileOpen(), hostedWorkerFiles(), pwaShell(),
   ],
 });

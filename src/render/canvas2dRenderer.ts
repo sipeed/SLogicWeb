@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Canvas 2D fallback for `WaveformRenderer`, for browsers whose WebGL2 is missing or
  * blocked (a GPU-blocklisted Chrome, a VM without GPU pass-through, `chrome://gpu`

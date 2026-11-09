@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Deterministic self-test for the OPFS record adapter. No real OPFS, no browser, no
  * timers: structural in-memory fakes of `FileSystemDirectoryHandle` /

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /** Types for shell.mjs, so the TypeScript self-test can import the build-side module. */
 
 export interface ShellList {

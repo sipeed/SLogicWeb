@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Settings > About: app name, version and build id, the licence line and links to the
  * source, the licence text and the third-party notices (the bundled sigrok decoders).
@@ -17,7 +17,7 @@ export const LICENSE_URL = `${SOURCE_URL}/blob/main/LICENSE`;
 export const NOTICE_URL = `${SOURCE_URL}/blob/main/NOTICE.md`;
 export const APP_NAME = 'slogicweb';
 /** Not translated: a legal notice reads the same in every locale. */
-export const COPYRIGHT = '© 2026 Daniel Tralamazza';
+export const COPYRIGHT = '© 2026 Sipeed Co., Ltd.';
 
 export interface BuildIdentity {
   readonly version: string;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Build identity, injected by vite.config.ts `define`. The offline self-tests bundle
  * sources with esbuild and no define, so readers must guard with `typeof` and fall back

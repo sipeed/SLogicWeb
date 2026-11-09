@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Device capability data shared by the profile table, the link handshake and the
  * trigger compiler. This file contains types only: behaviour lives in `profile.ts`,

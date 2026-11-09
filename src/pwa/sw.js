@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /*
  * slogicweb service worker: the offline shell for the hosted build (docs/ARCHITECTURE.md
  * section 7.2). Hand-written on purpose - no workbox; the whole policy fits on a page.

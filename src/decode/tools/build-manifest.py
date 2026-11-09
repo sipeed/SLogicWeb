@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 Daniel Tralamazza
+# Copyright (C) 2026 Sipeed Co., Ltd.
 """Generate src/decode/decoders/manifest.json from a libsigrokdecode checkout.
 
 The shim is pure Python, so decoder metadata can be extracted with the host

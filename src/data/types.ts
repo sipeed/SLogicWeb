@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Public types for src/data. The SampleStore shape is fixed by docs/ARCHITECTURE.md;
  * ColumnView is left to this module to define, so it is defined here.

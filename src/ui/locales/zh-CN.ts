@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * 简体中文 catalog. `: Messages` makes tsc prove this file key-complete against
  * locales/en.ts - a missing, extra, or renamed key is a compile error.

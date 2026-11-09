@@ -4,6 +4,9 @@ slogicweb is licensed under the **GNU General Public License, version 3 or later
 (`GPL-3.0-or-later`). The full text is in [LICENSE](LICENSE); every source file carries an
 SPDX identifier.
 
+Copyright (C) 2026 Sipeed Co., Ltd. and contributors. Each source file keeps its
+authors' copyright notices, as the GPL requires.
+
 ## Why GPL, and why it is not a constraint imposed from outside
 
 An earlier version of this file flagged the copyleft question as open: the app bundles

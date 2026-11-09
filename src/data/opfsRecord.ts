@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * M1 OPFS record core (docs/ARCHITECTURE.md §4.3-§4.4): a chunked, checksummed,
  * crash-recoverable archive that is independent of the RAM retention window.

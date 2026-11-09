@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 
 import {
   MARKER_GRAB_RADIUS_CSS, MARKER_SNAP_RADIUS_CSS, clampMarkerSample, isMarkerGrab,

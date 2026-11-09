@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 // Drive src/decode/bench in real Brave (Chromium) over CDP and print the
 // numbers. Re-runnable, no devtools eyeballing.
 //

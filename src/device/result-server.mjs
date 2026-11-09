@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Tiny collector so a self-test run in the browser can be read back from the
  * terminal. Run it alongside `npx vite`:

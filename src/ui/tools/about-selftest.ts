@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Settings > About: the view model (name, version/build, licence, copyright, links), the
  * build-identity fallback, the four catalogs, the Settings entry, the modal pattern
@@ -47,7 +47,8 @@ function check(name: string, pass: boolean, detail: string): void {
     view.title === en['about.title'] && view.name === 'slogicweb' && view.subtitle === en['app.title'] &&
       view.version === 'Version 1.2.3 · build abc1234' &&
       view.license === 'GPL-3.0-or-later · no warranty' &&
-      view.copyright === '© 2026 Daniel Tralamazza' && COPYRIGHT === view.copyright &&
+      view.copyright === '© 2026 Sipeed Co., Ltd.' && COPYRIGHT === view.copyright &&
+      !JSON.stringify(view).includes('Tralamazza') &&
       view.close === en['shortcuts.close'],
     JSON.stringify(view));
   check('the About links are the source repository, its LICENSE and NOTICE.md (third-party decoders)',

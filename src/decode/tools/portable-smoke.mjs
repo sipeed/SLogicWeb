@@ -156,6 +156,9 @@ try {
         fs.existsSync(path.join(ROOT, 'dist/sw.js')) || html.includes('sw.js')) {
       throw new Error(`portable build carries the PWA shell: ${JSON.stringify(pwa)}`);
     }
+    // The page names only Sipeed; README.md carries the acknowledgement (vite.config.ts
+    // pageNotices drops the original author's source-file line from what ships).
+    if (/Daniel Tralamazza/.test(html)) throw new Error('the page still carries the original author line');
   }
   console.log(JSON.stringify({ ok: true, protocol: 'uart', byte: '0x55',
     annotations: answer.count, requests }, null, 2));

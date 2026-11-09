@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Service-worker registration and the explicit update prompt (docs/ARCHITECTURE.md
  * section 7.2; the worker itself is src/pwa/sw.js).

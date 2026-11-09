@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Display formatting for the shell: time/frequency/rate/count formatting for the
  * axis and readouts, plus the render-time formatters for structured UI state

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
+// Copyright (C) 2026 Sipeed Co., Ltd.
 
 import { carryChannelState, channelColor, defaultChannelName, defaultChannels } from '../state.js';
 import type { ChannelState } from '../state.js';
