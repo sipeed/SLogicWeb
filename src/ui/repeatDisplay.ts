@@ -51,6 +51,8 @@ export interface RepeatLayerStore {
   readonly origin: number;
   /** The wave has a trigger sample, so T is meaningful to draw. */
   readonly hasTrigger: boolean;
+  /** The wave was an analog Auto sweep forced without a trigger (never with T). */
+  readonly forced?: boolean;
 }
 
 /** A display-relative seconds interval, used for the tint calculation. */
@@ -478,7 +480,7 @@ export class RepeatCompositeStore implements SampleStore {
 }
 
 /** A Repeat wave can wait for a trigger or run trigger-free; both hold the old frame. */
-export type RepeatTriggerState = 'off' | 'waiting' | 'triggered' | 'not-found';
+export type RepeatTriggerState = 'off' | 'waiting' | 'triggered' | 'forced' | 'not-found';
 
 /**
  * Whether the previous wave should hand the plot to the current one.

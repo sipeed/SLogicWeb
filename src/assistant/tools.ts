@@ -38,7 +38,7 @@ export interface HostSnapshot {
   dropped: number;
   samplerate: number;
   channelCount: number;
-  triggerState: 'off' | 'waiting' | 'triggered' | 'not-found';
+  triggerState: 'off' | 'waiting' | 'triggered' | 'forced' | 'not-found';
   triggerSampleIndex: number | null;
   settings: CaptureSettings;
   /** Highest samplerate per capture width for the connected device. */

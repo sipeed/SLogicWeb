@@ -91,6 +91,7 @@ export const zhCN: Messages = {
   'capture.loaded': '{source} · 加载耗时 {ms} ms',
   'capture.stoppedNoTrigger': '未触发 · 保留样本数 {samples}',
   'capture.live': '设备采集 · 样本数 {samples} @ {rate} · {duration}',
+  'capture.autoForced': '自动（未触发） · 样本数 {samples} @ {rate} · {duration}',
 
   // ------------------------------------------------- interaction hints
   'hints.barLabel': '鼠标操作',
@@ -554,6 +555,8 @@ export const zhCN: Messages = {
   'capturePanel.triggerRetuneRejected': '当前采集无法启用该模拟触发（板卡或采样率限制）；将在下一次采集生效。',
   'capturePanel.triggerViewLost': '已触发，但循环窗口短于一次 USB 传输，T 在视窗锁定前已被丢弃。请增大循环时长。',
   'capturePanel.triggerNotFound': '未触发而停止；未记录任何数据。',
+  'capturePanel.triggerAutoForced': '自动（未触发）',
+  'capturePanel.triggerAutoForcedHint': '一个采集窗口内没有满足条件的模拟穿越，按示波器 Auto 模式显示最近一段数据（无 T 标记）。',
   'capturePanel.repeatMissRetry': '上一轮未找到触发条件；将在下一个间隔重试。',
   'capturePanel.recording': '正在记录 {seconds} s · 样本数 {samples} · {megabytes} MB',
   'capturePanel.dropped': '{samples} 个样本因传输丢失，已标记为间隙',

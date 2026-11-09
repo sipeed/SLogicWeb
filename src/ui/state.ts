@@ -250,7 +250,9 @@ export type CaptureLabel =
   | { kind: 'capturing'; channels: number; rate: number }
   | { kind: 'loaded'; source: string; ms: number }
   | { kind: 'stoppedNoTrigger'; samples: number }
-  | { kind: 'live'; samples: number; rate: number; seconds: number };
+  | { kind: 'live'; samples: number; rate: number; seconds: number }
+  /** An analog Auto sweep forced the capture: real data, no trigger (no T). */
+  | { kind: 'autoForced'; samples: number; rate: number; seconds: number };
 
 export type StatusDetail =
   | { kind: 'diagnostic'; diag: Diagnostic }

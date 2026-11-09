@@ -48,7 +48,9 @@ import { capturePostTriggerSamples } from './capturePolicy.js';
 import { MAX_CURSOR_DISTANCE_ROWS, type DistanceSide } from './cursorDistance.js';
 import { MAX_CURSOR_EDGE_ROWS } from './cursorEdges.js';
 import { acquisitionTimeControl } from './timeControl.js';
-import { triggerPanelNotes, triggerStatusNote, type PreTriggerFill } from './triggerStatus.js';
+import {
+  triggerPanelNotes, triggerStatusNote, type PreTriggerFill, type TriggerNoteState,
+} from './triggerStatus.js';
 import { rateAdvice } from './rateAdvice.js';
 import type { CaptureMemoryReadout } from './capturePolicy.js';
 import { rateChangeMessageKey, type RateChangeNote } from './analogRateMemory.js';
@@ -168,7 +170,7 @@ export interface CapturePanelView {
   maxSamplerateHz: Readonly<Record<number, number>>;
   /** Per-width rate the board sustains below that ceiling (`Device.recommendedSamplerateHz`). */
   recommendedSamplerateHz?: Readonly<Record<number, number>>;
-  triggerState: 'off' | 'waiting' | 'triggered' | 'not-found';
+  triggerState: TriggerNoteState;
   cursors: readonly CursorRowView[];
   cursorDistances: readonly CursorDistanceRowView[];
   cursorEdges: readonly CursorEdgeRowView[];
@@ -501,6 +503,14 @@ export class CapturePanel {
       const hit = div('panel-note live');
       hit.textContent = t('capturePanel.triggered');
       host.appendChild(hit);
+    } else if (note === 'autoForced') {
+      // The analog Auto sweep: the data on screen is real but untriggered (no T). This is
+      // neither a match nor a miss, so it is neither "live" nor an error.
+      const auto = div('panel-note');
+      const head = document.createElement('strong');
+      head.textContent = t('capturePanel.triggerAutoForced');
+      auto.append(head, ' ', t('capturePanel.triggerAutoForcedHint'));
+      host.appendChild(auto);
     } else if (note === 'notFound' && !(v.repeatMissed && v.mode === 'repeat')) {
       const miss = div('panel-note error');
       // finish() discards the rolling search prefix - nothing was recorded.

@@ -97,6 +97,7 @@ export const en = {
   'capture.loaded': '{source} · loaded in {ms} ms',
   'capture.stoppedNoTrigger': 'no trigger · {samples} samples retained',
   'capture.live': 'device capture · {samples} samples @ {rate} · {duration}',
+  'capture.autoForced': 'auto (not triggered) · {samples} samples @ {rate} · {duration}',
 
   // ------------------------------------------------- interaction hints
   'hints.barLabel': 'Mouse controls',
@@ -608,6 +609,8 @@ export const en = {
   'capturePanel.triggerRetuneRejected': 'The active capture cannot arm this analog trigger (board or sample-rate limit); it applies to the next acquisition.',
   'capturePanel.triggerViewLost': 'Triggered, but the loop window was shorter than one USB transfer, so T was dropped before the view could lock. Increase the loop duration.',
   'capturePanel.triggerNotFound': 'Stopped without a trigger; nothing was recorded.',
+  'capturePanel.triggerAutoForced': 'Auto (not triggered)',
+  'capturePanel.triggerAutoForcedHint': 'No analog crossing within one capture window, so the most recent window is shown without T, like a scope Auto sweep.',
   'capturePanel.repeatMissRetry':
     'The previous interval found no trigger; the session is retrying at the next interval.',
   'capturePanel.recording': 'Recording {seconds} s · {samples} samples · {megabytes} MB',

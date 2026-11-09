@@ -8,8 +8,19 @@
  * doing (see `fillTriggerStatus`).
  */
 
+import type { CaptureLabel } from './state.js';
+import type { TriggerReconcilePhase } from './triggerViewport.js';
+
 export type TriggerNoteMode = 'single' | 'repeat' | 'loop';
-export type TriggerNoteState = 'off' | 'waiting' | 'triggered' | 'not-found';
+/**
+ * The app's trigger state for the capture in flight (or last finished).
+ *
+ * `forced` is the analog Auto sweep (ARCHITECTURE "Analog triggers sweep in Auto, digital
+ * ones in Normal"): no qualified crossing was decided within one capture window, so the
+ * matcher captured the window at the current sample anyway. The data is real but
+ * untriggered: there is no T, and it is never a miss ("no capture"/not-found).
+ */
+export type TriggerNoteState = 'off' | 'waiting' | 'triggered' | 'forced' | 'not-found';
 
 export interface TriggerNoteInput {
   mode: TriggerNoteMode;
@@ -37,6 +48,7 @@ export type TriggerNote =
   | 'loopReleased'
   | 'loopReleasedDigital'
   | 'triggered'
+  | 'autoForced'
   | 'notFound'
   | null;
 
@@ -44,6 +56,8 @@ export type TriggerNote =
 export function triggerStatusNote(v: TriggerNoteInput): TriggerNote {
   if (v.triggerState === 'waiting') return v.triggerPreFill ? 'preFilling' : 'waiting';
   if (v.triggerState === 'not-found') return 'notFound';
+  // Shown after the capture ended too: the plot holds untriggered data and must say so.
+  if (v.triggerState === 'forced') return 'autoForced';
   if (v.triggerState !== 'triggered' || !v.running) return null;
   if (v.triggerViewLost) return 'viewLost';
   if (v.mode === 'loop') {
@@ -105,7 +119,9 @@ export function triggerPanelNotes(v: TriggerPanelNoteInput): TriggerPanelNotes {
   const deferred = v.triggerArmDeferred === true && v.running && !v.stopping &&
     !v.triggerArmed;
   return {
-    pending: v.running && !v.stopping && v.triggerState === 'triggered' &&
+    // A forced (Auto) sweep has finished searching just like a match: edits apply next.
+    pending: v.running && !v.stopping &&
+      (v.triggerState === 'triggered' || v.triggerState === 'forced') &&
       !liveAnalog && !releasedOneShot,
     arming: v.running && v.settingsArmed && !v.triggerArmed && !v.triggerAutoDisarmed &&
       !deferred,
@@ -212,4 +228,52 @@ export interface AutoArmInput {
  */
 export function autoArmDefersToNextCapture(v: AutoArmInput): boolean {
   return v.autoArms && v.running && !v.stopping && !v.captureArmed;
+}
+
+export interface AutoSweepInput {
+  mode: TriggerNoteMode;
+  /** The armed conditions are analog only (no digital condition in the plan). */
+  analogSource: boolean;
+  /** The capture window in samples: the store budget `pre + post`. */
+  captureWindowSamples: number;
+}
+
+/**
+ * The matcher's `autoAfterSamples` for this acquisition, or undefined for Normal.
+ *
+ * An analog trigger sweeps in Auto in Single and Repeat: when no qualified crossing is
+ * decided within one capture window (`pre + post` samples counted after the pre-fill
+ * holdoff) the matcher forces the capture, like an oscilloscope's Auto sweep. A digital
+ * condition stays Normal (Single waits; Repeat misses and retries). Loop is continuous:
+ * it already shows live data while unlocked, and the matcher rejects the option there.
+ *
+ * Assumption: a plan that mixes digital and analog conditions (P1 `profile.trigger.mixed`)
+ * stays Normal, because its digital condition must still be waited for; P0 never mixes.
+ */
+export function triggerAutoAfterSamples(v: AutoSweepInput): number | undefined {
+  if (v.mode === 'loop' || !v.analogSource) return undefined;
+  const n = Math.floor(v.captureWindowSamples);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
+ * The reconcile/re-anchor phase for an app trigger state. A forced (Auto) sweep is past
+ * its search exactly like a match, so edits reconcile as they would after `triggered`
+ * (pending for the next acquisition, or a disable when the trigger is turned off).
+ */
+export function triggerReconcilePhase(state: TriggerNoteState): TriggerReconcilePhase {
+  return state === 'forced' ? 'triggered' : state;
+}
+
+/**
+ * The title a finished device capture gets. A not-found Single recorded nothing; a forced
+ * (Auto) sweep holds real untriggered data and says so instead of looking triggered.
+ */
+export function finishedCaptureLabel(
+  state: TriggerNoteState, samples: number, rate: number,
+): CaptureLabel {
+  if (state === 'not-found') return { kind: 'stoppedNoTrigger', samples };
+  const seconds = rate > 0 ? samples / rate : 0;
+  if (state === 'forced') return { kind: 'autoForced', samples, rate, seconds };
+  return { kind: 'live', samples, rate, seconds };
 }

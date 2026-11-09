@@ -93,6 +93,7 @@ export const fr: Messages = {
   'capture.loaded': '{source} · chargé en {ms} ms',
   'capture.stoppedNoTrigger': 'pas de déclenchement · échantillons conservés : {samples}',
   'capture.live': 'capture de l’appareil · échantillons : {samples} @ {rate} · {duration}',
+  'capture.autoForced': 'auto (non déclenché) · échantillons : {samples} @ {rate} · {duration}',
 
   // ------------------------------------------------- interaction hints
   'hints.barLabel': 'Commandes souris',
@@ -607,6 +608,8 @@ export const fr: Messages = {
   'capturePanel.triggerRetuneRejected': 'L’acquisition en cours ne peut pas armer ce déclencheur analogique (carte ou fréquence) ; il s’appliquera à la prochaine acquisition.',
   'capturePanel.triggerViewLost': 'Déclenchement détecté, mais la fenêtre de boucle est plus courte qu’un transfert USB : T a été évincé avant le verrouillage. Augmentez la durée de boucle.',
   'capturePanel.triggerNotFound': 'Arrêté sans déclenchement ; rien n’a été enregistré.',
+  'capturePanel.triggerAutoForced': 'Auto (non déclenché)',
+  'capturePanel.triggerAutoForcedHint': 'Aucun franchissement analogique dans une fenêtre de capture : la fenêtre la plus récente est affichée sans T, comme le balayage Auto d’un oscilloscope.',
   'capturePanel.repeatMissRetry':
     'L’intervalle précédent n’a trouvé aucun déclenchement ; la session réessaiera au prochain intervalle.',
   'capturePanel.recording': 'Enregistrement {seconds} s · échantillons : {samples} · {megabytes} Mo',

@@ -93,6 +93,7 @@ export const ru: Messages = {
   'capture.loaded': '{source} · загружено за {ms} мс',
   'capture.stoppedNoTrigger': 'нет триггера · сохранено образцов: {samples}',
   'capture.live': 'захват с устройства · образцов: {samples} @ {rate} · {duration}',
+  'capture.autoForced': 'авто (без триггера) · образцов: {samples} @ {rate} · {duration}',
 
   // ------------------------------------------------- interaction hints
   'hints.barLabel': 'Управление мышью',
@@ -598,6 +599,8 @@ export const ru: Messages = {
   'capturePanel.triggerRetuneRejected': 'Текущий захват не может включить этот аналоговый триггер (плата или частота); он применится к следующему захвату.',
   'capturePanel.triggerViewLost': 'Триггер сработал, но окно цикла короче одного USB-переноса: T вытеснен до закрепления вида. Увеличьте длительность цикла.',
   'capturePanel.triggerNotFound': 'Остановлено без триггера; ничего не записано.',
+  'capturePanel.triggerAutoForced': 'Авто (без триггера)',
+  'capturePanel.triggerAutoForcedHint': 'За одно окно захвата аналоговое пересечение не найдено, поэтому показано последнее окно без метки T, как в режиме Auto осциллографа.',
   'capturePanel.repeatMissRetry':
     'В предыдущем интервале триггер не сработал; попытка повторится через интервал.',
   'capturePanel.recording': 'Запись {seconds} с · образцов: {samples} · {megabytes} МБ',

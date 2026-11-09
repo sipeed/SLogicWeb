@@ -211,7 +211,8 @@ import {
 } from './triggerViewport.js';
 import { AnalogCrossingScanner } from './analogCrossingScan.js';
 import {
-  autoArmDefersToNextCapture, preTriggerFill, preTriggerShortfall, type PreTriggerFill,
+  autoArmDefersToNextCapture, finishedCaptureLabel, preTriggerFill, preTriggerShortfall,
+  triggerAutoAfterSamples, triggerReconcilePhase, type PreTriggerFill, type TriggerNoteState,
 } from './triggerStatus.js';
 import {
   RepeatCompositeStore, remapRepeatSample, repeatHoldReleased, repeatSurfacePixels,
@@ -485,7 +486,8 @@ export class App {
   private captureRequestedSeconds: number | null = null;
   /** Why the last capture ended early; null once a capture starts or one is opened. */
   private captureAbort: CaptureAbort | null = null;
-  private triggerState: 'off' | 'waiting' | 'triggered' | 'not-found' = 'off';
+  /** `forced`: an analog Auto sweep captured one window without a trigger (no T). */
+  private triggerState: TriggerNoteState = 'off';
   /** Trigger sample position in SampleStore; the time axis labels this sample T=0. */
   private triggerSampleIndex: number | null = null;
   /** Pre-trigger percentage as a viewport fraction while a loop trigger is armed. */
@@ -506,6 +508,8 @@ export class App {
   /** Fixed per-capture trigger parameters a live retune must not change. */
   private captureTriggerBase: {
     preTriggerSamples: number; maxSamples: number; searchLimitSamples: number;
+    /** The analog Auto sweep's window (`pre + post`); undefined for Loop (continuous). */
+    autoWindowSamples?: number;
   } | null = null;
   /** The mode the capture in flight (or last finished) was started with. */
   private captureMode: CaptureSettings['mode'] = 'single';
@@ -1201,10 +1205,7 @@ export class App {
       .map((trigger) => ({
         start: trigger.start, kind: trigger.kind, level: analogCodeFromVolts(trigger.volts, trigger.gain),
       }));
-    const phase: TriggerReconcilePhase =
-      this.triggerState === 'waiting' ? 'waiting' :
-      this.triggerState === 'triggered' ? 'triggered' :
-      this.triggerState === 'not-found' ? 'not-found' : 'off';
+    const phase: TriggerReconcilePhase = triggerReconcilePhase(this.triggerState);
     const action = reconcileTrigger({
       running: this.running,
       stopping: this.stopping,
@@ -1296,6 +1297,15 @@ export class App {
       preTriggerSamples: base.preTriggerSamples,
       maxSamples: base.maxSamples,
       searchLimitSamples: base.searchLimitSamples,
+      // An analog source keeps the acquisition's Auto window; a retune to a digital
+      // source waits in Normal (same rule as the start config). Always explicit: an
+      // omitted value keeps the matcher's running deadline, so a switch from analog to
+      // digital would otherwise still force.
+      autoAfterSamples: triggerAutoAfterSamples({
+        mode: this.captureMode,
+        analogSource: analog.length > 0 && conditions.length === 0,
+        captureWindowSamples: base.autoWindowSamples ?? 0,
+      }) ?? Number.POSITIVE_INFINITY,
     });
     this.triggerRetuneRequested = applied === false;
   }
@@ -4044,7 +4054,7 @@ export class App {
     if (!front) return;
     this.waveStore = front.store;
     this.triggerSampleIndex = front.hasTrigger ? front.origin : null;
-    this.triggerState = front.hasTrigger ? 'triggered' : 'off';
+    this.triggerState = front.hasTrigger ? 'triggered' : front.forced ? 'forced' : 'off';
     this.settledHeldCapture = true;
     this.setDisplayStore(front.store);
     this.repeatShowingFront = false;
@@ -4062,10 +4072,9 @@ export class App {
     this.settleHeldRepeatWave();
     if (!this.settledHeldCapture) return;
     const captured = this.captureStore;
-    const sr = captured.samplerate;
-    this.captureLabel = {
-      kind: 'live', samples: captured.length, rate: sr, seconds: captured.length / sr,
-    };
+    // The settled wave keeps its own trigger state (a forced Auto wave stays "Auto"),
+    // so the title says the same thing as the panel.
+    this.captureLabel = finishedCaptureLabel(this.triggerState, captured.length, captured.samplerate);
   }
 
   /**
@@ -5970,12 +5979,21 @@ export class App {
       // holdoff (added to the limit): a missing trigger then reports not-found, which B1 turns into a miss + next-Interval retry. Single
       // waits indefinitely for its one trigger and Loop is unbounded.
       const triggerSearchLimit = triggerSearchSamples(mode, this.captureLimitSamples, preTriggerSamples);
+      // An analog source sweeps in Auto (Single and Repeat): after one capture window
+      // (`pre + post`, the store budget) without a qualified crossing the matcher forces
+      // the capture and reports 'forced'. Digital conditions and Loop stay Normal.
+      const autoAfterSamples = softwareTrigger ? triggerAutoAfterSamples({
+        mode,
+        analogSource: analogTriggers.length > 0 && plan.digital.length === 0,
+        captureWindowSamples: this.captureLimitSamples,
+      }) : undefined;
       // A live retune may change conditions but not these: the ring was sized here and
       // the emitted-stream budget fixes the store's stop point.
       this.captureTriggerBase = softwareTrigger ? {
         preTriggerSamples,
         maxSamples: isLoop ? Number.POSITIVE_INFINITY : this.captureLimitSamples,
         searchLimitSamples: triggerSearchLimit,
+        ...(isLoop ? {} : { autoWindowSamples: this.captureLimitSamples }),
       } : null;
       this.captureArming = true;
       await device.start(cfg, (chunk) => {
@@ -5998,10 +6016,7 @@ export class App {
           // Scan while the trigger owns the view (before placement, and while a lock is
           // active) and after a release: new edges are what take the lock again. A
           // disabled trigger never scans, so a stale condition cannot re-lock the view.
-          const phase: TriggerReconcilePhase =
-            this.triggerState === 'waiting' ? 'waiting' :
-            this.triggerState === 'triggered' ? 'triggered' :
-            this.triggerState === 'not-found' ? 'not-found' : 'off';
+          const phase: TriggerReconcilePhase = triggerReconcilePhase(this.triggerState);
           const waitingForTrigger = this.captureIsLoop && this.captureUsesSoftwareTrigger &&
             this.triggerState === 'waiting';
           const mayRelock = mayReanchor({
@@ -6126,13 +6141,14 @@ export class App {
           analog: analogTriggers.map((a) => ({
             start: a.start, kind: a.kind, level: analogCodeFromVolts(a.volts, a.gain),
           })),
-          // Qualified, never raw: arming hysteresis and a persistence window derived from
+          // Qualified, never raw: arming hysteresis and an OR-artifact window derived from
           // this capture's rate. Passed even for a digital trigger, so a live retune to an
           // analog source finds the ring already sized for it.
           ...analogTriggerQualification(cfg.samplerate),
           preTriggerSamples,
           maxSamples: isLoop ? Number.POSITIVE_INFINITY : this.captureLimitSamples,
           searchLimitSamples: triggerSearchSamples(mode, this.captureLimitSamples, preTriggerSamples),
+          ...autoSweepOption(autoAfterSamples),
         },
         onTriggerState: (state, triggerSampleIndex) => {
           // A superseded acquisition or a disarmed trigger must not pin the view.
@@ -6145,6 +6161,22 @@ export class App {
           if (state === 'not-found' && this.settledHeldCapture &&
               (this.stopping || !this.running)) return;
           this.triggerState = state;
+          if (state === 'forced') {
+            // Analog Auto sweep: the matcher captured one window at the current sample
+            // with no qualified crossing. Real data, but no T: no marker, no lock, no
+            // viewport anchor, and never a miss. The capture completes like an
+            // untriggered one (onEnd -> captureFilled).
+            this.clearTriggerSample();
+            this.captureStart = performance.now();
+            if (this.repeatSession && this.settings.mode === 'repeat') {
+              // A forced wave is a normal wave: let the hand-over show it.
+              this.repeatWaveHolding = false;
+            }
+            if (this.repeatMissed) {
+              this.repeatMissed = false;
+              this.renderPanels();
+            }
+          }
           if (state === 'triggered' && triggerSampleIndex !== undefined) {
             // The device reports the index in the emitted stream, but the sink may have
             // dropped front samples during the same transfer that produced the match.
@@ -6556,10 +6588,7 @@ export class App {
     // whole window, or a configuration change that stopped triggering), a later edge
     // re-locks automatically; the lock is a data/configuration state, not a user action.
     // A disabled trigger is the exception: it must never re-lock on a stale condition.
-    const phase: TriggerReconcilePhase =
-      this.triggerState === 'waiting' ? 'waiting' :
-      this.triggerState === 'triggered' ? 'triggered' :
-      this.triggerState === 'not-found' ? 'not-found' : 'off';
+    const phase: TriggerReconcilePhase = triggerReconcilePhase(this.triggerState);
     if (mayReanchor({
       running: this.running,
       stopping: this.stopping,
@@ -6664,9 +6693,7 @@ export class App {
     // A Single that completed while following shows the whole capture (see the rule).
     const fitsCapture = this.session !== null && !this.captureIsLoop && !this.repeatSession &&
       sweepEndFitsCapture(this.session, reason, this.viewIntent || !this.stack.followLatest);
-    this.captureLabel = this.triggerState === 'not-found'
-      ? { kind: 'stoppedNoTrigger', samples: captured.length }
-      : { kind: 'live', samples: captured.length, rate: sr, seconds: captured.length / sr };
+    this.captureLabel = finishedCaptureLabel(this.triggerState, captured.length, sr);
     if (this.repeatSession && reason === 'completed' &&
         this.settings.mode === 'repeat' && this.device !== null) {
       this.repeatTimer.schedule(this.settings.repeatIntervalSeconds, () => { void this.startCapture('repeat'); });
@@ -6688,6 +6715,7 @@ export class App {
           store: captured,
           origin: this.triggerSampleIndex ?? 0,
           hasTrigger: this.triggerSampleIndex !== null,
+          forced: this.triggerState === 'forced',
         };
         this.repeatComposite = null;
         this.repeatShowingFront = false;
@@ -7316,6 +7344,14 @@ function clampCaptureSettings(
     triggerConditions,
     preTriggerPercent: Math.max(0, Math.min(75, s.preTriggerPercent)),
   };
+}
+
+/**
+ * The matcher's analog Auto-sweep option as a spreadable fragment: absent (Normal) when
+ * `triggerAutoAfterSamples` says the acquisition does not sweep in Auto.
+ */
+function autoSweepOption(autoAfterSamples: number | undefined): { autoAfterSamples?: number } {
+  return autoAfterSamples === undefined ? {} : { autoAfterSamples };
 }
 
 /** Configuration edits describe a future capture; they must not leave the previous

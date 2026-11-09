@@ -35,6 +35,12 @@ check('waiting and not-found win over every running/armed detail',
   note({ triggerState: 'off' }) === null,
   `${note({ triggerState: 'waiting' })}, ${note({ triggerState: 'not-found' })}, ${note({ triggerState: 'off' })}`);
 
+check('a forced (Auto) sweep is its own note, never not-found, also after the capture ends',
+  note({ triggerState: 'forced' }) === 'autoForced' &&
+  note({ triggerState: 'forced', running: false }) === 'autoForced' &&
+  note({ triggerState: 'forced', mode: 'repeat' }) === 'autoForced',
+  `${note({ triggerState: 'forced' })}, ${note({ triggerState: 'forced', running: false })}`);
+
 check('a trigger match outside a running capture has no note',
   note({ running: false }) === null && note({ running: false, mode: 'loop' }) === null,
   `${note({ running: false })}, ${note({ running: false, mode: 'loop' })}`);

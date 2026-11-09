@@ -85,6 +85,12 @@ export function formatCaptureLabel(label: CaptureLabel): string {
     case 'loaded': return t('capture.loaded', { source: label.source, ms: label.ms });
     case 'stoppedNoTrigger':
       return t('capture.stoppedNoTrigger', { samples: formatCount(label.samples) });
+    case 'autoForced':
+      return t('capture.autoForced', {
+        samples: formatCount(label.samples),
+        rate: formatRate(label.rate),
+        duration: formatDuration(label.seconds),
+      });
     case 'live':
       return t('capture.live', {
         samples: formatCount(label.samples),
