@@ -193,7 +193,7 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const ids = SHORTCUTS.map((entry) => entry.id);
   check('every id appears once and every chord is claimed once across the catalogue',
     new Set(ids).size === ids.length && new Set(chords).size === chords.length &&
-    SHORTCUTS.length === 10 && chords.length === 12,
+    SHORTCUTS.length === 14 && chords.length === 16,
     `ids=${ids.join(',')}, chords=${chords.join(',')}`);
 }
 
@@ -214,7 +214,8 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const every = SHORTCUTS.map((entry) =>
     entry.chords.map((chord) => actionOf(chord) === entry.id).join(',')).join(';');
   check('actionOf resolves every catalogued chord to its own row',
-    every === 'true;true;true;true;true;true;true,true;true,true;true;true',
+    every === 'true;true;true;true;true;true;true,true;true,true;true;true;' +
+      'true;true;true;true',
     `every=${every}`);
 }
 
@@ -252,6 +253,7 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
 
 {
   const unmapped = ['', 'F ', 'Enter', 'Return', 'Add', 'Shift+F', 'Shift+ArrowLeft',
+    'Shift+1', 'Ctrl+1', 'Mod+1', 'Mod+2', 'Alt+2',
     'Ctrl+O', 'Alt+O', 'Unknown+Key'];
   const answers = unmapped.map((chord) => actionOf(chord));
   check('actionOf answers null for chords the catalogue does not own yet',
@@ -264,7 +266,7 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const counts = groups.map((group) => shortcutsIn(group).length).join(',');
   const ids = groups.flatMap((group) => shortcutsIn(group).map((entry) => entry.id));
   check('the three groups partition the catalogue without losing or repeating a row',
-    counts === '3,7,0' && new Set(ids).size === ids.length &&
+    counts === '3,7,4' && new Set(ids).size === ids.length &&
     ids.length === SHORTCUTS.length,
     `counts=${counts}, ids=${ids.join(',')}`);
 }
@@ -352,8 +354,8 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const mac: string = apple;
   check('every catalogued chord prints a non-empty distinct notation on both platforms',
     mac !== text &&
-    text === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F|Esc|+ / =|- / _|←|→' &&
-    mac === '⌘O|⌘S|⌘,|Space|F|Esc|+ / =|- / _|←|→',
+    text === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F|Esc|+ / =|- / _|←|→|1|2|3|\\' &&
+    mac === '⌘O|⌘S|⌘,|Space|F|Esc|+ / =|- / _|←|→|1|2|3|\\',
     `text=${rendered}, apple=${apple}`);
 }
 

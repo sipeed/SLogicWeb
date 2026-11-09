@@ -126,14 +126,15 @@ const body = keydownBody(appSource);
 {
   const rows = SHORTCUTS.map((entry) =>
     `${entry.id}|${entry.group}|${entry.chords.join(',')}`).join(';');
-  check('the catalogue is exactly ten rows in dispatch order with pinned groups and chords',
-    SHORTCUTS.length === 10 &&
+  check('the catalogue is exactly fourteen rows in dispatch order with pinned groups and chords',
+    SHORTCUTS.length === 14 &&
     rows === 'file.open|file|Mod+O;file.save|file|Mod+S;settings.open|file|Mod+,;' +
       'capture.toggle|view|Space;view.fit|view|F;cursors.clear|view|Escape;' +
       'view.zoomIn|view|+,=;view.zoomOut|view|-,_;view.panLeft|view|ArrowLeft;' +
-      'view.panRight|view|ArrowRight' &&
+      'view.panRight|view|ArrowRight;sidebar.capture|navigation|1;' +
+      'sidebar.cursors|navigation|2;sidebar.decoders|navigation|3;sidebar.toggle|navigation|\\' &&
     shortcutsIn('view').length === 7 && shortcutsIn('file').length === 3 &&
-    shortcutsIn('navigation').length === 0,
+    shortcutsIn('navigation').length === 4,
     `rows=${rows}`);
 }
 
@@ -141,7 +142,7 @@ const body = keydownBody(appSource);
   const shown = SHORTCUTS.map((entry) =>
     entry.chords.map((chord) => formatChord(chord, false)).join(' / ')).join('|');
   check('every reference row prints its chords through formatChord, aliases included',
-    shown === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F|Esc|+ / =|- / _|←|→',
+    shown === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F|Esc|+ / =|- / _|←|→|1|2|3|\\',
     `shown=${shown}`);
 }
 
@@ -205,8 +206,8 @@ function groupListProblem(
   const mutated = SHORTCUTS.map((entry) => ({ ...entry, chords: [...entry.chords].reverse() }))
     .map((entry) => entry.chords.map((chord) => formatChord(chord, true)).join(' / ')).join('|');
   check('control: a reordered chord list changes the rendered notation',
-    mutated !== single && single === '⌘O|⌘S|⌘,|Space|F|Esc|+ / =|- / _|←|→' &&
-    mutated === '⌘O|⌘S|⌘,|Space|F|Esc|= / +|_ / -|←|→',
+    mutated !== single && single === '⌘O|⌘S|⌘,|Space|F|Esc|+ / =|- / _|←|→|1|2|3|\\' &&
+    mutated === '⌘O|⌘S|⌘,|Space|F|Esc|= / +|_ / -|←|→|1|2|3|\\',
     `real=${single}, mutated=${mutated}`);
 }
 
@@ -224,10 +225,15 @@ function groupListProblem(
     ['_', actionOf('_')],
     ['ArrowLeft', actionOf('ArrowLeft')],
     ['ArrowRight', actionOf('ArrowRight')],
+    ['1', actionOf('1')],
+    ['2', actionOf('2')],
+    ['3', actionOf('3')],
+    ['\\', actionOf('\\')],
   ];
   const want = ['file.open', 'file.save', 'settings.open', 'capture.toggle', 'view.fit',
     'cursors.clear', 'view.zoomIn', 'view.zoomIn', 'view.zoomOut', 'view.zoomOut',
-    'view.panLeft', 'view.panRight'];
+    'view.panLeft', 'view.panRight', 'sidebar.capture', 'sidebar.cursors',
+    'sidebar.decoders', 'sidebar.toggle'];
   check('actionOf maps every live chord and alias to its id',
     mapped.every(([, id], index) => id === want[index]),
     `mapped=${mapped.map(([key, id]) => `${JSON.stringify(key)}:${String(id)}`).join(',')}`);
@@ -394,7 +400,9 @@ function groupListProblem(
       'settings.open|shortcuts.settings;' +
       'capture.toggle|toolbar.start,toolbar.stop;view.fit|toolbar.fit;' +
       'cursors.clear|shortcuts.clearCursors;view.zoomIn|shortcuts.zoomIn;' +
-      'view.zoomOut|shortcuts.zoomOut;view.panLeft|shortcuts.panLeft;view.panRight|shortcuts.panRight',
+      'view.zoomOut|shortcuts.zoomOut;view.panLeft|shortcuts.panLeft;view.panRight|shortcuts.panRight;' +
+      'sidebar.capture|shortcuts.sidebarCapture;sidebar.cursors|shortcuts.sidebarCursors;' +
+      'sidebar.decoders|shortcuts.sidebarDecoders;sidebar.toggle|shortcuts.sidebarToggle',
     `rows=${rows}`);
 }
 
@@ -456,21 +464,54 @@ function groupListProblem(
     const direct = actionOf(chord);
     if (direct !== null) return direct;
     const unshifted = chord.startsWith('Shift+') ? chord.slice('Shift+'.length) : '';
-    return guardLetters && /^[A-Z]$/.test(unshifted) ? null : actionOf(unshifted);
+    return guardLetters && /^[A-Z0-9]$/.test(unshifted) ? null : actionOf(unshifted);
   };
   const fallback = body.includes("const unshifted = chord.startsWith('Shift+') ? " +
     "chord.slice('Shift+'.length) : '';") &&
-    body.includes('actionOf(chord) ?? (/^[A-Z]$/.test(unshifted) ? null : actionOf(unshifted))') &&
+    body.includes('actionOf(chord) ?? (/^[A-Z0-9]$/.test(unshifted) ? null : actionOf(unshifted))') &&
     actionOf('F') === 'view.fit' && actionOf('ArrowLeft') === 'view.panLeft';
   const broadened = body
-    .replace('(/^[A-Z]$/.test(unshifted) ? null : actionOf(unshifted))', 'actionOf(unshifted)');
-  check('a shifted non-letter keeps its unmodified chord while a shifted letter resolves nothing',
+    .replace('(/^[A-Z0-9]$/.test(unshifted) ? null : actionOf(unshifted))', 'actionOf(unshifted)');
+  check('a shifted non-letter keeps its unmodified chord while a shifted letter or digit resolves nothing',
     fallback && broadened !== body &&
     resolve('Shift+F', false) === 'view.fit' && resolve('Shift+F', true) === null &&
+    resolve('Shift+D', true) === null &&
     resolve('Shift+ArrowLeft', true) === 'view.panLeft' &&
-    resolve('Shift+Escape', true) === 'cursors.clear',
+    resolve('Shift+Escape', true) === 'cursors.clear' &&
+    resolve('Shift+1', false) === 'sidebar.capture' && resolve('Shift+1', true) === null &&
+    resolve('Shift+2', true) === null && resolve('Shift+3', true) === null,
     `fallback=${fallback}, widened=${String(resolve('Shift+F', false))}, ` +
-    `narrowed=${String(resolve('Shift+F', true))}`);
+    `narrowed=${String(resolve('Shift+F', true))}, digit=${String(resolve('Shift+1', true))}`);
+}
+
+{
+  const shortcuts = runShortcutBody(appSource);
+  const page = (id: string, target: string): string =>
+    `      case '${id}':\n        this.applySidebar(selectSidebarPage(this.sidebar, '${target}'));\n` +
+    '        return true;\n';
+  const mapping = ['capture', 'cursors', 'decoders']
+    .map((target) => page(`sidebar.${target}`, target)).join('');
+  check('each page chord applies the one sidebar side effect the tab strip uses',
+    shortcuts.includes(mapping) &&
+    shortcuts.includes("      case 'sidebar.toggle':\n" +
+      '        if (this.sidebar.visible) this.handleCollapse();\n        else this.handleExpand();\n'),
+    `mapping=${mapping.length}, body=${shortcuts.length}`);
+}
+
+{
+  const shortcuts = runShortcutBody(appSource);
+  const directWrite = shortcuts.replace(
+    "        this.applySidebar(selectSidebarPage(this.sidebar, 'capture'));\n",
+    "        this.sidebar = { visible: true, page: 'capture', assistant: false };\n        this.renderPanels();\n");
+  const noFocus = shortcuts.replace(
+    '        if (this.sidebar.visible) this.handleCollapse();\n        else this.handleExpand();\n',
+    '        this.applySidebar(toggleSidebarVisible(this.sidebar));\n');
+  check('control: a hand-written sidebar transition or a focus-free toggle fails the same predicate',
+    directWrite !== shortcuts && noFocus !== shortcuts &&
+    !directWrite.includes("selectSidebarPage(this.sidebar, 'capture')") &&
+    directWrite.includes("this.sidebar = { visible: true") &&
+    !noFocus.includes('this.handleCollapse()') && shortcuts.includes('this.handleCollapse()'),
+    `direct=${directWrite !== shortcuts}, noFocus=${noFocus !== shortcuts}`);
 }
 
 {
@@ -497,6 +538,12 @@ const SHORTCUT_KEY_VALUES: ReadonlyArray<readonly [MessageKey, readonly [string,
     'La molette zoome (sans Ctrl)']],
   ['shortcuts.close', ['Close', '关闭', 'Закрыть', 'Fermer']],
   ['shortcuts.clearCursors', ['Clear cursors', '清除光标', 'Сбросить курсоры', 'Effacer les curseurs']],
+  ['shortcuts.sidebarCapture', ['Capture panel', '采集面板', 'Панель захвата', 'Panneau Capture']],
+  ['shortcuts.sidebarCursors', ['Cursors panel', '光标面板', 'Панель курсоров', 'Panneau Curseurs']],
+  ['shortcuts.sidebarDecoders', ['Decoders panel', '解码器面板', 'Панель декодеров',
+    'Panneau Décodeurs']],
+  ['shortcuts.sidebarToggle', ['Show or hide the sidebar', '显示或隐藏侧栏',
+    'Показать или скрыть боковую панель', 'Afficher ou masquer la barre latérale']],
 ];
 
 const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = [
@@ -527,7 +574,8 @@ const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = 
   const capture = SHORTCUTS.find((entry) => entry.id === 'capture.toggle')!;
   check('the reference action text joins the labeled catalog keys with the two-label separator',
     texts.join(' | ') === 'Open… | Save… | Settings | Capture / Stop | Fit | Clear cursors | ' +
-      'Zoom in | Zoom out | Pan left (earlier) | Pan right (later)' &&
+      'Zoom in | Zoom out | Pan left (earlier) | Pan right (later) | Capture panel | ' +
+      'Cursors panel | Decoders panel | Show or hide the sidebar' &&
     capture.labels.length === 2 && t('toolbar.start') === 'Capture',
     `texts=${texts.join(' | ')}`);
 }

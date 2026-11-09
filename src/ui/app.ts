@@ -3102,7 +3102,7 @@ export class App {
       const chord = chordOf(e);
       if (chord === null) return;
       const unshifted = chord.startsWith('Shift+') ? chord.slice('Shift+'.length) : '';
-      const id = actionOf(chord) ?? (/^[A-Z]$/.test(unshifted) ? null : actionOf(unshifted));
+      const id = actionOf(chord) ?? (/^[A-Z0-9]$/.test(unshifted) ? null : actionOf(unshifted));
       if (id === null) return;
       if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {
         if (this.runShortcut(id, e.shiftKey)) e.preventDefault();
@@ -3193,6 +3193,19 @@ export class App {
         this.channelList.closeDialog();
         this.menuStack.closeOthers(null, 'outside');
         this.settingsDialog.open(this.el.settings);
+        return true;
+      case 'sidebar.capture':
+        this.applySidebar(selectSidebarPage(this.sidebar, 'capture'));
+        return true;
+      case 'sidebar.cursors':
+        this.applySidebar(selectSidebarPage(this.sidebar, 'cursors'));
+        return true;
+      case 'sidebar.decoders':
+        this.applySidebar(selectSidebarPage(this.sidebar, 'decoders'));
+        return true;
+      case 'sidebar.toggle':
+        if (this.sidebar.visible) this.handleCollapse();
+        else this.handleExpand();
         return true;
       default: {
         const unreachable: never = id;

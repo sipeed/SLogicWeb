@@ -5,7 +5,8 @@ import { CHORD_ALIASES } from './chords.js';
 export type ShortcutId =
   | 'file.open' | 'file.save' | 'settings.open'
   | 'capture.toggle' | 'view.fit' | 'cursors.clear'
-  | 'view.zoomIn' | 'view.zoomOut' | 'view.panLeft' | 'view.panRight';
+  | 'view.zoomIn' | 'view.zoomOut' | 'view.panLeft' | 'view.panRight'
+  | 'sidebar.capture' | 'sidebar.cursors' | 'sidebar.decoders' | 'sidebar.toggle';
 
 export type ShortcutGroup = 'file' | 'view' | 'navigation';
 
@@ -46,6 +47,22 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
   { id: 'view.zoomOut', group: 'view', chords: ['-', '_'], labels: ['shortcuts.zoomOut'] },
   { id: 'view.panLeft', group: 'view', chords: ['ArrowLeft'], labels: ['shortcuts.panLeft'] },
   { id: 'view.panRight', group: 'view', chords: ['ArrowRight'], labels: ['shortcuts.panRight'] },
+  {
+    id: 'sidebar.capture', group: 'navigation', chords: ['1'],
+    labels: ['shortcuts.sidebarCapture'],
+  },
+  {
+    id: 'sidebar.cursors', group: 'navigation', chords: ['2'],
+    labels: ['shortcuts.sidebarCursors'],
+  },
+  {
+    id: 'sidebar.decoders', group: 'navigation', chords: ['3'],
+    labels: ['shortcuts.sidebarDecoders'],
+  },
+  {
+    id: 'sidebar.toggle', group: 'navigation', chords: ['\\'],
+    labels: ['shortcuts.sidebarToggle'],
+  },
 ];
 
 export const WORK_ANYWHERE: ReadonlySet<ShortcutId> = new Set(
