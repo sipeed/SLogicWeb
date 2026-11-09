@@ -542,16 +542,17 @@ type TriggerBudget =
     `level + h`, h = 4 codes. A crossing fires once per arm.
   - **OR-artifact rejection**: a *run* is the maximal stretch of consecutive samples on one
     side of a threshold (past the level for a candidate, past `level ∓ h` for an arm). A run
-    is an artifact when it is at most `W = ceil(240 ns × samplerate)` samples long (24 at
-    100 MS/s), it ends (the next sample is back on the other side), and every code `g` in
+    is an artifact when it is shorter than `W = ceil(240 ns × samplerate)` samples (at
+    most 23 at 100 MS/s; measured glitch runs are 1-14), it ends (the next sample is back
+    on the other side), and every code `g` in
     it carries every 1-bit of both neighbours and is larger than both
     (`(g & a) === a`, `(g & b) === b`, `g > max(a, b)`, with `a` the sample before the run
     and `b` the one after). The OR only ever raises a code, so it can fake a Rising
     candidate and a Falling arm; an artifact run neither fires nor arms. A run is judged
     once, from its first sample (inside a glitch run the neighbour is the glitch itself).
-    Any other run - longer than W, or with codes of any other shape - is real.
-  - **T is the first sample of the candidate run.** Deciding needs at most W samples of
-    look-ahead; the state carries across transfers (including a sample split across
+    Any other run - W samples or longer, or with codes of any other shape - is real.
+  - **T is the first sample of the candidate run.** Deciding needs at most W - 1 samples
+    of look-ahead; the state carries across transfers (including a sample split across
     transfers), gaps reset it, the matcher keeps at most W samples beyond the pre-trigger
     ring so the emitted prefix still ends at T, look-ahead samples count toward the search
     limit, and a candidate inside the pre-fill holdoff is consumed. Mixed digital + analog:
