@@ -32,14 +32,19 @@ export interface CaptureStartOptions {
    * of any device length register. Omit it - or pass 0 - for an unbounded capture.
    */
   deviceSampleLimit?: number;
-  /** `triggerSampleIndex` is present for `triggered` and refers to the emitted stream. */
+  /**
+   * `triggerSampleIndex` is present for `triggered` and refers to the emitted stream.
+   * `forced` (reported once, no index) means an Auto sweep (`softwareTrigger.
+   * autoAfterSamples`) found no qualified crossing in time and captured untriggered
+   * data instead: the capture completes like a triggered one, but has no T.
+   */
   onTriggerState?: (
-    state: 'waiting' | 'triggered' | 'not-found', triggerSampleIndex?: number,
+    state: 'waiting' | 'triggered' | 'forced' | 'not-found', triggerSampleIndex?: number,
   ) => void;
   /**
    * A bounded capture completed and all its data has been handed to the sink: the
    * host delivered `deviceSampleLimit` samples, the software trigger emitted its full
-   * budget, or a bounded trigger search ended with no match (nothing was delivered;
+   * budget (after a match or an Auto force), or a bounded trigger search ended with no match (nothing was delivered;
    * `onTriggerState` has already said `not-found`). Fired at most once per capture,
    * after the last sink call for it, and never for a capture the caller stopped
    * manually - so the caller can stop() on it without keeping a separate sample count.

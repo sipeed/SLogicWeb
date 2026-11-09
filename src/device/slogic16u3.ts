@@ -25,7 +25,7 @@ import type { CaptureConfig, CaptureStartOptions, Device, DropoutSink, SampleSin
 import { DiagnosticError } from '../diagnostics.js';
 import type { DiagnosticCode } from '../diagnostics.js';
 import { SoftwareTrigger, type SoftwareTriggerConfig } from '../data/softwareTrigger.js';
-type SoftwareTriggerState = 'waiting' | 'triggered' | 'not-found';
+type SoftwareTriggerState = 'waiting' | 'triggered' | 'forced' | 'not-found';
 import { bytesPerSampleForChannels } from '../types.js';
 import {
   AuxTransaction,
@@ -551,6 +551,8 @@ export class Slogic16U3 implements Device {
     state: SoftwareTriggerState | 'waiting', triggerSampleIndex?: number,
   ) => void) | null = null;
   private triggerNotFound = false;
+  /** `onTriggerState('forced')` was reported for this capture (once per capture). */
+  private triggerForcedReported = false;
   /** Last page-ack promise produced by the trigger's sink, returned as delivery
    *  backpressure. Without it a triggered loop (whose stream is unbounded) could run the
    *  transport ahead of the page indefinitely while its main thread stalls. */
@@ -969,6 +971,7 @@ export class Slogic16U3 implements Device {
     this.stopping = false;
     this.sampleCarry = new Uint8Array(0);
     this.triggerNotFound = false;
+    this.triggerForcedReported = false;
     this.discard = opts.discard ?? false;
     this.loopMode = opts.loop ?? false;
     this.triggerState = opts.onTriggerState ?? null;
@@ -1680,6 +1683,17 @@ export class Slogic16U3 implements Device {
   private maybeFinishTrigger(): void {
     const trigger = this.trigger;
     if (!trigger) return;
+    // An Auto sweep forced the capture (analog trigger, `autoAfterSamples`): report it
+    // once, after the forced data was handed to the sink, with no index - there is no T.
+    // It is not waiting any more, so the search-limit check below cannot also report
+    // not-found, and completion follows `stats.complete` exactly like a match.
+    if (trigger.stats.forced) {
+      if (!this.triggerForcedReported) {
+        this.triggerForcedReported = true;
+        this.triggerState?.('forced');
+      }
+      return;
+    }
     if (trigger.stats.noTrigger && !this.triggerNotFound) {
       this.triggerNotFound = true;
       this.triggerState?.('not-found');

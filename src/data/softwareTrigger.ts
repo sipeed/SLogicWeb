@@ -81,6 +81,23 @@
  * (each decides independently, within W - 1 samples of T). An analog candidate whose
  * digital part fails at T still fires (and so disarms) without a match: the slope it
  * belongs to was crossed while the gate was closed.
+ *
+ * Auto sweep (`autoAfterSamples`, one-shot only; docs/ARCHITECTURE.md "Analog triggers
+ * sweep in Auto"): a scope's Auto mode shows untriggered data rather than waiting
+ * forever. The matcher counts the samples it inspects outside the pre-fill holdoff (the
+ * count starts when the holdoff ends; a gap pauses it while the emptied ring refills the
+ * holdoff, it does not restart it; a retune keeps it). The sample F on which that count
+ * reaches `autoAfterSamples` is first evaluated like any other: a qualified fire decided
+ * on F (or earlier) wins and is an ordinary match. Otherwise the matcher **forces** at F
+ * exactly as if T were F: it emits the ring's newest `pre` samples `[F - pre, F)` and
+ * then F and the following samples up to `maxSamples`. `stats.forced` becomes true,
+ * `matched` stays false, `triggerSampleIndex` stays null and `onMatch` is not called.
+ * An analog candidate run still being judged at F (T <= F, decision due after F) is
+ * abandoned: the force does not wait for its look-ahead. F is an inspected sample, so
+ * with Repeat's search limit `pre + (pre + post)` and `autoAfterSamples = pre + post` the
+ * force lands on the last inspectable sample, before the limit could end the search as
+ * `noTrigger`. Infinity (the default) never forces: Normal mode. Continuous (Loop) mode
+ * rejects a finite value; Loop already shows live data while it is unlocked.
  */
 
 import { bytesPerSampleForChannels, isChannelCount, type ChannelCount } from '../types.js';
@@ -254,6 +271,17 @@ export interface SoftwareTriggerConfig {
    * every match, and the first match is always reported.
    */
   reportGapSamples?: number;
+  /**
+   * Auto sweep deadline (one-shot only): when no qualified fire is decided within this
+   * many samples inspected after the pre-fill holdoff, force the capture at the sample
+   * that reaches the count (module comment, "Auto sweep"). A positive integer or
+   * Infinity; default Infinity (Normal: wait as long as the search limit allows).
+   * Continuous mode throws for a finite value. `reconfigure()` adopts a given value and
+   * keeps the running one when omitted (pass Infinity to switch back to Normal); the
+   * count already made is kept, so a value at or below it forces at the next inspected
+   * sample after the holdoff.
+   */
+  autoAfterSamples?: number;
 }
 
 export interface SoftwareTriggerStats {
@@ -275,6 +303,9 @@ export interface SoftwareTriggerStats {
   scanStride: number;
   /** True after finish() when no trigger condition matched. */
   noTrigger: boolean;
+  /** True after an Auto sweep forced the capture (`autoAfterSamples`). `matched` stays
+   * false and `triggerSampleIndex` null: the data is real but untriggered. */
+  forced: boolean;
   /** Whether maxSamples has been emitted and the caller can stop the device. Never
    * sets for an unbounded (loop) trigger, whose maxSamples is Infinity. */
   complete: boolean;
@@ -482,6 +513,14 @@ function assertConfig(c: SoftwareTriggerConfig): void {
   if (c.mode !== undefined && c.mode !== 'one-shot' && c.mode !== 'continuous') {
     throw new Error(`unsupported trigger mode ${String(c.mode)}`);
   }
+  if (c.autoAfterSamples !== undefined && c.autoAfterSamples !== Number.POSITIVE_INFINITY) {
+    if (!Number.isSafeInteger(c.autoAfterSamples) || c.autoAfterSamples < 1) {
+      throw new Error(`autoAfterSamples must be a positive integer or Infinity, got ${c.autoAfterSamples}`);
+    }
+    if (c.mode === 'continuous') {
+      throw new Error('autoAfterSamples (Auto sweep) is one-shot only; continuous mode cannot force');
+    }
+  }
   if (c.reportGapSamples !== undefined &&
       (!Number.isInteger(c.reportGapSamples) || c.reportGapSamples < 0)) {
     throw new Error(`reportGapSamples must be a non-negative integer, got ${c.reportGapSamples}`);
@@ -529,6 +568,10 @@ export class SoftwareTrigger {
   readonly searchLimitSamples: number;
   /** Analog arming hysteresis in codes; updated by reconfigure(). */
   analogHysteresis: number;
+  /** Auto sweep deadline in post-holdoff inspected samples; Infinity = Normal. */
+  autoAfterSamples: number;
+  /** Samples inspected outside the pre-fill holdoff, toward `autoAfterSamples`. */
+  private autoInspected = 0;
   /** Analog OR-artifact window W in samples; fixed (it sizes the ring). */
   readonly analogArtifactSamples: number;
   /** Look-ahead samples beyond T: `max(0, W - 1)`. */
@@ -626,6 +669,7 @@ export class SoftwareTrigger {
     lastTriggerSampleIndex: null,
     scanStride: 1,
     noTrigger: false,
+    forced: false,
     complete: false,
   };
 
@@ -659,6 +703,7 @@ export class SoftwareTrigger {
     this.preTriggerSamples = this.clampPreTrigger(opts.config.preTriggerSamples);
     this.ringCapacity = this.preTriggerSamples + this.analogLookahead;
     this.searchLimitSamples = opts.config.searchLimitSamples ?? this.maxSamples + this.preTriggerSamples;
+    this.autoAfterSamples = opts.config.autoAfterSamples ?? Number.POSITIVE_INFINITY;
     this.emit = opts.emit;
     // Validate the scan-buffer cap before allocating anything, so a rejected configuration
     // cannot transiently allocate the pre-trigger ring.
@@ -681,7 +726,7 @@ export class SoftwareTrigger {
   }
 
   get waiting(): boolean {
-    return !this.statsValue.matched && !this.statsValue.noTrigger;
+    return !this.statsValue.matched && !this.statsValue.noTrigger && !this.statsValue.forced;
   }
 
   /** The retained prefix a request gets: below the output budget, and inside the byte
@@ -756,6 +801,7 @@ export class SoftwareTrigger {
     // Every field is validated before anything is written: a refused retune must not
     // partially apply (in particular, reportGapSamples must keep its old value).
     const nextReportGap = config.reportGapSamples ?? this.reportGapSamples;
+    const nextAuto = config.autoAfterSamples ?? this.autoAfterSamples;
     if (this.mode === 'continuous' && this.statsValue.matched) {
       // After the first match a tuning-only retune (`reportGapSamples`, or a scan policy
       // identical to the running one) must not restart the scan: doing so would invent a
@@ -775,6 +821,7 @@ export class SoftwareTrigger {
     this.analogHysteresis = nextHysteresis;
     this.installConditions(conditions, analog);
     this.reportGapSamples = nextReportGap;
+    this.autoAfterSamples = nextAuto;
     return true;
   }
 
@@ -966,7 +1013,8 @@ export class SoftwareTrigger {
    */
   private consumeWhole(bytes: Uint8Array): void {
     if (bytes.length === 0 || this.statsValue.complete || this.statsValue.noTrigger) return;
-    if (this.statsValue.matched) {
+    if (this.statsValue.matched || this.statsValue.forced) {
+      // A forced (Auto) capture is one-shot only, so everything after F is post output.
       if (this.mode === 'continuous') this.consumeContinuous(bytes);
       else this.emitPost(bytes);
       return;
@@ -985,7 +1033,7 @@ export class SoftwareTrigger {
    * untriggered samples are emitted: callers can expose `noTrigger` to the UI.
    */
   finish(): void {
-    if (this.statsValue.matched || this.statsValue.complete) return;
+    if (this.statsValue.matched || this.statsValue.forced || this.statsValue.complete) return;
     this.partial = new Uint8Array(0);
     this.ringStart = 0;
     this.ringCount = 0;
@@ -1059,7 +1107,8 @@ export class SoftwareTrigger {
    * (relative to `bytes`), or -1 when nothing matched.
    */
   private consumeAligned(bytes: Uint8Array): number {
-    if (this.statsValue.matched || this.statsValue.complete || this.statsValue.noTrigger) return -1;
+    if (this.statsValue.matched || this.statsValue.forced || this.statsValue.complete ||
+        this.statsValue.noTrigger) return -1;
     const total = bytes.length / this.bytesPerSample;
     if (total <= 0) return -1;
 
@@ -1098,15 +1147,30 @@ export class SoftwareTrigger {
     // A set with analog conditions takes the qualified path instead (its holdoff applies
     // to T, see consumeAlignedAnalog). The ring may be larger than the prefix (it also
     // holds the analog look-ahead samples), so the holdoff left is clamped at zero.
-    if (this.analogCompiled.length > 0) return this.consumeAlignedAnalog(bytes, scanSamples);
+    //
+    // The holdoff left is the same formula for both paths: a sample at block offset i is
+    // past the holdoff once `ringCount + i >= pre` (ringCount is exact below `pre`).
     const holdoff = Math.max(0, Math.min(scanSamples, this.preTriggerSamples - this.ringCount));
+    // Auto sweep: F is the sample on which the post-holdoff count reaches the deadline.
+    // Matching stops at F inclusive (a fire decided on F wins); past F nothing is looked at.
+    let forceAt = -1;
+    if (this.autoAfterSamples !== Number.POSITIVE_INFINITY) {
+      const left = Math.max(1, this.autoAfterSamples - this.autoInspected);
+      if (holdoff + left <= scanSamples) forceAt = holdoff + left - 1;
+    }
+    if (this.analogCompiled.length > 0) {
+      return this.consumeAlignedAnalog(bytes, scanSamples, holdoff, forceAt);
+    }
+    const end = forceAt >= 0 ? (forceAt + 1) * this.bytesPerSample : to;
     let from = 0;
     if (holdoff > 0) {
       from = holdoff * this.bytesPerSample;
       this.restorePrevious(bytes.subarray(from - this.bytesPerSample, from));
     }
-    const match = from < to ? this.findMatch(bytes, from, to) : -1;
+    const match = from < end ? this.findMatch(bytes, from, end) : -1;
     if (match >= 0) return this.acceptMatch(bytes, match, 0);
+    if (forceAt >= 0) return this.acceptForce(bytes, forceAt * this.bytesPerSample);
+    this.autoInspected += scanSamples - holdoff;
     this.statsValue.inspectedSamples += scanSamples;
     this.appendRing(bytes, 0, to);
     if (this.statsValue.inspectedSamples >= this.searchLimitSamples) this.finish();
@@ -1123,15 +1187,19 @@ export class SoftwareTrigger {
    * even when T arrived in an earlier transfer. Look-ahead samples are inspected, so a
    * decision past the search limit is never seen.
    */
-  private consumeAlignedAnalog(bytes: Uint8Array, scanSamples: number): number {
+  private consumeAlignedAnalog(
+    bytes: Uint8Array, scanSamples: number, holdoff: number, forceAt: number,
+  ): number {
     const bps = this.bytesPerSample;
     const to = scanSamples * bps;
+    // With an Auto deadline in this block the machine runs through F only.
+    const end = forceAt >= 0 ? (forceAt + 1) * bps : to;
     // Machine indices while waiting: the inspected count before this block plus the
     // sample's offset in it. Monotonic; a gap resets the machine anyway.
     const baseAbs = this.statsValue.inspectedSamples;
     let from = 0;
-    while (from < to) {
-      const decide = this.stepQualified(bytes, from, to, Number.POSITIVE_INFINITY, baseAbs);
+    while (from < end) {
+      const decide = this.stepQualified(bytes, from, end, Number.POSITIVE_INFINITY, baseAbs);
       if (decide < 0) break;
       const decideAbs = baseAbs + decide / bps;
       const lag = decideAbs - this.qualifiedT;
@@ -1146,6 +1214,8 @@ export class SoftwareTrigger {
       }
       from = decide + bps;
     }
+    if (forceAt >= 0) return this.acceptForce(bytes, forceAt * bps);
+    this.autoInspected += scanSamples - holdoff;
     this.statsValue.inspectedSamples += scanSamples;
     this.appendRing(bytes, 0, to);
     if (this.statsValue.inspectedSamples >= this.searchLimitSamples) this.finish();
@@ -1187,6 +1257,29 @@ export class SoftwareTrigger {
     // reported while scanning, before their block is emitted.
     this.reportMatch(this.statsValue.triggerSampleIndex);
     return match + bps;
+  }
+
+  /**
+   * Auto sweep: force the capture at F (`off` in `bytes`) as if T were F, with no match.
+   * Same emission as `acceptMatch` with lag 0: everything before F goes to the ring, its
+   * newest `pre` samples `[F - pre, F)` are emitted (F is past the holdoff, so the ring
+   * holds them), then F inside the budget. One-shot only, so the caller hands the rest
+   * of the block to `emitPost`. Returns the offset just past F.
+   */
+  private acceptForce(bytes: Uint8Array, off: number): number {
+    const bps = this.bytesPerSample;
+    this.statsValue.inspectedSamples += off / bps; // samples before F
+    this.appendRing(bytes, 0, off);
+    this.autoInspected = this.autoAfterSamples;
+    this.statsValue.forced = true;
+    this.emitRingNewest(this.preTriggerSamples);
+    if (this.statsValue.emittedSamples < this.maxSamples) {
+      this.emit(bytes.subarray(off, off + bps));
+      this.statsValue.emittedSamples += 1;
+    }
+    this.statsValue.inspectedSamples += 1; // F itself
+    if (this.statsValue.emittedSamples >= this.maxSamples) this.statsValue.complete = true;
+    return off + bps;
   }
 
   /* ---------------------------------------------------------------------------------

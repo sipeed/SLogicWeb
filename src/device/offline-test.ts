@@ -1496,6 +1496,75 @@ async function main(): Promise<void> {
       `bytes=${chunks.join(',')}, states=${states.join(',')}`);
   }
   {
+    // Auto sweep: an analog trigger that never crosses (A3 stays at code 10, raw 0x50)
+    // forces after one window. pre 4, post 10 (budget 14), autoAfterSamples 14 and
+    // Repeat's search limit pre + budget = 18: F = 4 + 14 - 1 = 17, so the capture is
+    // samples [13, 27). Byte 0 carries the sample number, and the transfers split
+    // samples at odd byte counts, so a misplaced or torn window cannot pass.
+    const all: number[] = [];
+    for (let i = 0; i < 40; i++) all.push(i, 0xa5, 0x5a, 0x50);
+    const fake = new FakeStreamDevice(recorded32(), [
+      { kind: 'data', bytes: all.slice(0, 7) },
+      { kind: 'data', bytes: all.slice(7, 61) },
+      { kind: 'data', bytes: all.slice(61, 69) },
+      { kind: 'data', bytes: all.slice(69, 101) },
+      { kind: 'data', bytes: all.slice(101) },
+    ], 0x3032);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    const chunks: number[] = [];
+    const states: string[] = [];
+    let ended = 0;
+    await dev.open();
+    await dev.start(
+      { channels: 32, samplerate: 100e6, thresholdVolts: 1.6 },
+      (chunk) => { chunks.push(...chunk); }, undefined,
+      {
+        tuning: { depth: 4, transferBytes: 1024 },
+        softwareTrigger: {
+          channels: 32, analog: [{ start: 24, kind: 'rising', level: 200 }],
+          preTriggerSamples: 4, maxSamples: 14, searchLimitSamples: 18, autoAfterSamples: 14,
+        },
+        onTriggerState: (state, index) =>
+          states.push(index === undefined ? state : `${state}@${index}`),
+        onEnd: () => { ended++; },
+      },
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    await dev.stop();
+    const expected = all.slice(13 * 4, 27 * 4).join(',');
+    check('32U3 analog Auto sweep reports forced once and completes with the budget',
+      chunks.join(',') === expected && states.join(',') === 'waiting,forced' && ended === 1,
+      `samples=${chunks.length / 4} first=${chunks[0]}, states=${states.join(',')}, ended=${ended}`);
+  }
+  {
+    // The same flat signal without autoAfterSamples (Normal) still ends as not-found
+    // after the search limit and delivers nothing: the old behaviour is unchanged.
+    const all: number[] = [];
+    for (let i = 0; i < 40; i++) all.push(i, 0, 0, 0x50);
+    const fake = new FakeStreamDevice(recorded32(), [{ kind: 'data', bytes: all }], 0x3032);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    let delivered = 0;
+    const states: string[] = [];
+    await dev.open();
+    await dev.start(
+      { channels: 32, samplerate: 100e6, thresholdVolts: 1.6 },
+      (chunk) => { delivered += chunk.byteLength; }, undefined,
+      {
+        tuning: { depth: 4, transferBytes: 1024 },
+        softwareTrigger: {
+          channels: 32, analog: [{ start: 24, kind: 'rising', level: 200 }],
+          preTriggerSamples: 4, maxSamples: 14, searchLimitSamples: 18,
+        },
+        onTriggerState: (state) => states.push(state),
+      },
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    await dev.stop();
+    check('32U3 analog trigger without autoAfterSamples stays Normal (not-found, no data)',
+      delivered === 0 && states.join(',') === 'waiting,not-found',
+      `bytes=${delivered}, states=${states.join(',')}`);
+  }
+  {
     // A finite capture flushes its coalesced tail and reports exactly one onEnd.
     const fake = new FakeStreamDevice(recorded32(), [], 0x3032);
     fake.autoStream = true;

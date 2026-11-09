@@ -70,7 +70,7 @@ export type FromWorker =
     }
   | ChunkMessage
   | { kind: 'dropout'; position: number; missing: number }
-  | { kind: 'trigger'; state: 'waiting' | 'triggered' | 'not-found'; index?: number }
+  | { kind: 'trigger'; state: 'waiting' | 'triggered' | 'forced' | 'not-found'; index?: number }
   /** The capture delivered everything it ever will; every chunk of it precedes this. */
   | { kind: 'ended' }
   | { kind: 'trace'; entry: TraceEntry }

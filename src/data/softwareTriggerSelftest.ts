@@ -15,6 +15,7 @@ import {
 } from './softwareTrigger.js';
 import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
 import { runQualifiedAnalogSuite } from './softwareTriggerAnalogSelftest.js';
+import { runAutoSweepSuite } from './softwareTriggerAutoSelftest.js';
 import { qualifiedFires } from './adcArtifactFixture.js';
 
 export interface SoftwareTriggerTestResult {
@@ -2615,5 +2616,6 @@ export function runSoftwareTriggerSuite(): SoftwareTriggerTestResult[] {
   results.push(...continuousResults());
   results.push(...holdoffResults());
   results.push(...runQualifiedAnalogSuite());
+  results.push(...runAutoSweepSuite());
   return results;
 }
