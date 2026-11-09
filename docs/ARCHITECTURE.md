@@ -550,7 +550,11 @@ type TriggerBudget =
     and `b` the one after). The OR only ever raises a code, so it can fake a Rising
     candidate and a Falling arm; an artifact run neither fires nor arms. A run is judged
     once, from its first sample (inside a glitch run the neighbour is the glitch itself).
-    Any other run - W samples or longer, or with codes of any other shape - is real.
+    Any other run - W samples or longer, or with codes of any other shape - is real. The
+    first sample after arming, a gap or a condition edit has no predecessor: it starts a
+    run and that run is real (so a level already past `level ∓ h` arms at once; no
+    candidate can occur there because nothing is armed yet). W of 0 or 1 turns artifact
+    rejection off (hysteresis only).
   - **T is the first sample of the candidate run.** Deciding needs at most W - 1 samples
     of look-ahead; the state carries across transfers (including a sample split across
     transfers), gaps reset it, the matcher keeps at most W samples beyond the pre-trigger
