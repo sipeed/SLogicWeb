@@ -11,6 +11,7 @@ import {
   PANEL_WIDTH_RESERVE,
   PANEL_WIDTH_STEP,
   PANEL_WIDTH_STORAGE_KEY,
+  narrowestPanelWidth,
   sanitizePanelWidth,
   setPanelWidth,
   widthFromKey,
@@ -253,6 +254,7 @@ let storageListener: StorageListener | null = null;
     clampPanelWidth(100), maxPanelWidth(400), maxPanelWidth(1000),
     widthFromKey(300, 'ArrowRight', true, 560), widthFromKey(300, 'Home', false, 560),
   ];
+  const capped = [narrowestPanelWidth(), PANEL_WIDTH_MAX];
   setPanelWidth(210);
   const grown = getPanelWidth();
   setPanelWidth(300);
@@ -269,12 +271,18 @@ let storageListener: StorageListener | null = null;
   const keptAfterIgnored = currentPanelMinWidth();
   resetPanelMinWidthForTest();
   const reset = currentPanelMinWidth();
+  publishPanelMinWidth(900);
+  const cappedWide = narrowestPanelWidth();
+  const clampedWide = clampPanelWidth(900);
+  resetPanelMinWidthForTest();
   const floorAgrees = PANEL_WIDTH_MIN === PANEL_MIN_FLOOR && PANEL_MIN_FLOOR === 200;
   check('the measured minimum raises every clamp and grows the panel, never shrinking it',
     floorAgrees && atFloor.join(',') === '200,200,200' && raised.join(',') === '260,260,560,260,260' &&
+    capped.join(',') === '260,560' && cappedWide === 560 && clampedWide === 560 &&
     grown === 260 && pushed === 360 && keptWide === 360 && neverShrinks === 400 &&
     ignored.join(',') === '300,300,300' && keptAfterIgnored === 300 && reset === 200,
-    `floorAgrees=${floorAgrees}, atFloor=${atFloor}, raised=${raised}, grown=${grown}, ` +
+    `floorAgrees=${floorAgrees}, atFloor=${atFloor}, raised=${raised}, capped=${capped}/${cappedWide}/${clampedWide}, ` +
+    `grown=${grown}, ` +
     `pushed=${pushed}, keptWide=${keptWide}, neverShrinks=${neverShrinks}, ` +
     `ignored=${ignored}, kept=${keptAfterIgnored}, reset=${reset}`);
 }
@@ -805,7 +813,7 @@ function readIndexHtml(): string {
     'onPanelWidthChange(',
     'setHidden(',
     "setAttribute('aria-valuemin'",
-    'currentPanelMinWidth()',
+    'narrowestPanelWidth()',
   ];
   const missing = needles.filter((needle) => !resizer.includes(needle));
   check('panelResizer.ts exists and wires capture, a cancellable drag, consumed keys, and the width-change subscription',

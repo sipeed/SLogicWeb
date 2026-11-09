@@ -385,6 +385,18 @@ check('bank start uses the absolute channel index',
   check('the panel measures each bank grid and the sheet reserves the measured chip width',
     markUp && sheetChips, `markup=${markUp}, sheet=${sheetChips}`);
 
+  const minSource = chipFs.readFileSync('src/ui/panelMinWidth.ts', 'utf8');
+  const liveGap = chipPanel.includes('getComputedStyle(grid).columnGap') &&
+    chipPanel.includes('Number.isFinite(gap) ? gap : undefined');
+  const fallback = chipPanel.includes('this.chipFallback = true') &&
+    chipPanel.includes("window.addEventListener('resize'") &&
+    chipPanel.includes('requestAnimationFrame(apply)');
+  const analogSkip = minSource.includes("section.querySelector('.channel-bank-grid') === null") &&
+    minSource.includes('if (grid === null || analog === null) return 0;');
+  check('the chip row reads the sheet gap, survives a missing ResizeObserver, and the minimum skips analog-only sections',
+    liveGap && fallback && analogSkip,
+    `gap=${liveGap}, fallback=${fallback}, analogSkip=${analogSkip}`);
+
   const analogBox = /\.analog-button \{[^}]*\}/.exec(chipSheet)?.[0] ?? '';
   const analogDecls = analogBox.includes('flex: 0 1 auto;') &&
     analogBox.includes('width: 52px;') && analogBox.includes('max-width: 52px;') &&

@@ -1,9 +1,8 @@
 import {
-  applyPanelWidth, clampPanelWidth, getPanelWidth, maxPanelWidth, onPanelWidthChange,
-  PANEL_WIDTH_DEFAULT, PANEL_WIDTH_MAX, PANEL_WIDTH_MIN, setPanelWidth,
+  applyPanelWidth, clampPanelWidth, getPanelWidth, maxPanelWidth, narrowestPanelWidth,
+  onPanelWidthChange, PANEL_WIDTH_DEFAULT, PANEL_WIDTH_MAX, setPanelWidth,
   widthFromKey, widthFromPointer,
 } from './panelWidth.js';
-import { currentPanelMinWidth } from './panelMinWidth.js';
 
 interface DragState {
   pointerId: number;
@@ -22,7 +21,7 @@ export class PanelResizer {
     private readonly panel: HTMLElement,
     private readonly row: HTMLElement,
   ) {
-    handle.setAttribute('aria-valuemin', String(PANEL_WIDTH_MIN));
+    handle.setAttribute('aria-valuemin', String(narrowestPanelWidth()));
     handle.setAttribute('aria-valuemax', String(PANEL_WIDTH_MAX));
     handle.addEventListener('pointerdown', this.onPointerDown);
     handle.addEventListener('pointermove', this.onPointerMove);
@@ -42,8 +41,7 @@ export class PanelResizer {
 
   private syncValue(): void {
     this.handle.setAttribute('aria-valuenow', String(getPanelWidth() ?? PANEL_WIDTH_DEFAULT));
-    this.handle.setAttribute('aria-valuemin',
-      String(Math.max(PANEL_WIDTH_MIN, currentPanelMinWidth())));
+    this.handle.setAttribute('aria-valuemin', String(narrowestPanelWidth()));
   }
 
   private currentMaxWidth(): number {

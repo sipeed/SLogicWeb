@@ -51,8 +51,12 @@ function notify(): void {
   for (const cb of listeners) cb();
 }
 
+export function narrowestPanelWidth(): number {
+  return Math.min(PANEL_WIDTH_MAX, Math.max(PANEL_WIDTH_MIN, currentPanelMinWidth()));
+}
+
 function narrowest(): number {
-  return Math.max(PANEL_WIDTH_MIN, currentPanelMinWidth());
+  return narrowestPanelWidth();
 }
 
 function upperBound(maxWidth: number): number {
