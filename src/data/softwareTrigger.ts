@@ -25,34 +25,61 @@
  * section). The ADC module's bus is sampled asynchronously to its code transitions, so
  * at a carry boundary the host reads the OR of the old and new codes for up to ~140 ns;
  * a raw "previous < level <= current" test fires a Rising condition on the falling
- * slope. Every analog condition therefore runs a small state machine:
+ * slope. Rejecting short runs by duration is wrong too: a real AM wave with a 33 MHz
+ * carrier is past the level for one or two samples per half period. Every analog
+ * condition therefore runs a small state machine on the code sequence:
  *
- *  - hysteresis `h` (`analogHysteresis`): a rising condition arms only after P
- *    consecutive codes <= `level - h` (falling: >= `level + h`, both clamped to the code
- *    range);
- *  - persistence `P` (`analogArtifactSamples`): the first armed sample at/past the level
- *    is a *candidate*; it is confirmed only when P consecutive samples, the candidate
- *    included, stay at/past the level. A sample back across the level drops the
- *    candidate and keeps the arm; confirmation disarms.
+ *  - hysteresis `h` (`analogHysteresis`): a rising condition arms only on a code
+ *    <= `level - h` (falling: >= `level + h`, both clamped to the code range), and fires
+ *    at most once per arm;
+ *  - OR-artifact rejection with window `W` (`analogArtifactSamples`): a *run* is a
+ *    maximal stretch of consecutive samples past a threshold (past the level: a
+ *    candidate run, only looked for while armed; past the arming threshold: an arm run,
+ *    only looked for while unarmed). A run is an *artifact* when it is shorter than W
+ *    samples, it ends (the next sample is back on the other side), and every code `g` in
+ *    it satisfies `(g & a) === a && (g & b) === b && g > max(a, b)`, where `a` is the
+ *    sample just before the run and `b` the one just after it. An artifact run neither
+ *    arms nor fires; any other run arms / fires at its first sample. A run is judged
+ *    once, from its first sample: a run still past on its W-th sample is real there;
+ *    otherwise its end sample `b` decides. So the decision needs at most W - 1 samples of
+ *    look-ahead past the run's start.
  *
- * The artifact only ever raises a code (the OR of two codes is >= both), so it fakes a
- * rising *candidate* and a falling *arm*: 111 -> 112 reads 127, which would arm a
- * Falling 112 trigger on the rising slope, after which the genuine codes <= 112 persist.
- * Persistence therefore applies to arming as well; with P = 1 both rules reduce to one
- * sample.
+ *    The boundary follows the reference oracle the fixtures were measured with (a run of
+ *    exactly W samples is real); docs/ARCHITECTURE.md words it as "at most W", which
+ *    differs by one sample. The measured artifacts are 1-14 samples and W is 24 at
+ *    100 MS/s, so the two readings only differ for a 24-sample OR-shaped run.
  *
- * T is the candidate sample, confirmed P - 1 samples later. To still emit exactly
- * `preTriggerSamples` before T, the waiting ring holds `preTriggerSamples + P - 1`
- * samples (bounded by MAX_ANALOG_ARTIFACT_SAMPLES); the persistence samples are inspected
- * and count toward `searchLimitSamples`. The pre-fill holdoff then applies to T: a
- * confirmation whose candidate lies inside the holdoff is consumed without a match.
- * Candidate state carries across transfers (complete samples only); a gap,
- * `resetContinuity()` or a condition edit resets it.
+ * The OR only ever raises a code, so it can fake a rising candidate (127 -> 128 reads
+ * 255) and a falling arm (111 -> 112 reads 127, which would arm a Falling 112 trigger on
+ * the rising slope); both have exactly the artifact shape. A genuine fast crossing does
+ * not: its codes do not carry every 1-bit of both neighbours.
  *
- * Mixed digital + analog: the analog part must be confirmed and every digital condition
- * must hold on T itself (its edge evaluated against T - 1). Several analog conditions
- * must all have their candidate on the same sample T. An analog candidate whose digital
- * part fails at T is still confirmed (and so disarms) without a match: the slope it
+ * Degenerate windows: W = 0 and W = 1 both judge every run real at its first sample
+ * (hysteresis only, no artifact rejection, no look-ahead; with h = 1 that is the raw
+ * crossing test). W = 2 rejects only one-sample artifacts. The app passes
+ * `ceil(240 ns * samplerate)`, 24 at 100 MS/s.
+ *
+ * Start of a stream: the first sample after arming, a gap, `resetContinuity()` or a
+ * condition edit has no predecessor. It never starts a candidate (no crossing was seen),
+ * but it may start an arm run, which is judged like any other except that its missing
+ * `a` is left out of the artifact test (only `b` is checked): a run already in progress
+ * is judged from the first sample seen, and a glitch that happens to be that first
+ * sample cannot arm.
+ *
+ * T is the first sample of the real candidate run; the deciding sample C is T + lag with
+ * 0 <= lag <= W - 1. To still emit exactly `preTriggerSamples` before T, the waiting ring
+ * holds `preTriggerSamples + max(0, W - 1)` samples (W bounded by
+ * MAX_ANALOG_ARTIFACT_SAMPLES); the
+ * look-ahead samples are inspected and count toward `searchLimitSamples`. The pre-fill
+ * holdoff applies to T: a candidate whose T lies inside the holdoff is consumed (it
+ * disarms) without a match. The run state (length, `a`, the AND and the minimum of its
+ * codes) carries across transfers and complete samples only; a gap, `resetContinuity()`
+ * or a condition edit resets it.
+ *
+ * Mixed digital + analog: every digital condition must hold on T itself (its edge
+ * evaluated against T - 1). Several analog conditions must all fire with the same T
+ * (each decides independently, within W - 1 samples of T). An analog candidate whose
+ * digital part fails at T still fires (and so disarms) without a match: the slope it
  * belongs to was crossed while the gate was closed.
  */
 
@@ -77,7 +104,7 @@ export const MAX_SOFTWARE_TRIGGER_PREFIX_BYTES = 64 * 1024 * 1024;
  */
 export const DEFAULT_ANALOG_HYSTERESIS_CODES = 4;
 /**
- * Upper bound on `analogArtifactSamples`. 240 ns at the ADC's 800 MS/s ceiling is 192
+ * Upper bound on `analogArtifactSamples` (W). 240 ns at the ADC's 800 MS/s ceiling is 192
  * samples; the bound only keeps a mistyped value from growing the waiting ring.
  */
 export const MAX_ANALOG_ARTIFACT_SAMPLES = 4096;
@@ -171,21 +198,23 @@ export interface SoftwareTriggerConfig {
    * when its budget runs out.
    */
   conditions?: readonly SoftwareTriggerCondition[];
-  /** Qualified analog crossings; T is their common candidate sample, on which the
+  /** Qualified analog crossings; T is their common real candidate sample, on which the
    * digital conditions must hold (see the module comment). */
   analog?: readonly SoftwareTriggerAnalogCondition[];
   /**
    * Analog arming hysteresis in codes, an integer 1..255; default
    * DEFAULT_ANALOG_HYSTERESIS_CODES. 1 arms on any code before the level, which with
-   * `analogArtifactSamples: 1` is the old raw crossing test. May change on `reconfigure()`
+   * `analogArtifactSamples: 1` is the raw crossing test. May change on `reconfigure()`
    * (omitted there: keep the running value).
    */
   analogHysteresis?: number;
   /**
-   * Samples an analog candidate must stay at/past the level, the candidate included,
-   * an integer 1..MAX_ANALOG_ARTIFACT_SAMPLES; default 1 (no persistence). The app passes
-   * `ceil(240 ns * samplerate)`. Fixed for a matcher, because it sizes the waiting ring:
-   * `reconfigure()` refuses a different value (omitted there: keep the running value).
+   * The OR-artifact window W in samples, an integer 0..MAX_ANALOG_ARTIFACT_SAMPLES: a run
+   * shorter than W samples of the OR-artifact shape neither arms nor fires (module
+   * comment). 0 and 1 admit no artifact. Default 1. The app passes `ceil(240 ns *
+   * samplerate)`. Fixed for a matcher, because it sizes the waiting ring (W - 1
+   * look-ahead samples): `reconfigure()` refuses a different value (omitted there: keep
+   * the running value).
    */
   analogArtifactSamples?: number;
   /** Legacy single-condition fields; retained for callers upgrading from v1. */
@@ -229,7 +258,7 @@ export interface SoftwareTriggerConfig {
 
 export interface SoftwareTriggerStats {
   /** Samples inspected while waiting, through the deciding sample if found: the trigger
-   * sample, or for an analog set the sample that confirmed it (T + P - 1). */
+   * sample, or for an analog set the sample that decided it (T .. T + W - 1). */
   inspectedSamples: number;
   /** Samples emitted to the downstream store. */
   emittedSamples: number;
@@ -280,6 +309,22 @@ interface CompiledCondition {
   bit: number;
   kind: SoftwareTriggerKind;
   level: number;
+}
+
+/** Per-condition states of the qualified analog machine (module comment). */
+const Q_UNARMED = 0;
+/** Unarmed, judging an arm run that started on its first sample. */
+const Q_ARM_RUN = 1;
+const Q_ARMED = 2;
+/** Armed, judging a candidate run; T is its first sample. */
+const Q_CAND_RUN = 3;
+
+/** Whether an ended run (fewer than W samples) has the OR-artifact shape: `and` and `min`
+ * are the AND and the minimum of its codes, `a` / `b` its neighbours. `a` < 0 (a run
+ * that began on the first sample after a reset) leaves `a` out of the test. */
+function orArtifact(a: number, b: number, and: number, min: number): boolean {
+  if ((and & b) !== b || min <= b) return false;
+  return a < 0 || ((and & a) === a && min > a);
 }
 
 interface CompiledAnalogCondition {
@@ -446,10 +491,10 @@ function assertConfig(c: SoftwareTriggerConfig): void {
     throw new Error(`analogHysteresis must be an integer code count 1..255, got ${c.analogHysteresis}`);
   }
   if (c.analogArtifactSamples !== undefined &&
-      (!Number.isInteger(c.analogArtifactSamples) || c.analogArtifactSamples < 1 ||
+      (!Number.isInteger(c.analogArtifactSamples) || c.analogArtifactSamples < 0 ||
         c.analogArtifactSamples > MAX_ANALOG_ARTIFACT_SAMPLES)) {
     throw new Error(
-      `analogArtifactSamples must be an integer 1..${MAX_ANALOG_ARTIFACT_SAMPLES}, got ${c.analogArtifactSamples}`,
+      `analogArtifactSamples must be an integer 0..${MAX_ANALOG_ARTIFACT_SAMPLES}, got ${c.analogArtifactSamples}`,
     );
   }
   normalizeScanOptions(c.scan);
@@ -484,8 +529,10 @@ export class SoftwareTrigger {
   readonly searchLimitSamples: number;
   /** Analog arming hysteresis in codes; updated by reconfigure(). */
   analogHysteresis: number;
-  /** Analog persistence in samples; fixed (it sizes the ring). */
+  /** Analog OR-artifact window W in samples; fixed (it sizes the ring). */
   readonly analogArtifactSamples: number;
+  /** Look-ahead samples beyond T: `max(0, W - 1)`. */
+  private readonly analogLookahead: number;
 
   private readonly emit: (chunk: Uint8Array) => void;
   private readonly onMatch: ((match: SoftwareTriggerMatch) => void) | null;
@@ -497,15 +544,34 @@ export class SoftwareTrigger {
   private analogCompiled!: CompiledAnalogCondition[];
   /** Per-condition channel value of the sample being evaluated; see `findMatch`. */
   private values!: Uint8Array;
-  /** Per analog condition: armed (1) or not, see the module comment. */
-  private analogArmed!: Uint8Array;
-  /** Per analog condition: samples at/past the level since the candidate, 0 = none. */
-  private analogRun!: Int32Array;
-  /** Per analog condition, while unarmed: consecutive samples past the arming
-   * threshold; the condition arms when this reaches the persistence window. */
-  private analogArmRun!: Int32Array;
-  /** Per analog condition: whether the digital conditions held on its candidate. */
-  private analogCandDigital!: Uint8Array;
+  /** Per analog condition: Q_UNARMED / Q_ARM_RUN / Q_ARMED / Q_CAND_RUN. */
+  private qState!: Uint8Array;
+  /** Per analog condition: code of the previous machine sample, -1 = none. */
+  private qPrev!: Int32Array;
+  /** Per analog condition, while a run is judged: its length, the AND and the minimum of
+   * its codes, and the code before it (-1 = none). */
+  private qRunLength!: Int32Array;
+  private qRunAnd!: Int32Array;
+  private qRunMin!: Int32Array;
+  private qRunBefore!: Int32Array;
+  /** Per analog condition: machine index of the candidate T being judged / last fired. */
+  private qCandT!: Float64Array;
+  /** Per analog condition: whether the digital conditions held on its candidate T. */
+  private qGate!: Uint8Array;
+  /**
+   * Several analog conditions: how many of them fired with T, kept in slot
+   * `T % qSlots` (`qFireTag` holds T, -1 = empty). Each condition fires a given T at most
+   * once and decides it within W - 1 samples, so with `qSlots = max(1, W)` slots a slot
+   * is never reused while its T can still gain a fire. A per-condition "last fired T"
+   * would not do: one condition may fire T and a later T' before a slower one decides T.
+   */
+  private qSlots = 1;
+  private qFireTag!: Float64Array;
+  private qFireCount!: Uint16Array;
+  /** Machine index of T for the deciding sample `stepQualified` last returned. Machine
+   * indices are `inspectedSamples`-based while waiting and emitted-stream indices after
+   * the first match (`rebaseAnalog`). */
+  private qualifiedT = 0;
   /** Per analog condition, continuous mode: armed as seen by the strided scan. */
   private coarseArmed!: Uint8Array;
   /** Continuous mode with analog conditions: the exact (stride-1) machine is running. */
@@ -515,7 +581,7 @@ export class SoftwareTrigger {
   private exactIdleAfterAbs = 0;
   /** Offset of the sample at which `stepQualified` last stopped for being idle. */
   private qualifiedStopOff = 0;
-  /** Pre-trigger ring capacity: `preTriggerSamples + analogArtifactSamples - 1`. */
+  /** Pre-trigger ring capacity: `preTriggerSamples + max(0, analogArtifactSamples - 1)`. */
   private readonly ringCapacity: number;
   private ringStart = 0;
   private ringCount = 0;
@@ -588,9 +654,10 @@ export class SoftwareTrigger {
     }
     this.analogHysteresis = opts.config.analogHysteresis ?? DEFAULT_ANALOG_HYSTERESIS_CODES;
     this.analogArtifactSamples = opts.config.analogArtifactSamples ?? 1;
+    this.analogLookahead = Math.max(0, this.analogArtifactSamples - 1);
     this.installConditions(conditions, analog);
     this.preTriggerSamples = this.clampPreTrigger(opts.config.preTriggerSamples);
-    this.ringCapacity = this.preTriggerSamples + this.analogArtifactSamples - 1;
+    this.ringCapacity = this.preTriggerSamples + this.analogLookahead;
     this.searchLimitSamples = opts.config.searchLimitSamples ?? this.maxSamples + this.preTriggerSamples;
     this.emit = opts.emit;
     // Validate the scan-buffer cap before allocating anything, so a rejected configuration
@@ -618,13 +685,13 @@ export class SoftwareTrigger {
   }
 
   /** The retained prefix a request gets: below the output budget, and inside the byte
-   * bound together with the analog persistence samples the ring also holds. */
+   * bound together with the analog look-ahead samples the ring also holds. */
   private clampPreTrigger(requested: number): number {
     return Math.min(
       requested,
       Math.max(0, this.maxSamples - 1),
       Math.max(0, Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / this.bytesPerSample) -
-        (this.analogArtifactSamples - 1)),
+        this.analogLookahead),
     );
   }
 
@@ -654,7 +721,7 @@ export class SoftwareTrigger {
       return false;
     }
     if (config.channels !== this.channels) return false;
-    // The persistence window sizes the ring like the prefix does; omitted keeps it.
+    // The artifact window sizes the ring like the prefix does; omitted keeps it.
     if (config.analogArtifactSamples !== undefined &&
         config.analogArtifactSamples !== this.analogArtifactSamples) return false;
     // The constructor clamps the requested prefix to the capture budget and the prefix
@@ -802,20 +869,49 @@ export class SoftwareTrigger {
     this.values = new Uint8Array(this.compiled.length);
     this.previous = Array.from({ length: this.channels }, () => null);
     const n = this.analogCompiled.length;
-    this.analogArmed = new Uint8Array(n);
-    this.analogRun = new Int32Array(n);
-    this.analogArmRun = new Int32Array(n);
-    this.analogCandDigital = new Uint8Array(n);
+    this.qState = new Uint8Array(n);
+    this.qPrev = new Int32Array(n).fill(-1);
+    this.qRunLength = new Int32Array(n);
+    this.qRunAnd = new Int32Array(n);
+    this.qRunMin = new Int32Array(n);
+    this.qRunBefore = new Int32Array(n).fill(-1);
+    this.qCandT = new Float64Array(n);
+    this.qGate = new Uint8Array(n);
+    this.qSlots = n > 1 ? Math.max(1, this.analogArtifactSamples) : 0;
+    this.qFireTag = new Float64Array(this.qSlots).fill(-1);
+    this.qFireCount = new Uint16Array(this.qSlots);
     this.coarseArmed = new Uint8Array(n);
   }
 
-  /** Forget every analog arm and candidate (a gap, a reset or a condition edit). */
+  /** Forget every analog arm, run and predecessor (a gap, a reset or a condition edit):
+   * the next sample starts a stream (module comment). */
   private resetAnalogState(): void {
-    this.analogArmed.fill(0);
-    this.analogRun.fill(0);
-    this.analogArmRun.fill(0);
-    this.analogCandDigital.fill(0);
+    this.qState.fill(Q_UNARMED);
+    this.qPrev.fill(-1);
+    this.qRunLength.fill(0);
+    this.qRunBefore.fill(-1);
+    this.qGate.fill(0);
+    this.qFireTag.fill(-1);
+    this.qFireCount.fill(0);
     this.coarseArmed.fill(0);
+  }
+
+  /** Move machine indices from the waiting numbering to the emitted stream's at the
+   * first continuous match (the stream after it is contiguous, so one shift is exact). */
+  private rebaseAnalog(delta: number): void {
+    for (let i = 0; i < this.qCandT.length; i++) this.qCandT[i] += delta;
+    // Open T values span fewer than `qSlots` consecutive indices, so re-slotting them
+    // cannot collide.
+    const tags = this.qFireTag.slice();
+    const counts = this.qFireCount.slice();
+    this.qFireTag.fill(-1);
+    this.qFireCount.fill(0);
+    for (let k = 0; k < tags.length; k++) {
+      if (tags[k]! < 0) continue;
+      const t = tags[k]! + delta;
+      this.qFireTag[t % this.qSlots] = t;
+      this.qFireCount[t % this.qSlots] = counts[k]!;
+    }
   }
 
   get stats(): SoftwareTriggerStats {
@@ -1001,7 +1097,7 @@ export class SoftwareTrigger {
     //
     // A set with analog conditions takes the qualified path instead (its holdoff applies
     // to T, see consumeAlignedAnalog). The ring may be larger than the prefix (it also
-    // holds the analog persistence samples), so the holdoff left is clamped at zero.
+    // holds the analog look-ahead samples), so the holdoff left is clamped at zero.
     if (this.analogCompiled.length > 0) return this.consumeAlignedAnalog(bytes, scanSamples);
     const holdoff = Math.max(0, Math.min(scanSamples, this.preTriggerSamples - this.ringCount));
     let from = 0;
@@ -1020,26 +1116,35 @@ export class SoftwareTrigger {
   /**
    * The waiting scan for a condition set with analog crossings. The qualified machine
    * runs over every inspected sample, holdoff included, so an arm or a candidate is
-   * never invented at the holdoff's end. A confirmation counts only when its candidate T
-   * has `preTriggerSamples` observed samples before it; one inside the holdoff is
-   * consumed (it disarms) and the scan continues. The ring holds `pre + P - 1` samples,
-   * so at a confirmation C it still holds [T - pre, C) even when T arrived in an earlier
-   * transfer. Persistence samples are inspected, so a confirmation past the search limit
-   * is never seen.
+   * never invented at the holdoff's end. A decision at sample C fires T = C - lag with
+   * 0 <= lag <= W - 1; it counts only when T has `preTriggerSamples` observed samples
+   * before it, and one inside the holdoff is consumed (it disarms) and the scan
+   * continues. The ring holds `pre + W - 1` samples, so at C it still holds [T - pre, C)
+   * even when T arrived in an earlier transfer. Look-ahead samples are inspected, so a
+   * decision past the search limit is never seen.
    */
   private consumeAlignedAnalog(bytes: Uint8Array, scanSamples: number): number {
     const bps = this.bytesPerSample;
     const to = scanSamples * bps;
-    const lag = this.analogArtifactSamples - 1;
-    // `ringCount` is the samples observed since the last ring reset, exact below the
-    // ring's capacity - and the capacity is exactly the `pre + lag` a match needs.
-    const need = this.preTriggerSamples + lag;
+    // Machine indices while waiting: the inspected count before this block plus the
+    // sample's offset in it. Monotonic; a gap resets the machine anyway.
+    const baseAbs = this.statsValue.inspectedSamples;
     let from = 0;
     while (from < to) {
-      const confirm = this.stepQualified(bytes, from, to, Number.POSITIVE_INFINITY);
-      if (confirm < 0) break;
-      if (this.ringCount + confirm / bps >= need) return this.acceptMatch(bytes, confirm, lag);
-      from = confirm + bps;
+      const decide = this.stepQualified(bytes, from, to, Number.POSITIVE_INFINITY, baseAbs);
+      if (decide < 0) break;
+      const decideAbs = baseAbs + decide / bps;
+      const lag = decideAbs - this.qualifiedT;
+      // `ringCount` is exact below the ring's capacity `pre + W - 1`, which already covers
+      // `pre + lag`: the samples observed before T are `ringCount + decide/bps - lag`.
+      if (this.ringCount + decide / bps - lag >= this.preTriggerSamples) {
+        if (this.mode === 'continuous') {
+          // T's emitted index will be `emittedSamples + pre`, so the decision's is `+ lag`.
+          this.rebaseAnalog(this.statsValue.emittedSamples + this.preTriggerSamples + lag - decideAbs);
+        }
+        return this.acceptMatch(bytes, decide, lag);
+      }
+      from = decide + bps;
     }
     this.statsValue.inspectedSamples += scanSamples;
     this.appendRing(bytes, 0, to);
@@ -1049,7 +1154,7 @@ export class SoftwareTrigger {
 
   /**
    * Emit the first match. `match` is the offset in `bytes` of the deciding sample C; T
-   * lies `lag` samples before it (0 for a digital set, P - 1 for an analog one).
+   * lies `lag` samples before it (0 for a digital set, 0..W - 1 for an analog one).
    * Everything before C goes to the ring first, so the ring's newest `pre + lag` samples
    * are [T - pre, C). They and C are emitted inside `maxSamples`, and T's emitted index
    * is exactly `pre`. Returns the offset just past C.
@@ -1069,7 +1174,7 @@ export class SoftwareTrigger {
     if (this.mode === 'continuous') {
       this.beginContinuousScan(bytes, match, this.statsValue.triggerSampleIndex + lag);
     }
-    // `pre <= maxSamples - 1` keeps T inside the budget; the persistence samples after
+    // `pre <= maxSamples - 1` keeps T inside the budget; the look-ahead samples after
     // it (and C) may not all fit a tiny budget.
     if (this.statsValue.emittedSamples < this.maxSamples) {
       this.emit(bytes.subarray(match, match + bps));
@@ -1094,10 +1199,10 @@ export class SoftwareTrigger {
    * ------------------------------------------------------------------------------- */
 
   /** Seed the repeated-match scan at the deciding sample (the trigger sample, or for an
-   * analog set its confirming sample; `triggerIndex` is that sample's emitted index).
+   * analog set its deciding sample; `triggerIndex` is that sample's emitted index).
    * Called before the sample is emitted, so its bytes are copied first: a sink may
-   * detach the buffer. An analog set keeps its exact machine (just confirmed, so
-   * disarmed) running until it is idle. */
+   * detach the buffer. An analog set keeps its exact machine (just fired, so disarmed,
+   * and already past the deciding sample) running until it is idle. */
   private beginContinuousScan(bytes: Uint8Array, match: number, triggerIndex: number): void {
     this.exactLive = true;
     this.exactIdleAfterAbs = triggerIndex + 1;
@@ -1270,25 +1375,22 @@ export class SoftwareTrigger {
    * one raw sample the way the digital refinement is. Two states alternate instead:
    *
    *  - exact: the machine runs at stride 1 on every sample, across blocks, and reports
-   *    each confirmed T (which may lie in an earlier, already emitted block - the index
-   *    is absolute). It runs while a candidate is pending, at stride 1, and until the
-   *    sample that made it start; once idle it hands back to the strided scan with its
-   *    arm state.
+   *    each fired T (which may lie in an earlier, already emitted block - the index is
+   *    absolute). It runs while a run is being judged, and at least until the sample that
+   *    made it start; once idle it hands back to the strided scan with its arm state.
    *  - strided: every `scanStep()`-th sample is read coarsely. The strided scan never
    *    arms by itself (one sample may be an artifact): an unarmed condition past its
-   *    arming threshold starts the exact machine at that sample, which qualifies the arm
-   *    over P samples and hands the result back. A code at/past the level while armed is
-   *    a hit: the exact machine restarts at the sample after the previous strided one
-   *    (read from the bounded history ring when that lies in an earlier block), armed,
-   *    with the digital edge state rebuilt from that previous sample.
+   *    arming threshold starts the exact machine at the sample after the previous strided
+   *    one, which judges the arm run and hands the result back. A code at/past the level
+   *    while armed is a hit: the exact machine restarts there too, armed. Either way its
+   *    previous code and the digital edge state come from the previous strided sample
+   *    (read from the bounded history ring when the restart lies in an earlier block).
    *
    * Every reported T is a crossing qualified at stride 1; the stride can only miss one.
-   * The strided scan assumes no qualified crossing hid between two strided samples, so a
-   * crossing whose P samples all lie between strided samples (P < stride) can be missed,
-   * and the arm taken from before it can then qualify a later candidate: keep the stride
-   * at or below the persistence window when that matters. Exact runs are bounded by
-   * `stride + P` samples per strided sample plus the time a candidate or an arm is
-   * pending.
+   * The strided scan assumes no arm run and no candidate run hid entirely between two
+   * strided samples, so a crossing shorter than the stride (a fast carrier) can be
+   * missed: keep the stride below the shortest run that must be caught. Exact runs are
+   * bounded by `stride + W` samples per strided sample.
    * ------------------------------------------------------------------------------- */
 
   private scanPostMatchAnalog(region: Uint8Array, baseAbs: number, count: number): void {
@@ -1311,7 +1413,7 @@ export class SoftwareTrigger {
         continue;
       }
       if (coarse === COARSE_ARM) {
-        pos = this.enterExact(baseAbs, candAbs, candAbs + this.analogArtifactSamples - 1);
+        pos = this.enterExact(baseAbs, candAbs);
         continue;
       }
       this.lastScannedSample.set(region.subarray(off, off + bps));
@@ -1323,8 +1425,8 @@ export class SoftwareTrigger {
   }
 
   /** The finite stream ends in this block: run the exact machine over whatever the
-   * strided scan left after its last sample, to the end. A candidate still pending at
-   * the end can never be confirmed. */
+   * strided scan left after its last sample, to the end. A run still being judged at
+   * the end can never be decided. */
   private drainFinalTailAnalog(region: Uint8Array, baseAbs: number, count: number): void {
     const endAbs = baseAbs + count;
     // A live machine has already run to the end. Each pass otherwise either runs to the
@@ -1358,39 +1460,46 @@ export class SoftwareTrigger {
 
   /**
    * Restart the exact machine at `lastScannedAbs + 1` for a strided sample at
-   * `candAbs`: armed as the exact machine last handed back, no candidate, digital state
-   * from the previous strided sample. It runs at least through `idleAfterAbs` - the hit
-   * sample, or for an arm `candAbs + P - 1`, since an arm needs P samples. Samples before
+   * `candAbs`: armed as the exact machine last handed back, no run pending, previous
+   * code and digital state from the previous strided sample. It runs at least through
+   * `idleAfterAbs` (the strided sample) and then while a run is judged. Samples before
    * `baseAbs` come from the history ring and are run here; the return value is where the
    * caller continues inside the block.
    */
   private enterExact(baseAbs: number, candAbs: number, idleAfterAbs = candAbs): number {
     const startAbs = this.lastScannedAbs + 1;
-    this.restorePrevious(this.hasScannedContinuity ? this.lastScannedSample : null);
-    this.analogArmed.set(this.coarseArmed);
-    this.analogRun.fill(0);
-    this.analogArmRun.fill(0);
+    this.restoreExact(this.hasScannedContinuity ? this.lastScannedSample : null);
     this.exactLive = true;
     this.exactIdleAfterAbs = idleAfterAbs;
     if (startAbs >= baseAbs) return startAbs;
     const wanted = baseAbs - startAbs;
     if (!this.historyCovers(startAbs, wanted)) {
       // Defensive, as in refineMatch: never bridge samples we do not have.
-      this.restorePrevious(null);
+      this.restoreExact(null);
       return baseAbs;
     }
     this.copyHistory(startAbs, wanted, this.refineScratch, 0);
     return Math.max(baseAbs, this.runExact(this.refineScratch, startAbs, startAbs, baseAbs));
   }
 
+  /** Exact-machine state at a strided handover: the arm the machine handed back, no
+   * run, and the previous codes / digital values of `sample` (null: none). */
+  private restoreExact(sample: Uint8Array | null): void {
+    this.restorePrevious(sample);
+    const an = this.analogCompiled;
+    for (let i = 0; i < an.length; i++) {
+      this.qState[i] = this.coarseArmed[i] === 1 ? Q_ARMED : Q_UNARMED;
+      this.qPrev[i] = sample === null ? -1 : REVERSED_BYTE[sample[an[i]!.byte]!]!;
+    }
+  }
+
   /**
    * Run the exact machine over `[fromAbs, toAbs)` of `buf`, whose first sample is
-   * `bufBaseAbs`. Reports every confirmation. Returns the sample after the one where the
+   * `bufBaseAbs`. Reports every fired T. Returns the sample after the one where the
    * machine went idle and handed back to the strided scan, or `toAbs` while still live.
    */
   private runExact(buf: Uint8Array, bufBaseAbs: number, fromAbs: number, toAbs: number): number {
     const bps = this.bytesPerSample;
-    const lag = this.analogArtifactSamples - 1;
     let abs = fromAbs;
     while (abs < toAbs) {
       // At stride 1 the machine never hands back: it is the scan.
@@ -1398,23 +1507,25 @@ export class SoftwareTrigger {
         ? (Math.max(abs, this.exactIdleAfterAbs) - bufBaseAbs) * bps
         : Number.POSITIVE_INFINITY;
       const r = this.stepQualified(
-        buf, (abs - bufBaseAbs) * bps, (toAbs - bufBaseAbs) * bps, idleFrom,
+        buf, (abs - bufBaseAbs) * bps, (toAbs - bufBaseAbs) * bps, idleFrom, bufBaseAbs,
       );
       if (r >= 0) {
-        const confirmAbs = bufBaseAbs + r / bps;
-        const exactAbs = confirmAbs - lag;
+        const decideAbs = bufBaseAbs + r / bps;
+        const exactAbs = this.qualifiedT;
         this.statsValue.matchCount += 1;
         this.statsValue.lastTriggerSampleIndex = exactAbs;
         this.reportMatch(exactAbs);
-        this.exactIdleAfterAbs = confirmAbs + 1;
-        abs = confirmAbs + 1;
+        this.exactIdleAfterAbs = decideAbs + 1;
+        abs = decideAbs + 1;
         continue;
       }
       if (r === -2) {
         const off = this.qualifiedStopOff;
         const stopAbs = bufBaseAbs + off / bps;
         this.exactLive = false;
-        this.coarseArmed.set(this.analogArmed);
+        for (let i = 0; i < this.coarseArmed.length; i++) {
+          this.coarseArmed[i] = this.qState[i] === Q_ARMED ? 1 : 0;
+        }
         this.lastScannedSample.set(buf.subarray(off, off + bps));
         this.lastScannedAbs = stopAbs;
         this.hasScannedContinuity = true;
@@ -1428,125 +1539,122 @@ export class SoftwareTrigger {
 
   /**
    * Advance the qualified analog machine (and the digital edge state) over whole samples
-   * `[from, to)` of `bytes`. Returns the offset of the sample that confirms a match (T is
-   * `analogArtifactSamples - 1` samples earlier), -1 at `to`, or -2 when, at a sample at
-   * or after `idleFrom`, no candidate is pending (`qualifiedStopOff` is that sample).
-   * See the module comment for the rule; state lives in the fields, so a call may stop
-   * and resume anywhere, including across transfers.
+   * `[from, to)` of `bytes`, whose sample at offset 0 has machine index `baseAbs`.
+   * Returns the offset of a sample that decides a match (`qualifiedT` is T, 0..W - 1
+   * samples earlier), -1 at `to`, or -2 when, at a sample at or after `idleFrom`, no run
+   * is being judged (`qualifiedStopOff` is that sample). The deciding sample is fully
+   * processed (it may already start the next arm run). See the module comment for the
+   * rule; state lives in the fields, so a call may stop and resume anywhere, including
+   * across transfers.
    */
-  private stepQualified(bytes: Uint8Array, from: number, to: number, idleFrom: number): number {
+  private stepQualified(
+    bytes: Uint8Array, from: number, to: number, idleFrom: number, baseAbs: number,
+  ): number {
     const bps = this.bytesPerSample;
-    const persist = this.analogArtifactSamples;
+    const W = this.analogArtifactSamples;
     const an = this.analogCompiled;
     const conds = this.compiled;
-    const armed = this.analogArmed;
-    const run = this.analogRun;
-    const armRun = this.analogArmRun;
     const prev = this.previous;
-    if (conds.length === 0 && an.length === 1) {
-      // The common case, one crossing with no gate, gets a tight loop of its own.
+    const st = this.qState;
+    const qp = this.qPrev;
+    const rLen = this.qRunLength;
+    const rAnd = this.qRunAnd;
+    const rMin = this.qRunMin;
+    const rBefore = this.qRunBefore;
+    const candT = this.qCandT;
+    const gates = this.qGate;
+    if (an.length === 1 && conds.length <= 1) {
+      // The common cases - one crossing, optionally gated by one digital condition - get
+      // a tight loop of their own with the state in locals.
       const a = an[0]!;
       const byte = a.byte;
       const level = a.level;
       const arm = a.arm;
       const rise = a.rise;
-      let isArmed = armed[0]!;
-      let r = run[0]!;
-      let ar = armRun[0]!;
+      const d = conds.length === 1 ? conds[0]! : null;
+      const dByte = d === null ? 0 : d.byte;
+      const dMask = d === null ? 0 : 1 << d.bit;
+      const dKind = d === null ? 'level' : d.kind;
+      const dLevel = d === null ? 0 : d.level;
+      let digital = d === null ? null : prev[d.channel] ?? null;
+      let s = st[0]!;
+      let p = qp[0]!;
+      let n = rLen[0]!;
+      let and = rAnd[0]!;
+      let mn = rMin[0]!;
+      let before = rBefore[0]!;
+      let t = candT[0]!;
+      let gate = gates[0]!;
+      let result = -1;
       for (let off = from; off < to; off += bps) {
-        const code = REVERSED_BYTE[bytes[off + byte]!]!;
-        const past = rise ? code >= level : code <= level;
-        if (r > 0) r = past ? r + 1 : 0;
-        else if (past) {
-          // Past the level is not past the arming threshold: an arm run restarts.
-          if (isArmed === 1) r = 1;
-          else ar = 0;
-        } else if (isArmed === 0) {
-          ar = (rise ? code <= arm : code >= arm) ? ar + 1 : 0;
-          if (ar >= persist) { isArmed = 1; ar = 0; }
+        let digitalOk = true;
+        if (d !== null) {
+          const bit = (bytes[off + dByte]! & dMask) === 0 ? 0 : 1;
+          digitalOk = dKind === 'level' ? bit === dLevel
+            : dKind === 'rising' ? digital === 0 && bit === 1
+              : dKind === 'falling' ? digital === 1 && bit === 0
+                : digital !== null && digital !== bit;
+          digital = bit;
         }
-        if (r >= persist) {
-          armed[0] = 0;
-          run[0] = 0;
-          armRun[0] = 0;
-          return off;
-        }
-        if (r === 0 && ar === 0 && off >= idleFrom) {
-          armed[0] = isArmed;
-          run[0] = 0;
-          armRun[0] = 0;
-          this.qualifiedStopOff = off;
-          return -2;
-        }
-      }
-      armed[0] = isArmed;
-      run[0] = r;
-      armRun[0] = ar;
-      return -1;
-    }
-    const cand = this.analogCandDigital;
-    if (conds.length === 1 && an.length === 1) {
-      // The natural mixed case - a digital gate plus an ADC crossing.
-      const d = conds[0]!;
-      const mask = 1 << d.bit;
-      const a = an[0]!;
-      const rise = a.rise;
-      let digital = prev[d.channel] ?? null;
-      let isArmed = armed[0]!;
-      let r = run[0]!;
-      let ar = armRun[0]!;
-      let gate = cand[0]!;
-      for (let off = from; off < to; off += bps) {
-        const bit = (bytes[off + d.byte]! & mask) === 0 ? 0 : 1;
-        const digitalOk = d.kind === 'level' ? bit === d.level
-          : d.kind === 'rising' ? digital === 0 && bit === 1
-            : d.kind === 'falling' ? digital === 1 && bit === 0
-              : digital !== null && digital !== bit;
-        digital = bit;
-        const code = REVERSED_BYTE[bytes[off + a.byte]!]!;
-        const past = rise ? code >= a.level : code <= a.level;
-        if (r > 0) r = past ? r + 1 : 0;
-        else if (past) {
-          if (isArmed === 1) {
-            r = 1;
-            gate = digitalOk ? 1 : 0;
+        const g = REVERSED_BYTE[bytes[off + byte]!]!;
+        const past = rise ? g >= level : g <= level;
+        const far = rise ? g <= arm : g >= arm;
+        let fired = false;
+        // Finish the run being judged: it continues, reaches W samples (real), or ends
+        // here with `g` as its after-neighbour.
+        if (s === Q_ARM_RUN) {
+          if (far) {
+            n++; and &= g; if (g < mn) mn = g;
+            if (n >= W) s = Q_ARMED;
           } else {
-            ar = 0;
+            s = orArtifact(before, g, and, mn) ? Q_UNARMED : Q_ARMED;
           }
-        } else if (isArmed === 0) {
-          ar = (rise ? code <= a.arm : code >= a.arm) ? ar + 1 : 0;
-          if (ar >= persist) { isArmed = 1; ar = 0; }
-        }
-        if (r >= persist) {
-          isArmed = 0;
-          r = 0;
-          if (gate === 1) {
-            prev[d.channel] = digital;
-            armed[0] = 0;
-            run[0] = 0;
-            armRun[0] = 0;
-            cand[0] = gate;
-            return off;
+        } else if (s === Q_CAND_RUN) {
+          if (past) {
+            n++; and &= g; if (g < mn) mn = g;
+            if (n >= W) { s = Q_UNARMED; fired = true; }
+          } else if (orArtifact(before, g, and, mn)) {
+            s = Q_ARMED;
+          } else {
+            s = Q_UNARMED; fired = true;
           }
         }
-        if (r === 0 && ar === 0 && off >= idleFrom) {
-          prev[d.channel] = digital;
-          armed[0] = isArmed;
-          run[0] = 0;
-          armRun[0] = 0;
-          cand[0] = gate;
+        // A run starting on this sample (the previous one was on the other side). A run
+        // that just ended or fired here cannot start the same kind of run on `g`.
+        // The first sample after a reset (p < 0) may start an arm run, never a candidate.
+        if (s === Q_UNARMED) {
+          if (far && !(p >= 0 && (rise ? p <= arm : p >= arm))) {
+            if (W <= 1) s = Q_ARMED;
+            else { s = Q_ARM_RUN; n = 1; and = g; mn = g; before = p; }
+          }
+        } else if (s === Q_ARMED) {
+          if (past && p >= 0 && !(rise ? p >= level : p <= level)) {
+            t = baseAbs + off / bps;
+            gate = digitalOk ? 1 : 0;
+            if (W <= 1) { s = Q_UNARMED; fired = true; }
+            else { s = Q_CAND_RUN; n = 1; and = g; mn = g; before = p; }
+          }
+        }
+        p = g;
+        if (fired && gate === 1) { result = off; break; }
+        if (off >= idleFrom && s !== Q_ARM_RUN && s !== Q_CAND_RUN) {
           this.qualifiedStopOff = off;
-          return -2;
+          result = -2;
+          break;
         }
       }
-      prev[d.channel] = digital;
-      armed[0] = isArmed;
-      run[0] = r;
-      armRun[0] = ar;
-      cand[0] = gate;
-      return -1;
+      if (d !== null) prev[d.channel] = digital;
+      st[0] = s; qp[0] = p; rLen[0] = n; rAnd[0] = and; rMin[0] = mn; rBefore[0] = before;
+      candT[0] = t; gates[0] = gate;
+      if (result >= 0) this.qualifiedT = t;
+      return result;
     }
+    // General case: several digital conditions and/or several analog crossings. Every
+    // analog condition must fire on one common T on which the digital conditions held.
     const values = this.values;
+    const fireTag = this.qFireTag;
+    const fireCount = this.qFireCount;
+    const slots = this.qSlots;
     for (let off = from; off < to; off += bps) {
       let digitalOk = true;
       for (let i = 0; i < conds.length; i++) {
@@ -1563,42 +1671,68 @@ export class SoftwareTrigger {
         }
       }
       for (let i = 0; i < conds.length; i++) prev[conds[i]!.channel] = values[i]!;
-      // Every analog condition must confirm on this sample: with equal persistence their
-      // candidates then all began on the same T, where cand[0] says the gate held.
-      let all = true;
+      const abs = baseAbs + off / bps;
+      let matchT = -1;
       let pending = false;
       for (let i = 0; i < an.length; i++) {
         const a = an[i]!;
-        const code = REVERSED_BYTE[bytes[off + a.byte]!]!;
-        const past = a.rise ? code >= a.level : code <= a.level;
-        let r = run[i]!;
-        if (r > 0) r = past ? r + 1 : 0;
-        else if (past) {
-          if (armed[i] === 1) {
-            r = 1;
-            cand[i] = digitalOk ? 1 : 0;
+        const g = REVERSED_BYTE[bytes[off + a.byte]!]!;
+        const past = a.rise ? g >= a.level : g <= a.level;
+        const far = a.rise ? g <= a.arm : g >= a.arm;
+        const p = qp[i]!;
+        let s = st[i]!;
+        let fired = false;
+        if (s === Q_ARM_RUN) {
+          if (far) {
+            rLen[i] += 1; rAnd[i] &= g; if (g < rMin[i]!) rMin[i] = g;
+            if (rLen[i]! >= W) s = Q_ARMED;
           } else {
-            armRun[i] = 0;
+            s = orArtifact(rBefore[i]!, g, rAnd[i]!, rMin[i]!) ? Q_UNARMED : Q_ARMED;
           }
-        } else if (armed[i] === 0) {
-          const ar = (a.rise ? code <= a.arm : code >= a.arm) ? armRun[i]! + 1 : 0;
-          if (ar >= persist) {
-            armed[i] = 1;
-            armRun[i] = 0;
+        } else if (s === Q_CAND_RUN) {
+          if (past) {
+            rLen[i] += 1; rAnd[i] &= g; if (g < rMin[i]!) rMin[i] = g;
+            if (rLen[i]! >= W) { s = Q_UNARMED; fired = true; }
+          } else if (orArtifact(rBefore[i]!, g, rAnd[i]!, rMin[i]!)) {
+            s = Q_ARMED;
           } else {
-            armRun[i] = ar;
+            s = Q_UNARMED; fired = true;
           }
         }
-        if (r >= persist) {
-          armed[i] = 0;
-          r = 0;
-        } else {
-          all = false;
+        if (s === Q_UNARMED) {
+          if (far && !(p >= 0 && (a.rise ? p <= a.arm : p >= a.arm))) {
+            if (W <= 1) s = Q_ARMED;
+            else { s = Q_ARM_RUN; rLen[i] = 1; rAnd[i] = g; rMin[i] = g; rBefore[i] = p; }
+          }
+        } else if (s === Q_ARMED) {
+          if (past && p >= 0 && !(a.rise ? p >= a.level : p <= a.level)) {
+            candT[i] = abs;
+            gates[i] = digitalOk ? 1 : 0;
+            if (W <= 1) { s = Q_UNARMED; fired = true; }
+            else { s = Q_CAND_RUN; rLen[i] = 1; rAnd[i] = g; rMin[i] = g; rBefore[i] = p; }
+          }
         }
-        if (r > 0 || armRun[i]! > 0) pending = true;
-        run[i] = r;
+        qp[i] = g;
+        st[i] = s;
+        if (fired) {
+          const t = candT[i]!;
+          if (an.length === 1) {
+            if (gates[i] === 1) matchT = t;
+          } else {
+            // Every condition's candidate T saw the same digital sample, so one gate
+            // stands for all of them.
+            const slot = t % slots;
+            if (fireTag[slot] !== t) { fireTag[slot] = t; fireCount[slot] = 0; }
+            fireCount[slot] += 1;
+            if (fireCount[slot] === an.length && gates[i] === 1) matchT = t;
+          }
+        }
+        if (s === Q_ARM_RUN || s === Q_CAND_RUN) pending = true;
       }
-      if (all && cand[0] === 1) return off;
+      if (matchT >= 0) {
+        this.qualifiedT = matchT;
+        return off;
+      }
       if (!pending && off >= idleFrom) {
         this.qualifiedStopOff = off;
         return -2;
@@ -1942,7 +2076,7 @@ export class SoftwareTrigger {
   /**
    * Emit the newest `want` ring samples (oldest first) inside the output budget, then
    * empty the ring. The ring holds at least `want` samples whenever a match is
-   * accepted; it may hold more (a digital match leaves the analog persistence room
+   * accepted; it may hold more (a digital match leaves the analog look-ahead room
    * unused), and those older samples are dropped. At most two copies: the span's two
    * contiguous parts. Per-sample copies would create avoidable allocation pressure for
    * a large pre-trigger window.

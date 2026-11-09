@@ -75,15 +75,17 @@
  * Analog crossings are qualified, never raw (docs/ARCHITECTURE.md trigger section). The
  * descriptor carries the two numbers every analog executor takes, with the
  * `SoftwareTriggerConfig` field names: `analogHysteresis` (h, the module's
- * `ADC_TRIGGER_HYSTERESIS_CODES` = 4 codes) and `analogArtifactSamples` (P,
- * `analogTriggerArtifactSamples(samplerate)` = ceil(240 ns * rate), 24 at 100 MS/s), both
+ * `ADC_TRIGGER_HYSTERESIS_CODES` = 4 codes) and `analogArtifactSamples` (W, the
+ * OR-artifact window, `analogTriggerArtifactSamples(samplerate)` = ceil(240 ns * rate),
+ * 24 at 100 MS/s), both
  * from `analogTriggerQualification`. They are in codes and samples, not part of the
  * plan: the plan stays in volts, and its optional volt `hysteresis` is still only set
  * when the legacy input supplies one (the legacy default is none). A digital plan
  * carries them too; a digital matcher ignores them. The `unsupported-analog-host`
  * refusal carries the compiled plan and this descriptor, so lifting the refusal once an
- * analog executor exists needs no plan change. Persistence samples are inspected
- * samples: an executor counts them toward `searchLimitSamples`, so the Repeat allowance
+ * analog executor exists needs no plan change. The up to W - 1 look-ahead samples that
+ * decide a crossing are inspected samples: an executor counts them toward
+ * `searchLimitSamples`, so the Repeat allowance
  * below needs no analog term (T must still lie inside the sweep).
  *
  * ## Assumptions
@@ -188,8 +190,8 @@ export interface CaptureHostTriggerDescriptor {
   /** Analog arming hysteresis in ADC codes (`SoftwareTriggerConfig.analogHysteresis`). */
   readonly analogHysteresis: number;
   /**
-   * Samples an analog candidate must persist, `ceil(240 ns * samplerate)`
-   * (`SoftwareTriggerConfig.analogArtifactSamples`).
+   * The analog OR-artifact window W, `ceil(240 ns * samplerate)`: a shorter run of the
+   * artifact's shape neither arms nor fires (`SoftwareTriggerConfig.analogArtifactSamples`).
    */
   readonly analogArtifactSamples: number;
 }

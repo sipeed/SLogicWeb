@@ -25,7 +25,8 @@ export interface AdcArtifactOptions {
   ditherNear?: readonly number[];
   /** Per-sample dither probability near a level; default 0.15. */
   ditherProbability?: number;
-  /** Longest artifact run; default 14 (the measured worst case at 100 MS/s). */
+  /** Longest artifact run; default 14 (the measured worst case at 100 MS/s). A run never
+   * covers the whole dwell of a code: its last sample reads the settled code. */
   maxArtifactSamples?: number;
 }
 
@@ -81,13 +82,13 @@ export function adcArtifactTrace(opts: AdcArtifactOptions): AdcArtifactTrace {
     if (old === next) continue;
     const or = old | next;
     if (or === old || or === next) continue;
-    // The first 1..longest samples of the new code read as the OR, never past the run.
-    // Dither can put carry transitions back to back; the measured artifact never ran
-    // longer than `longest` consecutive samples, so a chain is capped there too.
-    let streak = 0;
-    while (streak < i && isArtifact[i - 1 - streak] === 1) streak++;
-    const want = Math.min(1 + Math.floor(rng() * longest), longest - streak);
-    for (let k = 0; k < want && i + k < opts.length && dithered[i + k] === next; k++) {
+    // The first 1..longest samples of the new code read as the OR. The host always sees
+    // the settled code before the next transition (the measured artifact is shorter than
+    // one code's dwell), so the last sample of a dwell keeps the true code and an artifact
+    // never chains into the next one.
+    const want = 1 + Math.floor(rng() * longest);
+    for (let k = 0; k < want && i + k + 1 < opts.length && dithered[i + k] === next &&
+        dithered[i + k + 1] === next; k++) {
       codes[i + k] = or;
       isArtifact[i + k] = 1;
       artifactSamples++;
@@ -135,6 +136,68 @@ export function checkCrossings(
     }
   }
   return '';
+}
+
+/** One qualified analog fire: T and the sample whose arrival decided it. */
+export interface QualifiedFire {
+  t: number;
+  decide: number;
+}
+
+/**
+ * Reference model of the qualified analog crossing (docs/ARCHITECTURE.md, "Analog
+ * crossings are qualified, never raw"; SoftwareTrigger module comment), written over a
+ * whole code array with unlimited look-ahead, as the oracle the streaming matchers are
+ * compared against. A run is real when it reaches `w` samples or ends without the
+ * OR-artifact shape. Index 0 is the first sample after a reset: it may start an arm run
+ * (judged without `a`), never a candidate. A run whose judgement needs samples past the
+ * end is undecided and does not fire. `w` <= 1 rejects nothing.
+ */
+export function qualifiedFires(
+  codes: ArrayLike<number>, kind: 'rising' | 'falling', level: number, h: number, w: number,
+): QualifiedFire[] {
+  const rise = kind === 'rising';
+  const arm = rise ? Math.max(0, level - h) : Math.min(255, level + h);
+  const past = (g: number): boolean => (rise ? g >= level : g <= level);
+  const far = (g: number): boolean => (rise ? g <= arm : g >= arm);
+  const n = codes.length;
+  /** [real, decide] for the run starting at i, or null when undecided at the end. */
+  const judge = (i: number, inRun: (g: number) => boolean): [boolean, number] | null => {
+    if (w <= 1) return [true, i];
+    let j = i;
+    while (j < n && inRun(codes[j]!) && j - i < w) j++;
+    if (j - i >= w) return [true, i + w - 1];
+    if (j >= n) return null;
+    const a = i > 0 ? codes[i - 1]! : -1;
+    const b = codes[j]!;
+    for (let k = i; k < j; k++) {
+      const g = codes[k]!;
+      if ((g & b) !== b || g <= b || (a >= 0 && ((g & a) !== a || g <= a))) return [true, j];
+    }
+    return [false, j];
+  };
+  const fires: QualifiedFire[] = [];
+  let armed = false;
+  for (let i = 0; i < n; i++) {
+    const g = codes[i]!;
+    if (!armed) {
+      if (far(g) && (i === 0 || !far(codes[i - 1]!))) {
+        const r = judge(i, far);
+        if (r === null) break;
+        if (r[0]) armed = true;
+      }
+      continue;
+    }
+    if (i > 0 && past(g) && !past(codes[i - 1]!)) {
+      const r = judge(i, past);
+      if (r === null) break;
+      if (r[0]) {
+        fires.push({ t: i, decide: r[1] });
+        armed = false;
+      }
+    }
+  }
+  return fires;
 }
 
 /** A raw `previous < level <= current` scan, for showing that a trace is adversarial. */

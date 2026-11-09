@@ -77,9 +77,10 @@ export type TriggerBudget =
  *
  * An analog condition is always executed qualified, never raw (docs/ARCHITECTURE.md):
  * the executor arms with at least the ADC's own code hysteresis
- * (`ADC_TRIGGER_HYSTERESIS_CODES`) - a larger `hysteresis` here widens it - and confirms
- * a crossing only after `ceil(240 ns * samplerate)` samples at/past the level. The
- * persistence window is not a plan field: it follows from the executing capture's rate.
+ * (`ADC_TRIGGER_HYSTERESIS_CODES`) - a larger `hysteresis` here widens it - and rejects
+ * a crossing or an arm only when it has the shape of the bus's carry-boundary OR
+ * artifact and is shorter than W = `ceil(240 ns * samplerate)` samples. The artifact
+ * window is not a plan field: it follows from the executing capture's rate.
  */
 export type TriggerCondition =
   | { kind: 'digital'; signal: string; mode: TriggerKind; level?: 0 | 1 }

@@ -15,6 +15,7 @@ import {
 } from './softwareTrigger.js';
 import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
 import { runQualifiedAnalogSuite } from './softwareTriggerAnalogSelftest.js';
+import { qualifiedFires } from './adcArtifactFixture.js';
 
 export interface SoftwareTriggerTestResult {
   name: string;
@@ -104,11 +105,11 @@ function referenceRun(
   const bps = bytesPerSampleForChannels(channels);
   const maxSamples = config.maxSamples;
   const h = config.analogHysteresis ?? 4;
-  const persist = config.analogArtifactSamples ?? 1;
+  const w = config.analogArtifactSamples ?? 1;
   const pre = Math.min(
     config.preTriggerSamples,
     Math.max(0, maxSamples - 1),
-    Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bps) - (persist - 1),
+    Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bps) - Math.max(0, w - 1),
   );
   const limit = config.searchLimitSamples ?? maxSamples + pre;
   const conditions = config.conditions?.length
@@ -117,14 +118,31 @@ function referenceRun(
       ? [{ channel: config.channel, kind: config.kind, level: config.level }]
       : [];
   const previous: Array<number | null> = Array.from({ length: channels }, () => null);
-  // The qualified analog rule, one sample at a time (module comment of softwareTrigger):
-  // arm after `persist` samples past `level -/+ h`; a candidate is the first armed sample
-  // at/past the level; it confirms after `persist` samples at/past it, or drops (keeping
-  // the arm) on one back.
-  const armed = analog.map(() => false);
-  const armRuns = analog.map(() => 0);
-  const runs = analog.map(() => 0);
-  const candidateAt = analog.map(() => -1);
+  // The qualified analog rule (module comment of softwareTrigger) comes from the
+  // whole-array reference model `qualifiedFires`, run per condition on its own group's
+  // codes: each fire is a T and the sample that decided it. A set of analog conditions
+  // matches on a T every one of them fired, decided when the last of them decides; the
+  // per-sample walk below then sees it at that sample.
+  const firesByCondition = analog.map((a) => {
+    const codes = samples.map((sample) => analogRaw((sample >>> ((a.start >>> 3) * 8)) & 0xff));
+    return qualifiedFires(codes, a.kind, a.level, h, w);
+  });
+  const decidedAt = new Map<number, number[]>();
+  if (analog.length > 0) {
+    for (const f of firesByCondition[0]!) {
+      let decide = f.decide;
+      let all = true;
+      for (let k = 1; k < analog.length; k++) {
+        const other = firesByCondition[k]!.find((g) => g.t === f.t);
+        if (!other) { all = false; break; }
+        decide = Math.max(decide, other.decide);
+      }
+      if (!all) continue;
+      const list = decidedAt.get(decide) ?? [];
+      list.push(f.t);
+      decidedAt.set(decide, list);
+    }
+  }
   const digitalAt = new Map<number, boolean>();
   let inspected = 0;
   let trigger = -1;
@@ -144,33 +162,10 @@ function referenceRun(
     let at = i;
     if (analog.length > 0) {
       digitalAt.set(i, matched);
-      const confirmedAt: number[] = [];
-      analog.forEach((a, k) => {
-        const code = analogRaw((sample >>> ((a.start >>> 3) * 8)) & 0xff);
-        const rise = a.kind === 'rising';
-        const past = rise ? code >= a.level : code <= a.level;
-        const armAt = rise ? Math.max(0, a.level - h) : Math.min(255, a.level + h);
-        if (runs[k]! > 0) {
-          if (past) runs[k]! += 1;
-          else runs[k] = 0;
-        } else if (past) {
-          if (armed[k]) { runs[k] = 1; candidateAt[k] = i; }
-          armRuns[k] = 0;
-        } else if (!armed[k]) {
-          armRuns[k] = (rise ? code <= armAt : code >= armAt) ? armRuns[k]! + 1 : 0;
-          if (armRuns[k]! >= persist) { armed[k] = true; armRuns[k] = 0; }
-        }
-        if (runs[k]! >= persist) {
-          armed[k] = false;
-          runs[k] = 0;
-          confirmedAt.push(candidateAt[k]!);
-        }
-      });
-      // Every analog condition confirms here, on one common candidate T, and the digital
-      // conditions held on T.
-      at = confirmedAt.length === analog.length && confirmedAt.every((t) => t === confirmedAt[0])
-        ? confirmedAt[0]! : -1;
-      matched = at >= 0 && digitalAt.get(at) === true;
+      // A T decided on this sample, on which the digital conditions held, outside the
+      // holdoff (one inside it is consumed).
+      at = (decidedAt.get(i) ?? []).find((t) => digitalAt.get(t) === true && t >= pre) ?? -1;
+      matched = at >= 0;
     }
     inspected++;
     // Pre-fill holdoff: a match counts only once `pre` samples precede T.
@@ -215,7 +210,7 @@ function referenceComparison(): SoftwareTriggerTestResult[] {
     { name: 'block scanner matches the per-sample reference (unbounded loop)', kind: 'loop', cases: 45 },
     { name: 'block scanner matches the per-sample reference (streams that never match)', kind: 'none', cases: 45 },
     // Slowly walking ADC codes with OR-of-codes artifacts, random hysteresis and
-    // persistence: the qualified rule against the oracle's one-sample-at-a-time model.
+    // artifact windows 0..6: the qualified rule against the reference model.
     { name: 'block scanner matches the per-sample reference (qualified analog crossings)', kind: 'analog', cases: 240 },
   ] as const;
   const results: SoftwareTriggerTestResult[] = [];
@@ -322,10 +317,10 @@ function referenceComparison(): SoftwareTriggerTestResult[] {
       const optionalLimit = searchLimitSamples === undefined
         ? {}
         : { searchLimitSamples };
-      // The analog group draws its own hysteresis and persistence; the others keep the
-      // defaults (4 codes, one sample).
+      // The analog group draws its own hysteresis and artifact window; the others keep the
+      // defaults (4 codes, W = 1).
       const qualification = analogGroup
-        ? { analogHysteresis: 1 + Math.floor(rng() * 6), analogArtifactSamples: 1 + Math.floor(rng() * 5) }
+        ? { analogHysteresis: 1 + Math.floor(rng() * 6), analogArtifactSamples: Math.floor(rng() * 7) }
         : {};
       const config: SoftwareTriggerConfig = {
         channels,
