@@ -840,6 +840,7 @@ export const ru: Messages = {
   'settings.theme': 'Тема',
   'settings.close': 'Закрыть',
   'settings.sections.appearance': 'Внешний вид',
+  'settings.sections.general': 'Общие',
 
   // ----------------------------------------------------------- shortcuts
   'shortcuts.title': 'Клавиши и жесты',

@@ -248,19 +248,24 @@ const NAV_NEEDLES: readonly string[] = [
 {
   const keys = ['ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter', 'Tab', ' ', 'a', 'Escape'];
   const rows = keys.map((key) => ({ key, next: settingsSectionAfter(key, SECTION) }));
+  const moving = ['ArrowUp', 'ArrowDown', 'End'];
   const changed = rows.filter((row) => row.next !== null);
-  check('the shipped section table is a single section and no key resolves to a different one',
-    SETTINGS_SECTIONS.length === 1 && SECTION === 'appearance' && changed.length === 0,
+  check('the shipped section table is the appearance-then-general pair and only the roving keys that leave the first section resolve',
+    SETTINGS_SECTIONS.length === 2 && SECTION === 'appearance' && SETTINGS_SECTIONS[1] === 'general' &&
+    changed.length === moving.length &&
+    changed.every((row) => moving.includes(row.key) && row.next === 'general'),
     `sections=${JSON.stringify(SETTINGS_SECTIONS)}, changed=${JSON.stringify(changed)}`);
 }
 
 {
-  const inert = ['ArrowUp', 'ArrowDown', 'Home', 'End']
-    .every((key) => settingsSectionAfter(key, SECTION) === null);
-  check('every roving key is inert on the shipped single-section table without throwing',
-    inert && settingsSectionAfter('ArrowDown', SECTION) === null &&
-    settingsSectionAfter('', SECTION) === null,
-    `inert=${inert}`);
+  const fromGeneral = ['ArrowUp', 'ArrowDown', 'Home', 'End']
+    .map((key) => settingsSectionAfter(key, 'general'));
+  check('every roving key lands on another shipped section, wraps at either end and never throws',
+    fromGeneral[0] === 'appearance' && fromGeneral[1] === 'appearance' &&
+    fromGeneral[2] === 'appearance' && fromGeneral[3] === null &&
+    settingsSectionAfter('', 'general') === null &&
+    fromGeneral.every((next) => next === null || SETTINGS_SECTIONS.includes(next)),
+    `fromGeneral=${JSON.stringify(fromGeneral)}`);
 }
 
 {
@@ -385,12 +390,14 @@ const ACTION_ROW_NEEDLES: readonly string[] = [
 
 function paneComposition(source: string): boolean {
   const body = methodBody(source, 'private paneContent(section: SettingsSectionId): HTMLElement[] {');
-  return body.includes("return section === 'appearance' ? [this.labelsRow(), this.shortcutsRow()] : [];") &&
+  const appearanceAt = body.indexOf("if (section === 'appearance') return [this.labelsRow(), this.shortcutsRow()];");
+  const generalAt = body.indexOf('    return [];');
+  return appearanceAt >= 0 && generalAt > appearanceAt &&
     !body.includes('settings-item') && !body.includes('new SettingsMenu');
 }
 
 {
-  check('the appearance pane is exactly the display toggle row and the shortcuts row',
+  check('the appearance pane is exactly the display toggle row and the shortcuts row, and the general pane is still empty',
     paneComposition(dialogSource),
     `ok=${paneComposition(dialogSource)}, ` +
     `body=${JSON.stringify(methodBody(dialogSource, 'private paneContent(section: SettingsSectionId): HTMLElement[] {').replace(/\s+/g, ' '))}`);
@@ -398,11 +405,17 @@ function paneComposition(source: string): boolean {
 
 {
   const mutated = dialogSource.replace(
-    "return section === 'appearance' ? [this.labelsRow(), this.shortcutsRow()] : [];",
-    "return section === 'appearance' ? [this.shortcutsRow()] : [];");
-  check('control: dropping a row from the appearance pane is detected by the same composition predicate',
-    mutated !== dialogSource && !paneComposition(mutated) && paneComposition(dialogSource),
-    `mutated=${paneComposition(mutated)}, real=${paneComposition(dialogSource)}`);
+    "if (section === 'appearance') return [this.labelsRow(), this.shortcutsRow()];",
+    "if (section === 'appearance') return [this.shortcutsRow()];");
+  const filledGeneral = dialogSource.replace(
+    '    return [];',
+    '    return [this.shortcutsRow()];');
+  check('control: dropping a row from the appearance pane or filling the general pane early is detected by the same composition predicate',
+    mutated !== dialogSource && !paneComposition(mutated) &&
+    filledGeneral !== dialogSource && !paneComposition(filledGeneral) &&
+    paneComposition(dialogSource),
+    `mutated=${paneComposition(mutated)}, filled=${paneComposition(filledGeneral)}, ` +
+    `real=${paneComposition(dialogSource)}`);
 }
 
 {
@@ -574,9 +587,16 @@ function settingsHandlerOpensDialog(source: string): boolean {
 
 {
   const registrations = appSource.match(/this\.menuStack\.register\(this\.(\w+)\);/g) ?? [];
-  check('the exclusion owner holds only the language and theme menus',
-    registrations.length === 2 &&
-    registrations.join(' ') === 'this.menuStack.register(this.languageMenu); this.menuStack.register(this.themeMenu);',
+  const want = [
+    'this.menuStack.register(this.deviceMenu);',
+    'this.menuStack.register(this.languageMenu);',
+    'this.menuStack.register(this.themeMenu);',
+    'this.menuStack.register(this.saveMenu);',
+    'this.menuStack.register(this.openMenu);',
+  ];
+  check('the exclusion owner holds only the five transient menus and never the settings window',
+    registrations.length === want.length && registrations.join(' ') === want.join(' ') &&
+    !appSource.includes('menuStack.register(this.settings'),
     `registrations=${JSON.stringify(registrations)}`);
 }
 
@@ -587,8 +607,8 @@ function settingsHandlerOpensDialog(source: string): boolean {
   const guard = 'if (this.settingsDialog.isOpen) this.settingsDialog.renderStrings();';
   check('retranslate refreshes the window strings only while the window is open',
     body.includes(guard) &&
-    body.includes('if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings();') &&
-    body.indexOf('this.shortcutsDialog.renderStrings();') < body.indexOf(guard),
+    body.includes('if (this.shortcutsDialog.isOpen) this.shortcutsDialog.renderStrings(this.wheelZooms);') &&
+    body.indexOf('this.shortcutsDialog.renderStrings(this.wheelZooms);') < body.indexOf(guard),
     `guard=${body.includes(guard)}, body=${body.length}`);
 }
 
@@ -955,7 +975,7 @@ function cssRules(sheet: string): CssRule[] {
       }
     }
   };
-  walk(sheet);
+  walk(sheet.replace(/\/\*[\s\S]*?\*\//g, ' '));
   return rules;
 }
 

@@ -12,11 +12,12 @@ export const SETTINGS_ROW_PADDING_Y = 3;
 export const SETTINGS_PANE_GAP = 4;
 export const SETTINGS_DIALOG_NARROW_MARGIN = 16;
 
-export const SETTINGS_SECTIONS = ['appearance'] as const;
+export const SETTINGS_SECTIONS = ['appearance', 'general'] as const;
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number];
 
 const SECTION_LABELS: Record<SettingsSectionId, MessageKey> = {
   appearance: 'settings.sections.appearance',
+  general: 'settings.sections.general',
 };
 
 export function settingsSectionAfter(key: string, current: SettingsSectionId): SettingsSectionId | null {
@@ -171,7 +172,8 @@ export class SettingsDialog {
   }
 
   private paneContent(section: SettingsSectionId): HTMLElement[] {
-    return section === 'appearance' ? [this.labelsRow(), this.shortcutsRow()] : [];
+    if (section === 'appearance') return [this.labelsRow(), this.shortcutsRow()];
+    return [];
   }
 
   private onNavKey(event: KeyboardEvent): void {
