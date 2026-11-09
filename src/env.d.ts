@@ -3,7 +3,7 @@
 /**
  * Build identity, injected by vite.config.ts `define`. The offline self-tests bundle
  * sources with esbuild and no define, so readers must guard with `typeof` and fall back
- * to 'dev' (src/ui/aboutDialog.ts buildIdentity()).
+ * to 'dev' (src/ui/about.ts buildIdentity()).
  */
 declare const __APP_VERSION__: string;
 declare const __GIT_HASH__: string;

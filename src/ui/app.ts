@@ -132,7 +132,6 @@ import {
   fitWheelAction, wheelAction, wheelDeltaPixels, type WheelAction, type WheelModifiers,
 } from './wheelGesture.js';
 import { cornerView, cornerViewEqual, type CornerView } from './cornerCell.js';
-import { AboutDialog } from './aboutDialog.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
 import { TOUCH_TARGET_PX } from './presenters.js';
 import {
@@ -387,7 +386,6 @@ export class App {
   private unloadGuard: ((event: BeforeUnloadEvent) => void) | null = null;
   /** Info about the file just opened (e.g. probes an old .sr could not carry); null when none. */
   private fileNotice: { key: MessageKey; vars?: MessageVars } | null = null;
-  private readonly aboutDialog: AboutDialog;
   private detailedLabels = true;
   /** "Wheel zooms without Ctrl" (PulseView habit); persisted with the workspace. */
   private wheelZooms = false;
@@ -725,10 +723,6 @@ export class App {
       setHideIdle: (on) => this.setHideIdle(on),
       developerTools: () => this.developerTools,
       setDeveloperTools: (on) => this.setDeveloperTools(on),
-      openAbout: (invoker) => {
-        this.channelList.closeDialog();
-        this.aboutDialog.open(invoker);
-      },
     });
     this.languageMenu = new SettingsMenu(this.el.language, 'language-menu');
     this.themeMenu = new SettingsMenu(this.el.theme, 'theme-menu');
@@ -740,7 +734,6 @@ export class App {
     this.menuStack.register(this.saveMenu);
     this.openMenu = new SettingsMenu(this.el.open, 'open-menu');
     this.menuStack.register(this.openMenu);
-    this.aboutDialog = new AboutDialog();
     this.el.theme.dataset.mode = getMode();
     this.resizer = new PanelResizer(this.el.resizer, this.el.side, this.el.main);
 
@@ -4613,7 +4606,6 @@ export class App {
   private retranslate(): void {
     this.menuStack.closeAll('retranslate');
     applyStaticI18n(document);
-    if (this.aboutDialog.isOpen) this.aboutDialog.renderStrings();
     if (this.settingsDialog.isOpen) this.settingsDialog.renderStrings();
     this.relayout();       // channel cells rebuild; an open channel dialog closes here
     this.renderPanels();   // side panels + toolbar chrome

@@ -378,7 +378,7 @@ const BANNER =
 const portable = process.env.SLOGICWEB_PORTABLE === '1';
 
 /*
- * Build identity for Settings > About (src/ui/aboutDialog.ts): package.json's version and
+ * Build identity for Settings > About (src/ui/about.ts): package.json's version and
  * the short commit hash. Either falls back to 'dev' (no version field, no git checkout).
  */
 function readBuildIdentity(): { version: string; hash: string } {

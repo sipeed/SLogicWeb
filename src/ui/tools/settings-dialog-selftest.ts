@@ -67,7 +67,7 @@ const DIALOG_NEEDLES: readonly string[] = [
   'private toggleRow(',
   'const text = this.rowLabel(label, input.id);',
   'input.dataset.settingsKey = camelKey(key);',
-  "this.rowLabel('settings.about')",
+  "block.dataset.settingsKey = 'about';",
   'this.shortcutBlocks()',
   "this.closeButton.setAttribute('aria-label', t('settings.close'));",
   'this.host.setDetailedLabels(',
@@ -454,7 +454,7 @@ const PANE_CASES: ReadonlyArray<readonly [string, string]> = [
   ['appearance', 'return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];'],
   ['shortcuts', 'return this.shortcutBlocks();'],
   ['developer', 'return [this.developerToolsRow()];'],
-  ['about', 'return [this.aboutRow()];'],
+  ['about', 'return [this.aboutBlock()];'],
 ];
 
 function paneComposition(source: string): boolean {
@@ -488,14 +488,14 @@ function paneComposition(source: string): boolean {
     'this.wheelZoomsRow(), this.compactRowsRow(),',
     'this.compactRowsRow(), this.wheelZoomsRow(),');
   const merged = dialogSource.replace(
-    "      case 'developer':\n        return [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutRow()];",
-    "      case 'developer':\n        return [this.developerToolsRow(), this.aboutRow()];\n      case 'about':\n        return [this.aboutRow()];");
+    "      case 'developer':\n        return [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutBlock()];",
+    "      case 'developer':\n        return [this.developerToolsRow(), this.aboutBlock()];\n      case 'about':\n        return [this.aboutBlock()];");
   const missingCase = dialogSource.replace(
-    "      case 'about':\n        return [this.aboutRow()];\n",
+    "      case 'about':\n        return [this.aboutBlock()];\n",
     '');
   const generalAgain = dialogSource.replace(
     "      case 'shortcuts':\n        return this.shortcutBlocks();",
-    "      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'general':\n        return [this.developerToolsRow(), this.aboutRow()];");
+    "      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'general':\n        return [this.developerToolsRow(), this.aboutBlock()];");
   check('control: dropping an appearance row, swapping two toggles, merging two sections, dropping a case or re-nesting a general case fails the same composition predicate',
     dropped !== dialogSource && !paneComposition(dropped) &&
     swapped !== dialogSource && !paneComposition(swapped) &&
@@ -695,95 +695,71 @@ function paneOpensNoDialog(source: string): boolean {
     `dialog=${paneOpensNoDialog(secondDialog)}`);
 }
 
-const ABOUT_ROW_NEEDLES: readonly string[] = [
-  "row.className = 'settings-row settings-row--action';",
-  "row.dataset.settingsKey = 'about';",
-  "hint.className = 'settings-row-hint';",
-  "hint.setAttribute('aria-hidden', 'true');",
-  "hint.textContent = '▸';",
-  "row.append(this.rowLabel('settings.about'), hint);",
-  'this.host.openAbout(row)',
+const ABOUT_BLOCK_NEEDLES: readonly string[] = [
+  "block.className = 'settings-about';",
+  "block.dataset.settingsKey = 'about';",
+  'const view = aboutView();',
+  "this.aboutLine('about-name', `${view.name} — ${view.subtitle}`, false),",
+  "this.aboutLine('about-meta', view.version, false),",
+  "this.aboutLine('about-meta', view.license),",
+  "this.aboutLine('about-meta', view.copyright, false),",
+  'this.aboutLinks(view.links),',
 ];
 
-function aboutRowBody(source: string): string {
-  return methodBody(source, 'private aboutRow(): HTMLButtonElement {');
+const ABOUT_LINK_NEEDLES: readonly string[] = [
+  "list.className = 'about-links';",
+  "anchor.target = '_blank';",
+  "anchor.rel = 'noopener noreferrer';",
+  'anchor.textContent = link.label;',
+];
+
+function aboutBlockBody(source: string): string {
+  return methodBody(source, 'private aboutBlock(): HTMLElement {');
+}
+
+function aboutLinksBody(source: string): string {
+  return methodBody(source, 'private aboutLinks(links: readonly AboutLink[]): HTMLUListElement {');
 }
 
 function shortcutBlocksBody(source: string): string {
   return methodBody(source, 'private shortcutBlocks(): HTMLElement[] {');
 }
 
+function aboutPaneIntact(source: string): boolean {
+  return ABOUT_BLOCK_NEEDLES.every((needle) => aboutBlockBody(source).includes(needle)) &&
+    ABOUT_LINK_NEEDLES.every((needle) => aboutLinksBody(source).includes(needle)) &&
+    !aboutLinksBody(source).includes('innerHTML') &&
+    !source.includes('openAbout') && !source.includes('settings-row--action');
+}
+
 {
-  const body = aboutRowBody(dialogSource);
-  const missing = ABOUT_ROW_NEEDLES.filter((needle) => !body.includes(needle));
-  check('the About row is the shared action frame, keyed about and handed to its own host bridge',
-    body.length > 0 && missing.length === 0 &&
-    !body.includes('settings-item') && !body.includes("rowLabel('settings.shortcuts')") &&
-    !body.includes('shortcutsRow'),
+  const body = aboutBlockBody(dialogSource);
+  const links = aboutLinksBody(dialogSource);
+  const missing = ABOUT_BLOCK_NEEDLES.filter((needle) => !body.includes(needle));
+  check('the About pane block prints the name line, version, licence and copyright from the view, appends the link list and is keyed about',
+    body.length > 0 && missing.length === 0 && aboutPaneIntact(dialogSource) &&
+    links.length > 0,
     `missing=${JSON.stringify(missing)}, body=${JSON.stringify(body.replace(/\s+/g, ' '))}`);
 }
 
 {
-  const plainButton = dialogSource.replace(
-    "    row.className = 'settings-row settings-row--action';\n    row.dataset.settingsKey = 'about';",
-    "    row.className = 'settings-row';\n    row.dataset.settingsKey = 'about';");
-  const foreignInvoker = dialogSource.replace(
-    'row.addEventListener(\'click\', () => this.host.openAbout(row));',
-    'row.addEventListener(\'click\', () => this.host.openAbout(this.closeButton));');
-  const mislabelled = dialogSource.replace(
-    "    row.append(this.rowLabel('settings.about'), hint);",
-    "    row.append(this.rowLabel('settings.shortcuts'), hint);");
-  const namedHint = dialogSource.replace('    hint.setAttribute(\'aria-hidden\', \'true\');\n    hint.textContent = \'▸\';\n    row.append(this.rowLabel(\'settings.about\')',
-    '    hint.textContent = \'▸\';\n    row.append(this.rowLabel(\'settings.about\')');
-  const intact = (source: string): boolean =>
-    ABOUT_ROW_NEEDLES.every((needle) => aboutRowBody(source).includes(needle));
-  check('control: an About row without the action variant, with a foreign frame, another row label or a named hint fails the same predicate',
-    plainButton !== dialogSource && !intact(plainButton) &&
-    foreignInvoker !== dialogSource && !intact(foreignInvoker) &&
-    mislabelled !== dialogSource && !intact(mislabelled) &&
-    namedHint !== dialogSource && !intact(namedHint) &&
-    intact(dialogSource),
-    `plain=${intact(plainButton)}, foreign=${intact(foreignInvoker)}, ` +
-    `label=${intact(mislabelled)}, namedHint=${intact(namedHint)}, real=${intact(dialogSource)}`);
-}
-
-{
-  const contract = dialogSource.includes('openAbout(invoker: HTMLElement): void;');
-  const wiring = appSource.includes('openAbout: (invoker) => {');
-  const start = appSource.indexOf('openAbout: (invoker) => {');
-  const end = start >= 0 ? appSource.indexOf('\n      },', start) : -1;
-  const body = start >= 0 && end > start ? appSource.slice(start, end) : '';
-  const order = body.indexOf('this.channelList.closeDialog();');
-  const openAt = body.indexOf('this.aboutDialog.open(invoker);');
-  check('the host contract carries the About opener and App wires it to the About dialog after closing the channel dialog',
-    contract && wiring && order >= 0 && openAt > order,
-    `contract=${contract}, wiring=${wiring}, body=${JSON.stringify(body.replace(/\s+/g, ' '))}`);
-}
-
-{
-  const droppedContract = dialogSource.replace('  openAbout(invoker: HTMLElement): void;\n', '');
-  const staleMenu = appSource.replace(
-    '        this.aboutDialog.open(invoker);',
-    '        this.aboutDialog.open(this.el.settings);');
-  const noClose = appSource.replace(
-    '      openAbout: (invoker) => {\n        this.channelList.closeDialog();\n        this.aboutDialog.open(invoker);',
-    '      openAbout: (invoker) => {\n        this.aboutDialog.open(invoker);');
-  const wired = (dialog: string, app: string): boolean => {
-    const start = app.indexOf('openAbout: (invoker) => {');
-    const end = start >= 0 ? app.indexOf('\n      },', start) : -1;
-    const body = start >= 0 && end > start ? app.slice(start, end) : '';
-    return dialog.includes('openAbout(invoker: HTMLElement): void;') &&
-      body.includes('this.aboutDialog.open(invoker);') &&
-      body.indexOf('this.channelList.closeDialog();') >= 0 &&
-      body.indexOf('this.channelList.closeDialog();') < body.indexOf('this.aboutDialog.open(invoker);');
-  };
-  check('control: a dropped host declaration, a stale menu invoker or a missing channel-dialog close fails the same wiring predicate',
-    droppedContract !== dialogSource && !wired(droppedContract, appSource) &&
-    staleMenu !== appSource && !wired(dialogSource, staleMenu) &&
-    noClose !== appSource && !wired(dialogSource, noClose) &&
-    wired(dialogSource, appSource),
-    `contract=${wired(droppedContract, appSource)}, stale=${wired(dialogSource, staleMenu)}, ` +
-    `noClose=${wired(dialogSource, noClose)}, real=${wired(dialogSource, appSource)}`);
+  const plainName = dialogSource.replace("      this.aboutLine('about-name',", "      this.aboutLine('about-meta',");
+  const noLinks = dialogSource.replace('      this.aboutLinks(view.links),\n', '');
+  const bare = dialogSource.replace("      anchor.rel = 'noopener noreferrer';\n", '');
+  const unlabelled = dialogSource.replace('      anchor.textContent = link.label;\n', '');
+  const opened = dialogSource.replace(
+    '  setDeveloperTools(on: boolean): void;\n}',
+    '  setDeveloperTools(on: boolean): void;\n  openAbout(invoker: HTMLElement): void;\n}');
+  check('control: a mislabelled name line, a dropped link list, a bare anchor, a link without text or a reintroduced opener bridge fails the same pane predicate',
+    plainName !== dialogSource && !aboutPaneIntact(plainName) &&
+    noLinks !== dialogSource && !aboutPaneIntact(noLinks) &&
+    bare !== dialogSource && !aboutPaneIntact(bare) &&
+    unlabelled !== dialogSource && !aboutPaneIntact(unlabelled) &&
+    opened !== dialogSource && !aboutPaneIntact(opened) &&
+    aboutPaneIntact(dialogSource),
+    `plain=${aboutPaneIntact(plainName)}, links=${aboutPaneIntact(noLinks)}, ` +
+    `bare=${aboutPaneIntact(bare)}, unlabelled=${aboutPaneIntact(unlabelled)}, ` +
+    `opened=${aboutPaneIntact(opened)}, real=${aboutPaneIntact(dialogSource)}`);
 }
 
 const camelOf = (kebab: string): string => kebab
@@ -865,23 +841,26 @@ function rowWiredToHost(source: string, entry: ToggleRow): boolean {
 
 {
   const toggleCalls = (source: string): number => source.match(/this\.toggleRow\(/g)?.length ?? 0;
-  const actionRows = (source: string): number => source.match(/row\.dataset\.settingsKey = /g)?.length ?? 0;
-  const keyed = SETTINGS_SECTIONS.length + toggleCalls(dialogSource) + actionRows(dialogSource);
-  check('the window keys one control per tab, five toggles, the About row and the shared reference row: eleven today',
+  const aboutBlocks = (source: string): number => source.match(/block\.dataset\.settingsKey = /g)?.length ?? 0;
+  const referenceRows = (source: string): number => source.match(/row\.dataset\.settingsKey = key;/g)?.length ?? 0;
+  const keyed = SETTINGS_SECTIONS.length + toggleCalls(dialogSource) + aboutBlocks(dialogSource) +
+    referenceRows(dialogSource);
+  check('the window keys one control per tab, five toggles, the About block and the shared reference row: eleven today',
     keyed === 11 && SETTINGS_SECTIONS.length === 4 && toggleCalls(dialogSource) === 5 &&
-    actionRows(dialogSource) === 2,
+    aboutBlocks(dialogSource) === 1 && referenceRows(dialogSource) === 1,
     `keyed=${keyed}, tabs=${SETTINGS_SECTIONS.length}, toggles=${toggleCalls(dialogSource)}, ` +
-    `keyedRows=${actionRows(dialogSource)}`);
+    `about=${aboutBlocks(dialogSource)}, reference=${referenceRows(dialogSource)}`);
 }
 
 {
   const extraToggle = dialogSource.replace(
     "      case 'developer':\n        return [this.developerToolsRow()];",
-    "      case 'developer':\n        return [this.developerToolsRow(), this.toggleRow('extra', 'settings.about', false, () => {})];");
+    "      case 'developer':\n        return [this.developerToolsRow(), this.toggleRow('extra', 'settings.detailedLabels', false, () => {})];");
   const droppedAction = dialogSource.replace('    row.dataset.settingsKey = key;\n', '');
   const countOf = (source: string): number => SETTINGS_SECTIONS.length +
     (source.match(/this\.toggleRow\(/g)?.length ?? 0) +
-    (source.match(/row\.dataset\.settingsKey = /g)?.length ?? 0);
+    (source.match(/block\.dataset\.settingsKey = /g)?.length ?? 0) +
+    (source.match(/row\.dataset\.settingsKey = key;/g)?.length ?? 0);
   check('control: a sixth toggle or a reference row without its settings key moves the keyed-control count',
     extraToggle !== dialogSource && countOf(extraToggle) === 12 &&
     droppedAction !== dialogSource && countOf(droppedAction) === 10 && countOf(dialogSource) === 11,
@@ -1109,7 +1088,9 @@ function shortcutTogglesWindow(source: string): boolean {
     `mutated=${mutated.includes('if (this.settingsDialog.isOpen)')}`);
 }
 
-const RETIRED_REFERENCE_TOKENS: readonly string[] = ['openShortcuts', 'shortcutsDialog', 'ShortcutsDialog'];
+const RETIRED_REFERENCE_TOKENS: readonly string[] = [
+  'openShortcuts', 'shortcutsDialog', 'ShortcutsDialog', 'openAbout', 'aboutDialog',
+];
 
 function referenceInPane(settings: string, app: string): boolean {
   const pane = methodBody(settings, 'private paneContent(section: SettingsSectionId): HTMLElement[] {');
@@ -1118,7 +1099,7 @@ function referenceInPane(settings: string, app: string): boolean {
 }
 
 {
-  check('the reference opens inside the pane, so neither the host bridge nor a second dialog survives',
+  check('the reference and About open inside the pane, so neither host bridge nor a second dialog survives',
     referenceInPane(dialogSource, appSource),
     `retired=${JSON.stringify(RETIRED_REFERENCE_TOKENS
       .filter((token) => `${dialogSource}\n${appSource}`.includes(token)))}, ` +
@@ -1127,8 +1108,8 @@ function referenceInPane(settings: string, app: string): boolean {
 
 {
   const bridge = appSource.replace(
-    '      openAbout: (invoker) => {',
-    '      openShortcuts: (invoker) => this.settingsDialog.open(invoker),\n      openAbout: (invoker) => {');
+    '      setDeveloperTools: (on) => this.setDeveloperTools(on),',
+    '      setDeveloperTools: (on) => this.setDeveloperTools(on),\n      openShortcuts: (invoker) => this.settingsDialog.open(invoker),');
   const paneless = dialogSource.replace('        return this.shortcutBlocks();', '        return [];');
   check('control: a restored host bridge or a pane that no longer returns the reference blocks fails the same predicate',
     bridge !== appSource && !referenceInPane(dialogSource, bridge) &&
@@ -1300,7 +1281,7 @@ const SHORTCUT_CLASSES: readonly string[] = [
   'shortcuts-section', 'shortcuts-list', 'shortcuts-row', 'shortcuts-action', 'shortcuts-key',
 ];
 
-const shortcutConsumers: string = ['confirmDialog', 'aboutDialog', 'settingsDialog']
+const shortcutConsumers: string = ['confirmDialog', 'settingsDialog']
   .map((name) => fs.readFileSync(`src/ui/${name}.ts`, 'utf8')).join('\n');
 
 function classRuleIn(sheet: string, name: string): boolean {
@@ -1668,12 +1649,6 @@ const UNSCOPED_RING = '.settings-nav-item:focus-visible';
 }
 
 const ROW_COLUMNS = `minmax(${SETTINGS_ROW_LABEL_MIN}px, max-content) minmax(0, 1fr)`;
-const ROW_TRANSITION =
-  'transition: background-color var(--motion-fast) var(--motion-ease), ' +
-  'color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);';
-const ROW_ACTION_RING = '.settings-dialog .settings-row--action:focus-visible';
-const UNSCOPED_ROW_ACTION_RING = '.settings-row--action:focus-visible';
-
 const ROW_CSS_NEEDLES: readonly string[] = [
   `grid-template-columns: ${ROW_COLUMNS};`,
   `gap: ${SETTINGS_ROW_GAP}px;`,
@@ -1681,13 +1656,6 @@ const ROW_CSS_NEEDLES: readonly string[] = [
   `min-height: ${SETTINGS_ROW_HEIGHT}px;`,
   `padding: ${SETTINGS_ROW_PADDING_Y}px 8px;`,
   'border-radius: calc(var(--radius) - 2px);',
-  'width: 100%;',
-  'font: inherit;',
-  'text-align: left;',
-  'background: var(--muted); color: var(--foreground);',
-  '.settings-row--action:hover { background: var(--muted); color: var(--foreground); }',
-  `${ROW_ACTION_RING} { outline: 2px solid var(--ring); outline-offset: -2px; }`,
-  '.settings-row-hint { justify-self: end; color: var(--muted-foreground); }',
   'justify-self: start;',
   '.settings-toggle input { margin: 0; accent-color: var(--primary); }',
 ];
@@ -1697,10 +1665,6 @@ function rowGridMirrors(block: string): boolean {
   return rule.includes(`grid-template-columns: ${ROW_COLUMNS};`) &&
     effectiveGaps(rule).column === SETTINGS_ROW_GAP &&
     rule.includes('align-items: center;');
-}
-
-function actionRowRule(block: string): string {
-  return ruleBlock(block, '.settings-row--action {');
 }
 
 const ROW_LABEL_RULE = '.settings-row-label {';
@@ -1756,19 +1720,11 @@ function labelAffordsRowClick(block: string): boolean {
     `fixed=${labelAffordsRowClick(fixedRow)}, real=${labelAffordsRowClick(dialogCss)}`);
 }
 
-function rowActionRingWins(sheet: string): boolean {
-  return sheet.includes(`${ROW_ACTION_RING} { outline: 2px solid var(--ring); outline-offset: -2px; }`) &&
-    specificityAtLeast(selectorSpecificity(ROW_ACTION_RING), selectorSpecificity(GENERIC_FOCUS_RING)) &&
-    !specificityAtLeast(selectorSpecificity(UNSCOPED_ROW_ACTION_RING), selectorSpecificity(GENERIC_FOCUS_RING));
-}
-
 {
   const missing = ROW_CSS_NEEDLES.filter((needle) => !dialogCss.includes(needle));
-  check('the sheet lays out the appearance rows with the mirrored grid, toggle and action chrome',
-    dialogCss.length > 0 && missing.length === 0 &&
-    actionRowRule(dialogCss).includes(ROW_TRANSITION),
-    `missing=${JSON.stringify(missing)}, transition=${actionRowRule(dialogCss).includes(ROW_TRANSITION)}, ` +
-    `block=${dialogCss.length}`);
+  check('the sheet lays out the appearance rows with the mirrored grid and toggle chrome',
+    dialogCss.length > 0 && missing.length === 0,
+    `missing=${JSON.stringify(missing)}, block=${dialogCss.length}`);
 }
 
 {
@@ -1853,31 +1809,11 @@ function paneMatchesRowRhythm(block: string): boolean {
 {
   const noAccent = dialogCss.replace(
     '.settings-toggle input { margin: 0; accent-color: var(--primary); }', '.settings-toggle input { margin: 0; }');
-  const actionRule = actionRowRule(dialogCss);
-  const noTransition = dialogCss.replace(actionRule, actionRule.replace(ROW_TRANSITION, ''));
-  check('control: a checkbox without the brand accent, or an action row without the motion pair, is detected by the same predicate',
+  check('control: a checkbox without the brand accent is detected by the same predicate',
     noAccent !== dialogCss && !ROW_CSS_NEEDLES.every((needle) => noAccent.includes(needle)) &&
-    noTransition !== dialogCss && !actionRowRule(noTransition).includes(ROW_TRANSITION) &&
-    ROW_CSS_NEEDLES.every((needle) => dialogCss.includes(needle)) &&
-    actionRowRule(dialogCss).includes(ROW_TRANSITION),
+    ROW_CSS_NEEDLES.every((needle) => dialogCss.includes(needle)),
     `accent=${ROW_CSS_NEEDLES.filter((n) => !noAccent.includes(n)).length}, ` +
-    `transition=${actionRowRule(noTransition).includes(ROW_TRANSITION)}, ` +
     `real=${ROW_CSS_NEEDLES.filter((n) => !dialogCss.includes(n)).length}`);
-}
-
-{
-  check('the row action ring is inset and outranks the generic themed button ring',
-    rowActionRingWins(css),
-    `ring=${selectorSpecificity(ROW_ACTION_RING).join(',')}, ` +
-    `generic=${selectorSpecificity(GENERIC_FOCUS_RING).join(',')}, ` +
-    `unscoped=${selectorSpecificity(UNSCOPED_ROW_ACTION_RING).join(',')}`);
-}
-
-{
-  const mutated = css.replaceAll(ROW_ACTION_RING, UNSCOPED_ROW_ACTION_RING);
-  check('control: the unscoped row-action ring loses the cascade, so the dialog scope is load-bearing',
-    mutated !== css && !rowActionRingWins(mutated) && rowActionRingWins(css),
-    `mutated=${rowActionRingWins(mutated)}, real=${rowActionRingWins(css)}`);
 }
 
 const PANE_RING = '.settings-dialog .settings-pane:focus-visible';
@@ -1961,19 +1897,16 @@ function narrowBodyStacks(narrow: string): boolean {
 
 function narrowRowsStack(stack: string): boolean {
   const row = mediaRule(stack, '.settings-row {');
-  const action = mediaRule(stack, '.settings-row--action {');
   const gaps = effectiveGaps(row);
   return row.includes('grid-template-columns: minmax(0, 1fr);') &&
     gaps.row === STACK_ROW_GAP &&
-    gaps.row < SETTINGS_PANE_GAP &&
-    action.includes('grid-template-columns: minmax(0, 1fr) auto;');
+    gaps.row < SETTINGS_PANE_GAP;
 }
 
 function narrowKeepsInsetRings(narrow: string, stack: string): boolean {
   const blocks = `${narrow}\n${stack}`;
   return narrow.length > 0 && stack.length > 0 && !blocks.includes(':focus-visible') &&
-    css.includes(`${SCOPED_RING} { outline: 2px solid var(--ring); outline-offset: -2px; }`) &&
-    css.includes(`${ROW_ACTION_RING} { outline: 2px solid var(--ring); outline-offset: -2px; }`);
+    css.includes(`${SCOPED_RING} { outline: 2px solid var(--ring); outline-offset: -2px; }`);
 }
 
 function narrowBlocksInSection(section: string): boolean {
@@ -2043,10 +1976,9 @@ function narrowBlocksInSection(section: string): boolean {
 }
 
 {
-  check('the narrow rows stack their label above the control without squeezing it, and the action row keeps its hint inline',
+  check('the narrow rows stack their label above the control without squeezing it',
     stackCss.length > 0 && narrowRowsStack(stackCss),
-    `row=${JSON.stringify(mediaRule(stackCss, '.settings-row {'))}, ` +
-    `action=${JSON.stringify(mediaRule(stackCss, '.settings-row--action {'))}`);
+    `row=${JSON.stringify(mediaRule(stackCss, '.settings-row {'))}`);
 }
 
 {
@@ -2055,16 +1987,13 @@ function narrowBlocksInSection(section: string): boolean {
     `grid-template-columns: minmax(${SETTINGS_ROW_LABEL_MIN}px, max-content) minmax(0, 1fr); row-gap`);
   const rhythmGap = stackCss.replace('row-gap: 2px;', `row-gap: ${SETTINGS_PANE_GAP}px;`);
   const looseGap = stackCss.replace('row-gap: 2px;', 'row-gap: 12px;');
-  const stackedAction = stackCss.replace('grid-template-columns: minmax(0, 1fr) auto;', 'grid-template-columns: minmax(0, 1fr);');
-  check('control: a label column kept beside the control, a stacked pair split as wide as the row rhythm, or an action row with its hint dropped to its own line fails the same predicate',
+  check('control: a label column kept beside the control, or a stacked pair split as wide as the row rhythm, fails the same predicate',
     twoColumns !== stackCss && !narrowRowsStack(twoColumns) &&
     rhythmGap !== stackCss && !narrowRowsStack(rhythmGap) &&
     looseGap !== stackCss && !narrowRowsStack(looseGap) &&
-    stackedAction !== stackCss && !narrowRowsStack(stackedAction) &&
     narrowRowsStack(stackCss),
     `twoColumns=${narrowRowsStack(twoColumns)}, rhythmGap=${narrowRowsStack(rhythmGap)}, ` +
-    `looseGap=${narrowRowsStack(looseGap)}, stackedAction=${narrowRowsStack(stackedAction)}, ` +
-    `real=${narrowRowsStack(stackCss)}`);
+    `looseGap=${narrowRowsStack(looseGap)}, real=${narrowRowsStack(stackCss)}`);
 }
 
 {
@@ -2078,8 +2007,8 @@ function narrowBlocksInSection(section: string): boolean {
     '  .settings-nav-item { width: auto; }',
     '  .settings-nav-item { width: auto; }\n  .settings-nav-item:focus-visible { outline-offset: 1px; }');
   const stackOutward = stackCss.replace(
-    '  .settings-row--action { grid-template-columns: minmax(0, 1fr) auto; }',
-    '  .settings-row--action { grid-template-columns: minmax(0, 1fr) auto; }\n  .settings-row--action:focus-visible { outline-offset: 1px; }');
+    '  .settings-row { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }',
+    '  .settings-row { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }\n  .settings-row:focus-visible { outline-offset: 1px; }');
   check('control: an outward focus offset added by either responsive layer fails the same predicate',
     outward !== narrowCss && !narrowKeepsInsetRings(outward, stackCss) &&
     stackOutward !== stackCss && !narrowKeepsInsetRings(narrowCss, stackOutward) &&

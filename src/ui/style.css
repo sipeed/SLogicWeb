@@ -1091,9 +1091,10 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
   transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
 .shortcuts-close:hover { background: var(--muted); border-color: var(--primary); color: var(--foreground); }
-.about-dialog p { margin: 0; font-size: 12px; line-height: 18px; }
-.about-dialog .about-name { font-size: 13px; font-weight: 600; }
-.about-dialog .about-meta { color: var(--muted-foreground); }
+.settings-about { display: flex; flex-direction: column; gap: 4px; padding: 3px 8px; font-size: 12px; }
+.settings-about p { margin: 0; font-size: 12px; line-height: 18px; }
+.settings-about .about-name { font-size: 13px; font-weight: 600; }
+.settings-about .about-meta { color: var(--muted-foreground); }
 .about-links { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
 .about-links a { color: var(--primary); }
 
@@ -1221,20 +1222,6 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
   align-items: center;
   cursor: pointer;
 }
-.settings-row--action {
-  width: 100%;
-  background: none;
-  border: 0;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
-}
-.settings-row--action:hover { background: var(--muted); color: var(--foreground); }
-.settings-dialog .settings-row--action:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-.settings-row-hint { justify-self: end; color: var(--muted-foreground); }
 .settings-toggle {
   justify-self: start;
   display: flex;
@@ -1253,7 +1240,6 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
 
 @media (max-width: 400px) {
   .settings-row { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }
-  .settings-row--action { grid-template-columns: minmax(0, 1fr) auto; }
 }
 
 .select-popover, .settings-menu, .settings-flyout {

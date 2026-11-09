@@ -1,5 +1,7 @@
 import { t } from './i18n.js';
 import type { MessageKey } from './i18n.js';
+import { aboutView } from './about.js';
+import type { AboutLink } from './about.js';
 import { formatChord } from './chords.js';
 import {
   gestureNotation, referenceGestures, referenceGroups, shortcutActionText,
@@ -51,7 +53,6 @@ export interface SettingsDialogHost {
   setHideIdle(on: boolean): void;
   developerTools(): boolean;
   setDeveloperTools(on: boolean): void;
-  openAbout(invoker: HTMLElement): void;
 }
 
 function camelKey(kebab: string): string {
@@ -199,7 +200,7 @@ export class SettingsDialog {
       case 'developer':
         return [this.developerToolsRow()];
       case 'about':
-        return [this.aboutRow()];
+        return [this.aboutBlock()];
     }
   }
 
@@ -337,17 +338,43 @@ export class SettingsDialog {
       (on) => this.host.setDeveloperTools(on));
   }
 
-  private aboutRow(): HTMLButtonElement {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'settings-row settings-row--action';
-    row.dataset.settingsKey = 'about';
-    const hint = document.createElement('span');
-    hint.className = 'settings-row-hint';
-    hint.setAttribute('aria-hidden', 'true');
-    hint.textContent = '▸';
-    row.append(this.rowLabel('settings.about'), hint);
-    row.addEventListener('click', () => this.host.openAbout(row));
-    return row;
+  private aboutBlock(): HTMLElement {
+    const view = aboutView();
+    const block = document.createElement('div');
+    block.className = 'settings-about';
+    block.dataset.settingsKey = 'about';
+    block.tabIndex = -1;
+    block.append(
+      this.aboutLine('about-name', `${view.name} — ${view.subtitle}`, false),
+      this.aboutLine('about-meta', view.version, false),
+      this.aboutLine('about-meta', view.license),
+      this.aboutLine('about-meta', view.copyright, false),
+      this.aboutLinks(view.links),
+    );
+    return block;
+  }
+
+  private aboutLine(className: string, text: string, translated = true): HTMLParagraphElement {
+    const line = document.createElement('p');
+    line.className = className;
+    line.textContent = text;
+    if (!translated) line.translate = false;
+    return line;
+  }
+
+  private aboutLinks(links: readonly AboutLink[]): HTMLUListElement {
+    const list = document.createElement('ul');
+    list.className = 'about-links';
+    list.append(...links.map((link) => {
+      const item = document.createElement('li');
+      const anchor = document.createElement('a');
+      anchor.href = link.href;
+      anchor.target = '_blank';
+      anchor.rel = 'noopener noreferrer';
+      anchor.textContent = link.label;
+      item.appendChild(anchor);
+      return item;
+    }));
+    return list;
   }
 }

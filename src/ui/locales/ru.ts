@@ -831,8 +831,6 @@ export const ru: Messages = {
   'settings.compactRows': 'Компактные строки (цифровые до 24 px)',
   'settings.hideIdle': 'Скрыть неактивные каналы (без фронтов в захвате)',
   'settings.developerTools': 'Инструменты разработчика (консоль регистров USB)',
-  'settings.about': 'О программе',
-  'about.title': 'О программе',
   'about.version': 'Версия {version} · сборка {build}',
   'about.license': 'GPL-3.0-or-later · без каких-либо гарантий',
   'about.source': 'Исходный код',

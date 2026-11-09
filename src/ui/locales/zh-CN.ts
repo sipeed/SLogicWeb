@@ -786,8 +786,6 @@ export const zhCN: Messages = {
   'settings.compactRows': '紧凑行高（数字通道最低 24 px）',
   'settings.hideIdle': '隐藏无跳变通道（本次采集中没有边沿）',
   'settings.developerTools': '开发者工具（USB 寄存器控制台）',
-  'settings.about': '关于',
-  'about.title': '关于',
   'about.version': '版本 {version} · 构建 {build}',
   'about.license': 'GPL-3.0-or-later · 不提供任何担保',
   'about.source': '源代码',

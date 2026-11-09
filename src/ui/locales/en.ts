@@ -841,8 +841,6 @@ export const en = {
   'settings.compactRows': 'Compact rows (digital rows down to 24 px)',
   'settings.hideIdle': 'Hide idle channels (no edges in the capture)',
   'settings.developerTools': 'Developer tools (USB register console)',
-  'settings.about': 'About',
-  'about.title': 'About',
   'about.version': 'Version {version} · build {build}',
   'about.license': 'GPL-3.0-or-later · no warranty',
   'about.source': 'Source code',

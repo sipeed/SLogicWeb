@@ -2,13 +2,13 @@
 // Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Settings > About: the view model (name, version/build, licence, copyright, links), the
- * build-identity fallback, the four catalogs, the Settings entry, the modal pattern
- * shared with the shortcuts dialog, and the vite `define` that injects the identity.
+ * build-identity fallback, the four catalogs, the About pane's inline render and the vite
+ * `define` that injects the identity.
  */
 
 import {
   aboutView, buildIdentity, COPYRIGHT, LICENSE_URL, NOTICE_URL, SOURCE_URL,
-} from '../aboutDialog.js';
+} from '../about.js';
 import type { MessageKey } from '../i18n.js';
 import { en } from '../locales/en.js';
 import { fr } from '../locales/fr.js';
@@ -42,19 +42,32 @@ function sourceSlice(source: string, from: string, to: string): string {
   return end < 0 ? source.slice(start) : source.slice(start, end);
 }
 
-function aboutEntry(settingsWindow: string, app: string): boolean {
+function aboutPane(settingsWindow: string, app: string, about: string): boolean {
   const pane = sourceSlice(settingsWindow, 'private paneContent(section: SettingsSectionId)', 'private shortcutBlocks(');
-  const row = sourceSlice(settingsWindow, 'private aboutRow()', '}\n');
+  const block = sourceSlice(settingsWindow, 'private aboutBlock()', '  private aboutLine(');
+  const linksAt = settingsWindow.indexOf('private aboutLinks(');
+  const links = linksAt < 0 ? '' : settingsWindow.slice(linksAt);
   const shortcutsAt = pane.indexOf("case 'shortcuts':");
   const aboutAt = pane.indexOf("case 'about':");
-  return row.includes("this.rowLabel('settings.about')") &&
-    row.includes("row.dataset.settingsKey = 'about';") &&
-    row.includes('this.host.openAbout(row)') &&
+  return block.includes("block.className = 'settings-about';") &&
+    block.includes("block.dataset.settingsKey = 'about';") &&
+    block.includes('const view = aboutView();') &&
+    block.includes("this.aboutLine('about-name', `${view.name} — ${view.subtitle}`, false),") &&
+    block.includes("this.aboutLine('about-meta', view.version, false),") &&
+    block.includes("this.aboutLine('about-meta', view.license),") &&
+    block.includes("this.aboutLine('about-meta', view.copyright, false),") &&
+    block.includes('this.aboutLinks(view.links),') &&
+    links.includes('list.className = \'about-links\';') &&
+    links.includes("anchor.target = '_blank';") &&
+    links.includes("anchor.rel = 'noopener noreferrer';") &&
+    links.includes('anchor.textContent = link.label;') &&
+    !links.includes('innerHTML') &&
     shortcutsAt >= 0 && aboutAt > shortcutsAt &&
     pane.includes('return this.shortcutBlocks();') &&
-    pane.includes('return [this.aboutRow()];') &&
-    app.includes('if (this.aboutDialog.isOpen) this.aboutDialog.renderStrings();') &&
-    sourceSlice(app, 'openAbout: (invoker) => {', '\n      },').includes('this.aboutDialog.open(invoker);') &&
+    pane.includes('return [this.aboutBlock()];') &&
+    !settingsWindow.includes('openAbout') &&
+    !app.includes('aboutDialog') &&
+    !about.includes('class AboutDialog') && !about.includes('showModal') &&
     !app.includes('settingsItems');
 }
 
@@ -67,11 +80,11 @@ function aboutEntry(settingsWindow: string, app: string): boolean {
 {
   const view = aboutView({ version: '1.2.3', hash: 'abc1234' });
   check('the About view names the app, version and build, the GPL line and the copyright',
-    view.title === en['about.title'] && view.name === 'slogicweb' && view.subtitle === en['app.title'] &&
+    view.name === 'slogicweb' && view.subtitle === en['app.title'] &&
       view.version === 'Version 1.2.3 · build abc1234' &&
       view.license === 'GPL-3.0-or-later · no warranty' &&
       view.copyright === '© 2026 Sipeed Co., Ltd.' && COPYRIGHT === view.copyright &&
-      view.close === en['shortcuts.close'],
+      !('title' in view) && !('close' in view),
     JSON.stringify(view));
   check('the About links are the source repository, its LICENSE and NOTICE.md (third-party decoders)',
     view.links.length === 3 &&
@@ -84,9 +97,9 @@ function aboutEntry(settingsWindow: string, app: string): boolean {
 
 {
   const keys: MessageKey[] = [
-    'settings.about', 'about.title', 'about.version', 'about.license', 'about.source',
-    'about.licenseLink', 'about.notice',
+    'about.version', 'about.license', 'about.source', 'about.licenseLink', 'about.notice',
   ];
+  const retired = ['settings.about', 'about.title'] as const;
   const catalogs = { 'zh-CN': zhCN, fr, ru } as const;
   const problems: string[] = [];
   for (const [locale, m] of Object.entries(catalogs)) {
@@ -95,6 +108,9 @@ function aboutEntry(settingsWindow: string, app: string): boolean {
       if (!v) problems.push(`${locale}:${key} missing`);
       else if (key !== 'about.license' && v === en[key] && !/^Version/.test(v)) problems.push(`${locale}:${key} untranslated`);
     }
+    for (const key of retired) {
+      if (Object.prototype.hasOwnProperty.call(m, key)) problems.push(`${locale}:${key} still present`);
+    }
     if (!m['about.version'].includes('{version}') || !m['about.version'].includes('{build}')) {
       problems.push(`${locale}:about.version placeholders`);
     }
@@ -102,43 +118,45 @@ function aboutEntry(settingsWindow: string, app: string): boolean {
       problems.push(`${locale}:about.license`);
     }
   }
-  check('every locale translates the About strings and keeps the version placeholders and SPDX id',
+  check('every locale translates the About strings, keeps the version placeholders and SPDX id, and drops the retired dialog keys',
     problems.length === 0, JSON.stringify(problems));
 }
 
 {
   const app = read('src/ui/app.ts');
   const settingsWindow = read('src/ui/settingsDialog.ts');
-  const entry = aboutEntry(settingsWindow, app);
-  const dialog = read('src/ui/aboutDialog.ts');
-  const modal = dialog.includes('this.dialog.showModal();') &&
-    dialog.includes("this.dialog.addEventListener('cancel', (event) => {") &&
-    dialog.includes('event.preventDefault();\n      this.close();') &&
-    dialog.includes('if (invoker?.isConnected) invoker.focus();') &&
-    dialog.includes("this.dialog.setAttribute('aria-labelledby', 'about-title');") &&
-    dialog.includes("a.rel = 'noopener noreferrer';") && !dialog.includes('innerHTML');
-  check('Settings lists About after Shortcuts; it opens a modal dialog (focus trap, Esc closes, focus returns)',
-    entry && modal, `entry=${entry}, modal=${modal}`);
+  const about = read('src/ui/about.ts');
+  const inline = aboutPane(settingsWindow, app, about);
+  check('Settings renders About inline after Shortcuts: the name line, version, licence, copyright and the link list, with no dialog left to open',
+    inline, `pane=${inline}`);
 
   const movedFirst = settingsWindow.replace(
-    "      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'developer':\n        return [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutRow()];",
-    "      case 'about':\n        return [this.aboutRow()];\n      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'developer':\n        return [this.developerToolsRow()];");
+    "      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'developer':\n        return [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutBlock()];",
+    "      case 'about':\n        return [this.aboutBlock()];\n      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'developer':\n        return [this.developerToolsRow()];");
   const shortcutsPaneDropped = settingsWindow.replace(
     "        return this.shortcutBlocks();",
     "        return [];");
-  const strayHandOff = settingsWindow.replace('this.host.openAbout(row)', 'this.host.openAbout(this.closeButton)');
-  const unlocalized = app.replace(
-    'if (this.aboutDialog.isOpen) this.aboutDialog.renderStrings();',
-    '');
-  check('control: About listed before Shortcuts, an emptied shortcuts pane, a row handing off another frame or a modal left unlocalized fails the same entry predicate',
-    movedFirst !== settingsWindow && !aboutEntry(movedFirst, app) &&
-    shortcutsPaneDropped !== settingsWindow && !aboutEntry(shortcutsPaneDropped, app) &&
-    strayHandOff !== settingsWindow && !aboutEntry(strayHandOff, app) &&
-    unlocalized !== app && !aboutEntry(settingsWindow, unlocalized) &&
-    aboutEntry(settingsWindow, app),
-    `moved=${aboutEntry(movedFirst, app)}, dropped=${aboutEntry(shortcutsPaneDropped, app)}, ` +
-    `stray=${aboutEntry(strayHandOff, app)}, ` +
-    `unlocalized=${aboutEntry(settingsWindow, unlocalized)}, real=${aboutEntry(settingsWindow, app)}`);
+  const noRel = settingsWindow.replace("      anchor.rel = 'noopener noreferrer';\n", '');
+  const noTarget = settingsWindow.replace("      anchor.target = '_blank';\n", '');
+  const unlabelled = settingsWindow.replace("      anchor.textContent = link.label;\n", '');
+  const reopened = settingsWindow.replace(
+    '  setDeveloperTools(on: boolean): void;\n}',
+    '  setDeveloperTools(on: boolean): void;\n  openAbout(invoker: HTMLElement): void;\n}');
+  const dialogBack = `${about}\nexport class AboutDialog {\n  open(anchor: HTMLElement): void { this.dialog.showModal(); }\n}\n`;
+  check('control: About listed before Shortcuts, an emptied shortcuts pane, a bare link, an unlabelled anchor, an opener bridge or a reintroduced dialog class fails the same inline predicate',
+    movedFirst !== settingsWindow && !aboutPane(movedFirst, app, about) &&
+    shortcutsPaneDropped !== settingsWindow && !aboutPane(shortcutsPaneDropped, app, about) &&
+    noRel !== settingsWindow && !aboutPane(noRel, app, about) &&
+    noTarget !== settingsWindow && !aboutPane(noTarget, app, about) &&
+    unlabelled !== settingsWindow && !aboutPane(unlabelled, app, about) &&
+    reopened !== settingsWindow && !aboutPane(reopened, app, about) &&
+    dialogBack !== about && !aboutPane(settingsWindow, app, dialogBack) &&
+    aboutPane(settingsWindow, app, about),
+    `moved=${aboutPane(movedFirst, app, about)}, dropped=${aboutPane(shortcutsPaneDropped, app, about)}, ` +
+    `rel=${aboutPane(noRel, app, about)}, target=${aboutPane(noTarget, app, about)}, ` +
+    `label=${aboutPane(unlabelled, app, about)}, ` +
+    `reopened=${aboutPane(reopened, app, about)}, dialog=${aboutPane(settingsWindow, app, dialogBack)}, ` +
+    `real=${aboutPane(settingsWindow, app, about)}`);
 }
 
 {

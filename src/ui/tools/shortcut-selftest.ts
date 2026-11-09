@@ -731,8 +731,8 @@ function referenceInPane(settings: string, app: string): boolean {
   const settings = fs.readFileSync('src/ui/settingsDialog.ts', 'utf8');
   const staleDialog = `${appSource}\n  private readonly shortcutsDialog = new ShortcutsDialog();\n`;
   const staleBridge = appSource.replace(
-    '      openAbout: (invoker) => {',
-    '      openShortcuts: (invoker) => this.shortcutsDialog.open(invoker),\n      openAbout: (invoker) => {');
+    '      setDeveloperTools: (on) => this.setDeveloperTools(on),',
+    '      setDeveloperTools: (on) => this.setDeveloperTools(on),\n      openShortcuts: (invoker) => this.shortcutsDialog.open(invoker),');
   const handWritten = settings.replace(
     'this.shortcutList(shortcutsIn(group).map((entry) => this.keyRow(',
     'this.shortcutList([{ labels: [], notation: \'F\' }].map((entry) => this.keyRow(');
