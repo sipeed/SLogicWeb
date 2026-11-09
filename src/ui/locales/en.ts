@@ -865,7 +865,6 @@ export const en = {
   'shortcuts.panPage': 'Pan by half a screen',
   'shortcuts.zoomTime': 'Zoom time at the pointer',
   'shortcuts.scrollRows': 'Scroll channels',
-  'shortcuts.scrollRowsOrZoom': 'Scroll channels; zooms when every channel fits on screen',
   'shortcuts.panTime': 'Pan time',
   'shortcuts.addCursor': 'Add a cursor',
   'shortcuts.input.wheel': 'Wheel',

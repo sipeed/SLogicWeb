@@ -864,7 +864,6 @@ export const fr: Messages = {
   'shortcuts.panPage': 'Déplacer d’un demi-écran',
   'shortcuts.zoomTime': 'Zoomer le temps au pointeur',
   'shortcuts.scrollRows': 'Faire défiler les voies',
-  'shortcuts.scrollRowsOrZoom': 'Faire défiler les voies ; zoome quand toutes les voies tiennent à l’écran',
   'shortcuts.panTime': 'Déplacer dans le temps',
   'shortcuts.addCursor': 'Ajouter un curseur',
   'shortcuts.input.wheel': 'Molette',

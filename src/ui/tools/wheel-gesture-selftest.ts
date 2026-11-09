@@ -26,41 +26,38 @@ const mods = (mod: Mod) => ({
   ctrlKey: mod === 'ctrl', metaKey: mod === 'meta', shiftKey: mod === 'shift',
 });
 
-// [wheelZooms, rowsOverflow, hasCapture] -> plain, ctrl, meta, shift
-const TABLE: Array<[boolean, boolean, boolean, [WheelAction, WheelAction, WheelAction, WheelAction]]> = [
-  [false, true, true, ['native', 'zoom', 'zoom', 'pan']],
-  [false, false, true, ['zoom', 'zoom', 'zoom', 'pan']],
-  [true, true, true, ['zoom', 'scroll-rows', 'scroll-rows', 'pan']],
-  [true, false, true, ['zoom', 'scroll-rows', 'scroll-rows', 'pan']],
-  [false, true, false, ['native', 'block', 'block', 'block']],
-  [false, false, false, ['native', 'block', 'block', 'block']],
-  [true, true, false, ['native', 'scroll-rows', 'scroll-rows', 'block']],
-  [true, false, false, ['native', 'scroll-rows', 'scroll-rows', 'block']],
+// [wheelZooms, hasCapture] -> plain, ctrl, meta, shift. With the preference off a plain wheel
+// never zooms (it only scrolls rows); with it on only the plain wheel zooms.
+const TABLE: Array<[boolean, boolean, [WheelAction, WheelAction, WheelAction, WheelAction]]> = [
+  [false, true, ['native', 'zoom', 'zoom', 'pan']],
+  [true, true, ['zoom', 'scroll-rows', 'scroll-rows', 'pan']],
+  [false, false, ['native', 'block', 'block', 'block']],
+  [true, false, ['native', 'scroll-rows', 'scroll-rows', 'block']],
 ];
 
 {
   const bad: string[] = [];
-  for (const [wheelZooms, rowsOverflow, hasCapture, want] of TABLE) {
+  for (const [wheelZooms, hasCapture, want] of TABLE) {
     (['plain', 'ctrl', 'meta', 'shift'] as const).forEach((mod, i) => {
-      const got = wheelAction(mods(mod), { wheelZooms, rowsOverflow, hasCapture });
-      if (got !== want[i]) bad.push(`zooms=${wheelZooms} overflow=${rowsOverflow} cap=${hasCapture} ${mod}: ${got}`);
+      const got = wheelAction(mods(mod), { wheelZooms, hasCapture });
+      if (got !== want[i]) bad.push(`zooms=${wheelZooms} cap=${hasCapture} ${mod}: ${got}`);
     });
   }
-  check('wheelAction matches the full setting x overflow x capture x modifier table',
+  check('wheelAction matches the full setting x capture x modifier table',
     bad.length === 0, bad.length === 0 ? `${TABLE.length * 4} cells` : bad.join('; '));
 }
 
 {
   // Ctrl+wheel must never reach the browser (it would zoom the whole page), in any state.
-  const leaks = TABLE.filter(([wheelZooms, rowsOverflow, hasCapture]) =>
-    wheelAction(mods('ctrl'), { wheelZooms, rowsOverflow, hasCapture }) === 'native');
+  const leaks = TABLE.filter(([wheelZooms, hasCapture]) =>
+    wheelAction(mods('ctrl'), { wheelZooms, hasCapture }) === 'native');
   check('Ctrl+wheel is always swallowed, so the page never zooms over the waveform',
     leaks.length === 0, `leaks=${leaks.length}`);
 }
 
 {
   const both = wheelAction({ ctrlKey: true, shiftKey: true },
-    { wheelZooms: false, rowsOverflow: true, hasCapture: true });
+    { wheelZooms: false, hasCapture: true });
   check('Shift wins over Ctrl: Ctrl+Shift+wheel pans', both === 'pan', `got=${both}`);
 }
 

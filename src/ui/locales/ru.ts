@@ -855,7 +855,6 @@ export const ru: Messages = {
   'shortcuts.panPage': 'Сдвиг на пол-экрана',
   'shortcuts.zoomTime': 'Масштаб времени у указателя',
   'shortcuts.scrollRows': 'Прокрутка каналов',
-  'shortcuts.scrollRowsOrZoom': 'Прокрутка каналов; масштаб, если все каналы помещаются на экране',
   'shortcuts.panTime': 'Сдвиг по времени',
   'shortcuts.addCursor': 'Добавить курсор',
   'shortcuts.input.wheel': 'Колесо',

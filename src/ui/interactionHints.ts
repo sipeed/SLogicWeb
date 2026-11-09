@@ -27,11 +27,10 @@
  *   - #toolbar    a click activates the command.
  *
  * The wheel over the plot, axis and overview is decided by `wheelAction` (wheelGesture.ts),
- * which the handlers call too, so the three wheel variants below are the only ones:
+ * which the handlers call too, so the two wheel variants below are the only ones:
  *
- *   - rows overflow, "wheel zooms" off: wheel scrolls rows, Ctrl+wheel zooms;
- *   - rows all fit,  "wheel zooms" off: wheel zooms (nothing to scroll);
- *   - "wheel zooms" on:                 wheel zooms, Ctrl+wheel scrolls rows.
+ *   - "wheel zooms" off: wheel scrolls rows (never zooms), Ctrl+wheel zooms;
+ *   - "wheel zooms" on:  wheel zooms, Ctrl+wheel scrolls rows.
  *
  * Assumptions and unsupported combinations:
  *
@@ -65,8 +64,6 @@ export interface InteractionContext {
   readonly running?: boolean;
   /** The "wheel zooms without Ctrl" preference; default off. */
   readonly wheelZooms?: boolean;
-  /** Whether the row stack overflows vertically; default true (a plain wheel scrolls). */
-  readonly rowsOverflow?: boolean;
 }
 
 export interface HintSpec {
@@ -158,7 +155,7 @@ const OVERVIEW_NO_CAPTURE = Object.freeze([
 ]);
 
 type WheelArea = 'plot' | 'axis' | 'overview';
-type WheelVariant = 'scroll' | 'fit' | 'wheelZooms';
+type WheelVariant = 'scroll' | 'wheelZooms';
 
 const WHEEL_KEYS: Readonly<Record<WheelArea, { scroll: MessageKey; zoom: MessageKey; pan: MessageKey }>> = {
   plot: { scroll: 'hints.plot.scroll', zoom: 'hints.plot.zoom', pan: 'hints.plot.pan' },
@@ -174,9 +171,7 @@ const POINTER_HINTS: Readonly<Record<WheelArea, readonly HintSpec[]>> = {
 
 /** The wheel hints for one area and variant, read off `wheelAction` itself. */
 function wheelHints(area: WheelArea, variant: WheelVariant): readonly HintSpec[] {
-  const ctx = {
-    hasCapture: true, wheelZooms: variant === 'wheelZooms', rowsOverflow: variant !== 'fit',
-  };
+  const ctx = { hasCapture: true, wheelZooms: variant === 'wheelZooms' };
   const keys = WHEEL_KEYS[area];
   const out: HintSpec[] = [];
   const plain = wheelAction({ ctrlKey: false, shiftKey: false }, ctx);
@@ -197,14 +192,12 @@ const WHEEL_CAPTURE: Readonly<Record<WheelArea, Readonly<Record<WheelVariant, re
     area,
     Object.freeze({
       scroll: wheelHints(area, 'scroll'),
-      fit: wheelHints(area, 'fit'),
       wheelZooms: wheelHints(area, 'wheelZooms'),
     }),
   ])) as Record<WheelArea, Record<WheelVariant, readonly HintSpec[]>>);
 
 function wheelVariant(context: InteractionContext): WheelVariant {
-  if (context.wheelZooms === true) return 'wheelZooms';
-  return context.rowsOverflow === false ? 'fit' : 'scroll';
+  return context.wheelZooms === true ? 'wheelZooms' : 'scroll';
 }
 
 const LABELS_CAPTURE = Object.freeze([

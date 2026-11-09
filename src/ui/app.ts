@@ -554,7 +554,6 @@ export class App {
   /** Last area/capture state drawn, so pointer moves do not rebuild the bar. */
   private renderedInteractionArea: InteractionArea | null = null;
   private renderedInteractionHasCapture: boolean | null = null;
-  private renderedInteractionOverflow: boolean | null = null;
   /** The corner strings last written, so an unchanged frame skips the DOM. */
   private renderedCorner: CornerView | null = null;
   private decodeBusy = false;
@@ -3606,17 +3605,7 @@ export class App {
   private wheelActionFor(e: WheelModifiers, target: 'rows' | 'fit' = 'rows'): WheelAction {
     // The corner Fit button is a zoom control, not a row surface (DESIGN §3.4).
     if (target === 'fit') return fitWheelAction(e, this.store.length > 0);
-    return wheelAction(e, {
-      wheelZooms: this.wheelZooms,
-      rowsOverflow: this.rowsOverflow(),
-      hasCapture: this.store.length > 0,
-    });
-  }
-
-  /** Whether the channel stack is taller than the scroll area (a plain wheel can scroll). */
-  private rowsOverflow(): boolean {
-    const scroll = this.el.scroll;
-    return scroll.scrollHeight > scroll.clientHeight + 1;
+    return wheelAction(e, { wheelZooms: this.wheelZooms, hasCapture: this.store.length > 0 });
   }
 
   /** Scroll the channel stack by one wheel event (Ctrl+wheel when "wheel zooms" is on). */
@@ -4936,18 +4925,13 @@ export class App {
     this.statusRenders += 1;
     const area = this.hoveredInteractionArea;
     const hasCapture = this.store.length > 0;
-    // Only the wheel areas depend on the overflow; reading layout elsewhere is wasted.
-    const wheelArea = area === 'plot' || area === 'axis' || area === 'overview';
-    const rowsOverflow = wheelArea ? this.rowsOverflow() : true;
     const wheelZooms = this.wheelZooms;
     if (!force && area === this.renderedInteractionArea &&
-        hasCapture === this.renderedInteractionHasCapture &&
-        rowsOverflow === this.renderedInteractionOverflow) return;
+        hasCapture === this.renderedInteractionHasCapture) return;
     this.renderedInteractionArea = area;
     this.renderedInteractionHasCapture = hasCapture;
-    this.renderedInteractionOverflow = rowsOverflow;
     this.el.interactionArea.textContent = t(interactionAreaLabelKey(area));
-    const hints = interactionHints(area, { hasCapture, running: this.running, wheelZooms, rowsOverflow });
+    const hints = interactionHints(area, { hasCapture, running: this.running, wheelZooms });
     this.el.interactionHints.replaceChildren(
       ...hints.map((spec) => this.interactionHintItem(spec)));
   }

@@ -130,42 +130,40 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
 }
 
 {
-  // The three wheel variants. Each is read off `wheelAction`, the function the plot,
-  // axis and overview handlers call, so the bar and the handlers cannot disagree.
-  const variant = (area: InteractionArea, wheelZooms: boolean, rowsOverflow: boolean): string =>
-    interactionHints(area, { hasCapture: true, wheelZooms, rowsOverflow }).map(signature).join('|');
-  const expected: Array<[InteractionArea, boolean, boolean, string]> = [
-    ['plot', false, true,
+  // The two wheel variants. Each is read off `wheelAction`, the function the plot, axis
+  // and overview handlers call, so the bar and the handlers cannot disagree. With the
+  // setting off a plain wheel only scrolls (it never zooms); with it on only it zooms.
+  const variant = (area: InteractionArea, wheelZooms: boolean): string =>
+    interactionHints(area, { hasCapture: true, wheelZooms }).map(signature).join('|');
+  const expected: Array<[InteractionArea, boolean, string]> = [
+    ['plot', false,
       'wheel:hints.plot.scroll|Ctrl+wheel:hints.plot.zoom|Shift+wheel:hints.plot.pan|' +
       'left:hints.plot.dragPan|left:hints.plot.addCursor'],
-    ['plot', false, false,
-      'wheel:hints.plot.zoom|Shift+wheel:hints.plot.pan|left:hints.plot.dragPan|left:hints.plot.addCursor'],
-    ['plot', true, true,
+    ['plot', true,
       'wheel:hints.plot.zoom|Ctrl+wheel:hints.wheel.scrollRows|Shift+wheel:hints.plot.pan|' +
       'left:hints.plot.dragPan|left:hints.plot.addCursor'],
-    ['plot', true, false,
-      'wheel:hints.plot.zoom|Ctrl+wheel:hints.wheel.scrollRows|Shift+wheel:hints.plot.pan|' +
-      'left:hints.plot.dragPan|left:hints.plot.addCursor'],
-    ['axis', false, false, 'wheel:hints.axis.zoom|Shift+wheel:hints.axis.pan|left:hints.axis.dragPan|left:hints.axis.dragCursor'],
-    ['axis', true, true,
+    ['axis', false,
+      'wheel:hints.axis.scroll|Ctrl+wheel:hints.axis.zoom|Shift+wheel:hints.axis.pan|left:hints.axis.dragPan|left:hints.axis.dragCursor'],
+    ['axis', true,
       'wheel:hints.axis.zoom|Ctrl+wheel:hints.wheel.scrollRows|Shift+wheel:hints.axis.pan|left:hints.axis.dragPan|left:hints.axis.dragCursor'],
-    ['overview', false, false,
-      'wheel:hints.overview.zoom|Shift+wheel:hints.overview.pan|left:hints.overview.center'],
-    ['overview', true, true,
+    ['overview', false,
+      'wheel:hints.overview.scroll|Ctrl+wheel:hints.overview.zoom|Shift+wheel:hints.overview.pan|' +
+      'left:hints.overview.center'],
+    ['overview', true,
       'wheel:hints.overview.zoom|Ctrl+wheel:hints.wheel.scrollRows|Shift+wheel:hints.overview.pan|' +
       'left:hints.overview.center'],
   ];
-  const bad = expected.filter(([area, zooms, overflow, want]) => variant(area, zooms, overflow) !== want)
-    .map(([area, zooms, overflow]) => `${area}/${zooms}/${overflow}: ${variant(area, zooms, overflow)}`);
+  const bad = expected.filter(([area, zooms, want]) => variant(area, zooms) !== want)
+    .map(([area, zooms]) => `${area}/${zooms}: ${variant(area, zooms)}`);
   // Labels, side panel and toolbar have no wheel handler of their own; the setting must
   // not change what they advertise.
   const steady = (['labels', 'side-panel', 'toolbar', 'corner', 'none'] as const).every((area) =>
-    variant(area, true, false) === signatures(area, true));
+    variant(area, true) === signatures(area, true));
   // Without a capture a plain wheel stays native scrolling in every variant.
   const noCapture = (['plot', 'axis', 'overview'] as const).every((area) =>
-    interactionHints(area, { hasCapture: false, wheelZooms: true, rowsOverflow: false })
+    interactionHints(area, { hasCapture: false, wheelZooms: true })
       .map(signature).join('|') === signatures(area, false));
-  check('the wheel hints follow the "wheel zooms" setting and row overflow exactly as wheelAction does',
+  check('the wheel hints follow the "wheel zooms" setting exactly as wheelAction does',
     bad.length === 0 && steady && noCapture,
     bad.length === 0 ? `${expected.length} variants, steady=${steady}, noCapture=${noCapture}` : bad.join('; '));
 }
@@ -281,8 +279,7 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
   );
   const appContract = wire.length > 0 && wire.includes('interactionAreaOf(target)') &&
     wire.includes('{ passive: true }') && wire.includes('this.el.interactionBar.contains(target)') &&
-    render.includes('interactionHints(area, { hasCapture, running: this.running, wheelZooms, rowsOverflow })') &&
-    render.includes('rowsOverflow === this.renderedInteractionOverflow') &&
+    render.includes('interactionHints(area, { hasCapture, running: this.running, wheelZooms })') &&
     render.includes('this.el.interactionHints.replaceChildren(') &&
     render.includes('area === this.renderedInteractionArea') &&
     app.includes('this.renderInteractionBar(true)') &&

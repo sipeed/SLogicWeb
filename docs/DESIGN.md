@@ -450,7 +450,7 @@ object. Every gesture has a visible equivalent.
 | Input | Plot | Axis / ruler | Overview | Keyboard |
 | --- | --- | --- | --- | --- |
 | Mouse drag | Pan; drag a cursor/trigger handle | Pan; drag a cursor's chip moves that cursor | Pan frame | Arrows pan |
-| Mouse wheel | Scroll rows when they overflow; zoom when every row fits | Same | Same | — |
+| Mouse wheel | Scroll rows (zoom with "wheel zooms" on) | Same | Same | — |
 | Ctrl/⌘ wheel, pinch | Zoom at pointer | Zoom at pointer | Zoom at pointer | `+` / `=` / `-` |
 | Shift wheel | Pan | Pan | Pan | `←` / `→` (Shift: half a screen) |
 | Mouse double-click | Add cursor | Reset analog scale over a ruler | No action; use Fit | — |
@@ -467,9 +467,8 @@ object. Every gesture has a visible equivalent.
 Wheel rules (one decision, `wheelGesture.ts` `wheelAction`, shared by the plot, axis,
 overview and the hint bar):
 
-- Default: a plain wheel scrolls the rows while they overflow; when every row already
-  fits there is nothing to scroll, so a plain wheel zooms instead. Ctrl/⌘+wheel always
-  zooms, Shift+wheel always pans.
+- Default: a plain wheel only scrolls the rows (when every row fits it does nothing; it
+  never zooms) and Ctrl/⌘+wheel zooms. Shift+wheel always pans.
 - Settings > "Wheel zooms (no Ctrl needed)" (PulseView habit, persisted in the
   workspace, off by default): a plain wheel always zooms and Ctrl/⌘+wheel scrolls rows.
 - Ctrl/⌘+wheel is always swallowed over these areas, so the page itself never zooms.
@@ -636,7 +635,7 @@ polite live region, so assistive technology reads the area and hints when they c
 
 | Area | Hints |
 | --- | --- |
-| Waveform | wheel per §7 (scroll rows, or zoom when rows fit / "wheel zooms" on); the other of Ctrl+wheel; Shift+wheel pans time; drag pans; double-click adds a cursor |
+| Waveform | wheel per §7 (scroll rows, or zoom with "wheel zooms" on); the other of Ctrl+wheel; Shift+wheel pans time; drag pans; double-click adds a cursor |
 | Time axis | wheel per §7; Shift+wheel pans; drag pans; dragging a cursor's numbered chip moves that cursor |
 | Overview | wheel per §7; Shift+wheel pans the timeline; click or drag centers the view |
 | Channel labels | wheel scrolls rows; double-click a name renames it; the trigger icon opens the trigger editor |

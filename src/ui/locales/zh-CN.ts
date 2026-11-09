@@ -810,7 +810,6 @@ export const zhCN: Messages = {
   'shortcuts.panPage': '平移半屏',
   'shortcuts.zoomTime': '以指针为中心缩放时间',
   'shortcuts.scrollRows': '上下滚动通道',
-  'shortcuts.scrollRowsOrZoom': '上下滚动通道；所有通道都在屏幕内时改为缩放',
   'shortcuts.panTime': '平移时间',
   'shortcuts.addCursor': '添加游标',
   'shortcuts.input.wheel': '滚轮',

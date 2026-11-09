@@ -182,10 +182,9 @@ function mediaOverrides(selector: string, prop: string): string[] {
   // The rows still auto-fit the *viewport* (not the grown column) and the label wheel
   // still scrolls the shared scroll area.
   const fit = app.includes('const plotH = Math.max(120, (this.el.scroll.clientHeight || 630) - axisH - overviewH - analogH);');
-  const overflow = app.includes('return scroll.scrollHeight > scroll.clientHeight + 1;');
   const wheel = app.includes('scroll.scrollTop += wheelDeltaPixels(e.deltaY, e.deltaMode, scroll.clientHeight);');
-  check('row fit, the overflow test and the row-scroll wheel still read the scroll viewport',
-    fit && overflow && wheel, `fit=${fit}, overflow=${overflow}, wheel=${wheel}`);
+  check('row fit and the row-scroll wheel still read the scroll viewport',
+    fit && wheel, `fit=${fit}, wheel=${wheel}`);
 }
 
 // ------------------------------------------------------------------ #11 density chrome

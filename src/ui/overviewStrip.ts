@@ -434,7 +434,7 @@ export class OverviewStrip {
     // letting Ctrl+wheel through zooms the page.
     const state = this.state;
     const action = this.cb.wheelAction?.(event) ?? wheelAction(event, {
-      wheelZooms: false, rowsOverflow: true, hasCapture: !!state && state.store.length > 0,
+      wheelZooms: false, hasCapture: !!state && state.store.length > 0,
     });
     if (action === 'native') return;
     event.preventDefault();

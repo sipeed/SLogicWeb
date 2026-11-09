@@ -229,7 +229,7 @@ const body = keydownBody(appSource);
     .flatMap((entry) => [entry.input, ...entry.labels]));
   const missing = keys.filter((key) => [en, zhCN, ru, fr].some((dict) => !dict[key]));
   check('the mouse reference lists the wheel, Shift+wheel, Shift+arrows, drag, double-click and pinch',
-    off.startsWith('shortcuts.input.wheel=shortcuts.scrollRowsOrZoom;Ctrl+shortcuts.input.wheel=shortcuts.zoomTime;') &&
+    off.startsWith('shortcuts.input.wheel=shortcuts.scrollRows;Ctrl+shortcuts.input.wheel=shortcuts.zoomTime;') &&
     on.startsWith('shortcuts.input.wheel=shortcuts.zoomTime;Ctrl+shortcuts.input.wheel=shortcuts.scrollRows;') &&
     off.endsWith('Shift+shortcuts.input.wheel=shortcuts.panTime;Shift+shortcuts.input.arrows=shortcuts.panPage;' +
       'shortcuts.input.drag=shortcuts.panTime;shortcuts.input.doubleClick=shortcuts.addCursor;' +

@@ -190,7 +190,7 @@ function check(name: string, pass: boolean, detail: string): void {
   // Page zoom is stopped before the data check; the default (no app callback) is the
   // overflowing-rows grammar: plain wheel native, Ctrl zooms, Shift pans.
   const wheel = nativeAt >= 0 && preventAt > nativeAt && blockAt > preventAt && dataAt > blockAt &&
-    wheelBody.includes('wheelZooms: false, rowsOverflow: true') &&
+    wheelBody.includes('wheelZooms: false, hasCapture:') &&
     wheelBody.includes("if (action === 'zoom')") && strip.includes('this.cb.onZoom(') &&
     strip.includes('this.cb.onPan(');
   check('the strip carries a fixed trigger-relative time scale and the shared wheel contract',

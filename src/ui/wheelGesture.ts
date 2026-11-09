@@ -6,11 +6,9 @@
  * hint bar (`interactionHints`) cannot drift apart.
  *
  *   - Shift+wheel always pans time.
- *   - Default (`wheelZooms` off): Ctrl/⌘+wheel zooms time; a plain wheel scrolls the row
- *     stack - but only while the rows overflow. When every row already fits on screen a
- *     plain wheel has nothing to scroll, so it zooms instead (decided in the M4 UX
- *     review: an inert wheel read as "zoom is broken"). As soon as the rows overflow
- *     again the plain wheel goes back to scrolling, and the hint bar follows.
+ *   - Default (`wheelZooms` off): Ctrl/⌘+wheel zooms time; a plain wheel only scrolls the
+ *     row stack (when every row fits it does nothing) - it never zooms, so the setting is
+ *     the one switch between the two habits.
  *   - "Wheel zooms" on (PulseView/sigrok habit): a plain wheel zooms time and
  *     Ctrl/⌘+wheel scrolls the row stack.
  *
@@ -28,8 +26,6 @@ export interface WheelModifiers {
 export interface WheelContext {
   /** The persisted "wheel zooms without Ctrl" preference. */
   readonly wheelZooms: boolean;
-  /** The row stack is taller than its viewport, so vertical scrolling moves something. */
-  readonly rowsOverflow: boolean;
   readonly hasCapture: boolean;
 }
 
@@ -50,19 +46,20 @@ export function wheelAction(mods: WheelModifiers, ctx: WheelContext): WheelActio
     return ctx.hasCapture ? 'zoom' : 'block';
   }
   if (!ctx.hasCapture) return 'native';
-  if (ctx.wheelZooms || !ctx.rowsOverflow) return 'zoom';
-  return 'native';
+  return ctx.wheelZooms ? 'zoom' : 'native';
 }
 
 /**
  * The wheel over the corner cell's Fit button (DESIGN §3.4): it is a zoom control, not a
  * row surface, so a plain wheel and Ctrl/⌘+wheel both zoom time and Shift+wheel pans,
- * whatever the "wheel zooms" preference or the row overflow. It is `wheelAction` read
- * with "rows all fit", so it inherits the no-capture rules unchanged: a plain wheel stays
- * native scrolling and Ctrl/Shift are swallowed.
+ * whatever the "wheel zooms" preference. Without a capture the usual rules hold: a plain
+ * wheel stays native scrolling and Ctrl/Shift are swallowed.
  */
 export function fitWheelAction(mods: WheelModifiers, hasCapture: boolean): WheelAction {
-  return wheelAction(mods, { wheelZooms: false, rowsOverflow: false, hasCapture });
+  if (mods.shiftKey) return hasCapture ? 'pan' : 'block';
+  const ctrl = mods.ctrlKey || mods.metaKey === true;
+  if (!hasCapture) return ctrl ? 'block' : 'native';
+  return 'zoom';
 }
 
 /** Pixels for one wheel event's vertical delta, whatever its `deltaMode`. */
