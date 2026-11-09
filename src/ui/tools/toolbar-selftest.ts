@@ -949,12 +949,15 @@ const shortcutsRowBody = shortcutsRowAt >= 0 ? settingsDialogSrc.slice(shortcuts
 const shortcutsRowOpensDialog = shortcutsRowBody.includes("hint.textContent = '▸';") &&
   shortcutsRowBody.includes('this.host.openShortcuts(row)') &&
   !shortcutsRowBody.includes('this.shortcutsDialog.open(');
+const windowRowsComposed = ['labelsRow', 'shortcutsRow'].every((row) =>
+  settingsDialogSrc.includes(`private ${row}(): `) &&
+  settingsDialogSrc.includes(`this.${row}()`));
 const settingsRowsScoped = !settingsDialogSrc.includes("t('settings.language')") &&
   !settingsDialogSrc.includes("t('settings.theme')") &&
   !settingsDialogSrc.includes('LOCALES.map') &&
   !settingsDialogSrc.includes('settingsMenu') &&
   (settingsDialogSrc.match(/data-settings-key/g)?.length ?? 0) === 2 &&
-  detailedLabelsRowAt >= 0 && shortcutsRowAt > detailedLabelsRowAt;
+  detailedLabelsRowAt >= 0 && shortcutsRowAt >= 0 && windowRowsComposed;
 const constructorBody = methodBody('constructor() {');
 const detailedLabelsReflection = app.includes("document.documentElement.removeAttribute('data-toolbar-labels')") &&
   app.includes("document.documentElement.setAttribute('data-toolbar-labels', 'off')") &&
@@ -962,7 +965,7 @@ const detailedLabelsReflection = app.includes("document.documentElement.removeAt
   constructorBody.includes('this.reflectDetailedLabels();') &&
   setDetailedLabelsBody.includes('this.reflectDetailedLabels();');
 check(
-  'settings offers the checked default-on display toggle, one row that opens the shortcuts reference, and About last',
+  'settings offers the checked default-on display toggle and one row that opens the shortcuts reference, both composed into the window',
   detailedLabelsToggle && detailedLabelsDefault && detailedLabelsReflection && settingsRowsScoped &&
     shortcutsRowOpensDialog,
   `toggle=${detailedLabelsToggle}, default=${detailedLabelsDefault}, reflection=${detailedLabelsReflection}, ` +

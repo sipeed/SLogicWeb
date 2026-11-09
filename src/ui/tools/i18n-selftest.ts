@@ -898,7 +898,8 @@ const baseSettings: CaptureSettings = {
   // clean FAIL, not a crash.
   const probes: (keyof Messages)[] = [
     'toolbar.start', 'settings.language', 'settings.theme',
-    'settings.detailedLabels', 'settings.close', 'settings.sections.appearance',
+    'settings.detailedLabels', 'settings.compactRows', 'settings.hideIdle',
+    'settings.developerTools', 'settings.close', 'settings.sections.appearance',
     'settings.sections.general',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortStop',
     'toolbar.shortStopping', 'toolbar.shortOpen', 'toolbar.shortSave',
