@@ -117,7 +117,7 @@ function onStorage(event: StorageEvent): void {
 
 function onNarrowestChange(): void {
   const floor = narrowest();
-  if (current !== null && current < floor) {
+  if ((current ?? PANEL_WIDTH_DEFAULT) < floor) {
     setPanelWidth(floor);
     return;
   }

@@ -413,7 +413,7 @@ const describe = (s: SidebarState): string =>
     /\bflex: 1 1 0;/.test(tab) && /\bmin-width: 0;/.test(tab) &&
     /\bbackground: transparent;/.test(tab) && /\bcolor: var\(--text50\);/.test(tab);
   const collapseInRow = host.includes('this.strip.append(this.collapseButton, this.tablist);') &&
-    /\bwidth: 24px;/.test(collapse) && /\bheight: var\(--side-tabs-h\);/.test(collapse) &&
+    /\bwidth: 24px;/.test(collapse) && /\balign-self: stretch;/.test(collapse) &&
     /\bborder: 0;/.test(collapse) && /\bbackground: transparent;/.test(collapse);
   check('the strip is full-bleed: a sticky band with no padding or gap, a leading flush collapse control, and three equal-width tabs',
     fullBleed && equalTabs && collapseInRow,
@@ -455,10 +455,12 @@ const describe = (s: SidebarState): string =>
     /\bwidth: 24px;/.test(rail) && /\bborder-left: 1px solid var\(--border-low\);/.test(rail) &&
     /\bbackground: var\(--secondary\);/.test(rail) && !/\bposition: absolute;/.test(rail);
   const sameBox = /\bheight: var\(--side-tabs-h\);/.test(expand) &&
-    /\bheight: var\(--side-tabs-h\);/.test(collapse) &&
     /\bdisplay: flex;/.test(expand) && /\bwidth: 100%;/.test(expand) &&
     /\bcolor: var\(--text50\);/.test(expand);
-  const sharedMetric = /:root \{[^}]*--side-tabs-h: 31px;/.test(css);
+  const tabRow = /\bpadding: 7px 4px;/.test(tab) && /\bline-height: 16px;/.test(tab) &&
+    /\bborder-bottom: 1px solid var\(--border-low\);/.test(strip);
+  const sharedMetric = /:root \{[^}]*--side-tabs-h: 31px;/.test(css) && tabRow &&
+    7 + 16 + 7 + 1 === 31;
   const coarseTarget = coarse.includes('left: -16px;') && coarse.includes('width: 48px;') &&
     coarse.includes('height: 48px;');
   const railStructure = host.includes("this.rail = div('side-rail');") &&

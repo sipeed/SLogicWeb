@@ -267,6 +267,7 @@ export class CapturePanel {
   private loopSwapEl: HTMLElement | null = null;
   private readonly chipRows = new Map<Element, () => void>();
   private chipObserver: ResizeObserver | null = null;
+  private chipFallback = false;
 
   constructor(
     private readonly host: CapturePanelHost,
@@ -287,18 +288,32 @@ export class CapturePanel {
       if (sample === undefined) return;
       const full = widestChipBox(sample, indices.map((index) => chipLabel(index, 'full')));
       const short = widestChipBox(sample, indices.map((index) => chipLabel(index, 'short')));
-      const fit = chipRowFit(grid.clientWidth, CHANNEL_BANK_SIZE, full, short);
+      const gap = Number.parseFloat(getComputedStyle(grid).columnGap);
+      const fit = chipRowFit(grid.clientWidth, CHANNEL_BANK_SIZE, full, short,
+        Number.isFinite(gap) ? gap : undefined);
       grid.dataset.chipForm = fit.form;
       grid.style.setProperty('--chip-min-w', `${Math.round(fit.chipCss * 100) / 100}px`);
     };
+    this.chipRows.set(grid, apply);
     if (this.chipObserver === null && typeof ResizeObserver !== 'undefined') {
       this.chipObserver = new ResizeObserver((entries) => {
         for (const entry of entries) this.chipRows.get(entry.target)?.();
       });
     }
-    if (this.chipObserver === null) return;
-    this.chipRows.set(grid, apply);
-    this.chipObserver.observe(grid);
+    if (this.chipObserver !== null) {
+      this.chipObserver.observe(grid);
+      return;
+    }
+    if (!this.chipFallback) {
+      this.chipFallback = true;
+      if (typeof window !== 'undefined') {
+        window.addEventListener('resize', () => {
+          for (const refresh of this.chipRows.values()) refresh();
+        });
+      }
+    }
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(apply);
+    else apply();
   }
 
   private *roots(): Generator<HTMLElement, void, undefined> {

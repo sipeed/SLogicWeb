@@ -280,6 +280,24 @@ let storageListener: StorageListener | null = null;
 }
 
 {
+  resetPanelMinWidthForTest();
+  setPanelWidth(null);
+  const factory = getPanelWidth();
+  publishPanelMinWidth(320);
+  const factoryGrown = getPanelWidth();
+  const keptLast = [publishPanelMinWidth(null), publishPanelMinWidth(Number.NaN)];
+  const appliedAfterKept = getPanelWidth();
+  resetPanelMinWidthForTest();
+  setPanelWidth(296);
+  const backToDefault = getPanelWidth();
+  check('a factory-width panel grows when the measured minimum exceeds the default, and a lost measurement keeps the last value',
+    factory === null && factoryGrown === 320 && keptLast.join(',') === '320,320' &&
+    appliedAfterKept === 320 && backToDefault === null,
+    `factory=${factory}, grown=${factoryGrown}, kept=${keptLast}, applied=${appliedAfterKept}, ` +
+    `default=${backToDefault}`);
+}
+
+{
   const log: StyleOp[] = [];
   const storage = makeStorage();
   defineGlobal('localStorage', storage.api);

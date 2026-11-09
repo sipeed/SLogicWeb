@@ -41,6 +41,7 @@ export function measurePanelMinWidth(panel: HTMLElement): number | null {
   if (panel.getClientRects().length === 0) return null;
   const section = panel.querySelector<HTMLElement>(DIGITAL_SECTION_SELECTOR);
   if (section === null || section.getClientRects().length === 0) return null;
+  if (section.querySelector('.channel-bank-grid') === null) return null;
   const chrome = panel.getBoundingClientRect().width - section.getBoundingClientRect().width;
   const value = Math.ceil(digitalSectionMinWidth(section) + Math.max(0, chrome));
   return value > 0 ? value : null;

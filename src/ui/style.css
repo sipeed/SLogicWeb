@@ -1633,8 +1633,8 @@ html[data-theme="light"] .grid-canvas { mix-blend-mode: darken; }
 :is(html[data-theme="dark"], html[data-theme="light"]) .side-tab.on { background: var(--background); }
 #side-panel .side-collapse {
   width: 24px;
-  height: var(--side-tabs-h);
-  align-self: flex-start;
+  height: auto;
+  align-self: stretch;
   padding: 0;
   border: 0;
   border-radius: 0;
