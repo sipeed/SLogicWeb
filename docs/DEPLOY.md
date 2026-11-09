@@ -98,9 +98,11 @@ and commit the regenerated manifest in the same change.
 A hosted build emits a service worker and a web manifest (`src/pwa/`, policy in
 ARCHITECTURE.md §7.2), so the installed or revisited page starts without the network.
 Every file it serves has a content-hashed name except `index.html`, `sw.js`, the manifest
-and the icons, and the worker refetches the last three itself on each new version. After a
-deploy, purge exactly **`index.html` and `sw.js`** from the CDN; a stale `sw.js` only delays
-the update, and a stale `index.html` makes the new worker's install fail (it checks the
+and the icons, and the worker refetches the last three itself on each new version. The
+deploy workflow's `purge-cdn` job purges all of them (`PATHS` in
+`.github/scripts/purge-qiniu-cdn.sh`) and checks an edge serves the new bytes; a manual
+deploy must purge at least **`index.html` and `sw.js`**. A stale `sw.js` only delays the
+update; a stale `index.html` makes the new worker's install fail (it checks the
 `slogicweb-build` stamp) until the purge lands. Open tabs then show "A new version is ready"
 and reload only when the user clicks.
 

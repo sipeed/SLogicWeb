@@ -28,7 +28,7 @@ DIST=${1:?usage: purge-qiniu-cdn.sh <dist-dir>}
 SITE=https://slogic.sipeed.com
 # Target of the default (mainland) DNS line; the overseas line goes straight to Pages.
 QINIU_CNAME=slogic-sipeed-com-idvs37w.qiniudns.com
-PATHS=(/ /index.html /favicon.svg /DEPLOY.txt /LICENSE.txt /THIRD_PARTY_LICENSES.txt /ota/ /ota/index.html /ota/batch.html /ota/favicon.svg /ota/firmware.json)
+PATHS=(/ /index.html /sw.js /manifest.webmanifest /icons/icon-192.png /icons/icon-512.png /icons/icon-maskable-512.png /favicon.svg /DEPLOY.txt /LICENSE.txt /THIRD_PARTY_LICENSES.txt /ota/ /ota/index.html /ota/batch.html /ota/favicon.svg /ota/firmware.json)
 # Qiniu documents purges as taking effect within minutes; resubmit once halfway through.
 TIMEOUT=600
 RESUBMIT_AFTER=300
