@@ -849,6 +849,9 @@ export const ru: Messages = {
   // ----------------------------------------------------------- shortcuts
   'shortcuts.close': 'Закрыть',
   'shortcuts.clearCursors': 'Сбросить курсоры',
+  'shortcuts.open': 'Открыть…',
+  'shortcuts.save': 'Сохранить…',
+  'shortcuts.settings': 'Настройки',
   'shortcuts.group.file': 'Файл',
   'shortcuts.group.view': 'Вид',
   'shortcuts.group.navigation': 'Навигация',

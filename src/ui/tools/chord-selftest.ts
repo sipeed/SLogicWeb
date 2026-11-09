@@ -141,7 +141,7 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
     [{ key: 'ArrowLeft', metaKey: true, altKey: true }, null],
   ];
   check('off Apple, Meta is the OS key and never reaches the catalogue',
-    allMatch(false, rows) && actionOf('Mod+O') === null,
+    allMatch(false, rows) && actionOf('Mod+Z') === null && actionOf('Mod+O') === 'file.open',
     pressRows(false, rows));
 }
 
@@ -193,7 +193,7 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const ids = SHORTCUTS.map((entry) => entry.id);
   check('every id appears once and every chord is claimed once across the catalogue',
     new Set(ids).size === ids.length && new Set(chords).size === chords.length &&
-    SHORTCUTS.length === 7 && chords.length === 9,
+    SHORTCUTS.length === 10 && chords.length === 12,
     `ids=${ids.join(',')}, chords=${chords.join(',')}`);
 }
 
@@ -214,7 +214,7 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const every = SHORTCUTS.map((entry) =>
     entry.chords.map((chord) => actionOf(chord) === entry.id).join(',')).join(';');
   check('actionOf resolves every catalogued chord to its own row',
-    every === 'true;true;true;true,true;true,true;true;true',
+    every === 'true;true;true;true;true;true;true,true;true,true;true;true',
     `every=${every}`);
 }
 
@@ -251,8 +251,8 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
 }
 
 {
-  const unmapped = ['', 'F ', 'Enter', 'Return', 'Add', 'Shift+F', 'Shift+ArrowLeft', 'Mod+O',
-    'Ctrl+O', 'Unknown+Key'];
+  const unmapped = ['', 'F ', 'Enter', 'Return', 'Add', 'Shift+F', 'Shift+ArrowLeft',
+    'Ctrl+O', 'Alt+O', 'Unknown+Key'];
   const answers = unmapped.map((chord) => actionOf(chord));
   check('actionOf answers null for chords the catalogue does not own yet',
     answers.every((answer) => answer === null) && actionOf('Space') === 'capture.toggle',
@@ -264,7 +264,7 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const counts = groups.map((group) => shortcutsIn(group).length).join(',');
   const ids = groups.flatMap((group) => shortcutsIn(group).map((entry) => entry.id));
   check('the three groups partition the catalogue without losing or repeating a row',
-    counts === '0,7,0' && new Set(ids).size === ids.length &&
+    counts === '3,7,0' && new Set(ids).size === ids.length &&
     ids.length === SHORTCUTS.length,
     `counts=${counts}, ids=${ids.join(',')}`);
 }
@@ -272,20 +272,23 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
 {
   const anywhere = (rows: readonly { readonly id: string; readonly anywhere?: boolean }[]): Set<string> =>
     new Set(rows.filter((row) => row.anywhere === true).map((row) => row.id));
-  check('nothing runs while a window or menu is open in this catalogue',
-    WORK_ANYWHERE.size === 0 && [...WORK_ANYWHERE].length === 0 &&
-    SHORTCUTS.every((entry) => entry.anywhere !== true) &&
-    anywhere(SHORTCUTS).size === 0,
-    `workAnywhere=${[...WORK_ANYWHERE].join(',')}`);
+  const locked = [...WORK_ANYWHERE].join(',');
+  const unmarked = SHORTCUTS.filter((entry) => entry.anywhere === true).map((entry) => entry.id);
+  check('exactly the three file and window commands run while a window or menu is open',
+    locked === 'file.open,file.save,settings.open' && unmarked.join(',') === locked &&
+    anywhere(SHORTCUTS).size === 3 &&
+    SHORTCUTS.filter((entry) => entry.group === 'file').every((entry) => entry.anywhere === true),
+    `workAnywhere=${locked}, unmarked=${unmarked.join(',')}`);
 }
 
 {
   const anywhere = (rows: readonly { readonly id: string; readonly anywhere?: boolean }[]): Set<string> =>
     new Set(rows.filter((row) => row.anywhere === true).map((row) => row.id));
-  check('control: an anywhere row would land in the same derived set',
-    anywhere([{ id: 'file.open', anywhere: true }, { id: 'view.fit' }]).size === 1 &&
-    anywhere(SHORTCUTS).size === 0,
-    `synthetic=${anywhere([{ id: 'file.open', anywhere: true }]).size}`);
+  const synthetic = SHORTCUTS.map((entry) =>
+    entry.id === 'capture.toggle' ? { ...entry, anywhere: true } : entry);
+  check('control: a fourth anywhere row changes the derived set',
+    anywhere(synthetic).size === 4 && anywhere(SHORTCUTS).size === 3,
+    `synthetic=${anywhere(synthetic).size}, real=${anywhere(SHORTCUTS).size}`);
 }
 
 // ---------------------------------------------------------------- formatChord
@@ -345,8 +348,12 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
     entry.chords.map((chord) => formatChord(chord, false)).join(' / ')).join('|');
   const apple = SHORTCUTS.map((entry) =>
     entry.chords.map((chord) => formatChord(chord, true)).join(' / ')).join('|');
+  const text: string = rendered;
+  const mac: string = apple;
   check('every catalogued chord prints a non-empty distinct notation on both platforms',
-    rendered === 'Space|F|Esc|+ / =|- / _|←|→' && apple === rendered,
+    mac !== text &&
+    text === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F|Esc|+ / =|- / _|←|→' &&
+    mac === '⌘O|⌘S|⌘,|Space|F|Esc|+ / =|- / _|←|→',
     `text=${rendered}, apple=${apple}`);
 }
 

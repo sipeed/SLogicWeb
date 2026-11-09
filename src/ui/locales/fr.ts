@@ -858,6 +858,9 @@ export const fr: Messages = {
   // ----------------------------------------------------------- shortcuts
   'shortcuts.close': 'Fermer',
   'shortcuts.clearCursors': 'Effacer les curseurs',
+  'shortcuts.open': 'Ouvrir…',
+  'shortcuts.save': 'Enregistrer…',
+  'shortcuts.settings': 'Paramètres',
   'shortcuts.group.file': 'Fichier',
   'shortcuts.group.view': 'Affichage',
   'shortcuts.group.navigation': 'Navigation',

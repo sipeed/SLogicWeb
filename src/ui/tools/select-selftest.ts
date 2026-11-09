@@ -830,18 +830,38 @@ check(
   );
 
   // The guard also skips textareas, contenteditables and the assistant panel; what this
-  // pins is that text fields and .select-field are excluded before any shortcut runs.
-  const guardIndex = app.indexOf("closest('.select-field");
-  const fitIndex = app.indexOf('const chord = chordOf(e);');
-  const inputGuard = app.indexOf('target instanceof HTMLInputElement');
-  const textareaGuard = app.indexOf('target instanceof HTMLTextAreaElement');
-  const shortcutGuard = guardIndex >= 0 && fitIndex >= 0 &&
-    inputGuard >= 0 && inputGuard < guardIndex && guardIndex < fitIndex &&
-    textareaGuard >= 0 && textareaGuard < fitIndex;
+  // pins is that text fields and .select-field are excluded before a plot dispatch.
+  const listenerStart = app.indexOf("window.addEventListener('keydown', (e) => {");
+  const listener = listenerStart < 0 ? ''
+    : app.slice(listenerStart, app.indexOf('\n    });', listenerStart));
+  const guardIndex = listener.indexOf("closest('.select-field");
+  const chordIndex = listener.indexOf('const chord = chordOf(e);');
+  const anywhereIndex = listener.indexOf('if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {');
+  const inputGuard = listener.indexOf('target instanceof HTMLInputElement');
+  const textareaGuard = listener.indexOf('target instanceof HTMLTextAreaElement');
+  const plotDispatch = listener.indexOf('this.runShortcut(id, e.shiftKey)', guardIndex);
+  const shortcutGuard = guardIndex >= 0 && chordIndex >= 0 && anywhereIndex > chordIndex &&
+    inputGuard > anywhereIndex && inputGuard < guardIndex && guardIndex < plotDispatch &&
+    textareaGuard > anywhereIndex && textareaGuard < plotDispatch;
+  const anywhereBlock = '      if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {\n' +
+    '        if (this.runShortcut(id, e.shiftKey)) e.preventDefault();\n' +
+    '        return;\n      }\n';
+  const movedBelowGuards = app.replace(anywhereBlock, '').replace(
+    "      if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;\n",
+    "      if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;\n" +
+      anywhereBlock);
+  const movedOrder = (source: string): boolean => {
+    const start = source.indexOf("window.addEventListener('keydown', (e) => {");
+    const body = start < 0 ? '' : source.slice(start, source.indexOf('\n    });', start));
+    const anywhere = body.indexOf('if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {');
+    const dialog = body.indexOf("closest('dialog[open]')");
+    return anywhere >= 0 && dialog > anywhere;
+  };
   check(
-    'application shortcuts ignore key events from .select-field before any chord dispatch',
-    shortcutGuard,
-    `inputGuard@${inputGuard}, textareaGuard@${textareaGuard}, selectFieldGuard@${guardIndex}, fHandler@${fitIndex}`,
+    'application shortcuts ignore key events from .select-field before a plot dispatch, after the anywhere set',
+    shortcutGuard && movedBelowGuards !== app && movedOrder(app) && !movedOrder(movedBelowGuards),
+    `inputGuard@${inputGuard}, textareaGuard@${textareaGuard}, selectFieldGuard@${guardIndex}, ` +
+      `anywhere@${anywhereIndex}, chord@${chordIndex}, dispatch@${plotDispatch}`,
   );
 }
 

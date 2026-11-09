@@ -3,6 +3,7 @@ import type { MessageKey } from './i18n.js';
 import { CHORD_ALIASES } from './chords.js';
 
 export type ShortcutId =
+  | 'file.open' | 'file.save' | 'settings.open'
   | 'capture.toggle' | 'view.fit' | 'cursors.clear'
   | 'view.zoomIn' | 'view.zoomOut' | 'view.panLeft' | 'view.panRight';
 
@@ -25,6 +26,16 @@ export interface ShortcutEntry {
 }
 
 export const SHORTCUTS: readonly ShortcutEntry[] = [
+  {
+    id: 'file.open', group: 'file', chords: ['Mod+O'], labels: ['shortcuts.open'], anywhere: true,
+  },
+  {
+    id: 'file.save', group: 'file', chords: ['Mod+S'], labels: ['shortcuts.save'], anywhere: true,
+  },
+  {
+    id: 'settings.open', group: 'file', chords: ['Mod+,'], labels: ['shortcuts.settings'],
+    anywhere: true,
+  },
   {
     id: 'capture.toggle', group: 'view', chords: ['Space'],
     labels: ['toolbar.start', 'toolbar.stop'],

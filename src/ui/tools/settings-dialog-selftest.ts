@@ -1031,6 +1031,39 @@ function settingsHandlerOpensDialog(source: string): boolean {
     `mutated=${settingsHandlerOpensDialog(mutated)}, real=${settingsHandlerOpensDialog(appSource)}`);
 }
 
+function shortcutTogglesWindow(source: string): boolean {
+  const body = methodBody(source, 'private runShortcut(');
+  const at = body.indexOf("      case 'settings.open':");
+  const windowCase = at < 0 ? '' : body.slice(at);
+  const isOpenAt = windowCase.indexOf('if (this.settingsDialog.isOpen) {');
+  const closeAt = windowCase.indexOf('this.settingsDialog.close();');
+  const openAt = windowCase.indexOf('this.settingsDialog.open(this.el.settings);');
+  return isOpenAt >= 0 && closeAt > isOpenAt && openAt > closeAt &&
+    windowCase.includes("this.menuStack.closeOthers(null, 'outside')") &&
+    windowCase.indexOf('this.channelList.closeDialog()') < openAt;
+}
+
+{
+  check('the settings shortcut toggles the same window closed and open through the toolbar invoker',
+    shortcutTogglesWindow(appSource),
+    `ok=${shortcutTogglesWindow(appSource)}`);
+}
+
+{
+  const invokerless = appSource.replace(
+    '        this.settingsDialog.open(this.el.settings);',
+    '        this.settingsDialog.open(null);');
+  const openFirst = appSource.replace(
+    "        if (this.settingsDialog.isOpen) {\n          this.settingsDialog.close();\n          return true;\n        }\n",
+    '');
+  check('control: a null invoker or a case that never closes is detected by the same toggle predicate',
+    invokerless !== appSource && !shortcutTogglesWindow(invokerless) &&
+    openFirst !== appSource && !shortcutTogglesWindow(openFirst) &&
+    shortcutTogglesWindow(appSource),
+    `invokerless=${shortcutTogglesWindow(invokerless)}, openFirst=${shortcutTogglesWindow(openFirst)}, ` +
+    `real=${shortcutTogglesWindow(appSource)}`);
+}
+
 {
   const retired = ['settingsItems', 'this.settingsMenu']
     .filter((needle) => appSource.includes(needle));

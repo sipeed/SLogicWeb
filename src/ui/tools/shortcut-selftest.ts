@@ -1,6 +1,6 @@
 import {
-  SHORTCUTS, SHORTCUT_GROUPS, actionOf, gestureNotation, referenceGestures, referenceGroups,
-  shortcutActionText, shortcutGroupLabel, shortcutsIn,
+  SHORTCUTS, SHORTCUT_GROUPS, WORK_ANYWHERE, actionOf, gestureNotation, referenceGestures,
+  referenceGroups, shortcutActionText, shortcutGroupLabel, shortcutsIn,
   type ShortcutEntry, type ShortcutGroup, type ShortcutId,
 } from '../shortcuts.js';
 import { formatChord } from '../chords.js';
@@ -60,20 +60,64 @@ function runShortcutBody(source: string): string {
 }
 
 const BRANCH_ACTIONS: ReadonlyArray<readonly [string, string]> = [
-  ["if (id === 'capture.toggle') {", 'this.primaryAction();'],
-  ["if (id === 'view.fit') {", 'this.stack.zoomToFit();'],
-  ["if (id === 'cursors.clear') {", 'this.clearCursors();'],
+  ['capture.toggle', 'this.primaryAction();'],
+  ['view.fit', 'this.stack.zoomToFit();'],
+  ['cursors.clear', 'this.clearCursors();'],
 ];
 
-function branchBody(source: string, anchor: string): string {
+function branchBody(source: string, id: string): string {
+  const anchor = `      case '${id}':\n`;
   const start = source.indexOf(anchor);
   if (start < 0) return '';
-  const end = source.indexOf('\n    }', start);
-  return end < 0 ? '' : source.slice(start, end);
+  const rest = source.slice(start + anchor.length);
+  const next = rest.search(/^ {6}(?:case |default:)/m);
+  return next < 0 ? rest : rest.slice(0, next);
 }
 
 function branchesKeepTheirOwnAction(source: string): boolean {
-  return BRANCH_ACTIONS.every(([anchor, action]) => branchBody(source, anchor).includes(action));
+  return BRANCH_ACTIONS.every(([id, action]) => branchBody(source, id).includes(action));
+}
+
+const SWITCH_OPEN = '    switch (id) {\n';
+const SWITCH_NEVER =
+  '      default: {\n        const unreachable: never = id;\n        return unreachable;\n      }\n';
+
+function exhaustiveSwitch(source: string): boolean {
+  const body = runShortcutBody(source);
+  const open = body.indexOf(SWITCH_OPEN);
+  const never = body.indexOf(SWITCH_NEVER, open);
+  const close = body.lastIndexOf('\n    }');
+  return body.length > 0 && open > 0 && never > open && close > never &&
+    !body.slice(never).includes('this.keyPan(');
+}
+
+const ANYWHERE_BLOCK = '      if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {\n' +
+  '        if (this.runShortcut(id, e.shiftKey)) e.preventDefault();\n' +
+  '        return;\n      }\n';
+
+const OVERLAY_SCOPE = [
+  'if (document.querySelector(`dialog[open]:not(#${SETTINGS_DIALOG_ID})`) !== null) return true;',
+  "return target instanceof Element && target.closest('[role=\"dialog\"]') !== null;",
+];
+
+function anywhereOverlaysOnly(source: string): boolean {
+  const listener = keydownBody(source);
+  const method = methodBody(source, 'private shortcutBlockedByOverlay(');
+  return listener.includes(ANYWHERE_BLOCK) &&
+    OVERLAY_SCOPE.every((needle) => method.includes(needle)) &&
+    source.includes('import { SETTINGS_DIALOG_ID, SettingsDialog }');
+}
+
+function anywhereBeforeGuards(source: string): boolean {
+  const listener = keydownBody(source);
+  const anywhere = listener.indexOf(ANYWHERE_BLOCK);
+  const inputGuard = listener.indexOf('target instanceof HTMLInputElement');
+  const dialogGuard = listener.indexOf("closest('dialog[open]')");
+  const dispatch = listener.lastIndexOf(
+    'if (this.runShortcut(id, e.shiftKey)) e.preventDefault();');
+  return listener.length > 0 && anywhere >= 0 && inputGuard > anywhere &&
+    dialogGuard > anywhere && dispatch > dialogGuard &&
+    listener.indexOf('const id = actionOf(chord)') < anywhere;
 }
 
 const appSource = fs.readFileSync('src/ui/app.ts', 'utf8');
@@ -82,12 +126,13 @@ const body = keydownBody(appSource);
 {
   const rows = SHORTCUTS.map((entry) =>
     `${entry.id}|${entry.group}|${entry.chords.join(',')}`).join(';');
-  check('the catalogue is exactly seven rows in dispatch order with pinned groups and chords',
-    SHORTCUTS.length === 7 &&
-    rows === 'capture.toggle|view|Space;view.fit|view|F;cursors.clear|view|Escape;' +
+  check('the catalogue is exactly ten rows in dispatch order with pinned groups and chords',
+    SHORTCUTS.length === 10 &&
+    rows === 'file.open|file|Mod+O;file.save|file|Mod+S;settings.open|file|Mod+,;' +
+      'capture.toggle|view|Space;view.fit|view|F;cursors.clear|view|Escape;' +
       'view.zoomIn|view|+,=;view.zoomOut|view|-,_;view.panLeft|view|ArrowLeft;' +
       'view.panRight|view|ArrowRight' &&
-    shortcutsIn('view').length === 7 && shortcutsIn('file').length === 0 &&
+    shortcutsIn('view').length === 7 && shortcutsIn('file').length === 3 &&
     shortcutsIn('navigation').length === 0,
     `rows=${rows}`);
 }
@@ -96,7 +141,7 @@ const body = keydownBody(appSource);
   const shown = SHORTCUTS.map((entry) =>
     entry.chords.map((chord) => formatChord(chord, false)).join(' / ')).join('|');
   check('every reference row prints its chords through formatChord, aliases included',
-    shown === 'Space|F|Esc|+ / =|- / _|←|→',
+    shown === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F|Esc|+ / =|- / _|←|→',
     `shown=${shown}`);
 }
 
@@ -160,13 +205,16 @@ function groupListProblem(
   const mutated = SHORTCUTS.map((entry) => ({ ...entry, chords: [...entry.chords].reverse() }))
     .map((entry) => entry.chords.map((chord) => formatChord(chord, true)).join(' / ')).join('|');
   check('control: a reordered chord list changes the rendered notation',
-    mutated !== single && single === 'Space|F|Esc|+ / =|- / _|←|→' &&
-    mutated === 'Space|F|Esc|= / +|_ / -|←|→',
+    mutated !== single && single === '⌘O|⌘S|⌘,|Space|F|Esc|+ / =|- / _|←|→' &&
+    mutated === '⌘O|⌘S|⌘,|Space|F|Esc|= / +|_ / -|←|→',
     `real=${single}, mutated=${mutated}`);
 }
 
 {
   const mapped: Array<[string, ShortcutId | null]> = [
+    ['Mod+O', actionOf('Mod+O')],
+    ['Mod+S', actionOf('Mod+S')],
+    ['Mod+,', actionOf('Mod+,')],
     ['Space', actionOf('Space')],
     ['F', actionOf('F')],
     ['Escape', actionOf('Escape')],
@@ -177,8 +225,9 @@ function groupListProblem(
     ['ArrowLeft', actionOf('ArrowLeft')],
     ['ArrowRight', actionOf('ArrowRight')],
   ];
-  const want = ['capture.toggle', 'view.fit', 'cursors.clear', 'view.zoomIn', 'view.zoomIn',
-    'view.zoomOut', 'view.zoomOut', 'view.panLeft', 'view.panRight'];
+  const want = ['file.open', 'file.save', 'settings.open', 'capture.toggle', 'view.fit',
+    'cursors.clear', 'view.zoomIn', 'view.zoomIn', 'view.zoomOut', 'view.zoomOut',
+    'view.panLeft', 'view.panRight'];
   check('actionOf maps every live chord and alias to its id',
     mapped.every(([, id], index) => id === want[index]),
     `mapped=${mapped.map(([key, id]) => `${JSON.stringify(key)}:${String(id)}`).join(',')}`);
@@ -198,6 +247,7 @@ function groupListProblem(
     ['chordOf(e)', body.includes('const chord = chordOf(e);')],
     ['chord === null', body.includes('if (chord === null) return;')],
     ['actionOf(chord)', body.includes('const id = actionOf(chord)')],
+    ['WORK_ANYWHERE', body.includes('if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {')],
     ['runShortcut(shift)', body.includes('this.runShortcut(id, e.shiftKey)')],
     ['HTMLInputElement', body.includes('HTMLInputElement')],
     ['.select-field', body.includes('.select-field')],
@@ -210,8 +260,8 @@ function groupListProblem(
 }
 
 {
-  const branches = BRANCH_ACTIONS.map(([anchor, action]) => {
-    const slice = branchBody(runShortcutBody(appSource), anchor);
+  const branches = BRANCH_ACTIONS.map(([id, action]) => {
+    const slice = branchBody(runShortcutBody(appSource), id);
     return `${action}@${slice.length}`;
   });
   check('each dispatched branch keeps its own action inside its own body',
@@ -222,13 +272,74 @@ function groupListProblem(
 {
   const source = runShortcutBody(appSource);
   const moved = source
-    .replace('      this.primaryAction();\n', '')
-    .replace('      this.stack.zoomToFit();\n', '      this.stack.zoomToFit();\n      this.primaryAction();\n');
+    .replace('        this.primaryAction();\n', '')
+    .replace('        if (!this.fitLockedViewport()) this.stack.zoomToFit();\n',
+      '        if (!this.fitLockedViewport()) this.stack.zoomToFit();\n        this.primaryAction();\n');
   check('control: an action moved into another branch still fails the branch predicate',
     moved !== source && !branchesKeepTheirOwnAction(moved) &&
     branchesKeepTheirOwnAction(source),
     `moved=${moved !== source}, movedHit=${branchesKeepTheirOwnAction(moved)}, ` +
     `realHit=${branchesKeepTheirOwnAction(source)}`);
+}
+
+{
+  check('runShortcut is one exhaustive switch whose default returns the never-typed id',
+    exhaustiveSwitch(appSource) && runShortcutBody(appSource).includes("      case 'settings.open':\n"),
+    `exhaustive=${exhaustiveSwitch(appSource)}, body=${runShortcutBody(appSource).length}`);
+}
+
+{
+  const source = runShortcutBody(appSource);
+  const silentFallthrough = source.replace(SWITCH_NEVER,
+    '      default:\n        this.keyPan(1, shiftKey);\n        return true;\n');
+  check('control: a silent keyPan fallthrough replacing the never-typed default fails the same predicate',
+    silentFallthrough !== source && !exhaustiveSwitch(silentFallthrough) &&
+    exhaustiveSwitch(appSource),
+    `fallthrough=${exhaustiveSwitch(silentFallthrough)}, real=${exhaustiveSwitch(appSource)}`);
+}
+
+{
+  const fileBeforeGuards = anywhereBeforeGuards(appSource);
+  const movedBelowGuards = appSource.replace(ANYWHERE_BLOCK, '').replace(
+    "      if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;\n",
+    "      if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;\n" +
+      ANYWHERE_BLOCK);
+  check('the anywhere set runs before the field, button and open-dialog guards and everything else stays behind them',
+    fileBeforeGuards && movedBelowGuards !== appSource && !anywhereBeforeGuards(movedBelowGuards),
+    `real=${fileBeforeGuards}, moved=${anywhereBeforeGuards(movedBelowGuards)}`);
+}
+
+{
+  const unscoped = appSource.replace(
+    'if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {',
+    'if (WORK_ANYWHERE.has(id)) {');
+  const settingsIsAModal = appSource.replace(':not(#${SETTINGS_DIALOG_ID})', '');
+  const editorDraftLoss = appSource.replace(
+    "    return target instanceof Element && target.closest('[role=\"dialog\"]') !== null;",
+    '    return false;');
+  check('the anywhere set reaches only the settings window and a transient menu',
+    anywhereOverlaysOnly(appSource) && unscoped !== appSource &&
+    settingsIsAModal !== appSource && editorDraftLoss !== appSource &&
+    !anywhereOverlaysOnly(unscoped) && !anywhereOverlaysOnly(settingsIsAModal) &&
+    !anywhereOverlaysOnly(editorDraftLoss),
+    `real=${anywhereOverlaysOnly(appSource)}, unscoped=${anywhereOverlaysOnly(unscoped)}, ` +
+    `modal=${anywhereOverlaysOnly(settingsIsAModal)}, editor=${anywhereOverlaysOnly(editorDraftLoss)}`);
+}
+
+{
+  const runsWithWindowOpen = (id: ShortcutId): boolean => WORK_ANYWHERE.has(id);
+  const locked = [...WORK_ANYWHERE].sort().join(',');
+  check('exactly the file and window commands run while the settings window is open',
+    locked === 'file.open,file.save,settings.open' &&
+    SHORTCUTS.filter((entry) => entry.anywhere === true).length === 3 &&
+    runsWithWindowOpen('file.open') && runsWithWindowOpen('file.save') &&
+    runsWithWindowOpen('settings.open') && !runsWithWindowOpen('capture.toggle') &&
+    !runsWithWindowOpen('view.fit') && !runsWithWindowOpen('cursors.clear') &&
+    actionOf('Mod+,') === 'settings.open' && actionOf('Space') === 'capture.toggle' &&
+    anywhereBeforeGuards(appSource) &&
+    runShortcutBody(appSource).includes(
+      '        if (this.settingsDialog.isOpen) {\n          this.settingsDialog.close();\n          return true;\n        }'),
+    `anywhere=${locked}, space=${String(actionOf('Space'))}, close=${String(actionOf('Mod+,'))}`);
 }
 
 {
@@ -279,7 +390,9 @@ function groupListProblem(
 {
   const rows = SHORTCUTS.map((entry) => `${entry.id}|${entry.labels.join(',')}`).join(';');
   check('every row names its command through catalog keys, in dispatch order',
-    rows === 'capture.toggle|toolbar.start,toolbar.stop;view.fit|toolbar.fit;' +
+    rows === 'file.open|shortcuts.open;file.save|shortcuts.save;' +
+      'settings.open|shortcuts.settings;' +
+      'capture.toggle|toolbar.start,toolbar.stop;view.fit|toolbar.fit;' +
       'cursors.clear|shortcuts.clearCursors;view.zoomIn|shortcuts.zoomIn;' +
       'view.zoomOut|shortcuts.zoomOut;view.panLeft|shortcuts.panLeft;view.panRight|shortcuts.panRight',
     `rows=${rows}`);
@@ -311,9 +424,9 @@ function groupListProblem(
   const shortcuts = runShortcutBody(appSource);
   const listener = body;
   check('the zoom and pan keys dispatch to keyZoom/keyPan and never see a modifier flag',
-    shortcuts.includes("if (id === 'view.zoomIn') { this.keyZoom(1); return true; }") &&
-    shortcuts.includes("if (id === 'view.zoomOut') { this.keyZoom(-1); return true; }") &&
-    shortcuts.includes("if (id === 'view.panLeft') { this.keyPan(-1, shiftKey); return true; }") &&
+    shortcuts.includes("      case 'view.zoomIn':\n        this.keyZoom(1);\n        return true;") &&
+    shortcuts.includes("      case 'view.zoomOut':\n        this.keyZoom(-1);\n        return true;") &&
+    shortcuts.includes("      case 'view.panLeft':\n        this.keyPan(-1, shiftKey);\n        return true;") &&
     shortcuts.includes('this.keyPan(1, shiftKey);') &&
     shortcuts.includes('return true;') &&
     !shortcuts.includes('ctrlKey') && !shortcuts.includes('metaKey') &&
@@ -328,8 +441,8 @@ function groupListProblem(
 {
   const shortcuts = runShortcutBody(appSource);
   const gated = shortcuts.replace(
-    "if (id === 'view.zoomIn') { this.keyZoom(1); return true; }",
-    "if (id === 'view.zoomIn') { if (ctrlKey) return false; this.keyZoom(1); return true; }");
+    '      case \'view.zoomIn\':\n        this.keyZoom(1);\n        return true;',
+    '      case \'view.zoomIn\':\n        if (ctrlKey) return false;\n        this.keyZoom(1);\n        return true;');
   const modifierFree = (source: string): boolean =>
     source.length > 0 && !source.includes('ctrlKey') && !source.includes('metaKey') &&
     !source.includes('altKey');
@@ -411,19 +524,21 @@ const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = 
 
 {
   const texts = SHORTCUTS.map((entry) => shortcutActionText(entry));
+  const capture = SHORTCUTS.find((entry) => entry.id === 'capture.toggle')!;
   check('the reference action text joins the labeled catalog keys with the two-label separator',
-    texts.join(' | ') === 'Capture / Stop | Fit | Clear cursors | Zoom in | Zoom out | ' +
-      'Pan left (earlier) | Pan right (later)' &&
-    SHORTCUTS[0]!.labels.length === 2 && t('toolbar.start') === 'Capture',
+    texts.join(' | ') === 'Open… | Save… | Settings | Capture / Stop | Fit | Clear cursors | ' +
+      'Zoom in | Zoom out | Pan left (earlier) | Pan right (later)' &&
+    capture.labels.length === 2 && t('toolbar.start') === 'Capture',
     `texts=${texts.join(' | ')}`);
 }
 
 {
-  const swapped: ShortcutEntry = { ...SHORTCUTS[0]!, labels: ['toolbar.stop', 'toolbar.start'] };
+  const capture = SHORTCUTS.find((entry) => entry.id === 'capture.toggle')!;
+  const swapped: ShortcutEntry = { ...capture, labels: ['toolbar.stop', 'toolbar.start'] };
   check('control: a swapped label pair does not reproduce the pinned action text',
     shortcutActionText(swapped) === 'Stop / Capture' &&
-    shortcutActionText(swapped) !== shortcutActionText(SHORTCUTS[0]!),
-    `swapped=${shortcutActionText(swapped)}, real=${shortcutActionText(SHORTCUTS[0]!)}`);
+    shortcutActionText(swapped) !== shortcutActionText(capture),
+    `swapped=${shortcutActionText(swapped)}, real=${shortcutActionText(capture)}`);
 }
 
 function methodBody(source: string, marker: string): string {

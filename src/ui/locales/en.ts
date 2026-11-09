@@ -859,6 +859,9 @@ export const en = {
   // ----------------------------------------------------------- shortcuts
   'shortcuts.close': 'Close',
   'shortcuts.clearCursors': 'Clear cursors',
+  'shortcuts.open': 'Open…',
+  'shortcuts.save': 'Save…',
+  'shortcuts.settings': 'Settings',
   'shortcuts.group.file': 'File',
   'shortcuts.group.view': 'View',
   'shortcuts.group.navigation': 'Navigation',

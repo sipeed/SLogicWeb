@@ -894,16 +894,35 @@ const edgeMethodsSource = slice(app,
     sideControlSource.includes("if (e.key === ' ') e.stopPropagation();"),
     `guarded=${sideControlSource.includes("if (e.key === ' ') e.stopPropagation();")}`);
 
+  const listenerBody = (source: string): string => {
+    const start = source.indexOf("window.addEventListener('keydown', (e) => {");
+    return start < 0 ? '' : source.slice(start, source.indexOf('\n    });', start));
+  };
+  const pickerGuardOrder = (source: string): boolean => {
+    const listener = listenerBody(source);
+    const anywhere = listener.indexOf('if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {');
+    const guard = listener.indexOf("closest('.select-field");
+    const dispatch = listener.indexOf('this.runShortcut(id, e.shiftKey)', guard);
+    return anywhere >= 0 && guard > anywhere && dispatch > guard;
+  };
+  const anywhereBlock = '      if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {\n' +
+    '        if (this.runShortcut(id, e.shiftKey)) e.preventDefault();\n' +
+    '        return;\n      }\n';
+  const movedBelowGuard = app.replace(anywhereBlock, '').replace(
+    "            target.closest('.ch-editor-popover, button, [role=\"button\"], [role=\"slider\"]') !== null)) return;\n",
+    "            target.closest('.ch-editor-popover, button, [role=\"button\"], [role=\"slider\"]') !== null)) return;\n" +
+      anywhereBlock);
   check('the popover keeps Space and Escape for its own picker',
     app.includes("target.closest('.select-field, .assistant-panel, .cursor-dist-popover') !== null") &&
-    app.indexOf("closest('.select-field") < app.indexOf('const chord = chordOf(e);'),
-    `guard=${app.includes('.cursor-dist-popover')}`);
+    pickerGuardOrder(app) && movedBelowGuard !== app && !pickerGuardOrder(movedBelowGuard),
+    `guard=${app.includes('.cursor-dist-popover')}, real=${pickerGuardOrder(app)}, ` +
+    `moved=${pickerGuardOrder(movedBelowGuard)}`);
 
-  const escapeBlock = slice(app, "if (id === 'cursors.clear') {", 'this.clearCursors();');
+  const escapeBlock = slice(app, "case 'cursors.clear':", 'this.clearCursors();');
   check('an open picker hands Escape back to the browser before the cursor clear',
     escapeBlock.includes(
-      "if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return false;\n" +
-      '      this.releaseMarkerPointer();') &&
+      "        if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return false;\n" +
+      '        this.releaseMarkerPointer();') &&
     !escapeBlock.includes('clearCursors'),
     `block=${escapeBlock.length} chars, clear=${escapeBlock.includes('clearCursors')}`);
 }

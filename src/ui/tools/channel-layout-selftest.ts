@@ -266,17 +266,29 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const shortcutBody = shortcutEnd > shortcutStart
     ? app.slice(shortcutStart, shortcutEnd) : '';
   const dialogGuardIndex = shortcutBody.indexOf("closest('dialog[open]') !== null");
-  const shortcutActions = [
-    shortcutBody.indexOf('const chord = chordOf(e);'),
-    shortcutBody.indexOf('const id = actionOf(chord)'),
-    shortcutBody.indexOf('this.runShortcut(id, e.shiftKey)'),
-  ];
-  const dialogGuard = dialogGuardIndex >= 0 &&
-    shortcutActions.every((index) => index > dialogGuardIndex);
-  check('app-level shortcuts stay out of an open dialog',
-    dialogGuard,
-    `guard@${dialogGuardIndex}, actions=${JSON.stringify(shortcutActions)}, ` +
-    `body=${shortcutBody.length}`);
+  const plotDispatch = shortcutBody.indexOf('this.runShortcut(id, e.shiftKey)', dialogGuardIndex);
+  const anywhereIndex = shortcutBody.indexOf('if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {');
+  const resolveIndex = shortcutBody.indexOf('const id = actionOf(chord)');
+  const dialogGuard = dialogGuardIndex >= 0 && anywhereIndex > resolveIndex &&
+    dialogGuardIndex > anywhereIndex && plotDispatch > dialogGuardIndex;
+  const anywhereBlock = '      if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {\n' +
+    '        if (this.runShortcut(id, e.shiftKey)) e.preventDefault();\n' +
+    '        return;\n      }\n';
+  const movedBelowGuard = app.replace(anywhereBlock, '').replace(
+    "      if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;\n",
+    "      if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;\n" +
+      anywhereBlock);
+  const movesOrder = (source: string): boolean => {
+    const start = source.indexOf("window.addEventListener('keydown', (e) => {");
+    const body = start < 0 ? '' : source.slice(start, source.indexOf('\n    });', start));
+    const anywhere = body.indexOf('if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {');
+    const dialog = body.indexOf("closest('dialog[open]')");
+    return anywhere >= 0 && dialog > anywhere;
+  };
+  check('app-level shortcuts stay out of an open dialog while the anywhere set still runs',
+    dialogGuard && movedBelowGuard !== app && movesOrder(app) && !movesOrder(movedBelowGuard),
+    `guard@${dialogGuardIndex}, anywhere@${anywhereIndex}, resolve@${resolveIndex}, ` +
+    `dispatch@${plotDispatch}, body=${shortcutBody.length}`);
 
   const channelList = fs.readFileSync('src/ui/channelList.ts', 'utf8');
   const rowStart = channelList.indexOf('export class ChannelList');

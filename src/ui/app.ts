@@ -119,14 +119,14 @@ import {
 } from './workspacePreferences.js';
 import { baseTheme, canvasPalette, type CanvasPalette } from './canvasPalette.js';
 import { SettingsMenu, type SettingsMenuItem } from './settingsMenu.js';
-import { SettingsDialog } from './settingsDialog.js';
+import { SETTINGS_DIALOG_ID, SettingsDialog } from './settingsDialog.js';
 import { MenuStack } from './menuStack.js';
 import {
   DEFAULT_SIDEBAR_STATE, hideSidebar, selectSidebarPage, toggleSidebarVisible,
   type SidebarPage, type SidebarState,
 } from './sidebar.js';
 import { SidebarHost } from './sidebarHost.js';
-import { actionOf, type ShortcutId } from './shortcuts.js';
+import { actionOf, WORK_ANYWHERE, type ShortcutId } from './shortcuts.js';
 import { chordOf } from './chords.js';
 import {
   fitWheelAction, wheelAction, wheelDeltaPixels, type WheelAction, type WheelModifiers,
@@ -3099,7 +3099,16 @@ export class App {
     });
 
     window.addEventListener('keydown', (e) => {
-      // Shortcuts belong to the plot. Typing anywhere else - a text field, the chat box,
+      const chord = chordOf(e);
+      if (chord === null) return;
+      const unshifted = chord.startsWith('Shift+') ? chord.slice('Shift+'.length) : '';
+      const id = actionOf(chord) ?? (/^[A-Z]$/.test(unshifted) ? null : actionOf(unshifted));
+      if (id === null) return;
+      if (WORK_ANYWHERE.has(id) && !this.shortcutBlockedByOverlay(e.target)) {
+        if (this.runShortcut(id, e.shiftKey)) e.preventDefault();
+        return;
+      }
+      // The rest belong to the plot. Typing anywhere else - a text field, the chat box,
       // a contenteditable, anything inside the assistant (whose buttons keep focus
       // after a click) or an open dialog - must not leak: Space would start a capture.
       const target = e.target;
@@ -3110,11 +3119,6 @@ export class App {
             target.closest('.select-field, .assistant-panel, .cursor-dist-popover') !== null ||
             target.closest('.ch-editor-popover, button, [role="button"], [role="slider"]') !== null)) return;
       if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;
-      const chord = chordOf(e);
-      if (chord === null) return;
-      const unshifted = chord.startsWith('Shift+') ? chord.slice('Shift+'.length) : '';
-      const id = actionOf(chord) ?? (/^[A-Z]$/.test(unshifted) ? null : actionOf(unshifted));
-      if (id === null) return;
       if (this.runShortcut(id, e.shiftKey)) e.preventDefault();
     });
 
@@ -3135,30 +3139,66 @@ export class App {
     });
   }
 
+  private shortcutBlockedByOverlay(target: EventTarget | null): boolean {
+    if (document.querySelector(`dialog[open]:not(#${SETTINGS_DIALOG_ID})`) !== null) return true;
+    return target instanceof Element && target.closest('[role="dialog"]') !== null;
+  }
+
   private runShortcut(id: ShortcutId, shiftKey: boolean): boolean {
-    if (id === 'capture.toggle') {
-      this.primaryAction();
-      return true;
+    switch (id) {
+      case 'capture.toggle':
+        this.primaryAction();
+        return true;
+      case 'view.fit':
+        this.beginViewportGesture();
+        if (!this.fitLockedViewport()) this.stack.zoomToFit();
+        this.dirty = true;
+        return false;
+      case 'cursors.clear':
+        if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return false;
+        this.releaseMarkerPointer();
+        this.clearCursors();
+        this.renderPanels();
+        this.dirty = true;
+        return false;
+      case 'view.zoomIn':
+        this.keyZoom(1);
+        return true;
+      case 'view.zoomOut':
+        this.keyZoom(-1);
+        return true;
+      case 'view.panLeft':
+        this.keyPan(-1, shiftKey);
+        return true;
+      case 'view.panRight':
+        this.keyPan(1, shiftKey);
+        return true;
+      case 'file.open':
+        if (this.settingsDialog.isOpen) this.settingsDialog.close();
+        this.channelList.closeDialog();
+        this.menuStack.closeOthers(this.openMenu, 'outside');
+        this.openMenu.toggle(this.openItems());
+        return true;
+      case 'file.save':
+        if (this.settingsDialog.isOpen) this.settingsDialog.close();
+        this.channelList.closeDialog();
+        this.menuStack.closeOthers(this.saveMenu, 'outside');
+        this.saveMenu.toggle(this.saveItems());
+        return true;
+      case 'settings.open':
+        if (this.settingsDialog.isOpen) {
+          this.settingsDialog.close();
+          return true;
+        }
+        this.channelList.closeDialog();
+        this.menuStack.closeOthers(null, 'outside');
+        this.settingsDialog.open(this.el.settings);
+        return true;
+      default: {
+        const unreachable: never = id;
+        return unreachable;
+      }
     }
-    if (id === 'view.fit') {
-      this.beginViewportGesture();
-      if (!this.fitLockedViewport()) this.stack.zoomToFit();
-      this.dirty = true;
-      return false;
-    }
-    if (id === 'cursors.clear') {
-      if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return false;
-      this.releaseMarkerPointer();
-      this.clearCursors();
-      this.renderPanels();
-      this.dirty = true;
-      return false;
-    }
-    if (id === 'view.zoomIn') { this.keyZoom(1); return true; }
-    if (id === 'view.zoomOut') { this.keyZoom(-1); return true; }
-    if (id === 'view.panLeft') { this.keyPan(-1, shiftKey); return true; }
-    this.keyPan(1, shiftKey);
-    return true;
   }
 
   private showDropOverlay(active: boolean): void {
