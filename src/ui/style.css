@@ -1819,7 +1819,8 @@ html.resizing { cursor: col-resize; user-select: none; }
 .channel-banks { display: flex; flex-direction: column; gap: 8px; }
 .channel-bank { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .analog-button {
-  flex: none; min-width: 52px; height: 22px; padding: 0 8px; cursor: pointer;
+  flex: 0 1 auto; width: 52px; max-width: 52px; min-width: max-content;
+  height: 22px; padding: 0 8px; cursor: pointer;
   background: var(--bg20); color: #4C9AFF; border: 1px solid #4C9AFF; border-radius: 3px;
   font: inherit; font-size: 10px;
 }

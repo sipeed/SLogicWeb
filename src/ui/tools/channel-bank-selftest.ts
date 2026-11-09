@@ -374,6 +374,13 @@ check('bank start uses the absolute channel index',
     chipSheet.includes('.channel-bank-grid[data-chip-form="short"] .chip-d { display: none; }');
   check('the panel measures each bank grid and the sheet reserves the measured chip width',
     markUp && sheetChips, `markup=${markUp}, sheet=${sheetChips}`);
+
+  const analogBox = /\.analog-button \{[^}]*\}/.exec(chipSheet)?.[0] ?? '';
+  const analogDecls = analogBox.includes('flex: 0 1 auto;') &&
+    analogBox.includes('width: 52px;') && analogBox.includes('max-width: 52px;') &&
+    analogBox.includes('min-width: max-content;') && !analogBox.includes('min-width: 52px');
+  check('the analog button keeps its 52 px box as a maximum and shrinks to its own label',
+    analogDecls, analogBox.replace(/\s+/g, ' ').slice(0, 220));
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
