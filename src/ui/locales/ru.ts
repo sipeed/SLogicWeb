@@ -830,7 +830,7 @@ export const ru: Messages = {
   'settings.wheelZooms': 'Колесо масштабирует (без Ctrl)',
   'settings.compactRows': 'Компактные строки (цифровые до 24 px)',
   'settings.hideIdle': 'Скрыть неактивные каналы (без фронтов в захвате)',
-  'settings.developerTools': 'Инструменты разработчика (консоль регистров USB)',
+  'settings.developerTools': 'Консоль регистров USB',
   'about.version': 'Версия {version} · сборка {build}',
   'about.license': 'GPL-3.0-or-later · без каких-либо гарантий',
   'about.source': 'Исходный код',

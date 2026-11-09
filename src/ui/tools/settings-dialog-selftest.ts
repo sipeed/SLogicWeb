@@ -2076,6 +2076,52 @@ const EN_SETTINGS_KEYS = Object.keys(en).filter((key) => key.startsWith('setting
     `mutatedKeys=${missingKeys.length}, realKeys=${EN_SETTINGS_KEYS.length}`);
 }
 
+const DEVELOPER_ROW_LABELS_WANT: readonly string[] = [
+  'USB register console',
+  'USB 寄存器控制台',
+  'Консоль регистров USB',
+  'Console de registres USB',
+];
+
+interface DeveloperRowLabel { locale: string; label: string; console: string; want: string }
+
+function developerRowLabels(
+  lookups: ReadonlyArray<readonly [string, (key: MessageKey) => string]>,
+): DeveloperRowLabel[] {
+  return lookups.map(([locale, lookup], index) => ({
+    locale,
+    label: lookup('settings.developerTools'),
+    console: lookup('capturePanel.usbConsole'),
+    want: DEVELOPER_ROW_LABELS_WANT[index]!,
+  }));
+}
+
+function developerRowLabelDrift(rows: readonly DeveloperRowLabel[]): string[] {
+  return rows
+    .filter((row) => row.label !== row.console || row.label !== row.want)
+    .map((row) => `${row.locale}=${JSON.stringify(row.label)}`);
+}
+
+{
+  const rows = developerRowLabels(CATALOGS.map(([locale, lookup]) => [locale, lookup] as const));
+  const drift = developerRowLabelDrift(rows);
+  check('the developer-tools row prints the console name in every catalog',
+    drift.length === 0 && rows.length === CATALOGS.length,
+    drift.length === 0 ? rows.map((row) => `${row.locale}=${row.label}`).join('; ') : drift.join('; '));
+}
+
+{
+  const withParenthetical = developerRowLabels(CATALOGS.map(([locale, lookup]) => [locale, lookup] as const))
+    .map((row, index) => (index === 0 ? { ...row, label: 'Developer tools (USB register console)' } : row));
+  const relocated = developerRowLabels(CATALOGS.map(([locale, lookup]) => [locale, lookup] as const))
+    .map((row, index) => (index === 2 ? { ...row, label: 'Инструменты разработчика (консоль регистров USB)' } : row));
+  check('control: a re-added parenthetical, or a row label that no longer matches the console, fails the same predicate',
+    developerRowLabelDrift(withParenthetical).length === 1 &&
+    developerRowLabelDrift(relocated).length === 1 &&
+    developerRowLabelDrift(developerRowLabels(CATALOGS.map(([locale, lookup]) => [locale, lookup] as const))).length === 0,
+    `parenthetical=${developerRowLabelDrift(withParenthetical).length}, relocated=${developerRowLabelDrift(relocated).length}`);
+}
+
 const SECTION_LABELS_WANT: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['appearance', ['Appearance', '外观', 'Внешний вид', 'Apparence']],
   ['shortcuts', ['Shortcuts and gestures', '快捷键与鼠标操作', 'Клавиши и жесты', 'Raccourcis et gestes']],

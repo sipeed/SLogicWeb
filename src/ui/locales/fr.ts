@@ -839,7 +839,7 @@ export const fr: Messages = {
   'settings.wheelZooms': 'La molette zoome (sans Ctrl)',
   'settings.compactRows': 'Lignes compactes (voies logiques jusqu’à 24 px)',
   'settings.hideIdle': 'Masquer les voies inactives (aucun front dans l’acquisition)',
-  'settings.developerTools': 'Outils développeur (console de registres USB)',
+  'settings.developerTools': 'Console de registres USB',
   'about.version': 'Version {version} · build {build}',
   'about.license': 'GPL-3.0-or-later · sans aucune garantie',
   'about.source': 'Code source',

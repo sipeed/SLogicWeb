@@ -840,7 +840,7 @@ export const en = {
   'settings.wheelZooms': 'Wheel zooms (no Ctrl needed)',
   'settings.compactRows': 'Compact rows (digital rows down to 24 px)',
   'settings.hideIdle': 'Hide idle channels (no edges in the capture)',
-  'settings.developerTools': 'Developer tools (USB register console)',
+  'settings.developerTools': 'USB register console',
   'about.version': 'Version {version} · build {build}',
   'about.license': 'GPL-3.0-or-later · no warranty',
   'about.source': 'Source code',
