@@ -95,8 +95,8 @@ check('a forced sweep has no pre-trigger shortfall readout (no T)',
   const digitalRepeat = triggerAutoAfterSamples({ mode: 'repeat', analogSource: false, captureWindowSamples: w });
   const empty = triggerAutoAfterSamples({ mode: 'single', analogSource: true, captureWindowSamples: 0 });
   const bad = triggerAutoAfterSamples({ mode: 'single', analogSource: true, captureWindowSamples: Number.NaN });
-  check('analog Single/Repeat sweep in Auto after pre + post; digital and Loop stay Normal',
-    single === w && repeat === w && loop === undefined && digital === undefined &&
+  check('analog Single/Repeat/Loop sweep in Auto after one window; digital stays Normal',
+    single === w && repeat === w && loop === w && digital === undefined &&
     digitalRepeat === undefined && empty === undefined && bad === undefined,
     `${single} ${repeat} ${loop} ${digital} ${digitalRepeat} ${empty} ${bad}`);
 }
@@ -181,7 +181,7 @@ check('a forced Repeat wave hands the plot over once it has data (a normal wave)
   check('the start config computes Auto from the analog-only source and the capture window',
     start.length > 0 &&
     /analogSource: analogTriggers\.length > 0 && plan\.digital\.length === 0/.test(start) &&
-    /captureWindowSamples: this\.captureLimitSamples/.test(start) &&
+    /captureWindowSamples: isLoop \? this\.loopRetentionLen : this\.captureLimitSamples/.test(start) &&
     /\bmode,/.test(start), start.slice(0, 240));
   // The window must be read after the trigger budget clamp (pre + post).
   const budgetAt = app.indexOf('this.captureLimitSamples = Math.min(MAX_SAMPLES - 1, postTriggerSamples + preTriggerSamples)');
@@ -197,11 +197,16 @@ check('a forced Repeat wave hands the plot over once it has data (a normal wave)
     triggerCfg.slice(-400));
   const retune = app.slice(app.indexOf('const applied = update?.({'),
     app.indexOf('this.triggerRetuneRequested = applied === false;'));
-  check('a live retune keeps Auto only for an analog source and never in Loop',
+  check('a live retune keeps Auto only for an analog source, with the Loop window in Loop',
     /analogSource: analog\.length > 0 && conditions\.length === 0/.test(retune) &&
     /mode: this\.captureMode/.test(retune) &&
-    /\.\.\.\(isLoop \? \{\} : \{ autoWindowSamples: this\.captureLimitSamples \}\)/.test(app),
+    /autoWindowSamples: isLoop \? this\.loopRetentionLen : this\.captureLimitSamples,/.test(app),
     retune.slice(0, 200));
+  const relock = app.slice(app.indexOf('private lockFromCrossing('),
+    app.indexOf('private releaseLoopTrigger('));
+  check('a Loop Auto sweep that re-locks on a real crossing reads triggered',
+    /if \(this\.triggerState === 'forced'\) this\.triggerState = 'triggered';/.test(relock),
+    relock.slice(0, 200));
   const handler = app.slice(app.indexOf('onTriggerState: (state, triggerSampleIndex)'),
     app.indexOf('} : {', app.indexOf('onTriggerState: (state, triggerSampleIndex)')));
   const forcedBlock = handler.slice(handler.indexOf("if (state === 'forced') {"),

@@ -505,7 +505,7 @@ export class App {
   /** Fixed per-capture trigger parameters a live retune must not change. */
   private captureTriggerBase: {
     preTriggerSamples: number; maxSamples: number; searchLimitSamples: number;
-    /** The analog Auto sweep's window (`pre + post`); undefined for Loop (continuous). */
+    /** The analog Auto sweep's window: `pre + post`, or the loop window in Loop. */
     autoWindowSamples?: number;
   } | null = null;
   /** The mode the capture in flight (or last finished) was started with. */
@@ -6046,7 +6046,7 @@ export class App {
       const autoAfterSamples = softwareTrigger ? triggerAutoAfterSamples({
         mode,
         analogSource: analogTriggers.length > 0 && plan.digital.length === 0,
-        captureWindowSamples: this.captureLimitSamples,
+        captureWindowSamples: isLoop ? this.loopRetentionLen : this.captureLimitSamples,
       }) : undefined;
       // A live retune may change conditions but not these: the ring was sized here and
       // the emitted-stream budget fixes the store's stop point.
@@ -6054,7 +6054,7 @@ export class App {
         preTriggerSamples,
         maxSamples: isLoop ? Number.POSITIVE_INFINITY : this.captureLimitSamples,
         searchLimitSamples: triggerSearchLimit,
-        ...(isLoop ? {} : { autoWindowSamples: this.captureLimitSamples }),
+        autoWindowSamples: isLoop ? this.loopRetentionLen : this.captureLimitSamples,
       } : null;
       this.captureArming = true;
       await device.start(cfg, (chunk) => {
@@ -6375,6 +6375,9 @@ export class App {
     this.pendingRelockAbs = null;
     this.triggerViewPending = false;
     this.triggerViewLost = false;
+    // A Loop that started as an Auto sweep (no crossing within its first window) has now
+    // locked on a real qualified crossing: it is triggered from here on.
+    if (this.triggerState === 'forced') this.triggerState = 'triggered';
     this.placeLockViewport();
     this.renderPanels();
     this.dirty = true;

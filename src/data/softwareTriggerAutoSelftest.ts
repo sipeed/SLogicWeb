@@ -12,7 +12,7 @@
  */
 
 import { SoftwareTrigger, reverseAdcByte, type SoftwareTriggerConfig } from './softwareTrigger.js';
-import { fixtureRng } from './adcArtifactFixture.js';
+import { fixtureRng, qualifiedFires } from './adcArtifactFixture.js';
 import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
 import type { SoftwareTriggerTestResult } from './softwareTriggerSelftest.js';
 
@@ -306,7 +306,8 @@ export function runAutoSweepSuite(): SoftwareTriggerTestResult[] {
       errors.length === 0, errors.join('; ') || 'ok');
   }
 
-  // 6. Validation: continuous mode rejects a finite value; bad values throw.
+  // 6. Validation: bad values throw; continuous (Loop) accepts a deadline, at start and
+  //    on a retune.
   {
     const throws = (cfg: SoftwareTriggerConfig): boolean => {
       try { new SoftwareTrigger({ config: cfg, emit: () => {} }); return false; } catch { return true; }
@@ -314,25 +315,65 @@ export function runAutoSweepSuite(): SoftwareTriggerTestResult[] {
     const { autoAfterSamples: _omit, ...base } = analogConfig(16, 0, 'rising', 200, 10, 10);
     const bad = [0, -1, 1.5, Number.NaN, Number.NEGATIVE_INFINITY, 2 ** 53]
       .filter((v) => !throws({ ...base, autoAfterSamples: v }));
-    const loopRejects = throws({ ...base, mode: 'continuous', maxSamples: Number.POSITIVE_INFINITY, autoAfterSamples: 100 }) &&
-      throws({ ...base, mode: 'continuous', autoAfterSamples: 1 });
-    const loopInfinityOk = !throws({
-      ...base, mode: 'continuous', maxSamples: Number.POSITIVE_INFINITY,
-      autoAfterSamples: Number.POSITIVE_INFINITY,
-    });
+    const loopOk = !throws({ ...base, mode: 'continuous', maxSamples: Number.POSITIVE_INFINITY, autoAfterSamples: 100 }) &&
+      !throws({ ...base, mode: 'continuous', maxSamples: Number.POSITIVE_INFINITY, autoAfterSamples: Number.POSITIVE_INFINITY });
     const oneShotOk = !throws({ ...base, autoAfterSamples: 1 }) && !throws({ ...base, mode: 'one-shot' });
-    // A continuous retune cannot slip a deadline in either.
     const loop = new SoftwareTrigger({
       config: { ...base, mode: 'continuous', maxSamples: Number.POSITIVE_INFINITY },
       emit: () => {},
     });
-    let retuneRejects = false;
-    try { loop.reconfigure({ ...base, mode: 'continuous', maxSamples: Number.POSITIVE_INFINITY, autoAfterSamples: 5 }); }
-    catch { retuneRejects = true; }
-    check('auto sweep: invalid values and continuous (Loop) mode are rejected',
-      bad.length === 0 && loopRejects && loopInfinityOk && oneShotOk && retuneRejects,
-      `accepted bad ${bad.join(',')}; loop rejects ${loopRejects}; loop Infinity ok ${loopInfinityOk}; ` +
-        `one-shot ok ${oneShotOk}; retune rejects ${retuneRejects}`);
+    const retuneOk = loop.reconfigure({ ...base, mode: 'continuous', maxSamples: Number.POSITIVE_INFINITY, autoAfterSamples: 5 });
+    check('auto sweep: invalid values are rejected; continuous (Loop) accepts a deadline',
+      bad.length === 0 && loopOk && oneShotOk && retuneOk,
+      `accepted bad ${bad.join(',')}; loop ok ${loopOk}; one-shot ok ${oneShotOk}; retune ok ${retuneOk}`);
+  }
+
+  // 6b. Loop: no crossing within the window forces at F and the stream keeps flowing from
+  //     F - pre, byte-exact; every qualified crossing decided after F is then reported at
+  //     its emitted index (a run pending at F included), at every width and chunking.
+  {
+    const errors: string[] = [];
+    let reported = 0;
+    for (const [li, [channels, start]] of LAYOUTS.entries()) {
+      for (const chunking of CHUNKINGS) {
+        const pre = 50 + li * 7;
+        const auto = 400;
+        const F = pre + auto - 1;
+        // Below the level, then a slow wave crossing 128 several times, with a 127/128
+        // glitch run (255) that must not fire; one real crossing starts just before F.
+        const codes = noisyCodes(3000, 100, 120, li * 13 + 1);
+        for (let i = F - 2; i < F + 30; i++) codes[i] = 140;
+        for (let i = 900; i < 905; i++) codes[i] = 255;
+        for (let k = 0; k < 4; k++) for (let i = 1200 + k * 400; i < 1300 + k * 400; i++) codes[i] = 150;
+        const raw = encode(codes, channels, start, li * 31 + 7);
+        const bps = bytesPerSampleForChannels(channels);
+        const fires = qualifiedFires(codes, 'rising', 128, H, W).filter((f) => f.decide > F);
+        const out: number[] = [];
+        let emitted = 0;
+        const matches: number[] = [];
+        const t = new SoftwareTrigger({
+          config: {
+            ...analogConfig(channels, start, 'rising', 128, pre, 0),
+            mode: 'continuous', maxSamples: Number.POSITIVE_INFINITY, autoAfterSamples: auto,
+            scan: { minStride: 1, maxStride: 1, initialStride: 1 },
+          },
+          emit: (chunk) => { for (const v of chunk) out.push(v); emitted += chunk.length / bps; },
+          onMatch: (m) => { matches.push(m.index); },
+        });
+        feedAll(t, raw, chunking, li + 3);
+        const tag = `${channels}ch ${chunking}`;
+        const want = fires.map((f) => f.t - (F - pre));
+        const st = t.stats;
+        const exact = out.length === raw.length - (F - pre) * bps &&
+          out.every((v, i) => v === raw[(F - pre) * bps + i]);
+        if (!st.forced || st.matched || st.triggerSampleIndex !== null) errors.push(`${tag}: forced=${st.forced} matched=${st.matched}`);
+        else if (!exact) errors.push(`${tag}: emitted ${emitted} samples, want ${codes.length - (F - pre)} from F - pre`);
+        else if (matches.join() !== want.join()) errors.push(`${tag}: matches ${matches.join()} want ${want.join()}`);
+        reported += matches.length;
+      }
+    }
+    check('auto sweep (Loop): forces at F, keeps streaming byte-exact, then reports every later crossing',
+      errors.length === 0 && reported > 0, errors.slice(0, 4).join('; ') || `${reported} later crossings reported`);
   }
 
   // 7. Repeat's search limit pre + (pre + post) with auto = pre + post: the force lands

@@ -73,7 +73,7 @@
  * digital part fails at T still fires (and so disarms) without a match: the slope it
  * belongs to was crossed while the gate was closed.
  *
- * Auto sweep (`autoAfterSamples`, one-shot only; docs/ARCHITECTURE.md "Analog triggers
+ * Auto sweep (`autoAfterSamples`; docs/ARCHITECTURE.md "Analog triggers
  * sweep in Auto"): a scope's Auto mode shows untriggered data rather than waiting
  * forever. The matcher counts the samples it inspects outside the pre-fill holdoff (the
  * count starts when the holdoff ends; a gap pauses it while the emptied ring refills the
@@ -83,12 +83,14 @@
  * exactly as if T were F: it emits the ring's newest `pre` samples `[F - pre, F)` and
  * then F and the following samples up to `maxSamples`. `stats.forced` becomes true,
  * `matched` stays false, `triggerSampleIndex` stays null and `onMatch` is not called.
- * An analog candidate run still being judged at F (T <= F, decision due after F) is
- * abandoned: the force does not wait for its look-ahead. F is an inspected sample, so
+ * One-shot: an analog candidate run still being judged at F (T <= F, decision due after
+ * F) is abandoned: the force does not wait for its look-ahead. F is an inspected sample, so
  * with Repeat's search limit `pre + (pre + post)` and `autoAfterSamples = pre + post` the
  * force lands on the last inspectable sample, before the limit could end the search as
- * `noTrigger`. Infinity (the default) never forces: Normal mode. Continuous (Loop) mode
- * rejects a finite value; Loop already shows live data while it is unlocked.
+ * `noTrigger`. Infinity (the default) never forces: Normal mode. Continuous (Loop): the
+ * force starts the stream exactly like a first match without T, and the repeated-match
+ * scan runs from F, so a real crossing after it (or a run pending at F) is reported
+ * through `onMatch` like any later match; `matched` stays false.
  */
 
 import { isAdcGlitchRun } from './adcArtifactShape.js';
@@ -268,7 +270,7 @@ export interface SoftwareTriggerConfig {
    * many samples inspected after the pre-fill holdoff, force the capture at the sample
    * that reaches the count (module comment, "Auto sweep"). A positive integer or
    * Infinity; default Infinity (Normal: wait as long as the search limit allows).
-   * Continuous mode throws for a finite value. `reconfigure()` adopts a given value and
+   * Continuous mode forces once and then keeps streaming. `reconfigure()` adopts a given value and
    * keeps the running one when omitted (pass Infinity to switch back to Normal); the
    * count already made is kept, so a value at or below it forces at the next inspected
    * sample after the holdoff.
@@ -500,9 +502,6 @@ function assertConfig(c: SoftwareTriggerConfig): void {
   if (c.autoAfterSamples !== undefined && c.autoAfterSamples !== Number.POSITIVE_INFINITY) {
     if (!Number.isSafeInteger(c.autoAfterSamples) || c.autoAfterSamples < 1) {
       throw new Error(`autoAfterSamples must be a positive integer or Infinity, got ${c.autoAfterSamples}`);
-    }
-    if (c.mode === 'continuous') {
-      throw new Error('autoAfterSamples (Auto sweep) is one-shot only; continuous mode cannot force');
     }
   }
   if (c.reportGapSamples !== undefined &&
@@ -786,7 +785,7 @@ export class SoftwareTrigger {
     // partially apply (in particular, reportGapSamples must keep its old value).
     const nextReportGap = config.reportGapSamples ?? this.reportGapSamples;
     const nextAuto = config.autoAfterSamples ?? this.autoAfterSamples;
-    if (this.mode === 'continuous' && this.statsValue.matched) {
+    if (this.mode === 'continuous' && (this.statsValue.matched || this.statsValue.forced)) {
       // After the first match a tuning-only retune (`reportGapSamples`, or a scan policy
       // identical to the running one) must not restart the scan: doing so would invent a
       // null previous value at the edit and drop an edge that straddles it. Only an edit
@@ -854,8 +853,8 @@ export class SoftwareTrigger {
     this.historyStartAbs = this.statsValue.emittedSamples;
     this.historyEndAbs = this.statsValue.emittedSamples;
     this.strideValue = Math.min(next.maxStride, Math.max(next.minStride,
-      this.statsValue.matched ? this.strideValue : next.initialStride));
-    this.statsValue.scanStride = this.statsValue.matched ? this.strideValue : 1;
+      this.streaming ? this.strideValue : next.initialStride));
+    this.statsValue.scanStride = this.streaming ? this.strideValue : 1;
     this.scanCostMs = 0;
     this.scanCoveredSamples = 0;
     return true;
@@ -945,6 +944,11 @@ export class SoftwareTrigger {
     }
   }
 
+  /** Continuous mode past its first match or Auto force: every sample is emitted. */
+  private get streaming(): boolean {
+    return this.statsValue.matched || this.statsValue.forced;
+  }
+
   get stats(): SoftwareTriggerStats {
     return { ...this.statsValue };
   }
@@ -998,7 +1002,6 @@ export class SoftwareTrigger {
   private consumeWhole(bytes: Uint8Array): void {
     if (bytes.length === 0 || this.statsValue.complete || this.statsValue.noTrigger) return;
     if (this.statsValue.matched || this.statsValue.forced) {
-      // A forced (Auto) capture is one-shot only, so everything after F is post output.
       if (this.mode === 'continuous') this.consumeContinuous(bytes);
       else this.emitPost(bytes);
       return;
@@ -1247,8 +1250,11 @@ export class SoftwareTrigger {
    * Auto sweep: force the capture at F (`off` in `bytes`) as if T were F, with no match.
    * Same emission as `acceptMatch` with lag 0: everything before F goes to the ring, its
    * newest `pre` samples `[F - pre, F)` are emitted (F is past the holdoff, so the ring
-   * holds them), then F inside the budget. One-shot only, so the caller hands the rest
-   * of the block to `emitPost`. Returns the offset just past F.
+   * holds them), then F inside the budget. One-shot: the caller hands the rest of the
+   * block to `emitPost`. Continuous: the repeated-match scan starts at F, so the first
+   * real crossing after it is reported like any later match (an analog machine keeps its
+   * arm and any run pending at F, renumbered to emitted indices). Returns the offset just
+   * past F.
    */
   private acceptForce(bytes: Uint8Array, off: number): number {
     const bps = this.bytesPerSample;
@@ -1256,6 +1262,13 @@ export class SoftwareTrigger {
     this.appendRing(bytes, 0, off);
     this.autoInspected = this.autoAfterSamples;
     this.statsValue.forced = true;
+    if (this.mode === 'continuous') {
+      // F's machine index is the inspected count before it; its emitted index is pre
+      // past the current output.
+      const fIndex = this.statsValue.emittedSamples + this.preTriggerSamples;
+      if (this.analogCompiled.length > 0) this.rebaseAnalog(fIndex - this.statsValue.inspectedSamples);
+      this.beginContinuousScan(bytes, off, fIndex);
+    }
     this.emitRingNewest(this.preTriggerSamples);
     if (this.statsValue.emittedSamples < this.maxSamples) {
       this.emit(bytes.subarray(off, off + bps));

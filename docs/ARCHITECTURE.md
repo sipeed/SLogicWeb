@@ -587,7 +587,11 @@ type TriggerBudget =
   no T. The device reports the state `'forced'` (`onTriggerState`), the store keeps the
   real untriggered data, the view has no T marker and the panel says "Auto (not
   triggered)", never "no capture". In Repeat a forced sweep is a wave like any other, not
-  a miss. Loop already shows live data while it is unlocked and is unchanged. A forced
+  a miss. Loop sweeps the same way with its loop window as `autoAfterSamples`: the
+  matcher used to emit nothing until the first crossing, so a Loop on an unreachable
+  level only counted elapsed time (seen 2026-11-09). After the force the stream flows
+  like a matched Loop and its repeated-match scan runs from F, so a later real crossing
+  is reported and the page re-locks on it; the app state then reads `triggered`. A forced
   capture never sets T, so nothing downstream (viewport lock, cursors relative to T)
   treats it as triggered.
 - **P0 keeps the single-family rule** (digital *or* analog) to preserve current

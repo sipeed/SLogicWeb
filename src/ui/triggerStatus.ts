@@ -243,15 +243,17 @@ export interface AutoSweepInput {
  *
  * An analog trigger sweeps in Auto in Single and Repeat: when no qualified crossing is
  * decided within one capture window (`pre + post` samples counted after the pre-fill
- * holdoff) the matcher forces the capture, like an oscilloscope's Auto sweep. A digital
- * condition stays Normal (Single waits; Repeat misses and retries). Loop is continuous:
- * it already shows live data while unlocked, and the matcher rejects the option there.
+ * holdoff) the matcher forces the capture, like an oscilloscope's Auto sweep. Loop does
+ * the same with its loop window: the stream starts untriggered and locks on the first
+ * real crossing after it (without it Loop delivered nothing until a crossing, so an
+ * unreachable level looked like a hung capture). A digital condition stays Normal
+ * (Single waits; Repeat misses and retries; Loop waits).
  *
  * Assumption: a plan that mixes digital and analog conditions (P1 `profile.trigger.mixed`)
  * stays Normal, because its digital condition must still be waited for; P0 never mixes.
  */
 export function triggerAutoAfterSamples(v: AutoSweepInput): number | undefined {
-  if (v.mode === 'loop' || !v.analogSource) return undefined;
+  if (!v.analogSource) return undefined;
   const n = Math.floor(v.captureWindowSamples);
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
