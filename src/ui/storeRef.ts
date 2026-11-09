@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
 // Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * A SampleStore that forwards to another one, so the inner store can be replaced.

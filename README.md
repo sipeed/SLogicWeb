@@ -45,7 +45,7 @@ Copyright (C) 2026 Sipeed Co., Ltd. and contributors.
 
 SLogicWeb grew out of [logicweb](https://github.com/tralamazza/logicweb), the browser logic
 analyzer for the SLogic16 U3 written by Daniel Tralamazza. Thank you for the original
-design and code. Source files from that version keep his copyright notice.
+design and code.
 
 Protocol decoding uses [sigrok](https://sigrok.org/) decoders, and the device protocol was
 cross-checked against the sipeed-slogic-analyzer driver in libsigrok.

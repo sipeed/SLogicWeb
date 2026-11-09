@@ -1,8 +1,8 @@
 # Sipeed SLogic16 U3 - USB protocol
 
 Distilled from the working libsigrok driver at
-`src/hardware/sipeed-slogic-analyzer/` (`api.c`, `protocol.c`) in a libsigrok checkout -
-see https://github.com/tralamazza/libsigrok. That driver is the ground truth. If anything here
+`src/hardware/sipeed-slogic-analyzer/` (`api.c`, `protocol.c`) in a libsigrok checkout.
+That driver is the ground truth. If anything here
 disagrees with it, the driver wins - go read it, do not guess.
 
 Verified on the attached unit (`ioreg -p IOUSB -l`):

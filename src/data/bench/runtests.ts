@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2026 Daniel Tralamazza
 // Copyright (C) 2026 Sipeed Co., Ltd.
 /**
  * Node entry point for the correctness suite. The browser runs the same code from

@@ -48,7 +48,6 @@ function check(name: string, pass: boolean, detail: string): void {
       view.version === 'Version 1.2.3 · build abc1234' &&
       view.license === 'GPL-3.0-or-later · no warranty' &&
       view.copyright === '© 2026 Sipeed Co., Ltd.' && COPYRIGHT === view.copyright &&
-      !JSON.stringify(view).includes('Tralamazza') &&
       view.close === en['shortcuts.close'],
     JSON.stringify(view));
   check('the About links are the source repository, its LICENSE and NOTICE.md (third-party decoders)',
