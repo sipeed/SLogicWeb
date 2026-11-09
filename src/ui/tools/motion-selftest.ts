@@ -223,7 +223,9 @@ const NON_BUTTON_CONSUMERS: readonly string[] = [
   const animRules = rules.filter((r) => /(^|;)\s*(-webkit-)?animation(-[\w]+)?\s*:/.test(r.body)).map((r) => r.selector).sort();
   const want = [...ENTRY_RULES].sort();
   const listOk = animRules.length === want.length && animRules.every((s, i) => s === want[i]);
-  const bySelector = new Map(rules.map((r) => [r.selector, r.body]));
+  const bySelector = new Map(rules
+    .filter((r) => !media.some((range) => r.start > range.start && r.start < range.end))
+    .map((r) => [r.selector, r.body]));
   const timed = ENTRY_RULES.every((s) =>
     /animation:\s*motion-(fade|pop) var\(--motion-fast\) var\(--motion-ease\);/.test(bySelector.get(s) ?? ''));
   const forbidden = ['animation-fill-mode', '@starting-style', 'allow-discrete'].filter((s) => code.includes(s));

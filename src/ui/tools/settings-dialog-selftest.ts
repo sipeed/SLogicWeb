@@ -1,6 +1,7 @@
 import {
   SETTINGS_DIALOG_HEIGHT,
   SETTINGS_DIALOG_ID,
+  SETTINGS_DIALOG_NARROW_MARGIN,
   SETTINGS_DIALOG_WIDTH,
   SETTINGS_NAV_WIDTH,
   SETTINGS_PANE_GAP,
@@ -1332,6 +1333,231 @@ function paneMatchesRowRhythm(block: string): boolean {
   check('control: the unscoped row-action ring loses the cascade, so the dialog scope is load-bearing',
     mutated !== css && !rowActionRingWins(mutated) && rowActionRingWins(css),
     `mutated=${rowActionRingWins(mutated)}, real=${rowActionRingWins(css)}`);
+}
+
+const PANE_RING = '.settings-dialog .settings-pane:focus-visible';
+
+function paneRingIsInset(block: string): boolean {
+  const rule = ruleBlock(block, `${PANE_RING} {`);
+  return rule.includes('outline: 2px solid var(--ring);') &&
+    rule.includes('outline-offset: -2px;') &&
+    specificityAtLeast(selectorSpecificity(PANE_RING), selectorSpecificity(GENERIC_FOCUS_RING));
+}
+
+{
+  check('the focusable tabpanel carries an inset themed ring, so the window edge cannot clip it',
+    paneRingIsInset(dialogCss),
+    `rule=${JSON.stringify(ruleBlock(dialogCss, `${PANE_RING} {`))}`);
+}
+
+{
+  const ringRule = ruleBlock(dialogCss, `${PANE_RING} {`);
+  const missing = dialogCss.replace(ringRule, '');
+  const outward = dialogCss.replace(
+    `${PANE_RING} { outline: 2px solid var(--ring); outline-offset: -2px; }`,
+    `${PANE_RING} { outline: 2px solid var(--ring); outline-offset: 0px; }`);
+  check('control: a tabpanel without its ring rule or with the ring pushed onto the window edge fails the same predicate',
+    ringRule.length > 0 && missing !== dialogCss && !paneRingIsInset(missing) &&
+    outward !== dialogCss && !paneRingIsInset(outward) && paneRingIsInset(dialogCss),
+    `missing=${paneRingIsInset(missing)}, outward=${paneRingIsInset(outward)}, ` +
+    `real=${paneRingIsInset(dialogCss)}`);
+}
+
+const NARROW_QUERY = '(max-width: 760px)';
+const STACK_QUERY = '(max-width: 400px)';
+const STACK_ROW_GAP = 2;
+
+function mediaBlock(block: string, query: string): string {
+  const start = block.indexOf(`@media ${query} {`);
+  if (start < 0) return '';
+  const open = block.indexOf('{', start);
+  const end = open >= 0 ? matchingBrace(block, open) : -1;
+  return end > open ? block.slice(start, end + 1) : '';
+}
+
+function mediaRule(block: string, selector: string): string {
+  const start = block.indexOf(selector);
+  if (start < 0) return '';
+  const open = block.indexOf('{', start);
+  const end = open >= 0 ? matchingBrace(block, open) : -1;
+  return end > open ? block.slice(start, end + 1) : '';
+}
+
+const narrowCss = mediaBlock(dialogCss, NARROW_QUERY);
+const stackCss = mediaBlock(dialogCss, STACK_QUERY);
+
+function narrowWindowSized(narrow: string): boolean {
+  const rule = mediaRule(narrow, '.settings-dialog {');
+  const margin = SETTINGS_DIALOG_NARROW_MARGIN;
+  return rule.includes(`width: calc(100vw - ${margin}px);`) &&
+    rule.includes(`max-width: calc(100vw - ${margin}px);`) &&
+    rule.includes(`min-height: min(${SETTINGS_DIALOG_HEIGHT}px, calc(100dvh - ${margin}px));`) &&
+    rule.includes(`max-height: calc(100dvh - ${margin}px);`);
+}
+
+function narrowRailIsATabRow(narrow: string): boolean {
+  const rail = mediaRule(narrow, '.settings-nav {');
+  const item = mediaRule(narrow, '.settings-nav-item {');
+  return rail.includes('flex-direction: row;') &&
+    !rail.includes('flex-direction: column;') &&
+    rail.includes('flex-wrap: nowrap;') &&
+    rail.includes('overflow-x: auto;') &&
+    rail.includes('overflow-y: hidden;') &&
+    rail.includes('border-right: 0;') &&
+    rail.includes('border-bottom: 1px solid var(--border);') &&
+    item.includes('width: auto;');
+}
+
+function narrowBodyStacks(narrow: string): boolean {
+  const body = mediaRule(narrow, '.settings-dialog-body {');
+  return body.includes('grid-template-columns: minmax(0, 1fr);') &&
+    body.includes('grid-template-rows: auto minmax(0, 1fr);');
+}
+
+function narrowRowsStack(stack: string): boolean {
+  const row = mediaRule(stack, '.settings-row {');
+  const action = mediaRule(stack, '.settings-row--action {');
+  const gaps = effectiveGaps(row);
+  return row.includes('grid-template-columns: minmax(0, 1fr);') &&
+    gaps.row === STACK_ROW_GAP &&
+    gaps.row < SETTINGS_PANE_GAP &&
+    action.includes('grid-template-columns: minmax(0, 1fr) auto;');
+}
+
+function narrowKeepsInsetRings(narrow: string, stack: string): boolean {
+  const blocks = `${narrow}\n${stack}`;
+  return narrow.length > 0 && stack.length > 0 && !blocks.includes(':focus-visible') &&
+    css.includes(`${SCOPED_RING} { outline: 2px solid var(--ring); outline-offset: -2px; }`) &&
+    css.includes(`${ROW_ACTION_RING} { outline: 2px solid var(--ring); outline-offset: -2px; }`);
+}
+
+function narrowBlocksInSection(section: string): boolean {
+  const narrow = mediaBlock(section, NARROW_QUERY);
+  const stack = mediaBlock(section, STACK_QUERY);
+  const base = section.indexOf('.settings-toggle input { margin: 0; accent-color: var(--primary); }');
+  return narrow.length > 0 && stack.length > 0 && base >= 0 &&
+    section.indexOf(narrow) > base && section.indexOf(stack) > section.indexOf(narrow);
+}
+
+{
+  check('the narrow window keeps the 16 px viewport margin and the shipped height cap from the exported constants',
+    narrowCss.length > 0 && narrowWindowSized(narrowCss),
+    `margin=${SETTINGS_DIALOG_NARROW_MARGIN}, height=${SETTINGS_DIALOG_HEIGHT}, ` +
+    `rule=${JSON.stringify(mediaRule(narrowCss, '.settings-dialog {'))}`);
+}
+
+{
+  const drifted = narrowCss.replaceAll(`calc(100vw - ${SETTINGS_DIALOG_NARROW_MARGIN}px)`, 'calc(100vw - 12px)');
+  const droppedCap = narrowCss.replace(` max-width: calc(100vw - ${SETTINGS_DIALOG_NARROW_MARGIN}px);`, '');
+  const wideTail = narrowCss.replaceAll('calc(100dvh - 16px)', 'calc(100dvh - 32px)');
+  check('control: a drifted margin, a dropped max-width or the wide-pair height tail fails the same predicate',
+    drifted !== narrowCss && !narrowWindowSized(drifted) &&
+    droppedCap !== narrowCss && !narrowWindowSized(droppedCap) &&
+    wideTail !== narrowCss && !narrowWindowSized(wideTail) &&
+    narrowWindowSized(narrowCss),
+    `drifted=${narrowWindowSized(drifted)}, dropped=${narrowWindowSized(droppedCap)}, ` +
+    `wideTail=${narrowWindowSized(wideTail)}, real=${narrowWindowSized(narrowCss)}`);
+}
+
+{
+  check('the section rail becomes a horizontally scrolling tab row and moves its divider to the bottom edge',
+    narrowRailIsATabRow(narrowCss),
+    `rail=${JSON.stringify(mediaRule(narrowCss, '.settings-nav {'))}, ` +
+    `item=${JSON.stringify(mediaRule(narrowCss, '.settings-nav-item {'))}`);
+}
+
+{
+  const stillColumn = narrowCss.replace('flex-direction: row;', 'flex-direction: column;');
+  const clipping = narrowCss.replace('overflow-x: auto; ', '');
+  const wrapped = narrowCss.replace('flex-wrap: nowrap; ', 'flex-wrap: wrap; ');
+  const sideDivider = narrowCss.replace('border-right: 0; ', 'border-right: 1px solid var(--border); ');
+  check('control: a rail restored to a column, a wrapping rail, a rail without horizontal scrolling or one keeping its side divider fails the same predicate',
+    stillColumn !== narrowCss && !narrowRailIsATabRow(stillColumn) &&
+    wrapped !== narrowCss && !narrowRailIsATabRow(wrapped) &&
+    clipping !== narrowCss && !narrowRailIsATabRow(clipping) &&
+    sideDivider !== narrowCss && !narrowRailIsATabRow(sideDivider) &&
+    narrowRailIsATabRow(narrowCss),
+    `column=${narrowRailIsATabRow(stillColumn)}, wrapped=${narrowRailIsATabRow(wrapped)}, ` +
+    `clipped=${narrowRailIsATabRow(clipping)}, divider=${narrowRailIsATabRow(sideDivider)}, ` +
+    `real=${narrowRailIsATabRow(narrowCss)}`);
+}
+
+{
+  check('the narrow body stacks the rail above a pane that keeps the remaining height',
+    narrowBodyStacks(narrowCss),
+    `body=${JSON.stringify(mediaRule(narrowCss, '.settings-dialog-body {'))}`);
+}
+
+{
+  const looseRows = narrowCss.replace(' grid-template-rows: auto minmax(0, 1fr);', '');
+  const autoRows = narrowCss.replace('auto minmax(0, 1fr)', 'auto auto');
+  check('control: a body without the constrained second row, or one whose pane row is auto, fails the same predicate',
+    looseRows !== narrowCss && !narrowBodyStacks(looseRows) &&
+    autoRows !== narrowCss && !narrowBodyStacks(autoRows) && narrowBodyStacks(narrowCss),
+    `loose=${narrowBodyStacks(looseRows)}, auto=${narrowBodyStacks(autoRows)}, real=${narrowBodyStacks(narrowCss)}`);
+}
+
+{
+  check('the narrow rows stack their label above the control without squeezing it, and the action row keeps its hint inline',
+    stackCss.length > 0 && narrowRowsStack(stackCss),
+    `row=${JSON.stringify(mediaRule(stackCss, '.settings-row {'))}, ` +
+    `action=${JSON.stringify(mediaRule(stackCss, '.settings-row--action {'))}`);
+}
+
+{
+  const twoColumns = stackCss.replace(
+    'grid-template-columns: minmax(0, 1fr); row-gap',
+    `grid-template-columns: minmax(${SETTINGS_ROW_LABEL_MIN}px, max-content) minmax(0, 1fr); row-gap`);
+  const rhythmGap = stackCss.replace('row-gap: 2px;', `row-gap: ${SETTINGS_PANE_GAP}px;`);
+  const looseGap = stackCss.replace('row-gap: 2px;', 'row-gap: 12px;');
+  const stackedAction = stackCss.replace('grid-template-columns: minmax(0, 1fr) auto;', 'grid-template-columns: minmax(0, 1fr);');
+  check('control: a label column kept beside the control, a stacked pair split as wide as the row rhythm, or an action row with its hint dropped to its own line fails the same predicate',
+    twoColumns !== stackCss && !narrowRowsStack(twoColumns) &&
+    rhythmGap !== stackCss && !narrowRowsStack(rhythmGap) &&
+    looseGap !== stackCss && !narrowRowsStack(looseGap) &&
+    stackedAction !== stackCss && !narrowRowsStack(stackedAction) &&
+    narrowRowsStack(stackCss),
+    `twoColumns=${narrowRowsStack(twoColumns)}, rhythmGap=${narrowRowsStack(rhythmGap)}, ` +
+    `looseGap=${narrowRowsStack(looseGap)}, stackedAction=${narrowRowsStack(stackedAction)}, ` +
+    `real=${narrowRowsStack(stackCss)}`);
+}
+
+{
+  check('the responsive layers add no focus rule of their own, so the inset rail and row rings survive the clipping rail',
+    narrowKeepsInsetRings(narrowCss, stackCss),
+    `outward=${JSON.stringify(`${narrowCss}\n${stackCss}`.includes(':focus-visible'))}`);
+}
+
+{
+  const outward = narrowCss.replace(
+    '  .settings-nav-item { width: auto; }',
+    '  .settings-nav-item { width: auto; }\n  .settings-nav-item:focus-visible { outline-offset: 1px; }');
+  const stackOutward = stackCss.replace(
+    '  .settings-row--action { grid-template-columns: minmax(0, 1fr) auto; }',
+    '  .settings-row--action { grid-template-columns: minmax(0, 1fr) auto; }\n  .settings-row--action:focus-visible { outline-offset: 1px; }');
+  check('control: an outward focus offset added by either responsive layer fails the same predicate',
+    outward !== narrowCss && !narrowKeepsInsetRings(outward, stackCss) &&
+    stackOutward !== stackCss && !narrowKeepsInsetRings(narrowCss, stackOutward) &&
+    narrowKeepsInsetRings(narrowCss, stackCss),
+    `narrow=${narrowKeepsInsetRings(outward, stackCss)}, stack=${narrowKeepsInsetRings(narrowCss, stackOutward)}, ` +
+    `real=${narrowKeepsInsetRings(narrowCss, stackCss)}`);
+}
+
+{
+  check('both responsive blocks sit in the settings section after the base declarations they override',
+    narrowCss.length > 0 && stackCss.length > 0 && narrowBlocksInSection(dialogCss),
+    `narrow=${narrowCss.length}, stack=${stackCss.length}, ok=${narrowBlocksInSection(dialogCss)}`);
+}
+
+{
+  const movedAhead = `${narrowCss}\n${stackCss}\n${dialogCss}`;
+  const swapped = dialogCss.replace(narrowCss, '@@NARROW@@').replace(stackCss, narrowCss).replace('@@NARROW@@', stackCss);
+  check('control: a narrow block moved ahead of the wide declarations, or the stack block placed before the narrow one, fails the same predicate',
+    !narrowBlocksInSection(movedAhead) &&
+    swapped !== dialogCss && !narrowBlocksInSection(swapped) &&
+    narrowBlocksInSection(dialogCss),
+    `ahead=${narrowBlocksInSection(movedAhead)}, swapped=${narrowBlocksInSection(swapped)}, ` +
+    `real=${narrowBlocksInSection(dialogCss)}`);
 }
 
 const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string, Record<string, string>]> = [

@@ -10,6 +10,7 @@ export const SETTINGS_ROW_GAP = 12;
 export const SETTINGS_ROW_HEIGHT = 28;
 export const SETTINGS_ROW_PADDING_Y = 3;
 export const SETTINGS_PANE_GAP = 4;
+export const SETTINGS_DIALOG_NARROW_MARGIN = 16;
 
 export const SETTINGS_SECTIONS = ['appearance'] as const;
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number];
