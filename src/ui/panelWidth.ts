@@ -55,19 +55,15 @@ export function narrowestPanelWidth(): number {
   return Math.min(PANEL_WIDTH_MAX, Math.max(PANEL_WIDTH_MIN, currentPanelMinWidth()));
 }
 
-function narrowest(): number {
-  return narrowestPanelWidth();
-}
-
 function upperBound(maxWidth: number): number {
   if (!Number.isFinite(maxWidth)) return PANEL_WIDTH_MAX;
   const rounded = Math.round(maxWidth);
-  return Math.min(PANEL_WIDTH_MAX, Math.max(narrowest(), rounded));
+  return Math.min(PANEL_WIDTH_MAX, Math.max(narrowestPanelWidth(), rounded));
 }
 
 function clampWidth(value: number, maxWidth: number): number {
   const rounded = Number.isFinite(value) ? Math.round(value) : PANEL_WIDTH_DEFAULT;
-  return Math.min(upperBound(maxWidth), Math.max(narrowest(), rounded));
+  return Math.min(upperBound(maxWidth), Math.max(narrowestPanelWidth(), rounded));
 }
 
 export function clampPanelWidth(width: number): number {
@@ -75,9 +71,9 @@ export function clampPanelWidth(width: number): number {
 }
 
 export function maxPanelWidth(rowWidthPx: number): number {
-  if (!Number.isFinite(rowWidthPx)) return narrowest();
+  if (!Number.isFinite(rowWidthPx)) return narrowestPanelWidth();
   const available = Math.round(rowWidthPx) - PANEL_WIDTH_RESERVE;
-  return Math.min(PANEL_WIDTH_MAX, Math.max(narrowest(), available));
+  return Math.min(PANEL_WIDTH_MAX, Math.max(narrowestPanelWidth(), available));
 }
 
 export function sanitizePanelWidth(raw: string | null): number | null {
@@ -120,7 +116,7 @@ function onStorage(event: StorageEvent): void {
 }
 
 function onNarrowestChange(): void {
-  const floor = narrowest();
+  const floor = narrowestPanelWidth();
   if ((current ?? PANEL_WIDTH_DEFAULT) < floor) {
     setPanelWidth(floor);
     return;
@@ -166,7 +162,7 @@ export function widthFromKey(
   switch (key) {
     case 'ArrowLeft': return clampWidth(currentWidth + step, maxWidth);
     case 'ArrowRight': return clampWidth(currentWidth - step, maxWidth);
-    case 'Home': return clampWidth(narrowest(), maxWidth);
+    case 'Home': return clampWidth(narrowestPanelWidth(), maxWidth);
     case 'End': return clampWidth(upperBound(maxWidth), maxWidth);
     case 'Enter': return clampWidth(PANEL_WIDTH_DEFAULT, maxWidth);
     case ' ': return clampWidth(PANEL_WIDTH_DEFAULT, maxWidth);

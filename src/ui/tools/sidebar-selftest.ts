@@ -459,8 +459,7 @@ const describe = (s: SidebarState): string =>
     /\bcolor: var\(--text50\);/.test(expand);
   const tabRow = /\bpadding: 7px 4px;/.test(tab) && /\bline-height: 16px;/.test(tab) &&
     /\bborder-bottom: 1px solid var\(--border-low\);/.test(strip);
-  const sharedMetric = /:root \{[^}]*--side-tabs-h: 31px;/.test(css) && tabRow &&
-    7 + 16 + 7 + 1 === 31;
+  const sharedMetric = /:root \{[^}]*--side-tabs-h: 31px;/.test(css) && tabRow;
   const coarseTarget = coarse.includes('left: -16px;') && coarse.includes('width: 48px;') &&
     coarse.includes('height: 48px;');
   const railStructure = host.includes("this.rail = div('side-rail');") &&
