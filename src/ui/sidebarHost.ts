@@ -57,6 +57,7 @@ export class SidebarHost {
   private readonly strip: HTMLDivElement;
   private readonly tablist: HTMLDivElement;
   private readonly collapseButton: HTMLButtonElement;
+  private readonly rail: HTMLDivElement;
   private readonly expandButton: HTMLButtonElement;
   private readonly tabs = new Map<SidebarPage, HTMLButtonElement>();
   private readonly pages = new Map<SidebarPage, HTMLElement>();
@@ -101,9 +102,11 @@ export class SidebarHost {
 
     this.expandButton = iconButton('side-expand', 'left');
     this.expandButton.setAttribute('aria-expanded', 'false');
-    this.expandButton.hidden = true;
     this.expandButton.addEventListener('click', () => this.cb.expand());
-    (this.root.parentElement ?? this.root).appendChild(this.expandButton);
+    this.rail = div('side-rail');
+    this.rail.hidden = true;
+    this.rail.appendChild(this.expandButton);
+    (this.root.parentElement ?? this.root).appendChild(this.rail);
     this.syncNames();
   }
 
@@ -129,7 +132,7 @@ export class SidebarHost {
     this.root.dataset.assistant = String(state.assistant);
     this.root.classList.toggle('hidden', !state.visible);
     this.collapseButton.setAttribute('aria-expanded', String(state.visible));
-    this.expandButton.hidden = state.visible;
+    this.rail.hidden = state.visible;
     this.strip.inert = state.assistant;
     if (covered && !this.covered) this.root.scrollTop = 0;
     this.covered = covered;
@@ -165,6 +168,7 @@ export class SidebarHost {
     this.mounted.clear();
     this.tabs.clear();
     this.layer.remove();
+    this.rail.remove();
     this.expandButton.remove();
   }
 

@@ -40,6 +40,7 @@
      channel names are empty now, so the column no longer reserves "Channel 15" width. */
   --labels-w: 128px;
   --strip-w: 5px;      /* device x 0..9 */
+  --side-tabs-h: 31px;
   --panel-w: 296px;
   --panel-reserve-w: 320px;
 }
@@ -1632,8 +1633,8 @@ html[data-theme="light"] .grid-canvas { mix-blend-mode: darken; }
 :is(html[data-theme="dark"], html[data-theme="light"]) .side-tab.on { background: var(--background); }
 #side-panel .side-collapse {
   width: 24px;
-  height: auto;
-  align-self: stretch;
+  height: var(--side-tabs-h);
+  align-self: flex-start;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -1657,31 +1658,43 @@ html[data-theme="light"] .grid-canvas { mix-blend-mode: darken; }
 #side-panel > .side-assistant[hidden] { display: none; }
 #side-panel[data-assistant="true"] { overflow: hidden; }
 
-/* The collapsed panel's reopen affordance: a full-height edge strip in the flow of
-   #main (the plot gives up its 24 px, so nothing is covered), mirroring the in-panel
-   .side-collapse strip. On touch it widens to 32 px and a transparent ::before extends
-   the hit area to 48 px over the plot edge. */
-#main > .side-expand {
+#main > .side-rail {
   position: relative;
   flex: none;
   align-self: stretch;
   width: 24px;
-  height: auto;
-  padding: 0;
-  border: 0;
-  border-left: 1px solid var(--border-low);
-  border-radius: 0;
   background: var(--secondary);
-  color: var(--text50);
+  border-left: 1px solid var(--border-low);
   z-index: 5;
 }
-#main > .side-expand:hover { background: var(--panel); color: var(--text); }
-#main > .side-expand svg { width: 16px; height: 16px; }
-@media (pointer: coarse) {
-  #main > .side-expand { width: 32px; }
-  #main > .side-expand::before { content: ''; position: absolute; top: 0; bottom: 0; left: -16px; width: 48px; }
+#main > .side-rail[hidden] { display: none; }
+#main > .side-rail > .side-expand {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: var(--side-tabs-h);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text50);
+  cursor: pointer;
 }
-#main > .side-expand[hidden] { display: none; }
+#main > .side-rail > .side-expand:hover { background: var(--panel); color: var(--text); }
+#main > .side-rail > .side-expand svg { width: 16px; height: 16px; }
+@media (pointer: coarse) {
+  #main > .side-rail { width: 32px; }
+  #main > .side-rail > .side-expand::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -16px;
+    width: 48px;
+    height: 48px;
+  }
+}
 
 #panel-resizer {
   position: absolute;

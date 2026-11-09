@@ -348,7 +348,7 @@ const describe = (s: SidebarState): string =>
     'this.root.dataset.page = state.page',
     'this.root.dataset.assistant = String(state.assistant)',
     "this.root.classList.toggle('hidden', !state.visible)",
-    'this.expandButton.hidden = state.visible',
+    'this.rail.hidden = state.visible',
     "el.setAttribute('aria-controls', 'side-panel')",
     "this.collapseButton.setAttribute('aria-expanded', 'true')",
     'tabTargetIndex(index, event.key, SIDEBAR_PAGES.length)',
@@ -413,7 +413,7 @@ const describe = (s: SidebarState): string =>
     /\bflex: 1 1 0;/.test(tab) && /\bmin-width: 0;/.test(tab) &&
     /\bbackground: transparent;/.test(tab) && /\bcolor: var\(--text50\);/.test(tab);
   const collapseInRow = host.includes('this.strip.append(this.collapseButton, this.tablist);') &&
-    /\bwidth: 24px;/.test(collapse) && /\balign-self: stretch;/.test(collapse) &&
+    /\bwidth: 24px;/.test(collapse) && /\bheight: var\(--side-tabs-h\);/.test(collapse) &&
     /\bborder: 0;/.test(collapse) && /\bbackground: transparent;/.test(collapse);
   check('the strip is full-bleed: a sticky band with no padding or gap, a leading flush collapse control, and three equal-width tabs',
     fullBleed && equalTabs && collapseInRow,
@@ -445,23 +445,33 @@ const describe = (s: SidebarState): string =>
     `ground=${tabGround}/${panelGround}, retired=${retired}, ` +
     `active=${JSON.stringify(active.trim())}, themed=${JSON.stringify(themedActive.trim())}`);
 
-  const expand = rule('#main > .side-expand');
-  const coarse = /@media \(pointer: coarse\) \{\s*#main > \.side-expand \{ width: 32px; \}\s*#main > \.side-expand::before \{[^}]*left: -16px; width: 48px; \}/.test(css);
+  const rail = rule('#main > .side-rail');
+  const expand = rule('#main > .side-rail > .side-expand');
+  const coarse = /@media \(pointer: coarse\) \{\s*#main > \.side-rail \{ width: 32px; \}\s*#main > \.side-rail > \.side-expand::before \{([^}]*)\}/.exec(css)?.[1] ?? '';
   const iconFamily = host.includes("iconButton('side-collapse', 'right')") &&
     host.includes("iconButton('side-expand', 'left')") &&
     host.includes("button(`analyzer-act ${className}`, '')");
-  // The collapsed reopen control is a visible full-height edge strip like .side-collapse,
-  // in the flow of #main (it covers no plot), with a 48 px touch hit area.
-  const edgeStrip = /\bflex: none;/.test(expand) && /\balign-self: stretch;/.test(expand) &&
-    /\bwidth: 24px;/.test(expand) && /\bborder-left: 1px solid var\(--border-low\);/.test(expand) &&
-    /\bbackground: var\(--secondary\);/.test(expand) && !/\bposition: absolute;/.test(expand) &&
-    !/\btop: 8px;/.test(expand) && coarse &&
-    /#main > \.side-expand\[hidden\] \{ display: none; \}/.test(css);
+  const railShell = /\bflex: none;/.test(rail) && /\balign-self: stretch;/.test(rail) &&
+    /\bwidth: 24px;/.test(rail) && /\bborder-left: 1px solid var\(--border-low\);/.test(rail) &&
+    /\bbackground: var\(--secondary\);/.test(rail) && !/\bposition: absolute;/.test(rail);
+  const sameBox = /\bheight: var\(--side-tabs-h\);/.test(expand) &&
+    /\bheight: var\(--side-tabs-h\);/.test(collapse) &&
+    /\bdisplay: flex;/.test(expand) && /\bwidth: 100%;/.test(expand) &&
+    /\bcolor: var\(--text50\);/.test(expand);
+  const sharedMetric = /:root \{[^}]*--side-tabs-h: 31px;/.test(css);
+  const coarseTarget = coarse.includes('left: -16px;') && coarse.includes('width: 48px;') &&
+    coarse.includes('height: 48px;');
+  const railStructure = host.includes("this.rail = div('side-rail');") &&
+    host.includes('this.rail.appendChild(this.expandButton);') &&
+    host.includes('this.rail.hidden = state.visible;') && host.includes('this.rail.remove();') &&
+    /#main > \.side-rail\[hidden\] \{ display: none; \}/.test(css);
   const onMirrorsAria = host.includes("node.classList.toggle('on', tab.selected)") &&
     host.includes("node.setAttribute('aria-selected', String(tab.selected))");
-  check('collapse and expand keep the shared icon-button family, the collapsed expand is a full-height edge strip, and the on class mirrors aria-selected',
-    iconFamily && edgeStrip && onMirrorsAria,
-    `iconFamily=${iconFamily}, edgeStrip=${edgeStrip}, onMirrorsAria=${onMirrorsAria}, expand=${JSON.stringify(expand)}`);
+  check('the collapsed reopen control is the collapse button\'s own box on a full-height rail, and the on class mirrors aria-selected',
+    iconFamily && railShell && sameBox && sharedMetric && coarseTarget && railStructure && onMirrorsAria,
+    `iconFamily=${iconFamily}, railShell=${railShell}, sameBox=${sameBox}, metric=${sharedMetric}, ` +
+    `coarse=${coarseTarget}, structure=${railStructure}, onMirrorsAria=${onMirrorsAria}, ` +
+    `rail=${JSON.stringify(rail)}, expand=${JSON.stringify(expand)}`);
 }
 
 {
