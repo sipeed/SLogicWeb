@@ -1,7 +1,8 @@
 import {
-  SHORTCUTS, gestureNotation, referenceGestures, shortcutActionText, shortcutIdFor,
+  SHORTCUTS, actionOf, gestureNotation, referenceGestures, shortcutActionText, shortcutsIn,
   type ShortcutEntry, type ShortcutId,
 } from '../shortcuts.js';
+import { formatChord } from '../chords.js';
 import { t, type MessageKey } from '../i18n.js';
 import { en } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
@@ -38,13 +39,6 @@ function check(name: string, pass: boolean, detail: string): void {
 
 const RETIRED_KEY_LITERALS = ["e.key === 'f'", "e.key === ' '", "e.key === 'Escape'"];
 
-function between(source: string, from: string, to: string): string {
-  const start = source.indexOf(from);
-  if (start < 0) return '';
-  const end = source.indexOf(to, start + from.length);
-  return end < 0 ? source.slice(start) : source.slice(start, end);
-}
-
 function keydownBody(source: string): string {
   const start = source.indexOf("window.addEventListener('keydown'");
   if (start < 0) return '';
@@ -57,16 +51,23 @@ function hasRetiredKeyLiteral(source: string): boolean {
   return RETIRED_KEY_LITERALS.some((needle) => body.includes(needle));
 }
 
+function runShortcutBody(source: string): string {
+  const start = source.indexOf('private runShortcut(');
+  if (start < 0) return '';
+  const end = source.indexOf('\n  }', start);
+  return end < 0 ? '' : source.slice(start, end);
+}
+
 const BRANCH_ACTIONS: ReadonlyArray<readonly [string, string]> = [
-  ["if (shortcut === 'capture.toggle') {", 'this.primaryAction();'],
-  ["} else if (shortcut === 'view.fit') {", 'this.stack.zoomToFit();'],
-  ["} else if (shortcut === 'cursors.clear') {", 'this.clearCursors();'],
+  ["if (id === 'capture.toggle') {", 'this.primaryAction();'],
+  ["if (id === 'view.fit') {", 'this.stack.zoomToFit();'],
+  ["if (id === 'cursors.clear') {", 'this.clearCursors();'],
 ];
 
 function branchBody(source: string, anchor: string): string {
   const start = source.indexOf(anchor);
   if (start < 0) return '';
-  const end = source.indexOf('\n      }', start);
+  const end = source.indexOf('\n    }', start);
   return end < 0 ? '' : source.slice(start, end);
 }
 
@@ -74,111 +75,105 @@ function branchesKeepTheirOwnAction(source: string): boolean {
   return BRANCH_ACTIONS.every(([anchor, action]) => branchBody(source, anchor).includes(action));
 }
 
-function entriesAreUnique(rows: readonly { id: string; key: string }[]): boolean {
-  return new Set(rows.map((row) => row.id)).size === rows.length &&
-    new Set(rows.map((row) => row.key)).size === rows.length;
-}
-
 const appSource = fs.readFileSync('src/ui/app.ts', 'utf8');
 const body = keydownBody(appSource);
 
 {
-  const rows = SHORTCUTS.map((entry) => `${entry.id}|${entry.key}|${entry.notation}`).join(',');
-  check('the catalogue is exactly seven rows in dispatch order with pinned keys and notation',
+  const rows = SHORTCUTS.map((entry) =>
+    `${entry.id}|${entry.group}|${entry.chords.join(',')}`).join(';');
+  check('the catalogue is exactly seven rows in dispatch order with pinned groups and chords',
     SHORTCUTS.length === 7 &&
-    rows === "capture.toggle| |Space,view.fit|f|F,cursors.clear|Escape|Esc," +
-      'view.zoomIn|+|+ / =,view.zoomOut|-|-,view.panLeft|ArrowLeft|←,view.panRight|ArrowRight|→',
+    rows === 'capture.toggle|view|Space;view.fit|view|F;cursors.clear|view|Escape;' +
+      'view.zoomIn|view|+,=;view.zoomOut|view|-,_;view.panLeft|view|ArrowLeft;' +
+      'view.panRight|view|ArrowRight' &&
+    shortcutsIn('view').length === 7 && shortcutsIn('file').length === 0 &&
+    shortcutsIn('navigation').length === 0,
     `rows=${rows}`);
 }
 
 {
-  const ids = SHORTCUTS.map((entry) => entry.id);
-  const keys = SHORTCUTS.map((entry) => entry.key);
-  check('ids and KeyboardEvent.key values are both unique',
-    entriesAreUnique(SHORTCUTS) && SHORTCUTS.length === 7 &&
-    new Set(SHORTCUTS.flatMap((entry) => [entry.key, ...(entry.aliases ?? [])])).size ===
-      SHORTCUTS.reduce((n, entry) => n + 1 + (entry.aliases?.length ?? 0), 0),
-    `ids=${ids.join(',')}, keys=${JSON.stringify(keys)}`);
+  const shown = SHORTCUTS.map((entry) =>
+    entry.chords.map((chord) => formatChord(chord, false)).join(' / ')).join('|');
+  check('every reference row prints its chords through formatChord, aliases included',
+    shown === 'Space|F|Esc|+ / =|- / _|←|→',
+    `shown=${shown}`);
 }
 
 {
-  const duplicatedKey = SHORTCUTS.map((entry, index) =>
-    index === 1 ? { ...entry, key: SHORTCUTS[0]!.key } : { ...entry });
-  const duplicatedId = SHORTCUTS.map((entry, index) =>
-    index === 1 ? { ...entry, id: SHORTCUTS[0]!.id } : { ...entry });
-  check('control: a duplicated key or id fails the same uniqueness predicate',
-    entriesAreUnique(SHORTCUTS) && !entriesAreUnique(duplicatedKey) &&
-    !entriesAreUnique(duplicatedId) &&
-    duplicatedKey[1]!.key === duplicatedKey[0]!.key &&
-    duplicatedKey[1]!.id !== duplicatedKey[0]!.id &&
-    duplicatedId[1]!.id === duplicatedId[0]!.id,
-    `real=${entriesAreUnique(SHORTCUTS)}, dupKey=${entriesAreUnique(duplicatedKey)}, ` +
-    `dupId=${entriesAreUnique(duplicatedId)}, ` +
-    `keys=${JSON.stringify(duplicatedKey.map((entry) => entry.key))}`);
+  const single = SHORTCUTS.map((entry) =>
+    entry.chords.map((chord) => formatChord(chord, true)).join(' / ')).join('|');
+  const mutated = SHORTCUTS.map((entry) => ({ ...entry, chords: [...entry.chords].reverse() }))
+    .map((entry) => entry.chords.map((chord) => formatChord(chord, true)).join(' / ')).join('|');
+  check('control: a reordered chord list changes the rendered notation',
+    mutated !== single && single === 'Space|F|Esc|+ / =|- / _|←|→' &&
+    mutated === 'Space|F|Esc|= / +|_ / -|←|→',
+    `real=${single}, mutated=${mutated}`);
 }
 
 {
   const mapped: Array<[string, ShortcutId | null]> = [
-    [' ', shortcutIdFor(' ')],
-    ['f', shortcutIdFor('f')],
-    ['Escape', shortcutIdFor('Escape')],
-    ['+', shortcutIdFor('+')],
-    ['=', shortcutIdFor('=')],
-    ['-', shortcutIdFor('-')],
-    ['_', shortcutIdFor('_')],
-    ['ArrowLeft', shortcutIdFor('ArrowLeft')],
-    ['ArrowRight', shortcutIdFor('ArrowRight')],
+    ['Space', actionOf('Space')],
+    ['F', actionOf('F')],
+    ['Escape', actionOf('Escape')],
+    ['+', actionOf('+')],
+    ['=', actionOf('=')],
+    ['-', actionOf('-')],
+    ['_', actionOf('_')],
+    ['ArrowLeft', actionOf('ArrowLeft')],
+    ['ArrowRight', actionOf('ArrowRight')],
   ];
   const want = ['capture.toggle', 'view.fit', 'cursors.clear', 'view.zoomIn', 'view.zoomIn',
     'view.zoomOut', 'view.zoomOut', 'view.panLeft', 'view.panRight'];
-  check('shortcutIdFor maps every live key and alias to its id',
+  check('actionOf maps every live chord and alias to its id',
     mapped.every(([, id], index) => id === want[index]),
     `mapped=${mapped.map(([key, id]) => `${JSON.stringify(key)}:${String(id)}`).join(',')}`);
 }
 
 {
-  const misses = ['', 'F', 'Enter', 'Return', 'f ', 'ArrowUp', 'ArrowDown', 'Add'];
-  const answers = misses.map((key) => shortcutIdFor(key));
-  check('shortcutIdFor answers null for unmatched keys, including Shift+f and a trailing space',
-    answers.every((answer) => answer === null),
+  const misses = ['', 'F ', 'Enter', 'Return', 'f ', 'ArrowUp', 'ArrowDown', 'Add',
+    'Shift+ArrowLeft', 'Mod++', 'Mod+=', 'Mod+Space', 'Mod+F', 'Alt+Escape'];
+  const answers = misses.map((key) => actionOf(key));
+  check('actionOf answers null for unmatched and modifier-held chords',
+    answers.every((answer) => answer === null) && actionOf('+') === 'view.zoomIn',
     `answers=${answers.map((answer) => String(answer)).join(',')}`);
 }
 
 {
   const needles: Array<[string, boolean]> = [
-    ['shortcutIdFor(e.key)', body.includes('shortcutIdFor(e.key)')],
-    ['primaryAction()', body.includes('this.primaryAction()')],
-    ['zoomToFit()', body.includes('this.stack.zoomToFit()')],
-    ['clearCursors()', body.includes('this.clearCursors()')],
+    ['chordOf(e)', body.includes('const chord = chordOf(e);')],
+    ['chord === null', body.includes('if (chord === null) return;')],
+    ['actionOf(chord)', body.includes('const id = actionOf(chord)')],
+    ['runShortcut(shift)', body.includes('this.runShortcut(id, e.shiftKey)')],
     ['HTMLInputElement', body.includes('HTMLInputElement')],
     ['.select-field', body.includes('.select-field')],
     ['dialog[open]', body.includes('dialog[open]')],
   ];
   const missing = needles.filter(([, hit]) => !hit).map(([name]) => name);
-  check('the keydown listener dispatches through the catalogue and keeps every guard',
-    missing.length === 0 && body.length > 0,
+  check('the keydown listener resolves a chord, then an id, then one handler, and keeps every guard',
+    missing.length === 0 && body.length > 0 && !body.includes('shortcutIdFor'),
     `missing=${JSON.stringify(missing)}, bodyLength=${body.length}`);
 }
 
 {
   const branches = BRANCH_ACTIONS.map(([anchor, action]) => {
-    const slice = branchBody(appSource, anchor);
+    const slice = branchBody(runShortcutBody(appSource), anchor);
     return `${action}@${slice.length}`;
   });
   check('each dispatched branch keeps its own action inside its own body',
-    branchesKeepTheirOwnAction(appSource),
+    branchesKeepTheirOwnAction(runShortcutBody(appSource)),
     `branches=${JSON.stringify(branches)}`);
 }
 
 {
-  const moved = appSource
-    .replace('        this.primaryAction();\n', '')
-    .replace('        this.stack.zoomToFit();\n', '        this.stack.zoomToFit();\n        this.primaryAction();\n');
+  const source = runShortcutBody(appSource);
+  const moved = source
+    .replace('      this.primaryAction();\n', '')
+    .replace('      this.stack.zoomToFit();\n', '      this.stack.zoomToFit();\n      this.primaryAction();\n');
   check('control: an action moved into another branch still fails the branch predicate',
-    moved !== appSource && !branchesKeepTheirOwnAction(moved) &&
-    branchesKeepTheirOwnAction(appSource),
-    `moved=${moved !== appSource}, movedHit=${branchesKeepTheirOwnAction(moved)}, ` +
-    `realHit=${branchesKeepTheirOwnAction(appSource)}`);
+    moved !== source && !branchesKeepTheirOwnAction(moved) &&
+    branchesKeepTheirOwnAction(source),
+    `moved=${moved !== source}, movedHit=${branchesKeepTheirOwnAction(moved)}, ` +
+    `realHit=${branchesKeepTheirOwnAction(source)}`);
 }
 
 {
@@ -190,8 +185,8 @@ const body = keydownBody(appSource);
 
 {
   const mutated = appSource.replace(
-    'const shortcut = shortcutIdFor(e.key);',
-    "const shortcut = shortcutIdFor(e.key);\n      if (e.key === 'f') return;");
+    'const chord = chordOf(e);',
+    "const chord = chordOf(e);\n      if (e.key === 'f') return;");
   check('control: a re-inserted e.key === \'f\' literal is detected by the same predicate',
     mutated !== appSource && hasRetiredKeyLiteral(mutated) && !hasRetiredKeyLiteral(appSource),
     `mutated=${mutated !== appSource}, mutatedHit=${hasRetiredKeyLiteral(mutated)}, ` +
@@ -204,9 +199,10 @@ const body = keydownBody(appSource);
   const hits = forbidden.filter((token) => source.includes(token));
   const imports = [...source.matchAll(/^import .*$/gm)].map((match) => match[0]);
   const bodySource = source.replace(/^import .*$/gm, '');
-  check('the catalogue imports only the message catalog and touches no DOM or browser state',
-    hits.length === 0 && imports.length === 2 &&
-    imports.every((line) => line.endsWith("from './i18n.js';")) &&
+  check('the catalogue imports only the message catalog and the chord model, and touches no DOM',
+    hits.length === 0 && imports.length === 3 &&
+    imports.filter((line) => line.endsWith("from './i18n.js';")).length === 2 &&
+    imports.filter((line) => line.endsWith("from './chords.js';")).length === 1 &&
     bodySource.trimStart().startsWith('export type ShortcutId'),
     `hits=${JSON.stringify(hits)}, imports=${JSON.stringify(imports)}`);
 }
@@ -214,13 +210,14 @@ const body = keydownBody(appSource);
 {
   const source = fs.readFileSync('src/ui/shortcuts.ts', 'utf8');
   const mutated = source.replace(
-    "import { t } from './i18n.js';",
-    "import { t } from './i18n.js';\nimport { zoomToFit } from './view.js';");
+    "import { CHORD_ALIASES } from './chords.js';",
+    "import { CHORD_ALIASES } from './chords.js';\nimport { zoomToFit } from './view.js';");
   const imports = (text: string): string[] => [...text.matchAll(/^import .*$/gm)].map((match) => match[0]);
-  check('control: a third import from another module is detected by the same predicate',
-    mutated !== source && imports(mutated).length === 3 &&
-    !imports(mutated).every((line) => line.endsWith("from './i18n.js';")) &&
-    imports(source).every((line) => line.endsWith("from './i18n.js';")),
+  const allowed = (lines: readonly string[]): boolean => lines.every((line) =>
+    line.endsWith("from './i18n.js';") || line.endsWith("from './chords.js';"));
+  check('control: a third module import is detected by the same predicate',
+    mutated !== source && imports(mutated).length === 4 && !allowed(imports(mutated)) &&
+    allowed(imports(source)),
     `mutated=${imports(mutated).length}, real=${imports(source).length}`);
 }
 
@@ -256,18 +253,71 @@ const body = keydownBody(appSource);
 }
 
 {
-  // The new view keys share the Space/F/Esc guard, leave Ctrl/Cmd/Alt chords to the
-  // browser (Ctrl+= / Ctrl+- are page zoom), and step from the view centre.
-  const branch = between(appSource, "} else if (shortcut !== null && !e.ctrlKey && !e.metaKey && !e.altKey) {", '\n      }');
-  check('the zoom and pan keys skip modifier chords and dispatch to keyZoom/keyPan',
-    branch.includes('e.preventDefault();') &&
-    branch.includes("if (shortcut === 'view.zoomIn') this.keyZoom(1);") &&
-    branch.includes("else if (shortcut === 'view.zoomOut') this.keyZoom(-1);") &&
-    branch.includes("else if (shortcut === 'view.panLeft') this.keyPan(-1, e.shiftKey);") &&
-    branch.includes('else this.keyPan(1, e.shiftKey);') &&
+  const shortcuts = runShortcutBody(appSource);
+  const listener = body;
+  check('the zoom and pan keys dispatch to keyZoom/keyPan and never see a modifier flag',
+    shortcuts.includes("if (id === 'view.zoomIn') { this.keyZoom(1); return true; }") &&
+    shortcuts.includes("if (id === 'view.zoomOut') { this.keyZoom(-1); return true; }") &&
+    shortcuts.includes("if (id === 'view.panLeft') { this.keyPan(-1, shiftKey); return true; }") &&
+    shortcuts.includes('this.keyPan(1, shiftKey);') &&
+    shortcuts.includes('return true;') &&
+    !shortcuts.includes('ctrlKey') && !shortcuts.includes('metaKey') &&
+    !shortcuts.includes('altKey') &&
+    !listener.includes('ctrlKey') && !listener.includes('metaKey') &&
+    !listener.includes('altKey') &&
     appSource.includes('this.stack.zoomAt(this.stack.widthDevicePx / 2, direction > 0 ? Math.SQRT1_2 : Math.SQRT2);') &&
     appSource.includes('this.stack.panPixels(direction * this.stack.widthDevicePx * (big ? 0.5 : 0.1));'),
-    `branch=${branch.length}`);
+    `shortcuts=${shortcuts.length}, listener=${listener.length}`);
+}
+
+{
+  const shortcuts = runShortcutBody(appSource);
+  const gated = shortcuts.replace(
+    "if (id === 'view.zoomIn') { this.keyZoom(1); return true; }",
+    "if (id === 'view.zoomIn') { if (ctrlKey) return false; this.keyZoom(1); return true; }");
+  const modifierFree = (source: string): boolean =>
+    source.length > 0 && !source.includes('ctrlKey') && !source.includes('metaKey') &&
+    !source.includes('altKey');
+  check('control: a reintroduced per-branch modifier gate fails the same predicate',
+    gated !== shortcuts && !modifierFree(gated) && modifierFree(shortcuts),
+    `gated=${modifierFree(gated)}, real=${modifierFree(shortcuts)}`);
+}
+
+{
+  const resolve = (chord: string, guardLetters: boolean): ShortcutId | null => {
+    const direct = actionOf(chord);
+    if (direct !== null) return direct;
+    const unshifted = chord.startsWith('Shift+') ? chord.slice('Shift+'.length) : '';
+    return guardLetters && /^[A-Z]$/.test(unshifted) ? null : actionOf(unshifted);
+  };
+  const fallback = body.includes("const unshifted = chord.startsWith('Shift+') ? " +
+    "chord.slice('Shift+'.length) : '';") &&
+    body.includes('actionOf(chord) ?? (/^[A-Z]$/.test(unshifted) ? null : actionOf(unshifted))') &&
+    actionOf('F') === 'view.fit' && actionOf('ArrowLeft') === 'view.panLeft';
+  const broadened = body
+    .replace('(/^[A-Z]$/.test(unshifted) ? null : actionOf(unshifted))', 'actionOf(unshifted)');
+  check('a shifted non-letter keeps its unmodified chord while a shifted letter resolves nothing',
+    fallback && broadened !== body &&
+    resolve('Shift+F', false) === 'view.fit' && resolve('Shift+F', true) === null &&
+    resolve('Shift+ArrowLeft', true) === 'view.panLeft' &&
+    resolve('Shift+Escape', true) === 'cursors.clear',
+    `fallback=${fallback}, widened=${String(resolve('Shift+F', false))}, ` +
+    `narrowed=${String(resolve('Shift+F', true))}`);
+}
+
+{
+  const shortcuts = runShortcutBody(appSource);
+  const premature = shortcuts.replace(
+    '      if (document.querySelector(\'.cursor-dist-popover:popover-open\') !== null) return false;\n', '');
+  check('the cursor clearing branch keeps its open-picker bail before touching the cursors',
+    shortcuts.includes(".cursor-dist-popover:popover-open") &&
+    shortcuts.includes('this.releaseMarkerPointer();') &&
+    shortcuts.includes('this.clearCursors();') &&
+    shortcuts.indexOf('.cursor-dist-popover:popover-open') <
+      shortcuts.indexOf('this.clearCursors();') &&
+    premature !== shortcuts && !premature.includes('.cursor-dist-popover:popover-open'),
+    `bailAt=${shortcuts.indexOf('.cursor-dist-popover:popover-open')}, ` +
+    `clearAt=${shortcuts.indexOf('this.clearCursors();')}`);
 }
 
 const SHORTCUT_KEY_VALUES: ReadonlyArray<readonly [MessageKey, readonly [string, string, string, string]]> = [
@@ -331,7 +381,9 @@ const REFERENCE_NEEDLES: readonly string[] = [
   "this.groupTitle('shortcuts.keyboard'),",
   "this.groupTitle('shortcuts.mouse'),",
   'this.shortcutList(SHORTCUTS.map((entry) => this.keyRow(',
-  'shortcutActionText(entry), entry.notation, `shortcut:${entry.id}`',
+  'shortcutActionText(entry),',
+  "entry.chords.map((chord) => formatChord(chord)).join(' / '),",
+  '`shortcut:${entry.id}`',
   'this.shortcutList(referenceGestures(this.host.wheelZooms()).map((entry, index) => this.keyRow(',
   'shortcutActionText(entry), gestureNotation(entry), `gesture:${index}`',
   "list.className = 'shortcuts-list';",

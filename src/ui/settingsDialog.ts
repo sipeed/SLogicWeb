@@ -1,5 +1,6 @@
 import { t } from './i18n.js';
 import type { MessageKey } from './i18n.js';
+import { formatChord } from './chords.js';
 import {
   SHORTCUTS, gestureNotation, referenceGestures, shortcutActionText,
 } from './shortcuts.js';
@@ -205,7 +206,9 @@ export class SettingsDialog {
     return [
       this.groupTitle('shortcuts.keyboard'),
       this.shortcutList(SHORTCUTS.map((entry) => this.keyRow(
-        shortcutActionText(entry), entry.notation, `shortcut:${entry.id}`))),
+        shortcutActionText(entry),
+        entry.chords.map((chord) => formatChord(chord)).join(' / '),
+        `shortcut:${entry.id}`))),
       this.groupTitle('shortcuts.mouse'),
       this.shortcutList(referenceGestures(this.host.wheelZooms()).map((entry, index) => this.keyRow(
         shortcutActionText(entry), gestureNotation(entry), `gesture:${index}`))),

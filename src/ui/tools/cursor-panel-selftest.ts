@@ -896,14 +896,14 @@ const edgeMethodsSource = slice(app,
 
   check('the popover keeps Space and Escape for its own picker',
     app.includes("target.closest('.select-field, .assistant-panel, .cursor-dist-popover') !== null") &&
-    app.indexOf("closest('.select-field") < app.indexOf("shortcut === 'view.fit'"),
+    app.indexOf("closest('.select-field") < app.indexOf('const chord = chordOf(e);'),
     `guard=${app.includes('.cursor-dist-popover')}`);
 
-  const escapeBlock = slice(app, "if (shortcut === 'cursors.clear') {", 'this.clearCursors();');
+  const escapeBlock = slice(app, "if (id === 'cursors.clear') {", 'this.clearCursors();');
   check('an open picker hands Escape back to the browser before the cursor clear',
     escapeBlock.includes(
-      "if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return;\n" +
-      '        this.releaseMarkerPointer();') &&
+      "if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return false;\n" +
+      '      this.releaseMarkerPointer();') &&
     !escapeBlock.includes('clearCursors'),
     `block=${escapeBlock.length} chars, clear=${escapeBlock.includes('clearCursors')}`);
 }

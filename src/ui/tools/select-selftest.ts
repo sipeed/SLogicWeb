@@ -832,14 +832,14 @@ check(
   // The guard also skips textareas, contenteditables and the assistant panel; what this
   // pins is that text fields and .select-field are excluded before any shortcut runs.
   const guardIndex = app.indexOf("closest('.select-field");
-  const fitIndex = app.indexOf("shortcut === 'view.fit'");
+  const fitIndex = app.indexOf('const chord = chordOf(e);');
   const inputGuard = app.indexOf('target instanceof HTMLInputElement');
   const textareaGuard = app.indexOf('target instanceof HTMLTextAreaElement');
   const shortcutGuard = guardIndex >= 0 && fitIndex >= 0 &&
     inputGuard >= 0 && inputGuard < guardIndex && guardIndex < fitIndex &&
     textareaGuard >= 0 && textareaGuard < fitIndex;
   check(
-    'application shortcuts ignore key events from .select-field before f/Space/Escape handling',
+    'application shortcuts ignore key events from .select-field before any chord dispatch',
     shortcutGuard,
     `inputGuard@${inputGuard}, textareaGuard@${textareaGuard}, selectFieldGuard@${guardIndex}, fHandler@${fitIndex}`,
   );

@@ -126,7 +126,8 @@ import {
   type SidebarPage, type SidebarState,
 } from './sidebar.js';
 import { SidebarHost } from './sidebarHost.js';
-import { shortcutIdFor } from './shortcuts.js';
+import { actionOf, type ShortcutId } from './shortcuts.js';
+import { chordOf } from './chords.js';
 import {
   fitWheelAction, wheelAction, wheelDeltaPixels, type WheelAction, type WheelModifiers,
 } from './wheelGesture.js';
@@ -3109,28 +3110,12 @@ export class App {
             target.closest('.select-field, .assistant-panel, .cursor-dist-popover') !== null ||
             target.closest('.ch-editor-popover, button, [role="button"], [role="slider"]') !== null)) return;
       if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;
-      const shortcut = shortcutIdFor(e.key);
-      if (shortcut === 'capture.toggle') {
-        e.preventDefault();
-        this.primaryAction();
-      } else if (shortcut === 'view.fit') {
-        this.beginViewportGesture();
-        if (!this.fitLockedViewport()) this.stack.zoomToFit();
-        this.dirty = true;
-      } else if (shortcut === 'cursors.clear') {
-        if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return;
-        this.releaseMarkerPointer();
-        this.clearCursors();
-        this.renderPanels();
-        this.dirty = true;
-      } else if (shortcut !== null && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        // Ctrl/⌘/Alt with +/-/arrows stay the browser's (page zoom, history).
-        e.preventDefault();
-        if (shortcut === 'view.zoomIn') this.keyZoom(1);
-        else if (shortcut === 'view.zoomOut') this.keyZoom(-1);
-        else if (shortcut === 'view.panLeft') this.keyPan(-1, e.shiftKey);
-        else this.keyPan(1, e.shiftKey);
-      }
+      const chord = chordOf(e);
+      if (chord === null) return;
+      const unshifted = chord.startsWith('Shift+') ? chord.slice('Shift+'.length) : '';
+      const id = actionOf(chord) ?? (/^[A-Z]$/.test(unshifted) ? null : actionOf(unshifted));
+      if (id === null) return;
+      if (this.runShortcut(id, e.shiftKey)) e.preventDefault();
     });
 
     // Drag and drop a capture file straight onto the window. While files are over the
@@ -3148,6 +3133,32 @@ export class App {
       const files = [...(e.dataTransfer?.files ?? [])];
       if (files.length) void this.openFiles(files);
     });
+  }
+
+  private runShortcut(id: ShortcutId, shiftKey: boolean): boolean {
+    if (id === 'capture.toggle') {
+      this.primaryAction();
+      return true;
+    }
+    if (id === 'view.fit') {
+      this.beginViewportGesture();
+      if (!this.fitLockedViewport()) this.stack.zoomToFit();
+      this.dirty = true;
+      return false;
+    }
+    if (id === 'cursors.clear') {
+      if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return false;
+      this.releaseMarkerPointer();
+      this.clearCursors();
+      this.renderPanels();
+      this.dirty = true;
+      return false;
+    }
+    if (id === 'view.zoomIn') { this.keyZoom(1); return true; }
+    if (id === 'view.zoomOut') { this.keyZoom(-1); return true; }
+    if (id === 'view.panLeft') { this.keyPan(-1, shiftKey); return true; }
+    this.keyPan(1, shiftKey);
+    return true;
   }
 
   private showDropOverlay(active: boolean): void {

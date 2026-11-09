@@ -1,27 +1,49 @@
 import { t } from './i18n.js';
 import type { MessageKey } from './i18n.js';
+import { CHORD_ALIASES } from './chords.js';
 
 export type ShortcutId =
   | 'capture.toggle' | 'view.fit' | 'cursors.clear'
   | 'view.zoomIn' | 'view.zoomOut' | 'view.panLeft' | 'view.panRight';
 
+export type ShortcutGroup = 'file' | 'view' | 'navigation';
+
 export interface ShortcutEntry {
   readonly id: ShortcutId;
-  readonly key: string;
-  readonly aliases?: readonly string[];
-  readonly notation: string;
+  readonly group: ShortcutGroup;
+  readonly chords: readonly string[];
   readonly labels: readonly MessageKey[];
+  readonly anywhere?: boolean;
 }
 
 export const SHORTCUTS: readonly ShortcutEntry[] = [
-  { id: 'capture.toggle', key: ' ', notation: 'Space', labels: ['toolbar.start', 'toolbar.stop'] },
-  { id: 'view.fit', key: 'f', notation: 'F', labels: ['toolbar.fit'] },
-  { id: 'cursors.clear', key: 'Escape', notation: 'Esc', labels: ['shortcuts.clearCursors'] },
-  { id: 'view.zoomIn', key: '+', aliases: ['='], notation: '+ / =', labels: ['shortcuts.zoomIn'] },
-  { id: 'view.zoomOut', key: '-', aliases: ['_'], notation: '-', labels: ['shortcuts.zoomOut'] },
-  { id: 'view.panLeft', key: 'ArrowLeft', notation: '←', labels: ['shortcuts.panLeft'] },
-  { id: 'view.panRight', key: 'ArrowRight', notation: '→', labels: ['shortcuts.panRight'] },
+  {
+    id: 'capture.toggle', group: 'view', chords: ['Space'],
+    labels: ['toolbar.start', 'toolbar.stop'],
+  },
+  { id: 'view.fit', group: 'view', chords: ['F'], labels: ['toolbar.fit'] },
+  { id: 'cursors.clear', group: 'view', chords: ['Escape'], labels: ['shortcuts.clearCursors'] },
+  { id: 'view.zoomIn', group: 'view', chords: ['+', '='], labels: ['shortcuts.zoomIn'] },
+  { id: 'view.zoomOut', group: 'view', chords: ['-', '_'], labels: ['shortcuts.zoomOut'] },
+  { id: 'view.panLeft', group: 'view', chords: ['ArrowLeft'], labels: ['shortcuts.panLeft'] },
+  { id: 'view.panRight', group: 'view', chords: ['ArrowRight'], labels: ['shortcuts.panRight'] },
 ];
+
+export const WORK_ANYWHERE: ReadonlySet<ShortcutId> = new Set(
+  SHORTCUTS.filter((entry) => entry.anywhere === true).map((entry) => entry.id),
+);
+
+export function actionOf(chord: string): ShortcutId | null {
+  const direct = SHORTCUTS.find((entry) => entry.chords.includes(chord));
+  if (direct !== undefined) return direct.id;
+  if (!Object.hasOwn(CHORD_ALIASES, chord)) return null;
+  const alias = CHORD_ALIASES[chord];
+  return SHORTCUTS.find((entry) => entry.chords.includes(alias))?.id ?? null;
+}
+
+export function shortcutsIn(group: ShortcutGroup): readonly ShortcutEntry[] {
+  return SHORTCUTS.filter((entry) => entry.group === group);
+}
 
 export interface GestureEntry {
   readonly modifiers: readonly string[];
@@ -55,11 +77,4 @@ export function shortcutActionText(entry: ShortcutEntry | GestureEntry): string 
 
 export function gestureNotation(entry: GestureEntry): string {
   return [...entry.modifiers, t(entry.input)].join(' + ');
-}
-
-export function shortcutIdFor(key: string): ShortcutId | null {
-  for (const entry of SHORTCUTS) {
-    if (entry.key === key || entry.aliases?.includes(key) === true) return entry.id;
-  }
-  return null;
 }

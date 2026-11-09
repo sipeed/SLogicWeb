@@ -164,7 +164,7 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
       .match(/this\.clampLockView\(\);/g) ?? []).length === 3 &&
     !between(app, 'private centerOverview', 'private captureFixedView').includes('noteLockGesture');
   const fitSites = [
-    between(app, "if (shortcut === 'view.fit') {", "} else if (shortcut === 'cursors.clear') {"),
+    between(app, "if (id === 'view.fit') {", "if (id === 'cursors.clear') {"),
     // Fit moved from the top bar to the corner cell (DESIGN §3.4); it is the same action.
     between(app, "this.el.cornerFit.addEventListener('click'", "this.el.cornerSummary.addEventListener('click'"),
   ];
@@ -248,7 +248,7 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
   const pinchSite = between(app, 'if (pinch && pointers.size >= 2)', '      if (dragging) {');
   const dragSite = between(app, '      if (dragging) {', 'this.updateHover');
   const axisSite = between(app, "this.el.axis.addEventListener('pointermove'", 'const axisEnd');
-  const fitShortcut = between(app, "if (shortcut === 'view.fit') {", "} else if (shortcut === 'cursors.clear') {");
+  const fitShortcut = between(app, "if (id === 'view.fit') {", "if (id === 'cursors.clear') {");
   const fitButton = between(app, "this.el.cornerFit.addEventListener('click'", "this.el.cornerSummary.addEventListener('click'");
   const debugViewport = between(app, 'setViewportSeconds: (a: number', 'setMarker:');
   const debugZoom = between(app, 'zoomToAnnotation: (analyzerIndex', 'snapshot:');

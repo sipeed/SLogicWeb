@@ -185,7 +185,7 @@ const toolbar = between(html, '<div id="toolbar"', '<div id="main">') || between
 
 {
   const wire = between(app, 'private wireCorner(): void {', 'private openAddDecoder(');
-  const shortcut = between(app, "} else if (shortcut === 'view.fit') {", "} else if (shortcut === 'cursors.clear') {");
+  const shortcut = between(app, "if (id === 'view.fit') {", "if (id === 'cursors.clear') {");
   const fitBody = between(app, 'private fitViewport(): void {', 'private fitLockedViewport(');
   check('the corner Fit is the F action: both fit the lock or zoom to fit and record intent',
     wire.includes("this.el.cornerFit.addEventListener('click', () => {\n      this.fitViewport();") &&
