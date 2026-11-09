@@ -30,6 +30,9 @@ import {
   type SimStartConfig,
 } from './simDriver.js';
 import { analogVoltsFromCode } from '../ui/channelBanks.js';
+import {
+  ADC_TRACE_LEVELS, crossingProblem, loadAdcTrace, traceCrossings, traceSlope,
+} from '../data/adcTraceFiles.js';
 
 const nodeProcess = (() => {
   const p = (globalThis as {
@@ -1180,7 +1183,8 @@ function hash32(n: number): number {
 
 // Slow enough that genuine code transitions (one per ~64 samples at the steepest point,
 // plus the dither) are further apart than the longest 14-sample artifact, as on the
-// module at 100 MS/s: the artifacts are isolated, never chained.
+// module at 100 MS/s: the artifacts are isolated, never chained (glitchedSineCode caps
+// one that would run into the next transition).
 const SINE_PERIOD = 40000;
 const SINE_AMPLITUDE = 100;
 
@@ -1209,7 +1213,16 @@ function glitchedSineCode(n: number): number {
     if (m <= 0) break;
     const before = sineCode(m - 1);
     const after = sineCode(m);
-    if (before !== after) return j < 1 + (hash32(m * 7 + 3) % 14) ? before | after : after;
+    if (before === after) continue;
+    // The OR lasts until the bus settles, and always leaves the new code readable at
+    // least once before the next transition (as measured): near the sine's extremes the
+    // dither and the sine can move twice within 14 samples, and an OR that hid the
+    // intermediate code entirely (32 -> [62 ...] -> 31) is not the module's artifact.
+    let lasts = 1 + (hash32(m * 7 + 3) % 14);
+    for (let d = 1; d <= lasts; d++) {
+      if (sineCode(m + d) !== after) { lasts = d - 1; break; }
+    }
+    return j < lasts ? before | after : after;
   }
   return sineCode(n);
 }
@@ -1294,24 +1307,26 @@ await expectReject(
     .start(startConfig(16), new RecordingSink()),
   'invalid-config',
 );
-await expectReject(
-  'an out-of-range persistence window is refused',
-  () => new SimDriver(SLOGIC32U3_PROFILE, {
-    analog: { start: 0, code: () => 0 }, analogArtifactSamples: 0,
-  }).start(startConfig(8), new RecordingSink()),
-  'invalid-config',
-);
+for (const [label, value] of [['-1', -1], ['1.5', 1.5], ['4097', 4097]] as const) {
+  await expectReject(
+    `an out-of-range artifact window (${label}) is refused`,
+    () => new SimDriver(SLOGIC32U3_PROFILE, {
+      analog: { start: 0, code: () => 0 }, analogArtifactSamples: value,
+    }).start(startConfig(8), new RecordingSink()),
+    'invalid-config',
+  );
+}
 
 {
-  // Raw crossings (h = 1, P = 1) fire on the wrong slope on this signal: proof that the
-  // synthetic artifact is the one the qualification exists for.
+  // Raw crossings (h = 1, W = 0: no artifact rejection) fire on the wrong slope on this
+  // signal: proof that the synthetic artifact is the one the qualification exists for.
   let wrong = 0;
   const raw: string[] = [];
   for (const kind of ['rising', 'falling'] as const) {
     for (const level of [60, 96, 112, 128, 144, 160, 200]) {
       const plan = compiledAnalogPlan(kind, level, 100e6, 0, 64);
       const { driver } = await runAnalog(plan, glitchedSineCode, {
-        analogHysteresis: 1, analogArtifactSamples: 1,
+        analogHysteresis: 1, analogArtifactSamples: 0,
       });
       const t = driver.triggeredAt;
       if (t !== null && sineRising(t) !== (kind === 'rising')) {
@@ -1325,12 +1340,15 @@ await expectReject(
 }
 
 {
-  // Qualified (defaults: h = 4, P = 24 at 100 MS/s): every level, both slopes, reports
-  // T on the correct slope at the candidate sample, with the exact pre-trigger prefix.
+  // Qualified (defaults: h = 4, W = 24 at 100 MS/s): every level, both slopes, reports
+  // the rule's first crossing after the holdoff, on the correct slope, never an OR
+  // artifact, with the exact pre-trigger prefix.
   const failures: string[] = [];
-  const P = 24;
+  const codes = new Uint8Array(45_000);
+  for (let i = 0; i < codes.length; i++) codes[i] = glitchedSineCode(i);
   for (const kind of ['rising', 'falling'] as const) {
     for (const level of [40, 60, 96, 112, 127, 128, 144, 160, 200, 215]) {
+      const rule = traceCrossings(codes, kind === 'rising', level);
       for (const pre of [0, 3, 50]) {
         const post = 100;
         const plan = compiledAnalogPlan(kind, level, 100e6, pre / post * 100, post);
@@ -1342,13 +1360,8 @@ await expectReject(
           failures.push(`${tag}: no match`);
           continue;
         }
-        const past = (c: number): boolean => kind === 'rising' ? c >= level : c <= level;
-        // T is the candidate: past the level for P samples, and the sample before it is
-        // not past (else the candidate would have started earlier).
-        let persists = true;
-        for (let i = 0; i < P; i++) persists &&= past(glitchedSineCode(t + i));
-        const fresh = !past(glitchedSineCode(t - 1));
-        // Correct slope, close to the noiseless crossing.
+        const want = rule.find((x) => x >= preSamples);
+        const problem = crossingProblem(codes, t, kind === 'rising', level);
         const slope = sineRising(t) === (kind === 'rising');
         const near = Math.abs(sineClean(t) - level) <= 4;
         const range = deliveredRange(sink, 1);
@@ -1356,15 +1369,15 @@ await expectReject(
           range.first === t - preSamples && range.end === t + post &&
           driver.firstSample === t - preSamples &&
           equalBytes(sink.bytes(), analogBytes(glitchedSineCode, t - preSamples, preSamples + post));
-        if (!persists || !fresh || !slope || !near || !exact) {
-          failures.push(`${tag}: T=${t} persists=${persists} fresh=${fresh} slope=${slope} ` +
+        if (t !== want || problem || !slope || !near || !exact) {
+          failures.push(`${tag}: T=${t} rule=${String(want)} ${problem} slope=${slope} ` +
             `near=${near} clean=${sineClean(t).toFixed(2)} range=${JSON.stringify(range)}`);
         }
       }
     }
   }
   check(
-    'qualified crossings report T on the correct slope at the candidate, prefix exact',
+    'qualified crossings report the rule\'s T on the correct slope, prefix exact',
     failures.length === 0,
     failures.slice(0, 6).join('\n        ') || '60 runs',
   );
@@ -1380,15 +1393,16 @@ function stepsCode(steps: ReadonlyArray<readonly [number, number]>): (n: number)
 }
 
 {
-  // A budget shorter than the persistence window: confirmation lands P - 1 samples after
-  // T, but delivery is still exactly [T - pre, T + post).
-  const code = stepsCode([[0, 50], [100, 200]]);
+  // A budget shorter than the look-ahead: 64 -> 192 is OR-shaped, so the run from 100 is
+  // decided real only when it outlasts W (at 124), but delivery is still exactly
+  // [T - pre, T + post).
+  const code = stepsCode([[0, 64], [100, 192]]);
   const plan = compiledAnalogPlan('rising', 128, 100e6, 200, 4);
   const pre = plan.preTrigger.samples!;
   const { driver, sink } = await runAnalog(plan, code);
   const range = deliveredRange(sink, 1);
   check(
-    'a post budget below P still delivers exactly [T - pre, T + post)',
+    'a post budget below the look-ahead still delivers exactly [T - pre, T + post)',
     driver.triggeredAt === 100 && driver.complete && range !== null && range.contiguous &&
       range.first === 100 - pre && range.end === 104 &&
       equalBytes(sink.bytes(), analogBytes(code, 100 - pre, pre + 4)),
@@ -1397,45 +1411,63 @@ function stepsCode(steps: ReadonlyArray<readonly [number, number]>): (n: number)
 }
 
 {
-  // A candidate that falls back across the level is dropped but keeps the arm: the
-  // codes after it (126, inside the hysteresis band) could never re-arm on their own.
-  const code = stepsCode([[0, 50], [100, 200], [110, 126], [150, 200]]);
+  // An OR-shaped candidate run that ends within W (64 -> [192 x 10] -> 64) is an artifact:
+  // it does not fire and keeps the arm, so the next real run (130, not OR-shaped) is T.
+  const code = stepsCode([[0, 64], [100, 192], [110, 64], [150, 130]]);
   const { driver } = await runAnalog(compiledAnalogPlan('rising', 128, 100e6, 0, 30), code);
   check(
-    'a dropped candidate keeps the arm and the next persistent run is T',
+    'an OR-artifact candidate run is rejected and keeps the arm',
     driver.triggeredAt === 150,
     `T=${String(driver.triggeredAt)}`,
   );
-  // Arming needs P consecutive codes past the threshold: 23 low samples do not arm.
-  const shortArm = stepsCode([[0, 200], [100, 50], [123, 200], [400, 50], [500, 200]]);
-  const { driver: second } = await runAnalog(
-    compiledAnalogPlan('rising', 128, 100e6, 0, 30), shortArm,
+  // A short run that is not OR-shaped is real however short (the ~33 MHz AM case):
+  // 64 -> 130 for one sample.
+  const blip = stepsCode([[0, 64], [100, 130], [101, 64]]);
+  const { driver: short } = await runAnalog(compiledAnalogPlan('rising', 128, 100e6, 0, 30), blip);
+  check(
+    'a one-sample crossing that is not OR-shaped fires',
+    short.triggeredAt === 100,
+    `T=${String(short.triggeredAt)}`,
+  );
+  // W = 0 disables the rejection: the OR-shaped run fires at once.
+  const { driver: w0 } = await runAnalog(
+    compiledAnalogPlan('rising', 128, 100e6, 0, 30), code, { analogArtifactSamples: 0 },
+  );
+  check('W = 0 fires on the OR-shaped run (no artifact rejection)', w0.triggeredAt === 100,
+    `T=${String(w0.triggeredAt)}`);
+  // A Falling condition armed by the OR: 127 -> 255 -> 129 looks like a code above
+  // level + h but is an artifact, so the fall to 100 at 150 is not a crossing; the
+  // genuine 140 at 200 arms and the fall at 300 is T.
+  const fake = stepsCode([[0, 120], [50, 127], [100, 255], [105, 129], [150, 100], [200, 140], [300, 100]]);
+  const { driver: falling } = await runAnalog(compiledAnalogPlan('falling', 128, 100e6, 0, 30), fake);
+  const { driver: fallingRaw } = await runAnalog(
+    compiledAnalogPlan('falling', 128, 100e6, 0, 30), fake, { analogArtifactSamples: 0 },
   );
   check(
-    'an arm needs P consecutive samples past the threshold',
-    second.triggeredAt === 500,
-    `T=${String(second.triggeredAt)}`,
+    'an OR-artifact arm run does not arm a Falling condition',
+    falling.triggeredAt === 300 && fallingRaw.triggeredAt === 150,
+    `T=${String(falling.triggeredAt)} raw=${String(fallingRaw.triggeredAt)}`,
   );
 }
 
 {
-  // Search limit accounting includes the persistence samples. T = 100 is confirmed at
-  // sample 123, the 124th inspected sample.
-  const code = stepsCode([[0, 50], [100, 200]]);
+  // Search limit accounting includes the look-ahead samples. T = 100 (64 -> 192, OR-
+  // shaped) is decided real at sample 124, the 125th inspected sample.
+  const code = stepsCode([[0, 64], [100, 192]]);
   const plan = compiledAnalogPlan('rising', 128, 100e6, 0, 30);
-  const enough = await runAnalog(plan, code, { searchLimitSamples: 124 });
-  const short = await runAnalog(plan, code, { searchLimitSamples: 123 });
+  const enough = await runAnalog(plan, code, { searchLimitSamples: 125 });
+  const short = await runAnalog(plan, code, { searchLimitSamples: 124 });
   check(
-    'a search limit that covers the confirmation matches',
+    'a search limit that covers the decision matches',
     enough.driver.triggeredAt === 100 && enough.driver.complete &&
       !enough.driver.searchExhausted,
     `T=${String(enough.driver.triggeredAt)} exhausted=${enough.driver.searchExhausted}`,
   );
   check(
-    'a search limit that ends inside the persistence window finds nothing',
+    'a search limit that ends inside the look-ahead finds nothing',
     short.driver.triggeredAt === null && short.driver.searchExhausted &&
       short.driver.state === 'stopped' && short.sink.writes.length === 0 &&
-      short.driver.position === 123,
+      short.driver.position === 124,
     `T=${String(short.driver.triggeredAt)} exhausted=${short.driver.searchExhausted} ` +
       `state=${short.driver.state} writes=${short.sink.writes.length} pos=${short.driver.position}`,
   );
@@ -1450,9 +1482,10 @@ function stepsCode(steps: ReadonlyArray<readonly [number, number]>): (n: number)
 }
 
 {
-  // A dropout in the middle of a candidate clears the candidate and the arm: the high
-  // codes after the gap cannot confirm, and the next armed crossing is T.
-  const code = stepsCode([[0, 50], [100, 200], [300, 50], [400, 200]]);
+  // A dropout while a run is pending (the OR-shaped 64 -> 192 at 100, undecided until
+  // 124) drops it and the arm: the first sample after the gap has no predecessor and
+  // cannot fire, and the next armed crossing is T.
+  const code = stepsCode([[0, 64], [100, 192], [300, 64], [400, 200]]);
   const plan = compiledAnalogPlan('rising', 128, 100e6, 100, 8);
   const pre = plan.preTrigger.samples!;
   const { driver, sink } = await runAnalog(plan, code, {
@@ -1460,7 +1493,7 @@ function stepsCode(steps: ReadonlyArray<readonly [number, number]>): (n: number)
   });
   const range = deliveredRange(sink, 1);
   check(
-    'a gap mid-candidate resets the qualification',
+    'a gap mid-run resets the qualification',
     driver.triggeredAt === 400 && range !== null && range.first === 400 - pre &&
       range.end === 408 && sink.gaps.length === 0,
     `T=${String(driver.triggeredAt)} range=${JSON.stringify(range)} gaps=${sink.gaps.length}`,
@@ -1471,8 +1504,8 @@ function stepsCode(steps: ReadonlyArray<readonly [number, number]>): (n: number)
 }
 
 {
-  // A confirmation whose candidate lies inside the pre-fill holdoff is consumed
-  // unmatched; the analog plan also needs a source on its bank.
+  // A decision whose T lies inside the pre-fill holdoff is consumed unmatched; the analog
+  // plan also needs a source on its bank.
   const code = stepsCode([[0, 50], [30, 200], [100, 50], [200, 200]]);
   const plan = compiledAnalogPlan('rising', 128, 100e6, 50, 120);
   const { driver } = await runAnalog(plan, code, { analogArtifactSamples: 8 });
@@ -1487,6 +1520,58 @@ function stepsCode(steps: ReadonlyArray<readonly [number, number]>): (n: number)
       startConfig(8, 100e6), new RecordingSink(), { trigger: plan },
     ),
     'trigger-unsupported',
+  );
+}
+
+{
+  // The real ADC traces (fixtures/ADC-TRACES.md) as the analog source, read through
+  // code(position) from several offsets into each trace and run with coarse steps: T is
+  // the rule's first crossing after the holdoff, it is a real crossing, on the sine it is
+  // on the configured slope, and the delivered bytes are the trace's MSB-first codes.
+  const failures: string[] = [];
+  let runs = 0;
+  for (const name of ['sine', 'am3', 'am33'] as const) {
+    const trace = loadAdcTrace(name);
+    const offsets = name === 'sine' ? [0, 123_457] : [0, 4_321, 77_777];
+    for (const level of ADC_TRACE_LEVELS[name]) {
+      for (const kind of ['rising', 'falling'] as const) {
+        const rising = kind === 'rising';
+        for (const offset of offsets) {
+          const code = (n: number): number => trace[(offset + n) % trace.length]!;
+          const plan = compiledAnalogPlan(kind, level, 100e6, 50, 64);
+          const pre = plan.preTrigger.samples!;
+          const driver = new SimDriver(SLOGIC32U3_PROFILE, {
+            seed: 0x77, transferBytes: 4096 + 13, analog: { start: 0, code },
+          });
+          const sink = new RecordingSink();
+          await driver.start(startConfig(8, 100e6), sink, { trigger: plan });
+          for (let s = 0; s < 400 && !driver.complete && driver.state !== 'stopped'; s++) {
+            await driver.step(997 + (s % 7) * 61);
+          }
+          runs++;
+          const t = driver.triggeredAt;
+          const local = traceCrossings(trace, rising, level, offset).find((x) => x - offset >= pre);
+          const want = local === undefined ? undefined : local - offset;
+          const tag = `${name} ${kind} ${level} @${offset}`;
+          if (t === null || !driver.complete) {
+            failures.push(`${tag}: no match (rule ${String(want)})`);
+            continue;
+          }
+          const problem = crossingProblem(trace, offset + t, rising, level);
+          const wrongSlope = name === 'sine' && (traceSlope(trace, offset + t) > 0) !== rising;
+          const exact = equalBytes(sink.bytes(), analogBytes(code, t - pre, pre + 64));
+          if (t !== want || problem || wrongSlope || !exact) {
+            failures.push(`${tag}: T=${t} rule=${String(want)} ${problem} ` +
+              `wrongSlope=${wrongSlope} exact=${exact}`);
+          }
+        }
+      }
+    }
+  }
+  check(
+    'the SimDriver on the real ADC traces fires at the rule\'s T, real and on-slope',
+    failures.length === 0,
+    failures.slice(0, 6).join('\n        ') || `${runs} runs over sine, 3.3 MHz and 33 MHz AM`,
   );
 }
 

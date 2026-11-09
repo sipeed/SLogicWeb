@@ -253,9 +253,9 @@ async function main(): Promise<void> {
   }
 
   // 5. Qualified analog crossing on the 32U3's ADC bank: a carry-boundary artifact
-  // (111 -> 112 reads 127) before the genuine crossing is not T; T is the first sample
-  // of the persistent run, the stream starts exactly pre samples before it, and the
-  // stored inputs read back the code MSB-first.
+  // (111 -> 112 reads 127, an OR-shaped run that ends within W) before the genuine
+  // crossing is not T; T is the first sample of the real run, the stream starts exactly
+  // pre samples before it, and the stored inputs read back the code MSB-first.
   {
     const rate = 100e6;
     const level = 120;
@@ -284,7 +284,7 @@ async function main(): Promise<void> {
       await driver.step(13);
     }
     const t = driver.triggeredAt;
-    check('analog: the artifact is not T; the persistent crossing is', t === 300,
+    check('analog: the artifact is not T; the real crossing is', t === 300,
       `T=${String(t)}`);
     check('analog: the stream starts exactly pre samples before T',
       driver.firstSample === 300 - pre && sink.store.origin === 300 - pre,
@@ -302,6 +302,49 @@ async function main(): Promise<void> {
     check('analog: the stored inputs read the code MSB-first at T and before it',
       readCode(300) === 140 && readCode(299) === 112,
       `T=${readCode(300)} T-1=${readCode(299)}`);
+  }
+
+  // 6. A run whose decision straddles transfers: 64 -> 192 is OR-shaped, so the run from
+  // 205 is decided real only at its (W+1)-th sample, 229, several 7-sample transfers
+  // after T. The store still starts exactly pre samples before T, holds pre + post
+  // samples, and reads 192 at T and 64 just before it.
+  {
+    const rate = 100e6;
+    const code = (n: number): number => n < 205 ? 64 : 192;
+    const compiled = compileTriggerPlan({
+      profile: SLOGIC32U3_PROFILE,
+      enableMask: true,
+      source: 'analog',
+      digital: [],
+      analog: [{ signal: 'a0', kind: 'rising', volts: analogVoltsFromCode(128) }],
+      preTriggerPercent: 50,
+      postTrigger: { kind: 'samples', value: 16 },
+      capture: { samplerate: rate, channels: 8 },
+      compiledAt: 0,
+    });
+    if (!compiled.ok) throw new Error(`analog plan refused: ${compiled.reason}`);
+    const plan = compiled.plan;
+    const pre = plan.preTrigger.samples!;
+    const sink = new StoreSink(8, rate);
+    const driver = new SimDriver(SLOGIC32U3_PROFILE, {
+      transferBytes: 7, analog: { start: 0, code },
+    });
+    await driver.start({ channels: 8, samplerate: rate }, sink, { trigger: plan });
+    for (let i = 0; i < 1024 && !driver.complete && driver.state !== 'stopped'; i++) {
+      await driver.step(5);
+    }
+    const readCode = (position: number): number => {
+      let value = 0;
+      for (let input = 0; input < 8; input++) {
+        value |= (sink.store.sample(`d${input}`, position) ?? 0) << (7 - input);
+      }
+      return value;
+    };
+    check('analog: a decision W samples after T still delivers [T - pre, T + post)',
+      driver.triggeredAt === 205 && driver.complete && sink.store.origin === 205 - pre &&
+        sink.store.newest[GROUP] === 205 + 16 && readCode(205) === 192 && readCode(204) === 64,
+      `T=${String(driver.triggeredAt)} origin=${sink.store.origin} pre=${pre} ` +
+        `newest=${sink.store.newest[GROUP]} codes=${readCode(204)},${readCode(205)}`);
   }
 
   console.log(`\n${failed === 0 ? 'PASS' : 'FAIL'} simDriver→SignalStore integration: ` +

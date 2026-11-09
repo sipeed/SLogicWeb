@@ -1,16 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * The Loop display's continuous ADC crossing scanner: group byte, bit order, stride,
- * chunk boundaries, continuity across a retune/gap, and wide-sample layouts.
+ * chunk boundaries, continuity across a retune/gap, wide-sample layouts, and the
+ * OR-artifact qualification on synthetic and real (fixtures/) ADC traces.
  */
 
 import { AnalogCrossingScanner } from '../analogCrossingScan.js';
 import {
   ADC_TRIGGER_HYSTERESIS_CODES, analogTriggerArtifactSamples, analogTriggerQualification,
 } from '../channelBanks.js';
-import { reverseAdcByte } from '../../data/softwareTrigger.js';
+import { MAX_ANALOG_ARTIFACT_SAMPLES, reverseAdcByte } from '../../data/softwareTrigger.js';
+import { AnalogRunQualifier } from '../../data/analogRunQualifier.js';
 import {
-  adcArtifactTrace, checkCrossings, cleanCrossings, cleanSlope, fixtureRng, rawCrossings,
+  ADC_TRACE_LEVELS, crossingProblem, loadAdcTrace, traceCrossings, traceSlope,
+  type AdcTraceName,
+} from '../../data/adcTraceFiles.js';
+import {
+  adcArtifactTrace, cleanSlope, fixtureRng, rawCrossings,
 } from '../../data/adcArtifactFixture.js';
 import { bytesPerSampleForChannels, type ChannelCount } from '../../types.js';
 
@@ -240,10 +246,10 @@ const adc = (code: number): number => adcWord(0, code);
 
 // ---------------------------------------------------------------------------------------
 // Qualified crossings on the measured ADC carry-boundary artifact (adcArtifactFixture):
-// hysteresis 4 codes, persistence 24 samples (240 ns at 100 MS/s).
+// hysteresis 4 codes, artifact window W = 24 samples (240 ns at 100 MS/s).
 // ---------------------------------------------------------------------------------------
 
-const P = 24;
+const W = 24;
 const H = 4;
 const LEVELS = [100, 112, 128, 144, 160] as const;
 
@@ -275,30 +281,42 @@ function scanChunks(
 }
 
 {
+  // The synthetic artifact trace (adcArtifactFixture), across layouts, strides and seeded
+  // chunk sizes: stride 1 reports exactly the rule's crossings, every stride reports only
+  // real ones. Not checked against the clean sine's slope: with dither the generator can
+  // hide a new code entirely behind its OR (126 -> [254 254] -> 127, where 128 is never
+  // read), a shape the measured traces never show and the rule deliberately calls real.
+  // The slope is pinned on the measured traces below.
   const trace = adcArtifactTrace({ length: 100_000, period: 10_000, seed: 5, phase: 0.7, ditherNear: LEVELS });
+  const codes = trace.codes;
   let bad = '';
   let total = 0;
   let rawWrong = 0;
   for (const kind of ['rising', 'falling'] as const) {
+    const rising = kind === 'rising';
     for (const level of LEVELS) {
       const want = kind === 'rising' ? 1 : -1;
-      rawWrong += rawCrossings(trace.codes, kind, level).filter((i) => cleanSlope(trace, i) !== want).length;
+      rawWrong += rawCrossings(codes, kind, level).filter((i) => cleanSlope(trace, i) !== want).length;
+      const rule = traceCrossings(codes, rising, level, 0, H, W)
+        .filter((t) => t < codes.length - W - 1).join();
       for (const stride of [1, 4, 16, 64]) {
         for (const [channels, start] of [[16, 8], [32, 24], [64, 40], [128, 120]] as const) {
           const bps = bytesPerSampleForChannels(channels);
-          const raw = encodeCodes(trace.codes, channels, start, stride + level);
+          const raw = encodeCodes(codes, channels, start, stride + level);
           const scanner = new AnalogCrossingScanner({
             channels, condition: { start, kind, level }, stride,
-            analogHysteresis: H, analogArtifactSamples: P,
+            analogHysteresis: H, analogArtifactSamples: W,
           });
           const found = scanChunks(scanner, raw, bps, stride * 7 + level + channels, 4000);
-          const clean = cleanCrossings(trace, kind, level).filter((c) => c > 200).length;
-          const err = checkCrossings(trace, kind, level, found);
           const name = `${kind} ${level} stride ${stride} ${channels}ch`;
-          if (err) bad = `${name}: ${err}`;
-          else if (found.filter((c) => c > 200).length !== clean) {
-            bad = `${name}: ${found.length} found, ${clean} clean crossings`;
+          for (const t of found) {
+            const problem = crossingProblem(codes, t, rising, level, W);
+            if (problem) { bad = `${name}: ${problem}`; break; }
           }
+          if (!bad && stride === 1 && found.filter((t) => t < codes.length - W - 1).join() !== rule) {
+            bad = `${name}: ${found.length} reports differ from the rule`;
+          }
+          if (!bad && found.length === 0) bad = `${name}: nothing reported`;
           total += found.length;
           if (bad) break;
         }
@@ -308,81 +326,106 @@ function scanChunks(
     }
     if (bad) break;
   }
-  check('the Loop scanner reports every qualified crossing on the right slope (strides 1-64)',
+  check('the Loop scanner follows the rule on the synthetic artifact trace (strides 1-64)',
     bad === '' && total > 0 && rawWrong > 0,
     bad || `${total} crossings; a raw test would have put ${rawWrong} on the wrong slope`);
 }
 
 {
-  // Levels outside the signal: the artifact reaches 255 (127 -> 128) in short bursts only.
-  const trace = adcArtifactTrace({ length: 60_000, period: 10_000, seed: 9, ditherNear: LEVELS });
-  const raw = encodeCodes(trace.codes, 16, 0, 3);
+  // Levels outside the measured sine (84..175) and the 3.3 MHz AM wave (~95..161): the OR
+  // artifact reaches 255 (127 -> 128) and dips nowhere, in short OR-shaped runs only, so
+  // nothing fires. (The 33 MHz AM trace is not used here: at ~3 samples per carrier
+  // period its bus reads arbitrary old/new bit mixes - 1, 32, 211 - that are not OR-shaped
+  // and do cross far levels; see ADC-TRACES.md.)
   const fired: string[] = [];
-  for (const [kind, level] of [['rising', 200], ['rising', 80], ['falling', 60], ['falling', 190]] as const) {
-    for (const stride of [1, 16]) {
-      const scanner = new AnalogCrossingScanner({
-        channels: 16, condition: { start: 0, kind, level }, stride,
-        analogHysteresis: H, analogArtifactSamples: P,
-      });
-      const found = scanChunks(scanner, raw, 2, level + stride, 3000);
-      if (found.length > 0) fired.push(`${kind} ${level} stride ${stride}: ${found[0]}`);
+  for (const name of ['sine', 'am3'] as const) {
+    const raw = encodeCodes(loadAdcTrace(name), 16, 0, 3);
+    for (const [kind, level] of [['rising', 200], ['rising', 80], ['falling', 60], ['falling', 190]] as const) {
+      for (const stride of [1, 16]) {
+        const scanner = new AnalogCrossingScanner({
+          channels: 16, condition: { start: 0, kind, level }, stride,
+          analogHysteresis: H, analogArtifactSamples: W,
+        });
+        const found = scanChunks(scanner, raw, 2, level + stride, 3000);
+        if (found.length > 0) fired.push(`${name} ${kind} ${level} stride ${stride}: ${found[0]}`);
+      }
     }
   }
-  check('the Loop scanner never fires for a level outside the signal', fired.length === 0,
-    fired.join('; ') || 'rising 200/80, falling 60/190 at strides 1 and 16');
+  check('the Loop scanner never fires for a level outside the measured signal', fired.length === 0,
+    fired.join('; ') || 'sine and 3.3 MHz AM: rising 200/80, falling 60/190 at strides 1 and 16');
 }
 
 {
-  // The persistence window spans a chunk boundary; the reported crossing is the
-  // candidate in the earlier chunk. A one-sample chunk splits it further.
-  const codes = new Uint8Array(200);
-  for (let i = 0; i < codes.length; i++) codes[i] = i < 70 ? 90 : 140;
+  // A run that straddles chunk boundaries is judged across them. 64 -> 192 has the OR
+  // shape (192 & 64 === 64, 192 > 64): the run at 70..79 ends on 64 within W, an
+  // artifact, and is never reported although it is split by two boundaries; the run from
+  // 120 outlasts W and is real, decided at 144 in a later chunk, reported as T = 120.
+  const codes = new Uint8Array(260);
+  for (let i = 0; i < codes.length; i++) codes[i] = i >= 70 && i < 80 ? 192 : i < 120 ? 64 : 192;
   const raw = encodeCodes(codes, 32, 16, 4);
   const got: string[] = [];
   let pass = true;
   for (const stride of [1, 4, 16]) {
-    const scanner = new AnalogCrossingScanner({
-      channels: 32, condition: { start: 16, kind: 'rising', level: 128 }, stride,
-      analogHysteresis: H, analogArtifactSamples: P,
-    });
-    const a = scanner.feed(raw.subarray(0, 75 * 4), 0);
-    const b = scanner.feed(raw.subarray(75 * 4, 76 * 4), 75);
-    const c = scanner.feed(raw.subarray(76 * 4), 76);
-    const ok = a.length === 0 && b.length === 0 && c.length === 1 && c[0] === 70;
-    if (!ok) pass = false;
-    got.push(`stride ${stride}: ${JSON.stringify([a, b, c])}`);
+    for (const cuts of [[75, 76, 121, 130], [70, 80, 120, 144], [71, 79, 143, 145]]) {
+      const scanner = new AnalogCrossingScanner({
+        channels: 32, condition: { start: 16, kind: 'rising', level: 128 }, stride,
+        analogHysteresis: H, analogArtifactSamples: W,
+      });
+      const out: number[][] = [];
+      let from = 0;
+      for (const to of [...cuts, codes.length]) {
+        out.push(scanner.feed(raw.subarray(from * 4, to * 4), from));
+        from = to;
+      }
+      const flat = out.flat();
+      // Reported in the chunk holding the deciding sample 144 (the run's (W+1)-th).
+      const at = [...cuts, codes.length].findIndex((to) => to > 144);
+      const ok = flat.length === 1 && flat[0] === 120 && out[at]!.length === 1;
+      if (!ok) pass = false;
+      got.push(`stride ${stride} cuts ${cuts.join('/')}: ${JSON.stringify(out)}`);
+    }
   }
-  check('a persistence window spanning chunks reports the candidate sample', pass, got.join(' '));
+  check('a run straddling chunks is judged once across them (artifact dropped, real T kept)',
+    pass, pass ? '9 chunkings' : got.join(' | '));
 }
 
 {
-  // A gap (resetContinuity) or a discontinuous chunk mid-candidate restarts the arm.
+  // A gap (resetContinuity) or a discontinuous chunk with a run pending drops it and the
+  // arm: the pending OR-shaped run at 40 (192 after 64) never reports, the first sample
+  // after the gap cannot fire, and the next armed crossing is T.
   const mk = (parts: Array<[number, number]>): Uint8Array => {
     const codes: number[] = [];
     for (const [code, n] of parts) for (let i = 0; i < n; i++) codes.push(code);
     return encodeCodes(Uint8Array.from(codes), 8, 0, 6);
   };
-  const run = (how: 'reset' | 'skip'): number[] => {
+  const run = (how: 'reset' | 'skip' | 'none', stride: number): number[] => {
     const scanner = new AnalogCrossingScanner({
-      channels: 8, condition: { start: 0, kind: 'rising', level: 128 }, stride: 4,
-      analogHysteresis: H, analogArtifactSamples: P,
+      channels: 8, condition: { start: 0, kind: 'rising', level: 128 }, stride,
+      analogHysteresis: H, analogArtifactSamples: W,
     });
     const out: number[] = [];
-    out.push(...scanner.feed(mk([[90, 40], [140, 10]]), 0));
+    out.push(...scanner.feed(mk([[64, 40], [192, 10]]), 0));
     if (how === 'reset') {
       scanner.resetContinuity();
-      out.push(...scanner.feed(mk([[140, 40]]), 50));
+      out.push(...scanner.feed(mk([[192, 50]]), 50));
+    } else if (how === 'skip') {
+      out.push(...scanner.feed(mk([[192, 40]]), 60)); // chunk 50..59 was never scanned
     } else {
-      out.push(...scanner.feed(mk([[140, 40]]), 60)); // chunk 50..59 was never scanned
+      out.push(...scanner.feed(mk([[192, 50]]), 50));
     }
-    out.push(...scanner.feed(mk([[90, 40], [140, 40]]), 100));
+    out.push(...scanner.feed(mk([[64, 40], [192, 40]]), 100));
     return out;
   };
-  const reset = run('reset');
-  const skip = run('skip');
-  check('a gap or a skipped chunk mid-candidate restarts the scanner',
-    reset.length === 1 && reset[0] === 140 && skip.length === 1 && skip[0] === 140,
-    `reset=${JSON.stringify(reset)} skip=${JSON.stringify(skip)}`);
+  const got: string[] = [];
+  let pass = true;
+  for (const stride of [1, 4]) {
+    const reset = run('reset', stride);
+    const skip = run('skip', stride);
+    const none = run('none', stride);
+    pass &&= reset.join() === '140' && skip.join() === '140' && none.join() === '40,140';
+    got.push(`stride ${stride}: reset=${reset} skip=${skip} contiguous=${none}`);
+  }
+  check('a gap or a skipped chunk with a run pending restarts the scanner', pass, got.join('; '));
 }
 
 {
@@ -396,20 +439,132 @@ function scanChunks(
   };
   check('the scanner validates its qualification strictly',
     refused({ analogHysteresis: 0 }) && refused({ analogHysteresis: 300 }) &&
-    refused({ analogArtifactSamples: 0 }) && refused({ analogArtifactSamples: 1.5 }) &&
-    !refused({ analogHysteresis: H, analogArtifactSamples: P }),
-    'hysteresis 0/300 and persistence 0/1.5 refused');
+    refused({ analogArtifactSamples: -1 }) && refused({ analogArtifactSamples: 1.5 }) &&
+    refused({ analogArtifactSamples: MAX_ANALOG_ARTIFACT_SAMPLES + 1 }) &&
+    !refused({ analogArtifactSamples: 0 }) && !refused({ analogArtifactSamples: 1 }) &&
+    !refused({ analogHysteresis: H, analogArtifactSamples: W }),
+    'hysteresis 0/300 and window -1/1.5/MAX+1 refused; W = 0 and 1 accepted');
 }
 
 {
-  // P = ceil(240 ns x rate) without the float product rounding 24 up to 25.
+  // Degenerate windows. W = 0: no artifact rejection (hysteresis only) - the one-sample
+  // OR run 127 -> 255 -> 128 is a crossing. W = 1 rejects exactly that single-sample run
+  // but not a two-sample one; W = 24 rejects both.
+  const one = [100, 127, 255, 127, 100, 100];
+  const two = [100, 127, 255, 255, 127, 100];
+  const scan = (codes: number[], w: number): number[] => new AnalogCrossingScanner({
+    channels: 8, condition: { start: 0, kind: 'rising', level: 128 }, stride: 1,
+    analogHysteresis: H, analogArtifactSamples: w,
+  }).feed(encode(8, codes.map(adc)), 0);
+  const got = [0, 1, 24].map((w) => `${JSON.stringify(scan(one, w))}/${JSON.stringify(scan(two, w))}`);
+  check('W = 0 disables artifact rejection; W = 1 rejects one-sample OR runs only',
+    got.join(' ') === '[2]/[2] []/[2] []/[]', got.join(' '));
+}
+
+// ---------------------------------------------------------------------------------------
+// The real ADC traces (fixtures/ADC-TRACES.md), fed as MSB-first bus bytes.
+// ---------------------------------------------------------------------------------------
+
+const TRACES: readonly AdcTraceName[] = ['sine', 'am3', 'am33'];
+
+{
+  // The streaming qualifier against the flat-array rule, sample for sample (a run still
+  // undecided at the end of the trace is the only allowed difference).
+  let bad = '';
+  let total = 0;
+  for (const name of TRACES) {
+    const codes = loadAdcTrace(name);
+    for (const level of ADC_TRACE_LEVELS[name]) {
+      for (const rising of [true, false]) {
+        const want = traceCrossings(codes, rising, level).filter((t) => t < codes.length - W - 1);
+        const q = new AnalogRunQualifier({ rising, level, hysteresis: H, window: W });
+        const got: number[] = [];
+        for (let i = 0; i < codes.length; i++) {
+          const t = q.step(codes[i]!, i);
+          if (t >= 0 && t < codes.length - W - 1) got.push(t);
+        }
+        total += got.length;
+        if (got.join() !== want.join()) {
+          bad = `${name} ${rising ? 'rising' : 'falling'} ${level}: ${got.length} vs ${want.length}`;
+        }
+      }
+    }
+  }
+  check('the streaming qualifier equals the flat-array rule on the three real traces',
+    bad === '' && total > 0, bad || `${total} crossings`);
+}
+
+{
+  // The Loop scanner on the real traces at strides 1/4/16/64, seeded chunk sizes and
+  // several sample layouts: every reported T is a real crossing (predecessor on the other
+  // side, T past the level, not an OR-artifact run), the sine reports one per period on
+  // the configured slope and none on the other, and both AM traces report crossings at
+  // every stride. At stride 1 the reports are exactly the rule's crossings.
+  const layouts = [[8, 0], [16, 8], [32, 24], [64, 40], [128, 120]] as const;
+  const lines: string[] = [];
+  let bad = '';
+  let rawWrong = 0;
+  for (const name of TRACES) {
+    const codes = loadAdcTrace(name);
+    for (const level of ADC_TRACE_LEVELS[name]) {
+      for (const kind of ['rising', 'falling'] as const) {
+        const rising = kind === 'rising';
+        const want = traceCrossings(codes, rising, level);
+        if (name === 'sine') {
+          rawWrong += rawCrossings(codes, kind, level)
+            .filter((t) => (traceSlope(codes, t) > 0) !== rising && traceSlope(codes, t) !== 0).length;
+        }
+        const counts: number[] = [];
+        for (const [li, stride] of [1, 4, 16, 64].entries()) {
+          const [channels, start] = layouts[(li + level) % layouts.length]!;
+          const bps = bytesPerSampleForChannels(channels);
+          const raw = encodeCodes(codes, channels, start, stride + level);
+          const scanner = new AnalogCrossingScanner({
+            channels, condition: { start, kind, level }, stride,
+            analogHysteresis: H, analogArtifactSamples: W,
+          });
+          const found = scanChunks(scanner, raw, bps, stride * 7 + level + channels, 5000);
+          counts.push(found.length);
+          const tag = `${name} ${kind} ${level} stride ${stride} ${channels}ch`;
+          for (const t of found) {
+            const problem = crossingProblem(codes, t, rising, level);
+            if (problem) { bad = `${tag}: ${problem}`; break; }
+            if (name === 'sine' && (traceSlope(codes, t) > 0) !== rising) {
+              bad = `${tag}: T=${t} is on the wrong slope`;
+              break;
+            }
+          }
+          if (!bad && stride === 1 && found.filter((t) => t < codes.length - W - 1).join() !==
+            want.filter((t) => t < codes.length - W - 1).join()) {
+            bad = `${tag}: ${found.length} reports, the rule gives ${want.length}`;
+          }
+          if (!bad && found.length === 0) bad = `${tag}: no crossing reported`;
+          if (!bad && name === 'sine' && Math.abs(found.length - want.length) > 1) {
+            bad = `${tag}: ${found.length} reports for ${want.length} periods`;
+          }
+          if (bad) break;
+        }
+        lines.push(`${name} ${kind[0]}${level}: ${counts.join('/')}`);
+        if (bad) break;
+      }
+      if (bad) break;
+    }
+    if (bad) break;
+  }
+  check('the Loop scanner reports only real crossings on the real ADC traces (strides 1-64)',
+    bad === '' && rawWrong > 0,
+    bad || `${lines.join('; ')}; a raw test put ${rawWrong} sine crossings on the wrong slope`);
+}
+
+{
+  // W = ceil(240 ns x rate) without the float product rounding 24 up to 25.
   const rates = [100e6, 160e6, 200e6, 400e6, 800e6, 1e6];
   const got = rates.map((r) => analogTriggerArtifactSamples(r));
   const q = analogTriggerQualification(100e6);
-  check('the persistence window is ceil(240 ns x samplerate), 24 at 100 MS/s',
+  check('the artifact window W is ceil(240 ns x samplerate), 24 at 100 MS/s',
     got.join(',') === '24,39,48,96,192,1' && q.analogHysteresis === ADC_TRIGGER_HYSTERESIS_CODES &&
     q.analogHysteresis === 4 && q.analogArtifactSamples === 24,
-    `P=${got.join(',')}, h=${q.analogHysteresis}`);
+    `W=${got.join(',')}, h=${q.analogHysteresis}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

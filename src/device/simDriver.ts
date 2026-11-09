@@ -88,32 +88,34 @@
  * several analog conditions are refused (the sim has one source and the qualification
  * pins T to one candidate sample). Its volts are converted to a code at 1x gain
  * (`analogTriggerCode`); the sim has no declared gain. Crossings are qualified, never
- * raw (docs/ARCHITECTURE.md trigger section), with the same state machine and field
- * names as `SoftwareTrigger`:
+ * raw (docs/ARCHITECTURE.md trigger section), by the shared streaming rule
+ * `AnalogRunQualifier` (src/data/analogRunQualifier.ts) with the same field names as
+ * `SoftwareTrigger`:
  *
  *  - hysteresis `analogHysteresis` (h codes, default `ADC_TRIGGER_HYSTERESIS_CODES`, or
  *    the plan's volt hysteresis in codes when that is larger): a rising condition arms
- *    after `analogArtifactSamples` consecutive codes <= level - h (falling: >= level + h,
- *    clamped to the code range);
- *  - persistence `analogArtifactSamples` (P, default `analogTriggerArtifactSamples(rate)`,
- *    i.e. ceil(240 ns * rate)): the first armed sample at/past the level is the
- *    candidate; it is confirmed when P consecutive samples, the candidate included, stay
- *    at/past the level. A sample back across the level drops the candidate and keeps
- *    the arm; a confirmation disarms.
+ *    only on a code <= level - h (falling: >= level + h, clamped to the code range); one
+ *    fire per arm;
+ *  - OR-artifact rejection with window `analogArtifactSamples` (W, default
+ *    `analogTriggerArtifactSamples(rate)`, i.e. ceil(240 ns * rate), 24 at 100 MS/s): a
+ *    run past a threshold that is at most W samples long, ends, and whose every code g
+ *    has `(g & a) === a`, `(g & b) === b`, `g > max(a, b)` (a/b the samples before/after
+ *    it) neither arms nor fires. Any other run is real. W = 0 disables the rejection.
  *
- * T is the candidate sample, confirmed P - 1 samples later. The delivered range is still
- * exactly [T - preSamples, T + postSamples): the window up to the confirming sample is
- * regenerated at the match, so no extra prefix is retained while waiting. The holdoff
- * applies to T; a confirmation whose candidate lies inside it is consumed (disarmed)
- * without a match. A waiting dropout, `updateTrigger()` and `stop()` clear the arm and
- * the candidate.
+ * T is the first sample of a real candidate run, decided at most W samples later. The
+ * delivered range is still exactly [T - preSamples, T + postSamples): the window up to the
+ * deciding sample is regenerated at the match, so no extra prefix is retained while
+ * waiting (the qualifier keeps O(1) state per run, not its codes). The holdoff applies to
+ * T; a decision whose T lies inside it is consumed (disarmed) without a match. The first
+ * sample after start, a waiting dropout or `updateTrigger()` has no predecessor: it can
+ * arm but never fire. `stop()` clears the arm and any pending run.
  *
  * ## Search limit
  *
  * `options.searchLimitSamples` bounds one search (a Repeat sweep): once that many
  * samples have been inspected while waiting without a match, the driver stops with
- * `searchExhausted === true` and delivers nothing. Analog persistence samples are
- * inspected samples, so a crossing confirmed past the limit is not a match. Samples
+ * `searchExhausted === true` and delivers nothing. Analog look-ahead samples are
+ * inspected samples, so a crossing decided past the limit is not a match. Samples
  * lost to a dropout are not inspected and do not count. Default: unlimited.
  *
  * Waiting retains no search prefix. The pre-trigger window is regenerated from the
@@ -166,6 +168,7 @@ import {
 } from '../types.js';
 import type { TriggerPlan } from '../dsp/triggerPlan.js';
 import { reverseAdcByte } from '../data/softwareTrigger.js';
+import { AnalogRunQualifier } from '../data/analogRunQualifier.js';
 import {
   ADC_LSB_V,
   ADC_TRIGGER_HYSTERESIS_CODES,
@@ -198,10 +201,10 @@ const DEFAULT_DROPOUT_SAMPLES = 32;
 
 /** Inputs of one ADC bank. */
 const SIM_ANALOG_BANK = 8;
-/** Bounds of the qualification fields; the same ranges `SoftwareTrigger` validates
- * (`analogHysteresis` 1..255, `analogArtifactSamples` 1..MAX_ANALOG_ARTIFACT_SAMPLES). */
+/** Bounds of the qualification fields (`analogHysteresis` 1..255, `analogArtifactSamples`
+ * 0..4096; W = 0 disables artifact rejection, see the module header). */
 const SIM_ANALOG_HYSTERESIS_MAX = 255;
-const SIM_ANALOG_PERSIST_MAX = 4096;
+const SIM_ANALOG_ARTIFACT_MAX = 4096;
 
 const LINK_RATES: readonly LinkRate[] = ['fs', 'hs', 'ss5', 'ss10'];
 const TRIGGER_KINDS: readonly TriggerKind[] = [
@@ -299,8 +302,10 @@ export interface SimDriverOptions {
    */
   readonly analogHysteresis?: number;
   /**
-   * Samples an analog candidate (and an arm) must persist, an integer 1..4096. Default
-   * `analogTriggerArtifactSamples(samplerate)` = ceil(240 ns * rate), 24 at 100 MS/s.
+   * OR-artifact window W in samples, an integer 0..4096 (module header): a run at most
+   * W samples long with the OR shape neither arms nor fires; 0 disables the rejection.
+   * Default `analogTriggerArtifactSamples(samplerate)` = ceil(240 ns * rate), 24 at
+   * 100 MS/s.
    */
   readonly analogArtifactSamples?: number;
   /**
@@ -386,13 +391,13 @@ interface SimTriggerCondition {
 
 /** One qualified analog crossing in code space (see the module header). */
 interface SimAnalogCondition {
-  readonly rise: boolean;
+  readonly rising: boolean;
   /** The code the signal crosses. */
   readonly level: number;
-  /** Arming threshold: rising arms at code <= arm, falling at code >= arm. */
-  readonly arm: number;
-  /** Persistence window P in samples. */
-  readonly persist: number;
+  /** Hysteresis h in codes (the arming threshold is level -/+ h, clamped). */
+  readonly hysteresis: number;
+  /** OR-artifact window W in samples. */
+  readonly window: number;
 }
 
 interface SimTrigger {
@@ -578,8 +583,7 @@ function compileSimAnalog(
     h = Math.min(SIM_ANALOG_HYSTERESIS_MAX, Math.max(h, Math.round(volts / ADC_LSB_V)));
   }
   // A level within h of the code range's end arms at the end code itself.
-  const arm = rise ? Math.max(0, level - h) : Math.min(255, level + h);
-  return { rise, level, arm, persist: config.analogArtifactSamples };
+  return { rising: rise, level, hysteresis: h, window: config.analogArtifactSamples };
 }
 
 function validateFaults(faults: readonly SimFault[]): FaultState[] {
@@ -670,10 +674,10 @@ function resolveOptions(
   }
   const analogArtifactSamples = source.analogArtifactSamples ?? defaults.analogArtifactSamples ?? null;
   if (analogArtifactSamples !== null &&
-      (!Number.isInteger(analogArtifactSamples) || analogArtifactSamples < 1 ||
-        analogArtifactSamples > SIM_ANALOG_PERSIST_MAX)) {
+      (!Number.isInteger(analogArtifactSamples) || analogArtifactSamples < 0 ||
+        analogArtifactSamples > SIM_ANALOG_ARTIFACT_MAX)) {
     throw invalid(
-      `analogArtifactSamples must be an integer 1..${SIM_ANALOG_PERSIST_MAX}, got ${String(analogArtifactSamples)}`,
+      `analogArtifactSamples must be an integer 0..${SIM_ANALOG_ARTIFACT_MAX}, got ${String(analogArtifactSamples)}`,
     );
   }
   const searchLimitSamples = source.searchLimitSamples ?? defaults.searchLimitSamples ??
@@ -711,12 +715,9 @@ export class SimDriver {
   private nextSample = 0;
   /** Previous complete sample, for rising/falling/edge matching. */
   private previousWord: number | null = null;
-  /** Analog qualification state (module header): armed, candidate run, arm run. */
-  private analogArmed = false;
-  private analogRun = 0;
-  private analogArmRun = 0;
-  /** Position of the pending analog candidate; meaningful while `analogRun > 0`. */
-  private analogCandidate = 0;
+  /** Analog qualification state (module header): arm, pending run, predecessor. Null
+   *  without an analog plan. */
+  private analogQ: AnalogRunQualifier | null = null;
   /** Samples inspected by the current search (dropout samples excluded). */
   private inspected = 0;
   private exhausted = false;
@@ -1150,45 +1151,10 @@ export class SimDriver {
     return true;
   }
 
+  /** Forget the arm, the pending run and the predecessor (start, gap, retune, stop). */
   private resetAnalog(): void {
-    this.analogArmed = false;
-    this.analogRun = 0;
-    this.analogArmRun = 0;
-    this.analogCandidate = 0;
-  }
-
-  /**
-   * Advance the qualified analog crossing by one complete sample (module header).
-   * Returns the confirmed candidate T, or -1. The same transitions as
-   * `SoftwareTrigger`'s analog state machine.
-   */
-  private stepAnalog(a: SimAnalogCondition, word: number, position: number): number {
-    const code = reverseAdcByte((word >>> this.config!.analog!.start) & 0xff);
-    const past = a.rise ? code >= a.level : code <= a.level;
-    if (this.analogRun > 0) {
-      // Back across the level drops the candidate and keeps the arm.
-      this.analogRun = past ? this.analogRun + 1 : 0;
-    } else if (past) {
-      if (this.analogArmed) {
-        this.analogRun = 1;
-        this.analogCandidate = position;
-      } else {
-        // Past the level is not past the arming threshold: an arm run restarts.
-        this.analogArmRun = 0;
-      }
-    } else if (!this.analogArmed) {
-      this.analogArmRun = (a.rise ? code <= a.arm : code >= a.arm) ? this.analogArmRun + 1 : 0;
-      if (this.analogArmRun >= a.persist) {
-        this.analogArmed = true;
-        this.analogArmRun = 0;
-      }
-    }
-    if (this.analogRun >= a.persist) {
-      const candidate = this.analogCandidate;
-      this.resetAnalog();
-      return candidate;
-    }
-    return -1;
+    const a = this.trigger?.analog ?? null;
+    this.analogQ = a === null ? null : new AnalogRunQualifier(a);
   }
 
   // ---------------------------------------------------------------- stepping
@@ -1243,9 +1209,10 @@ export class SimDriver {
       const word = this.sampleWordAt(position);
       let matchPosition = -1;
       if (trigger.analog !== null) {
-        // T is the candidate, up to P - 1 samples before this confirming sample. A
-        // confirmation inside the holdoff is consumed (the machine disarmed) unmatched.
-        const candidate = this.stepAnalog(trigger.analog, word, position);
+        // T is the first sample of a real candidate run, decided up to W samples later.
+        // A decision whose T lies inside the holdoff is consumed (disarmed) unmatched.
+        const code = reverseAdcByte((word >>> this.config!.analog!.start) & 0xff);
+        const candidate = this.analogQ!.step(code, position);
         if (candidate >= 0 && this.matchArmed(candidate)) matchPosition = candidate;
       } else if (this.matches(word, this.previousWord) && this.matchArmed(position)) {
         matchPosition = position;
@@ -1261,8 +1228,8 @@ export class SimDriver {
         // §5.1: deliver preSamples + postSamples whole samples starting at `from`. The
         // holdoff (matchArmed) guarantees matchPosition >= preSamples; the clamp is
         // defensive. The samples up to the deciding one (T itself, or an analog
-        // confirmation) are regenerated now, never retained while waiting; a budget
-        // shorter than the persistence window ends inside them.
+        // decision) are regenerated now, never retained while waiting; a budget
+        // shorter than the look-ahead ends inside them.
         const total = trigger.preSamples + trigger.postSamples;
         const from = Math.max(0, matchPosition - trigger.preSamples);
         this.deliveryEnd = Number.isFinite(total)
