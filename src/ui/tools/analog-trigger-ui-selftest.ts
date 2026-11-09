@@ -315,6 +315,24 @@ function cssRules(selector: string): string[] {
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
+// Found on a real 32U3: after an analog trigger, turning the group off and setting D0
+// rising left triggerSource 'analog', so the capture free-ran with no notice. Committing a
+// digital condition selects the digital family, and an analog source with no analog
+// condition left falls back to digital in the settings clamp.
+{
+  const configureAt = app.indexOf('private configureChannel(');
+  const configure = app.slice(configureAt, app.indexOf('\n  }\n', configureAt));
+  const clampAt = app.indexOf('function clampCaptureSettings(');
+  const clamp = app.slice(clampAt, app.indexOf('\n}\n', clampAt));
+  const commits = configure.includes(
+    'const digitalCommitted = previous !== config.mode && config.mode !== DEFAULT_TRIGGER_MODE;') &&
+    configure.includes("...(digitalCommitted ? { triggerSource: 'digital' as const } : {}),");
+  const fallback = clamp.includes(
+    "triggerSource: s.triggerSource === 'analog' && Object.keys(analogTriggers).length === 0");
+  check('a digital condition selects the digital source; a source with no analog condition falls back',
+    configureAt >= 0 && clampAt >= 0 && commits && fallback, `commits=${commits}, fallback=${fallback}`);
+}
+
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
 nodeProcess.exit(failed === 0 ? 0 : 1);

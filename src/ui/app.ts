@@ -2090,10 +2090,14 @@ export class App {
         channel, kind: 'level' as const, level: 1 as const,
       };
       const autoArms = edgeTriggerAutoArms(previous, config.mode, this.settings.triggerEnableMask);
+      // One trigger family at a time (P0): committing a digital condition makes digital the
+      // source, exactly as committing an analog level makes analog the source.
+      const digitalCommitted = previous !== config.mode && config.mode !== DEFAULT_TRIGGER_MODE;
       const next = this.clampSettings({
         ...this.settings, triggerModes, triggerConditions,
         triggerChannel: first.channel, triggerKind: first.kind, triggerLevel: first.level,
         ...(autoArms ? { triggerEnableMask: true } : {}),
+        ...(digitalCommitted ? { triggerSource: 'digital' as const } : {}),
       });
       const triggerChanged = triggerSettingsChanged(this.settings, next);
       if (!this.running && triggerChanged) {
@@ -7328,6 +7332,10 @@ function clampCaptureSettings(
     singleUnlimited: s.mode === 'single' && s.singleUnlimited === true,
     repeatIntervalSeconds: clampRepeatIntervalSeconds(s.repeatIntervalSeconds),
     loopSamples,
+    // An analog source with no analog condition left (its group was turned off) cannot
+    // match anything; fall back to digital so the per-channel modes are not silently dead.
+    triggerSource: s.triggerSource === 'analog' && Object.keys(analogTriggers).length === 0
+      ? 'digital' : s.triggerSource,
     triggerEnableMask: s.triggerEnableMask ?? true,
     // Enable Mask is the sole global gate. Turning it off must not erase the
     // per-channel modes; turning it back on must restore the same conditions.
