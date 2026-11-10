@@ -105,9 +105,9 @@ function splitSelectors(prelude: string): string[] {
 
 const all = rules(css);
 /** The cascaded value of one property for a selector in the base (non-@media) layer. */
-function base(selector: string, prop: string): string | undefined {
+function base(selector: string, prop: string, ruleSet: readonly Rule[] = all): string | undefined {
   let value: string | undefined;
-  for (const rule of all) {
+  for (const rule of ruleSet) {
     if (rule.media !== null || !rule.selectors.includes(selector)) continue;
     const v = rule.decls.get(prop);
     if (v !== undefined) value = v;
@@ -185,6 +185,31 @@ function mediaOverrides(selector: string, prop: string): string[] {
   const wheel = app.includes('scroll.scrollTop += wheelDeltaPixels(e.deltaY, e.deltaMode, scroll.clientHeight);');
   check('row fit and the row-scroll wheel still read the scroll viewport',
     fit && wheel, `fit=${fit}, wheel=${wheel}`);
+}
+
+{
+  const bottom = 'calc(50% - (var(--overview-h) + var(--axis-h)) / 2)';
+  const pinned = (ruleSet: readonly Rule[]): boolean =>
+    base('#empty-hint', 'position', ruleSet) === 'sticky' &&
+    base('#empty-hint', 'bottom', ruleSet) === bottom &&
+    base('#empty-hint', 'height', ruleSet) === '0' &&
+    base('#empty-hint', 'contain', ruleSet) === 'layout' &&
+    base('#empty-hint', 'inset', ruleSet) === undefined &&
+    base('#empty-hint', 'align-items', ruleSet) === 'flex-start' &&
+    base('#empty-hint', 'justify-content', ruleSet) === 'center' &&
+    base('.empty-hint-body', 'transform', ruleSet) === 'translateY(-50%)';
+  const absolute = css.replace(`#empty-hint {\n  position: sticky;\n  bottom: ${bottom};`,
+    '#empty-hint {\n  position: absolute; inset: 0;');
+  const untransformed = css.replace('.empty-hint-body { transform: translateY(-50%); }', '');
+  const uncontained = css.replace('  contain: layout;\n', '');
+  const direct = /<div id="plot"[^>]*>\s*<div id="wave-stack"><\/div>\s*<div id="empty-hint" translate="yes">/.test(html);
+  const noOverrides = ['position', 'bottom', 'height', 'contain'].every((prop) =>
+    mediaOverrides('#empty-hint', prop).length === 0);
+  check('the empty hint sticks to the visible plot center without adding scrollable overflow',
+    pinned(all) && direct && noOverrides && absolute !== css && untransformed !== css && uncontained !== css &&
+      !pinned(rules(absolute)) && !pinned(rules(untransformed)) && !pinned(rules(uncontained)),
+    `pinned=${pinned(all)}, direct=${direct}, noOverrides=${noOverrides}, ` +
+    `controls=${!pinned(rules(absolute)) && !pinned(rules(untransformed)) && !pinned(rules(uncontained))}`);
 }
 
 // ------------------------------------------------------------------ #11 density chrome
