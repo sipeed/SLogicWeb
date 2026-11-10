@@ -98,6 +98,18 @@ const base = defaultCaptureSettings();
 }
 
 {
+  const loop = { ...base, mode: 'loop' as const, loopSamples: 2_000_896, seconds: 2_000_896 / 16e6 };
+  const patched = 0.001;
+  const samePatch = carryCaptureDuration(loop, { ...loop, mode: 'single' as const, seconds: patched });
+  const overwritten = samePatch.seconds !== patched &&
+    samePatch.seconds === loop.loopSamples / loop.samplerate;
+  const followUp = carryCaptureDuration(samePatch, { ...samePatch, seconds: patched });
+  check('a Loop-to-Single commit overwrites a same-patch seconds patch; a later Single commit keeps it',
+    overwritten && followUp.seconds === patched && followUp.mode === 'single',
+    `samePatch=${samePatch.seconds}, followUp=${followUp.seconds}`);
+}
+
+{
   const fs = nodeProcess.getBuiltinModule?.('fs') as {
     readFileSync(path: string, encoding: string): string;
   } | undefined;
@@ -112,6 +124,63 @@ const base = defaultCaptureSettings();
   const adopted = app.includes('carryCaptureDuration(this.settings, adopted)');
   check('App carries the duration through its single settings commit path and device adoption',
     wired && derived && adopted, `apply=${wired}, derive=${derived}, adopt=${adopted}`);
+}
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as {
+    readFileSync(path: string, encoding: string): string;
+  } | undefined;
+  if (!fs) throw new Error('node fs module unavailable');
+  const sources = new Map([
+    ['src/device/tools/flickerHarness.ts',
+      fs.readFileSync('src/device/tools/flickerHarness.ts', 'utf8')],
+    ['src/device/tools/appLoopHarness.ts',
+      fs.readFileSync('src/device/tools/appLoopHarness.ts', 'utf8')],
+  ]);
+  const settingsCommits = (file: string, marker: string): string[] => {
+    const source = sources.get(file) ?? '';
+    const start = source.indexOf(marker);
+    const nextExport = start < 0 ? -1 : source.indexOf('\nexport ', start + marker.length);
+    const body = start < 0 ? '' : source.slice(start, nextExport < 0 ? undefined : nextExport);
+    const calls: string[] = [];
+    let at = body.indexOf('setSettings(');
+    while (at >= 0) {
+      let depth = 0;
+      let cursor = at + 'setSettings'.length;
+      for (; cursor < body.length; cursor++) {
+        const char = body[cursor];
+        if (char === '(') depth += 1;
+        else if (char === ')') {
+          depth -= 1;
+          if (depth === 0) break;
+        }
+      }
+      calls.push(body.slice(at, cursor + 1));
+      at = body.indexOf('setSettings(', cursor);
+    }
+    return calls;
+  };
+  const paths = [
+    { file: 'src/device/tools/flickerHarness.ts', marker: 'export async function runFlickerProbe(',
+      name: 'flicker single probe', loopSetup: true },
+    { file: 'src/device/tools/flickerHarness.ts', marker: 'export async function runIdleFlickerProbe(',
+      name: 'flicker idle prime', loopSetup: false },
+    { file: 'src/device/tools/appLoopHarness.ts', marker: 'export async function startFixedWindowProbe(',
+      name: 'fixed-window probe', loopSetup: false },
+  ].map((path) => {
+    const calls = settingsCommits(path.file, path.marker);
+    const modeCommit = calls.findIndex((call) => /\bmode\b/.test(call));
+    const secondsCommit = calls.findIndex((call) => call.includes('maxCaptureSeconds('));
+    const separate = modeCommit >= 0 && secondsCommit > modeCommit &&
+      !/\bmode\b/.test(calls[secondsCommit] ?? '');
+    const loopKept = !path.loopSetup || (calls[modeCommit] ?? '').includes('loopSamples');
+    return { name: path.name, pass: separate && loopKept,
+      detail: `modeCommit=${modeCommit}, secondsCommit=${secondsCommit}, ` +
+        `separate=${separate}, loopSetupKept=${loopKept}, commits=${calls.length}` };
+  });
+  check('every finite single-capture harness commits its duration after the mode commit',
+    paths.every((path) => path.pass),
+    paths.map((path) => `${path.name}: ${path.detail}`).join('; '));
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

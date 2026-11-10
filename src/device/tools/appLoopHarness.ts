@@ -474,12 +474,12 @@ export async function startFixedWindowProbe(
     }
     app.debug.setSettings({
       mode: 'single',
-      seconds: maxCaptureSeconds(options.samplerate),
       channels,
       samplerate: options.samplerate,
       testMode: 2,
       softwareTrigger: false,
     });
+    app.debug.setSettings({ seconds: maxCaptureSeconds(options.samplerate) });
     await app.debug.start();
     await new Promise(resolve => setTimeout(resolve, options.settleMs ?? 400));
     app.debug.setViewportSeconds(options.viewStartSeconds, options.viewEndSeconds);

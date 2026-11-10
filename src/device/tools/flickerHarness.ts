@@ -402,12 +402,12 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
       samplerate,
       testMode: 2,
       softwareTrigger: false,
-      ...(mode === 'single' ? { seconds: maxCaptureSeconds(samplerate) } : {}),
       ...(mode === 'loop' ? { loopSamples: wantedLoopSamples } : {}),
     });
     if (mode === 'loop' && app.settings.loopSamples !== wantedLoopSamples) {
       app.debug.setSettings({ loopSamples: wantedLoopSamples });
     }
+    if (mode === 'single') app.debug.setSettings({ seconds: maxCaptureSeconds(samplerate) });
 
     if (primeSeconds > 0) {
       await withTimeout(app.debug.start(), START_TIMEOUT_MS, 'the prime capture did not start');
@@ -728,8 +728,8 @@ export async function runIdleFlickerProbe(
         samplerate,
         testMode: 2,
         softwareTrigger: false,
-        seconds: maxCaptureSeconds(samplerate),
       });
+      app.debug.setSettings({ seconds: maxCaptureSeconds(samplerate) });
       await withTimeout(app.debug.start(), START_TIMEOUT_MS, 'the idle prime capture did not start');
       await wait(primeSeconds * 1000);
       await withTimeout(app.debug.stop(), STOP_TIMEOUT_MS, 'the idle prime capture did not stop');
