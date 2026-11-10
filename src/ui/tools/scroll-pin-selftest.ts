@@ -197,19 +197,22 @@ function mediaOverrides(selector: string, prop: string): string[] {
     base('#empty-hint', 'inset', ruleSet) === undefined &&
     base('#empty-hint', 'align-items', ruleSet) === 'flex-start' &&
     base('#empty-hint', 'justify-content', ruleSet) === 'center' &&
+    base('#empty-hint', 'color', ruleSet) === 'var(--text50)' &&
     base('.empty-hint-body', 'transform', ruleSet) === 'translateY(-50%)';
   const absolute = css.replace(`#empty-hint {\n  position: sticky;\n  bottom: ${bottom};`,
     '#empty-hint {\n  position: absolute; inset: 0;');
   const untransformed = css.replace('.empty-hint-body { transform: translateY(-50%); }', '');
   const uncontained = css.replace('  contain: layout;\n', '');
+  const recolored = css.replace('color: var(--text50); pointer-events: none; text-align: center;',
+    'color: var(--text80); pointer-events: none; text-align: center;');
   const direct = /<div id="plot"[^>]*>\s*<div id="wave-stack"><\/div>\s*<div id="empty-hint" translate="yes">/.test(html);
-  const noOverrides = ['position', 'bottom', 'height', 'contain'].every((prop) =>
+  const noOverrides = ['position', 'bottom', 'height', 'contain', 'color'].every((prop) =>
     mediaOverrides('#empty-hint', prop).length === 0);
-  check('the empty hint sticks to the visible plot center without adding scrollable overflow',
-    pinned(all) && direct && noOverrides && absolute !== css && untransformed !== css && uncontained !== css &&
-      !pinned(rules(absolute)) && !pinned(rules(untransformed)) && !pinned(rules(uncontained)),
-    `pinned=${pinned(all)}, direct=${direct}, noOverrides=${noOverrides}, ` +
-    `controls=${!pinned(rules(absolute)) && !pinned(rules(untransformed)) && !pinned(rules(uncontained))}`);
+  const controls = [absolute, untransformed, uncontained, recolored].every((mutated) =>
+    mutated !== css && !pinned(rules(mutated)));
+  check('the empty hint sticks to the visible plot center and keeps its muted ink',
+    pinned(all) && direct && noOverrides && controls,
+    `pinned=${pinned(all)}, direct=${direct}, noOverrides=${noOverrides}, controls=${controls}`);
 }
 
 // ------------------------------------------------------------------ #11 density chrome
