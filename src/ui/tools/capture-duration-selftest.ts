@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { carryCaptureDuration } from '../capturePolicy.js';
+import { maxCaptureSeconds } from '../captureTime.js';
 import { defaultCaptureSettings } from '../state.js';
 
 const nodeProcess = (() => {
@@ -110,6 +111,32 @@ const base = defaultCaptureSettings();
 }
 
 {
+  const originals = [
+    { samplerate: 16e6, loopSamples: 2_000_896, seconds: 2_000_896 / 16e6 },
+    { samplerate: 100e6, loopSamples: 100_000_768, seconds: 1 },
+    { samplerate: 50e6, loopSamples: 160_768, seconds: 160_768 / 50e6 },
+  ].map(({ samplerate, loopSamples, seconds }) => {
+    const original = { ...base, mode: 'loop' as const, samplerate, loopSamples, seconds };
+    const probe = { ...original, mode: 'single' as const, seconds: maxCaptureSeconds(samplerate) };
+    const restored = carryCaptureDuration(probe, { ...original });
+    const followUp = carryCaptureDuration(restored, {
+      ...restored, loopSamples: original.loopSamples, seconds: original.seconds,
+    });
+    return {
+      original, restored, followUp,
+      window: `${restored.loopSamples} -> ${followUp.loopSamples}/${original.loopSamples}`,
+      seconds: `${restored.seconds} -> ${followUp.seconds}/${original.seconds}`,
+    };
+  });
+  check('a probe restore alone inflates the Loop window; the explicit recommit restores it exactly',
+    originals.every((row) => row.restored.loopSamples !== row.original.loopSamples &&
+      row.followUp.mode === 'loop' &&
+      row.followUp.loopSamples === row.original.loopSamples &&
+      row.followUp.seconds === row.original.seconds),
+    originals.map((row) => `window ${row.window}, seconds ${row.seconds}`).join('; '));
+}
+
+{
   const fs = nodeProcess.getBuiltinModule?.('fs') as {
     readFileSync(path: string, encoding: string): string;
   } | undefined;
@@ -181,6 +208,39 @@ const base = defaultCaptureSettings();
   check('every finite single-capture harness commits its duration after the mode commit',
     paths.every((path) => path.pass),
     paths.map((path) => `${path.name}: ${path.detail}`).join('; '));
+}
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as {
+    readFileSync(path: string, encoding: string): string;
+  } | undefined;
+  if (!fs) throw new Error('node fs module unavailable');
+  const source = fs.readFileSync('src/device/tools/flickerHarness.ts', 'utf8');
+  const cleanups = [
+    { name: 'flicker single probe', marker: 'export async function runFlickerProbe(' },
+    { name: 'flicker idle prime', marker: 'export async function runIdleFlickerProbe(' },
+  ].map(({ name, marker }) => {
+    const start = source.indexOf(marker);
+    const nextExport = start < 0 ? -1 : source.indexOf('\nexport ', start + marker.length);
+    const body = start < 0 ? '' : source.slice(start, nextExport < 0 ? undefined : nextExport);
+    const restore = 'setSettings(previousSettings)';
+    const restoreAt = body.indexOf(restore);
+    const restores = body.split(restore).length - 1;
+    const guard = "previousSettings.mode === 'loop'";
+    const guardAt = restoreAt < 0 ? -1 : body.indexOf(guard, restoreAt);
+    const windowAt = guardAt < 0 ? -1
+      : body.indexOf('loopSamples: previousSettings.loopSamples', guardAt);
+    const secondsAt = windowAt < 0 ? -1
+      : body.indexOf('seconds: previousSettings.seconds', windowAt);
+    const pass = restores === 1 && restoreAt >= 0 && guardAt > restoreAt &&
+      windowAt > guardAt && secondsAt > windowAt;
+    return { name, pass,
+      detail: `restores=${restores}, restoreAt=${restoreAt}, guardAt=${guardAt}, ` +
+        `windowAt=${windowAt}, secondsAt=${secondsAt}` };
+  });
+  check('both flicker cleanups recommit the original Loop window after restoring the settings',
+    cleanups.every((cleanup) => cleanup.pass),
+    cleanups.map((cleanup) => `${cleanup.name}: ${cleanup.detail}`).join('; '));
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

@@ -548,6 +548,12 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
       app.discardDevice();
       if (report !== null) report.deviceLeak = app.device !== null;
       app.debug.setSettings(previousSettings);
+      if (previousSettings.mode === 'loop') {
+        app.debug.setSettings({
+          loopSamples: previousSettings.loopSamples,
+          seconds: previousSettings.seconds,
+        });
+      }
       const enabled = app.channels.map((channel) => channel.enabled);
       for (let index = 0; index < enabled.length; index++) {
         if (enabled[index] !== previousEnabled[index]) {
@@ -874,6 +880,12 @@ export async function runIdleFlickerProbe(
         app.discardDevice();
         if (report !== null) report.deviceLeak = app.device !== null;
         app.debug.setSettings(previousSettings);
+        if (previousSettings.mode === 'loop') {
+          app.debug.setSettings({
+            loopSamples: previousSettings.loopSamples,
+            seconds: previousSettings.seconds,
+          });
+        }
         const enabled = app.channels.map((channel) => channel.enabled);
         for (let index = 0; index < enabled.length; index++) {
           if (enabled[index] !== previousEnabled[index]) {
