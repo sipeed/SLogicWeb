@@ -335,7 +335,7 @@ function check(name: string, pass: boolean, detail: string): void {
 
   const expectedText = [
     'app.title', 'connectHelp.retry',
-    'emptyHint.line1', 'emptyHint.line2', 'emptyHint.example', 'drop.overlay',
+    'emptyHint.line1', 'emptyHint.line2', 'drop.overlay',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortOpen', 'toolbar.shortSave',
     'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage',
     'toolbar.shortTheme', 'error.details',
@@ -878,11 +878,12 @@ const baseSettings: CaptureSettings = {
     'settings.sections.general', 'settings.shortcuts', 'settings.about', 'shortcuts.title',
     'shortcuts.keyboard', 'shortcuts.input.arrows', 'about.title',
     'settings.developerToolsNote', 'settings.developerToolsOpen',
+    'emptyHint.example',
   ];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const present = Object.entries(dicts).filter(([, dict]) =>
     retired.some((key) => Object.keys(dict).includes(key)));
-  check('the retired channel, bank, capture, capture-panel, toolbar and settings keys stay absent from every catalog',
+  check('the retired channel, bank, capture, capture-panel, toolbar, settings and empty-state keys stay absent from every catalog',
     present.length === 0,
     present.length === 0 ? `4 catalogs omit ${retired.length} keys` : present.map(([locale]) => locale).join(', '));
 }

@@ -604,7 +604,7 @@ export class App {
     errorBanner: HTMLDivElement; errorBannerText: HTMLSpanElement; errorDismiss: HTMLButtonElement;
     errorGuidance: HTMLSpanElement; errorRetry: HTMLButtonElement;
     platformNotice: HTMLDivElement; platformNoticeText: HTMLSpanElement;
-    platformNoticeDismiss: HTMLButtonElement; hintDetail: HTMLSpanElement; hintExample: HTMLButtonElement;
+    platformNoticeDismiss: HTMLButtonElement; hintDetail: HTMLSpanElement;
     fileNotice: HTMLDivElement; fileNoticeText: HTMLSpanElement; fileNoticeDismiss: HTMLButtonElement;
     errorDetails: HTMLDetailsElement; errorDetailText: HTMLSpanElement;
     errorAction: HTMLButtonElement;
@@ -654,7 +654,6 @@ export class App {
       fileNoticeText: must<HTMLSpanElement>('file-notice-text'),
       fileNoticeDismiss: must<HTMLButtonElement>('file-notice-dismiss'),
       hintDetail: must<HTMLSpanElement>('empty-hint-detail'),
-      hintExample: must<HTMLButtonElement>('empty-hint-example'),
       errorDetails: must<HTMLDetailsElement>('error-banner-details'),
       errorDetailText: must<HTMLSpanElement>('error-banner-detail-text'),
       errorAction: must<HTMLButtonElement>('error-banner-action'),
@@ -4260,7 +4259,6 @@ export class App {
       this.menuStack.closeOthers(this.openMenu, 'outside');
       this.openMenu.toggle(this.openItems());
     });
-    this.el.hintExample.addEventListener('click', () => void this.openExample());
     this.el.fileInput.addEventListener('change', () => {
       const files = [...(this.el.fileInput.files ?? [])];
       // Already confirmed (or nothing to lose) before the chooser opened.

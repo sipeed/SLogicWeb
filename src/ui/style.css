@@ -1552,17 +1552,6 @@ html[data-theme="light"] .grid-canvas { mix-blend-mode: darken; }
   display: flex; align-items: center; justify-content: center;
   color: var(--text50); pointer-events: none; text-align: center; line-height: 1.6;
 }
-/* The hint itself lets the plot's gestures through; only its example link takes clicks. */
-.empty-hint-example {
-  display: block; margin: 6px auto 0; padding: 2px 6px;
-  pointer-events: auto; cursor: pointer;
-  font: inherit; color: var(--primary); background: none; border: 0;
-  border-radius: calc(var(--radius) - 4px);
-  text-decoration: underline; text-underline-offset: 2px;
-}
-.empty-hint-example:hover { color: var(--foreground); }
-.empty-hint-example:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.empty-hint-example:disabled { cursor: default; opacity: .6; }
 
 /* A file dragged over the window: the plot says where it goes. The label is sticky so a
    tall (scrolled) plot still shows it near the top of the viewport. */

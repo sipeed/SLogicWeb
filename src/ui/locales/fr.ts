@@ -154,7 +154,6 @@ export const fr: Messages = {
   'emptyHint.line2': 'Ouvrez un fichier .sr ou .lwcap (ou glissez-le ici), ou connectez un SLogic16/32 U3.',
   'emptyHint.line2Connected': 'Appuyez sur Capturer pour enregistrer depuis {device}, ou ouvrez un fichier .sr ou .lwcap (ou glissez-le ici).',
   'emptyHint.line2NoUsb': 'Ouvrez un fichier .sr ou .lwcap (ou glissez-le ici) pour l’afficher et le décoder.',
-  'emptyHint.example': 'Ouvrir un exemple de capture',
   'drop.overlay': 'Déposez un fichier .sr / .lwcap pour l’ouvrir',
 
   // ---------------------------------------------------- browser notice

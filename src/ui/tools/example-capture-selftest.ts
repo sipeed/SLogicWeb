@@ -2,8 +2,8 @@
 /**
  * "Open example" (exampleCapture.ts): the bundled fixtures/uart.sr, handed over as the
  * data: URL Vite's `?url&inline` produces, decodes to a File that the ordinary open path
- * (`loadFiles` -> srLoad) loads like any .sr; app.ts reaches it from the Open menu and
- * the empty-state hint; the copy exists in all four locales. No DOM, no device.
+ * (`loadFiles` -> srLoad) loads like any .sr; app.ts reaches it from the Open menu; the
+ * copy exists in all four locales. No DOM, no device.
  */
 
 import { dataUrlBytes, EXAMPLE_CAPTURE_NAME, exampleCaptureFile } from '../exampleCapture.js';
@@ -59,22 +59,44 @@ const dataUrl = `data:application/octet-stream;base64,${btoa(binary)}`;
 {
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
   const html = fs.readFileSync('index.html', 'utf8');
+  const css = fs.readFileSync('src/ui/style.css', 'utf8');
   const wired = app.includes("import exampleCaptureUrl from '../../fixtures/uart.sr?url&inline';") &&
     app.includes("new SettingsMenu(this.el.open, 'open-menu')") &&
     app.includes('this.openMenu.toggle(this.openItems())') &&
     app.includes("{ label: t('open.example'), hint: t('open.exampleHint'), onPick: () => void this.openExample() }") &&
-    app.includes("this.el.hintExample.addEventListener('click', () => void this.openExample())") &&
     app.includes('file = await exampleCaptureFile(exampleCaptureUrl);') &&
     app.includes('await this.openFiles([file]);') &&
-    html.includes('id="empty-hint-example"') && html.includes('data-i18n="emptyHint.example"') &&
     html.includes('aria-controls="open-menu"');
-  check('Open is a two-row menu and the empty-state hint links the same example', wired, String(wired));
-  const keys = ['open.file', 'open.fileHint', 'open.example', 'open.exampleHint', 'emptyHint.example'] as const;
+  check('Open is a two-row menu carrying the only example entry', wired, String(wired));
+
+  interface Sources { html: string; app: string; css: string }
+  const emptyHintActions = (src: Sources): string[] =>
+    ([['index.html', src.html, 'empty-hint-example'],
+      ['index.html', src.html, 'emptyHint.example'],
+      ['src/ui/app.ts', src.app, 'hintExample'],
+      ['src/ui/style.css', src.css, 'empty-hint-example']] as const)
+      .filter(([, text, needle]) => text.includes(needle))
+      .map(([file, , needle]) => `${file}:${needle}`);
+  const leftovers = emptyHintActions({ html, app, css });
+  const mutatedHtml = html.replace('<div id="wave-stack"></div>',
+    '<div id="wave-stack"></div><button id="empty-hint-example" data-i18n="emptyHint.example"></button>');
+  const mutatedApp = app.replace("hintDetail: must<HTMLSpanElement>('empty-hint-detail'),",
+    "hintExample: must<HTMLButtonElement>('empty-hint-example'), hintDetail: must<HTMLSpanElement>('empty-hint-detail'),");
+  const mutatedCss = `${css}\n.empty-hint-example { display: block; }\n`;
+  const detected = emptyHintActions({ html: mutatedHtml, app: mutatedApp, css: mutatedCss });
+  check('the empty-state hint carries no example action in markup, wiring or styles',
+    leftovers.length === 0 && mutatedHtml !== html && mutatedApp !== app && detected.length === 4,
+    `${leftovers.join(', ') || 'none'}; control detected ${detected.length}/4`);
+
+  const keys = ['open.file', 'open.fileHint', 'open.example', 'open.exampleHint'] as const;
   const missing = keys.flatMap((key) => ([['zh-CN', zhCN], ['fr', fr], ['ru', ru]] as const)
     .filter(([, dict]) => !dict[key] || (dict[key] === en[key] && !/^[.\w ()]+$/.test(en[key])))
     .map(([locale]) => `${locale}:${key}`));
-  check('the example entries are translated', missing.length === 0 && zhCN['open.example'] === '打开示例',
-    missing.join(', ') || zhCN['open.example']);
+  const lingering = ([['en', en], ['zh-CN', zhCN], ['fr', fr], ['ru', ru]] as const)
+    .filter(([, dict]) => 'emptyHint.example' in dict).map(([locale]) => locale);
+  check('the example entries are translated and the empty-state copy is retired',
+    missing.length === 0 && lingering.length === 0 && zhCN['open.example'] === '打开示例',
+    `${missing.join(', ') || zhCN['open.example']}; lingering=${lingering.join(', ') || 'none'}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
