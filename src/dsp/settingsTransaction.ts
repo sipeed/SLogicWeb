@@ -74,13 +74,11 @@
  *   effective value on the plan. The configuration keeps the requested (profile
  *   clamped) percentage.
  * - Durations are clamped to the host storage envelope and must be at least one
- *   sample. For a finite Single/Repeat budget the duration is the largest sample
- *   count whose pre-trigger prefix also fits: `post + floor(post * percent / 100) <=
- *   MAX_SAMPLES - 1`, with the compiler's own floor/round rules. A Single unlimited
- *   capture resolves its pre-trigger base against the same envelope, so the base plus
- *   its prefix never exceeds `MAX_SAMPLES - 1` either. A Loop window is separately
- *   bounded by the 2 GiB / 2^30-sample retention budget (DESIGN §9, the same figure
- *   as the current UI); its stored `durationSeconds` keeps the plain
+ *   sample. For a Single/Repeat budget the duration is the largest sample count whose
+ *   pre-trigger prefix also fits: `post + floor(post * percent / 100) <=
+ *   MAX_SAMPLES - 1`, with the compiler's own floor/round rules. A Loop window is
+ *   separately bounded by the 2 GiB / 2^30-sample retention budget (DESIGN §9, the
+ *   same figure as the current UI); its stored `durationSeconds` keeps the plain
  *   `MAX_SAMPLES - 1` bound. A non-positive or non-finite duration is
  *   `invalid-value`, not a clamp.
  * - `thresholdVolts: null` in a profile means the profile declares no threshold
@@ -100,12 +98,7 @@
  * trigger or budget edit only changes `nextPlan` until the acquisition ends.
  *
  * Budget mapping:
- *   - Single + `unlimited` -> `{ kind: 'unlimited' }`; the pre-trigger percentage is
- *     resolved against the storage envelope, sized so the base plus its prefix stays
- *     inside `MAX_SAMPLES - 1`, mirroring the existing capture path.
- *   - Single/Repeat otherwise -> a `time` budget of `durationSeconds`. In Repeat,
- *     `unlimited` is retained as a preference but ignored, as the current capture
- *     path does.
+ *   - Single/Repeat -> a `time` budget of `durationSeconds`.
  *   - Loop -> an `unlimited` budget plus `loop.seconds = loopSeconds`. The plan owns
  *     the anchor: an armed Loop anchors to the trigger, a free-running Loop to free
  *     time. `CaptureConfig` deliberately has no anchor field.
@@ -150,8 +143,6 @@ export interface CaptureConfig {
   readonly thresholdVolts: number;
   /** Post-trigger duration for Single/Repeat. Also carries the last duration. */
   readonly durationSeconds: number;
-  /** Single capture runs until stopped. Stored in Repeat/Loop, where it is ignored. */
-  readonly unlimited: boolean;
   readonly repeatIntervalSeconds: number;
   /** The Loop data window D. */
   readonly loopSeconds: number;
@@ -203,7 +194,6 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   'samplerate',
   'thresholdVolts',
   'durationSeconds',
-  'unlimited',
   'repeatIntervalSeconds',
   'loopSeconds',
   'triggerEnableMask',
@@ -231,7 +221,6 @@ export const SETTING_POLICIES: Readonly<Record<SettingKey, SettingPolicy>> = {
   samplerate: { scope: 'live', capability: 'digital.rates' },
   thresholdVolts: { scope: 'live', capability: 'digital.thresholdVolts' },
   durationSeconds: { scope: 'next' },
-  unlimited: { scope: 'next' },
   repeatIntervalSeconds: { scope: 'next', capability: 'modes.repeat' },
   loopSeconds: { scope: 'next', capability: 'modes.loop' },
   triggerEnableMask: { scope: 'live', capability: 'trigger' },
@@ -252,7 +241,6 @@ export const SETTING_EDIT_FEATURES: Readonly<Record<SettingKey, EditFeature>> = 
   samplerate: 'rate',
   thresholdVolts: 'threshold',
   durationSeconds: 'duration',
-  unlimited: 'duration',
   repeatIntervalSeconds: 'repeatInterval',
   loopSeconds: 'loopWindow',
   triggerEnableMask: 'triggerMask',
@@ -342,7 +330,6 @@ const PLAN_INPUT_KEYS: readonly SettingKey[] = [
   'channels',
   'samplerate',
   'durationSeconds',
-  'unlimited',
   'loopSeconds',
   'triggerEnableMask',
   'triggerSource',
@@ -392,7 +379,6 @@ function cloneConfig(config: CaptureConfig): MutableConfig {
     samplerate: config.samplerate,
     thresholdVolts: config.thresholdVolts,
     durationSeconds: config.durationSeconds,
-    unlimited: config.unlimited,
     repeatIntervalSeconds: config.repeatIntervalSeconds,
     loopSeconds: config.loopSeconds,
     triggerEnableMask: config.triggerEnableMask,
@@ -420,7 +406,6 @@ function appliedConfig(
   if (appliedNow.has('samplerate')) applied.samplerate = next.samplerate;
   if (appliedNow.has('thresholdVolts')) applied.thresholdVolts = next.thresholdVolts;
   if (appliedNow.has('durationSeconds')) applied.durationSeconds = next.durationSeconds;
-  if (appliedNow.has('unlimited')) applied.unlimited = next.unlimited;
   if (appliedNow.has('repeatIntervalSeconds')) {
     applied.repeatIntervalSeconds = next.repeatIntervalSeconds;
   }
@@ -474,7 +459,7 @@ function mergePatch(current: CaptureConfig, patch: SettingsPatch): CaptureConfig
  * storage envelope: `post + floor(post * percent / 100) <= MAX_SAMPLES - 1`, using
  * the compiler's own floor/round rules. The estimate is exact for a fractional
  * prefix; the loop recovers the sample the floor frees when the split lands on an
- * integer. A Single unlimited capture uses the same count as its base window.
+ * integer. The count is the base window of every Single/Repeat plan.
  */
 function maxPostSamplesFor(preTriggerPercent: number): number {
   const maxTotal = MAX_SAMPLES - 1;
@@ -623,15 +608,6 @@ function normalizeConfig(
   }
   const requestedDurationSeconds = Math.max(rawDuration, 1 / samplerate);
 
-  const unlimited = config.unlimited;
-  if (typeof unlimited !== 'boolean') {
-    return failure(
-      'invalid-value',
-      `unlimited must be boolean, got ${String(unlimited)}`,
-      'unlimited',
-    );
-  }
-
   const repeatIntervalSeconds = config.repeatIntervalSeconds;
   if (!Number.isFinite(repeatIntervalSeconds) || repeatIntervalSeconds <= 0) {
     return failure(
@@ -707,19 +683,11 @@ function normalizeConfig(
   const preTriggerPercent = Math.min(rawPreTriggerPercent, profileMaxPercent);
 
   // The pre-trigger prefix is retained in addition to the post-trigger budget, so a
-  // finite Single/Repeat duration is bounded by the whole host envelope. Repeat
-  // ignores `unlimited`, so only an unlimited Single escapes this clamp. A Loop is a
-  // sliding window, not an additive budget, and keeps the plain envelope bound.
-  let durationSeconds: number;
-  if (mode === 'loop') {
-    durationSeconds = Math.min(requestedDurationSeconds, (MAX_SAMPLES - 1) / samplerate);
-  } else {
-    const finiteBudget = mode === 'repeat' || !unlimited;
-    const maxPostSamples = finiteBudget
-      ? maxPostSamplesFor(preTriggerPercent)
-      : MAX_SAMPLES - 1;
-    durationSeconds = Math.min(requestedDurationSeconds, maxPostSamples / samplerate);
-  }
+  // Single/Repeat duration is bounded by the whole host envelope. A Loop is a sliding
+  // window, not an additive budget, and keeps the plain envelope bound.
+  const durationSeconds = mode === 'loop'
+    ? Math.min(requestedDurationSeconds, (MAX_SAMPLES - 1) / samplerate)
+    : Math.min(requestedDurationSeconds, maxPostSamplesFor(preTriggerPercent) / samplerate);
 
   const testMode = config.testMode;
   if (testMode !== 0 && testMode !== 1 && testMode !== 2) {
@@ -743,7 +711,6 @@ function normalizeConfig(
     samplerate,
     thresholdVolts,
     durationSeconds,
-    unlimited,
     repeatIntervalSeconds,
     loopSeconds,
     triggerEnableMask,
@@ -759,7 +726,6 @@ function normalizeConfig(
 interface PlanBudget {
   postTrigger: TriggerBudget;
   loop?: TriggerPlanLoop;
-  retentionSeconds?: number;
 }
 
 /** See the module header: how each mode's requested budget maps onto the plan. */
@@ -771,15 +737,6 @@ function planBudgetFor(config: CaptureConfig): PlanBudget {
         seconds: config.loopSeconds,
         anchor: config.triggerEnableMask ? 'trigger' : 'free',
       },
-    };
-  }
-  if (config.mode === 'single' && config.unlimited) {
-    return {
-      postTrigger: { kind: 'unlimited' },
-      // The only honest base for the pre-trigger percentage on an unlimited capture
-      // is the host's storage envelope. Size it so the base plus its prefix stays
-      // inside MAX_SAMPLES - 1, exactly as the finite Single/Repeat clamp does.
-      retentionSeconds: maxPostSamplesFor(config.preTriggerPercent) / config.samplerate,
     };
   }
   return { postTrigger: { kind: 'time', value: config.durationSeconds } };
@@ -807,9 +764,7 @@ function triggerPlanField(
     case 'pre-trigger-cap':
       return 'preTriggerPercent';
     case 'invalid-budget':
-      if (config.mode === 'loop') return 'loopSeconds';
-      if (config.mode === 'single' && config.unlimited) return 'unlimited';
-      return 'durationSeconds';
+      return config.mode === 'loop' ? 'loopSeconds' : 'durationSeconds';
     case 'unsupported-mode':
       return config.mode === 'loop' ? 'mode' : 'triggerSource';
   }
@@ -829,9 +784,6 @@ function compilePlan(
     preTriggerPercent: config.preTriggerPercent,
     postTrigger: budget.postTrigger,
     ...(budget.loop === undefined ? {} : { loop: budget.loop }),
-    ...(budget.retentionSeconds === undefined
-      ? {}
-      : { retentionSeconds: budget.retentionSeconds }),
     capture: { samplerate: config.samplerate, channels: config.channels },
     // No clock input: a fixed stamp keeps the transaction deterministic.
     compiledAt: 0,

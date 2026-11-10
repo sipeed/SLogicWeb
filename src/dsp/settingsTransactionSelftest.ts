@@ -202,7 +202,6 @@ function baseConfig(overrides: Partial<CaptureConfig> = {}): CaptureConfig {
     samplerate: 16e6,
     thresholdVolts: 1.2,
     durationSeconds: 1,
-    unlimited: false,
     repeatIntervalSeconds: 1,
     loopSeconds: 1,
     triggerEnableMask: false,
@@ -858,20 +857,60 @@ const FALLING_D0: DigitalTriggerInput = { signal: 'd0', kind: 'falling' };
 }
 
 {
-  const result = commitSettings({
-    current: baseConfig({ unlimited: true }),
+  const single = commitSettings({
+    current: baseConfig({ durationSeconds: 2 }),
     patch: { triggerEnableMask: true, digitalConditions: [RISING_D0] },
     profile: PROFILE_16U3,
     linkRate: 'ss5',
     context: ctx(),
   });
   check(
-    'an unlimited Single capture still derives a bounded pre-trigger window',
-    result.ok &&
-      result.nextPlan !== null &&
-      result.nextPlan.budget.kind === 'unlimited' &&
-      result.nextPlan.preTrigger.seconds > 0,
-    failDetail(result),
+    'a Single capture compiles a finite time budget from durationSeconds',
+    single.ok &&
+      single.nextPlan !== null &&
+      single.nextPlan.budget.kind === 'time' &&
+      single.nextPlan.budget.value === 2 &&
+      single.nextPlan.loop === undefined &&
+      single.nextPlan.preTrigger.seconds > 0,
+    failDetail(single),
+  );
+
+  const repeat = commitSettings({
+    current: baseConfig({ mode: 'repeat', durationSeconds: 0.5 }),
+    patch: { triggerEnableMask: true, digitalConditions: [RISING_D0] },
+    profile: PROFILE_16U3,
+    linkRate: 'ss5',
+    context: ctx(),
+  });
+  check(
+    'a Repeat capture compiles the same finite time budget',
+    repeat.ok &&
+      repeat.nextPlan !== null &&
+      repeat.nextPlan.budget.kind === 'time' &&
+      repeat.nextPlan.budget.value === 0.5 &&
+      repeat.nextPlan.loop === undefined,
+    failDetail(repeat),
+  );
+
+  const retired = {
+    ...baseConfig({ durationSeconds: 2 }),
+    unlimited: true,
+  } as unknown as CaptureConfig;
+  const ignored = commitSettings({
+    current: retired,
+    patch: { triggerEnableMask: true, digitalConditions: [RISING_D0] },
+    profile: PROFILE_16U3,
+    linkRate: 'ss5',
+    context: ctx(),
+  });
+  check(
+    'a retired unlimited flag cannot turn a Single plan unlimited',
+    ignored.ok &&
+      ignored.nextPlan !== null &&
+      ignored.nextPlan.budget.kind === 'time' &&
+      ignored.nextPlan.budget.value === 2 &&
+      !Object.prototype.hasOwnProperty.call(ignored.next, 'unlimited'),
+    failDetail(ignored),
   );
 }
 
@@ -956,6 +995,29 @@ const FALLING_D0: DigitalTriggerInput = { signal: 'd0', kind: 'falling' };
     at100.ok ? `post=${post100}` : failDetail(at100),
   );
 
+  const repeatRetired = commitSettings({
+    current: {
+      ...baseConfig({ mode: 'repeat', preTriggerPercent: 75 }),
+      unlimited: true,
+    } as unknown as CaptureConfig,
+    patch: { durationSeconds: 1e9 },
+    profile: PROFILE_16U3,
+    linkRate: 'ss5',
+    context: ctx(),
+  });
+  const repeatPost = repeatRetired.ok
+    ? Math.round(repeatRetired.next.durationSeconds * samplerate)
+    : -1;
+  const repeatPre = repeatPost >= 0 ? Math.floor((repeatPost * 75) / 100) : -1;
+  check(
+    'a Repeat duration keeps the additive pre-trigger envelope with a retired flag present',
+    repeatRetired.ok &&
+      repeatPost > 0 &&
+      repeatPost < maxTotal &&
+      repeatPost + repeatPre <= maxTotal,
+    repeatRetired.ok ? `post=${repeatPost} pre=${repeatPre}` : failDetail(repeatRetired),
+  );
+
   const armed75 = commitSettings({
     current: baseConfig({ preTriggerPercent: 75, durationSeconds: 1e9 }),
     patch: { triggerEnableMask: true, digitalConditions: [RISING_D0] },
@@ -976,23 +1038,25 @@ const FALLING_D0: DigitalTriggerInput = { signal: 'd0', kind: 'falling' };
     `post=${planPost75} pre=${planPre75}`,
   );
 
-  const unlimited100 = commitSettings({
-    current: baseConfig({ preTriggerPercent: 100, unlimited: true }),
+  const planAt100 = commitSettings({
+    current: baseConfig({ preTriggerPercent: 100, durationSeconds: 1e9 }),
     patch: { triggerEnableMask: true, digitalConditions: [RISING_D0] },
     profile: profile100,
     linkRate: 'ss5',
     context: ctx(),
   });
-  const unlimitedPlan = unlimited100.ok ? unlimited100.nextPlan : null;
-  const unlimitedPre = unlimitedPlan === null
+  const plan100 = planAt100.ok ? planAt100.nextPlan : null;
+  const planPost100 = plan100 !== null && plan100.budget.kind === 'time'
+    ? Math.round(plan100.budget.value * samplerate)
+    : -1;
+  const planPre100 = plan100 === null
     ? -1
-    : (unlimitedPlan.preTrigger.samples ??
-      Math.round(unlimitedPlan.preTrigger.seconds * samplerate));
-  const unlimitedBase = Math.floor(maxTotal / 2);
+    : (plan100.preTrigger.samples ??
+      Math.round(plan100.preTrigger.seconds * samplerate));
   check(
-    'an unlimited Single base plus its 100% prefix fits MAX_SAMPLES - 1',
-    unlimitedPre >= 0 && unlimitedBase + unlimitedPre <= maxTotal,
-    `base=${unlimitedBase} pre=${unlimitedPre}`,
+    'the compiled 100% finite plan keeps its retained prefix and budget in the envelope',
+    planPre100 >= 0 && planPost100 >= 0 && planPre100 + planPost100 <= maxTotal,
+    `post=${planPost100} pre=${planPre100}`,
   );
 }
 
@@ -1169,6 +1233,13 @@ const FALLING_D0: DigitalTriggerInput = { signal: 'd0', kind: 'falling' };
       !(SETTINGS_EFFECTS as readonly string[]).includes('arm-record') &&
       !(SETTINGS_EFFECTS as readonly string[]).includes('disarm-record'),
     `keys=${SETTING_KEYS.join(',')} effects=${SETTINGS_EFFECTS.join(',')}`,
+  );
+  check(
+    'the retired single-unlimited key left the key, policy and edit tables',
+    !(SETTING_KEYS as readonly string[]).includes('unlimited') &&
+      !Object.prototype.hasOwnProperty.call(SETTING_POLICIES, 'unlimited') &&
+      !Object.prototype.hasOwnProperty.call(SETTING_EDIT_FEATURES, 'unlimited'),
+    `keys=${SETTING_KEYS.join(',')}`,
   );
   check(
     'disarm-trigger is a declared settings effect',
