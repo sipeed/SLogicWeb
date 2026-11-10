@@ -6,7 +6,7 @@
  * unit dropdown makes the user do the thinking. Instead the slider is split into stages
  * that change unit as it moves right, like reading a time value out loud:
  *
- *   1 ms ... 4999 ms | 5 s ... 59 s | 1 min ... 2 min | ∞
+ *   1 ms ... 4999 ms | 5 s ... 59 s | 1 min ... 2 min
  *
  * The thresholds are fixed in seconds so the crossing is predictable: below 1 ms values
  * step in microseconds, below 5 s in milliseconds, below 60 s in seconds, and after that
@@ -14,9 +14,6 @@
  * at 21 s has only the millisecond and second stages. Within a stage the step is a whole
  * number of its unit, chosen to keep the stage under {@link MAX_STAGE_STEPS} slider
  * positions; the numeric field remains the exact editor.
- *
- * The finite track positions are stable; the Unlimited notch, when offered, sits at the
- * end of the track and is handled by the control, not by {@link timeAtPosition}.
  */
 
 import { maxCaptureTimeValue } from './captureTime.js';
@@ -59,9 +56,7 @@ export interface StagedTimeScale {
   stages: readonly TimeStage[];
   /** Position of the last finite value. */
   finiteMax: number;
-  /** Position of the Unlimited notch, or null when this control has no Unlimited. */
-  unlimited: number | null;
-  /** The range input's max attribute. */
+  /** The range input's max attribute; the whole track is finite. */
   sliderMax: number;
 }
 
@@ -72,9 +67,6 @@ export interface ScaledTimeValue {
   unit: ScaleUnit;
   stage: TimeStage;
 }
-
-/** Fraction of the track used by finite values when Unlimited is offered. */
-const UNLIMITED_FINITE_FRACTION = 1000 / 1120;
 
 function validRange(minSeconds: number, maxSeconds: number): boolean {
   return Number.isFinite(minSeconds) && Number.isFinite(maxSeconds) &&
@@ -115,15 +107,12 @@ function makeStage(
   };
 }
 
-/**
- * Build the stages covering [minSeconds, maxSeconds]. `unlimited` reserves the warning
- * segment at the end of the track (only Single's duration offers it).
- */
+/** Build the stages covering [minSeconds, maxSeconds]. */
 export function buildTimeScale(
-  minSeconds: number, maxSeconds: number, unlimited = false,
+  minSeconds: number, maxSeconds: number,
 ): StagedTimeScale {
   if (!validRange(minSeconds, maxSeconds)) {
-    return { stages: [], finiteMax: 0, unlimited: null, sliderMax: 0 };
+    return { stages: [], finiteMax: 0, sliderMax: 0 };
   }
   const stages: TimeStage[] = [];
   let nextStart = 0;
@@ -156,14 +145,10 @@ export function buildTimeScale(
   const finiteMax = stages.length > 0
     ? stages[stages.length - 1]!.start + stages[stages.length - 1]!.steps
     : 0;
-  if (!unlimited) {
-    return { stages, finiteMax, unlimited: null, sliderMax: finiteMax };
-  }
-  const sliderMax = Math.max(finiteMax + 1, Math.round(finiteMax / UNLIMITED_FINITE_FRACTION));
-  return { stages, finiteMax, unlimited: sliderMax, sliderMax };
+  return { stages, finiteMax, sliderMax: finiteMax };
 }
 
-/** The value at a finite slider position. Positions on the Unlimited notch return null. */
+/** The value at a finite slider position; anything outside the track returns null. */
 export function timeAtPosition(scale: StagedTimeScale, position: number): ScaledTimeValue | null {
   if (!Number.isFinite(position) || !Number.isInteger(position) ||
       position < 0 || position > scale.finiteMax) return null;

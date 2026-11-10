@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * The staged acquisition-time control: a slider whose unit changes as it moves right
- * (microseconds, milliseconds, seconds, minutes, then Unlimited), plus a numeric field
- * and a read-only unit badge. The scale itself lives in `timeScale.ts`.
+ * (microseconds, milliseconds, seconds, minutes), plus a numeric field and a read-only
+ * unit badge. The scale itself lives in `timeScale.ts`.
  *
  * The slider commits on `change`, not on every `input`, so dragging does not spam the
  * settings path; the number and ARIA text follow the thumb while dragging. The numeric
@@ -13,19 +13,13 @@
 
 import { selectControl, type SelectOptionTuple } from './select.js';
 import {
-  buildTimeScale, finiteMaxValue, positionForSeconds, secondsInUnit, timeAtPosition,
+  buildTimeScale, positionForSeconds, secondsInUnit, timeAtPosition,
   unitValueText, type ScaleUnit,
 } from './timeScale.js';
 
 // The value stays the ASCII unit id ('us'); the label is the written unit, µs (search: "us").
 const SCALE_UNIT_OPTIONS: SelectOptionTuple[] = [['us', '\u00b5s', 'us'], ['ms', 'ms'], ['s', 's'], ['min', 'min']];
 const unitLabel = (unit: ScaleUnit): string => (unit === 'us' ? '\u00b5s' : unit);
-
-export interface AcquisitionTimeUnlimited {
-  active: boolean;
-  label: string;
-  onSelect(): void;
-}
 
 export interface AcquisitionTimeControlOptions {
   key: string;
@@ -34,13 +28,11 @@ export interface AcquisitionTimeControlOptions {
   minSeconds: number;
   maxSeconds: number;
   disabled: boolean;
-  unlimited?: AcquisitionTimeUnlimited;
   onValue(seconds: number): void;
 }
 
 export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): { el: HTMLDivElement } {
-  const hasUnlimited = options.unlimited !== undefined;
-  const scale = buildTimeScale(options.minSeconds, options.maxSeconds, hasUnlimited);
+  const scale = buildTimeScale(options.minSeconds, options.maxSeconds);
   const initial = positionForSeconds(scale, options.seconds);
   const unavailable = scale.stages.length === 0 || scale.finiteMax === 0;
   const root = document.createElement('div');
@@ -61,34 +53,15 @@ export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): 
   sliderWrap.className = 'acquisition-time-slider-wrap';
   const range = document.createElement('input');
   range.type = 'range';
-  range.className = 'acquisition-time-slider' + (hasUnlimited ? ' has-unlimited' : '');
+  range.className = 'acquisition-time-slider';
   range.dataset.timeSlider = options.key;
   range.min = '0';
   range.max = String(scale.sliderMax);
   range.step = '1';
-  const startPosition = options.unlimited?.active
-    ? scale.unlimited ?? scale.finiteMax
-    : initial?.position ?? 0;
-  range.value = String(startPosition);
+  range.value = String(initial?.position ?? 0);
   range.disabled = options.disabled || unavailable;
   range.setAttribute('aria-label', options.label);
-  if (scale.unlimited !== null) range.dataset.unlimitedValue = String(scale.unlimited);
   sliderWrap.appendChild(range);
-
-  if (options.unlimited) {
-    const labels = document.createElement('div');
-    labels.className = 'acquisition-time-slider-labels';
-    const finite = document.createElement('span');
-    const finiteTop = finiteMaxValue(scale);
-    finite.textContent = finiteTop ? `${finiteTop.value} ${finiteTop.unit}` : '';
-    finite.title = finite.textContent;
-    const unlimited = document.createElement('span');
-    unlimited.textContent = '∞';
-    unlimited.title = options.unlimited.label;
-    unlimited.setAttribute('aria-label', options.unlimited.label);
-    labels.append(finite, unlimited);
-    sliderWrap.appendChild(labels);
-  }
 
   const inputGroup = document.createElement('div');
   inputGroup.className = 'acquisition-time-input-group';
@@ -102,23 +75,15 @@ export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): 
   number.disabled = options.disabled || unavailable;
   number.setAttribute('aria-label', options.label);
 
-  const unlimitedValue = document.createElement('span');
-  unlimitedValue.className = 'acquisition-time-unlimited';
-  unlimitedValue.dataset.timeUnlimited = options.key;
-  unlimitedValue.textContent = '∞';
-  unlimitedValue.title = options.unlimited?.label ?? '';
-  unlimitedValue.setAttribute('aria-label', options.unlimited?.label ?? '');
-
   const unitControl = selectControl(
     `${options.key}.unit`, options.label, SCALE_UNIT_OPTIONS, 'ms',
   );
   unitControl.el.classList.add('acquisition-time-unit');
   unitControl.disabled = options.disabled || unavailable;
-  inputGroup.append(number, unlimitedValue, unitControl.el);
+  inputGroup.append(number, unitControl.el);
   body.append(sliderWrap, inputGroup);
   root.append(head, body);
 
-  let unlimitedDraft = options.unlimited?.active === true;
   let unit: ScaleUnit = initial?.value.unit ?? scale.stages[0]?.unit ?? 'ms';
 
   const setFieldInvalid = (invalid: boolean): void => {
@@ -137,29 +102,17 @@ export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): 
     const fraction = scale.sliderMax > 0 ? position / scale.sliderMax : 0;
     range.style.setProperty('--acquisition-fill', `${Math.min(100, Math.max(0, fraction * 100))}%`);
   };
-  const showFinite = (seconds: number, updateNumber = true): void => {
-    unlimitedDraft = false;
-    number.hidden = false;
-    unlimitedValue.hidden = true;
-    range.classList.remove('is-unlimited');
+  const showValue = (seconds: number): void => {
     const value = timeAtPosition(scale, positionForSeconds(scale, seconds)?.position ?? 0);
     if (value) setUnit(value.unit);
-    if (updateNumber) number.value = unitValueText(seconds, unit);
+    number.value = unitValueText(seconds, unit);
     range.setAttribute('aria-valuetext', `${unitValueText(seconds, unit)} ${unitLabel(unit)}`);
   };
   const syncFromPosition = (position: number): void => {
     setFill(position);
-    if (scale.unlimited !== null && position === scale.unlimited) {
-      unlimitedDraft = true;
-      range.classList.add('is-unlimited');
-      number.hidden = true;
-      unlimitedValue.hidden = false;
-      range.setAttribute('aria-valuetext', options.unlimited?.label ?? '');
-      return;
-    }
     const value = timeAtPosition(scale, position);
     if (!value) return;
-    showFinite(value.seconds);
+    showValue(value.seconds);
   };
   const commitSeconds = (seconds: number): void => {
     const clamped = Math.min(options.maxSeconds, Math.max(options.minSeconds, seconds));
@@ -173,15 +126,6 @@ export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): 
     number.value = unitValueText(initialSeconds, unit);
     range.setAttribute('aria-valuetext', `${unitValueText(initialSeconds, unit)} ${unitLabel(unit)}`);
   }
-  if (unlimitedDraft) {
-    number.hidden = true;
-    unlimitedValue.hidden = false;
-    range.classList.add('is-unlimited');
-    range.setAttribute('aria-valuetext', options.unlimited?.label ?? '');
-  } else {
-    number.hidden = false;
-    unlimitedValue.hidden = true;
-  }
   setFill(Number(range.value));
   setFieldInvalid(false);
 
@@ -190,12 +134,7 @@ export function acquisitionTimeControl(options: AcquisitionTimeControlOptions): 
     syncFromPosition(Number(range.value));
   });
   range.addEventListener('change', () => {
-    const position = Number(range.value);
-    if (scale.unlimited !== null && position === scale.unlimited) {
-      options.unlimited?.onSelect();
-      return;
-    }
-    const value = timeAtPosition(scale, position);
+    const value = timeAtPosition(scale, Number(range.value));
     if (value) commitSeconds(value.seconds);
   });
 

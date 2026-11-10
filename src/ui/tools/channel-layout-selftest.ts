@@ -535,7 +535,8 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     (panel.match(/acquisitionTimeControl\(\{/g) ?? []).length === 3 &&
     !panel.includes('secs.dataset.captureSeconds') && !panel.includes('interval.dataset.repeatInterval') &&
     !panel.includes('unlimited.dataset.singleUnlimited') && !panel.includes('win.dataset.loopSamples') &&
-    panel.includes('singleUnlimited: true') && panel.includes('singleUnlimited: false') &&
+    !panel.includes('unlimited: {') && !panel.includes('singleUnlimited: true') &&
+    panel.includes('singleUnlimited: false') &&
     modeBlock.includes('b.disabled = modeLocked') && modeBlock.includes('s.mode === id') &&
     modeBlock.includes('const modeLocked = v.running || v.stopping || v.repeatPending') &&
     !modeBlock.includes('oscilloscope') && !panel.includes('v.effectiveMode') &&

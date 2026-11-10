@@ -33,13 +33,14 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
 
 {
   const staged = source.includes("from './timeScale.js'") &&
-    source.includes('buildTimeScale(options.minSeconds, options.maxSeconds, hasUnlimited)') &&
+    source.includes('buildTimeScale(options.minSeconds, options.maxSeconds)') &&
     source.includes('positionForSeconds(scale, options.seconds)') &&
     source.includes('timeAtPosition(scale, position)') &&
     source.includes('secondsInUnit(typed, unit)') &&
     source.includes('unitValueText');
   check('the control is built on the staged scale, not a linear per-unit mapping',
-    staged && !source.includes("from './timeSlider.js'") && !source.includes('SLIDER_FINITE_MAX'),
+    staged && !source.includes("from './timeSlider.js'") && !source.includes('SLIDER_FINITE_MAX') &&
+    !source.includes('hasUnlimited'),
     `staged=${staged}, sliderImport=${source.includes("from './timeSlider.js'")}`);
 }
 
@@ -49,9 +50,9 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
   check('the slider previews its stage while dragging and commits only on change',
     rangeInput.includes('syncFromPosition(Number(range.value))') &&
     !rangeInput.includes('commitSeconds') &&
-    rangeChange.includes('scale.unlimited !== null && position === scale.unlimited') &&
-    rangeChange.includes('options.unlimited?.onSelect()') &&
-    rangeChange.includes('commitSeconds(value.seconds)'),
+    rangeChange.includes('timeAtPosition(scale, Number(range.value))') &&
+    rangeChange.includes('commitSeconds(value.seconds)') &&
+    !rangeChange.includes('unlimited') && !rangeChange.includes('onSelect'),
     `input=${rangeInput.length}, change=${rangeChange.length}`);
 }
 
@@ -81,10 +82,13 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
 {
   const sync = between(source, 'const syncFromPosition =', 'const commitSeconds =');
   const initial = between(source, 'const initialSeconds = options.seconds;', 'setFieldInvalid(false);');
-  check('Unlimited hides the number, shows the warning glyph, and a finite value restores it',
-    sync.includes('number.hidden = true') && sync.includes('unlimitedValue.hidden = false') &&
-    sync.includes("range.classList.add('is-unlimited')") &&
-    initial.includes('number.hidden = false') && initial.includes('unlimitedValue.hidden = true'),
+  check('the control keeps only the finite path: no infinity readout, label row or hidden number field',
+    sync.includes('showValue(value.seconds)') &&
+    initial.includes('number.value = unitValueText(initialSeconds, unit)') &&
+    !source.includes('unlimitedValue') && !source.includes('unlimitedDraft') &&
+    !source.includes('is-unlimited') && !source.includes('has-unlimited') &&
+    !source.includes('slider-labels') && !source.includes('number.hidden') &&
+    !source.includes('\u221e'),
     `sync=${sync.length}, initial=${initial.length}`);
 }
 
@@ -102,8 +106,8 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
   const fill = source.includes('position / scale.sliderMax') &&
     source.includes("'--acquisition-fill'");
   const aria = source.includes("range.setAttribute('aria-valuetext'") &&
-    source.includes('options.unlimited?.label');
-  check('the fill fraction and ARIA text follow the staged position and the Unlimited label',
+    source.includes('${unitValueText(seconds, unit)} ${unitLabel(unit)}');
+  check('the fill fraction and ARIA text follow the staged position and the unit label',
     fill && aria, `fill=${fill}, aria=${aria}`);
 }
 
@@ -112,8 +116,9 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
     (panel.match(/onValue: \(seconds\) =>/g) ?? []).length === 3 &&
     !panel.includes('captureTimeUnit') && !panel.includes('repeatIntervalUnit') &&
     !panel.includes('loopTimeUnit') && !panel.includes('unitLabel:') &&
-    !panel.includes('onUnit:');
-  check('all three controls pass seconds, and the panel keeps no per-control unit state',
+    !panel.includes('onUnit:') && !panel.includes('unlimited: {') &&
+    !panel.includes('singleUnlimited: true');
+  check('all three controls pass seconds, and the panel keeps no per-control unit or Unlimited state',
     panelWired, `panel=${panelWired}`);
 }
 
@@ -141,12 +146,30 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
 }
 
 {
+  const block = between(sheet, '.acquisition-time {', '.field-row');
+  check('the slider keeps the ordinary primary track over the whole finite span',
+    block.includes('linear-gradient(to right, var(--primary) 0 var(--acquisition-fill), var(--muted) var(--acquisition-fill) 100%)') &&
+    block.includes('background: var(--primary); border: 2px solid var(--bg10); border-radius: 50%') &&
+    block.includes('::-moz-range-progress { height: 4px; background: var(--primary); border-radius: 4px; }') &&
+    !/has-unlimited|is-unlimited|--warning|89\.285|slider-labels|acquisition-time-unlimited/.test(block),
+    `warn=${block.includes('--warning')}, sentinel=${block.includes('89.285')}`);
+}
+
+{
   check('the scale module owns the thresholds and has no DOM dependency',
     scaleSource.includes("'us', belowSeconds: 0.001") &&
     scaleSource.includes("'ms', belowSeconds: 5") &&
     scaleSource.includes("'s', belowSeconds: 60") &&
     !scaleSource.includes('document.') && !scaleSource.includes('HTMLElement'),
     'thresholds and DOM-free scale');
+}
+
+{
+  check('the scale module exposes no Unlimited endpoint for the control to render',
+    !/unlimited/i.test(scaleSource) && !scaleSource.includes('1120') &&
+    scaleSource.includes('finiteMax: 0, sliderMax: 0') &&
+    scaleSource.includes('return { stages, finiteMax, sliderMax: finiteMax };'),
+    `unlimited=${/unlimited/i.test(scaleSource)}, share=${scaleSource.includes('1120')}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

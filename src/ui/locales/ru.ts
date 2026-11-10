@@ -558,7 +558,7 @@ export const ru: Messages = {
   'capturePanel.repeatInterval': 'Интервал',
   'capturePanel.loopWindow': 'Сохранено {kept} из не более {limit} ({rate}) · отброшено {dropped}',
   'capturePanel.loopWindowLimit': 'Хранит не более {duration} ({rate}).',
-  'capturePanel.singleFiniteNote': 'Конечный захват до {max}; перетащите в правый сегмент для неограниченного.',
+  'capturePanel.singleFiniteNote': 'Конечный захват до {max}.',
   'capturePanel.singleUnlimitedNote': 'Захват идёт, пока вы не нажмёте «Стоп». Заданная ранее длительность запоминается и вернётся при обратном переключении.',
   'capturePanel.repeatFiniteNote': 'Конечный захват до {max}; каждый завершённый цикл ждёт интервал.',
   'capturePanel.repeatLayersNote': 'Повтор рисует предыдущий захват под текущим: тёплый фон — текущий захват, сине-серый — предыдущий захват, пока текущий не заполнит вид.',

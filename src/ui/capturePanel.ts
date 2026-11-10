@@ -997,13 +997,6 @@ export class CapturePanel {
         minSeconds: MIN_CAPTURE_SECONDS,
         maxSeconds,
         disabled: timeLocked,
-        ...(s.mode === 'single' ? {
-          unlimited: {
-            active: s.singleUnlimited,
-            label: t('capturePanel.unlimited'),
-            onSelect: () => this.cb.onSettings({ ...s, singleUnlimited: true }),
-          },
-        } : {}),
         onValue: (seconds) => {
           this.cb.onSettings({ ...s, seconds, singleUnlimited: false });
         },

@@ -567,7 +567,7 @@ export const fr: Messages = {
   'capturePanel.repeatInterval': 'Intervalle',
   'capturePanel.loopWindow': 'Conservé {kept} sur {limit} au plus ({rate}) · {dropped} abandonné',
   'capturePanel.loopWindowLimit': 'Conserve au plus {duration} ({rate}).',
-  'capturePanel.singleFiniteNote': 'Acquisition finie jusqu’à {max} ; faites glisser vers le segment droit pour Illimité.',
+  'capturePanel.singleFiniteNote': 'Acquisition finie jusqu’à {max}.',
   'capturePanel.singleUnlimitedNote': 'L’acquisition continue jusqu’à ce que vous appuyiez sur Arrêter. La durée réglée auparavant est mémorisée pour quand vous reviendrez.',
   'capturePanel.repeatFiniteNote': 'Acquisition finie jusqu’à {max} ; chaque cycle terminé attend l’intervalle.',
   'capturePanel.repeatLayersNote': 'Répéter dessine l’acquisition précédente derrière la courante : fond chaud = acquisition courante, bleu-gris = acquisition précédente, jusqu’à ce que la courante remplisse la vue.',

@@ -568,7 +568,7 @@ export const en = {
   'capturePanel.repeatInterval': 'Interval',
   'capturePanel.loopWindow': 'Kept {kept} of at most {limit} ({rate}) · {dropped} discarded',
   'capturePanel.loopWindowLimit': 'Keeps at most {duration} ({rate}).',
-  'capturePanel.singleFiniteNote': 'Finite capture up to {max}; drag to the right segment for Unlimited.',
+  'capturePanel.singleFiniteNote': 'Finite capture up to {max}.',
   'capturePanel.singleUnlimitedNote': 'Runs until you press Stop. The duration you set before is remembered for when you switch back.',
   'capturePanel.repeatFiniteNote': 'Finite capture up to {max}; each completed run waits for the interval.',
   'capturePanel.repeatLayersNote': 'Repeat draws the previous capture behind the current one: warm background = current capture, blue-grey = previous capture, until the current one fills the view.',

@@ -67,15 +67,15 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 {
-  const scale = buildTimeScale(0.001, 21.47, true);
-  const fraction = scale.finiteMax / scale.sliderMax;
+  const scale = buildTimeScale(0.001, 21.47);
   const top = finiteMaxValue(scale);
-  const last = timeAtPosition(scale, scale.finiteMax);
-  check('the finite track leaves the HSync 89.285% share before the Unlimited notch',
-    Math.abs(fraction - 1000 / 1120) < 0.002 && scale.unlimited === scale.sliderMax &&
+  const last = timeAtPosition(scale, scale.sliderMax);
+  check('the whole slider track is finite: its top position is the largest finite value',
+    scale.finiteMax > 0 && scale.sliderMax === scale.finiteMax &&
     top !== null && last !== null && top.seconds === last.seconds &&
-    timeAtPosition(scale, scale.unlimited!) === null,
-    `finite=${scale.finiteMax}, slider=${scale.sliderMax}, unlimited=${scale.unlimited}, fraction=${fraction.toFixed(4)}`);
+    timeAtPosition(scale, scale.sliderMax + 1) === null &&
+    Object.keys(scale).join(',') === 'stages,finiteMax,sliderMax',
+    `finite=${scale.finiteMax}, slider=${scale.sliderMax}, top=${top?.seconds}, keys=${Object.keys(scale).join(',')}`);
 }
 
 {

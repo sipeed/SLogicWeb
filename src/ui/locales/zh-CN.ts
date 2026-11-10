@@ -514,7 +514,7 @@ export const zhCN: Messages = {
   'capturePanel.repeatInterval': '间隔',
   'capturePanel.loopWindow': '已保留 {kept}，最长保留 {limit}（{rate}）· 已丢弃 {dropped}',
   'capturePanel.loopWindowLimit': '最长保留 {duration}（{rate}）。',
-  'capturePanel.singleFiniteNote': '有限采集最长 {max}；拖动到右段可选择无限。',
+  'capturePanel.singleFiniteNote': '有限采集最长 {max}。',
   'capturePanel.singleUnlimitedNote': '一直采集，直到点击停止。之前设置的时长会被记住，切回有限采集时恢复。',
   'capturePanel.repeatFiniteNote': '有限采集最长 {max}；每轮正常完成后等待间隔。',
   'capturePanel.repeatLayersNote': '重复模式会把上一次采集画在本次采集下面：暖色背景是本次采集，蓝灰背景是上一次采集，直到本次采集画满视图。',
