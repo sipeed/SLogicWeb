@@ -189,6 +189,7 @@ function mediaOverrides(selector: string, prop: string): string[] {
 
 {
   const bottom = 'calc(50% - (var(--overview-h) + var(--axis-h)) / 2)';
+  const ink = 'color-mix(in oklab, var(--muted-foreground) 92%, var(--bg10))';
   const pinned = (ruleSet: readonly Rule[]): boolean =>
     base('#empty-hint', 'position', ruleSet) === 'sticky' &&
     base('#empty-hint', 'bottom', ruleSet) === bottom &&
@@ -197,20 +198,23 @@ function mediaOverrides(selector: string, prop: string): string[] {
     base('#empty-hint', 'inset', ruleSet) === undefined &&
     base('#empty-hint', 'align-items', ruleSet) === 'flex-start' &&
     base('#empty-hint', 'justify-content', ruleSet) === 'center' &&
-    base('#empty-hint', 'color', ruleSet) === 'var(--text50)' &&
-    base('.empty-hint-body', 'transform', ruleSet) === 'translateY(-50%)';
+    base('#empty-hint', 'color', ruleSet) === ink &&
+    base('.empty-hint-body', 'transform', ruleSet) === 'translateY(-50%)' &&
+    base('.empty-hint-starting', 'color', ruleSet) === 'var(--text50)';
   const absolute = css.replace(`#empty-hint {\n  position: sticky;\n  bottom: ${bottom};`,
     '#empty-hint {\n  position: absolute; inset: 0;');
   const untransformed = css.replace('.empty-hint-body { transform: translateY(-50%); }', '');
   const uncontained = css.replace('  contain: layout;\n', '');
-  const recolored = css.replace('color: var(--text50); pointer-events: none; text-align: center;',
-    'color: var(--text80); pointer-events: none; text-align: center;');
+  const recolored = css.replace(`color: ${ink};`, 'color: var(--text50);');
+  const bootRecolored = css.replace(
+    '.empty-hint-starting { font-size: 12px; opacity: 0.8; color: var(--text50); }',
+    '.empty-hint-starting { font-size: 12px; opacity: 0.8; }');
   const direct = /<div id="plot"[^>]*>\s*<div id="wave-stack"><\/div>\s*<div id="empty-hint" translate="yes">/.test(html);
   const noOverrides = ['position', 'bottom', 'height', 'contain', 'color'].every((prop) =>
     mediaOverrides('#empty-hint', prop).length === 0);
-  const controls = [absolute, untransformed, uncontained, recolored].every((mutated) =>
+  const controls = [absolute, untransformed, uncontained, recolored, bootRecolored].every((mutated) =>
     mutated !== css && !pinned(rules(mutated)));
-  check('the empty hint sticks to the visible plot center and keeps its muted ink',
+  check('the empty hint sticks to the visible plot center with softened ink and unchanged boot ink',
     pinned(all) && direct && noOverrides && controls,
     `pinned=${pinned(all)}, direct=${direct}, noOverrides=${noOverrides}, controls=${controls}`);
 }
