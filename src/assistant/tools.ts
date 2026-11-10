@@ -222,7 +222,6 @@ function settingsView(s: CaptureSettings): Record<string, unknown> {
     threshold_v: s.thresholdVolts,
     mode: s.mode,
     seconds: s.seconds,
-    single_unlimited: s.singleUnlimited,
     repeat_interval_seconds: s.repeatIntervalSeconds,
     loop_samples: s.loopSamples,
     test_mode: s.testMode,
@@ -593,10 +592,10 @@ export const TOOLS: AssistantTool[] = [
       samplerate_hz: { type: 'number', exclusiveMinimum: 0 },
       threshold_v: { type: 'number', minimum: 0.1, maximum: 5 },
       mode: { type: 'string', enum: ['single', 'repeat', 'loop', 'timer', 'free'],
-        description: 'single: capture once. repeat: capture again after each finite capture. loop: retain the newest window. Legacy timer/free map to finite/unlimited single.' },
+        description: 'single: capture once for the finite seconds duration. repeat: capture again after each finite capture. loop: retain the newest window. Legacy timer/free map to a finite single capture.' },
       seconds: { type: 'number', minimum: 0.001,
         description: 'Post-trigger capture length in single/repeat mode, from 0.001 s (1 ms) up to the sample-count limit.' },
-      single_unlimited: { type: 'boolean', description: 'In single mode, run until stopped or the sample ceiling; seconds remains the finite draft.' },
+      single_unlimited: { type: 'boolean', description: 'Accepted for compatibility with older calls and ignored; a single capture always uses the finite seconds duration.' },
       repeat_interval_seconds: { type: 'number', minimum: 0.1, maximum: 10,
         description: 'Delay between a naturally completed repeat capture and the next one, from 0.1 to 10 seconds.' },
       loop_samples: { type: 'number', minimum: 1024,
@@ -616,17 +615,12 @@ export const TOOLS: AssistantTool[] = [
       const patch: Partial<CaptureSettings> = {};
       if (typeof i.samplerate_hz === 'number') patch.samplerate = i.samplerate_hz;
       if (typeof i.threshold_v === 'number') patch.thresholdVolts = i.threshold_v;
-      if (i.mode === 'free') {
+      if (i.mode === 'free' || i.mode === 'timer') {
         patch.mode = 'single';
-        patch.singleUnlimited = true;
-      } else if (i.mode === 'timer') {
-        patch.mode = 'single';
-        patch.singleUnlimited = false;
       } else if (i.mode === 'single' || i.mode === 'repeat' || i.mode === 'loop') {
         patch.mode = i.mode;
       }
       if (typeof i.seconds === 'number') patch.seconds = i.seconds;
-      if (typeof i.single_unlimited === 'boolean') patch.singleUnlimited = i.single_unlimited;
       if (typeof i.repeat_interval_seconds === 'number') patch.repeatIntervalSeconds = i.repeat_interval_seconds;
       if (typeof i.loop_samples === 'number') patch.loopSamples = i.loop_samples;
       if (i.test_mode === 0 || i.test_mode === 1 || i.test_mode === 2) patch.testMode = i.test_mode;
@@ -669,7 +663,7 @@ export const TOOLS: AssistantTool[] = [
     description:
       'Start a capture on the connected device with the current settings and wait until ' +
       'the single capture, one repeat iteration, or trigger stops, or `timeout_s` passes. ' +
-      'Unlimited single runs to the sample ceiling; loop keeps running after the timeout; ' +
+      'Loop keeps running after the timeout; ' +
       'repeat may be pending. Call stop_capture to end them.',
     inputSchema: obj({
       timeout_s: { type: 'number', minimum: 1, maximum: 120, description: 'How long to wait. Default 15.' },

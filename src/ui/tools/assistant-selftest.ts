@@ -225,7 +225,7 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
   const stateCaptureSettings = state.settings as Record<string, unknown>;
   check('get_state reports the capture and limits',
     st.ok && (state.capture as { samplerate_hz: number }).samplerate_hz === 16e6 &&
-    stateCaptureSettings.mode === 'single' && stateCaptureSettings.single_unlimited === false &&
+    stateCaptureSettings.mode === 'single' && !('single_unlimited' in stateCaptureSettings) &&
     stateCaptureSettings.repeat_interval_seconds === 1 &&
     JSON.stringify(state.max_samplerate_hz_by_width) === '{"16":400000000,"32":200000000}',
     JSON.stringify(state).slice(0, 300));
@@ -293,13 +293,13 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
   const lastRepeat = host.applied[host.applied.length - 1]!;
   check('set_capture_settings maps repeat fields',
     setRepeat.ok && lastRepeat.patch.mode === 'repeat' && lastRepeat.patch.repeatIntervalSeconds === 0.1 &&
-    lastRepeat.patch.singleUnlimited !== true,
+    !('singleUnlimited' in lastRepeat.patch),
     JSON.stringify(lastRepeat.patch));
   check('set_capture_settings maps loop fields',
     setLoop.ok && lastLoop.patch.mode === 'loop' && lastLoop.patch.loopSamples === 2_000_000,
     JSON.stringify(lastLoop.patch));
   check('set_capture_settings maps fields and clears dont-care channels',
-    set.ok && last.patch.mode === 'single' && last.patch.singleUnlimited === true &&
+    set.ok && last.patch.mode === 'single' && !('singleUnlimited' in last.patch) && !('seconds' in last.patch) &&
     last.patch.triggerEnableMask === true &&
     JSON.stringify(last.patch.triggerModes) === '{"0":"rising"}' && last.enabled?.length === 4,
     JSON.stringify(last));
@@ -446,6 +446,72 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
   check('an unknown bus index is explained', !missing.ok && /No bus view 9/.test(missing.err), missing.err);
 }
 
+// ------------------------------------------------------------------ 3c. legacy unlimited capture input
+{
+  const set = toolByName('set_capture_settings')!.inputSchema;
+  const props = set.properties as Record<string, { description?: string }>;
+  check('the legacy single_unlimited input is still accepted and type-checked',
+    validate({ single_unlimited: true }, set).length === 0 &&
+    validate({ single_unlimited: false }, set).length === 0 &&
+    validate({ single_unlimited: 'yes' }, set).length > 0);
+  check('the schema describes the legacy flag as ignored rather than advertised',
+    /ignored/.test(props.single_unlimited?.description ?? '') &&
+    !/unlimited/i.test(props.mode?.description ?? ''),
+    `${props.mode?.description} | ${props.single_unlimited?.description}`);
+  check('no assistant schema description or system prompt still promises unlimited single',
+    !/unlimited/i.test(SYSTEM_PROMPT) &&
+    TOOLS.every((t) => !/unlimited/i.test(t.description)) &&
+    TOOLS.every((t) => Object.entries(t.inputSchema.properties as Record<string, { description?: string }>)
+      .every(([k, p]) => k === 'single_unlimited' || !/unlimited/i.test(p.description ?? ''))),
+    TOOLS.filter((t) => /unlimited/i.test(t.description)).map((t) => t.name).join(','));
+
+  const legacyFree = new FakeHost();
+  const free = await run('set_capture_settings', { mode: 'free' }, legacyFree);
+  const freePatch = legacyFree.applied.at(-1)!.patch;
+  check('legacy free becomes a finite single and leaves the stored seconds draft alone',
+    free.ok && freePatch.mode === 'single' && !('singleUnlimited' in freePatch) && !('seconds' in freePatch) &&
+    legacyFree.s.seconds === 1,
+    JSON.stringify(freePatch));
+  check('legacy free is reported as a finite single settings change',
+    (free.out as { applied: { mode: string; seconds: number } }).applied.mode === 'single' &&
+    (free.out as { applied: { seconds: number } }).applied.seconds === 1,
+    JSON.stringify(free.out));
+
+  const legacyTimer = new FakeHost();
+  const timer = await run('set_capture_settings', { mode: 'timer', seconds: 0.25 }, legacyTimer);
+  const timerPatch = legacyTimer.applied.at(-1)!.patch;
+  check('legacy timer becomes a finite single and keeps an explicit seconds',
+    timer.ok && timerPatch.mode === 'single' && timerPatch.seconds === 0.25 && !('singleUnlimited' in timerPatch),
+    JSON.stringify(timerPatch));
+
+  for (const flag of [true, false]) {
+    const h = new FakeHost();
+    h.s = { ...h.s, seconds: 2 };
+    const r = await run('set_capture_settings', { mode: 'free', single_unlimited: flag }, h);
+    const p = h.applied.at(-1)!.patch;
+    check(`a legacy single_unlimited=${flag} is ignored and the finite seconds is kept`,
+      r.ok && p.mode === 'single' && !('singleUnlimited' in p) && !('seconds' in p) && h.s.seconds === 2,
+      JSON.stringify(p));
+  }
+
+  const explicit = new FakeHost();
+  explicit.s = { ...explicit.s, seconds: 2 };
+  const ex = await run('set_capture_settings', { mode: 'free', single_unlimited: true, seconds: 0.5 }, explicit);
+  const exPatch = explicit.applied.at(-1)!.patch;
+  check('an explicit seconds wins over the stored draft and the ignored flag',
+    ex.ok && exPatch.seconds === 0.5 && !('singleUnlimited' in exPatch) && explicit.s.seconds === 0.5,
+    JSON.stringify(exPatch));
+
+  const reported = await run('set_capture_settings', { single_unlimited: true, seconds: 0.5 }, explicit);
+  const applied = (reported.out as { applied: Record<string, unknown> }).applied;
+  const state = await run('get_state', {}, explicit);
+  const stateSettings = (state.out as { settings: Record<string, unknown> }).settings;
+  check('the applied result and get_state both omit single_unlimited',
+    reported.ok && !('single_unlimited' in applied) && !('single_unlimited' in stateSettings) &&
+    applied.seconds === 0.5 && stateSettings.seconds === 0.5,
+    JSON.stringify({ applied, stateSettings }));
+}
+
 // ------------------------------------------------------------------ 4. loop
 
 class ScriptedProvider implements Provider {
@@ -509,7 +575,7 @@ async function converse(provider: Provider, approve: boolean | 'abort', host = n
   ]);
   const { host } = await converse(p, true);
   check('an approved act tool runs', host.applied.length === 1 && host.applied[0]!.patch.mode === 'single' &&
-    host.applied[0]!.patch.singleUnlimited === true);
+    !('singleUnlimited' in host.applied[0]!.patch));
 }
 {
   const p = new ScriptedProvider([
