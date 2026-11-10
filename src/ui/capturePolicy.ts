@@ -9,7 +9,6 @@ import {
 
 export function capturePostTriggerSamples(settings: CaptureSettings): number {
   if (settings.mode === 'loop') return clampLoopSamples(settings.loopSamples, settings.channels);
-  if (settings.mode === 'single' && settings.singleUnlimited) return MAX_SAMPLES - 1;
   const seconds = clampCaptureSeconds(settings.seconds, settings.samplerate);
   return Math.min(MAX_SAMPLES - 1, Math.max(1, Math.round(seconds * settings.samplerate)));
 }
@@ -107,7 +106,7 @@ export interface CaptureMemoryReadout {
   warn: boolean;
 }
 
-/** The Unlimited readout: the ceiling, and "about x s left" at the current rate. */
+/** The ceiling readout for a cut request: the ceiling, and "about x s left" at the rate. */
 export function captureMemoryReadout(
   keptSamples: number, channels: ChannelCount, samplerate: number,
 ): CaptureMemoryReadout {

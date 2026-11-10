@@ -165,11 +165,13 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
     !state.includes('setTimeout') && !state.includes('setInterval') &&
     view.includes('captureState: this.capturePanelState(),') &&
     view.includes('progress: this.running ? this.progressView() : null,') &&
-    progress.includes('targetSamples: loop || unlimited ? null : this.captureLimitSamples') &&
+    progress.includes('targetSamples: loop ? null : this.captureLimitSamples') &&
+    !progress.includes('unlimited') &&
     !progress.includes('setTimeout') && !progress.includes('setInterval');
   const oneProgress = fill.includes("t('capturePanel.statusFiniteDetail')") &&
     fill.includes("t('capturePanel.statusLoopDetail')") &&
-    fill.includes("t('capturePanel.statusUnlimitedDetail')") &&
+    !fill.includes('statusUnlimitedDetail') &&
+    !status.includes('statusUnlimitedDetail') &&
     fill.includes('this.setStatusProgress(target !== null && target > 0 ? progress.samples / target * 100 : null)') &&
     setter.includes("this.progressEl.dataset.indeterminate = String(indeterminate)") &&
     setter.includes("this.progressEl.removeAttribute('aria-valuenow')") &&

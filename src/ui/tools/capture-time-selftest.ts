@@ -138,15 +138,18 @@ check('time units are us, ms and s with ms as the shared default',
 
 {
   const base = defaultCaptureSettings();
+  const ceiling = 2 ** 31 - 1;
+  const maximumSeconds = maxCaptureSeconds(base.samplerate);
   const finite = capturePostTriggerSamples({ ...base, seconds: 0.0015 }) === 24_000;
-  const unlimited = capturePostTriggerSamples({ ...base, singleUnlimited: true }) === 2 ** 31 - 1;
-  const repeat = capturePostTriggerSamples({
-    ...base, mode: 'repeat', singleUnlimited: true, seconds: 0.0015,
-  }) === 24_000;
+  const maximum = capturePostTriggerSamples({ ...base, seconds: maximumSeconds }) === ceiling;
+  const repeat = capturePostTriggerSamples({ ...base, mode: 'repeat', seconds: 0.0015 }) === 24_000;
+  const repeatMaximum = capturePostTriggerSamples({
+    ...base, mode: 'repeat', seconds: maximumSeconds,
+  }) === ceiling;
   const loop = capturePostTriggerSamples({ ...base, mode: 'loop', loopSamples: 12_345 }) === 13_312;
-  check('post-trigger policy shares finite, repeat, unlimited and loop budgets',
-    finite && unlimited && repeat && loop,
-    `finite=${finite}, unlimited=${unlimited}, repeat=${repeat}, loop=${loop}`);
+  check('post-trigger policy shares one finite budget across single and repeat and keeps the loop window',
+    finite && maximum && repeat && repeatMaximum && loop,
+    `finite=${finite}, maximum=${maximum}, repeat=${repeat}, repeatMaximum=${repeatMaximum}, loop=${loop}`);
 }
 
 {

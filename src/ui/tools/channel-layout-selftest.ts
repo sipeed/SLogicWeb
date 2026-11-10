@@ -519,7 +519,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const stateSrc = loopFs.readFileSync('src/ui/state.ts', 'utf8');
   check('capture mode stays a closed stored union with no oscilloscope transform',
     !stateSrc.includes('effectiveCaptureMode') && stateSrc.includes("mode: 'single' | 'repeat' | 'loop';") &&
-    stateSrc.includes('singleUnlimited: boolean;') && stateSrc.includes('repeatIntervalSeconds: number;'),
+    !stateSrc.includes('singleUnlimited') && stateSrc.includes('repeatIntervalSeconds: number;'),
     `transform=${stateSrc.includes('effectiveCaptureMode')}, ` +
     `union=${stateSrc.includes("mode: 'single' | 'repeat' | 'loop';")}`);
   const panel = loopFs.readFileSync('src/ui/capturePanel.ts', 'utf8');
@@ -535,8 +535,9 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     (panel.match(/acquisitionTimeControl\(\{/g) ?? []).length === 3 &&
     !panel.includes('secs.dataset.captureSeconds') && !panel.includes('interval.dataset.repeatInterval') &&
     !panel.includes('unlimited.dataset.singleUnlimited') && !panel.includes('win.dataset.loopSamples') &&
-    !panel.includes('unlimited: {') && !panel.includes('singleUnlimited: true') &&
-    panel.includes('singleUnlimited: false') &&
+    !panel.includes('singleUnlimited') &&
+    panel.includes('capturePanel.singleFiniteNote') && panel.includes('capturePanel.repeatFiniteNote') &&
+    panel.includes('capturePanel.loopWindowLimit') &&
     modeBlock.includes('b.disabled = modeLocked') && modeBlock.includes('s.mode === id') &&
     modeBlock.includes('const modeLocked = v.running || v.stopping || v.repeatPending') &&
     !modeBlock.includes('oscilloscope') && !panel.includes('v.effectiveMode') &&
@@ -563,7 +564,8 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     startSrc.includes("const isLoop = mode === 'loop'") &&
     startSrc.includes('const postTriggerSamples = capturePostTriggerSamples(this.settings)') &&
     startSrc.includes('this.captureLimitSamples = isLoop ? MAX_SAMPLES - 1 : postTriggerSamples;') &&
-    appSrc.includes("singleUnlimited: s.mode === 'single' && s.singleUnlimited === true") &&
+    startSrc.includes('this.captureRequestedSeconds = isLoop ? null : postTriggerSamples / cfg.samplerate;') &&
+    !appSrc.includes('singleUnlimited') &&
     appSrc.includes('repeatIntervalSeconds: clampRepeatIntervalSeconds(') &&
     !appSrc.includes('effectiveCaptureMode') && !appSrc.includes('effectiveMode:') &&
     !appSrc.includes('private oscilloscopeActive()');

@@ -81,7 +81,7 @@ function check(name: string, pass: boolean, detail: string): void {
       en.includes('actual 109.5 ms') && en.includes('10,952,704') &&
       zh.startsWith('主机过载') && zh.includes('请求 1.000 s') && zh.includes('实际 109.5 ms'),
     `en=${en} | zh=${zh}`);
-  check('an Unlimited or Loop abort reports only what arrived',
+  check('a Loop abort reports only what arrived',
     enOpen.startsWith('Device disconnected') && !enOpen.includes('requested') &&
       enOpen.includes('actual 109.5 ms'),
     enOpen);

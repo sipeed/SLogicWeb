@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
- * "Use it longer": the memory ceiling for Single Unlimited (and any request above it),
+ * "Use it longer": the memory ceiling for a request above it,
  * the panel's ceiling/remaining readout, the typed 'memory' abort, the streamed .lwcap
  * writer (byte-identical to the old one-buffer encoder, with progress and a typed
  * out-of-memory notice), the rate list's over-bandwidth marking, and the analog rate
@@ -23,6 +23,7 @@ import { samplerateOptions } from '../capturePanel.js';
 import {
   captureMemoryReadout, capturePostTriggerSamples, captureStoreBudget,
 } from '../capturePolicy.js';
+import { maxCaptureSeconds } from '../captureTime.js';
 import { analogSamplerates } from '../channelBanks.js';
 import { formatRate } from '../format.js';
 import { setLocale, t } from '../i18n.js';
@@ -59,17 +60,17 @@ function check(name: string, pass: boolean, detail: string): void {
     rows.map((r) => `${r.c}ch=${r.cap}`).join(' '));
 
   const base = { ...defaultCaptureSettings(), channels: 32 as const, samplerate: 50e6 };
-  const unlimited = captureStoreBudget(
-    capturePostTriggerSamples({ ...base, mode: 'single', singleUnlimited: true }), 32);
+  const maximum = captureStoreBudget(
+    capturePostTriggerSamples({ ...base, mode: 'single', seconds: maxCaptureSeconds(50e6) }), 32);
   const tooLong = captureStoreBudget(
-    capturePostTriggerSamples({ ...base, mode: 'single', singleUnlimited: false, seconds: 20 }), 32);
+    capturePostTriggerSamples({ ...base, mode: 'single', seconds: 20 }), 32);
   const fits = captureStoreBudget(
-    capturePostTriggerSamples({ ...base, mode: 'single', singleUnlimited: false, seconds: 1 }), 32);
-  check('Unlimited and an over-long request are memory-bound; a request that fits is not',
-    unlimited.memoryBound && unlimited.samples === 2 ** 29 &&
+    capturePostTriggerSamples({ ...base, mode: 'single', seconds: 1 }), 32);
+  check('a maximum finite request and an over-long request are memory-bound; a request that fits is not',
+    maximum.memoryBound && maximum.samples === 2 ** 29 &&
       tooLong.memoryBound && tooLong.samples === 2 ** 29 &&
       !fits.memoryBound && fits.samples === 50e6,
-    `unlimited=${JSON.stringify(unlimited)} tooLong=${JSON.stringify(tooLong)} fits=${JSON.stringify(fits)}`);
+    `maximum=${JSON.stringify(maximum)} tooLong=${JSON.stringify(tooLong)} fits=${JSON.stringify(fits)}`);
 
   const fresh = captureMemoryReadout(0, 16, 100e6);
   const half = captureMemoryReadout(2 ** 29, 16, 100e6);

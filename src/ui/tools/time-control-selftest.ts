@@ -117,7 +117,7 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
     !panel.includes('captureTimeUnit') && !panel.includes('repeatIntervalUnit') &&
     !panel.includes('loopTimeUnit') && !panel.includes('unitLabel:') &&
     !panel.includes('onUnit:') && !panel.includes('unlimited: {') &&
-    !panel.includes('singleUnlimited: true');
+    !panel.includes('singleUnlimited');
   check('all three controls pass seconds, and the panel keeps no per-control unit or Unlimited state',
     panelWired, `panel=${panelWired}`);
 }

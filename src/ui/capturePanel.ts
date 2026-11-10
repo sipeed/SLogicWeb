@@ -41,7 +41,7 @@ import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
 import type { CaptureSettings, ChannelState } from './state.js';
 import {
-  clampLoopSamples, defaultChannelName, LOOP_WINDOW_QUANTUM, maxCaptureSamples, maxLoopSamples,
+  clampLoopSamples, defaultChannelName, LOOP_WINDOW_QUANTUM, maxLoopSamples,
   THRESHOLD_VOLT_OPTIONS,
 } from './state.js';
 import {
@@ -156,11 +156,11 @@ export interface CapturePanelView {
     kept: number; limit: number;
     /** The running capture's rate; the loop line reads kept/limit/dropped as durations. */
     samplerateHz: number;
-    /** Finite sample target; null for Unlimited and Loop captures. */
+    /** Finite sample target; null for Loop captures. */
     targetSamples: number | null;
     /**
-     * The memory ceiling and the time left at the capture's rate, for Unlimited and for
-     * a finite request the ceiling cuts; null (or absent) otherwise.
+     * The memory ceiling and the time left at the capture's rate, for a finite request
+     * the ceiling cuts; null (or absent) otherwise.
      */
     memory?: CaptureMemoryReadout | null } | null;
   /**
@@ -418,9 +418,7 @@ export class CapturePanel {
     if (this.statusDetail) {
       this.statusDetail.textContent = target !== null
         ? t('capturePanel.statusFiniteDetail')
-        : progress.limit > 0
-          ? t('capturePanel.statusLoopDetail')
-          : t('capturePanel.statusUnlimitedDetail');
+        : t('capturePanel.statusLoopDetail');
     }
     this.setStatusProgress(target !== null && target > 0 ? progress.samples / target * 100 : null);
   }
@@ -976,9 +974,7 @@ export class CapturePanel {
               ? captureAbortDetail(v.abort ?? { cause: 'device', requestedSeconds: null },
                 v.result ?? { samples: 0, seconds: 0 })
             : v.progress && v.progress.targetSamples === null
-              ? v.progress.limit > 0
-                ? t('capturePanel.statusLoopDetail')
-                : t('capturePanel.statusUnlimitedDetail')
+              ? t('capturePanel.statusLoopDetail')
               : t('capturePanel.statusFiniteDetail');
     if (progressActive) this.setStatusProgress(null);
     else {
@@ -998,7 +994,7 @@ export class CapturePanel {
         maxSeconds,
         disabled: timeLocked,
         onValue: (seconds) => {
-          this.cb.onSettings({ ...s, seconds, singleUnlimited: false });
+          this.cb.onSettings({ ...s, seconds });
         },
       });
       modeSec.body.appendChild(duration.el);
@@ -1044,23 +1040,9 @@ export class CapturePanel {
         rate: formatRate(s.samplerate),
       });
     } else {
-      if (s.mode === 'single' && s.singleUnlimited) {
-        const cap = maxCaptureSamples(s.channels);
-        limit.textContent = `${t('capturePanel.singleUnlimitedNote')} ${t('capturePanel.memoryCeiling', {
-          size: formatBytes(cap * bytesPerSampleForChannels(s.channels)),
-          samples: cap.toLocaleString(),
-          duration: formatDuration(cap / s.samplerate, 3),
-          rate: formatRate(s.samplerate),
-        })}`;
-      } else if (s.mode === 'single') {
-        limit.textContent = t('capturePanel.singleFiniteNote', {
-          max: formatDuration(maxSeconds),
-        });
-      } else {
-        limit.textContent = t('capturePanel.repeatFiniteNote', {
-          max: formatDuration(maxSeconds),
-        });
-      }
+      const noteKey = s.mode === 'single'
+        ? 'capturePanel.singleFiniteNote' : 'capturePanel.repeatFiniteNote';
+      limit.textContent = t(noteKey, { max: formatDuration(maxSeconds) });
     }
     modeSec.body.appendChild(limit);
 

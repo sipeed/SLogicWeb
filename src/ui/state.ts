@@ -65,7 +65,6 @@ export interface CaptureSettings {
   thresholdVolts: number;
   mode: 'single' | 'repeat' | 'loop';
   seconds: number;
-  singleUnlimited: boolean;
   repeatIntervalSeconds: number;
   /** Loop window as a sample count (HSync's SampleLimit), not a duration. */
   loopSamples: number;
@@ -104,7 +103,6 @@ export function defaultCaptureSettings(): CaptureSettings {
     thresholdVolts: 1.2,
     mode: 'single',
     seconds: 1,
-    singleUnlimited: false,
     repeatIntervalSeconds: REPEAT_INTERVAL_SECONDS.default,
     loopSamples: DEFAULT_LOOP_SAMPLES,
     analogTriggers: {},
@@ -157,9 +155,9 @@ export function maxLoopSamples(channels: ChannelCount): number {
 /**
  * Single/Repeat store ceiling: the same 2 GiB of packed sample bytes as the Loop window
  * (one budget, one tab ceiling), and the store's own 2^31 - 1 sample limit:
- * 4ch/8ch 2^31 - 1 · 16ch 2^30 · 32ch 2^29 · 64ch 2^28 · 128ch 2^27. Unlimited, and any
- * finite request above it, stops here as a typed 'memory' abort (`captureAbort.ts`)
- * instead of growing until an allocation kills the tab.
+ * 4ch/8ch 2^31 - 1 · 16ch 2^30 · 32ch 2^29 · 64ch 2^28 · 128ch 2^27. A finite request above
+ * it stops here as a typed 'memory' abort (`captureAbort.ts`) instead of growing until an
+ * allocation kills the tab.
  */
 export const CAPTURE_MEMORY_MAX_BYTES = LOOP_RETENTION_MAX_BYTES;
 

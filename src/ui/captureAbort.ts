@@ -37,7 +37,7 @@ export function isAllocationFailure(error: unknown): boolean {
 
 export interface CaptureAbort {
   cause: CaptureAbortCause;
-  /** The duration the capture asked for; null for Unlimited and Loop. */
+  /** The duration the capture asked for; null for Loop. */
   requestedSeconds: number | null;
   channels: number;
   samplerate: number;
@@ -87,8 +87,8 @@ const CAUSE_KEYS = {
 
 /**
  * The panel's status line for an aborted capture, e.g. "Host overload · requested 1 s /
- * actual 109.5 ms · 10,952,704 samples". Unlimited and Loop asked for no duration, so
- * they report only what arrived.
+ * actual 109.5 ms · 10,952,704 samples". Loop asks for no duration, so it reports only
+ * what arrived.
  */
 export function captureAbortDetail(
   abort: Pick<CaptureAbort, 'cause' | 'requestedSeconds'>,

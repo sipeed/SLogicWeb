@@ -159,7 +159,7 @@ check('literal false and true survive parsing without coercion',
   const second = defaultCaptureSettings();
   const defaultsMatch = first.channels === 16 && first.samplerate === 16e6 &&
     first.thresholdVolts === 1.2 && first.mode === 'single' && first.seconds === 1 &&
-    !first.singleUnlimited && first.repeatIntervalSeconds === 1 &&
+    first.repeatIntervalSeconds === 1 &&
     first.loopSamples === 16_000_000 && first.testMode === 0 && !first.triggerEnableMask &&
     !first.softwareTrigger && first.triggerChannel === 0 && first.triggerKind === 'rising' &&
     first.triggerLevel === 1 && first.preTriggerPercent === 10;
@@ -269,7 +269,6 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     thresholdVolts: 1.65,
     mode: 'single' as const,
     seconds: 2.5,
-    singleUnlimited: true,
     repeatIntervalSeconds: 0.25,
     loopSamples: 123_456,
     testMode: 2 as const,
@@ -295,7 +294,6 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     thresholdVolts: 1.65,
     mode: 'single' as const,
     seconds: 2.5,
-    singleUnlimited: true,
     repeatIntervalSeconds: 0.25,
     loopSamples: 123_456,
     testMode: 2 as const,
@@ -353,9 +351,10 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     : serializeWorkspaceSnapshot({ version: 1, detailedLabels: true, capture });
   check('legacy timer capture migrates to finite single and keeps the rate marker absent',
     !threw && capture?.samplerate === 16e6 && capture.mode === 'single' &&
-    capture.singleUnlimited === false && capture.repeatIntervalSeconds === 1 &&
+    capture.repeatIntervalSeconds === 1 &&
     capture.samplerateExplicit !== true && serialized.includes('"samplerate":16000000') &&
-    serialized.includes('"repeatIntervalSeconds":1') && !serialized.includes('samplerateExplicit'),
+    serialized.includes('"repeatIntervalSeconds":1') && !serialized.includes('samplerateExplicit') &&
+    !serialized.includes('singleUnlimited'),
     `threw=${threw}, capture=${JSON.stringify(capture)}`);
 }
 
@@ -372,11 +371,13 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
   const loop = parseWorkspaceSnapshot(JSON.stringify({
     version: 1, capture: { mode: 'loop', singleUnlimited: true },
   }))?.capture;
-  check('legacy free maps to unlimited single while repeat and invalid fields stay finite',
-    legacyFree?.mode === 'single' && legacyFree.singleUnlimited === true && legacyFree.seconds === 2.5 &&
-    repeat?.mode === 'repeat' && repeat.singleUnlimited === false && repeat.repeatIntervalSeconds === 1 &&
-    single?.mode === 'single' && single.singleUnlimited === true &&
-    loop?.mode === 'loop' && loop.singleUnlimited === false,
+  const retiredAbsent = [legacyFree, repeat, single, loop]
+    .every((entry) => entry !== undefined && !('singleUnlimited' in entry));
+  check('legacy free maps to finite single, saved seconds survive, and the retired flag is ignored',
+    legacyFree?.mode === 'single' && legacyFree.seconds === 2.5 &&
+    repeat?.mode === 'repeat' && repeat.repeatIntervalSeconds === 1 &&
+    single?.mode === 'single' && single.seconds === 1 &&
+    loop?.mode === 'loop' && retiredAbsent,
     JSON.stringify({ legacyFree, repeat, single, loop }));
 }
 
@@ -386,7 +387,6 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     thresholdVolts: 1.65,
     mode: 'single' as const,
     seconds: 2.5,
-    singleUnlimited: true,
     repeatIntervalSeconds: 0.25,
     loopSamples: 123_456,
     testMode: 2 as const,
@@ -457,9 +457,12 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     parsed.capture.thresholdVolts === defaults.thresholdVolts && parsed.capture.mode === defaults.mode &&
     parsed.capture.testMode === defaults.testMode &&
     parsed.capture.triggerEnableMask === defaults.triggerEnableMask &&
-    parsed.capture.seconds === defaults.seconds && parsed.capture.singleUnlimited === false &&
+    parsed.capture.seconds === defaults.seconds &&
+    !('singleUnlimited' in parsed.capture) &&
     parsed.capture.repeatIntervalSeconds === defaults.repeatIntervalSeconds &&
-    parsed.capture.loopSamples === defaults.loopSamples && parsed.capture.preTriggerPercent === defaults.preTriggerPercent,
+    parsed.capture.loopSamples === defaults.loopSamples && parsed.capture.preTriggerPercent === defaults.preTriggerPercent &&
+    !serializeWorkspaceSnapshot({ version: 1, detailedLabels: true, capture: parsed.capture })
+      .includes('singleUnlimited'),
     JSON.stringify(parsed?.capture));
 }
 

@@ -144,7 +144,7 @@ const UART = fixture.channelNames.findIndex((n) => /uart/i.test(n) && /rx/i.test
 function settings(): CaptureSettings {
   return {
     channels: 16, samplerate: 16e6, thresholdVolts: 1.2, mode: 'single', seconds: 1,
-    singleUnlimited: false, repeatIntervalSeconds: 1, loopSamples: 16_000_000, analogTriggers: {}, triggerSource: 'digital',
+    repeatIntervalSeconds: 1, loopSamples: 16_000_000, analogTriggers: {}, triggerSource: 'digital',
     testMode: 0,
     triggerEnableMask: false, softwareTrigger: false, triggerModes: { 2: 'high' }, triggerConditions: [],
     triggerChannel: 0, triggerKind: 'rising', triggerLevel: 1, preTriggerPercent: 10,

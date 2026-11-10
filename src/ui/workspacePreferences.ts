@@ -45,7 +45,6 @@ export interface PersistedCaptureSettings {
   thresholdVolts: number;
   mode: CaptureSettings['mode'];
   seconds: number;
-  singleUnlimited?: boolean;
   repeatIntervalSeconds?: number;
   loopSamples: number;
   testMode: 0 | 1 | 2;
@@ -167,7 +166,6 @@ function restoreCapture(value: unknown, capacity: number): PersistedCaptureSetti
     thresholdVolts: defaults.thresholdVolts,
     mode: defaults.mode,
     seconds: defaults.seconds,
-    singleUnlimited: defaults.singleUnlimited,
     repeatIntervalSeconds: defaults.repeatIntervalSeconds,
     loopSamples: defaults.loopSamples,
     testMode: defaults.testMode,
@@ -190,15 +188,10 @@ function restoreCapture(value: unknown, capacity: number): PersistedCaptureSetti
   if (typeof value.thresholdVolts === 'number' && isRestorableThreshold(value.thresholdVolts)) {
     capture.thresholdVolts = value.thresholdVolts;
   }
-  if (value.mode === 'free') {
+  if (value.mode === 'free' || value.mode === 'timer') {
     capture.mode = 'single';
-    capture.singleUnlimited = true;
-  } else if (value.mode === 'timer') {
-    capture.mode = 'single';
-    capture.singleUnlimited = false;
   } else if (value.mode === 'single' || value.mode === 'repeat' || value.mode === 'loop') {
     capture.mode = value.mode;
-    capture.singleUnlimited = value.mode === 'single' && value.singleUnlimited === true;
   }
   if (typeof value.seconds === 'number' && Number.isFinite(value.seconds)) capture.seconds = value.seconds;
   if (typeof value.repeatIntervalSeconds === 'number' && Number.isFinite(value.repeatIntervalSeconds)) {
@@ -506,7 +499,6 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
       ...(capture.widthExplicit === true ? { widthExplicit: true } : {}),
       thresholdVolts: capture.thresholdVolts,
       mode: capture.mode,
-      ...(capture.singleUnlimited === true ? { singleUnlimited: true } : {}),
       seconds: capture.seconds,
       repeatIntervalSeconds: capture.repeatIntervalSeconds ?? defaultCaptureSettings().repeatIntervalSeconds,
       loopSamples: capture.loopSamples,

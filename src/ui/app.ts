@@ -480,7 +480,7 @@ export class App {
    * capture: reaching `captureLimitSamples` is then a 'memory' abort, not "Completed".
    */
   private captureMemoryBound = false;
-  /** The running capture's requested duration; null for Unlimited and Loop. */
+  /** The running capture's requested duration; null for Loop. */
   private captureRequestedSeconds: number | null = null;
   /** Why the last capture ended early; null once a capture starts or one is opened. */
   private captureAbort: CaptureAbort | null = null;
@@ -4454,7 +4454,6 @@ export class App {
         thresholdVolts: this.settings.thresholdVolts,
         mode: this.settings.mode,
         seconds: this.settings.seconds,
-        singleUnlimited: this.settings.singleUnlimited,
         repeatIntervalSeconds: this.settings.repeatIntervalSeconds,
         loopSamples: this.settings.loopSamples,
         testMode: this.settings.testMode,
@@ -4729,7 +4728,6 @@ export class App {
   }
 
   private progressView(): NonNullable<CapturePanelView['progress']> {    const loop = this.captureIsLoop;
-    const unlimited = this.settings.mode === 'single' && this.settings.singleUnlimited;
     // Acquisition progress is the current wave's, not the Repeat display composite's.
     const captured = this.captureStore;
     return {
@@ -4747,10 +4745,10 @@ export class App {
         (this.triggerViewLock !== null || this.triggerViewPending) && this.analogScanner !== null,
         this.loopTriggerSlackSamples,
       ) : 0,
-      targetSamples: loop || unlimited ? null : this.captureLimitSamples,
-      // Unlimited (or a request the ceiling cut) runs into the memory ceiling: the panel
-      // shows it and the time left at this rate, refreshed on the 500 ms panel clock.
-      memory: !loop && (unlimited || this.captureMemoryBound) &&
+      targetSamples: loop ? null : this.captureLimitSamples,
+      // A request the ceiling cut runs into the memory ceiling: the panel shows it and the
+      // time left at this rate, refreshed on the 500 ms panel clock.
+      memory: !loop && this.captureMemoryBound &&
         isChannelCount(captured.channelCount)
         ? captureMemoryReadout(captured.length, captured.channelCount, captured.samplerate)
         : null,
@@ -5929,8 +5927,7 @@ export class App {
       const postTriggerSamples = capturePostTriggerSamples(this.settings);
       this.captureLimitSamples = isLoop ? MAX_SAMPLES - 1 : postTriggerSamples;
       this.applyCaptureMemoryCeiling(isLoop, cfg.channels);
-      this.captureRequestedSeconds = isLoop || (mode === 'single' && this.settings.singleUnlimited)
-        ? null : postTriggerSamples / cfg.samplerate;
+      this.captureRequestedSeconds = isLoop ? null : postTriggerSamples / cfg.samplerate;
       this.captureAbort = null;
       this.startMutatedCapture = true;
       this.triggerState = softwareTrigger ? 'waiting' : 'off';
@@ -7392,7 +7389,6 @@ function clampCaptureSettings(
     seconds: s.mode === 'loop'
       ? loopDurationSeconds([s.seconds], loopSamples, samplerate, s.channels)
       : clampCaptureSeconds(s.seconds, samplerate),
-    singleUnlimited: s.mode === 'single' && s.singleUnlimited === true,
     repeatIntervalSeconds: clampRepeatIntervalSeconds(s.repeatIntervalSeconds),
     loopSamples,
     // An analog source with no analog condition left (its group was turned off) cannot
