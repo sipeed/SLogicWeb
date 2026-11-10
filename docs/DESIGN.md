@@ -185,7 +185,7 @@ shows Device and status only. The bar respects safe areas and stays reachable on
 
 **Capture split menu:**
 
-- Single: one sweep; duration or Unlimited; retention only.
+- Single: one finite-duration sweep; retention only.
 - Repeat: one sweep per Interval; retention per wave; the previous wave is held when the
   next is waiting.
 - Loop: one unbounded sweep; retention window L; recording may run independently.
@@ -561,12 +561,13 @@ Rules:
   analog group off restores the rate the first one replaced, re-clamped, unless the user
   picked a rate in between.
 - **Memory ceiling:** Single/Repeat stores share the Loop window's 2 GiB packed-sample
-  budget (`maxCaptureSamples`: 8 ch 2^31 - 1, 16 ch 2^30, 32 ch 2^29 samples). Unlimited
-  shows the ceiling and, while running, "about x s left at this rate" on the 500 ms panel
-  clock, in warning style within 10% of it. Reaching it, or an allocation failure, ends
-  the capture as "Aborted · Memory limit reached" with the samples kept, never a crashed
-  tab. A big .lwcap save streams bounded parts with "Saving… x%" and fails with a plain
-  "out of memory" notice, not the raw allocation error.
+  budget (`maxCaptureSamples`: 8 ch 2^31 - 1, 16 ch 2^30, 32 ch 2^29 samples). A finite
+  request that would exceed it is cut at the ceiling; the panel shows the ceiling and,
+  while running, "about x s left at this rate" on the 500 ms panel clock, in warning style
+  within 10% of it. Reaching it, or an allocation failure, ends the capture as "Aborted ·
+  Memory limit reached" with the samples kept, never a crashed tab. A big .lwcap save
+  streams bounded parts with "Saving… x%" and fails with a plain "out of memory" notice,
+  not the raw allocation error.
 - **Retention:** the panel shows kept bytes/time, the limit and the loop window; when the
   limit binds, a warning names the consequence. It never silently trims the trigger lock.
 - **Record:** a separate state (`off/armed/recording/paused/exporting/error/full`), with
