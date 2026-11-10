@@ -8,6 +8,7 @@ import {
   blankCanvasFrames, brightnessOutliers, type BlankCanvasHit, type CanvasSample,
 } from '../../ui/frameFlicker.js';
 import type { App } from '../../ui/app.js';
+import { maxCaptureSeconds } from '../../ui/captureTime.js';
 import type { CaptureSettings } from '../../ui/state.js';
 import { WorkerSlogicDevice } from '../workerTransport.js';
 import type { Device } from '../types.js';
@@ -401,7 +402,7 @@ export async function runFlickerProbe(options: FlickerProbeOptions): Promise<Fli
       samplerate,
       testMode: 2,
       softwareTrigger: false,
-      ...(mode === 'single' ? { singleUnlimited: true } : {}),
+      ...(mode === 'single' ? { seconds: maxCaptureSeconds(samplerate) } : {}),
       ...(mode === 'loop' ? { loopSamples: wantedLoopSamples } : {}),
     });
     if (mode === 'loop' && app.settings.loopSamples !== wantedLoopSamples) {
@@ -727,7 +728,7 @@ export async function runIdleFlickerProbe(
         samplerate,
         testMode: 2,
         softwareTrigger: false,
-        singleUnlimited: true,
+        seconds: maxCaptureSeconds(samplerate),
       });
       await withTimeout(app.debug.start(), START_TIMEOUT_MS, 'the idle prime capture did not start');
       await wait(primeSeconds * 1000);

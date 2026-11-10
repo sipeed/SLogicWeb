@@ -3,6 +3,7 @@
 import { WorkerSlogicDevice } from '../workerTransport.js';
 import type { Device } from '../types.js';
 import { bytesPerSampleForChannels } from '../../types.js';
+import { maxCaptureSeconds } from '../../ui/captureTime.js';
 import { FrameCostRing, framesPerSecond } from '../../ui/frameStats.js';
 import type { FrameStatsSnapshot } from '../../ui/frameStats.js';
 import type { App } from '../../ui/app.js';
@@ -473,7 +474,7 @@ export async function startFixedWindowProbe(
     }
     app.debug.setSettings({
       mode: 'single',
-      singleUnlimited: true,
+      seconds: maxCaptureSeconds(options.samplerate),
       channels,
       samplerate: options.samplerate,
       testMode: 2,
