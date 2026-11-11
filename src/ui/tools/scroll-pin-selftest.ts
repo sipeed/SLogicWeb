@@ -260,7 +260,7 @@ function mediaOverrides(selector: string, prop: string): string[] {
     const end = start >= 0 ? dialog.indexOf('\n  }', start) : -1;
     return start >= 0 && end > start ? dialog.slice(start, end) : '';
   })();
-  const order = ['labelsRow', 'wheelZoomsRow', 'compactRowsRow', 'hideIdleRow']
+  const order = ['labelsRow', 'compactRowsRow', 'hideIdleRow', 'wheelZoomsRow']
     .map((row) => paneBody.indexOf(`this.${row}()`));
   const ordered = order.every((at, i) => at >= 0 && (i === 0 || at > order[i - 1]!));
   const generalPane = paneBody.indexOf('this.developerToolsRow()');
@@ -269,7 +269,7 @@ function mediaOverrides(selector: string, prop: string): string[] {
   const restored = app.includes('this.compactRows = workspace.compactRows === true;') &&
     app.includes('this.hideIdleChannels = workspace.hideIdleChannels === true;');
   const atRest = app.includes('if (!this.hideIdleChannels || this.running || this.stopping || this.store.length === 0) {');
-  check('both density toggles sit next to "wheel zooms" in the settings window, default off, restore, and idle-hiding waits for rest',
+  check('both density toggles lead the appearance pane, wheel zooms opens the behaviour pane ahead of the developer pane, default off, restore, and idle-hiding waits for rest',
     ordered && generalPane > order[order.length - 1]! && defaults && restored && atRest,
     `order=${order.join(',')}, general=${generalPane}, defaults=${defaults}, restored=${restored}, atRest=${atRest}`);
 }

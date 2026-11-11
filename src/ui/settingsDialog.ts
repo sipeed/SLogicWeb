@@ -20,11 +20,12 @@ export const SETTINGS_ROW_PADDING_Y = 3;
 export const SETTINGS_PANE_GAP = 4;
 export const SETTINGS_DIALOG_NARROW_MARGIN = 16;
 
-export const SETTINGS_SECTIONS = ['appearance', 'shortcuts', 'developer', 'about'] as const;
+export const SETTINGS_SECTIONS = ['appearance', 'behaviour', 'shortcuts', 'developer', 'about'] as const;
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number];
 
 const SECTION_LABELS: Record<SettingsSectionId, MessageKey> = {
   appearance: 'settings.sections.appearance',
+  behaviour: 'settings.sections.behaviour',
   shortcuts: 'settings.sections.shortcuts',
   developer: 'settings.sections.developer',
   about: 'settings.sections.about',
@@ -196,7 +197,9 @@ export class SettingsDialog {
   private paneContent(section: SettingsSectionId): HTMLElement[] {
     switch (section) {
       case 'appearance':
-        return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];
+        return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];
+      case 'behaviour':
+        return [this.wheelZoomsRow()];
       case 'shortcuts':
         return this.shortcutBlocks();
       case 'developer':

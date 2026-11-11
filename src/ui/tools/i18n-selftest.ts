@@ -897,21 +897,21 @@ const baseSettings: CaptureSettings = {
     names.join(' | '));
 }
 
-// ----------------------------------------------- appearance labels and help copy
+// ----------------------------------------------- settings toggle labels and help copy
 
-const APPEARANCE_COPY: ReadonlyArray<readonly [keyof Messages, keyof Messages]> = [
+const SETTINGS_TOGGLE_COPY: ReadonlyArray<readonly [keyof Messages, keyof Messages]> = [
   ['settings.detailedLabels', 'settings.detailedLabelsHelp'],
   ['settings.wheelZooms', 'settings.wheelZoomsHelp'],
   ['settings.compactRows', 'settings.compactRowsHelp'],
   ['settings.hideIdle', 'settings.hideIdleHelp'],
 ];
 
-const APPEARANCE_CATALOGS: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
+const SETTINGS_TOGGLE_CATALOGS: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
 
-function appearanceCopyFailures(dicts: Record<string, Messages>): string[] {
+function settingsToggleCopyFailures(dicts: Record<string, Messages>): string[] {
   const failures: string[] = [];
   for (const [locale, dict] of Object.entries(dicts)) {
-    for (const [labelKey, helpKey] of APPEARANCE_COPY) {
+    for (const [labelKey, helpKey] of SETTINGS_TOGGLE_COPY) {
       const label: string | undefined = dict[labelKey];
       if (label === undefined) { failures.push(`${locale}:${labelKey} is missing`); continue; }
       if (label.trim().length === 0) failures.push(`${locale}:${labelKey} is empty`);
@@ -927,38 +927,38 @@ function appearanceCopyFailures(dicts: Record<string, Messages>): string[] {
 }
 
 {
-  const failures = appearanceCopyFailures(APPEARANCE_CATALOGS);
-  check('appearance labels drop their parenthetical and every option carries its own help copy',
+  const failures = settingsToggleCopyFailures(SETTINGS_TOGGLE_CATALOGS);
+  check('settings toggle labels drop their parenthetical and every option carries its own help copy',
     failures.length === 0,
     failures.length === 0
-      ? `${APPEARANCE_COPY.length} options x ${Object.keys(APPEARANCE_CATALOGS).length} catalogs`
+      ? `${SETTINGS_TOGGLE_COPY.length} options x ${Object.keys(SETTINGS_TOGGLE_CATALOGS).length} catalogs`
       : failures.join('; '));
 }
 
 {
   const parenthetical: Record<string, Messages> = {
-    ...APPEARANCE_CATALOGS,
+    ...SETTINGS_TOGGLE_CATALOGS,
     fr: { ...fr, 'settings.hideIdle': 'Masquer les voies inactives (aucun front dans l’acquisition)' },
   };
   const emptyHelp: Record<string, Messages> = {
-    ...APPEARANCE_CATALOGS, 'zh-CN': { ...zhCN, 'settings.compactRowsHelp': '  ' },
+    ...SETTINGS_TOGGLE_CATALOGS, 'zh-CN': { ...zhCN, 'settings.compactRowsHelp': '  ' },
   };
   const bracedHelp: Record<string, Messages> = {
-    ...APPEARANCE_CATALOGS, en: { ...en, 'settings.wheelZoomsHelp': 'Zoom with {modifier}+wheel.' },
+    ...SETTINGS_TOGGLE_CATALOGS, en: { ...en, 'settings.wheelZoomsHelp': 'Zoom with {modifier}+wheel.' },
   };
   const copiedLabel: Record<string, Messages> = {
-    ...APPEARANCE_CATALOGS, ru: { ...ru, 'settings.wheelZoomsHelp': ru['settings.wheelZooms'] },
+    ...SETTINGS_TOGGLE_CATALOGS, ru: { ...ru, 'settings.wheelZoomsHelp': ru['settings.wheelZooms'] },
   };
   const dropped = { ...fr } as Partial<Messages>;
   delete dropped['settings.hideIdleHelp'];
   const missingHelp: Record<string, Messages> = {
-    ...APPEARANCE_CATALOGS, fr: dropped as Messages,
+    ...SETTINGS_TOGGLE_CATALOGS, fr: dropped as Messages,
   };
-  const parenFailures = appearanceCopyFailures(parenthetical);
-  const emptyFailures = appearanceCopyFailures(emptyHelp);
-  const braceFailures = appearanceCopyFailures(bracedHelp);
-  const copyFailures = appearanceCopyFailures(copiedLabel);
-  const missingFailures = appearanceCopyFailures(missingHelp);
+  const parenFailures = settingsToggleCopyFailures(parenthetical);
+  const emptyFailures = settingsToggleCopyFailures(emptyHelp);
+  const braceFailures = settingsToggleCopyFailures(bracedHelp);
+  const copyFailures = settingsToggleCopyFailures(copiedLabel);
+  const missingFailures = settingsToggleCopyFailures(missingHelp);
   check('control: a parenthetical, an empty help, a placeholder brace, a copied label or a dropped help key fails the same predicate',
     parenFailures.length === 1 && parenFailures[0]!.includes('settings.hideIdle') &&
     emptyFailures.length === 1 && emptyFailures[0]!.includes('settings.compactRowsHelp') &&

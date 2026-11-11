@@ -232,7 +232,7 @@ function focusFallsBackToActiveTab(source: string): boolean {
 const SECTION = SETTINGS_SECTIONS[0];
 const SECTION_LABEL_KEY = `settings.sections.${SECTION}`;
 
-const SHIPPED_SECTION_ORDER: readonly string[] = ['appearance', 'shortcuts', 'developer', 'about'];
+const SHIPPED_SECTION_ORDER: readonly string[] = ['appearance', 'behaviour', 'shortcuts', 'developer', 'about'];
 
 function shippedSectionOrder(sections: readonly string[]): boolean {
   return sections.length === SHIPPED_SECTION_ORDER.length &&
@@ -261,10 +261,10 @@ const NAV_NEEDLES: readonly string[] = [
   const keys = ['ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter', 'Tab', ' ', 'a', 'Escape'];
   const rows = keys.map((key) => ({ key, next: settingsSectionAfter(key, SECTION) }));
   const roving: ReadonlyArray<readonly [string, string | null]> = [
-    ['ArrowUp', 'about'], ['ArrowDown', 'shortcuts'], ['Home', null], ['End', 'about'],
+    ['ArrowUp', 'about'], ['ArrowDown', 'behaviour'], ['Home', null], ['End', 'about'],
   ];
   const resolved = rows.filter((row) => row.next !== null).map((row) => row.key);
-  check('the shipped section table is appearance, shortcuts, developer, about and the first section roves into that ring',
+  check('the shipped section table is appearance, behaviour, shortcuts, developer, about and the first section roves into that ring',
     shippedSectionOrder(SETTINGS_SECTIONS) && SECTION === 'appearance' &&
     roving.every(([key, next]) => settingsSectionAfter(key, SECTION) === next) &&
     resolved.join(',') === 'ArrowUp,ArrowDown,End',
@@ -275,8 +275,8 @@ const NAV_NEEDLES: readonly string[] = [
   const forward = SETTINGS_SECTIONS.map((section) => settingsSectionAfter('ArrowDown', section));
   const backward = SETTINGS_SECTIONS.map((section) => settingsSectionAfter('ArrowUp', section));
   check('every roving key lands on another shipped section, wraps at either end and never throws',
-    forward.join(',') === 'shortcuts,developer,about,appearance' &&
-    backward.join(',') === 'about,appearance,shortcuts,developer' &&
+    forward.join(',') === 'behaviour,shortcuts,developer,about,appearance' &&
+    backward.join(',') === 'about,appearance,behaviour,shortcuts,developer' &&
     settingsSectionAfter('Home', 'appearance') === null &&
     settingsSectionAfter('End', 'about') === null &&
     settingsSectionAfter('', 'about') === null &&
@@ -286,7 +286,7 @@ const NAV_NEEDLES: readonly string[] = [
 
 {
   const renested = ['appearance', 'general'];
-  const swapped = ['appearance', 'developer', 'shortcuts', 'about'];
+  const swapped = ['appearance', 'developer', 'behaviour', 'shortcuts', 'about'];
   check('control: a re-nested general section or two sections out of order fails the same order predicate',
     !shippedSectionOrder(renested) && !shippedSectionOrder(swapped) && shippedSectionOrder(SETTINGS_SECTIONS),
     `renested=${shippedSectionOrder(renested)}, swapped=${shippedSectionOrder(swapped)}, ` +
@@ -294,8 +294,8 @@ const NAV_NEEDLES: readonly string[] = [
 }
 
 {
-  const dropped = [...SHIPPED_SECTION_ORDER].filter((section) => section !== 'about');
-  const renamed = ['appearance', 'shortcuts', 'developer', 'general'];
+  const dropped = [...SHIPPED_SECTION_ORDER].filter((section) => section !== 'behaviour');
+  const renamed = ['appearance', 'behaviour', 'shortcuts', 'developer', 'general'];
   check('control: a dropped section or a renamed last section fails the same order predicate',
     !shippedSectionOrder(dropped) && !shippedSectionOrder(renamed) && shippedSectionOrder(SETTINGS_SECTIONS),
     `dropped=${shippedSectionOrder(dropped)}, renamed=${shippedSectionOrder(renamed)}`);
@@ -428,9 +428,9 @@ interface ToggleRow {
 
 const TOGGLE_ROWS: readonly ToggleRow[] = [
   { row: 'labelsRow', kebab: 'detailed-labels', label: 'settings.detailedLabels', getter: 'detailedLabels', field: 'detailedLabels', setter: 'setDetailedLabels' },
-  { row: 'wheelZoomsRow', kebab: 'wheel-zooms', label: 'settings.wheelZooms', getter: 'wheelZooms', field: 'wheelZooms', setter: 'setWheelZooms' },
   { row: 'compactRowsRow', kebab: 'compact-rows', label: 'settings.compactRows', getter: 'compactRows', field: 'compactRows', setter: 'setCompactRows' },
   { row: 'hideIdleRow', kebab: 'hide-idle', label: 'settings.hideIdle', getter: 'hideIdle', field: 'hideIdleChannels', setter: 'setHideIdle' },
+  { row: 'wheelZoomsRow', kebab: 'wheel-zooms', label: 'settings.wheelZooms', getter: 'wheelZooms', field: 'wheelZooms', setter: 'setWheelZooms' },
   { row: 'developerToolsRow', kebab: 'developer-tools', label: 'settings.developerTools', getter: 'developerTools', field: 'developerTools', setter: 'setDeveloperTools' },
 ];
 
@@ -453,7 +453,8 @@ const REFERENCE_NEEDLES: readonly string[] = [
 ];
 
 const PANE_CASES: ReadonlyArray<readonly [string, string]> = [
-  ['appearance', 'return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];'],
+  ['appearance', 'return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];'],
+  ['behaviour', 'return [this.wheelZoomsRow()];'],
   ['shortcuts', 'return this.shortcutBlocks();'],
   ['developer', 'return [this.developerToolsRow(), this.clearCacheRow()];'],
   ['about', 'return [this.aboutBlock()];'],
@@ -475,7 +476,7 @@ function paneComposition(source: string): boolean {
 }
 
 {
-  check('the appearance pane is the four upstream toggles in order, the shortcuts pane is the reference, the developer pane is the console toggle then the saved-data action and About holds its own block',
+  check('the appearance pane is the three display toggles in order, the behaviour pane is the wheel row, the shortcuts pane is the reference, the developer pane is the console toggle then the saved-data action and About holds its own block',
     SETTINGS_SECTIONS.join(',') === PANE_CASES.map(([section]) => section).join(',') &&
     paneComposition(dialogSource),
     `ok=${paneComposition(dialogSource)}, ` +
@@ -483,12 +484,18 @@ function paneComposition(source: string): boolean {
 }
 
 {
-  const dropped = dialogSource.replace(
-    '        return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];',
-    '        return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];');
-  const swapped = dialogSource.replace(
-    'this.wheelZoomsRow(), this.compactRowsRow(),',
-    'this.compactRowsRow(), this.wheelZoomsRow(),');
+  const appearanceRows = '        return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];';
+  const dropped = dialogSource.replace(appearanceRows,
+    '        return [this.labelsRow(), this.hideIdleRow()];');
+  const swapped = dialogSource.replace(appearanceRows,
+    '        return [this.labelsRow(), this.hideIdleRow(), this.compactRowsRow()];');
+  const wheelLeft = dialogSource.replace(appearanceRows,
+    '        return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];');
+  const duplicated = dialogSource.replace(appearanceRows,
+    '        return [this.labelsRow(), this.compactRowsRow(), this.compactRowsRow(), this.hideIdleRow()];');
+  const behaviourDropped = dialogSource.replace(
+    "      case 'behaviour':\n        return [this.wheelZoomsRow()];\n",
+    '');
   const merged = dialogSource.replace(
     "      case 'developer':\n        return [this.developerToolsRow(), this.clearCacheRow()];\n      case 'about':\n        return [this.aboutBlock()];",
     "      case 'developer':\n        return [this.aboutBlock()];\n      case 'about':\n        return [this.aboutBlock()];");
@@ -504,9 +511,12 @@ function paneComposition(source: string): boolean {
   const actionFirst = dialogSource.replace(
     '        return [this.developerToolsRow(), this.clearCacheRow()];',
     '        return [this.clearCacheRow(), this.developerToolsRow()];');
-  check('control: dropping an appearance row, swapping two toggles, merging two sections, dropping a case, re-nesting a general case, dropping the saved-data action or leading the developer pane with it fails the same composition predicate',
+  check('control: dropping or reordering an appearance row, leaving the wheel row in Appearance, duplicating a pane row, dropping the behaviour case, merging two sections, dropping a case, re-nesting a general case, dropping the saved-data action or leading the developer pane with it fails the same composition predicate',
     dropped !== dialogSource && !paneComposition(dropped) &&
     swapped !== dialogSource && !paneComposition(swapped) &&
+    wheelLeft !== dialogSource && !paneComposition(wheelLeft) &&
+    duplicated !== dialogSource && !paneComposition(duplicated) &&
+    behaviourDropped !== dialogSource && !paneComposition(behaviourDropped) &&
     merged !== dialogSource && !paneComposition(merged) &&
     missingCase !== dialogSource && !paneComposition(missingCase) &&
     generalAgain !== dialogSource && !paneComposition(generalAgain) &&
@@ -514,6 +524,8 @@ function paneComposition(source: string): boolean {
     actionFirst !== dialogSource && !paneComposition(actionFirst) &&
     paneComposition(dialogSource),
     `dropped=${paneComposition(dropped)}, swapped=${paneComposition(swapped)}, ` +
+    `wheelLeft=${paneComposition(wheelLeft)}, duplicated=${paneComposition(duplicated)}, ` +
+    `behaviourDropped=${paneComposition(behaviourDropped)}, ` +
     `merged=${paneComposition(merged)}, missing=${paneComposition(missingCase)}, ` +
     `general=${paneComposition(generalAgain)}, actionDropped=${paneComposition(actionDropped)}, ` +
     `actionFirst=${paneComposition(actionFirst)}, real=${paneComposition(dialogSource)}`);
@@ -865,8 +877,8 @@ function keyedControls(source: string): number {
 
 {
   const keyed = keyedControls(dialogSource);
-  check('the window keys one control per tab, five toggles, the clear-cache action, the About block and the shared reference row: twelve today',
-    keyed === 12 && SETTINGS_SECTIONS.length === 4 && toggleRowCalls(dialogSource) === 5 &&
+  check('the window keys one control per tab, five toggles, the clear-cache action, the About block and the shared reference row: thirteen today',
+    keyed === 13 && SETTINGS_SECTIONS.length === 5 && toggleRowCalls(dialogSource) === 5 &&
     aboutKeyedBlocks(dialogSource) === 1 && referenceKeyedRows(dialogSource) === 1 &&
     actionKeyedControls(dialogSource) === 1,
     `keyed=${keyed}, tabs=${SETTINGS_SECTIONS.length}, toggles=${toggleRowCalls(dialogSource)}, ` +
@@ -881,10 +893,10 @@ function keyedControls(source: string): number {
   const droppedReference = dialogSource.replace('    row.dataset.settingsKey = key;\n', '');
   const droppedAction = dialogSource.replace("    action.dataset.settingsKey = 'clear-cache';\n", '');
   check('control: a sixth toggle, a reference row without its settings key or an action without its key moves the keyed-control count',
-    extraToggle !== dialogSource && keyedControls(extraToggle) === 13 &&
-    droppedReference !== dialogSource && keyedControls(droppedReference) === 11 &&
-    droppedAction !== dialogSource && keyedControls(droppedAction) === 11 &&
-    keyedControls(dialogSource) === 12,
+    extraToggle !== dialogSource && keyedControls(extraToggle) === 14 &&
+    droppedReference !== dialogSource && keyedControls(droppedReference) === 12 &&
+    droppedAction !== dialogSource && keyedControls(droppedAction) === 12 &&
+    keyedControls(dialogSource) === 13,
     `extra=${keyedControls(extraToggle)}, reference=${keyedControls(droppedReference)}, ` +
     `action=${keyedControls(droppedAction)}, real=${keyedControls(dialogSource)}`);
 }
@@ -2361,49 +2373,49 @@ function hintOutsideLabel(source: string): boolean {
     `unpassed=${hintOutsideLabel(unpassed)}, real=${hintOutsideLabel(dialogSource)}`);
 }
 
-interface AppearanceHelpRow {
+interface HintedToggleRow {
   row: string;
   label: MessageKey;
   hint: MessageKey;
 }
 
-const APPEARANCE_HELP_ROWS: readonly AppearanceHelpRow[] = [
+const HINTED_TOGGLE_ROWS: readonly HintedToggleRow[] = [
   { row: 'labelsRow', label: 'settings.detailedLabels', hint: 'settings.detailedLabelsHelp' },
-  { row: 'wheelZoomsRow', label: 'settings.wheelZooms', hint: 'settings.wheelZoomsHelp' },
   { row: 'compactRowsRow', label: 'settings.compactRows', hint: 'settings.compactRowsHelp' },
   { row: 'hideIdleRow', label: 'settings.hideIdle', hint: 'settings.hideIdleHelp' },
+  { row: 'wheelZoomsRow', label: 'settings.wheelZooms', hint: 'settings.wheelZoomsHelp' },
 ];
 
-function appearanceRowBodies(source: string): string[] {
-  return APPEARANCE_HELP_ROWS.map((entry) =>
+function hintedRowBodies(source: string): string[] {
+  return HINTED_TOGGLE_ROWS.map((entry) =>
     methodBody(source, `private ${entry.row}(): HTMLDivElement {`));
 }
 
-function appearanceHelpWiring(source: string): boolean {
-  const hints = APPEARANCE_HELP_ROWS.map((entry) => entry.hint);
-  const bodies = appearanceRowBodies(source);
-  return APPEARANCE_HELP_ROWS.length === 4 && new Set(hints).size === hints.length &&
-    APPEARANCE_HELP_ROWS.every((entry, index) => {
+function hintedHelpWiring(source: string): boolean {
+  const hints = HINTED_TOGGLE_ROWS.map((entry) => entry.hint);
+  const bodies = hintedRowBodies(source);
+  return HINTED_TOGGLE_ROWS.length === 4 && new Set(hints).size === hints.length &&
+    HINTED_TOGGLE_ROWS.every((entry, index) => {
       const body = bodies[index] ?? '';
       const own = `'${entry.hint}'`;
       return occurrences(body, 'this.toggleRow(') === 1 &&
         occurrences(body, own) === 1 &&
         occurrences(source, own) === 1 &&
-        APPEARANCE_HELP_ROWS.every((other) => other === entry || !body.includes(`'${other.hint}'`));
+        HINTED_TOGGLE_ROWS.every((other) => other === entry || !body.includes(`'${other.hint}'`));
     });
 }
 
 {
-  const bodies = appearanceRowBodies(dialogSource);
-  const missing = APPEARANCE_HELP_ROWS.flatMap((entry, index) => {
+  const bodies = hintedRowBodies(dialogSource);
+  const missing = HINTED_TOGGLE_ROWS.flatMap((entry, index) => {
     const body = bodies[index] ?? '';
     return occurrences(body, 'this.toggleRow(') === 1 && occurrences(body, `'${entry.hint}'`) === 1
       ? []
       : [`${entry.row}:${entry.hint}`];
   });
-  check('each appearance row passes its own help key to the shared toggle row and no other row\'s',
-    appearanceHelpWiring(dialogSource) && missing.length === 0,
-    `missing=${JSON.stringify(missing)}, ok=${appearanceHelpWiring(dialogSource)}`);
+  check('each hinted toggle row passes its own help key to the shared toggle row and no other row\'s',
+    hintedHelpWiring(dialogSource) && missing.length === 0,
+    `missing=${JSON.stringify(missing)}, ok=${hintedHelpWiring(dialogSource)}`);
 }
 
 {
@@ -2419,23 +2431,23 @@ function appearanceHelpWiring(source: string): boolean {
     "      (on) => this.host.setHideIdle(on), 'settings.hideIdleHelp');",
     "      (on) => this.host.setHideIdle(on), 'settings.compactRowsHelp');");
   check('control: dropping one help argument, swapping two rows\' help keys or reusing one help key twice fails the same wiring predicate',
-    droppedHint !== dialogSource && !appearanceHelpWiring(droppedHint) &&
-    swappedHints !== dialogSource && !appearanceHelpWiring(swappedHints) &&
-    reusedHint !== dialogSource && !appearanceHelpWiring(reusedHint) &&
-    appearanceHelpWiring(dialogSource),
-    `dropped=${appearanceHelpWiring(droppedHint)}, swapped=${appearanceHelpWiring(swappedHints)}, ` +
-    `reused=${appearanceHelpWiring(reusedHint)}, real=${appearanceHelpWiring(dialogSource)}`);
+    droppedHint !== dialogSource && !hintedHelpWiring(droppedHint) &&
+    swappedHints !== dialogSource && !hintedHelpWiring(swappedHints) &&
+    reusedHint !== dialogSource && !hintedHelpWiring(reusedHint) &&
+    hintedHelpWiring(dialogSource),
+    `dropped=${hintedHelpWiring(droppedHint)}, swapped=${hintedHelpWiring(swappedHints)}, ` +
+    `reused=${hintedHelpWiring(reusedHint)}, real=${hintedHelpWiring(dialogSource)}`);
 }
 
-interface AppearanceHelpCopy {
+interface HintedHelpCopy {
   locale: string;
   key: MessageKey;
   label: string;
   help: string;
 }
 
-function appearanceHelpCopyRows(): AppearanceHelpCopy[] {
-  return CATALOGS.flatMap(([locale, lookup]) => APPEARANCE_HELP_ROWS.map((entry) => ({
+function hintedHelpCopyRows(): HintedHelpCopy[] {
+  return CATALOGS.flatMap(([locale, lookup]) => HINTED_TOGGLE_ROWS.map((entry) => ({
     locale,
     key: entry.hint,
     label: lookup(entry.label),
@@ -2443,7 +2455,7 @@ function appearanceHelpCopyRows(): AppearanceHelpCopy[] {
   })));
 }
 
-function appearanceHelpCopyProblems(rows: readonly AppearanceHelpCopy[]): string[] {
+function hintedHelpCopyProblems(rows: readonly HintedHelpCopy[]): string[] {
   return rows
     .filter((row) => row.help.trim().length === 0)
     .map((row) => `${row.locale}:${row.key}=blank`)
@@ -2453,27 +2465,27 @@ function appearanceHelpCopyProblems(rows: readonly AppearanceHelpCopy[]): string
 }
 
 {
-  const rows = appearanceHelpCopyRows();
-  const problems = appearanceHelpCopyProblems(rows);
-  check('every appearance help key carries non-empty prose that is not its own label in all four catalogs',
-    rows.length === APPEARANCE_HELP_ROWS.length * CATALOGS.length && problems.length === 0,
+  const rows = hintedHelpCopyRows();
+  const problems = hintedHelpCopyProblems(rows);
+  check('every hinted settings help key carries non-empty prose that is not its own label in all four catalogs',
+    rows.length === HINTED_TOGGLE_ROWS.length * CATALOGS.length && problems.length === 0,
     problems.length === 0
-      ? `${APPEARANCE_HELP_ROWS.length} options × ${CATALOGS.length} catalogs`
+      ? `${HINTED_TOGGLE_ROWS.length} options × ${CATALOGS.length} catalogs`
       : problems.join('; '));
 }
 
 {
-  const rows = appearanceHelpCopyRows();
+  const rows = hintedHelpCopyRows();
   const copied = rows.map((row, index) => (index === 0 ? { ...row, help: row.label } : row));
   const blanked = rows.map((row, index) =>
     (index === rows.length - 1 ? { ...row, help: '   ' } : row));
   check('control: help prose copied from its own label or blanked out fails the same copy predicate',
-    appearanceHelpCopyProblems(copied).length > 0 &&
-    appearanceHelpCopyProblems(blanked).length > 0 &&
-    appearanceHelpCopyProblems(rows).length === 0,
-    `copied=${JSON.stringify(appearanceHelpCopyProblems(copied).slice(0, 2))}, ` +
-    `blanked=${JSON.stringify(appearanceHelpCopyProblems(blanked).slice(0, 2))}, ` +
-    `real=${appearanceHelpCopyProblems(rows).length}`);
+    hintedHelpCopyProblems(copied).length > 0 &&
+    hintedHelpCopyProblems(blanked).length > 0 &&
+    hintedHelpCopyProblems(rows).length === 0,
+    `copied=${JSON.stringify(hintedHelpCopyProblems(copied).slice(0, 2))}, ` +
+    `blanked=${JSON.stringify(hintedHelpCopyProblems(blanked).slice(0, 2))}, ` +
+    `real=${hintedHelpCopyProblems(rows).length}`);
 }
 
 interface WhereRow { locale: string; actual: string; want: string }
@@ -2630,6 +2642,7 @@ function labelCellCss(source: string): boolean {
 
 const SECTION_LABELS_WANT: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['appearance', ['Appearance', '外观', 'Внешний вид', 'Apparence']],
+  ['behaviour', ['Behaviour', '行为', 'Поведение', 'Comportement']],
   ['shortcuts', ['Shortcuts and gestures', '快捷键与鼠标操作', 'Клавиши и жесты', 'Raccourcis et gestes']],
   ['developer', ['Developer tools', '开发者工具', 'Для разработчиков', 'Outils développeur']],
   ['about', ['About', '关于', 'О программе', 'À propos']],
@@ -2677,7 +2690,7 @@ function sectionLabelDrift(
 {
   const lookups = CATALOGS.map(([locale, lookup]) => [locale, lookup] as const);
   const drift = sectionLabelDrift(lookups);
-  check('all four catalogs carry the four section labels with their pinned values',
+  check('all four catalogs carry the five section labels with their pinned values',
     drift.length === 0 && SECTION_LABELS_WANT.length === SETTINGS_SECTIONS.length &&
     SECTION_LABELS_WANT.every(([section], index) => SETTINGS_SECTIONS[index] === section),
     drift.length === 0 ? `${SECTION_LABELS_WANT.length} sections × ${CATALOGS.length} catalogs` : drift.join('; '));
