@@ -1119,6 +1119,7 @@ function resetCopyFailures(dicts: Record<string, Messages>): string[] {
     'settings.compactRows', 'settings.compactRowsHelp',
     'settings.hideIdle', 'settings.hideIdleHelp',
     'settings.developerTools', 'settings.close', 'settings.sections.appearance',
+    'settings.sections.behaviour',
     'settings.sections.shortcuts', 'settings.sections.developer', 'settings.sections.about',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortStop',
     'toolbar.shortStopping', 'toolbar.shortOpen', 'toolbar.shortSave',

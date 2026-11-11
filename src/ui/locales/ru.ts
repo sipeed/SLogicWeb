@@ -845,6 +845,7 @@ export const ru: Messages = {
   'settings.theme': 'Тема',
   'settings.close': 'Закрыть',
   'settings.sections.appearance': 'Внешний вид',
+  'settings.sections.behaviour': 'Поведение',
   'settings.sections.shortcuts': 'Клавиши и жесты',
   'settings.sections.developer': 'Для разработчиков',
   'settings.sections.about': 'О программе',

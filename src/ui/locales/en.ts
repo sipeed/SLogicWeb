@@ -855,6 +855,7 @@ export const en = {
   'settings.theme': 'Theme',
   'settings.close': 'Close',
   'settings.sections.appearance': 'Appearance',
+  'settings.sections.behaviour': 'Behaviour',
   'settings.sections.shortcuts': 'Shortcuts and gestures',
   'settings.sections.developer': 'Developer tools',
   'settings.sections.about': 'About',
