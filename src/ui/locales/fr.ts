@@ -185,6 +185,7 @@ export const fr: Messages = {
   'error.dropoutAccounting': 'comptage des pertes',
   'error.decodeWorkerWarmup': 'préchauffage du worker de décodage',
   'error.decode': 'décodage {id}',
+  'error.clearCache': 'vidage du cache',
   'error.localeLoad': 'Impossible de charger le catalogue de langue',
   'error.hostOverloadNotice':
     'Capture interrompue : le lien USB n’a pas suivi {channels} CH @ {rate}. Réduisez la fréquence d’échantillonnage ou le nombre de voies, puis relancez la capture.',
@@ -192,6 +193,7 @@ export const fr: Messages = {
   'error.captureMemory': 'mémoire de capture',
   'error.captureMemoryNotice': 'Capture arrêtée : mémoire insuffisante. Les échantillons déjà enregistrés sont conservés. Baissez la fréquence d’échantillonnage ou le nombre de voies, ou capturez moins longtemps.',
   'error.saveOutOfMemory': 'Échec de l’enregistrement : mémoire insuffisante. Fermez d’autres onglets et réessayez, ou enregistrez une capture plus courte.',
+  'error.clearCacheNotice': 'L’effacement est incomplet : certaines données enregistrées ou ressources en cache peuvent subsister. Vérifiez que le navigateur autorise le stockage de site pour SLogic Web, puis réessayez.',
   'error.notice.fileType': 'Ce fichier n’est pas une capture que slogicweb sait ouvrir. Choisissez une session sigrok .sr ou un fichier .lwcap.',
   'error.notice.fileUnsupported': 'Cette capture contient un élément que slogicweb ne sait pas encore ouvrir, par exemple des voies analogiques ou un nombre de voies inhabituel.',
   'error.notice.fileTooLong': 'Cette capture est trop longue pour être ouverte ici.',
@@ -840,6 +842,9 @@ export const fr: Messages = {
   'settings.hideIdleHelp': 'Masquer les voies sans front pendant que l’acquisition est au repos. Les voies avec une piste de décodeur restent visibles ; une note indique le nombre masqué et propose « Afficher ».',
   'settings.developerTools': 'Console de registres USB',
   'settings.developerToolsWhere': 'Panneau latéral › Capture › Avancé',
+  'settings.savedData': 'Données enregistrées',
+  'settings.savedDataHelp': 'Efface l’apparence, la disposition, l’espace de travail et les réglages d’acquisition enregistrés, les réglages de l’assistant et les clés d’API, la langue et le thème choisis, ainsi que les ressources de l’application téléchargées.',
+  'settings.clearCache': 'Vider le cache',
   'about.version': 'Version {version} · build {build}',
   'about.license': 'GPL-3.0-or-later · sans aucune garantie',
   'about.source': 'Code source',
@@ -852,6 +857,10 @@ export const fr: Messages = {
   'settings.sections.shortcuts': 'Raccourcis et gestes',
   'settings.sections.developer': 'Outils développeur',
   'settings.sections.about': 'À propos',
+  'reset.title': 'Effacer toutes les données enregistrées ?',
+  'reset.body': 'Cela efface vos réglages, votre espace de travail, la capture non enregistrée, les réglages de l’assistant et les clés d’API, ainsi que les ressources de l’application en cache, puis recharge SLogic Web ; restez en ligne pour restaurer l’application et la prise en charge hors ligne.',
+  'reset.confirm': 'Effacer et recharger',
+  'reset.cancel': 'Annuler',
 
   // ----------------------------------------------------------- shortcuts
   'shortcuts.close': 'Fermer',

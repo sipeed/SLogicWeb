@@ -189,6 +189,7 @@ export const en = {
   'error.dropoutAccounting': 'dropout accounting',
   'error.decodeWorkerWarmup': 'decode worker warmup',
   'error.decode': 'decode {id}',
+  'error.clearCache': 'clear cache',
   'error.localeLoad': 'Could not load the language catalog',
   'error.hostOverloadNotice':
     'Capture aborted: the USB link could not keep up with {channels} CH @ {rate}. Lower the sample rate or the channel count, then capture again.',
@@ -196,6 +197,7 @@ export const en = {
   'error.captureMemory': 'capture memory',
   'error.captureMemoryNotice': 'Capture stopped: out of memory. The samples recorded so far are kept. Lower the sample rate or the channel count, or capture for less time.',
   'error.saveOutOfMemory': 'Save failed: out of memory. Close other tabs and try again, or save a shorter capture.',
+  'error.clearCacheNotice': 'Clearing was incomplete: some saved data or cached resources may remain. Check that this browser allows site storage for SLogic Web, then try again.',
   'error.notice.fileType': 'This file is not a capture slogicweb can open. Choose a sigrok .sr session or a .lwcap file.',
   'error.notice.fileUnsupported': 'This capture uses something slogicweb cannot open yet, such as analog channels or an unusual channel count.',
   'error.notice.fileTooLong': 'This capture is too long to open here.',
@@ -841,6 +843,9 @@ export const en = {
   'settings.hideIdleHelp': 'Hide channels with no edges while a capture is at rest. Decoder-lane rows stay visible; a note shows the hidden count and a Show action.',
   'settings.developerTools': 'USB register console',
   'settings.developerToolsWhere': 'right sidebar › Capture › Advanced',
+  'settings.savedData': 'Saved data',
+  'settings.savedDataHelp': 'Clears saved appearance, layout, workspace and capture settings, assistant settings and API keys, the chosen language and theme, and the downloaded app resources.',
+  'settings.clearCache': 'Clear cache',
   'about.version': 'Version {version} · build {build}',
   'about.license': 'GPL-3.0-or-later · no warranty',
   'about.source': 'Source code',
@@ -853,6 +858,10 @@ export const en = {
   'settings.sections.shortcuts': 'Shortcuts and gestures',
   'settings.sections.developer': 'Developer tools',
   'settings.sections.about': 'About',
+  'reset.title': 'Clear all saved data?',
+  'reset.body': 'This erases your settings, workspace, unsaved capture, assistant settings and API keys, and cached app resources, then reloads SLogic Web; stay online to restore the app and offline support.',
+  'reset.confirm': 'Clear and reload',
+  'reset.cancel': 'Cancel',
 
   // ----------------------------------------------------------- shortcuts
   'shortcuts.close': 'Close',

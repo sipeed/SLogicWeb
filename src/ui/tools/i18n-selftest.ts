@@ -970,6 +970,143 @@ function appearanceCopyFailures(dicts: Record<string, Messages>): string[] {
     `missing=${JSON.stringify(missingFailures)}`);
 }
 
+const RESET_COPY_KEYS: readonly (keyof Messages)[] = [
+  'settings.savedData', 'settings.savedDataHelp', 'settings.clearCache',
+  'reset.title', 'reset.body', 'reset.confirm', 'reset.cancel',
+  'error.clearCache', 'error.clearCacheNotice',
+];
+
+const RESET_COPY_CATALOGS: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
+
+const RESET_SCRIPT: Record<string, RegExp> = {
+  'zh-CN': /\p{Script=Han}/u,
+  ru: /\p{Script=Cyrillic}/u,
+};
+
+const RESET_PROSE_ANCHORS: Record<string, readonly (readonly [keyof Messages, readonly RegExp[]])[]> = {
+  en: [
+    ['settings.savedDataHelp', [
+      /appearance/i, /layout/i, /workspace/i, /capture/i, /assistant/i,
+      /API keys?/i, /language/i, /theme/i, /downloaded app resources/i,
+    ]],
+    ['reset.body', [
+      /workspace/i, /unsaved capture/i, /API keys?/i, /cached app resources/i,
+      /reloads/i, /online/i,
+    ]],
+    ['error.clearCacheNotice', [/incomplete/i, /may remain/i, /site storage/i, /try again/i]],
+  ],
+  'zh-CN': [
+    ['settings.savedDataHelp', [
+      /外观/, /布局/, /工作区/, /采集/, /助手/, /API 密钥/, /语言/, /主题/, /已下载的应用资源/,
+    ]],
+    ['reset.body', [/工作区/, /未保存的采集/, /API 密钥/, /缓存的应用资源/, /重新加载/, /联网/]],
+    ['error.clearCacheNotice', [/未完成/, /可能仍然存在/, /站点存储/, /重试/]],
+  ],
+  ru: [
+    ['settings.savedDataHelp', [
+      /внешнего вида/i, /компоновк/i, /рабочей области/i, /захвата/i, /помощника/i,
+      /ключи API/i, /язык/i, /тем/i, /загруженные ресурсы/i,
+    ]],
+    ['reset.body', [
+      /рабоч\S* область/i, /несохранённый захват/i, /ключи API/i,
+      /кэшированные ресурсы/i, /перезагруз/i, /онлайн/i,
+    ]],
+    ['error.clearCacheNotice', [/не полностью/i, /могла остаться/i, /хранилище/i, /повторите попытку/i]],
+  ],
+  fr: [
+    ['settings.savedDataHelp', [
+      /apparence/i, /disposition/i, /espace de travail/i, /acquisition/i, /assistant/i,
+      /clés d’API/i, /langue/i, /thème/i, /ressources de l’application téléchargées/i,
+    ]],
+    ['reset.body', [
+      /espace de travail/i, /capture non enregistrée/i, /clés d’API/i,
+      /ressources de l’application en cache/i, /recharge/i, /en ligne/i,
+    ]],
+    ['error.clearCacheNotice', [/incompl/i, /peuvent subsister/i, /stockage de site/i, /réessayez/i]],
+  ],
+};
+
+function resetCopyFailures(dicts: Record<string, Messages>): string[] {
+  const failures: string[] = [];
+  for (const [locale, dict] of Object.entries(dicts)) {
+    const script = RESET_SCRIPT[locale];
+    for (const key of RESET_COPY_KEYS) {
+      const text: string | undefined = dict[key];
+      if (text === undefined) { failures.push(`${locale}:${key} is missing`); continue; }
+      if (text.trim().length === 0) { failures.push(`${locale}:${key} is empty`); continue; }
+      if (/[{}]/.test(text)) failures.push(`${locale}:${key} carries a placeholder brace`);
+      if (script !== undefined && !script.test(text)) {
+        failures.push(`${locale}:${key} is not written in the locale script`);
+      }
+      if (locale !== 'en' && text === en[key]) failures.push(`${locale}:${key} is still English`);
+    }
+    for (const [key, anchors] of RESET_PROSE_ANCHORS[locale] ?? []) {
+      const text = dict[key];
+      if (text === undefined) continue;
+      for (const anchor of anchors) {
+        if (!anchor.test(text)) failures.push(`${locale}:${key} is missing ${String(anchor)}`);
+      }
+    }
+  }
+  return failures;
+}
+
+{
+  const failures = resetCopyFailures(RESET_COPY_CATALOGS);
+  check('the clear-cache row, confirmation and failure copy is present, localized and complete in every catalog',
+    failures.length === 0,
+    failures.length === 0
+      ? `${RESET_COPY_KEYS.length} keys x ${Object.keys(RESET_COPY_CATALOGS).length} catalogs`
+      : failures.join('; '));
+}
+
+{
+  const dict = RESET_COPY_CATALOGS.en!;
+  const checkKeys: (readonly [keyof Messages, string])[] = [
+    ['settings.savedData', 'Saved data'],
+    ['settings.clearCache', 'Clear cache'],
+    ['reset.title', 'Clear all saved data?'],
+    ['reset.body', 'This erases your settings, workspace, unsaved capture, assistant settings and API keys, and cached app resources, then reloads SLogic Web; stay online to restore the app and offline support.'],
+    ['reset.confirm', 'Clear and reload'],
+    ['reset.cancel', 'Cancel'],
+    ['error.clearCache', 'clear cache'],
+  ];
+  const drift = checkKeys.filter(([key, want]) => dict[key] !== want);
+  check('the English source carries the approved destructive-action wording verbatim',
+    drift.length === 0,
+    drift.length === 0 ? `${checkKeys.length} strings pinned`
+      : drift.map(([key, want]) => `${key}=${JSON.stringify(dict[key])} (want ${JSON.stringify(want)})`).join('; '));
+}
+
+{
+  const empty = { ...RESET_COPY_CATALOGS, fr: { ...fr, 'reset.confirm': '  ' } };
+  const copied = {
+    ...RESET_COPY_CATALOGS, ru: { ...ru, 'error.clearCacheNotice': en['error.clearCacheNotice'] },
+  };
+  const latinZh = { ...RESET_COPY_CATALOGS, 'zh-CN': { ...zhCN, 'reset.cancel': 'Cancel' } };
+  const vagueBody = {
+    ...RESET_COPY_CATALOGS,
+    'zh-CN': { ...zhCN, 'reset.body': '这会清除一些数据，然后重新开始。' },
+  };
+  const dropped = { ...fr } as Partial<Messages>;
+  delete dropped['settings.savedDataHelp'];
+  const missing = { ...RESET_COPY_CATALOGS, fr: dropped as Messages };
+  const emptyFailures = resetCopyFailures(empty);
+  const copyFailures = resetCopyFailures(copied);
+  const scriptFailures = resetCopyFailures(latinZh);
+  const anchorFailures = resetCopyFailures(vagueBody);
+  const missingFailures = resetCopyFailures(missing);
+  check('control: an empty string, copied English, wrong-script text, a vague body or a dropped key fails the same predicate',
+    emptyFailures.some((f) => f.includes('fr:reset.confirm is empty')) &&
+    copyFailures.some((f) => f.includes('ru:error.clearCacheNotice is still English')) &&
+    scriptFailures.some((f) => f.includes('zh-CN:reset.cancel is not written in the locale script')) &&
+    anchorFailures.some((f) => f.includes('zh-CN:reset.body is missing')) &&
+    missingFailures.some((f) => f.includes('fr:settings.savedDataHelp is missing')),
+    `empty=${JSON.stringify(emptyFailures)}, copied=${JSON.stringify(copyFailures)}, ` +
+    `script=${JSON.stringify(scriptFailures)}, anchor=${JSON.stringify(anchorFailures)}, ` +
+    `missing=${JSON.stringify(missingFailures)}`);
+}
+
 {
   // A catalog that silently shipped the English text would pass parity and fail users.
   // Assert the PROPERTY (translated ≠ English) on salient keys, not exact wording, so a
