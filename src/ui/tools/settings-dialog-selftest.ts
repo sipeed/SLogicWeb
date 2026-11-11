@@ -455,7 +455,7 @@ const REFERENCE_NEEDLES: readonly string[] = [
 const PANE_CASES: ReadonlyArray<readonly [string, string]> = [
   ['appearance', 'return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];'],
   ['shortcuts', 'return this.shortcutBlocks();'],
-  ['developer', 'return [this.developerToolsRow()];'],
+  ['developer', 'return [this.developerToolsRow(), this.clearCacheRow()];'],
   ['about', 'return [this.aboutBlock()];'],
 ];
 
@@ -475,7 +475,7 @@ function paneComposition(source: string): boolean {
 }
 
 {
-  check('the appearance pane is the four upstream toggles in order, the shortcuts pane is the reference and each remaining section holds its own row',
+  check('the appearance pane is the four upstream toggles in order, the shortcuts pane is the reference, the developer pane is the console toggle then the saved-data action and About holds its own block',
     SETTINGS_SECTIONS.join(',') === PANE_CASES.map(([section]) => section).join(',') &&
     paneComposition(dialogSource),
     `ok=${paneComposition(dialogSource)}, ` +
@@ -490,24 +490,33 @@ function paneComposition(source: string): boolean {
     'this.wheelZoomsRow(), this.compactRowsRow(),',
     'this.compactRowsRow(), this.wheelZoomsRow(),');
   const merged = dialogSource.replace(
-    "      case 'developer':\n        return [this.developerToolsRow()];\n      case 'about':\n        return [this.aboutBlock()];",
+    "      case 'developer':\n        return [this.developerToolsRow(), this.clearCacheRow()];\n      case 'about':\n        return [this.aboutBlock()];",
     "      case 'developer':\n        return [this.aboutBlock()];\n      case 'about':\n        return [this.aboutBlock()];");
   const missingCase = dialogSource.replace(
     "      case 'about':\n        return [this.aboutBlock()];\n",
     '');
   const generalAgain = dialogSource.replace(
     "      case 'shortcuts':\n        return this.shortcutBlocks();",
-    "      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'general':\n        return [this.developerToolsRow(), this.aboutBlock()];");
-  check('control: dropping an appearance row, swapping two toggles, merging two sections, dropping a case or re-nesting a general case fails the same composition predicate',
+    "      case 'shortcuts':\n        return this.shortcutBlocks();\n      case 'general':\n        return [this.developerToolsRow(), this.clearCacheRow(), this.aboutBlock()];");
+  const actionDropped = dialogSource.replace(
+    '        return [this.developerToolsRow(), this.clearCacheRow()];',
+    '        return [this.developerToolsRow()];');
+  const actionFirst = dialogSource.replace(
+    '        return [this.developerToolsRow(), this.clearCacheRow()];',
+    '        return [this.clearCacheRow(), this.developerToolsRow()];');
+  check('control: dropping an appearance row, swapping two toggles, merging two sections, dropping a case, re-nesting a general case, dropping the saved-data action or leading the developer pane with it fails the same composition predicate',
     dropped !== dialogSource && !paneComposition(dropped) &&
     swapped !== dialogSource && !paneComposition(swapped) &&
     merged !== dialogSource && !paneComposition(merged) &&
     missingCase !== dialogSource && !paneComposition(missingCase) &&
     generalAgain !== dialogSource && !paneComposition(generalAgain) &&
+    actionDropped !== dialogSource && !paneComposition(actionDropped) &&
+    actionFirst !== dialogSource && !paneComposition(actionFirst) &&
     paneComposition(dialogSource),
     `dropped=${paneComposition(dropped)}, swapped=${paneComposition(swapped)}, ` +
     `merged=${paneComposition(merged)}, missing=${paneComposition(missingCase)}, ` +
-    `general=${paneComposition(generalAgain)}, real=${paneComposition(dialogSource)}`);
+    `general=${paneComposition(generalAgain)}, actionDropped=${paneComposition(actionDropped)}, ` +
+    `actionFirst=${paneComposition(actionFirst)}, real=${paneComposition(dialogSource)}`);
 }
 
 {
@@ -750,8 +759,8 @@ function aboutPaneIntact(source: string): boolean {
   const bare = dialogSource.replace("      anchor.rel = 'noopener noreferrer';\n", '');
   const unlabelled = dialogSource.replace('      anchor.textContent = link.label;\n', '');
   const opened = dialogSource.replace(
-    '  setDeveloperTools(on: boolean): void;\n}',
-    '  setDeveloperTools(on: boolean): void;\n  openAbout(invoker: HTMLElement): void;\n}');
+    '  clearCache(): void;\n}',
+    '  clearCache(): void;\n  openAbout(invoker: HTMLElement): void;\n}');
   check('control: a mislabelled name line, a dropped link list, a bare anchor, a link without text or a reintroduced opener bridge fails the same pane predicate',
     plainName !== dialogSource && !aboutPaneIntact(plainName) &&
     noLinks !== dialogSource && !aboutPaneIntact(noLinks) &&
@@ -841,32 +850,43 @@ function rowWiredToHost(source: string, entry: ToggleRow): boolean {
     `realHost=${pairs(dialogSource)}, realApp=${appPairs(appSource)}`);
 }
 
+const toggleRowCalls = (source: string): number => source.match(/this\.toggleRow\(/g)?.length ?? 0;
+const aboutKeyedBlocks = (source: string): number =>
+  source.match(/block\.dataset\.settingsKey = /g)?.length ?? 0;
+const referenceKeyedRows = (source: string): number =>
+  source.match(/row\.dataset\.settingsKey = key;/g)?.length ?? 0;
+const actionKeyedControls = (source: string): number =>
+  source.match(/action\.dataset\.settingsKey = /g)?.length ?? 0;
+
+function keyedControls(source: string): number {
+  return SETTINGS_SECTIONS.length + toggleRowCalls(source) + aboutKeyedBlocks(source) +
+    referenceKeyedRows(source) + actionKeyedControls(source);
+}
+
 {
-  const toggleCalls = (source: string): number => source.match(/this\.toggleRow\(/g)?.length ?? 0;
-  const aboutBlocks = (source: string): number => source.match(/block\.dataset\.settingsKey = /g)?.length ?? 0;
-  const referenceRows = (source: string): number => source.match(/row\.dataset\.settingsKey = key;/g)?.length ?? 0;
-  const keyed = SETTINGS_SECTIONS.length + toggleCalls(dialogSource) + aboutBlocks(dialogSource) +
-    referenceRows(dialogSource);
-  check('the window keys one control per tab, five toggles, the About block and the shared reference row: eleven today',
-    keyed === 11 && SETTINGS_SECTIONS.length === 4 && toggleCalls(dialogSource) === 5 &&
-    aboutBlocks(dialogSource) === 1 && referenceRows(dialogSource) === 1,
-    `keyed=${keyed}, tabs=${SETTINGS_SECTIONS.length}, toggles=${toggleCalls(dialogSource)}, ` +
-    `about=${aboutBlocks(dialogSource)}, reference=${referenceRows(dialogSource)}`);
+  const keyed = keyedControls(dialogSource);
+  check('the window keys one control per tab, five toggles, the clear-cache action, the About block and the shared reference row: twelve today',
+    keyed === 12 && SETTINGS_SECTIONS.length === 4 && toggleRowCalls(dialogSource) === 5 &&
+    aboutKeyedBlocks(dialogSource) === 1 && referenceKeyedRows(dialogSource) === 1 &&
+    actionKeyedControls(dialogSource) === 1,
+    `keyed=${keyed}, tabs=${SETTINGS_SECTIONS.length}, toggles=${toggleRowCalls(dialogSource)}, ` +
+    `actions=${actionKeyedControls(dialogSource)}, about=${aboutKeyedBlocks(dialogSource)}, ` +
+    `reference=${referenceKeyedRows(dialogSource)}`);
 }
 
 {
   const extraToggle = dialogSource.replace(
-    "      case 'developer':\n        return [this.developerToolsRow()];",
-    "      case 'developer':\n        return [this.toggleRow('extra', 'settings.detailedLabels', false, () => {}), this.developerToolsRow()];");
-  const droppedAction = dialogSource.replace('    row.dataset.settingsKey = key;\n', '');
-  const countOf = (source: string): number => SETTINGS_SECTIONS.length +
-    (source.match(/this\.toggleRow\(/g)?.length ?? 0) +
-    (source.match(/block\.dataset\.settingsKey = /g)?.length ?? 0) +
-    (source.match(/row\.dataset\.settingsKey = key;/g)?.length ?? 0);
-  check('control: a sixth toggle or a reference row without its settings key moves the keyed-control count',
-    extraToggle !== dialogSource && countOf(extraToggle) === 12 &&
-    droppedAction !== dialogSource && countOf(droppedAction) === 10 && countOf(dialogSource) === 11,
-    `extra=${countOf(extraToggle)}, dropped=${countOf(droppedAction)}, real=${countOf(dialogSource)}`);
+    "      case 'developer':\n        return [this.developerToolsRow(), this.clearCacheRow()];",
+    "      case 'developer':\n        return [this.toggleRow('extra', 'settings.detailedLabels', false, () => {}), this.developerToolsRow(), this.clearCacheRow()];");
+  const droppedReference = dialogSource.replace('    row.dataset.settingsKey = key;\n', '');
+  const droppedAction = dialogSource.replace("    action.dataset.settingsKey = 'clear-cache';\n", '');
+  check('control: a sixth toggle, a reference row without its settings key or an action without its key moves the keyed-control count',
+    extraToggle !== dialogSource && keyedControls(extraToggle) === 13 &&
+    droppedReference !== dialogSource && keyedControls(droppedReference) === 11 &&
+    droppedAction !== dialogSource && keyedControls(droppedAction) === 11 &&
+    keyedControls(dialogSource) === 12,
+    `extra=${keyedControls(extraToggle)}, reference=${keyedControls(droppedReference)}, ` +
+    `action=${keyedControls(droppedAction)}, real=${keyedControls(dialogSource)}`);
 }
 
 function appSetterFollows(source: string, name: string, order: readonly string[]): boolean {
@@ -941,8 +961,8 @@ function setterEffectBound(source: string, name: string, order: readonly string[
     '    this.persistWorkspace();\n    this.relayout();\n  }\n\n  private setHideIdle',
     '    this.persistWorkspace();\n    this.relayout();\n    this.renderPanels();\n  }\n\n  private setHideIdle');
   const strayHint = appSource.replace(
-    '    this.persistWorkspace();\n    this.renderPanels();\n  }\n\n  private deviceMenuItems',
-    '    this.persistWorkspace();\n    this.renderInteractionBar(true);\n    this.renderPanels();\n  }\n\n  private deviceMenuItems');
+    '    this.persistWorkspace();\n    this.renderPanels();\n  }\n\n  private async clearCache',
+    '    this.persistWorkspace();\n    this.renderInteractionBar(true);\n    this.renderPanels();\n  }\n\n  private async clearCache');
   const bound = (source: string): boolean =>
     SETTER_EFFECTS.every(([name, order]) => setterEffectBound(source, name, order));
   check('control: a duplicated workspace write or an undeclared refresh call in a setter fails the same bound',
@@ -2131,9 +2151,11 @@ function developerCase(source: string): string {
   return start >= 0 && end > start ? pane.slice(start, end) : '';
 }
 
-function developerPaneIsOneRow(source: string): boolean {
+const DEVELOPER_PANE_ROW = 'return [this.developerToolsRow(), this.clearCacheRow()];';
+
+function developerPaneRows(source: string): boolean {
   const body = developerCase(source);
-  return body.includes('        return [this.developerToolsRow()];') &&
+  return body.includes(`        ${DEVELOPER_PANE_ROW}`) &&
     !body.includes('developerNote') &&
     !body.includes('this.host.developerTools()') &&
     !source.includes('developerNote(') &&
@@ -2141,26 +2163,30 @@ function developerPaneIsOneRow(source: string): boolean {
 }
 
 {
-  check('the developer pane is the switch row in both states, with no note to gate',
-    developerPaneIsOneRow(dialogSource),
+  check('the developer pane is the console switch then the clear-cache action in both states, with no note to gate',
+    developerPaneRows(dialogSource),
     `case=${JSON.stringify(developerCase(dialogSource).replace(/\s+/g, ' '))}`);
 }
 
 {
   const gated = dialogSource.replace(
-    '        return [this.developerToolsRow()];',
+    `        ${DEVELOPER_PANE_ROW}`,
     '        return this.host.developerTools()\n' +
-    '          ? [this.developerToolsRow(), this.developerNote()]\n' +
-    '          : [this.developerToolsRow()];');
+    '          ? [this.developerToolsRow(), this.clearCacheRow(), this.developerNote()]\n' +
+    '          : [this.developerToolsRow(), this.clearCacheRow()];');
   const appended = dialogSource.replace(
-    '        return [this.developerToolsRow()];',
-    '        return [this.developerToolsRow(), this.developerNote()];');
-  check('control: a re-added note, gated or not, fails the same one-row predicate',
-    gated !== dialogSource && !developerPaneIsOneRow(gated) &&
-    appended !== dialogSource && !developerPaneIsOneRow(appended) &&
-    developerPaneIsOneRow(dialogSource),
-    `gated=${developerPaneIsOneRow(gated)}, appended=${developerPaneIsOneRow(appended)}, ` +
-    `real=${developerPaneIsOneRow(dialogSource)}`);
+    `        ${DEVELOPER_PANE_ROW}`,
+    '        return [this.developerToolsRow(), this.clearCacheRow(), this.developerNote()];');
+  const removed = dialogSource.replace(
+    `        ${DEVELOPER_PANE_ROW}`,
+    '        return [this.developerToolsRow()];');
+  check('control: a re-added note, gated or not, or a pane that drops the clear-cache action fails the same predicate',
+    gated !== dialogSource && !developerPaneRows(gated) &&
+    appended !== dialogSource && !developerPaneRows(appended) &&
+    removed !== dialogSource && !developerPaneRows(removed) &&
+    developerPaneRows(dialogSource),
+    `gated=${developerPaneRows(gated)}, appended=${developerPaneRows(appended)}, ` +
+    `removed=${developerPaneRows(removed)}, real=${developerPaneRows(dialogSource)}`);
 }
 
 function developerToggleWritesOnly(source: string): boolean {
@@ -2187,6 +2213,119 @@ function developerToggleWritesOnly(source: string): boolean {
     developerToggleWritesOnly(dialogSource),
     `rebuilt=${developerToggleWritesOnly(rebuilt)}, keyless=${developerToggleWritesOnly(keyless)}, ` +
     `real=${developerToggleWritesOnly(dialogSource)}`);
+}
+
+const CLEAR_CACHE_ROW_NEEDLES: readonly string[] = [
+  "    row.className = 'settings-row';",
+  "    cell.className = 'settings-row-label-cell';",
+  "    cell.append(this.rowLabel('settings.savedData'), helpTip(t('settings.savedDataHelp')));",
+  "    action.type = 'button';",
+  "    action.className = 'settings-action danger';",
+  "    action.dataset.settingsKey = 'clear-cache';",
+  "    action.textContent = t('settings.clearCache');",
+  "    action.addEventListener('click', () => this.host.clearCache());",
+  '    row.append(cell, action);',
+];
+
+function clearCacheRowBody(source: string): string {
+  return methodBody(source, 'private clearCacheRow(): HTMLDivElement {');
+}
+
+function clearCacheRowIntact(source: string): boolean {
+  const body = clearCacheRowBody(source);
+  return body.length > 0 && CLEAR_CACHE_ROW_NEEDLES.every((needle) => body.includes(needle)) &&
+    (body.match(/addEventListener\(/g)?.length ?? 0) === 1 &&
+    !body.includes('persistWorkspace') && !body.includes('localStorage') &&
+    !body.includes('confirmDialog') && !body.includes('showModal') &&
+    !body.includes("dataset.settingsKey = 'developer");
+}
+
+{
+  const missing = CLEAR_CACHE_ROW_NEEDLES.filter((needle) => !clearCacheRowBody(dialogSource).includes(needle));
+  check('the saved-data row is the settings grid label cell with its help tip and one destructive action keyed clear-cache',
+    clearCacheRowIntact(dialogSource) &&
+    dialogSource.includes('  clearCache(): void;\n}'),
+    `missing=${JSON.stringify(missing)}, ` +
+    `body=${JSON.stringify(clearCacheRowBody(dialogSource).replace(/\s+/g, ' '))}`);
+}
+
+{
+  const unkeyed = dialogSource.replace("    action.dataset.settingsKey = 'clear-cache';\n", '');
+  const undanger = dialogSource.replace(
+    "    action.className = 'settings-action danger';",
+    "    action.className = 'settings-action';");
+  const direct = dialogSource.replace(
+    "    action.addEventListener('click', () => this.host.clearCache());",
+    "    action.addEventListener('click', () => this.host.clearCache());\n    action.addEventListener('click', () => this.renderStrings());");
+  const note = dialogSource.replace(
+    "    row.append(cell, action);",
+    "    const note = document.createElement('p');\n    row.append(cell, action, note);");
+  const toggle = dialogSource.replace(
+    "    action.className = 'settings-action danger';",
+    "    action.className = 'settings-action danger';\n    action.dataset.settingsKey = 'developer-tools';");
+  check('control: an unkeyed or undecorated action, a second listener, an appended note or a reused developer key fails the same row predicate',
+    unkeyed !== dialogSource && !clearCacheRowIntact(unkeyed) &&
+    undanger !== dialogSource && !clearCacheRowIntact(undanger) &&
+    direct !== dialogSource && !clearCacheRowIntact(direct) &&
+    note !== dialogSource && !clearCacheRowIntact(note) &&
+    toggle !== dialogSource && !clearCacheRowIntact(toggle) &&
+    clearCacheRowIntact(dialogSource),
+    `unkeyed=${clearCacheRowIntact(unkeyed)}, undanger=${clearCacheRowIntact(undanger)}, ` +
+    `direct=${clearCacheRowIntact(direct)}, note=${clearCacheRowIntact(note)}, ` +
+    `toggle=${clearCacheRowIntact(toggle)}, real=${clearCacheRowIntact(dialogSource)}`);
+}
+
+{
+  const hostPair = dialogSource.includes('  clearCache(): void;\n}') &&
+    appSource.includes('      clearCache: () => void this.clearCache(),') &&
+    appSource.includes('  private async clearCache(): Promise<void> {');
+  const bridgeless = dialogSource.replace('  clearCache(): void;\n}', '}');
+  const unwired = appSource.replace('      clearCache: () => void this.clearCache(),\n', '');
+  check('the host contract and the App host literal carry the one clear-cache action, wired to the async App method',
+    hostPair &&
+    bridgeless !== dialogSource && !bridgeless.includes('clearCache(): void;') &&
+    unwired !== appSource && !unwired.includes('clearCache: () => void this.clearCache(),'),
+    `host=${hostPair}, bridgeless=${bridgeless.includes('clearCache(): void;')}, ` +
+    `unwired=${unwired.includes('clearCache: () => void this.clearCache(),')}`);
+}
+
+const ACTION_RULE = '.settings-action {';
+const ACTION_LABEL_RULE = '.settings-row-label:not(label) {';
+
+function sheetRuleWith(sheet: string, selector: string, from: string, to: string): string {
+  const rule = ruleBlock(sheet, selector);
+  return rule.length > 0 ? sheet.replace(rule, rule.replace(from, to)) : sheet;
+}
+
+function actionRuleOnlyAligns(sheet: string): boolean {
+  const action = declarationsIn(ruleBlock(sheet, ACTION_RULE));
+  const label = declarationsIn(ruleBlock(sheet, ACTION_LABEL_RULE));
+  return action.size === 1 && action.get('justify-self') === 'start' &&
+    label.size === 1 && label.get('cursor') === 'default' && !label.has('pointer-events');
+}
+
+{
+  const danger = declarationsIn(ruleBlock(css, '.danger {'));
+  check('the action sits left-aligned in its grid cell, its label stops promising the row is clickable, and the destructive colour stays on the shared .danger token rule',
+    actionRuleOnlyAligns(dialogCss) && danger.get('background') === 'var(--stop)' &&
+    danger.get('color') === '#fff' && !css.includes('settings-action--danger'),
+    `action=${JSON.stringify([...declarationsIn(ruleBlock(dialogCss, ACTION_RULE))])}, ` +
+    `label=${JSON.stringify([...declarationsIn(ruleBlock(dialogCss, ACTION_LABEL_RULE))])}, ` +
+    `danger=${JSON.stringify([...danger])}`);
+}
+
+{
+  const stretched = sheetRuleWith(dialogCss, ACTION_RULE, 'justify-self: start;', 'justify-self: stretch;');
+  const pointerLabel = sheetRuleWith(dialogCss, ACTION_LABEL_RULE, 'cursor: default;', 'cursor: pointer;');
+  const ownColour = sheetRuleWith(dialogCss, ACTION_RULE, 'justify-self: start;',
+    'justify-self: start;\n  background: #c00;');
+  check('control: a stretched action, a pointer-cursor action label or a private action colour fails the same sheet predicate',
+    stretched !== dialogCss && !actionRuleOnlyAligns(stretched) &&
+    pointerLabel !== dialogCss && !actionRuleOnlyAligns(pointerLabel) &&
+    ownColour !== dialogCss && !actionRuleOnlyAligns(ownColour) &&
+    actionRuleOnlyAligns(dialogCss),
+    `stretch=${actionRuleOnlyAligns(stretched)}, pointer=${actionRuleOnlyAligns(pointerLabel)}, ` +
+    `colour=${actionRuleOnlyAligns(ownColour)}, real=${actionRuleOnlyAligns(dialogCss)}`);
 }
 
 function hintOutsideLabel(source: string): boolean {

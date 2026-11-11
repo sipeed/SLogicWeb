@@ -1176,6 +1176,300 @@ async function degradedReset(s: Scenario, options: DegradedOptions = {}): Promis
     `tail=${JSON.stringify(tail.slice(0, 40))}`);
 }
 
+const readUiFile = (() => {
+  const fs = nodeProcess.getBuiltinModule?.('fs') as
+    { readFileSync(path: string, encoding: 'utf8'): string } | undefined;
+  if (!fs) throw new Error('node fs module unavailable');
+  return (path: string): string => fs.readFileSync(path, 'utf8');
+})();
+const appSource = readUiFile('src/ui/app.ts');
+const settingsSource = readUiFile('src/ui/settingsDialog.ts');
+
+function fileMethod(source: string, signature: string): string {
+  const start = source.indexOf(signature);
+  const end = start >= 0 ? source.indexOf('\n  }\n', start) : -1;
+  return start >= 0 && end > start ? source.slice(start + signature.length, end) : '';
+}
+
+const CLEAR_CACHE_SIGNATURE = '  private async clearCache(): Promise<void> {';
+const FAIL_CLEAR_CACHE_SIGNATURE = '  private failClearCache(e: unknown): void {';
+
+function clearCacheBody(source: string): string {
+  return fileMethod(source, CLEAR_CACHE_SIGNATURE);
+}
+
+const RESET_FLOW_ORDER: readonly string[] = [
+  'if (this.resetting) return;',
+  'this.channelList.closeDialog();',
+  "this.menuStack.closeAll('outside');",
+  'if (this.settingsDialog.isOpen) this.settingsDialog.close();',
+  'const confirmed = await this.confirmDialog.ask({',
+  "t('reset.title'),",
+  "t('reset.body'),",
+  "t('reset.confirm'),",
+  "t('reset.cancel'),",
+  '}, this.el.settings);',
+  'if (!confirmed) {',
+  'this.settingsDialog.open(this.el.settings);',
+  'this.resetting = true;',
+  'try {',
+  "if (this.running || this.repeatTimer.pending) await this.stopCapture('manual');",
+  'if (this.stopPending) await this.stopPending;',
+  'this.endPendingRepeatSession();',
+  'const report = await clearUserData({',
+  'beforeReload: () => {',
+  "window.removeEventListener('beforeunload', this.unloadGuard);",
+  'this.unloadGuard = null;',
+  'if (!report.ok) {',
+  'this.failClearCache(report.failures.length > 0',
+  '} catch (e) {',
+  'this.failClearCache(e);',
+];
+
+function resetFlowOrdered(body: string): boolean {
+  const at = RESET_FLOW_ORDER.map((needle) => body.indexOf(needle));
+  return body.length > 0 && at.every((index, i) => index >= 0 && (i === 0 || index > at[i - 1]!));
+}
+
+const CANCEL_BRANCH = [
+  '    if (!confirmed) {',
+  '      this.settingsDialog.open(this.el.settings);',
+  '      return;',
+  '    }',
+  '',
+].join('\n');
+
+function cancelBranchIsInert(body: string): boolean {
+  const start = body.indexOf('if (!confirmed) {');
+  const end = start >= 0 ? body.indexOf('\n    }', start) : -1;
+  const branch = start >= 0 && end > start ? body.slice(start, end) : '';
+  return branch.includes('this.settingsDialog.open(this.el.settings);') &&
+    branch.includes('return;') &&
+    !branch.includes('this.resetting') &&
+    !branch.includes('stopCapture') && !branch.includes('clearUserData') &&
+    !branch.includes('persistWorkspace') && !branch.includes('writeWorkspaceSnapshot');
+}
+
+function resetModeHeldOnSuccess(body: string): boolean {
+  return body.indexOf('const report = await clearUserData({') >= 0 &&
+    !body.includes('this.resetting = false');
+}
+
+function failurePathRecovers(source: string): boolean {
+  const body = fileMethod(source, FAIL_CLEAR_CACHE_SIGNATURE);
+  const at = [
+    'this.resetting = false;',
+    'this.syncUnloadGuard();',
+    'this.lastWorkspaceSnapshot = null;',
+    "this.fail('error.clearCache', e, undefined, { notice: { key: 'error.clearCacheNotice' } });",
+  ].map((needle) => body.indexOf(needle));
+  return body.length > 0 && at.every((index, i) => index >= 0 && (i === 0 || index > at[i - 1]!));
+}
+
+function oneCaughtFailurePath(body: string): boolean {
+  return (body.match(/\} catch \(/g)?.length ?? 0) === 1 &&
+    (body.match(/this\.failClearCache\(/g)?.length ?? 0) === 2 &&
+    body.indexOf('this.failClearCache(report.failures.length > 0') < body.indexOf('} catch (e) {');
+}
+
+function persistSuppressed(source: string): boolean {
+  const body = fileMethod(source, '  private persistWorkspace(): void {');
+  const guardAt = body.indexOf('if (this.resetting) return;');
+  return guardAt >= 0 && guardAt < body.indexOf('serializeWorkspaceSnapshot(snapshot)');
+}
+
+const START_CAPTURE_SIGNATURE =
+  "  private async startCapture(origin: CaptureStartOrigin = 'manual'): Promise<void> {";
+
+function captureStartResetGuards(source: string): boolean {
+  const body = fileMethod(source, START_CAPTURE_SIGNATURE);
+  const entryAt = body.indexOf(
+    'if (this.resetting || this.running || this.stopping || this.repeatTimer.pending) return;');
+  const connectAt = body.indexOf("if (await this.connect() !== 'connected' || !this.device) return;");
+  const postAt = connectAt >= 0 ? body.indexOf('if (this.resetting) return;', connectAt) : -1;
+  const deviceAt = body.indexOf('const device = this.device;');
+  return entryAt >= 0 && entryAt < connectAt && postAt > connectAt && deviceAt > postAt;
+}
+
+function clearCacheIsHostSide(source: string): boolean {
+  const body = clearCacheBody(source);
+  return body.length > 0 && !body.includes('persistWorkspace') &&
+    !body.includes('localStorage') && !body.includes('sessionStorage') &&
+    !body.includes('caches.') && !body.includes('serviceWorker') &&
+    (source.match(/clearUserData\(/g)?.length ?? 0) === 1 &&
+    !source.includes('location.reload');
+}
+
+const RESET_APP_COPY: readonly string[] = [
+  "t('reset.title')",
+  "t('reset.body')",
+  "t('reset.confirm')",
+  "t('reset.cancel')",
+  "this.fail('error.clearCache',",
+  "'error.clearCacheNotice'",
+];
+
+const RESET_SETTINGS_COPY: readonly string[] = [
+  "this.rowLabel('settings.savedData')",
+  "t('settings.savedDataHelp')",
+  "t('settings.clearCache')",
+];
+
+function clearCacheRowWired(settings: string, app: string): boolean {
+  return settings.includes('return [this.developerToolsRow(), this.clearCacheRow()];') &&
+    (settings.match(/this\.clearCacheRow\(\)/g)?.length ?? 0) === 1 &&
+    settings.includes("action.addEventListener('click', () => this.host.clearCache());") &&
+    settings.includes('  clearCache(): void;') &&
+    app.includes('      clearCache: () => void this.clearCache(),') &&
+    app.includes(CLEAR_CACHE_SIGNATURE) &&
+    RESET_SETTINGS_COPY.every((needle) => settings.includes(needle));
+}
+
+{
+  const body = clearCacheBody(appSource);
+  const noCancel = body.replace(CANCEL_BRANCH, '');
+  const cancelStops = body.replace(
+    'if (!confirmed) {\n      this.settingsDialog.open(this.el.settings);\n      return;\n    }',
+    "if (!confirmed) {\n      await this.stopCapture('manual');\n      return;\n    }");
+  const flagFirst = body.replace(
+    '    if (!confirmed) {\n      this.settingsDialog.open(this.el.settings);\n      return;\n    }\n    this.resetting = true;',
+    '    this.resetting = true;\n    if (!confirmed) {\n      this.settingsDialog.open(this.el.settings);\n      return;\n    }');
+  check('the clear-cache action closes every overlay and Settings, asks the native confirmation, and only a confirmed answer takes the reset',
+    resetFlowOrdered(body) && cancelBranchIsInert(body) &&
+    appSource.includes('  private resetting = false;'),
+    `ordered=${resetFlowOrdered(body)}, inert=${cancelBranchIsInert(body)}, ` +
+    `body=${JSON.stringify(body.replace(/\s+/g, ' '))}`);
+  check('control: dropping the cancel branch, letting it stop the capture or taking the reset before it fails the same predicate',
+    noCancel !== body && body.length > 0 &&
+    (!resetFlowOrdered(noCancel) || !cancelBranchIsInert(noCancel)) &&
+    cancelStops !== body && !cancelBranchIsInert(cancelStops) &&
+    flagFirst !== body && !resetFlowOrdered(flagFirst),
+    `noCancel=${cancelBranchIsInert(noCancel)}, stops=${cancelBranchIsInert(cancelStops)}, ` +
+    `flagFirst=${resetFlowOrdered(flagFirst)}, real=${resetFlowOrdered(body)}`);
+}
+
+{
+  const body = clearCacheBody(appSource);
+  const flagCleared = body.replace(
+    '      const report = await clearUserData({',
+    '      this.resetting = false;\n      const report = await clearUserData({');
+  check('a successful clear leaves the reset mode held until navigation replaces the page',
+    resetModeHeldOnSuccess(body),
+    `held=${resetModeHeldOnSuccess(body)}`);
+  check('control: clearing the reset flag before the reload tail re-enables persistence and fails the same predicate',
+    flagCleared !== body && !resetModeHeldOnSuccess(flagCleared) && resetModeHeldOnSuccess(body),
+    `cleared=${resetModeHeldOnSuccess(flagCleared)}, real=${resetModeHeldOnSuccess(body)}`);
+}
+
+{
+  const noPostGuard = appSource.replace(
+    '    if (this.resetting) return;\n    const device = this.device;', '    const device = this.device;');
+  const noEntryGuard = appSource.replace(
+    'if (this.resetting || this.running || this.stopping || this.repeatTimer.pending) return;',
+    'if (this.running || this.stopping || this.repeatTimer.pending) return;');
+  check('no capture can start during the reset, at the entry and after the connect suspension',
+    captureStartResetGuards(appSource),
+    `guards=${captureStartResetGuards(appSource)}`);
+  check('control: dropping either reset guard is caught by the same predicate, including a start that resumes after connect()',
+    noPostGuard !== appSource && !captureStartResetGuards(noPostGuard) &&
+    noEntryGuard !== appSource && !captureStartResetGuards(noEntryGuard) &&
+    captureStartResetGuards(appSource),
+    `post=${captureStartResetGuards(noPostGuard)}, entry=${captureStartResetGuards(noEntryGuard)}, ` +
+    `real=${captureStartResetGuards(appSource)}`);
+}
+
+{
+  const escaping = appSource.replace('      this.failClearCache(e);', '      throw e;');
+  check('non-OK reports and unexpected rejections share one caught recovery path, so no rejection escapes the host call',
+    oneCaughtFailurePath(clearCacheBody(appSource)) &&
+    clearCacheBody(appSource).includes('this.failClearCache(report.failures.length > 0') &&
+    appSource.includes('      clearCache: () => void this.clearCache(),'),
+    `caught=${oneCaughtFailurePath(clearCacheBody(appSource))}`);
+  check('control: a catch that rethrows instead of reporting fails the same single-recovery predicate',
+    escaping !== appSource && !oneCaughtFailurePath(clearCacheBody(escaping)) &&
+    oneCaughtFailurePath(clearCacheBody(appSource)),
+    `escaping=${oneCaughtFailurePath(clearCacheBody(escaping))}, ` +
+    `real=${oneCaughtFailurePath(clearCacheBody(appSource))}`);
+}
+
+{
+  const noResetFlag = appSource.replace(
+    '  private failClearCache(e: unknown): void {\n    this.resetting = false;\n',
+    '  private failClearCache(e: unknown): void {\n');
+  const noUnload = appSource.replace(
+    '    this.resetting = false;\n    this.syncUnloadGuard();\n',
+    '    this.resetting = false;\n');
+  const noBaseline = appSource.replace(
+    '    this.syncUnloadGuard();\n    this.lastWorkspaceSnapshot = null;\n',
+    '    this.syncUnloadGuard();\n');
+  const noNotice = appSource.replace(
+    "notice: { key: 'error.clearCacheNotice' }", "notice: { key: 'error.clearCache' }");
+  check('a failed reset restores the reset flag, the unload guard and the workspace baseline before the localized failure banner',
+    failurePathRecovers(appSource) &&
+    RESET_APP_COPY.every((needle) => appSource.includes(needle)),
+    `recovers=${failurePathRecovers(appSource)}`);
+  check('control: a recovery that keeps the reset flag, skips the unload guard or the baseline, or drops the failure notice fails the same predicate',
+    noResetFlag !== appSource && !failurePathRecovers(noResetFlag) &&
+    noUnload !== appSource && !failurePathRecovers(noUnload) &&
+    noBaseline !== appSource && !failurePathRecovers(noBaseline) &&
+    noNotice !== appSource && !failurePathRecovers(noNotice) &&
+    failurePathRecovers(appSource),
+    `flag=${failurePathRecovers(noResetFlag)}, unload=${failurePathRecovers(noUnload)}, ` +
+    `baseline=${failurePathRecovers(noBaseline)}`);
+}
+
+{
+  const alwaysPersists = appSource.replace(
+    '  private persistWorkspace(): void {\n    if (this.resetting) return;\n',
+    '  private persistWorkspace(): void {\n');
+  check('workspace persistence is suppressed while the reset is in flight, so no deleted key is recreated before the reload',
+    persistSuppressed(appSource) &&
+    (appSource.match(/writeWorkspaceSnapshot\(/g)?.length ?? 0) === 1,
+    `suppressed=${persistSuppressed(appSource)}`);
+  check('control: dropping the suppression guard, or adding a second write path, fails the same predicate',
+    alwaysPersists !== appSource && !persistSuppressed(alwaysPersists) &&
+    persistSuppressed(appSource),
+    `always=${persistSuppressed(alwaysPersists)}, real=${persistSuppressed(appSource)}`);
+}
+
+{
+  const helperInApp = appSource.replace(
+    '      const report = await clearUserData({',
+    "      localStorage.clear();\n      const report = await clearUserData({");
+  const reloadInApp = appSource.replace(
+    '      const report = await clearUserData({',
+    '      location.reload();\n      const report = await clearUserData({');
+  check('App orchestrates the reset through the helper only: no storage, cache, registration or reload work of its own',
+    clearCacheIsHostSide(appSource),
+    `hostSide=${clearCacheIsHostSide(appSource)}`);
+  check('control: a storage call or a reload inside App is caught by the same ownership predicate',
+    helperInApp !== appSource && !clearCacheIsHostSide(helperInApp) &&
+    reloadInApp !== appSource && !clearCacheIsHostSide(reloadInApp) &&
+    clearCacheIsHostSide(appSource),
+    `storage=${clearCacheIsHostSide(helperInApp)}, reload=${clearCacheIsHostSide(reloadInApp)}`);
+}
+
+{
+  const unwired = settingsSource.replace(
+    "    action.addEventListener('click', () => this.host.clearCache());\n", '');
+  const bridgeless = appSource.replace('      clearCache: () => void this.clearCache(),\n', '');
+  const misplaced = settingsSource.replace(
+    'return [this.developerToolsRow(), this.clearCacheRow()];',
+    'return [this.clearCacheRow(), this.developerToolsRow()];');
+  check('the saved-data row sits after the console switch, calls the one host action and reaches the App method through the host literal',
+    clearCacheRowWired(settingsSource, appSource),
+    `wired=${clearCacheRowWired(settingsSource, appSource)}`);
+  check('control: a row without its click wiring, an App without the host entry or a pane that leads with the action fails the same wiring predicate',
+    unwired !== settingsSource && !clearCacheRowWired(unwired, appSource) &&
+    bridgeless !== appSource && !clearCacheRowWired(settingsSource, bridgeless) &&
+    misplaced !== settingsSource && !clearCacheRowWired(misplaced, appSource) &&
+    clearCacheRowWired(settingsSource, appSource),
+    `unwired=${clearCacheRowWired(unwired, appSource)}, ` +
+    `bridge=${clearCacheRowWired(settingsSource, bridgeless)}, ` +
+    `misplaced=${clearCacheRowWired(misplaced, appSource)}, ` +
+    `real=${clearCacheRowWired(settingsSource, appSource)}`);
+}
+
 const failed = results.filter((result) => !result.pass).length;
 console.log(results.map((result) =>
   `${result.pass ? 'PASS' : 'FAIL'}  ${result.name}${result.pass || !result.detail ? '' : `\n        ${result.detail}`}`,

@@ -77,6 +77,7 @@ import { srExportParts, type SrProbe } from './srSave.js';
 import { csvExportParts, vcdExportParts } from './textExport.js';
 import { FileDragDepth, SavedCaptures, captureUnsaved } from './fileGuards.js';
 import { ConfirmDialog } from './confirmDialog.js';
+import { clearUserData } from './userData.js';
 import { connectSamplerate } from './connectDefaults.js';
 import {
   analogRateAfterClamp, analogRateBeforeClamp, analogRateUserEdit,
@@ -401,6 +402,7 @@ export class App {
   /** Shows the raw USB register console in Capture > Advanced; persisted, off by default. */
   private developerTools = false;
   private lastWorkspaceSnapshot: string | null = null;
+  private resetting = false;
   private pendingToolbarViewport: { start: number; end: number; follow: boolean } | null = null;
   private readonly resizer: PanelResizer;
   private readonly decodeClient = sharedDecodeClient({
@@ -723,6 +725,7 @@ export class App {
       setHideIdle: (on) => this.setHideIdle(on),
       developerTools: () => this.developerTools,
       setDeveloperTools: (on) => this.setDeveloperTools(on),
+      clearCache: () => void this.clearCache(),
     });
     this.languageMenu = new SettingsMenu(this.el.language, 'language-menu');
     this.themeMenu = new SettingsMenu(this.el.theme, 'theme-menu');
@@ -4354,6 +4357,50 @@ export class App {
     this.renderPanels();
   }
 
+  private async clearCache(): Promise<void> {
+    if (this.resetting) return;
+    this.channelList.closeDialog();
+    this.menuStack.closeAll('outside');
+    if (this.settingsDialog.isOpen) this.settingsDialog.close();
+    const confirmed = await this.confirmDialog.ask({
+      title: t('reset.title'),
+      body: t('reset.body'),
+      confirm: t('reset.confirm'),
+      cancel: t('reset.cancel'),
+    }, this.el.settings);
+    if (!confirmed) {
+      this.settingsDialog.open(this.el.settings);
+      return;
+    }
+    this.resetting = true;
+    try {
+      if (this.running || this.repeatTimer.pending) await this.stopCapture('manual');
+      if (this.stopPending) await this.stopPending;
+      this.endPendingRepeatSession();
+      const report = await clearUserData({
+        beforeReload: () => {
+          if (this.unloadGuard === null) return;
+          window.removeEventListener('beforeunload', this.unloadGuard);
+          this.unloadGuard = null;
+        },
+      });
+      if (!report.ok) {
+        this.failClearCache(report.failures.length > 0
+          ? report.failures[0]!.error
+          : report.remaining.join(', '));
+      }
+    } catch (e) {
+      this.failClearCache(e);
+    }
+  }
+
+  private failClearCache(e: unknown): void {
+    this.resetting = false;
+    this.syncUnloadGuard();
+    this.lastWorkspaceSnapshot = null;
+    this.fail('error.clearCache', e, undefined, { notice: { key: 'error.clearCacheNotice' } });
+  }
+
   private deviceMenuItems(): SettingsMenuItem[] {
     const device = this.device;
     if (!device) return [];
@@ -4478,6 +4525,7 @@ export class App {
   }
 
   private persistWorkspace(): void {
+    if (this.resetting) return;
     const snapshot = this.workspaceSnapshot();
     const serialized = serializeWorkspaceSnapshot(snapshot);
     if (serialized === this.lastWorkspaceSnapshot) return;
@@ -5832,7 +5880,7 @@ export class App {
   }
 
   private async startCapture(origin: CaptureStartOrigin = 'manual'): Promise<void> {
-    if (this.running || this.stopping || this.repeatTimer.pending) return;
+    if (this.resetting || this.running || this.stopping || this.repeatTimer.pending) return;
     this.settledHeldCapture = false;
     this.pendingCaptureStore = null;
     if (!this.device) {
@@ -5841,6 +5889,7 @@ export class App {
       if (origin !== 'manual') return;
       if (await this.connect() !== 'connected' || !this.device) return;
     }
+    if (this.resetting) return;
     const device = this.device;
     const generation = ++this.captureGeneration;
     try {

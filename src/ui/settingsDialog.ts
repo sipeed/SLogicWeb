@@ -54,6 +54,7 @@ export interface SettingsDialogHost {
   setHideIdle(on: boolean): void;
   developerTools(): boolean;
   setDeveloperTools(on: boolean): void;
+  clearCache(): void;
 }
 
 function camelKey(kebab: string): string {
@@ -199,7 +200,7 @@ export class SettingsDialog {
       case 'shortcuts':
         return this.shortcutBlocks();
       case 'developer':
-        return [this.developerToolsRow()];
+        return [this.developerToolsRow(), this.clearCacheRow()];
       case 'about':
         return [this.aboutBlock()];
     }
@@ -345,6 +346,22 @@ export class SettingsDialog {
   private developerToolsRow(): HTMLDivElement {
     return this.toggleRow('developer-tools', 'settings.developerTools', this.host.developerTools(),
       (on) => this.host.setDeveloperTools(on), 'settings.developerToolsWhere');
+  }
+
+  private clearCacheRow(): HTMLDivElement {
+    const row = document.createElement('div');
+    row.className = 'settings-row';
+    const cell = document.createElement('div');
+    cell.className = 'settings-row-label-cell';
+    cell.append(this.rowLabel('settings.savedData'), helpTip(t('settings.savedDataHelp')));
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'settings-action danger';
+    action.dataset.settingsKey = 'clear-cache';
+    action.textContent = t('settings.clearCache');
+    action.addEventListener('click', () => this.host.clearCache());
+    row.append(cell, action);
+    return row;
   }
 
   private aboutBlock(): HTMLElement {

@@ -1237,6 +1237,12 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
   cursor: pointer;
 }
 .settings-toggle input { margin: 0; accent-color: var(--primary); }
+.settings-action {
+  justify-self: start;
+}
+.settings-row-label:not(label) {
+  cursor: default;
+}
 
 @media (max-width: 760px) {
   .settings-dialog { width: calc(100vw - 16px); max-width: calc(100vw - 16px); min-height: min(360px, calc(100dvh - 16px)); max-height: calc(100dvh - 16px); }
