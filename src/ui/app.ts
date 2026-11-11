@@ -509,6 +509,10 @@ export class App {
   private loopScanSkip = 0;
   /** The most recent display scan found at least one qualified crossing. */
   private loopScanCrossed = false;
+  /** Chunks to defer between display scans; grows while the Loop sink overruns. */
+  private loopScanStride = 0;
+  /** Moving average of one Loop sink, in ms; the scan stride follows it. */
+  private loopSinkMsAvg = 0;
   /** A loop trigger is anchored to a valid edge in the current data. */
   private triggerViewLock: TriggerViewLock | null = null;
   /** The capture in flight was armed with a host-side matcher. */
@@ -6123,6 +6127,8 @@ export class App {
       // invented across it, and the lock-release check waits for the pending scan.
       this.loopScanSkip = 0;
       this.loopScanCrossed = false;
+      this.loopScanStride = 0;
+      this.loopSinkMsAvg = 0;
       let lastLoopSinkMs = 0;
       this.captureArming = true;
       await device.start(cfg, (chunk) => {
@@ -6165,6 +6171,7 @@ export class App {
             this.analogScanner?.resetContinuity();
           }
           let scanCrossed = false;
+          let scanned = false;
           if (!skipScan && this.analogScanner && chunk.length > 0 && this.settings.triggerEnableMask &&
               (this.triggerViewLock !== null || this.triggerViewPending ||
                waitingForTrigger || mayRelock)) {
@@ -6174,8 +6181,12 @@ export class App {
               scanCrossed = true;
               this.recordAnalogCrossing(abs);
             }, gap);
+            scanned = true;
           }
-          if (!skipScan) this.loopScanCrossed = scanCrossed;
+          if (scanned) {
+            this.loopScanCrossed = scanCrossed;
+            this.loopScanSkip = this.loopScanStride;
+          }
           // A trigger lock that would need more than the store's hard sample budget has
           // already lost the retention race: bounded memory wins over an anchor that can
           // no longer be kept. The guard is before append so the store can never throw.
@@ -6197,7 +6208,17 @@ export class App {
           this.enforceLoopRetention(store);
           this.livePending = true;
           lastLoopSinkMs = performance.now() - sinkStarted;
-          if (lastLoopSinkMs > 30) this.loopScanSkip = Math.max(this.loopScanSkip, 2);
+          // Keep the sink under the delivery interval by trading display update rate for
+          // scan work. The stride follows the moving average, not one chunk: a scan chunk
+          // is expected to be slow and is paid for by the skipped chunks after it.
+          this.loopSinkMsAvg = this.loopSinkMsAvg === 0
+            ? lastLoopSinkMs
+            : this.loopSinkMsAvg * 0.9 + lastLoopSinkMs * 0.1;
+          if (this.loopSinkMsAvg > 32) {
+            this.loopScanStride = Math.min(this.loopScanStride + 1, 8);
+          } else if (this.loopSinkMsAvg < 24 && this.loopScanStride > 0) {
+            this.loopScanStride -= 1;
+          }
           return;
         }
         const room = (this.captureLimitSamples - store.length) * bytesPerSample;

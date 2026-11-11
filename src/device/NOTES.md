@@ -1752,6 +1752,15 @@ re-locked at a different sample, so the view alternated between live and trigger
   survives between edges. The slack is memory the locked store already carries; the sink's hard
   sample guard still caps a genuinely absent signal.
 
+At 16ch/100 MS/s the page must consume 200 MB/s, and a scan chunk plus its store append can
+exceed the 40 ms delivery interval; the backlog then fills and drops in bursts (a 4ch user saw
+a loss burst every ~2 s). The display scan is now paced by the sink's moving average: above
+32 ms the stride grows (up to one scan per nine chunks), below 24 ms it shrinks. The stride is a
+countdown set after each real scan, so skipped chunks are paid for by the scans around them,
+and it is display-only work being traded for data integrity. Combined with the edge-aware hold,
+a scan every few chunks keeps the trigger locked and the window steady; the waveform updates a
+few times per second under full load instead of the transport dropping in bursts.
+
 At 8ch/100 MS/s with no drops, the window stayed locked for 20 s with T steady (tens of
 samples of drift) where it previously alternated by one signal period; the final build could
 not be re-run on the board because another browser held the interface. The offline viewport
