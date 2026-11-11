@@ -265,9 +265,8 @@ export interface StreamTuning {
   transferBytes: number;
   /**
    * Completed transfers the consumer may fall behind by before the loop stops
-   * replenishing the USB queue, **as a fallback for a capture with no length that
-   * cannot report an exact dropout position**: no dropout sink, or sub-8-channel
-   * packing, where a transfer can hold a fractional sample.
+   * replenishing the USB queue, **as a fallback for a capture with no length and no
+   * dropout sink**, which has nobody to tell what was skipped.
    *
    * A capture that knows its length (timer mode - `StartOptions.deviceSampleLimit`)
    * bounds the queue with that length instead, exactly as the driver does
@@ -326,6 +325,10 @@ export interface Stats {
   shortTransfers: number;
   /** Largest number of completed USB blocks waiting for the data consumer. */
   peakQueuedTransfers: number;
+  /** Times the lag governor skipped queued transfers instead of consuming them. */
+  lagSkips: number;
+  /** Samples the lag governor skipped; they never reached the sink. */
+  lagSkippedSamples: number;
   firstByteMs: number | null;
   elapsedMs: number;
   /** Wire rate including start-up latency, MB/s (10^6 bytes/s). */
@@ -641,6 +644,8 @@ export class Slogic16U3 implements Device {
       transfers: 0,
       shortTransfers: 0,
       peakQueuedTransfers: 0,
+      lagSkips: 0,
+      lagSkippedSamples: 0,
       firstByteMs: null,
       elapsedMs: 0,
       rawMBps: 0,
@@ -1340,9 +1345,8 @@ export class Slogic16U3 implements Device {
      * doing. One whose length is known is bounded by that length. One without a length
      * - software trigger, where the trigger position is not known before RUN - keeps
      * the host backlog bounded in bytes instead, dropping the oldest completed chunks
-     * and reporting the run through the dropout sink. Only when that report would be
-     * inaccurate (no sink, or sub-8-channel packing where a chunk holds a fractional
-     * sample) does the old consumer cap survive as a fallback.
+     * and reporting the run through the dropout sink. Only without a sink, where
+     * nobody could be told, does the old consumer cap survive as a fallback.
      *
      * Hardware, analog Loop trigger at 16ch/100M (NOTES 8.29): the page's display scan
      * plus store retention regularly overran the 40 ms delivery interval, the old cap
@@ -1364,9 +1368,8 @@ export class Slogic16U3 implements Device {
      */
     const outstandingChunks = (): number => completed.size + inFlight.size;
     const channels = this.cfg?.channels ?? 0;
-    /** No known length, but a dropped chunk still maps to an exact sample count. */
-    const canDropLag = (): boolean =>
-      targetWireBytes === 0 && this.dropoutSink !== null && channels >= 8;
+    /** No known length, and a sink that can be told what was skipped. */
+    const canDropLag = (): boolean => targetWireBytes === 0 && this.dropoutSink !== null;
     const withinBudget = (): boolean => targetWireBytes > 0
       ? requestedBytes < targetWireBytes
       : canDropLag() || outstandingChunks() < lagChunks;
@@ -1386,20 +1389,41 @@ export class Slogic16U3 implements Device {
      */
     const dropLag = (): void => {
       if (!canDropLag() || this.headRemaining > 0) return;
-      const wire = this.wireBytesPerSample(channels);
       const budget = this.tuning?.hostLagBudgetBytes ?? HOST_LAG_BUDGET_BYTES;
-      while (queuedBytes > budget && completed.has(nextSequence)) {
+      // Lag governor. The producer's rate is fixed, so a backlog that keeps growing can
+      // only be answered on the consumer side. A Loop shows nothing but its newest
+      // window: half the budget behind, it skips ahead to an eighth rather than finish
+      // data that is already stale. Every other capture keeps what it can and gives up
+      // only what does not fit the whole budget.
+      const high = this.loopMode ? budget / 2 : budget;
+      if (queuedBytes <= high) return;
+      const low = this.loopMode ? budget / 8 : budget;
+      const wire = this.wireBytesPerSample(channels);
+      const whole = channels >= 8 ? bytesPerSampleForChannels(channels) : 1;
+      let skipped = 0;
+      while (queuedBytes > low && completed.has(nextSequence)) {
         const item = completed.get(nextSequence)!;
-        if (item.error !== undefined || item.result?.status !== 'ok') return;
-        completed.delete(nextSequence++);
         const bytes = itemBytes(item);
+        // A transfer that does not end on a sample would shift every sample after it.
+        if (item.error !== undefined || item.result?.status !== 'ok' || bytes % whole !== 0) {
+          break;
+        }
+        completed.delete(nextSequence++);
         queuedBytes -= bytes;
-        const samples = Math.max(0, Math.floor(bytes / wire));
-        if (samples === 0) continue;
-        if (this.hostGapPosition === null) this.hostGapPosition = this.samplesDelivered;
-        this.hostGapSamples += samples;
-        this.samplesDelivered += samples;
+        skipped += Math.floor(bytes / wire);
       }
+      if (skipped === 0) return;
+      // Nothing may match across the skip, and a waiting matcher's search budget
+      // still advances by it.
+      const streaming = this.triggerStreaming();
+      this.trigger?.noteGap(skipped);
+      this.stats.lagSkips += 1;
+      this.stats.lagSkippedSamples += skipped;
+      if (this.hostGapPosition === null) this.hostGapPosition = this.samplesDelivered;
+      this.hostGapSamples += skipped;
+      // Positions are emitted-stream positions: a matcher still waiting for its first
+      // match has emitted nothing, so what it never saw does not move them.
+      if (streaming) this.samplesDelivered += skipped;
     };
     const finish = (item: CompletedTransfer): void => {
       this.lastCompletionAt = performance.now();
@@ -1669,6 +1693,13 @@ export class Slogic16U3 implements Device {
     } else {
       return this.emitSamples(out);
     }
+  }
+
+  /** No matcher, or one past its first match (or forced): it emits a continuous stream. */
+  private triggerStreaming(): boolean {
+    if (!this.trigger) return true;
+    const stats = this.trigger.stats;
+    return stats.matched || stats.forced;
   }
 
   private emitSamples(out: Uint8Array): void | Promise<void> {

@@ -509,6 +509,8 @@ export class App {
   private loopScanSkip = 0;
   /** The most recent display scan found at least one qualified crossing. */
   private loopScanCrossed = false;
+  /** The stream skipped ahead of the retained data; the next append must not join them. */
+  private loopGapPending = false;
   /** Chunks to defer between display scans; grows while the Loop sink overruns. */
   private loopScanStride = 0;
   /** Moving average of one Loop sink, in ms; the scan stride follows it. */
@@ -6127,6 +6129,7 @@ export class App {
       // invented across it, and the lock-release check waits for the pending scan.
       this.loopScanSkip = 0;
       this.loopScanCrossed = false;
+      this.loopGapPending = false;
       this.loopScanStride = 0;
       this.loopSinkMsAvg = 0;
       let lastLoopSinkMs = 0;
@@ -6218,6 +6221,7 @@ export class App {
               const drop = loopDropSamples(store.length, this.loopRetentionLen);
               if (drop > 0) this.dropLoopFront(store, drop);
             }
+            if (this.loopGapPending && !this.markLoopGap(store)) return;
             try {
               store.append(chunk);
             } catch (e) {
@@ -6277,6 +6281,22 @@ export class App {
               counted: pos, stored: store.length + this.droppedTotal,
             }));
         }
+        if (isLoop) {
+          // A Loop keeps only its newest window, and the transport's lag governor skips
+          // ahead when the consumer falls behind (NOTES 8.29). That is discarded data,
+          // like everything else older than the window: not a loss, no filler, and no
+          // reason to touch what is on screen. The current window stays until the next
+          // chunk replaces it or is appended behind a gap marker. While the matcher is
+          // still waiting nothing has been emitted, so positions do not move either.
+          if (!(softwareTrigger && this.triggerState === 'waiting')) {
+            this.droppedTotal += missing;
+            this.loopGapPending = true;
+            this.analogCrossings.length = 0;
+            this.pendingRelockAbs = null;
+            this.analogScanner?.resetContinuity();
+          }
+          return;
+        }
         // Waiting for a software trigger, the store holds nothing yet; filler would
         // shift every later sample away from the device timeline. (The transport does
         // not report dropouts yet; when it does, its trigger must also noteGap.) Count
@@ -6284,34 +6304,6 @@ export class App {
         if (softwareTrigger && this.triggerState === 'waiting') {
           this.lostSamples += missing;
           this.livePending = true;
-          return;
-        }
-        const reported = missing;
-        if (isLoop && missing >= this.loopRetentionLen) {
-          // A gap at least as long as the retained window leaves nothing of the old
-          // window to keep, so drop the pre-gap store and advance the timeline past the
-          // whole gap instead of materializing it. Appending the filler would cost as
-          // much as a real chunk, and under the repeated gaps of a sustained overload it
-          // starved the page exactly as the drops were meant to protect it (NOTES 8.29).
-          // The pad rounds the length up to what dropFront accepts; it is part of the
-          // gap, so only the remainder is advanced directly.
-          const pad = (DROP_FRONT_QUANTUM - (store.length % DROP_FRONT_QUANTUM)) %
-            DROP_FRONT_QUANTUM;
-          if (pad > 0) {
-            const padBytes = pad * bytesPerSampleForChannels(store.channelCount);
-            try {
-              store.append(new Uint8Array(padBytes));
-            } catch (e) {
-              if (this.captureOutOfMemory(e)) return;
-              throw e;
-            }
-          }
-          if (store.length > 0) this.dropLoopFront(store, store.length);
-          this.droppedTotal += missing - pad;
-          this.lostSamples += reported;
-          this.livePending = true;
-          // A crossing across the gap is unknowable; restart the scan from the next chunk.
-          this.analogScanner?.resetContinuity();
           return;
         }
         let n: number;
@@ -6322,11 +6314,10 @@ export class App {
           throw e;
         }
         if (n === 0) return;
-        this.lostSamples += reported;
+        this.lostSamples += n;
         this.livePending = true;
         // A crossing across the gap is unknowable; restart the scan from the next chunk.
         this.analogScanner?.resetContinuity();
-        if (isLoop) { this.enforceLoopRetention(store); return; }
         if (store.length >= this.captureLimitSamples) this.captureFilled();
       }, softwareTrigger ? {
         // A loop capture windows the triggered stream downstream of the trigger: the
@@ -6551,6 +6542,25 @@ export class App {
   }
 
   /**
+   * The stream skipped ahead since the retained data (see the Loop dropout handler).
+   * Put a short marked gap at the junction before new data is appended behind it, so
+   * the two sides are never drawn as one continuous trace. The filler stands in for
+   * skipped samples in the stream count; it does not add to it.
+   */
+  private markLoopGap(store: SampleStore): boolean {
+    this.loopGapPending = false;
+    if (store.length === 0) return true;
+    try {
+      this.droppedTotal -= appendLostSamples(
+        store, DROP_FRONT_QUANTUM, this.captureLimitSamples);
+    } catch (e) {
+      if (this.captureOutOfMemory(e)) return false;
+      throw e;
+    }
+    return true;
+  }
+
+  /**
    * Whole-window replacement for a Loop chunk that carries more than one window.
    *
    * At 16ch/100M the worker delivers 4 M samples every 40 ms. Appending all of them only
@@ -6635,6 +6645,7 @@ export class App {
       Math.ceil(before / q) * q, Math.floor((index >= 0 ? index : store.length) / q) * q);
     if (cut > 0) this.dropLoopFront(store, cut);
     this.droppedTotal += tailStart;
+    this.loopGapPending = false;
     this.enforceLoopRetention(store);
     return 'replaced';
   }

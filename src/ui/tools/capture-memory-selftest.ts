@@ -341,7 +341,7 @@ function toggle(
   check('the sink stops through captureFilled and turns allocation failures into a typed abort',
     sinkStart > 0 && !sink.includes("stopCapture('completed')") &&
       (sink.match(/this\.captureFilled\(\)/g) ?? []).length >= 4 &&
-      (sink.match(/this\.captureOutOfMemory\(e\)/g) ?? []).length === 4 &&
+      (sink.match(/this\.captureOutOfMemory\(e\)/g) ?? []).length === 3 &&
       app.includes('this.applyCaptureMemoryCeiling(isLoop, cfg.channels);') &&
       app.includes("cause: 'memory',"),
     `filled=${(sink.match(/this\.captureFilled\(\)/g) ?? []).length}`);

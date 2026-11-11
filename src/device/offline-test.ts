@@ -1994,6 +1994,61 @@ async function main(): Promise<void> {
       `sink ${stats.sinkBytes} + dropped ${missing} of ${chunks * transferBytes - 4}`);
   }
 
+  console.log('\nbackpressure: a Loop skips ahead at half the budget instead of filling it');
+  {
+    /*
+     * The lag governor (NOTES 8.29). The device's rate is fixed, so a consumer that keeps
+     * falling behind can only be answered on its own side. A Loop shows nothing but its
+     * newest window: half the budget behind, the transport skips ahead to an eighth and
+     * reports the run as one gap, instead of working through data that is already stale
+     * and letting the lag reach the whole budget.
+     */
+    const transferBytes = 262144;
+    const chunks = 48;
+    const budget = 4 * 1024 * 1024;
+    const script = Array.from({ length: chunks }, (_, i) => ({
+      kind: 'data' as const,
+      bytes: new Array<number>(transferBytes).fill(i & 0xff),
+    }));
+    const fake = new FakeStreamDevice(recorded(), script);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    let entered = 0;
+    let reportedMissing = 0;
+    const drops: { position: number; missing: number; expected: number }[] = [];
+    await dev.open();
+    await dev.start(
+      { channels: 8, samplerate: 16e6, thresholdVolts: 1.6 },
+      async (chunk) => {
+        entered += chunk.length;
+        await new Promise((r) => setTimeout(r, 8));
+      },
+      (position, missing) => {
+        drops.push({ position, missing, expected: entered + reportedMissing });
+        reportedMissing += missing;
+      },
+      { loop: true, tuning: { depth: 4, transferBytes, lagChunks: 4, hostLagBudgetBytes: budget } },
+    );
+    await new Promise((r) => setTimeout(r, 600));
+    await dev.stop();
+    const stats = dev.getStats();
+    const high = budget / 2 / transferBytes;
+    const low = budget / 8 / transferBytes;
+    check('a Loop skips ahead once it is half the budget behind',
+      stats.lagSkips > 0 && stats.peakQueuedTransfers <= high + 1 && stats.maxIdleGapMs === 0,
+      `${stats.lagSkips} skips, peak ${stats.peakQueuedTransfers} of ${high + 1}, ` +
+        `idle gap ${stats.maxIdleGapMs.toFixed(2)}ms`);
+    check('each skip takes the backlog down to an eighth of the budget',
+      drops.length > 0 && drops.every((d) => d.missing >= (high - low) * transferBytes),
+      drops.map((d) => d.missing / transferBytes).join(','));
+    check('a skip is reported at the exact end of the delivered timeline',
+      drops.every((d) => d.position === d.expected),
+      drops.map((d) => `${d.position}/${d.expected}`).join(' '));
+    check('delivered plus skipped accounts for every device byte after the head',
+      stats.sinkBytes + reportedMissing === chunks * transferBytes - 4 &&
+        stats.lagSkippedSamples === reportedMissing,
+      `sink ${stats.sinkBytes} + skipped ${reportedMissing} of ${chunks * transferBytes - 4}`);
+  }
+
   console.log('\nbackpressure: a known capture length, not the consumer, bounds the queue');
   {
     /*

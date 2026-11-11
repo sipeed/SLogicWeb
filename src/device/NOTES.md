@@ -1718,15 +1718,10 @@ and past it the transport drops the oldest completed chunks. Two details matter:
   the rest: the report flood had replaced the device starvation with a page-side death
   spiral.
 
-The page's gap handling now has a fast path. A gap at least as long as the retained window
-leaves nothing of the old window to keep, so the store is dropped (padded to the 64-sample
-drop quantum) and the timeline advances past the gap without materializing it; a gap shorter
-than the window is still materialized as before, and marks the untrusted span. The Loop sink
-also skips the next two display scans after a sink over 30 ms and resets the scanner's
-continuity, so a heavy scan chunk is followed by two store-only chunks and the average stays
-under the delivery interval. The old consumer cap survives only where a dropout cannot be
-placed exactly: no dropout sink, or sub-8-channel packing where a transfer holds a fractional
-sample.
+The page's first answer was a fast path that dropped the store for a gap at least as long as
+the window, and a rule that skipped the next two display scans after a sink over 30 ms. Both
+are superseded below: the scan is bounded and paced instead, and a Loop gap no longer touches
+the store. The old consumer cap survives only without a dropout sink.
 
 Hardware, 32U3, 16ch/100M analog rising-edge Loop with a real crossing (2026-11-11): 63 s
 with a lock acquired and released repeatedly, no freeze, `maxIdleGap 0`, `peakQueuedTransfers`
@@ -1788,6 +1783,38 @@ rising 0 V trigger, headless SwiftShader): the sink fell from ~60 ms to 3.0 ms p
 584 us window, 9.6 ms at 20 ms and 10.6 ms at 160 ms; the lock held in every poll, every T was
 an exact crossing (stream position = 0 mod the 40-sample period), the view offsets from T
 never moved, and stored plus dropped equalled the stream to the sample.
+
+**The lag governor.** The board, once free again, showed that the page was no longer the
+slow side: its chunk handler cost 3 ms per 40 ms, yet a gap was still marked after a few
+seconds, the corner readout fell back to "no capture" and the next lock reset the view to the
+whole window. Two separate faults:
+
+- Any consumer that stays slower than the device fills the budget sooner or later, and the
+  old rule only reacted when it was full: by then the page was 0.6 s behind and stayed there.
+- The page treated a transport gap in a Loop as lost data: it emptied the store, which
+  released the lock, and the re-lock placed the view on the whole window again.
+
+The device's rate is fixed, so a growing backlog can only be answered on the consumer side.
+`dropLag` is now a governor with marks on the same 128 MiB budget:
+
+- Half behind (Loop only): skip ahead to an eighth, as one reported gap, instead of working
+  through data that is already stale.
+- The whole budget (every other capture, where each sample matters): drop only what does not
+  fit, as before.
+
+A skip tells the matcher (`noteGap`), and a matcher still waiting for its first match does not
+move the emitted-stream positions. Every width can be skipped now: a full transfer is a whole
+number of samples at any width, so the sub-8-channel fallback to the consumer cap is gone.
+
+On the page a Loop gap is discarded data, like everything else older than the window: it is
+counted in `droppedTotal`, not as lost, the store and the lock are left alone, and the next
+chunk either replaces the window or is appended behind a 64-sample marked gap.
+
+Real board, 32U3, 16ch/100 MS/s, 584 us window, analog rising 0 V: 200 MB/s for 15 s with no
+skip (`peakQueuedTransfers` 79), the lock held in every poll with T and the view offsets
+steady. The skip path is pinned offline, and was exercised on the board through the
+plan-executor branch (page blocked 600 ms of every second: 51 skips in 23 s, lock held 20 of
+20 polls, no gap marked, `maxIdleGap 0`).
 
 At 8ch/100 MS/s with no drops, the window stayed locked for 20 s with T steady (tens of
 samples of drift) where it previously alternated by one signal period; the final build could
