@@ -501,6 +501,14 @@ export class App {
   private lastAnalogCrossingAbs = Number.NEGATIVE_INFINITY;
   /** An edge seen while unlocked; the next enforce re-locks the trigger view on it. */
   private pendingRelockAbs: number | null = null;
+  /**
+   * Loop sink chunks whose optional display scan is deferred to keep the data path
+   * inside the delivery interval. A pending scan also suppresses the "no edge" release:
+   * the window has not seen a scan yet, not seen the signal go away (NOTES 8.29).
+   */
+  private loopScanSkip = 0;
+  /** The most recent display scan found at least one qualified crossing. */
+  private loopScanCrossed = false;
   /** A loop trigger is anchored to a valid edge in the current data. */
   private triggerViewLock: TriggerViewLock | null = null;
   /** The capture in flight was armed with a host-side matcher. */
@@ -6112,9 +6120,10 @@ export class App {
       // store-only chunk ~20 ms, so a 1-in-2 ratio still averaged over the 40 ms
       // delivery interval and the backlog grew until the transport had to drop
       // (NOTES 8.29). A skipped chunk resets the scanner's continuity, so no edge is
-      // invented across it.
+      // invented across it, and the lock-release check waits for the pending scan.
+      this.loopScanSkip = 0;
+      this.loopScanCrossed = false;
       let lastLoopSinkMs = 0;
-      let scanSkip = 0;
       this.captureArming = true;
       await device.start(cfg, (chunk) => {
         // A late message from a superseded acquisition must never touch the new store.
@@ -6150,18 +6159,23 @@ export class App {
             locked: this.triggerViewLock !== null,
             pending: this.triggerViewPending,
           });
-          const skipScan = scanSkip > 0;
+          const skipScan = this.loopScanSkip > 0;
           if (skipScan) {
-            scanSkip -= 1;
+            this.loopScanSkip -= 1;
             this.analogScanner?.resetContinuity();
           }
+          let scanCrossed = false;
           if (!skipScan && this.analogScanner && chunk.length > 0 && this.settings.triggerEnableMask &&
               (this.triggerViewLock !== null || this.triggerViewPending ||
                waitingForTrigger || mayRelock)) {
             const base = store.length + store.droppedSamples;
             const gap = Math.max(1, Math.floor(this.loopRetentionLen / 64));
-            this.analogScanner.scan(chunk, base, (abs) => this.recordAnalogCrossing(abs), gap);
+            this.analogScanner.scan(chunk, base, (abs) => {
+              scanCrossed = true;
+              this.recordAnalogCrossing(abs);
+            }, gap);
           }
+          if (!skipScan) this.loopScanCrossed = scanCrossed;
           // A trigger lock that would need more than the store's hard sample budget has
           // already lost the retention race: bounded memory wins over an anchor that can
           // no longer be kept. The guard is before append so the store can never throw.
@@ -6183,7 +6197,7 @@ export class App {
           this.enforceLoopRetention(store);
           this.livePending = true;
           lastLoopSinkMs = performance.now() - sinkStarted;
-          if (lastLoopSinkMs > 30) scanSkip = Math.max(scanSkip, 2);
+          if (lastLoopSinkMs > 30) this.loopScanSkip = Math.max(this.loopScanSkip, 2);
           return;
         }
         const room = (this.captureLimitSamples - store.length) * bytesPerSample;
@@ -6533,9 +6547,17 @@ export class App {
     if (lock && this.analogScanner) {
       this.rollLoopWindow(store);
       const liveAbs = store.droppedSamples + store.length;
-      if (this.triggerViewLock && liveAbs - this.lastAnalogCrossingAbs > this.loopRetentionLen) {
-        // A whole Duration without a new edge: the current data + trigger configuration
-        // no longer triggers, so the lock has nothing to anchor to.
+      if (this.triggerViewLock && this.loopScanSkip === 0 && !this.loopScanCrossed &&
+          liveAbs - this.lastAnalogCrossingAbs >
+            this.loopRetentionLen + this.loopTriggerSlackSamples) {
+        // Release only after a scan examined the window and found no edge, and the last
+        // edge is more than the slack behind. Distance alone is wrong: an 8 MiB chunk can
+        // hold its last edge near its start and still contain dozens of edges, and
+        // releasing there re-locked on the next edge at a different sample - the view
+        // alternated between live and trigger (NOTES 8.29). A slower-than-window signal
+        // is held through the slack, which is memory the store already carries while
+        // locked; the sink's hard sample guard still caps an absent signal. While a scan
+        // is deferred the window has not been examined, so the release waits for it.
         this.releaseLoopTrigger();
       }
     }

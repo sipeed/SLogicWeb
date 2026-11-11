@@ -1736,6 +1736,27 @@ samples in 2.5 s. In the headless SwiftShader harness the page itself sits below
 freezing; a GPU browser leaves the 128 MiB budget to absorb render stalls, which was the
 original failure. The status line still reports the lost samples.
 
+The transport fix alone still left the Loop trigger view unusable. Live instrumenting showed
+the lock released between every pair of edges with a 20 ms window and a ~38 ms trigger period:
+`liveAbs - lastAnalogCrossingAbs > loopRetentionLen` fired between edges, and the next edge
+re-locked at a different sample, so the view alternated between live and trigger. That is the
+"frantic refresh" users see once the trigger is on. Three display-side rules changed:
+
+- A deferred display scan is not evidence that the signal went away. The release check waits
+  while `loopScanSkip` is non-zero.
+- Release now requires that the most recent scan found no qualified edge at all. Distance alone
+  was wrong: one 8 MiB chunk can hold its last edge near its start and still contain dozens of
+  edges, which released the lock immediately after a successful scan.
+- When a scan did find edges, the lock now holds through the existing memory slack
+  (`loopTriggerSlackSamples`) instead of only the window, so a trigger slower than the window
+  survives between edges. The slack is memory the locked store already carries; the sink's hard
+  sample guard still caps a genuinely absent signal.
+
+At 8ch/100 MS/s with no drops, the window stayed locked for 20 s with T steady (tens of
+samples of drift) where it previously alternated by one signal period; the final build could
+not be re-run on the board because another browser held the interface. The offline viewport
+selftest now pins the edge-aware release.
+
 Offline checks pin both halves: with a dropout sink the backlog passes `lagChunks` and the
 lanes stay armed, under budget nothing is lost, and past a 2 MiB test budget the reports are
 coalesced, their positions are the exact end of the delivered timeline, and delivered plus

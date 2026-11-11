@@ -318,7 +318,10 @@ const startSrc = app.slice(
     fitLock.includes('this.triggerViewOffsetEnd = (1 - lock.fraction) * this.loopRetentionLen;') &&
     !fitLock.includes('this.triggerViewLock = null;');
   const roll = enforce.includes('this.rollLoopWindow(store);') &&
-    enforce.includes('liveAbs - this.lastAnalogCrossingAbs > this.loopRetentionLen') &&
+    enforce.includes('liveAbs - this.lastAnalogCrossingAbs >') &&
+    enforce.includes('this.loopRetentionLen + this.loopTriggerSlackSamples') &&
+    enforce.includes('!this.loopScanCrossed') &&
+    enforce.includes('this.loopScanSkip === 0') &&
     enforce.includes('this.releaseLoopTrigger();') &&
     app.includes('private rollLoopWindow(store: SampleStore): void {') &&
     app.includes('planLoopSwap({') &&
