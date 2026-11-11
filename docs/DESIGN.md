@@ -329,7 +329,7 @@ Analog channels are not bus rows. Each analog signal has a row with:
   strip — an attached decoder keeps its own 20 px lane — so 32 channels fit a 768 px
   plot. Analog rows and lanes keep their sizes. It is an opt-in mouse density: it gives
   up the 48 px touch row (§5.1), which is why it is off by default.
-- **Hide idle channels.** Settings → **Hide idle channels (no edges in the capture)**
+- **Hide idle channels.** Settings → **Hide idle channels**
   (persisted, default off) hides rows whose channel has no edge anywhere in the capture
   on screen (one whole-capture summary column per channel, `low ≠ high`). A note row
   after the last row, pinned to the bottom of the stack, says how many are hidden
@@ -469,7 +469,7 @@ overview and the hint bar):
 
 - Default: a plain wheel only scrolls the rows (when every row fits it does nothing; it
   never zooms) and Ctrl/⌘+wheel zooms. Shift+wheel always pans.
-- Settings > "Wheel zooms (no Ctrl needed)" (PulseView habit, persisted in the
+- Settings > "Wheel zooms" (PulseView habit, persisted in the
   workspace, off by default): a plain wheel always zooms and Ctrl/⌘+wheel scrolls rows.
 - Ctrl/⌘+wheel is always swallowed over these areas, so the page itself never zooms.
 - Keyboard `+`/`=`/`-` zoom one wheel notch about the view centre; `←`/`→` pan a tenth of
@@ -802,6 +802,8 @@ polite live region, so assistive technology reads the area and hints when they c
 - Every key switch (channel width, Analog, trigger enable/source, capture mode, test mode)
   carries one plain sentence: what it does, when to use it, its effect. Longer detail goes
   in a "?" help tip (`.help-tip`, tooltip on hover/focus/tap), never a panel paragraph.
+  Every Settings → Appearance row carries one such circled `?` beside its short label and
+  explains itself on hover and on keyboard focus, so the option names stay scannable.
   No implementation terms ("matcher", "local step", "wave"): say "trigger", "capture",
   "previous capture". Test mode 2 is a "test pattern", never "simulator" (confusable with
   Analog).
