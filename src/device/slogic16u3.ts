@@ -188,6 +188,14 @@ const LARGE_READ_CEILING_BYTES_PER_SEC = 500e6;
  * transport and the page's only for the fallback.
  */
 const SINK_CHUNK_BYTES = 8 * 1024 * 1024;
+/**
+ * Completed-transfer backlog allowed while the capture has no known length. Past it the
+ * driver drops the oldest completed chunk (and reports the gap through the dropout sink)
+ * rather than stopping the USB reads: the device FIFO only covers a few milliseconds, so
+ * a page that overruns one delivery interval must not be allowed to wedge the sampling
+ * path.
+ */
+const HOST_LAG_BUDGET_BYTES = 128 * 1024 * 1024;
 
 /** How long stop() waits for in-flight transfers before forcing a USB reset. */
 const STOP_TIMEOUT_MS = 1500;
@@ -257,21 +265,31 @@ export interface StreamTuning {
   transferBytes: number;
   /**
    * Completed transfers the consumer may fall behind by before the loop stops
-   * replenishing the USB queue, **when the capture has no length of its own**.
+   * replenishing the USB queue, **as a fallback for a capture with no length that
+   * cannot report an exact dropout position**: no dropout sink, or sub-8-channel
+   * packing, where a transfer can hold a fractional sample.
    *
    * A capture that knows its length (timer mode - `StartOptions.deviceSampleLimit`)
    * bounds the queue with that length instead, exactly as the driver does
    * (protocol.c:395), and this value is ignored: the device must never be left
-   * without queued reads because the consumer is late (NOTES 8.27). Software-trigger mode,
-   * where the trigger position and so the capture's length are not known before RUN, has
-   * nothing else to bound the memory with and keeps this cap.
+   * without queued reads because the consumer is late (NOTES 8.27).
    *
-   * The bound is per-transfer, not per-byte: 16 chunks is 50 MB at the 3,129,344 B
-   * geometry, i.e. ~125 ms of 32ch/100M. Past it the device FIFO is on its own, which is
-   * the same cliff a host that never drained it would fall off, so the loop records why it
-   * stopped refilling in the trace rather than letting that look like a slow device.
+   * A no-length capture with a dropout sink keeps every lane armed and bounds the
+   * host backlog by `hostLagBudgetBytes` instead, dropping the oldest completed
+   * transfers and reporting the whole run as one dropout (NOTES 8.29). Stopping the
+   * reads is what wedged the board: the device FIFO covers only a few milliseconds,
+   * while a page doing Loop display work is regularly late by more than one delivery
+   * interval.
    */
   lagChunks?: number;
+  /**
+   * Bytes of completed, not-yet-consumed transfers a no-length capture may hold
+   * before the oldest are dropped and reported through the dropout sink. Ignored
+   * when the capture has a length or when the fallback `lagChunks` bound applies.
+   * The 128 MiB default is ~0.3 s of 32ch/400M: enough for a page that is late,
+   * small enough that the pile cannot exhaust a browser tab.
+   */
+  hostLagBudgetBytes?: number;
   /**
    * Total bytes of submitted URBs this host will actually accept. Linux charges every
    * submitted URB against `usbfs_memory_mb` (16 MiB unless raised) and Chromium reports
@@ -482,6 +500,9 @@ export function deriveStreamTuning(cfg: CaptureConfig, want: Partial<StreamTunin
   // transfers never trips it, small enough that the pile stays well under the store it
   // is feeding.
   const lagChunks = want.lagChunks && want.lagChunks > 0 ? want.lagChunks : depth * 4;
+  const hostLagBudgetBytes = want.hostLagBudgetBytes && want.hostLagBudgetBytes > 0
+    ? want.hostLagBudgetBytes
+    : HOST_LAG_BUDGET_BYTES;
   // Coalescing belongs to the small-read geometry the transport chose for itself: an
   // explicit tuning is a measurement or a test and gets its reads delivered one for one.
   const coalesceBytes: number | undefined = want.coalesceBytes && want.coalesceBytes > 0
@@ -490,7 +511,7 @@ export function deriveStreamTuning(cfg: CaptureConfig, want: Partial<StreamTunin
       ? SINK_CHUNK_BYTES
       : undefined;
   return {
-    depth, transferBytes, lagChunks,
+    depth, transferBytes, lagChunks, hostLagBudgetBytes,
     ...(coalesceBytes === undefined ? {} : { coalesceBytes }),
   };
 }
@@ -540,6 +561,12 @@ export class Slogic16U3 implements Device {
   /** This model's partial-head length; see `headDropBytesForProductId`. */
   private readonly headDrop: number;
   private sink: SampleSink | null = null;
+  /** Reports host-side drops when the page consumer falls behind (positions in samples). */
+  private dropoutSink: DropoutSink | null = null;
+  /** Timeline position where the coalesced host gap starts, or null when none is due. */
+  private hostGapPosition: number | null = null;
+  /** Samples dropped since `hostGapPosition`; one dropout report covers the whole run. */
+  private hostGapSamples = 0;
   /** Samples handed to the sink since start(), for dropout positions. */
   private samplesDelivered = 0;
   /** Coalescing block for sink delivery; see SINK_CHUNK_BYTES. */
@@ -945,7 +972,7 @@ export class Slogic16U3 implements Device {
   }
 
   async start(
-    cfg: CaptureConfig, sink: SampleSink, _onDropout?: DropoutSink, opts: StartOptions = {},
+    cfg: CaptureConfig, sink: SampleSink, onDropout?: DropoutSink, opts: StartOptions = {},
   ): Promise<void> {
     if (this.running) throw new DiagnosticError('device.startRunning');
     if (this.stopping || this.loopDone) {
@@ -960,6 +987,9 @@ export class Slogic16U3 implements Device {
 
     this.cfg = cfg;
     this.sink = sink;
+    this.dropoutSink = onDropout ?? null;
+    this.hostGapPosition = null;
+    this.hostGapSamples = 0;
     this.tuning = deriveStreamTuning(cfg, opts.tuning ?? {});
     // Sticky: an instance lives on exactly one thread, and `bench` restarts the loop
     // without repeating the options, so the label set by the first capture has to hold.
@@ -1306,48 +1336,77 @@ export class Slogic16U3 implements Device {
      * the board should never have been allowed to overrun - the failure the driver's own
      * resubmit rule exists to prevent.
      *
-     * So a capture whose length is known arms while the host has not already requested
-     * that whole length, the driver's rule. A capture without one
-     * - software trigger, where the trigger position is not known before RUN - keeps the
-     * consumer bound, because there is nothing else to bound the memory with, and says so
-     * in the trace when the cap is what stopped the refill.
+     * So a capture arms while its own byte budget allows, whatever the consumer is
+     * doing. One whose length is known is bounded by that length. One without a length
+     * - software trigger, where the trigger position is not known before RUN - keeps
+     * the host backlog bounded in bytes instead, dropping the oldest completed chunks
+     * and reporting the run through the dropout sink. Only when that report would be
+     * inaccurate (no sink, or sub-8-channel packing where a chunk holds a fractional
+     * sample) does the old consumer cap survive as a fallback.
+     *
+     * Hardware, analog Loop trigger at 16ch/100M (NOTES 8.29): the page's display scan
+     * plus store retention regularly overran the 40 ms delivery interval, the old cap
+     * stopped the refill, and the device FIFO starved within a few milliseconds. The
+     * capture did not abort; it froze until the user stopped it.
      */
-    const lagChunks = this.tuning!.lagChunks ?? depth * 4;
-    /**
-     * Chunks the host is holding: filled and waiting for the consumer, plus submitted and
-     * not yet filled. Each is `transferBytes` of memory, so the bound has to be on their
-     * sum. Bounding `completed` alone leaves the already-submitted lanes uncounted, and
-     * every one of them still lands: measured with lagChunks 8 and depth 4, the backlog
-     * grew to 12 before the cap took effect.
-     */
-    const outstandingChunks = (): number => completed.size + inFlight.size;
     /** Wire bytes requested from the endpoint and consumed within the host budget. */
     let requestedBytes = 0;
     let consumedWireBytes = 0;
-    let lagStoppedRefill = false;
+    let queuedBytes = 0;
+    const itemBytes = (item: CompletedTransfer): number =>
+      item.result?.data?.byteLength ?? 0;
+    const lagChunks = this.tuning!.lagChunks ?? depth * 4;
+    /**
+     * Completed plus submitted chunks, for the fallback cap. Bounding `completed`
+     * alone leaves the already-submitted lanes uncounted, and every one of them still
+     * lands: measured with lagChunks 8 and depth 4, the backlog grew to 12 before the
+     * old cap took effect.
+     */
+    const outstandingChunks = (): number => completed.size + inFlight.size;
+    const channels = this.cfg?.channels ?? 0;
+    /** No known length, but a dropped chunk still maps to an exact sample count. */
+    const canDropLag = (): boolean =>
+      targetWireBytes === 0 && this.dropoutSink !== null && channels >= 8;
     const withinBudget = (): boolean => targetWireBytes > 0
       ? requestedBytes < targetWireBytes
-      : outstandingChunks() < lagChunks;
+      : canDropLag() || outstandingChunks() < lagChunks;
     const canArm = (): boolean => inFlight.size < depth && withinBudget();
     /**
-     * Called once when the consumer bound is what stopped the refill. It is the one path
-     * where this transport deliberately lets the device starve, so it must be visible in
-     * the trace rather than looking like a slow device.
+     * Cap the page-side backlog for a capture with no known length. The page's Loop
+     * display does its own scan/store work and can overrun one delivery interval; the
+     * device FIFO only covers a few milliseconds, so stopping the reads (the old
+     * `lagChunks` bound) wedged the sampling path. Drop the oldest completed chunks
+     * instead, and accumulate the whole run of drops into one gap report: the page's
+     * filler path is not free, and one report per dropped 320 KiB transfer at 200 MB/s
+     * saturated it so thoroughly that it could never catch up (NOTES 8.29).
+     *
+     * The gap is reported on the next delivery (see `flushHostGap`), positioned after
+     * every sample already handed to the sink - including the coalescing fill, which is
+     * flushed first - so the page appends the filler in the right place.
      */
-    const noteLagStop = (): void => {
-      if (targetWireBytes > 0 || lagStoppedRefill) return;
-      lagStoppedRefill = true;
-      this.trace({
-        dir: 'info',
-        note: `refill held back: the consumer is ${outstandingChunks()} chunks ` +
-          `(${Math.round(outstandingChunks() * transferBytes / 1048576)} MiB) behind and this ` +
-          'capture has no length to bound the queue with',
-      });
+    const dropLag = (): void => {
+      if (!canDropLag() || this.headRemaining > 0) return;
+      const wire = this.wireBytesPerSample(channels);
+      const budget = this.tuning?.hostLagBudgetBytes ?? HOST_LAG_BUDGET_BYTES;
+      while (queuedBytes > budget && completed.has(nextSequence)) {
+        const item = completed.get(nextSequence)!;
+        if (item.error !== undefined || item.result?.status !== 'ok') return;
+        completed.delete(nextSequence++);
+        const bytes = itemBytes(item);
+        queuedBytes -= bytes;
+        const samples = Math.max(0, Math.floor(bytes / wire));
+        if (samples === 0) continue;
+        if (this.hostGapPosition === null) this.hostGapPosition = this.samplesDelivered;
+        this.hostGapSamples += samples;
+        this.samplesDelivered += samples;
+      }
     };
     const finish = (item: CompletedTransfer): void => {
       this.lastCompletionAt = performance.now();
       completed.set(item.sequence, item);
+      queuedBytes += itemBytes(item);
       this.stats.peakQueuedTransfers = Math.max(this.stats.peakQueuedTransfers, completed.size);
+      dropLag();
       // Refill here, with the chunk counted and before the consumer is woken. The central
       // throughput invariant is that the USB queue is replenished before a completed
       // buffer reaches any consumer work, and `notify()` only resolves a promise, so the
@@ -1356,8 +1415,6 @@ export class Slogic16U3 implements Device {
           canArm()) {
         arm();
         this.rearmMs.push(performance.now() - item.completedAt);
-      } else if (live() && targetWireBytes === 0) {
-        noteLagStop();
       }
       notify();
     };
@@ -1409,6 +1466,7 @@ export class Slogic16U3 implements Device {
       }
       const item = completed.get(nextSequence)!;
       completed.delete(nextSequence++);
+      queuedBytes -= itemBytes(item);
       // The completion callback could not refill - the consumer bound held it, or every
       // lane was already submitted - so the queue gets its depth back here. It is the only
       // other place a read is armed, and `canArm` keeps it inside the same two bounds, so a
@@ -1470,11 +1528,13 @@ export class Slogic16U3 implements Device {
         // are wire bytes, so the sub-8-channel packing divisor applies.
         this.samplesDelivered += data.byteLength / this.wireBytesPerSample(this.cfg!.channels);
       } else {
-        // Awaiting the sink is the backpressure: a worker pump hands each chunk to the
-        // page and waits for the ack, so `completed` grows at most to lagChunks before
-        // canArm() stops the refill above (see the refill rules).
+        // Awaiting the sink is the consumer's pace, not a refill bound: a worker pump
+        // hands each chunk to the page and waits for the ack, while the lane refills keep
+        // arming. Dropouts cap the backlog for a no-length capture (see the refill rules).
         if (data.byteLength > 0) await this.deliver(data);
       }
+      const gapPending = this.flushHostGap();
+      if (gapPending) await gapPending;
       await this.maybeEndCapture();
       this.sinkMs.push(performance.now() - sinkStarted);
       // A WebUSB short packet is successful data, not evidence that the unfilled part of
@@ -1536,6 +1596,9 @@ export class Slogic16U3 implements Device {
           this.onError?.(reason);
         }
         // Everything the tail put in the coalescing block is the end of this capture.
+        // A gap still pending here has no following chunk to trigger the report.
+        const gapPending = this.flushHostGap();
+        if (gapPending) await gapPending;
         try {
           await this.flushSink();
         } catch (reason) {
@@ -1552,9 +1615,9 @@ export class Slogic16U3 implements Device {
    * transfer is not thrown away at stop() time.
    */
   /**
-   * Returns the sink's promise when it has one, so the consumer can be held to the
-   * rate the sink can actually take (StreamTuning.lagChunks). A synchronous sink -
-   * every caller except the worker pump - returns undefined and costs nothing.
+   * Returns the sink's promise when it has one, so the read loop waits for the
+   * consumer between chunks. A synchronous sink - every caller except the worker
+   * pump - returns undefined and costs nothing.
    */
   private deliver(data: DataView): void | Promise<void> {
     let bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
@@ -1609,6 +1672,7 @@ export class Slogic16U3 implements Device {
   }
 
   private emitSamples(out: Uint8Array): void | Promise<void> {
+    const gapPending = this.flushHostGap();
     const bps = bytesPerSampleForChannels(this.cfg!.channels);
     this.stats.sinkBytes += out.length;
     this.samplesDelivered += out.length / bps;
@@ -1617,10 +1681,10 @@ export class Slogic16U3 implements Device {
     // Coalesce into blocks of `coalesceBytes`. The accounting above is unchanged - a byte
     // counts as delivered here, the moment the transport accepts it - so a dropout position
     // keeps meaning "device samples handed to the sink", and the only difference is that the
-    // sink sees them in larger pieces. A dropout report must call flushSink() first if that
-    // path is ever wired to this layer: the store's own length is the anchor the caller
-    // cross-checks against, and up to one block of it would still be held here.
-    let pending: void | Promise<void> = undefined;
+    // sink sees them in larger pieces. `flushHostGap` calls flushSink() before it reports:
+    // the store's own length is the anchor the caller cross-checks against, and up to one
+    // block of it would otherwise still be held here.
+    let pending: void | Promise<void> = gapPending;
     for (let offset = 0; offset < out.length;) {
       if (this.sinkBuffer.length === 0) this.sinkBuffer = new Uint8Array(coalesceBytes);
       const take = Math.min(coalesceBytes - this.sinkFill, out.length - offset);
@@ -1629,6 +1693,25 @@ export class Slogic16U3 implements Device {
       offset += take;
       if (this.sinkFill === coalesceBytes) pending = this.flushSink() ?? pending;
     }
+    return pending;
+  }
+
+  /**
+   * Report the coalesced host gap, if one is due. The coalescing block is flushed
+   * first: it holds only samples that precede the gap, and the page applies messages in
+   * order, so flushing here is what lets `position` stay the plain delivered count.
+   * Returns the sink's promise when the flush has one, so the read loop keeps its
+   * backpressure across the report.
+   */
+  private flushHostGap(): void | Promise<void> {
+    const position = this.hostGapPosition;
+    if (position === null) return;
+    const missing = this.hostGapSamples;
+    this.hostGapPosition = null;
+    this.hostGapSamples = 0;
+    const pending = this.flushSink();
+    this.dropoutSink?.(position, missing);
+    this.trace({ dir: 'info', note: `host lag: dropped ${missing} samples at ${position}` });
     return pending;
   }
 

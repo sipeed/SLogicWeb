@@ -1782,14 +1782,15 @@ async function main(): Promise<void> {
       callsAtFirstSink === 8, `transferIn calls at first sink: ${callsAtFirstSink}`);
   }
 
-  console.log('\nbackpressure: a sink that returns a promise holds the refill');
+  console.log('\nbackpressure: without a dropout sink the consumer cap still bounds a no-length capture');
   {
     /*
      * The worker pump hands each chunk to the page and waits for the ack, so the sink
-     * returns a promise. That is the only thing that can make the consumer slower than
-     * the USB queue, and the bound on how far it may fall behind is StreamTuning.lagChunks:
-     * past it the loop stops refilling, because an unbounded backlog is unbounded memory
-     * on a 400 MB/s stream (NOTES 8.13).
+     * returns a promise. With no dropout sink the transport cannot drop a chunk without
+     * misnumbering the stream, so StreamTuning.lagChunks remains the memory bound: past it
+     * the loop stops refilling, because an unbounded backlog is unbounded memory on a
+     * 400 MB/s stream (NOTES 8.13). The production path - a worker that reports dropouts -
+     * is covered below.
      *
      * 8 channels is one byte per sample, so the four-byte head is four samples and every
      * other byte the sink sees is a byte the device sent - which is what makes the order
@@ -1832,7 +1833,7 @@ async function main(): Promise<void> {
     await dev.stop();
     const stats = dev.getStats();
     const expectedLengths = script.map((_, i) => (i === 0 ? transferBytes - 4 : transferBytes));
-    check('a slow sink never lets the backlog grow past lagChunks',
+    check('the fallback consumer cap holds the backlog at lagChunks',
       stats.peakQueuedTransfers <= lagChunks,
       `peak ${stats.peakQueuedTransfers} of ${lagChunks} (depth ${stats.slowTransferLimit})`);
     check('the backlog actually reaches the cap, so the bound is what stopped it',
@@ -1875,6 +1876,122 @@ async function main(): Promise<void> {
     check('the synchronous sink still receives everything',
       bytes === 24 * 1024 - 4 && stats.transfers === 24,
       `${bytes} bytes in ${stats.transfers} transfers`);
+  }
+
+  console.log('\nbackpressure: a dropout sink turns the consumer cap off for a no-length capture');
+  {
+    /*
+     * The analog Loop trigger hang (NOTES 8.29): the page's display scan plus store
+     * retention regularly overran one delivery interval, the old consumer cap stopped
+     * the refill, and the device FIFO starved a few milliseconds later. With a dropout
+     * sink the transport keeps every lane armed instead and bounds the backlog in bytes;
+     * under that budget nothing is dropped, so a merely slow page loses nothing.
+     */
+    const transferBytes = 262144;
+    const chunks = 24;
+    const script = Array.from({ length: chunks }, (_, i) => ({
+      kind: 'data' as const,
+      bytes: new Array<number>(transferBytes).fill(i & 0xff),
+    }));
+    const fake = new FakeStreamDevice(recorded(), script);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    const seen: number[] = [];
+    const drops: { position: number; missing: number }[] = [];
+    let calls = 0;
+    await dev.open();
+    await dev.start(
+      { channels: 8, samplerate: 16e6, thresholdVolts: 1.6 },
+      async (chunk) => {
+        if (calls === 1) await new Promise((r) => setTimeout(r, 30));
+        seen.push(chunk.length);
+        calls += 1;
+      },
+      (position, missing) => drops.push({ position, missing }),
+      // lagChunks 4 is far below what this sink lets pile up; with a dropout sink the
+      // fallback must not engage.
+      { tuning: { depth: 4, transferBytes, lagChunks: 4 } },
+    );
+    await new Promise((r) => setTimeout(r, 400));
+    await dev.stop();
+    const stats = dev.getStats();
+    check('a dropout sink turns the consumer cap off: the backlog passes lagChunks',
+      stats.peakQueuedTransfers > 4, `peak ${stats.peakQueuedTransfers} of lag 4`);
+    check('the lanes stay armed through the slow sink',
+      stats.maxIdleGapMs === 0 && stats.transfers === chunks,
+      `idle gap ${stats.maxIdleGapMs.toFixed(2)}ms, transfers ${stats.transfers} of ${chunks}`);
+    check('under the byte budget nothing is dropped',
+      drops.length === 0 && stats.rawBytes - stats.sinkBytes === 4,
+      `${drops.length} drops, raw ${stats.rawBytes} sink ${stats.sinkBytes}`);
+    check('the slow sink still receives every chunk, in order and whole',
+      seen.length === chunks && seen[0] === transferBytes - 4 &&
+        seen.slice(1).every((len) => len === transferBytes),
+      `${seen.length} chunks seen`);
+  }
+
+  console.log('\nbackpressure: past the byte budget the oldest chunks are dropped and reported');
+  {
+    /*
+     * The other half of NOTES 8.29: a page that stays behind must not wedge the device,
+     * and the data it does get must keep an exact timeline. The transport drops the
+     * oldest completed chunks once the backlog passes hostLagBudgetBytes, accumulates
+     * the whole run into one gap, and reports it before the next delivered chunk; the
+     * page appends filler for the gap, so everything after it keeps its absolute sample
+     * position. One report per dropped 320 KiB transfer at 200 MB/s saturated the page's
+     * filler path (NOTES 8.29), hence the coalescing.
+     */
+    const transferBytes = 262144;
+    const chunks = 48;
+    const budget = 2 * 1024 * 1024;
+    const script = Array.from({ length: chunks }, (_, i) => ({
+      kind: 'data' as const,
+      bytes: new Array<number>(transferBytes).fill(i & 0xff),
+    }));
+    const fake = new FakeStreamDevice(recorded(), script);
+    const dev = new Slogic16U3(fake as unknown as USBDevice);
+    let entered = 0;
+    // The end of the timeline as the page sees it: delivered bytes plus every sample
+    // already reported missing. A new gap has to start exactly there.
+    let reportedMissing = 0;
+    const drops: { position: number; missing: number; expected: number }[] = [];
+    await dev.open();
+    await dev.start(
+      { channels: 8, samplerate: 16e6, thresholdVolts: 1.6 },
+      async (chunk) => {
+        entered += chunk.length;
+        await new Promise((r) => setTimeout(r, 8));
+      },
+      (position, missing) => {
+        drops.push({ position, missing, expected: entered + reportedMissing });
+        reportedMissing += missing;
+      },
+      {
+        tuning: {
+          depth: 4, transferBytes, lagChunks: 4, hostLagBudgetBytes: budget,
+        },
+      },
+    );
+    await new Promise((r) => setTimeout(r, 600));
+    await dev.stop();
+    const stats = dev.getStats();
+    check('a slow page is dropped past the budget, not allowed to stall the device',
+      drops.length > 0 && stats.maxIdleGapMs === 0,
+      `${drops.length} drops, idle gap ${stats.maxIdleGapMs.toFixed(2)}ms`);
+    check('the completed backlog stays inside the byte budget plus one transfer',
+      stats.peakQueuedTransfers <= Math.ceil(budget / transferBytes) + 1,
+      `peak ${stats.peakQueuedTransfers} of ${Math.ceil(budget / transferBytes) + 1}`);
+    check('every dropout position is the end of the delivered timeline',
+      drops.every((d) => d.position === d.expected),
+      drops.map((d) => `${d.position}/${d.expected}`).join(' '));
+    check('dropouts are reported in stream order and none is empty',
+      drops.every((d, i) => d.missing > 0 && (i === 0 || d.position > drops[i - 1]!.position)),
+      `${drops.length} drops`);
+    check('one report covers the whole run of consecutive drops',
+      drops.length <= 2 && drops.some((d) => d.missing > transferBytes),
+      `${drops.length} reports, sizes ${drops.map((d) => d.missing).join(',')}`);
+    const missing = drops.reduce((sum, d) => sum + d.missing, 0);
+    check('delivered plus dropped accounts for every device byte after the head',
+      stats.sinkBytes + missing === chunks * transferBytes - 4,
+      `sink ${stats.sinkBytes} + dropped ${missing} of ${chunks * transferBytes - 4}`);
   }
 
   console.log('\nbackpressure: a known capture length, not the consumer, bounds the queue');
@@ -2278,8 +2395,9 @@ async function main(): Promise<void> {
       streaming.kinds().includes('ack') && streaming.unacked.size === 0,
       `${streaming.kinds().join(',')} unacked=${streaming.unacked.size}`);
 
-    // Backpressure: the ack is what releases the worker's next slot, so a slow page has
-    // to hold it - that is the whole mechanism behind StreamTuning.lagChunks.
+    // Backpressure: the ack paces the worker's consumer, so a slow page still holds the
+    // next chunk. It no longer stops the refill - a no-length capture drops old chunks
+    // past StreamTuning.hostLagBudgetBytes instead (NOTES 8.29).
     const release: { fn: (() => void) | null } = { fn: null };
     const slow = new FakeWorker();
     const slowDevice = await openWorkerDevice(slow);

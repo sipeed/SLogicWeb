@@ -154,7 +154,9 @@ function check(name: string, pass: boolean, detail: string): void {
   const sink = sinkEnd > sinkStart ? app.slice(sinkStart, sinkEnd) : '';
   const appended = (sink.match(/this\.livePending = true;/g) ?? []).length >= 2 &&
     !sink.includes('this.dirty = true;');
-  const drop = app.slice(sinkEnd, sinkEnd + 3_000);
+  // The dropout handler ends where the start options begin; its size is not fixed.
+  const dropEnd = sinkEnd >= 0 ? app.indexOf('softwareTrigger ? {', sinkEnd) : -1;
+  const drop = dropEnd > sinkEnd ? app.slice(sinkEnd, dropEnd) : '';
   const dropout = drop.includes('this.livePending = true;') &&
     drop.includes('this.analogScanner?.resetContinuity();') &&
     drop.includes('if (isLoop)');

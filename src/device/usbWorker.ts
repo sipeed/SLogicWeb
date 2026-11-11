@@ -31,9 +31,10 @@ type QueuedCommand = Exclude<ToWorker, { kind: 'ack' }>;
 
 let device: Slogic16U3 | null = null;
 /**
- * One resolver per chunk in flight. The transport treats the returned promise as
- * backpressure (`StreamTuning.lagChunks`), so a slow page stops the worker from
- * replenishing the USB queue instead of piling chunks up in the message queue.
+ * One resolver per chunk in flight. The transport awaits it between chunks, so a slow
+ * page paces the consumer. It does not stop the USB refill: for a capture with no known
+ * length the transport drops and reports the oldest chunks past
+ * `StreamTuning.hostLagBudgetBytes` instead of starving the device.
  */
 const acks = new Map<number, () => void>();
 let nextChunkId = 1;

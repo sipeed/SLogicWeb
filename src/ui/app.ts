@@ -6106,6 +6106,15 @@ export class App {
         searchLimitSamples: triggerSearchLimit,
         autoWindowSamples: isLoop ? this.loopRetentionLen : this.captureLimitSamples,
       } : null;
+      // Display re-lock is optional work; when a Loop sink overruns its slice, skip the
+      // next two scans so the data path (store append/drop) keeps the USB consumer
+      // ahead. One skipped chunk was not enough: a scan chunk measured ~60 ms and a
+      // store-only chunk ~20 ms, so a 1-in-2 ratio still averaged over the 40 ms
+      // delivery interval and the backlog grew until the transport had to drop
+      // (NOTES 8.29). A skipped chunk resets the scanner's continuity, so no edge is
+      // invented across it.
+      let lastLoopSinkMs = 0;
+      let scanSkip = 0;
       this.captureArming = true;
       await device.start(cfg, (chunk) => {
         // A late message from a superseded acquisition must never touch the new store.
@@ -6122,6 +6131,7 @@ export class App {
           this.repeatWaveHolding = false;
         }
         if (isLoop) {
+          const sinkStarted = performance.now();
           // Scan before appending: the chunk's first sample has this absolute position in
           // the emitted stream, the same numbering the trigger index uses.
           // Scan while the trigger owns the view (before placement, and while a lock is
@@ -6140,7 +6150,12 @@ export class App {
             locked: this.triggerViewLock !== null,
             pending: this.triggerViewPending,
           });
-          if (this.analogScanner && chunk.length > 0 && this.settings.triggerEnableMask &&
+          const skipScan = scanSkip > 0;
+          if (skipScan) {
+            scanSkip -= 1;
+            this.analogScanner?.resetContinuity();
+          }
+          if (!skipScan && this.analogScanner && chunk.length > 0 && this.settings.triggerEnableMask &&
               (this.triggerViewLock !== null || this.triggerViewPending ||
                waitingForTrigger || mayRelock)) {
             const base = store.length + store.droppedSamples;
@@ -6167,6 +6182,8 @@ export class App {
           this.captureBytes += chunk.length;
           this.enforceLoopRetention(store);
           this.livePending = true;
+          lastLoopSinkMs = performance.now() - sinkStarted;
+          if (lastLoopSinkMs > 30) scanSkip = Math.max(scanSkip, 2);
           return;
         }
         const room = (this.captureLimitSamples - store.length) * bytesPerSample;
@@ -6213,6 +6230,34 @@ export class App {
           this.livePending = true;
           return;
         }
+        const reported = missing;
+        if (isLoop && missing >= this.loopRetentionLen) {
+          // A gap at least as long as the retained window leaves nothing of the old
+          // window to keep, so drop the pre-gap store and advance the timeline past the
+          // whole gap instead of materializing it. Appending the filler would cost as
+          // much as a real chunk, and under the repeated gaps of a sustained overload it
+          // starved the page exactly as the drops were meant to protect it (NOTES 8.29).
+          // The pad rounds the length up to what dropFront accepts; it is part of the
+          // gap, so only the remainder is advanced directly.
+          const pad = (DROP_FRONT_QUANTUM - (store.length % DROP_FRONT_QUANTUM)) %
+            DROP_FRONT_QUANTUM;
+          if (pad > 0) {
+            const padBytes = pad * bytesPerSampleForChannels(store.channelCount);
+            try {
+              store.append(new Uint8Array(padBytes));
+            } catch (e) {
+              if (this.captureOutOfMemory(e)) return;
+              throw e;
+            }
+          }
+          if (store.length > 0) this.dropLoopFront(store, store.length);
+          this.droppedTotal += missing - pad;
+          this.lostSamples += reported;
+          this.livePending = true;
+          // A crossing across the gap is unknowable; restart the scan from the next chunk.
+          this.analogScanner?.resetContinuity();
+          return;
+        }
         let n: number;
         try {
           n = appendLostSamples(store, missing, this.captureLimitSamples);
@@ -6221,7 +6266,7 @@ export class App {
           throw e;
         }
         if (n === 0) return;
-        this.lostSamples += n;
+        this.lostSamples += reported;
         this.livePending = true;
         // A crossing across the gap is unknowable; restart the scan from the next chunk.
         this.analogScanner?.resetContinuity();

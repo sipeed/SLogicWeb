@@ -1683,6 +1683,64 @@ so its walk does not move. Three new offline checks pin this:
 The walk has not yet been run on a real 32U3. The hardware runs still to do are 50, 16 and 1400 MHz,
 including 1400 directly after an 800-base rate.
 
+### 8.29 The consumer cap starved the device on analog Loop trigger, 2026-11-11
+
+A 32U3 running an analog rising-edge Loop trigger (16ch/100M, 2M-sample loop) froze under
+normal use: the UI stayed responsive and the recording timer moved, but the sample count and
+the retained samples stopped changing. Stop, then Capture, recovered it and the next freeze
+came minutes later. No console error was logged; on some runs the worker eventually reported
+an underrun and the bulk endpoint failed with "A transfer error has occurred".
+
+Instrumenting the page sink showed the cause. The Loop display scan (`AnalogCrossingScanner`)
+plus the store append/drop work took 30-78 ms on some chunks (scanner 9-40 ms, store append
+10-63 ms), while the worker delivers an 8 MiB coalesced block every ~40 ms at 200 MB/s. Each
+time the page overran its interval the worker's `lagChunks` consumer cap stopped arming USB
+reads. The device FIFO covers only a few milliseconds, so the board overran and stopped
+producing; the worker's `maxIdleGapMs` reached 63-141 ms and the capture could not resume.
+
+Temporarily forcing the refill budget to true for every capture confirmed the starvation:
+a 60 s analog Loop capture ran with `maxIdleGap 0` and no stalls. Lowering the scanner stride
+did not fix it (the scanner's exact machine dominates near the level, so the cost follows the
+chunk, not the grid), and skipping one scan after a slow sink did not either: a scan chunk
+measured ~60 ms and a store-only chunk ~20 ms, so a 1-in-2 ratio still averaged ~47 ms over
+the 40 ms interval.
+
+The refill rule now treats a no-length capture like any other: `depth` reads stay armed. The
+host backlog is bounded in bytes instead (`StreamTuning.hostLagBudgetBytes`, default 128 MiB),
+and past it the transport drops the oldest completed chunks. Two details matter:
+
+- The drops are accumulated into **one** gap and reported just before the next delivered
+  chunk, after flushing the coalescing fill. Their position is then exactly the plain
+  delivered count, and the page sees them in stream order.
+- The first version reported every dropped transfer. At 200 MB/s a 320 KiB geometry drops
+  ~600 transfers/s, and each report made the page materialize up to the whole Loop
+  retention as filler (30-56 ms per report). The page fell to ~50 MB/s received while losing
+  the rest: the report flood had replaced the device starvation with a page-side death
+  spiral.
+
+The page's gap handling now has a fast path. A gap at least as long as the retained window
+leaves nothing of the old window to keep, so the store is dropped (padded to the 64-sample
+drop quantum) and the timeline advances past the gap without materializing it; a gap shorter
+than the window is still materialized as before, and marks the untrusted span. The Loop sink
+also skips the next two display scans after a sink over 30 ms and resets the scanner's
+continuity, so a heavy scan chunk is followed by two store-only chunks and the average stays
+under the delivery interval. The old consumer cap survives only where a dropout cannot be
+placed exactly: no dropout sink, or sub-8-channel packing where a transfer holds a fractional
+sample.
+
+Hardware, 32U3, 16ch/100M analog rising-edge Loop with a real crossing (2026-11-11): 63 s
+with a lock acquired and released repeatedly, no freeze, `maxIdleGap 0`, `peakQueuedTransfers`
+410 (the old cap was 96), Stop completed in 536 ms, and the next Capture delivered 192 M
+samples in 2.5 s. In the headless SwiftShader harness the page itself sits below 200 MB/s
+(211 long tasks > 40 ms in 63 s), so it reports gaps for roughly half the stream instead of
+freezing; a GPU browser leaves the 128 MiB budget to absorb render stalls, which was the
+original failure. The status line still reports the lost samples.
+
+Offline checks pin both halves: with a dropout sink the backlog passes `lagChunks` and the
+lanes stay armed, under budget nothing is lost, and past a 2 MiB test budget the reports are
+coalesced, their positions are the exact end of the delivered timeline, and delivered plus
+dropped equals every byte after the head.
+
 ## Addendum 2026-11-03 - the head is per model, and Emulation checks the whole stream
 
 HSync's `fix/slogic-capture` work established on hardware that the leading byte drop belongs
