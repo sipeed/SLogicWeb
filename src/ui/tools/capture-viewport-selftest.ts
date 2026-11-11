@@ -216,17 +216,18 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
   check('plot, axis and overview wheels all route through wheelAction before touching the view',
     navNative >= 0 && navPrevent > navNative && navBlock > navPrevent && navStore > navBlock &&
     navigate.includes('const action = this.wheelActionFor(e, target);') &&
-    navigate.includes('this.scrollRowsBy(e);') &&
+    !navigate.includes('scrollRowsBy') &&
+    !navigate.includes("action === 'scroll-rows'") &&
     navigate.includes('this.stack.zoomAt(') && navigate.includes('this.stack.panPixels(') &&
     navigate.includes("wheelSpanFactor(e.deltaY, { isPhysicalWheel: physical, shift: false })") &&
     !navigate.includes('if (!e.ctrlKey && !e.shiftKey) return;') &&
     plotWheel.includes('wheelNavigate(e, left)') &&
     axisWheel.includes('wheelNavigate(e, left)') &&
     app.includes('wheelAction: (event) => this.wheelActionFor(event),') &&
-    app.includes('onScrollRows: (event) => this.scrollRowsBy(event),') &&
+    !app.includes('onScrollRows') &&
     stripNative >= 0 && stripPrevent > stripNative &&
     stripWheel.includes('this.cb.wheelAction?.(event)') &&
-    stripWheel.includes('this.cb.onScrollRows?.(event)') &&
+    !stripWheel.includes('onScrollRows') && !overview.includes('onScrollRows') &&
     stripWheel.includes('this.cb.onZoom(') && stripWheel.includes('this.cb.onPan(') &&
     !app.includes('wheelIntent') && !overview.includes('WheelIntent'),
     `navigate=${navigate.length}, plot=${plotWheel.length}, axis=${axisWheel.length}, strip=${stripWheel.length}`);

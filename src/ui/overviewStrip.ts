@@ -71,8 +71,6 @@ export interface OverviewCallbacks {
    * overflowing - plain wheel scrolls, Ctrl zooms, Shift pans.
    */
   wheelAction?(event: WheelEvent): WheelAction;
-  /** Scroll the channel stack by this wheel event. */
-  onScrollRows?(event: WheelEvent): void;
 }
 
 export interface OverviewViewportBox {
@@ -439,10 +437,6 @@ export class OverviewStrip {
     if (action === 'native') return;
     event.preventDefault();
     if (action === 'block') return;
-    if (action === 'scroll-rows') {
-      this.cb.onScrollRows?.(event);
-      return;
-    }
     if (!state || state.store.length <= 0) return;
     if (action === 'zoom') {
       if (event.deltaY === 0) return;

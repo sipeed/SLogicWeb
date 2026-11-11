@@ -1,5 +1,5 @@
 // Pins the one wheel decision shared by the plot, axis, overview strip and hint bar.
-import { fitWheelAction, wheelAction, wheelDeltaPixels, type WheelAction } from '../wheelGesture.js';
+import { fitWheelAction, wheelAction, type WheelAction } from '../wheelGesture.js';
 import {
   parseWorkspaceSnapshot, serializeWorkspaceSnapshot, WORKSPACE_SCHEMA_VERSION,
 } from '../workspacePreferences.js';
@@ -101,7 +101,7 @@ function cells(): { wheelZooms: boolean; hasCapture: boolean; mod: string; got: 
   const swap = (mods: Mods, ctx: { wheelZooms: boolean; hasCapture: boolean }): WheelAction => {
     const ctrl = mods.ctrlKey || mods.metaKey;
     if (mods.shiftKey) return ctx.hasCapture ? 'pan' : 'block';
-    if (ctrl) return ctx.wheelZooms ? 'scroll-rows' : (ctx.hasCapture ? 'zoom' : 'block');
+    if (ctrl) return ctx.wheelZooms ? 'native' : (ctx.hasCapture ? 'zoom' : 'block');
     if (!ctx.hasCapture) return 'native';
     return ctx.wheelZooms ? 'zoom' : 'native';
   };
@@ -123,14 +123,6 @@ function cells(): { wheelZooms: boolean; hasCapture: boolean; mod: string; got: 
   check('the Fit button wheel zooms with or without Ctrl, pans with Shift, and is inert without a capture',
     got(true) === 'zoom,zoom,zoom,pan' && got(false) === 'native,block,block,block',
     `capture=${got(true)}, none=${got(false)}`);
-}
-
-{
-  const px = wheelDeltaPixels(3, 0, 500);
-  const lines = wheelDeltaPixels(3, 1, 500);
-  const pages = wheelDeltaPixels(1, 2, 500);
-  check('wheel deltas convert pixel, line and page modes to pixels',
-    px === 3 && lines === 48 && pages === 500, `px=${px}, lines=${lines}, pages=${pages}`);
 }
 
 {

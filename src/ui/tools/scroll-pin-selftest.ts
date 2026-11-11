@@ -179,12 +179,124 @@ function mediaOverrides(selector: string, prop: string): string[] {
 }
 
 {
-  // The rows still auto-fit the *viewport* (not the grown column) and the label wheel
-  // still scrolls the shared scroll area.
+  // Rows auto-fit the *viewport* (not the grown column) and the label column keeps native
+  // wheel scrolling through #scroll-area, with no wheel listener of its own.
   const fit = app.includes('const plotH = Math.max(120, (this.el.scroll.clientHeight || 630) - axisH - overviewH - analogH);');
-  const wheel = app.includes('scroll.scrollTop += wheelDeltaPixels(e.deltaY, e.deltaMode, scroll.clientHeight);');
-  check('row fit and the row-scroll wheel still read the scroll viewport',
-    fit && wheel, `fit=${fit}, wheel=${wheel}`);
+  const allowed = ['bar', 'drag', 'plot', 'this.el.axis', 'this.el.cornerFit'].sort();
+
+  const stripComments = (source: string): string => {
+    let out = '';
+    let i = 0;
+    let quote = '';
+    while (i < source.length) {
+      const ch = source[i]!;
+      const next = source[i + 1];
+      if (quote !== '') {
+        out += ch;
+        if (ch === '\\') { out += next ?? ''; i += 2; continue; }
+        if (ch === quote) quote = '';
+        i++;
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === '`') { quote = ch; out += ch; i++; continue; }
+      if (ch === '/' && next === '/') {
+        while (i < source.length && source[i] !== '\n') i++;
+        continue;
+      }
+      if (ch === '/' && next === '*') {
+        i += 2;
+        while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) i++;
+        i += 2;
+        continue;
+      }
+      out += ch;
+      i++;
+    }
+    return out;
+  };
+
+  const receiverBefore = (source: string, end: number): string => {
+    let i = end;
+    let depth = 0;
+    while (i > 0) {
+      const ch = source[i - 1]!;
+      if (ch === ')' || ch === ']') { depth++; i--; continue; }
+      if (ch === '(' || ch === '[') {
+        if (depth === 0) break;
+        depth--;
+        i--;
+        continue;
+      }
+      if (depth > 0) { i--; continue; }
+      if (/[\w$.'"?!\s]/.test(ch)) { i--; continue; }
+      break;
+    }
+    return source.slice(i, end).replace(/\s+/g, '');
+  };
+
+  const wheelTargets = (raw: string): string[] => {
+    const source = stripComments(raw);
+    const targets: string[] = [];
+    const call = /^\s*(?:\.\s*(?:call|apply)\s*)?\??\s*\(\s*(?:[^(),'"]*?,\s*)?(['"`])wheel\1/;
+    for (const m of source.matchAll(/\.\s*addEventListener\b/g)) {
+      const at = m.index!;
+      const args = source.slice(at + m[0].length, at + m[0].length + 200);
+      if (call.test(args)) targets.push(receiverBefore(source, at));
+    }
+    for (const m of source.matchAll(/\.\s*onwheel\b/g)) {
+      targets.push(`${receiverBefore(source, m.index!)}.onwheel`);
+    }
+    return targets;
+  };
+  const exactTargets = (targets: readonly string[]): boolean =>
+    [...targets].sort().join('|') === allowed.join('|');
+
+  const wheel = wheelTargets(`${app}\n${channelList}`);
+  const wheelOk = wheel.length === allowed.length && exactTargets(wheel);
+  const overflow = base('#scroll-area', 'overflow-y') === 'auto';
+  const nested = /<div id="scroll-area">\s*<div id="labels-col"/.test(html);
+  const unscrollable = css.replace('  overflow-y: auto;\n  overflow-x: hidden;',
+    '  overflow-y: hidden;\n  overflow-x: hidden;');
+  const overflowControl = unscrollable !== css &&
+    base('#scroll-area', 'overflow-y', rules(unscrollable)) !== 'auto';
+  const wrapped = html.replace(/<div id="labels-col"/, '<div id="labels-wrap"><div id="labels-col"');
+  const nestedControl = wrapped !== html &&
+    !/<div id="scroll-area">\s*<div id="labels-col"/.test(wrapped);
+  const injected = app.replace("plot.addEventListener('wheel',",
+    "this.el.scroll.addEventListener('wheel',");
+  const injectedWheel = wheelTargets(`${injected}\n${channelList}`);
+  const receiverControl = injected !== app && injectedWheel.length === wheel.length &&
+    injectedWheel.includes('this.el.scroll') && !injectedWheel.includes('plot') &&
+    !exactTargets(injectedWheel);
+
+  const escapes: ReadonlyArray<readonly [string, string, string]> = [
+    ['getElementById', "document.getElementById('labels-col')!.addEventListener('wheel', () => {});",
+      "document.getElementById('labels-col')!"],
+    ['doubleQuote', 'this.el.scroll.addEventListener("wheel", () => {});', 'this.el.scroll'],
+    ['multiLine', "document\n  .querySelector('#labels-col')!\n  .addEventListener(\n    'wheel',\n    () => {},\n  );",
+      "document.querySelector('#labels-col')!"],
+    ['call', "this.el.scroll.addEventListener.call(this.el.scroll, 'wheel', () => {});", 'this.el.scroll'],
+    ['onwheel', 'document.getElementById("labels-col").onwheel = () => {};',
+      'document.getElementById("labels-col").onwheel'],
+  ];
+  const escapeProbes = escapes.map(([name, code, want]) => {
+    const seen = wheelTargets(`${app}\n${code}\n${channelList}`);
+    const detected = seen.length === wheel.length + 1 && seen[seen.length - 1] === want;
+    const rejected = !exactTargets(seen);
+    return { name, ok: detected && rejected, detail: `${name} detected=${detected} rejected=${rejected}` };
+  });
+  const unrelatedWheel = wheelTargets(`${app}\nplot.addEventListener('pointerdown', () => {});\n` +
+    `this.el.scroll.addEventListener('wheelScroll', () => {});\n${channelList}`);
+  const unrelatedOk = unrelatedWheel.length === wheel.length && exactTargets(unrelatedWheel);
+  const probes = [...escapeProbes, { name: 'unrelated', ok: unrelatedOk, detail: `unrelated ignored=${unrelatedOk}` }];
+
+  check('row fit reads the scroll viewport, the label column scrolls natively in #scroll-area, and only the scope bar, scope drag, plot, axis and corner Fit receive wheel input',
+    fit && wheelOk && overflow && nested && overflowControl && nestedControl &&
+      receiverControl && probes.every((p) => p.ok),
+    `fit=${fit}, wheel=${wheel.join(',')}, allowed=${allowed.join(',')}, wheelOk=${wheelOk}, ` +
+    `overflow=${overflow}, nested=${nested}, overflowControl=${overflowControl}, ` +
+    `nestedControl=${nestedControl}, injected=${injectedWheel.join(',')}, ` +
+    `receiverControl=${receiverControl}, probes=${probes.map((p) => p.detail).join('; ')}`);
 }
 
 {

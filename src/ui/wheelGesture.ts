@@ -30,10 +30,9 @@ export interface WheelContext {
  * - `zoom`        zoom time around the pointer
  * - `pan`         pan time
  * - `native`      do nothing; let the browser scroll the row stack
- * - `scroll-rows` swallow the event and scroll the row stack by its delta
  * - `block`       swallow the event (stops the browser's Ctrl+wheel page zoom)
  */
-export type WheelAction = 'zoom' | 'pan' | 'native' | 'scroll-rows' | 'block';
+export type WheelAction = 'zoom' | 'pan' | 'native' | 'block';
 
 export function wheelAction(mods: WheelModifiers, ctx: WheelContext): WheelAction {
   const ctrl = mods.ctrlKey || mods.metaKey === true;
@@ -54,11 +53,4 @@ export function fitWheelAction(mods: WheelModifiers, hasCapture: boolean): Wheel
   const ctrl = mods.ctrlKey || mods.metaKey === true;
   if (!hasCapture) return ctrl ? 'block' : 'native';
   return 'zoom';
-}
-
-/** Pixels for one wheel event's vertical delta, whatever its `deltaMode`. */
-export function wheelDeltaPixels(deltaY: number, deltaMode: number, pageHeight: number): number {
-  if (deltaMode === 1) return deltaY * 16;
-  if (deltaMode === 2) return deltaY * Math.max(1, pageHeight);
-  return deltaY;
 }

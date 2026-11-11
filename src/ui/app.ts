@@ -130,7 +130,7 @@ import { SidebarHost } from './sidebarHost.js';
 import { actionOf, WORK_ANYWHERE, type ShortcutId } from './shortcuts.js';
 import { chordOf } from './chords.js';
 import {
-  fitWheelAction, wheelAction, wheelDeltaPixels, type WheelAction, type WheelModifiers,
+  fitWheelAction, wheelAction, type WheelAction, type WheelModifiers,
 } from './wheelGesture.js';
 import { cornerView, cornerViewEqual, type CornerView } from './cornerCell.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
@@ -771,7 +771,6 @@ export class App {
       onPan: (samples) => this.panOverview(samples),
       onZoom: (anchor, factor) => this.zoomOverview(anchor, factor),
       wheelAction: (event) => this.wheelActionFor(event),
-      onScrollRows: (event) => this.scrollRowsBy(event),
     });
     this.stack.setBaseTheme(baseTheme(this.paintedTheme));
     this.channelList = new ChannelList(this.el.channelList, {
@@ -2860,10 +2859,6 @@ export class App {
       // exists; only after that is it safe to treat an empty store as a no-op.
       e.preventDefault();
       if (action === 'block') return;
-      if (action === 'scroll-rows') {
-        this.scrollRowsBy(e);
-        return;
-      }
       if (this.store.length === 0) return;
       const dpr = globalThis.devicePixelRatio || 1;
       if (action === 'zoom') {
@@ -3697,12 +3692,6 @@ export class App {
     // The corner Fit button is a zoom control, not a row surface (DESIGN §3.4).
     if (target === 'fit') return fitWheelAction(e, this.store.length > 0);
     return wheelAction(e, { wheelZooms: this.wheelZooms, hasCapture: this.store.length > 0 });
-  }
-
-  /** Scroll the channel stack by one wheel event. */
-  private scrollRowsBy(e: WheelEvent): void {
-    const scroll = this.el.scroll;
-    scroll.scrollTop += wheelDeltaPixels(e.deltaY, e.deltaMode, scroll.clientHeight);
   }
 
   /** `+`/`-`: zoom one wheel notch around the centre of the plot. */
