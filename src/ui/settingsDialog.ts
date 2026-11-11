@@ -324,22 +324,22 @@ export class SettingsDialog {
 
   private labelsRow(): HTMLDivElement {
     return this.toggleRow('detailed-labels', 'settings.detailedLabels', this.host.detailedLabels(),
-      (on) => this.host.setDetailedLabels(on));
+      (on) => this.host.setDetailedLabels(on), 'settings.detailedLabelsHelp');
   }
 
   private wheelZoomsRow(): HTMLDivElement {
     return this.toggleRow('wheel-zooms', 'settings.wheelZooms', this.host.wheelZooms(),
-      (on) => this.host.setWheelZooms(on));
+      (on) => this.host.setWheelZooms(on), 'settings.wheelZoomsHelp');
   }
 
   private compactRowsRow(): HTMLDivElement {
     return this.toggleRow('compact-rows', 'settings.compactRows', this.host.compactRows(),
-      (on) => this.host.setCompactRows(on));
+      (on) => this.host.setCompactRows(on), 'settings.compactRowsHelp');
   }
 
   private hideIdleRow(): HTMLDivElement {
     return this.toggleRow('hide-idle', 'settings.hideIdle', this.host.hideIdle(),
-      (on) => this.host.setHideIdle(on));
+      (on) => this.host.setHideIdle(on), 'settings.hideIdleHelp');
   }
 
   private developerToolsRow(): HTMLDivElement {

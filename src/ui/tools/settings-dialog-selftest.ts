@@ -2222,6 +2222,121 @@ function hintOutsideLabel(source: string): boolean {
     `unpassed=${hintOutsideLabel(unpassed)}, real=${hintOutsideLabel(dialogSource)}`);
 }
 
+interface AppearanceHelpRow {
+  row: string;
+  label: MessageKey;
+  hint: MessageKey;
+}
+
+const APPEARANCE_HELP_ROWS: readonly AppearanceHelpRow[] = [
+  { row: 'labelsRow', label: 'settings.detailedLabels', hint: 'settings.detailedLabelsHelp' },
+  { row: 'wheelZoomsRow', label: 'settings.wheelZooms', hint: 'settings.wheelZoomsHelp' },
+  { row: 'compactRowsRow', label: 'settings.compactRows', hint: 'settings.compactRowsHelp' },
+  { row: 'hideIdleRow', label: 'settings.hideIdle', hint: 'settings.hideIdleHelp' },
+];
+
+function appearanceRowBodies(source: string): string[] {
+  return APPEARANCE_HELP_ROWS.map((entry) =>
+    methodBody(source, `private ${entry.row}(): HTMLDivElement {`));
+}
+
+function appearanceHelpWiring(source: string): boolean {
+  const hints = APPEARANCE_HELP_ROWS.map((entry) => entry.hint);
+  const bodies = appearanceRowBodies(source);
+  return APPEARANCE_HELP_ROWS.length === 4 && new Set(hints).size === hints.length &&
+    APPEARANCE_HELP_ROWS.every((entry, index) => {
+      const body = bodies[index] ?? '';
+      const own = `'${entry.hint}'`;
+      return occurrences(body, 'this.toggleRow(') === 1 &&
+        occurrences(body, own) === 1 &&
+        occurrences(source, own) === 1 &&
+        APPEARANCE_HELP_ROWS.every((other) => other === entry || !body.includes(`'${other.hint}'`));
+    });
+}
+
+{
+  const bodies = appearanceRowBodies(dialogSource);
+  const missing = APPEARANCE_HELP_ROWS.flatMap((entry, index) => {
+    const body = bodies[index] ?? '';
+    return occurrences(body, 'this.toggleRow(') === 1 && occurrences(body, `'${entry.hint}'`) === 1
+      ? []
+      : [`${entry.row}:${entry.hint}`];
+  });
+  check('each appearance row passes its own help key to the shared toggle row and no other row\'s',
+    appearanceHelpWiring(dialogSource) && missing.length === 0,
+    `missing=${JSON.stringify(missing)}, ok=${appearanceHelpWiring(dialogSource)}`);
+}
+
+{
+  const droppedHint = dialogSource.replace(
+    "      (on) => this.host.setCompactRows(on), 'settings.compactRowsHelp');",
+    '      (on) => this.host.setCompactRows(on));');
+  const swappedHints = dialogSource
+    .replace("this.host.setWheelZooms(on), 'settings.wheelZoomsHelp'",
+      "this.host.setWheelZooms(on), 'settings.compactRowsHelp'")
+    .replace("this.host.setCompactRows(on), 'settings.compactRowsHelp'",
+      "this.host.setCompactRows(on), 'settings.wheelZoomsHelp'");
+  const reusedHint = dialogSource.replace(
+    "      (on) => this.host.setHideIdle(on), 'settings.hideIdleHelp');",
+    "      (on) => this.host.setHideIdle(on), 'settings.compactRowsHelp');");
+  check('control: dropping one help argument, swapping two rows\' help keys or reusing one help key twice fails the same wiring predicate',
+    droppedHint !== dialogSource && !appearanceHelpWiring(droppedHint) &&
+    swappedHints !== dialogSource && !appearanceHelpWiring(swappedHints) &&
+    reusedHint !== dialogSource && !appearanceHelpWiring(reusedHint) &&
+    appearanceHelpWiring(dialogSource),
+    `dropped=${appearanceHelpWiring(droppedHint)}, swapped=${appearanceHelpWiring(swappedHints)}, ` +
+    `reused=${appearanceHelpWiring(reusedHint)}, real=${appearanceHelpWiring(dialogSource)}`);
+}
+
+interface AppearanceHelpCopy {
+  locale: string;
+  key: MessageKey;
+  label: string;
+  help: string;
+}
+
+function appearanceHelpCopyRows(): AppearanceHelpCopy[] {
+  return CATALOGS.flatMap(([locale, lookup]) => APPEARANCE_HELP_ROWS.map((entry) => ({
+    locale,
+    key: entry.hint,
+    label: lookup(entry.label),
+    help: lookup(entry.hint),
+  })));
+}
+
+function appearanceHelpCopyProblems(rows: readonly AppearanceHelpCopy[]): string[] {
+  return rows
+    .filter((row) => row.help.trim().length === 0)
+    .map((row) => `${row.locale}:${row.key}=blank`)
+    .concat(rows
+      .filter((row) => row.help === row.label)
+      .map((row) => `${row.locale}:${row.key}=label`));
+}
+
+{
+  const rows = appearanceHelpCopyRows();
+  const problems = appearanceHelpCopyProblems(rows);
+  check('every appearance help key carries non-empty prose that is not its own label in all four catalogs',
+    rows.length === APPEARANCE_HELP_ROWS.length * CATALOGS.length && problems.length === 0,
+    problems.length === 0
+      ? `${APPEARANCE_HELP_ROWS.length} options × ${CATALOGS.length} catalogs`
+      : problems.join('; '));
+}
+
+{
+  const rows = appearanceHelpCopyRows();
+  const copied = rows.map((row, index) => (index === 0 ? { ...row, help: row.label } : row));
+  const blanked = rows.map((row, index) =>
+    (index === rows.length - 1 ? { ...row, help: '   ' } : row));
+  check('control: help prose copied from its own label or blanked out fails the same copy predicate',
+    appearanceHelpCopyProblems(copied).length > 0 &&
+    appearanceHelpCopyProblems(blanked).length > 0 &&
+    appearanceHelpCopyProblems(rows).length === 0,
+    `copied=${JSON.stringify(appearanceHelpCopyProblems(copied).slice(0, 2))}, ` +
+    `blanked=${JSON.stringify(appearanceHelpCopyProblems(blanked).slice(0, 2))}, ` +
+    `real=${appearanceHelpCopyProblems(rows).length}`);
+}
+
 interface WhereRow { locale: string; actual: string; want: string }
 
 const DEVELOPER_WHERE_WANT: readonly string[] = [
