@@ -420,26 +420,41 @@ function groupListProblem(
     `rows=${rows}`);
 }
 
+type GestureRow = ReturnType<typeof referenceGestures>[number];
+
+const GESTURE_TAIL = 'Shift+shortcuts.input.wheel=shortcuts.panTime;' +
+  'shortcuts.input.drag=shortcuts.panTime;shortcuts.input.doubleClick=shortcuts.addCursor;' +
+  'shortcuts.input.pinch=shortcuts.zoomTime';
+
+const describeGestures = (rows: readonly GestureRow[]): string => rows
+  .map((entry) => `${entry.modifiers.join('+')}${entry.modifiers.length > 0 ? '+' : ''}${entry.input}=` +
+    entry.labels.join(','))
+  .join(';');
+
+function gestureReferenceMatches(
+  off: readonly GestureRow[], on: readonly GestureRow[],
+): boolean {
+  return describeGestures(off) ===
+    `shortcuts.input.wheel=shortcuts.scrollRows;Ctrl+shortcuts.input.wheel=shortcuts.zoomTime;${GESTURE_TAIL}` &&
+    describeGestures(on) ===
+    `shortcuts.input.wheel=shortcuts.zoomTime;Ctrl+shortcuts.input.wheel=shortcuts.zoomTime;${GESTURE_TAIL}`;
+}
+
 {
   // The mouse half of the reference follows the "wheel zooms" setting the same way the
   // wheel handlers do, and every row names catalog keys present in all four locales.
-  const describe = (zooms: boolean): string => referenceGestures(zooms)
-    .map((entry) => `${entry.modifiers.join('+')}${entry.modifiers.length > 0 ? '+' : ''}${entry.input}=` +
-      entry.labels.join(','))
-    .join(';');
-  const off = describe(false);
-  const on = describe(true);
-  const keys = [false, true].flatMap((zooms) => referenceGestures(zooms)
-    .flatMap((entry) => [entry.input, ...entry.labels]));
+  const off = referenceGestures(false);
+  const on = referenceGestures(true);
+  const retiredSwap: readonly GestureRow[] = on.map((entry, index) => (index === 1
+    ? { ...entry, labels: ['shortcuts.scrollRows'] }
+    : entry));
+  const keys = [...off, ...on].flatMap((entry) => [entry.input, ...entry.labels]);
   const missing = keys.filter((key) => [en, zhCN, ru, fr].some((dict) => !dict[key]));
-  check('the mouse reference lists the wheel, Shift+wheel, Shift+arrows, drag, double-click and pinch',
-    off.startsWith('shortcuts.input.wheel=shortcuts.scrollRows;Ctrl+shortcuts.input.wheel=shortcuts.zoomTime;') &&
-    on.startsWith('shortcuts.input.wheel=shortcuts.zoomTime;Ctrl+shortcuts.input.wheel=shortcuts.scrollRows;') &&
-    off.endsWith('Shift+shortcuts.input.wheel=shortcuts.panTime;' +
-      'shortcuts.input.drag=shortcuts.panTime;shortcuts.input.doubleClick=shortcuts.addCursor;' +
-      'shortcuts.input.pinch=shortcuts.zoomTime') &&
-    gestureNotation(referenceGestures(false)[1]!) === 'Ctrl + Wheel' && missing.length === 0,
-    `off=${off}; on=${on}; missing=${missing.join(',')}`);
+  check('the mouse reference keeps Ctrl+wheel on zoom when wheel zoom is on, so both forms zoom',
+    gestureReferenceMatches(off, on) && !gestureReferenceMatches(off, retiredSwap) &&
+    gestureNotation(off[1]!) === 'Ctrl + Wheel' && missing.length === 0,
+    `off=${describeGestures(off)}; on=${describeGestures(on)}; ` +
+    `retired=${gestureReferenceMatches(off, retiredSwap)}; missing=${missing.join(',')}`);
 }
 
 {

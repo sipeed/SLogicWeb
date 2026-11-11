@@ -2850,9 +2850,9 @@ export class App {
     const plot = this.el.plot;
 
     // The wheel decision is `wheelAction` (wheelGesture.ts), shared with the overview strip
-    // and the hint bar. By default a plain wheel scrolls the channel stack while it
-    // overflows (HSync/DSView habit), Ctrl zooms time and Shift pans it; with every row on
-    // screen, or with the "wheel zooms" preference (PulseView habit), a plain wheel zooms.
+    // and the hint bar. A plain wheel lets the browser scroll the channel stack unless the
+    // "wheel zooms" preference turns plain-wheel zoom on; Ctrl/⌘ zooms time either way and
+    // Shift pans it.
     const wheelNavigate = (e: WheelEvent, left: number, target: 'rows' | 'fit' = 'rows'): void => {
       const action = this.wheelActionFor(e, target);
       if (action === 'native') return;
@@ -3699,7 +3699,7 @@ export class App {
     return wheelAction(e, { wheelZooms: this.wheelZooms, hasCapture: this.store.length > 0 });
   }
 
-  /** Scroll the channel stack by one wheel event (Ctrl+wheel when "wheel zooms" is on). */
+  /** Scroll the channel stack by one wheel event. */
   private scrollRowsBy(e: WheelEvent): void {
     const scroll = this.el.scroll;
     scroll.scrollTop += wheelDeltaPixels(e.deltaY, e.deltaMode, scroll.clientHeight);

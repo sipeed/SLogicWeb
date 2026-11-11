@@ -6,15 +6,12 @@
  * hint bar (`interactionHints`) cannot drift apart.
  *
  *   - Shift+wheel always pans time.
- *   - Default (`wheelZooms` off): Ctrl/⌘+wheel zooms time; a plain wheel only scrolls the
- *     row stack (when every row fits it does nothing) - it never zooms, so the setting is
- *     the one switch between the two habits.
- *   - "Wheel zooms" on (PulseView/sigrok habit): a plain wheel zooms time and
- *     Ctrl/⌘+wheel scrolls the row stack.
+ *   - Ctrl/⌘+wheel always zooms time when a capture exists.
+ *   - A plain wheel lets the browser scroll the row stack, and also zooms time when the
+ *     persisted "wheel zooms" preference is on.
  *
  * Without a capture there is nothing to zoom or pan: a plain wheel keeps the browser's
- * scrolling, Ctrl+wheel is still swallowed so it never zooms the page, and with "wheel
- * zooms" on Ctrl+wheel scrolls rows exactly as it would with a capture.
+ * scrolling, and Ctrl/⌘+wheel and Shift+wheel are swallowed so they never zoom the page.
  */
 
 export interface WheelModifiers {
@@ -41,10 +38,7 @@ export type WheelAction = 'zoom' | 'pan' | 'native' | 'scroll-rows' | 'block';
 export function wheelAction(mods: WheelModifiers, ctx: WheelContext): WheelAction {
   const ctrl = mods.ctrlKey || mods.metaKey === true;
   if (mods.shiftKey) return ctx.hasCapture ? 'pan' : 'block';
-  if (ctrl) {
-    if (ctx.wheelZooms) return 'scroll-rows';
-    return ctx.hasCapture ? 'zoom' : 'block';
-  }
+  if (ctrl) return ctx.hasCapture ? 'zoom' : 'block';
   if (!ctx.hasCapture) return 'native';
   return ctx.wheelZooms ? 'zoom' : 'native';
 }

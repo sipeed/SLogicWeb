@@ -880,6 +880,7 @@ const baseSettings: CaptureSettings = {
     'settings.sections.general', 'settings.shortcuts', 'settings.about', 'shortcuts.title',
     'shortcuts.keyboard', 'shortcuts.input.arrows', 'about.title',
     'settings.developerToolsNote', 'settings.developerToolsOpen',
+    'hints.wheel.scrollRows',
     'emptyHint.example',
   ];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
@@ -968,6 +969,63 @@ function settingsToggleCopyFailures(dicts: Record<string, Messages>): string[] {
     `parenthetical=${JSON.stringify(parenFailures)}, empty=${JSON.stringify(emptyFailures)}, ` +
     `brace=${JSON.stringify(braceFailures)}, copied=${JSON.stringify(copyFailures)}, ` +
     `missing=${JSON.stringify(missingFailures)}`);
+}
+
+const WHEEL_HELP_MODIFIERS: Readonly<Record<string, readonly RegExp[]>> = {
+  en: [/Ctrl/, /Shift/],
+  'zh-CN': [/Ctrl/, /Shift/],
+  ru: [/Ctrl/, /Shift/],
+  fr: [/Ctrl/, /Maj/],
+};
+
+const WHEEL_HELP_ROW_SCROLL: Readonly<Record<string, RegExp>> = {
+  en: /scroll/i,
+  'zh-CN': /滚动/,
+  ru: /прокруч/i,
+  fr: /défil/i,
+};
+
+const WHEEL_HELP_RETIRED: Readonly<Record<string, string>> = {
+  en: 'Zoom with the mouse wheel without Ctrl. Ctrl/Command+wheel scrolls rows instead; Shift+wheel always pans.',
+  'zh-CN': '不用 Ctrl，滚动滚轮即可缩放。Ctrl/Command+滚轮改为上下滚动通道；Shift+滚轮始终平移视图。',
+  ru: 'Масштабирование колесом без Ctrl. Ctrl/Command+колесо прокручивает строки, Shift+колесо всегда панорамирует.',
+  fr: 'Zoomer à la molette sans Ctrl. Ctrl/Command+molette fait défiler les voies ; Maj+molette décale toujours la vue.',
+};
+
+function wheelHelpProblems(dicts: Record<string, Messages>): string[] {
+  const problems: string[] = [];
+  for (const [locale, dict] of Object.entries(dicts)) {
+    const modifiers = WHEEL_HELP_MODIFIERS[locale];
+    const rowScroll = WHEEL_HELP_ROW_SCROLL[locale];
+    const help: string | undefined = dict['settings.wheelZoomsHelp'];
+    if (!modifiers || !rowScroll || help === undefined) { problems.push(`${locale}:missing`); continue; }
+    for (const modifier of modifiers) {
+      if (!modifier.test(help)) problems.push(`${locale}: missing ${modifier}`);
+    }
+    if (rowScroll.test(help)) problems.push(`${locale}: claims row scrolling`);
+  }
+  return problems;
+}
+
+{
+  const problems = wheelHelpProblems(SETTINGS_TOGGLE_CATALOGS);
+  check('every locale describes plain-wheel zoom as additive and never claims row scrolling',
+    problems.length === 0,
+    problems.length === 0
+      ? `${Object.keys(SETTINGS_TOGGLE_CATALOGS).length} catalogs`
+      : problems.join('; '));
+}
+
+{
+  const retired: Record<string, Messages> = Object.fromEntries(
+    Object.entries(SETTINGS_TOGGLE_CATALOGS).map(([locale, dict]) => [
+      locale, { ...dict, 'settings.wheelZoomsHelp': WHEEL_HELP_RETIRED[locale]! },
+    ]));
+  const problems = wheelHelpProblems(retired);
+  check('control: the retired swap help fails that predicate in every locale',
+    Object.keys(SETTINGS_TOGGLE_CATALOGS).every((locale) =>
+      problems.some((problem) => problem.startsWith(`${locale}:`))),
+    problems.join('; '));
 }
 
 const RESET_COPY_KEYS: readonly (keyof Messages)[] = [

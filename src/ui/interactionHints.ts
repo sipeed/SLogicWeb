@@ -29,8 +29,8 @@
  * The wheel over the plot, axis and overview is decided by `wheelAction` (wheelGesture.ts),
  * which the handlers call too, so the two wheel variants below are the only ones:
  *
- *   - "wheel zooms" off: wheel scrolls rows (never zooms), Ctrl+wheel zooms;
- *   - "wheel zooms" on:  wheel zooms, Ctrl+wheel scrolls rows.
+ *   - "wheel zooms" off: wheel scrolls rows, Ctrl+wheel zooms;
+ *   - "wheel zooms" on:  wheel and Ctrl+wheel both zoom.
  *
  * Assumptions and unsupported combinations:
  *
@@ -178,9 +178,7 @@ function wheelHints(area: WheelArea, variant: WheelVariant): readonly HintSpec[]
   const ctrl = wheelAction({ ctrlKey: true, shiftKey: false }, ctx);
   if (plain === 'zoom') out.push(hint(keys.zoom, 'wheel'));
   else out.push(hint(keys.scroll, 'wheel'));
-  // A Ctrl variant that repeats the plain wheel is not worth a second hint.
-  if (ctrl === 'scroll-rows') out.push(hint('hints.wheel.scrollRows', 'wheel', 'Ctrl'));
-  else if (ctrl === 'zoom' && plain !== 'zoom') out.push(hint(keys.zoom, 'wheel', 'Ctrl'));
+  if (ctrl === 'zoom') out.push(hint(keys.zoom, 'wheel', 'Ctrl'));
   if (wheelAction({ ctrlKey: false, shiftKey: true }, ctx) === 'pan') {
     out.push(hint(keys.pan, 'wheel', 'Shift'));
   }

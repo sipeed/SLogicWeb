@@ -132,7 +132,7 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
 {
   // The two wheel variants. Each is read off `wheelAction`, the function the plot, axis
   // and overview handlers call, so the bar and the handlers cannot disagree. With the
-  // setting off a plain wheel only scrolls (it never zooms); with it on only it zooms.
+  // setting off a plain wheel only scrolls; with it on the plain wheel zooms as well.
   const variant = (area: InteractionArea, wheelZooms: boolean): string =>
     interactionHints(area, { hasCapture: true, wheelZooms }).map(signature).join('|');
   const expected: Array<[InteractionArea, boolean, string]> = [
@@ -140,17 +140,17 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
       'wheel:hints.plot.scroll|Ctrl+wheel:hints.plot.zoom|Shift+wheel:hints.plot.pan|' +
       'left:hints.plot.dragPan|left:hints.plot.addCursor'],
     ['plot', true,
-      'wheel:hints.plot.zoom|Ctrl+wheel:hints.wheel.scrollRows|Shift+wheel:hints.plot.pan|' +
+      'wheel:hints.plot.zoom|Ctrl+wheel:hints.plot.zoom|Shift+wheel:hints.plot.pan|' +
       'left:hints.plot.dragPan|left:hints.plot.addCursor'],
     ['axis', false,
       'wheel:hints.axis.scroll|Ctrl+wheel:hints.axis.zoom|Shift+wheel:hints.axis.pan|left:hints.axis.dragPan|left:hints.axis.dragCursor'],
     ['axis', true,
-      'wheel:hints.axis.zoom|Ctrl+wheel:hints.wheel.scrollRows|Shift+wheel:hints.axis.pan|left:hints.axis.dragPan|left:hints.axis.dragCursor'],
+      'wheel:hints.axis.zoom|Ctrl+wheel:hints.axis.zoom|Shift+wheel:hints.axis.pan|left:hints.axis.dragPan|left:hints.axis.dragCursor'],
     ['overview', false,
       'wheel:hints.overview.scroll|Ctrl+wheel:hints.overview.zoom|Shift+wheel:hints.overview.pan|' +
       'left:hints.overview.center'],
     ['overview', true,
-      'wheel:hints.overview.zoom|Ctrl+wheel:hints.wheel.scrollRows|Shift+wheel:hints.overview.pan|' +
+      'wheel:hints.overview.zoom|Ctrl+wheel:hints.overview.zoom|Shift+wheel:hints.overview.pan|' +
       'left:hints.overview.center'],
   ];
   const bad = expected.filter(([area, zooms, want]) => variant(area, zooms) !== want)

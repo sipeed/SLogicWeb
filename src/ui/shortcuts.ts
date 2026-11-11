@@ -111,7 +111,7 @@ export function referenceGestures(wheelZooms: boolean): readonly GestureEntry[] 
   const wheel: GestureEntry[] = wheelZooms
     ? [
       { modifiers: [], input: 'shortcuts.input.wheel', labels: ['shortcuts.zoomTime'] },
-      { modifiers: ['Ctrl'], input: 'shortcuts.input.wheel', labels: ['shortcuts.scrollRows'] },
+      { modifiers: ['Ctrl'], input: 'shortcuts.input.wheel', labels: ['shortcuts.zoomTime'] },
     ]
     : [
       { modifiers: [], input: 'shortcuts.input.wheel', labels: ['shortcuts.scrollRows'] },

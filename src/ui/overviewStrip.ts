@@ -71,7 +71,7 @@ export interface OverviewCallbacks {
    * overflowing - plain wheel scrolls, Ctrl zooms, Shift pans.
    */
   wheelAction?(event: WheelEvent): WheelAction;
-  /** Scroll the channel stack by this wheel event (Ctrl+wheel with "wheel zooms" on). */
+  /** Scroll the channel stack by this wheel event. */
   onScrollRows?(event: WheelEvent): void;
 }
 
