@@ -897,6 +897,79 @@ const baseSettings: CaptureSettings = {
     names.join(' | '));
 }
 
+// ----------------------------------------------- appearance labels and help copy
+
+const APPEARANCE_COPY: ReadonlyArray<readonly [keyof Messages, keyof Messages]> = [
+  ['settings.detailedLabels', 'settings.detailedLabelsHelp'],
+  ['settings.wheelZooms', 'settings.wheelZoomsHelp'],
+  ['settings.compactRows', 'settings.compactRowsHelp'],
+  ['settings.hideIdle', 'settings.hideIdleHelp'],
+];
+
+const APPEARANCE_CATALOGS: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
+
+function appearanceCopyFailures(dicts: Record<string, Messages>): string[] {
+  const failures: string[] = [];
+  for (const [locale, dict] of Object.entries(dicts)) {
+    for (const [labelKey, helpKey] of APPEARANCE_COPY) {
+      const label: string | undefined = dict[labelKey];
+      if (label === undefined) { failures.push(`${locale}:${labelKey} is missing`); continue; }
+      if (label.trim().length === 0) failures.push(`${locale}:${labelKey} is empty`);
+      if (/[()（）]/.test(label)) failures.push(`${locale}:${labelKey} keeps a parenthetical`);
+      const help: string | undefined = dict[helpKey];
+      if (help === undefined) { failures.push(`${locale}:${helpKey} is missing`); continue; }
+      if (help.trim().length === 0) failures.push(`${locale}:${helpKey} is empty`);
+      else if (help === label) failures.push(`${locale}:${helpKey} repeats the label`);
+      if (/[{}]/.test(help)) failures.push(`${locale}:${helpKey} carries a placeholder brace`);
+    }
+  }
+  return failures;
+}
+
+{
+  const failures = appearanceCopyFailures(APPEARANCE_CATALOGS);
+  check('appearance labels drop their parenthetical and every option carries its own help copy',
+    failures.length === 0,
+    failures.length === 0
+      ? `${APPEARANCE_COPY.length} options x ${Object.keys(APPEARANCE_CATALOGS).length} catalogs`
+      : failures.join('; '));
+}
+
+{
+  const parenthetical: Record<string, Messages> = {
+    ...APPEARANCE_CATALOGS,
+    fr: { ...fr, 'settings.hideIdle': 'Masquer les voies inactives (aucun front dans l’acquisition)' },
+  };
+  const emptyHelp: Record<string, Messages> = {
+    ...APPEARANCE_CATALOGS, 'zh-CN': { ...zhCN, 'settings.compactRowsHelp': '  ' },
+  };
+  const bracedHelp: Record<string, Messages> = {
+    ...APPEARANCE_CATALOGS, en: { ...en, 'settings.wheelZoomsHelp': 'Zoom with {modifier}+wheel.' },
+  };
+  const copiedLabel: Record<string, Messages> = {
+    ...APPEARANCE_CATALOGS, ru: { ...ru, 'settings.wheelZoomsHelp': ru['settings.wheelZooms'] },
+  };
+  const dropped = { ...fr } as Partial<Messages>;
+  delete dropped['settings.hideIdleHelp'];
+  const missingHelp: Record<string, Messages> = {
+    ...APPEARANCE_CATALOGS, fr: dropped as Messages,
+  };
+  const parenFailures = appearanceCopyFailures(parenthetical);
+  const emptyFailures = appearanceCopyFailures(emptyHelp);
+  const braceFailures = appearanceCopyFailures(bracedHelp);
+  const copyFailures = appearanceCopyFailures(copiedLabel);
+  const missingFailures = appearanceCopyFailures(missingHelp);
+  check('control: a parenthetical, an empty help, a placeholder brace, a copied label or a dropped help key fails the same predicate',
+    parenFailures.length === 1 && parenFailures[0]!.includes('settings.hideIdle') &&
+    emptyFailures.length === 1 && emptyFailures[0]!.includes('settings.compactRowsHelp') &&
+    braceFailures.length === 1 && braceFailures[0]!.includes('settings.wheelZoomsHelp') &&
+    copyFailures.length === 1 && copyFailures[0]!.includes('settings.wheelZoomsHelp') &&
+    missingFailures.length === 1 && missingFailures[0]!.includes('settings.hideIdleHelp is missing'),
+    `parenthetical=${JSON.stringify(parenFailures)}, empty=${JSON.stringify(emptyFailures)}, ` +
+    `brace=${JSON.stringify(braceFailures)}, copied=${JSON.stringify(copyFailures)}, ` +
+    `missing=${JSON.stringify(missingFailures)}`);
+}
+
 {
   // A catalog that silently shipped the English text would pass parity and fail users.
   // Assert the PROPERTY (translated ≠ English) on salient keys, not exact wording, so a
@@ -904,7 +977,10 @@ const baseSettings: CaptureSettings = {
   // clean FAIL, not a crash.
   const probes: (keyof Messages)[] = [
     'toolbar.start', 'settings.language', 'settings.theme',
-    'settings.detailedLabels', 'settings.compactRows', 'settings.hideIdle',
+    'settings.detailedLabels', 'settings.detailedLabelsHelp',
+    'settings.wheelZooms', 'settings.wheelZoomsHelp',
+    'settings.compactRows', 'settings.compactRowsHelp',
+    'settings.hideIdle', 'settings.hideIdleHelp',
     'settings.developerTools', 'settings.close', 'settings.sections.appearance',
     'settings.sections.shortcuts', 'settings.sections.developer', 'settings.sections.about',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortStop',
