@@ -487,7 +487,7 @@ const startSrc = app.slice(
 {
   // The hard cap must run before the append, or the store can throw at 2^31 samples
   // before the guard ever sees the overflow.
-  const guardAt = app.indexOf('if (this.captureUsesSoftwareTrigger &&\n              store.length + chunkSamples > LOOP_STORE_HARD_SAMPLES) {');
+  const guardAt = app.indexOf('if (this.captureUsesSoftwareTrigger &&\n                store.length + chunkSamples > LOOP_STORE_HARD_SAMPLES) {');
   const appendAt = app.indexOf('store.append(chunk);', guardAt);
   const hardCap = guardAt >= 0 && appendAt > guardAt &&
     app.includes('const LOOP_STORE_HARD_SAMPLES = 0x7fffffff - 0x1000000;') &&

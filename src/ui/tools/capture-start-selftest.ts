@@ -183,9 +183,9 @@ const HOLD: CaptureStartDisplayInput = {
 
   const retentionCalls = count('this.enforceLoopRetention(');
   check('the loop retention trims the capture store, never the held display store',
-    retentionCalls === 3 &&
+    retentionCalls === 4 &&
     count('this.enforceLoopRetention(this.storeRef)') === 0 &&
-    count('this.enforceLoopRetention(store)') === 2 &&
+    count('this.enforceLoopRetention(store)') === 3 &&
     count('this.enforceLoopRetention(capture)') === 1,
     `retention calls ${retentionCalls}, display-store calls ` +
       `${count('this.enforceLoopRetention(this.storeRef)')}`);

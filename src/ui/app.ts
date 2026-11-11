@@ -1276,7 +1276,7 @@ export class App {
       // Give the new condition one full window to produce an edge; the quiet-window
       // release then applies if it never does. A digital plan has no scanner, so the
       // lock remains one-shot and is released only when its window leaves retention.
-      this.lastAnalogCrossingAbs = this.store.droppedSamples + this.triggerSampleIndex;
+      this.lastAnalogCrossingAbs = this.droppedTotal + this.triggerSampleIndex;
     }
     if (this.triggerState !== 'waiting') return;
     // A page-side transport can answer synchronously; a worker queues the message. Only a
@@ -4201,7 +4201,7 @@ export class App {
       // would shorten the quiet window and release the lock early.
       this.lastAnalogCrossingAbs = Math.max(
         this.lastAnalogCrossingAbs,
-        this.store.droppedSamples + this.triggerSampleIndex,
+        this.droppedTotal + this.triggerSampleIndex,
       );
       this.placeLockViewport();
       return;
@@ -4752,12 +4752,12 @@ export class App {
     const rate = store.samplerate;
     const channels = store.channelCount;
     if (!(rate > 0) || !isChannelCount(channels)) return null;
-    const liveAbs = store.length + store.droppedSamples;
+    const liveAbs = store.length + this.droppedTotal;
     const D = this.loopRetentionLen > 0 ? this.loopRetentionLen : 1;
     // The local roll's budget is based on the fresh data beyond the DurationWindow's
     // right edge, not on the user's (possibly zoomed) ViewWindow span.
     const triggerAbs = this.triggerSampleIndex === null
-      ? null : store.droppedSamples + this.triggerSampleIndex;
+      ? null : this.droppedTotal + this.triggerSampleIndex;
     const fraction = this.triggerViewLock?.fraction ?? 0;
     const available = triggerAbs === null
       ? Math.max(0, liveAbs - this.loopSwapCursorAbs)
@@ -6165,47 +6165,68 @@ export class App {
             locked: this.triggerViewLock !== null,
             pending: this.triggerViewPending,
           });
-          const skipScan = this.loopScanSkip > 0;
-          if (skipScan) {
-            this.loopScanSkip -= 1;
-            this.analogScanner?.resetContinuity();
+          const scanWanted = this.analogScanner !== null && chunk.length > 0 &&
+            this.settings.triggerEnableMask &&
+            (this.triggerViewLock !== null || this.triggerViewPending ||
+             waitingForTrigger || mayRelock);
+          // A chunk longer than the window replaces the window outright; 'miss' means
+          // that path already scanned and a held lock found no edge.
+          const replace = scanWanted && !waitingForTrigger
+            ? this.replaceLoopWindow(store, chunk, mayRelock) : 'skip';
+          if (replace !== 'replaced') {
+            const skipScan = this.loopScanSkip > 0;
+            if (skipScan) {
+              this.loopScanSkip -= 1;
+              this.analogScanner?.resetContinuity();
+            }
+            const sampleBytes = bytesPerSampleForChannels(store.channelCount);
+            const chunkSamples = Math.floor(chunk.length / sampleBytes);
+            let scanCrossed = false;
+            let scanned = false;
+            if (!skipScan && replace === 'skip' && scanWanted && this.analogScanner) {
+              // Absolute positions are stream positions: `droppedTotal` also counts what
+              // was never materialized (a replaced window's prefix, a long gap).
+              const base = store.length + this.droppedTotal;
+              const gap = Math.max(1, Math.floor(this.loopRetentionLen / 64));
+              const record = (abs: number): void => {
+                scanCrossed = true;
+                this.recordAnalogCrossing(abs);
+              };
+              // The newest half million samples first, the rest only on a miss and only
+              // while the sink has time: a dense signal made a whole 8 MiB chunk cost
+              // ~45 ms to scan, more than the 40 ms it arrives in (NOTES 8.29).
+              const from = Math.max(0, chunkSamples - 524_288);
+              if (from > 0) this.analogScanner.resetContinuity();
+              this.analogScanner.scan(
+                from > 0 ? chunk.subarray(from * sampleBytes) : chunk, base + from, record, gap);
+              if (!scanCrossed && from > 0 && this.loopSinkMsAvg < 24) {
+                this.analogScanner.resetContinuity();
+                this.analogScanner.scan(chunk.subarray(0, from * sampleBytes), base, record, gap);
+              }
+              scanned = true;
+            }
+            if (scanned) {
+              this.loopScanCrossed = scanCrossed;
+              this.loopScanSkip = this.loopScanStride;
+            }
+            // A trigger lock that would need more than the store's hard sample budget has
+            // already lost the retention race: bounded memory wins over an anchor that can
+            // no longer be kept. The guard is before append so the store can never throw.
+            if (this.captureUsesSoftwareTrigger &&
+                store.length + chunkSamples > LOOP_STORE_HARD_SAMPLES) {
+              this.disableRunningTrigger(true);
+              const drop = loopDropSamples(store.length, this.loopRetentionLen);
+              if (drop > 0) this.dropLoopFront(store, drop);
+            }
+            try {
+              store.append(chunk);
+            } catch (e) {
+              if (this.captureOutOfMemory(e)) return;
+              throw e;
+            }
+            this.captureBytes += chunk.length;
+            this.enforceLoopRetention(store);
           }
-          let scanCrossed = false;
-          let scanned = false;
-          if (!skipScan && this.analogScanner && chunk.length > 0 && this.settings.triggerEnableMask &&
-              (this.triggerViewLock !== null || this.triggerViewPending ||
-               waitingForTrigger || mayRelock)) {
-            const base = store.length + store.droppedSamples;
-            const gap = Math.max(1, Math.floor(this.loopRetentionLen / 64));
-            this.analogScanner.scan(chunk, base, (abs) => {
-              scanCrossed = true;
-              this.recordAnalogCrossing(abs);
-            }, gap);
-            scanned = true;
-          }
-          if (scanned) {
-            this.loopScanCrossed = scanCrossed;
-            this.loopScanSkip = this.loopScanStride;
-          }
-          // A trigger lock that would need more than the store's hard sample budget has
-          // already lost the retention race: bounded memory wins over an anchor that can
-          // no longer be kept. The guard is before append so the store can never throw.
-          const chunkSamples = Math.floor(chunk.length /
-            bytesPerSampleForChannels(store.channelCount));
-          if (this.captureUsesSoftwareTrigger &&
-              store.length + chunkSamples > LOOP_STORE_HARD_SAMPLES) {
-            this.disableRunningTrigger(true);
-            const drop = loopDropSamples(store.length, this.loopRetentionLen);
-            if (drop > 0) this.dropLoopFront(store, drop);
-          }
-          try {
-            store.append(chunk);
-          } catch (e) {
-            if (this.captureOutOfMemory(e)) return;
-            throw e;
-          }
-          this.captureBytes += chunk.length;
-          this.enforceLoopRetention(store);
           this.livePending = true;
           lastLoopSinkMs = performance.now() - sinkStarted;
           // Keep the sink under the delivery interval by trading display update rate for
@@ -6373,7 +6394,7 @@ export class App {
             // dropped front samples during the same transfer that produced the match.
             // The plot, the marker and the retention shift all speak store-relative
             // positions, so convert once here.
-            const sample = relativeTriggerSample(triggerSampleIndex, store.droppedSamples);
+            const sample = relativeTriggerSample(triggerSampleIndex, this.droppedTotal);
             this.triggerSampleIndex = sample;
             this.captureStart = performance.now();
             if (sample !== null && isLoop && softwareTrigger) {
@@ -6530,6 +6551,95 @@ export class App {
   }
 
   /**
+   * Whole-window replacement for a Loop chunk that carries more than one window.
+   *
+   * At 16ch/100M the worker delivers 4 M samples every 40 ms. Appending all of them only
+   * to drop most again, after scanning every one for crossings, cost the main thread more
+   * than the delivery interval; the backlog filled every ~2 s and the transport dropped
+   * (NOTES 8.29). When the window is shorter than the chunk, only the newest
+   * `window + search` samples can reach the screen. So: scan that tail for the newest
+   * qualified crossing with a whole post-trigger window after it, append only the tail
+   * and move T there. The skipped prefix is data the retention would have dropped; it is
+   * counted in `droppedTotal`, which is why absolute positions use that and not the
+   * store's own drop count.
+   *
+   * Returns 'skip' when the chunk must take the ordinary path untouched, and 'miss' when
+   * a held lock found no crossing: the ordinary path then keeps the old window and owns
+   * the release rule, without scanning again.
+   */
+  private replaceLoopWindow(
+    store: SampleStore, chunk: Uint8Array, mayRelock: boolean,
+  ): 'replaced' | 'miss' | 'skip' {
+    const scanner = this.analogScanner;
+    const lock = this.triggerViewLock;
+    if (!scanner || this.triggerViewPending || (lock === null && !mayRelock)) return 'skip';
+    const bps = bytesPerSampleForChannels(store.channelCount);
+    const n = Math.floor(chunk.length / bps);
+    const D = this.loopRetentionLen;
+    // How far back from the newest full window an edge is looked for: one window, but at
+    // least 2.6 ms and at most 5.2 ms of 100 MS/s, so the scan stays a few milliseconds.
+    const search = Math.min(Math.max(D, 262_144), 524_288);
+    if (!(D > 0) || chunk.length !== n * bps || n < D + search + DROP_FRONT_QUANTUM) {
+      return 'skip';
+    }
+    const fraction = lock ? lock.fraction : this.triggerViewFraction;
+    const pre = Math.floor(fraction * D);
+    // The last index that still has a whole post-trigger window after it.
+    const newest = n - (D - pre);
+    const base = store.length + this.droppedTotal;
+    const gap = Math.max(1, Math.floor(D / 64));
+    let tailStart = n - (D + search);
+    let anchor = -1;
+    const scan = (from: number, to: number, floor: number): void => {
+      // The slice does not continue whatever was scanned last: no run is carried in.
+      scanner.resetContinuity();
+      scanner.scan(chunk.subarray(from * bps, to * bps), base + from, (abs) => {
+        const at = abs - base;
+        if (at >= floor && at <= newest) anchor = at;
+      }, gap);
+    };
+    // One quantum of margin keeps the anchor in the store when the cut below rounds up.
+    scan(tailStart, Math.min(n, newest + 4096), tailStart + DROP_FRONT_QUANTUM);
+    if (anchor < 0 && this.loopSinkMsAvg < 24) {
+      // Slower than the search range: look through the rest while the sink has time.
+      scan(0, tailStart, 0);
+      if (anchor >= 0) tailStart = Math.max(0, anchor - pre - DROP_FRONT_QUANTUM);
+    }
+    this.loopScanCrossed = anchor >= 0;
+    this.loopScanSkip = 0;
+    if (anchor < 0 && lock !== null) return 'miss';
+    const before = store.length;
+    try {
+      store.append(tailStart > 0 ? chunk.subarray(tailStart * bps) : chunk);
+    } catch (e) {
+      if (this.captureOutOfMemory(e)) return 'replaced';
+      throw e;
+    }
+    this.captureBytes += chunk.length;
+    const index = anchor < 0 ? -1 : before + anchor - tailStart;
+    if (index >= 0) {
+      if (lock !== null) {
+        // Same lock, same ViewWindow offsets: only T moves, exactly as a roll does.
+        this.triggerSampleIndex = index;
+        this.placeLockViewport();
+        this.triggerViewLost = false;
+      } else {
+        this.pendingRelockAbs = base + anchor;
+      }
+      this.lastAnalogCrossingAbs = base + anchor;
+    }
+    this.analogCrossings.length = 0;
+    // Drop the old window, rounding up into the tail so nothing stale stays in front.
+    const q = DROP_FRONT_QUANTUM;
+    const cut = Math.min(
+      Math.ceil(before / q) * q, Math.floor((index >= 0 ? index : store.length) / q) * q);
+    if (cut > 0) this.dropLoopFront(store, cut);
+    this.droppedTotal += tailStart;
+    this.enforceLoopRetention(store);
+    return 'replaced';
+  }
+
+  /**
    * Loop retention. With a locked analog trigger the store may carry a bounded excess
    * (the slack) so the front can stay put until a new crossing arrives; each local step
    * moves the window to a real edge's phase, which is what makes a periodic waveform
@@ -6556,7 +6666,7 @@ export class App {
     // Re-lock on an edge seen while the view was free. The scan happens before the chunk
     // is appended, so wait until the data is actually in the store.
     if (!this.triggerViewLock && !this.triggerViewPending && this.pendingRelockAbs !== null) {
-      const rel = this.pendingRelockAbs - store.droppedSamples;
+      const rel = this.pendingRelockAbs - this.droppedTotal;
       if (rel >= 0 && rel < store.length) {
         this.lockFromCrossing(rel, this.pendingRelockAbs);
       }
@@ -6567,7 +6677,7 @@ export class App {
     const lock = this.triggerViewLock;
     if (lock && this.analogScanner) {
       this.rollLoopWindow(store);
-      const liveAbs = store.droppedSamples + store.length;
+      const liveAbs = this.droppedTotal + store.length;
       if (this.triggerViewLock && this.loopScanSkip === 0 && !this.loopScanCrossed &&
           liveAbs - this.lastAnalogCrossingAbs >
             this.loopRetentionLen + this.loopTriggerSlackSamples) {
@@ -6623,7 +6733,7 @@ export class App {
     const D = this.loopRetentionLen;
     const channels = store.channelCount;
     if (!(D > 0) || !isChannelCount(channels)) return;
-    const front = store.droppedSamples;
+    const front = this.droppedTotal;
     const live = front + store.length;
     const triggerAbs = front + T;
     const fraction = lock.fraction;

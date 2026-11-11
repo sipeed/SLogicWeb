@@ -1761,6 +1761,34 @@ and it is display-only work being traded for data integrity. Combined with the e
 a scan every few chunks keeps the trigger locked and the window steady; the waveform updates a
 few times per second under full load instead of the transport dropping in bursts.
 
+Pacing the scan was still not enough at 16ch/100 MS/s: the field report was a loss burst
+every ~2 s (306 M of 828 M samples) with a 584 us window. The sink was doing work nobody could
+see. A 4 M-sample chunk arrives every 40 ms; with a window shorter than the chunk, all but the
+newest window was appended, indexed, scanned sample by sample for crossings (~45 ms for a
+dense signal, because the exact machine runs wherever the signal is near the level) and then
+dropped. Two changes remove that work:
+
+- **Whole-window replacement** (`replaceLoopWindow`). When a chunk carries at least a window
+  plus a search range (one window, clamped to 262144..524288 samples), only that tail is
+  scanned for the newest qualified crossing that still has a whole post-trigger window after
+  it; only the tail is appended, T moves there with the lock and the ViewWindow offsets
+  intact, and the old window is cut. A held lock that finds no crossing falls back to the
+  ordinary path, which keeps the old window and owns the release rule. With no lock and no
+  crossing the tail is simply the newest data.
+- **Bounded scan on the ordinary path** (windows longer than a chunk): the newest 524288
+  samples first, the rest only on a miss and only while the sink average is under 24 ms.
+
+Absolute positions are now stream positions everywhere (`droppedTotal`, which also counts a
+replaced window's prefix and an unmaterialized gap) instead of the store's own drop count;
+the two were equal until this section's fast paths, and the dropout accounting check already
+used the stream count.
+
+Measured with a fake 16ch/100 MS/s device in the page (8 MiB every 40 ms, 2.5 MHz sine on A0,
+rising 0 V trigger, headless SwiftShader): the sink fell from ~60 ms to 3.0 ms per chunk at a
+584 us window, 9.6 ms at 20 ms and 10.6 ms at 160 ms; the lock held in every poll, every T was
+an exact crossing (stream position = 0 mod the 40-sample period), the view offsets from T
+never moved, and stored plus dropped equalled the stream to the sample.
+
 At 8ch/100 MS/s with no drops, the window stayed locked for 20 s with T steady (tens of
 samples of drift) where it previously alternated by one signal period; the final build could
 not be re-run on the board because another browser held the interface. The offline viewport
