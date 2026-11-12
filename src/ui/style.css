@@ -562,6 +562,12 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
    still has its own lane row above the trace. */
 .ch-cell.compact .ch-body { padding-top: 0; padding-bottom: 0; }
 .ch-cell.compact .ch-analyzers { display: none; }
+.ch-cell.compact .ch-actions {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 4px;
+}
 :is(html[data-theme="dark"], html[data-theme="light"]) .ch-cell.compact { padding-top: 1px; padding-bottom: 1px; }
 :is(html[data-theme="dark"], html[data-theme="light"]) .ch-cell.compact .ch-analyzers { display: none; }
 
@@ -621,13 +627,11 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ch-trigger-preview {
-  flex: none;
-  align-self: center;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 18px;
-  height: 18px;
+  height: 16px;
   color: var(--text50);
 }
 .ch-trigger-preview.configured { color: var(--text80); }

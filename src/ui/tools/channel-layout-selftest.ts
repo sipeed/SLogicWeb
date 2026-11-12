@@ -404,7 +404,8 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     !rowSource.includes('preview.addEventListener') &&
     !rowSource.includes("'ch-trigger'") &&
     rowSource.includes('head.append(tag, original)') &&
-    rowSource.includes('if (preview !== null) head.append(preview)') &&
+    rowSource.includes('if (preview !== null) actions.appendChild(preview)') &&
+    !rowSource.includes('head.append(preview)') &&
     rowSource.includes("const main = div('ch-main')") &&
     rowSource.includes('main.appendChild(head)') &&
     rowSource.includes('main.appendChild(chips)') &&
@@ -428,10 +429,13 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   };
   const settingsBlock = block('.ch-settings');
   const trailingSlot = block('.ch-actions').includes('flex: none') &&
+    block('.ch-actions').includes('grid-template-rows: 18px 16px') &&
+    block('.ch-actions').includes('justify-items: center') &&
     !settingsBlock.includes('margin-left: auto') &&
     !block('.ch-trigger-preview').includes('margin-left: auto');
   check('the actions column owns the trailing slot so the head cannot slide with its children',
     trailingSlot, `actions=${block('.ch-actions').includes('flex: none')}, ` +
+    `rows=${block('.ch-actions').includes('grid-template-rows: 18px 16px')}, ` +
     `settings=${settingsBlock.includes('margin-left: auto')}, ` +
     `trigger=${block('.ch-trigger-preview').includes('margin-left: auto')}`);
 

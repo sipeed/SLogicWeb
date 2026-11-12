@@ -836,7 +836,6 @@ export class ChannelList {
       settings.addEventListener('mousedown', () => { el.draggable = false; });
       settings.addEventListener('mouseup', () => { el.draggable = true; });
       head.append(tag, original);
-      if (preview !== null) head.append(preview);
       const main = div('ch-main');
       main.appendChild(head);
 
@@ -867,6 +866,7 @@ export class ChannelList {
 
       const actions = div('ch-actions');
       actions.appendChild(settings);
+      if (preview !== null) actions.appendChild(preview);
       body.append(main, actions);
 
       card.appendChild(body);

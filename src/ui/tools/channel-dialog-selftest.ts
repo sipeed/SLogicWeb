@@ -149,6 +149,7 @@ function chooseMode(mode: TriggerMode): void {
   const h = setup([makeCell(0, { name: 'CLK', mode: 'rising' }), makeCell(1)]);
   const head = h.root.querySelector('.ch-head');
   const kids = head?.children ?? [];
+  const column = actions(h.root)?.children ?? [];
   const readOnly = kids[0]?.className === 'ch-tag ch-tag--name' && kids[0]?.textContent === 'CLK' &&
     !(kids[0]?.className ?? '').includes('ch-tag--editable') &&
     kids[0]?.getAttribute('role') === null && kids[0]?.getAttribute('contenteditable') === null;
@@ -157,18 +158,18 @@ function chooseMode(mode: TriggerMode): void {
   kids[0]?.dispatchEvent(fakeEvent('keydown', { key: 'Enter' }));
   const noInlineEntry = h.root.querySelectorAll('input').length === 0 &&
     settingsDialog()?.open === false;
-  const order = kids.length === 3 &&
+  const order = kids.length === 2 &&
     kids[1]?.className === 'ch-original-id' && kids[1]?.textContent === 'D0' &&
     kids[1]?.hidden === false &&
-    kids[2]?.localName === 'span' && kids[2]?.className === 'ch-trigger-preview configured' &&
-    (actions(h.root)?.children ?? []).length === 1 &&
-    actions(h.root)?.children[0]?.localName === 'button' &&
-    actions(h.root)?.children[0]?.className === 'ch-settings';
-  check('a channel head renders a read-only name, the D-index and the trigger preview; the gear sits in the actions column',
+    column.length === 2 &&
+    column[0]?.localName === 'button' && column[0]?.className === 'ch-settings' &&
+    column[1]?.localName === 'span' &&
+    column[1]?.className === 'ch-trigger-preview configured';
+  check('a channel head renders a read-only name and the D-index; the gear then the trigger preview sit in the actions column',
     readOnly && noInlineEntry && order,
     `readOnly=${readOnly}, inlineEntry=${!noInlineEntry}, order=${order}, ` +
     `kids=${kids.map((k) => k.className).join('|')}, ` +
-    `actions=${(actions(h.root)?.children ?? []).map((k) => k.className).join('|')}`);
+    `actions=${column.map((k) => k.className).join('|')}`);
 
   const opener = gear(h.root, 0);
   opener?.click();
@@ -280,15 +281,16 @@ function chooseMode(mode: TriggerMode): void {
 {
   const h = setup([makeCell(0, { name: 'CLK', mode: 'rising' })]);
   const glyph = preview(h.root);
-  const head = h.root.querySelector('.ch-head');
-  const before = head?.children ?? [];
+  const column = actions(h.root);
+  const before = column?.children ?? [];
   const input = nameInput()!;
   let selects = 0;
   input.select = () => { selects += 1; };
   gear(h.root, 0)?.click();
   const untouched = (): boolean => preview(h.root) === glyph && glyph?.isConnected === true &&
-    (head?.children ?? []).length === before.length &&
-    (head?.children ?? []).every((kid, at) => kid === before[at]);
+    (column?.children ?? []).length === before.length &&
+    (column?.children ?? []).every((kid, at) => kid === before[at]) &&
+    (column?.children ?? [])[1] === glyph;
   const opened = settingsDialog()?.open === true && doc.activeElement === input &&
     selects === 1 && untouched();
   cancel()?.click();
