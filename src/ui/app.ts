@@ -4609,6 +4609,7 @@ export class App {
         id: a.id,
         decoderId: a.decoderId,
         label: a.label,
+        ordinal: a.ordinal,
         color: a.color,
         channels: { ...a.channels },
         options: { ...a.options },

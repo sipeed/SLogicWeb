@@ -1,6 +1,6 @@
 import {
   analyzerLabelFrom, defaultAnalyzerLabel, MAX_ANALYZER_LABEL_LENGTH, nextAnalyzerOrdinal,
-  sanitizeAnalyzerLabel, type AnalyzerOrdinal,
+  restoredAnalyzerOrdinal, sanitizeAnalyzerLabel, type AnalyzerOrdinal,
 } from '../analyzerNaming.js';
 
 interface FsLike {
@@ -111,6 +111,49 @@ const twoI2c = entries('i2c', [1, 2]);
     custom === 'MyI2C' && blank === 'I²C-2' && spaces === 'I²C-3' &&
     controls.every((pass) => pass),
     `custom=${custom}, blank=${blank}, spaces=${spaces}, controls=${JSON.stringify(controls)}`);
+}
+
+{
+  const table: {
+    raw: unknown; label: string; used: readonly number[]; want: number;
+  }[] = [
+    { raw: 4, label: 'Custom', used: [], want: 4 },
+    { raw: 2, label: 'I²C-2', used: [], want: 2 },
+    { raw: 2, label: 'I²C-2', used: [2], want: 1 },
+    { raw: 2, label: 'I²C-3', used: [2], want: 3 },
+    { raw: undefined, label: 'I²C-4', used: [], want: 4 },
+    { raw: undefined, label: 'I²C-4', used: [4], want: 1 },
+    { raw: undefined, label: 'I²C-4', used: [1, 4], want: 2 },
+    { raw: undefined, label: 'MyI2C', used: [], want: 1 },
+    { raw: undefined, label: 'MyI2C', used: [1, 2], want: 3 },
+    { raw: undefined, label: 'i2c', used: [], want: 1 },
+    { raw: 0, label: 'MyI2C', used: [], want: 1 },
+    { raw: -2, label: 'MyI2C', used: [], want: 1 },
+    { raw: 1.5, label: 'MyI2C', used: [], want: 1 },
+    { raw: '2', label: 'MyI2C', used: [], want: 1 },
+    { raw: null, label: 'MyI2C', used: [], want: 1 },
+    { raw: undefined, label: 'MyI2C', used: [], want: 1 },
+    { raw: Number.NaN, label: 'MyI2C', used: [], want: 1 },
+    { raw: 0, label: 'I²C-5', used: [], want: 5 },
+    { raw: '3' as unknown, label: 'I²C-6', used: [], want: 6 },
+    { raw: undefined, label: 'I²C-0', used: [], want: 1 },
+    { raw: undefined, label: 'I²C-12345', used: [], want: 1 },
+  ];
+  const wrong = table.filter((row) =>
+    restoredAnalyzerOrdinal(row.raw, row.label, new Set(row.used)) !== row.want);
+  const controls = [
+    restoredAnalyzerOrdinal(4, 'Custom', new Set()) !== 1,
+    restoredAnalyzerOrdinal(2, 'Custom', new Set([2])) !== 2,
+    restoredAnalyzerOrdinal(undefined, 'I²C-4', new Set()) !== 1,
+    restoredAnalyzerOrdinal(undefined, 'I²C-4', new Set([4])) !== 4,
+    restoredAnalyzerOrdinal(0, 'MyI2C', new Set()) !== 0,
+    restoredAnalyzerOrdinal('2', 'MyI2C', new Set()) !== 2,
+  ];
+  check('restoredAnalyzerOrdinal prefers the persisted ordinal, then a label suffix, then the free set',
+    wrong.length === 0 && controls.every((pass) => pass),
+    `wrong=${JSON.stringify(wrong.map((row) =>
+      restoredAnalyzerOrdinal(row.raw, row.label, new Set(row.used))))}, ` +
+    `controls=${JSON.stringify(controls)}`);
 }
 
 {

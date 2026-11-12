@@ -721,6 +721,7 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
       id: 'i2c-0',
       decoderId: 'i2c',
       label: 'I2C',
+      ordinal: 1,
       color: '#9A7B2E',
       channels: { 0: 3, 1: 4, 2: -1 },
       options: { address_format: 'unshifted', address: 72, bitrate: 100000 },
@@ -730,6 +731,7 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
       id: 'spi-1',
       decoderId: 'spi',
       label: 'SPI',
+      ordinal: 1,
       color: '#A8504E',
       channels: { 0: 6, 1: 7 },
       options: {},
@@ -742,6 +744,7 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
   const [i2c, spi] = parsed;
   check('legal analyzer mounts round-trip with unassigned channels and per-instance identities',
     parsed.length === 2 && i2c?.id === 'i2c-0' && i2c.decoderId === 'i2c' && i2c.label === 'I2C' &&
+    i2c.ordinal === 1 && spi?.ordinal === 1 &&
     i2c.color === '#9A7B2E' && JSON.stringify(i2c.channels) === '{"0":3,"1":4,"2":-1}' &&
     i2c.options.address === 72 && i2c.options.address_format === 'unshifted' && i2c.options.bitrate === 100000 &&
     i2c.laneChannel === 4 && spi?.id === 'spi-1' && spi.decoderId === 'spi' && spi.laneChannel === 7,
@@ -811,6 +814,7 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
       id: 'xy2-100-1',
       decoderId: 'xy2-100',
       label: 'XY2-100',
+      ordinal: 1,
       color: '#9A7B2E',
       channels: { 0: 2, 1: 3, 2: -1 },
       options: { address: 0 },
@@ -998,7 +1002,7 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
   const failed = lanes.filter(([channels, expected]) => analyzerLaneChannel(channels) !== expected);
   const channels = { 0: 3, 1: -1 };
   const mounted: PersistedAnalyzer = {
-    id: 'jtag-0', decoderId: 'jtag', label: 'JTAG', color: analyzerColor(0),
+    id: 'jtag-0', decoderId: 'jtag', label: 'JTAG', ordinal: 1, color: analyzerColor(0),
     channels: { ...channels }, options: {}, laneChannel: analyzerLaneChannel(channels),
   };
   const roundTripped = parseWorkspaceSnapshot(serializeWorkspaceSnapshot({
@@ -1056,6 +1060,7 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
       id: 'i2c-0',
       decoderId: 'i2c',
       label: 'I2C',
+      ordinal: 2,
       color: '#9A7B2E',
       channels: { 5: 9, 0: 3, 2: -1 },
       options: { sample_rate: 400000, address: 72, address_format: 'shifted' },
@@ -1072,10 +1077,78 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     first === second && reserialized === first &&
     first.includes('"channels":{"0":3,"2":-1,"5":9}') &&
     first.includes('"options":{"address":72,"address_format":"shifted","sample_rate":400000}') &&
-    first.indexOf('"label"') < first.indexOf('"channels"') &&
+    first.indexOf('"label"') < first.indexOf('"ordinal"') &&
+    first.indexOf('"ordinal"') < first.indexOf('"channels"') &&
     first.indexOf('"channels"') < first.indexOf('"options"') &&
     first.indexOf('"options"') < first.indexOf('"laneChannel"'),
     first);
+}
+
+{
+  const roundTrip = (ordinal: unknown, label: unknown) => parseWorkspaceSnapshot(JSON.stringify({
+    version: 1, analyzers: [{ decoderId: 'i2c', channels: {}, label, ordinal }],
+  }))?.analyzers?.[0]?.ordinal;
+  const persisted = roundTrip(4, 'Custom');
+  const duplicate = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    analyzers: [
+      { decoderId: 'i2c', channels: {}, label: 'A', ordinal: 2 },
+      { decoderId: 'i2c', channels: {}, label: 'B', ordinal: 2 },
+    ],
+  }))?.analyzers ?? [];
+  const suffix = roundTrip(undefined, 'I²C-4');
+  const suffixTaken = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    analyzers: [
+      { decoderId: 'i2c', channels: {}, label: 'A', ordinal: 4 },
+      { decoderId: 'i2c', channels: {}, label: 'I²C-4' },
+    ],
+  }))?.analyzers ?? [];
+  const rejected = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    analyzers: [
+      { decoderId: 'i2c', channels: { 0: 99 }, label: 'Rejected', ordinal: 1 },
+      { decoderId: 'i2c', channels: {}, label: 'Kept', ordinal: 1 },
+    ],
+  }))?.analyzers ?? [];
+  const controls = [
+    roundTrip(1, 'Custom') !== 4,
+    duplicate[1]?.ordinal !== 2,
+    suffix !== 1,
+    suffixTaken[1]?.ordinal !== 4,
+    rejected[0]?.ordinal !== 2,
+  ];
+  check('analyzer ordinals round-trip, fall back on duplicates, and rejections consume none',
+    persisted === 4 && duplicate.length === 2 && duplicate[0]?.ordinal === 2 &&
+    duplicate[1]?.ordinal === 1 &&
+    suffix === 4 && suffixTaken[1]?.ordinal === 1 &&
+    rejected.length === 1 && rejected[0]?.label === 'Kept' && rejected[0]?.ordinal === 1 &&
+    controls.every((pass) => pass),
+    `persisted=${persisted}, duplicate=${JSON.stringify(duplicate.map((a) => a.ordinal))}, ` +
+    `suffix=${suffix}, taken=${JSON.stringify(suffixTaken.map((a) => a.ordinal))}, ` +
+    `rejected=${JSON.stringify(rejected.map((a) => a.ordinal))}, controls=${JSON.stringify(controls)}`);
+}
+
+{
+  const legacy = parseWorkspaceSnapshot(JSON.stringify({
+    version: 1,
+    analyzers: [
+      { decoderId: 'i2c', channels: {}, label: 'I²C-2' },
+      { decoderId: 'i2c', channels: {}, label: 'I²C-1' },
+      { decoderId: 'i2c', channels: {}, label: 'MyI2C' },
+      { decoderId: 'spi', channels: {}, label: 'SPI-7' },
+      { decoderId: 'uart', channels: {} },
+    ],
+  }))?.analyzers ?? [];
+  const ordinals = legacy.map((analyzer) => analyzer.ordinal);
+  const controls = [
+    legacy[0]?.ordinal !== 1,
+    legacy[2]?.ordinal !== 1,
+    legacy[3]?.ordinal !== 1,
+  ];
+  check('legacy snapshots without an ordinal derive it from the label suffix, then from the free set',
+    JSON.stringify(ordinals) === '[2,1,3,7,1]' && controls.every((pass) => pass),
+    `${JSON.stringify(ordinals)}, controls=${JSON.stringify(controls)}`);
 }
 
 {
@@ -1089,7 +1162,7 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
     version: 1, detailedLabels: true, analyzers: parsed?.analyzers ?? [],
   });
   check('restored analyzer DTOs carry no decode result, status, note or annotation index',
-    keys === 'channels,color,decoderId,id,label,laneChannel,options' &&
+    keys === 'channels,color,decoderId,id,label,laneChannel,options,ordinal' &&
     !serialized.includes('"result"') && !serialized.includes('"status"') &&
     !serialized.includes('"note"') && !serialized.includes('"index"'),
     `${keys} | ${serialized}`);
@@ -1097,13 +1170,13 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
 
 {
   const persisted: PersistedAnalyzer[] = [{
-    id: 'i2c-0', decoderId: 'i2c', label: 'I2C', color: '#9A7B2E',
+    id: 'i2c-0', decoderId: 'i2c', label: 'I2C', ordinal: 3, color: '#9A7B2E',
     channels: { 0: 3 }, options: { address: 72 }, laneChannel: 3,
   }];
   const states = analyzerStatesFrom(persisted);
   const state = states[0];
   const shape = states.length === 1 && state?.id === 'i2c-0' && state.decoderId === 'i2c' &&
-    state.label === 'I2C' && state.color === '#9A7B2E' && state.laneChannel === 3 &&
+    state.label === 'I2C' && state.ordinal === 3 && state.color === '#9A7B2E' && state.laneChannel === 3 &&
     state.result === null && state.index === null && state.status === 'idle' &&
     JSON.stringify(state.note) === '{"kind":"pending"}' &&
     JSON.stringify(state.channels) === '{"0":3}' && JSON.stringify(state.options) === '{"address":72}';
@@ -1448,7 +1521,7 @@ check('the App snapshot boundary serializes canonical labels/channels/order and 
 const analyzerProjectionAt = snapshotBody.indexOf('analyzers: this.analyzers');
 const analyzerProjection = analyzerProjectionAt >= 0 ? snapshotBody.slice(analyzerProjectionAt) : '';
 const projectionFields = [
-  'id: a.id', 'decoderId: a.decoderId', 'label: a.label', 'color: a.color',
+  'id: a.id', 'decoderId: a.decoderId', 'label: a.label', 'ordinal: a.ordinal', 'color: a.color',
   'channels: { ...a.channels }', 'options: { ...a.options }', 'laneChannel: a.laneChannel',
 ];
 const projectionMissing = projectionFields.filter((needle) => !analyzerProjection.includes(needle));

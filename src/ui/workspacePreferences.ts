@@ -13,7 +13,7 @@ import {
 const LEGACY_ANALOG_FULL_SCALE_V = 30;
 const LEGACY_ANALOG_OFFSET_V = -15;
 import { cloneBusConfig, defaultBusConfig, normalizeBankBusConfig } from './busPanel.js';
-import { nextAnalyzerOrdinal } from './analyzerNaming.js';
+import { restoredAnalyzerOrdinal, sanitizeAnalyzerLabel } from './analyzerNaming.js';
 import { ANALOG_HEIGHTS, BUS_HEIGHTS, type BusBitOrder, type BusViewConfig } from './busView.js';
 import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannelName, defaultChannels,
@@ -27,7 +27,6 @@ export const WORKSPACE_SCHEMA_VERSION = 1 as const;
 export const MAX_PERSISTED_ANALYZERS = 64;
 
 const MAX_DECODER_CHANNELS = 64;
-const MAX_ANALYZER_LABEL_LENGTH = 64;
 const ANALYZER_TOKEN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ANALYZER_ID = /^[a-z0-9_-]+-\d+$/;
 const CANONICAL_INDEX_KEY = /^(0|[1-9]\d*)$/;
@@ -60,6 +59,7 @@ export interface PersistedAnalyzer {
   id: string;
   decoderId: string;
   label: string;
+  ordinal: number;
   color: string;
   channels: Record<number, number>;
   options: Record<string, string | number>;
@@ -379,11 +379,6 @@ function restoreAnalyzerOptions(value: unknown): Record<string, string | number>
   return options;
 }
 
-function restoreAnalyzerLabel(value: unknown, decoderId: string): string {
-  if (typeof value !== 'string') return decoderId;
-  return value.trim().slice(0, MAX_ANALYZER_LABEL_LENGTH) || decoderId;
-}
-
 function restoredLaneChannel(
   value: unknown, channels: Record<number, number>, capacity: number,
 ): number {
@@ -402,6 +397,7 @@ function restoreAnalyzers(value: unknown, capacity: number): PersistedAnalyzer[]
   if (!Array.isArray(value)) return [];
   const analyzers: PersistedAnalyzer[] = [];
   const ids = new Set<string>();
+  const usedOrdinals = new Map<string, Set<number>>();
   for (const candidate of value) {
     if (analyzers.length >= MAX_PERSISTED_ANALYZERS) break;
     if (!isRecord(candidate)) continue;
@@ -411,10 +407,16 @@ function restoreAnalyzers(value: unknown, capacity: number): PersistedAnalyzer[]
     if (channels === null) continue;
     const id = restoredAnalyzerId(candidate.id, decoderId, ids);
     ids.add(id);
+    const label = sanitizeAnalyzerLabel(candidate.label, decoderId);
+    const used = usedOrdinals.get(decoderId) ?? new Set<number>();
+    usedOrdinals.set(decoderId, used);
+    const ordinal = restoredAnalyzerOrdinal(candidate.ordinal, label, used);
+    used.add(ordinal);
     analyzers.push({
       id,
       decoderId,
-      label: restoreAnalyzerLabel(candidate.label, decoderId),
+      label,
+      ordinal,
       color: typeof candidate.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(candidate.color)
         ? candidate.color : analyzerColor(analyzers.length),
       channels,
@@ -528,6 +530,7 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
     id: analyzer.id,
     decoderId: analyzer.decoderId,
     label: analyzer.label,
+    ordinal: analyzer.ordinal,
     color: analyzer.color,
     channels: Object.fromEntries(Object.entries(analyzer.channels)
       .sort(([a], [b]) => Number(a) - Number(b))),
@@ -552,24 +555,20 @@ export function writeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): boolean {
 }
 
 export function analyzerStatesFrom(persisted: readonly PersistedAnalyzer[]): AnalyzerState[] {
-  const states: AnalyzerState[] = [];
-  for (const analyzer of persisted) {
-    states.push({
-      id: analyzer.id,
-      decoderId: analyzer.decoderId,
-      label: analyzer.label,
-      ordinal: nextAnalyzerOrdinal(states, analyzer.decoderId),
-      color: analyzer.color,
-      channels: { ...analyzer.channels },
-      options: { ...analyzer.options },
-      laneChannel: analyzer.laneChannel,
-      result: null,
-      index: null,
-      status: 'idle',
-      note: { kind: 'pending' },
-    });
-  }
-  return states;
+  return persisted.map((analyzer) => ({
+    id: analyzer.id,
+    decoderId: analyzer.decoderId,
+    label: analyzer.label,
+    ordinal: analyzer.ordinal,
+    color: analyzer.color,
+    channels: { ...analyzer.channels },
+    options: { ...analyzer.options },
+    laneChannel: analyzer.laneChannel,
+    result: null,
+    index: null,
+    status: 'idle',
+    note: { kind: 'pending' },
+  }));
 }
 
 export function nextAnalyzerSequence(analyzers: readonly { id: string }[]): number {
