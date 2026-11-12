@@ -362,11 +362,11 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
 }
 
 {
-  // Digital rows edit colour from their settings popover (DESIGN 5.1); the analog bus
-  // rows' scope controls must not grow a picker of their own.
+  // The digital channel dialog owns the channel colour; the analog bus rows' scope
+  // controls must not grow a picker of their own.
   const busRows = list.slice(list.indexOf('  renderBuses('), list.indexOf('  render(cells'));
   const noColor = busRows.length > 0 && !busRows.includes('HsvPicker') &&
-    !list.includes('CHANNEL_COLOR_PRESETS') && !list.includes('selectedColor');
+    !busRows.includes('CHANNEL_COLOR_PRESETS') && !busRows.includes('selectedColor');
   check('analog scope controls do not reintroduce colour editing', noColor, `noColor=${noColor}`);
 }
 

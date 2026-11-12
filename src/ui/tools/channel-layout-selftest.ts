@@ -390,40 +390,82 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `nameBranch=${rowSource.includes("this.openEditor(trigger, cell, 'name')")}, ` +
     `editableClass=${rowSource.includes('ch-tag--editable')}`);
 
-  const popover = rowSource.includes("this.editor.className = 'ch-editor-popover'") &&
-    rowSource.includes("this.editor.setAttribute('role', 'dialog')") &&
-    rowSource.includes("if (event.isComposing) return;") &&
-    rowSource.includes("this.editor.contains(document.activeElement)") &&
-    rowSource.includes('this.editor.hidden = false') &&
-    rowSource.includes('private commitEditor(index: number, name: string, mode: TriggerMode, color: string)') &&
-    rowSource.includes('this.cb.onConfigure(index, { name, mode, color })') &&
-    rowSource.includes('this.closeEditor();') &&
-    rowSource.includes("if (event.key === 'Escape'") &&
-    !rowSource.includes('nameInput');
-  const sixModes = rowSource.includes('for (const mode of TRIGGER_MODES_MENU)') &&
-    rowSource.includes("item.setAttribute('aria-checked'") &&
-    rowSource.includes('item.disabled = cell.trigger.disabled') &&
-    rowSource.includes("mode === 'dont-care' ? ' none'") &&
-    rowSource.includes("t('channels.triggerAllNote')") &&
-    rowSource.includes("className = 'ch-original-id'");
-  check('the trigger popover offers all six trigger modes and carries no name draft',
-    popover && sixModes,
-    `popover=${popover}, modes=${sixModes}, nameDraft=${rowSource.includes('nameInput')}`);
+  const dialogStart = channelList.indexOf('class ChannelSettingsDialog');
+  const dialogSource = dialogStart >= 0 && rowStart > dialogStart
+    ? channelList.slice(dialogStart, rowStart) : '';
+  const gearEntry = rowSource.includes("settings.className = 'ch-settings'") &&
+    rowSource.includes("settings.setAttribute('aria-haspopup', 'dialog')") &&
+    rowSource.includes("settings.title = t('channels.settings', { index: cell.channel.index })") &&
+    rowSource.includes('settings.appendChild(settingsIcon())') &&
+    rowSource.includes("this.settingsDialog.open(settings, cell, 'name')") &&
+    rowSource.includes("this.settingsDialog.open(trigger, cell, 'trigger')") &&
+    rowSource.includes('head.append(tag, original, trigger, settings)') &&
+    rowSource.includes("settings.addEventListener('mousedown', () => { el.draggable = false; })") &&
+    rowSource.includes('this.settingsDialog.closeUnless(cells.map((cell) => cell.channel.index))') &&
+    !rowSource.includes('nameInput') &&
+    rowSource.includes("this.editor.className = 'ch-editor-popover'");
+  check('the row head keeps the trigger glyph and puts the settings gear right-most',
+    rowStart >= 0 && dialogSource.length > 0 && gearEntry,
+    `rowStart=${rowStart}, dialog=${dialogSource.length}, gear=${gearEntry}`);
 
-  // Colour is edited from the trigger popover's shared HSV picker, coalesced to one
-  // commit per frame, never a native input or a modal.
-  const colorEntry = channelList.includes('new HsvPicker(') &&
-    rowSource.includes('requestAnimationFrame(flushColor)') &&
-    rowSource.includes('let pendingColor: string | null = null') &&
-    rowSource.includes('picker.setColor(cell.channel.color)') &&
-    rowSource.includes('channelColor(index)') &&
-    rowSource.includes('this.commitEditor(index, cell.channel.name, mode, committedColor)') &&
-    !channelList.includes('channel-settings-dialog') &&
+  const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
+  const block = (selector: string): string => {
+    const at = sheet.indexOf(`\n${selector} {`);
+    if (at < 0) return '';
+    const end = sheet.indexOf('}', at);
+    return end < 0 ? '' : sheet.slice(at, end);
+  };
+  const settingsBlock = block('.ch-settings');
+  const trailingSlot = settingsBlock.includes('margin-left: auto') &&
+    !block('.ch-trigger').includes('margin-left: auto');
+  check('the settings gear owns the trailing slot so the head cannot slide with its children',
+    trailingSlot, `settings=${settingsBlock.includes('margin-left: auto')}, ` +
+    `trigger=${block('.ch-trigger').includes('margin-left: auto')}`);
+
+  const dialogFields = dialogSource.includes("this.dialog.className = 'channel-settings-dialog'") &&
+    dialogSource.includes("form.className = 'channel-settings-form'") &&
+    dialogSource.includes("'channel-settings-fields'") &&
+    (dialogSource.match(/'channel-settings-field channel-settings-kv'/g) ?? []).length === 3 &&
+    dialogSource.includes("this.nameInput.className = 'channel-settings-name'") &&
+    dialogSource.includes("button('', 'channel-name-reset')") &&
+    dialogSource.includes('this.nameInput.value = defaultChannelName(this.channel)') &&
+    dialogSource.includes('this.triggerFieldset.disabled = cell.trigger.disabled') &&
+    dialogSource.includes('this.dialog.showModal()');
+  const triggerChoices = channelList.includes(
+    "['dont-care', 'rising', 'falling', 'edge', 'high', 'low']") &&
+    dialogSource.includes("this.triggerFieldset.className = 'channel-trigger-options'") &&
+    dialogSource.includes("label.className = 'channel-trigger-option'") &&
+    dialogSource.includes("input.type = 'radio'") &&
+    dialogSource.includes("triggerIcon(mode, 'menu')") &&
+    dialogSource.includes('option.input.setAttribute(\'aria-label\', name)');
+  check('the settings dialog owns the name, trigger and colour fields in one form',
+    dialogFields && triggerChoices,
+    `fields=${dialogFields}, triggers=${triggerChoices}`);
+
+  const colorDraft = dialogSource.includes('for (const color of CHANNEL_COLOR_PRESETS)') &&
+    dialogSource.includes("'channel-color-swatch channel-color-preset'") &&
+    dialogSource.includes("'channel-color-swatch channel-color-custom'") &&
+    dialogSource.includes("this.colorPalette.setAttribute('popover', 'auto')") &&
+    dialogSource.includes('new HsvPicker(') &&
+    dialogSource.includes('this.colorPicker.setColor(this.selectedColor)') &&
+    dialogSource.includes('channelColor(this.channel)') &&
+    dialogSource.includes("t('channels.resetColor', { index: channel })") &&
+    dialogSource.includes('private syncColorSelection(): void') &&
+    !channelList.includes('pendingColor') &&
+    !channelList.includes('requestAnimationFrame(flushColor)') &&
     !channelList.includes("type = 'color'");
-  const resetRetired = !rowSource.includes('nameInput.value = defaultChannelName(index)') &&
-    !rowSource.includes('resetName');
-  check('the trigger popover keeps live colour editing while the name reset is retired',
-    colorEntry && resetRetired, `color=${colorEntry}, nameResetRetired=${resetRetired}`);
+  check('colour is a draft of presets plus a custom HSV swatch, never applied live',
+    colorDraft, `colorDraft=${colorDraft}`);
+
+  const commits = (dialogSource.match(/this\.onConfigure\(/g) ?? []).length === 1 &&
+    dialogSource.includes("form.addEventListener('submit', this.onSubmit)") &&
+    dialogSource.includes('this.onConfigure(channel, config)') &&
+    dialogSource.includes("this.dialog.addEventListener('cancel'") &&
+    dialogSource.includes('if (event.target === this.dialog)') &&
+    dialogSource.includes('if (restoreFocus) this.onDismiss(channel, focus, opener)') &&
+    dialogSource.includes('if (this.dialog.open) this.dialog.close()');
+  check('the dialog commits once on submit while Escape, the backdrop and Cancel discard',
+    commits, `commits=${commits}`);
 
   const anyEdgeGlyph = channelList.includes("mode === 'edge' ? t('trigger.anyEdge')") &&
     channelList.includes("mode === 'edge' ? 'M1 4H6L18 12H23M1 12H6L18 4H23'") &&

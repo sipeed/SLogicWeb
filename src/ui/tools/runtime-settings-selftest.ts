@@ -75,7 +75,8 @@ const zh = fs.readFileSync('src/ui/locales/zh-CN.ts', 'utf8');
 }
 
 {
-  const apply = between(app, 'private applySettings(s: CaptureSettings): void {', '  /** Commit one inline channel edit.');
+  const apply = between(app, 'private applySettings(s: CaptureSettings): void {',
+    '  private configureChannel(channel: number, config: ChannelConfiguration): void {');
   const live = apply.includes('const liveLoopWindow = this.running && this.captureIsLoop &&') &&
     apply.includes('next.loopSamples !== this.settings.loopSamples &&') &&
     apply.includes('next.samplerate === this.settings.samplerate &&') &&

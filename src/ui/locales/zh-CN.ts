@@ -406,7 +406,6 @@ export const zhCN: Messages = {
   'channels.triggerOn': '触发：{name}',
   'channels.triggerLevel': '电平',
   'channels.triggerTip': '触发：{name}，当前 {mode}。点击设置',
-  'channels.triggerAllNote': '多个通道都有条件时，必须同时满足。',
   'channels.idleHidden': '已隐藏 {count} 个无跳变通道 · 显示',
   'channels.idleHiddenTip': '这些通道在本次采集中没有任何边沿。点击重新显示（关闭“隐藏无跳变通道”）。',
   'channels.name': '通道名称',

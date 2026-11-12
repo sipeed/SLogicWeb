@@ -2114,9 +2114,9 @@ export class App {
     this.renderPanels();
   }
 
-  /** Commit one inline channel edit. The name stays editable during capture; trigger
-   * modes reconcile live with the running acquisition (see `syncActiveTrigger`). Colour
-   * is not editable. */
+  /** Commit one channel settings dialog draft. Name and colour stay editable during
+   * capture; trigger modes reconcile live with the running acquisition (see
+   * `syncActiveTrigger`). */
   private configureChannel(channel: number, config: ChannelConfiguration): void {
     const current = this.channels[channel];
     if (!current) return;
@@ -4743,9 +4743,10 @@ export class App {
   /** Re-render every string in the shell after a locale change. */
   private retranslate(): void {
     this.menuStack.closeAll('retranslate');
+    this.channelList.closeDialog();
     applyStaticI18n(document);
     if (this.settingsDialog.isOpen) this.settingsDialog.renderStrings();
-    this.relayout();       // channel cells rebuild; an open channel dialog closes here
+    this.relayout();       // channel cells rebuild with the new strings
     this.renderPanels();   // side panels + toolbar chrome
     this.renderInteractionBar(true);  // hint text follows the locale
     this.renderCorner();              // corner strings are part of the view, keyed by text

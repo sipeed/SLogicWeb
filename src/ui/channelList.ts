@@ -17,21 +17,24 @@
  * `.ch-card`), all cards exactly the trace-band height thanks to the `--ch-lane-offset`
  * margin and a reserved one-line decoder strip - see src/ui/NOTES.md section 13.
  *
- * The head shows the channel name as read-only text and the trigger glyph as its one
- * inline control: the glyph opens the trigger popover, whose mode choice commits through
- * `onConfigure`. A colour change applies live (coalesced to one commit per frame) and
- * persists with the workspace. Analog bus rows keep their own trigger menu.
+ * Names are read-only in the row. One gear button opens a native modal whose shadcn-style
+ * header / field group / footer owns name, trigger and color editing, so the card no
+ * longer carries three independent editing controls. The trigger glyph stays as the
+ * armed/configured indicator and opens the same dialog on its trigger field; analog bus
+ * rows keep their own trigger menu.
  */
 
 import { ANALOG_HEIGHTS, analogHeightIndex, stepAnalogHeight } from './busView.js';
+import { button, div } from './capturePanel.js';
 import {
   ANALOG_GAIN_DEFAULT, analogHalfRangeV, analogVoltsPerCode, formatAnalogGain,
 } from './channelBanks.js';
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
+import { CHANNEL_COLOR_PRESETS } from './metrics.js';
 import { isCompactRow } from './channelLayout.js';
 import { HsvPicker } from './colorPicker.js';
-import { channelColor, defaultChannelName,
+import { channelColor, defaultChannelName, DEFAULT_TRIGGER_MODE,
   type AnalyzerState, type ChannelState, type TriggerMode } from './state.js';
 
 export interface ChannelConfiguration {
@@ -114,21 +117,323 @@ export interface BusScopePatch {
   heightCss?: number;
 }
 
-const TRIGGER_MODES_MENU: readonly TriggerMode[] = ['dont-care', 'rising', 'falling', 'edge', 'high', 'low'];
+const TRIGGER_MODES: readonly TriggerMode[] = ['dont-care', 'rising', 'falling', 'edge', 'high', 'low'];
+
+type ChannelSettingsFocus = 'name' | 'trigger';
+
+interface TriggerOption {
+  label: HTMLLabelElement;
+  input: HTMLInputElement;
+}
+
+class ChannelSettingsDialog {
+  private readonly dialog: HTMLDialogElement;
+  private readonly title: HTMLHeadingElement;
+  private readonly nameLabel: HTMLLabelElement;
+  private readonly nameInput: HTMLInputElement;
+  private readonly resetNameButton: HTMLButtonElement;
+  private readonly triggerLabel: HTMLSpanElement;
+  private readonly triggerFieldset: HTMLFieldSetElement;
+  private readonly triggerOptions = new Map<TriggerMode, TriggerOption>();
+  private readonly colorLabel: HTMLSpanElement;
+  private readonly colorPalette: HTMLDivElement;
+  private readonly customColorButton: HTMLButtonElement;
+  private readonly colorResetButton: HTMLButtonElement;
+  private readonly colorPicker: HsvPicker;
+  private readonly presetColorButtons = new Map<string, HTMLButtonElement>();
+  private readonly cancelButton: HTMLButtonElement;
+  private readonly saveButton: HTMLButtonElement;
+  private selectedColor = '#000000';
+  private channel = -1;
+  private focusField: ChannelSettingsFocus = 'name';
+  private opener: HTMLButtonElement | null = null;
+
+  constructor(
+    private readonly onConfigure: ChannelListCallbacks['onConfigure'],
+    private readonly onDismiss: (
+      channel: number, focus: ChannelSettingsFocus, opener: HTMLButtonElement | null,
+    ) => void,
+  ) {
+    this.dialog = document.createElement('dialog');
+    this.dialog.className = 'channel-settings-dialog';
+    this.dialog.setAttribute('aria-labelledby', 'channel-settings-title');
+
+    const form = document.createElement('form');
+    form.className = 'channel-settings-form';
+
+    const header = div('channel-settings-header');
+    this.title = document.createElement('h2');
+    this.title.id = 'channel-settings-title';
+    header.appendChild(this.title);
+
+    const fields = div('channel-settings-fields');
+
+    const nameField = div('channel-settings-field channel-settings-kv');
+    this.nameLabel = document.createElement('label');
+    this.nameLabel.className = 'channel-settings-copy';
+    this.nameLabel.htmlFor = 'channel-settings-name';
+    this.nameInput = document.createElement('input');
+    this.nameInput.id = 'channel-settings-name';
+    this.nameInput.className = 'channel-settings-name';
+    this.nameInput.type = 'text';
+    this.nameInput.spellcheck = false;
+    this.nameInput.autocomplete = 'off';
+    const nameControl = div('channel-settings-name-control');
+    this.resetNameButton = button('', 'channel-name-reset');
+    this.resetNameButton.type = 'button';
+    this.resetNameButton.appendChild(resetNameIcon());
+    this.resetNameButton.addEventListener('click', () => {
+      if (this.channel < 0) return;
+      this.nameInput.value = defaultChannelName(this.channel);
+      this.nameInput.focus();
+      this.nameInput.select();
+    });
+    nameControl.append(this.nameInput, this.resetNameButton);
+    nameField.append(this.nameLabel, nameControl);
+
+    const triggerField = div('channel-settings-field channel-settings-kv');
+    this.triggerLabel = document.createElement('span');
+    this.triggerLabel.className = 'channel-settings-copy';
+    this.triggerLabel.id = 'channel-settings-trigger-label';
+    this.triggerFieldset = document.createElement('fieldset');
+    this.triggerFieldset.className = 'channel-trigger-options';
+    this.triggerFieldset.setAttribute('aria-labelledby', this.triggerLabel.id);
+    for (const mode of TRIGGER_MODES) {
+      const label = document.createElement('label');
+      label.className = 'channel-trigger-option';
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = 'channel-trigger-mode';
+      input.value = mode;
+      label.append(input, triggerIcon(mode, 'menu'));
+      this.triggerFieldset.appendChild(label);
+      this.triggerOptions.set(mode, { label, input });
+    }
+    triggerField.append(this.triggerLabel, this.triggerFieldset);
+
+    const colorField = div('channel-settings-field channel-settings-kv');
+    this.colorLabel = document.createElement('span');
+    this.colorLabel.className = 'channel-settings-copy';
+    this.colorLabel.id = 'channel-settings-color-label';
+    const colorGrid = div('channel-color-grid');
+    colorGrid.setAttribute('role', 'group');
+    colorGrid.setAttribute('aria-labelledby', this.colorLabel.id);
+    for (const color of CHANNEL_COLOR_PRESETS) {
+      const preset = button('', 'channel-color-swatch channel-color-preset');
+      preset.type = 'button';
+      preset.title = color;
+      preset.setAttribute('aria-label', color);
+      preset.setAttribute('aria-pressed', 'false');
+      preset.style.background = color;
+      preset.addEventListener('click', () => {
+        this.selectedColor = color;
+        this.syncColorSelection();
+        this.hideColorPalette();
+      });
+      colorGrid.appendChild(preset);
+      this.presetColorButtons.set(color, preset);
+    }
+
+    this.customColorButton = button('', 'channel-color-swatch channel-color-custom');
+    this.customColorButton.type = 'button';
+    this.customColorButton.setAttribute('aria-pressed', 'false');
+    const customMark = document.createElement('span');
+    customMark.className = 'channel-color-custom-mark';
+    customMark.setAttribute('aria-hidden', 'true');
+    customMark.textContent = '+';
+    this.customColorButton.appendChild(customMark);
+    colorGrid.appendChild(this.customColorButton);
+
+    this.colorPalette = div('channel-color-palette');
+    this.colorPalette.id = 'channel-color-palette';
+    this.colorPalette.setAttribute('popover', 'auto');
+    this.colorPalette.setAttribute('role', 'group');
+    this.customColorButton.setAttribute('popovertarget', this.colorPalette.id);
+    this.colorPicker = new HsvPicker((hex) => {
+      this.selectedColor = hex;
+      this.syncColorSelection();
+    });
+    this.colorPalette.addEventListener('toggle', () => {
+      if (this.colorPalette.matches(':popover-open')) {
+        this.colorPicker.setColor(this.selectedColor);
+        this.colorPicker.focus();
+      } else {
+        this.colorPicker.endDrag();
+      }
+    });
+    this.colorPalette.addEventListener('focusout', (event) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && this.colorPalette.contains(next)) return;
+      this.hideColorPalette();
+    });
+    this.colorResetButton = button('', 'channel-name-reset');
+    this.colorResetButton.type = 'button';
+    this.colorResetButton.appendChild(resetNameIcon());
+    this.colorResetButton.addEventListener('click', () => {
+      if (this.channel < 0) return;
+      this.selectedColor = channelColor(this.channel);
+      this.colorPicker.setColor(this.selectedColor);
+      this.syncColorSelection();
+    });
+    this.colorPalette.append(this.colorPicker.element, this.colorResetButton);
+    colorField.append(this.colorLabel, colorGrid, this.colorPalette);
+
+    fields.append(nameField, triggerField, colorField);
+
+    const footer = div('channel-settings-actions');
+    this.cancelButton = button('', 'channel-settings-cancel');
+    this.cancelButton.type = 'button';
+    this.saveButton = button('', 'primary');
+    this.saveButton.type = 'submit';
+    footer.append(this.cancelButton, this.saveButton);
+
+    form.append(header, fields, footer);
+    this.dialog.appendChild(form);
+    document.body.appendChild(this.dialog);
+
+    form.addEventListener('submit', this.onSubmit);
+    this.cancelButton.addEventListener('click', () => this.dismiss(true));
+    this.dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      this.dismiss(true);
+    });
+    this.dialog.addEventListener('pointerdown', (event) => {
+      if (event.target === this.dialog) {
+        event.preventDefault();
+        this.dismiss(true);
+      }
+    });
+  }
+
+  open(opener: HTMLButtonElement, cell: ChannelCell, focus: ChannelSettingsFocus): void {
+    if (this.dialog.open) this.close();
+    this.channel = cell.channel.index;
+    this.opener = opener;
+    this.focusField = focus;
+    this.renderStrings(cell.channel.index);
+    this.nameInput.value = cell.channel.name;
+    this.selectedColor = cell.channel.color;
+    this.colorPicker.setColor(cell.channel.color);
+    this.syncColorSelection();
+    this.triggerFieldset.disabled = cell.trigger.disabled;
+    for (const [mode, option] of this.triggerOptions) {
+      option.input.checked = mode === cell.trigger.mode;
+    }
+    this.dialog.showModal();
+    if (focus === 'trigger') {
+      const chosen = this.triggerOptions.get(cell.trigger.mode)
+        ?? this.triggerOptions.values().next().value;
+      chosen?.input.focus();
+    } else {
+      this.nameInput.focus();
+      this.nameInput.select();
+    }
+  }
+
+  close(): void {
+    this.dismiss(false);
+  }
+
+  closeUnless(present: readonly number[]): void {
+    if (this.channel < 0 || present.includes(this.channel)) return;
+    this.dismiss(false);
+  }
+
+  private renderStrings(channel: number): void {
+    this.title.textContent = t('channels.settings', { index: channel });
+    this.nameLabel.textContent = t('channels.name');
+    const resetNameTitle = t('channels.resetName', { index: channel });
+    this.resetNameButton.title = resetNameTitle;
+    this.resetNameButton.setAttribute('aria-label', resetNameTitle);
+    this.triggerLabel.textContent = t('channels.triggerMode');
+    this.colorLabel.textContent = t('channels.color');
+    this.colorPalette.setAttribute('aria-label', t('channels.customColor'));
+    this.colorPicker.renderStrings();
+    this.customColorButton.title = t('channels.customColor');
+    this.customColorButton.setAttribute('aria-label', t('channels.customColor'));
+    const resetColorTitle = t('channels.resetColor', { index: channel });
+    this.colorResetButton.title = resetColorTitle;
+    this.colorResetButton.setAttribute('aria-label', resetColorTitle);
+    this.cancelButton.textContent = t('channels.cancel');
+    this.saveButton.textContent = t('toolbar.save');
+    for (const [mode, option] of this.triggerOptions) {
+      const name = triggerModeName(mode);
+      option.label.title = name;
+      option.input.setAttribute('aria-label', name);
+    }
+  }
+
+  private syncColorSelection(): void {
+    const selected = this.selectedColor.toLowerCase();
+    let presetSelected = false;
+    for (const [color, preset] of this.presetColorButtons) {
+      const active = color.toLowerCase() === selected;
+      presetSelected ||= active;
+      preset.classList.toggle('selected', active);
+      preset.setAttribute('aria-pressed', String(active));
+    }
+    this.customColorButton.classList.toggle('selected', !presetSelected);
+    this.customColorButton.setAttribute('aria-pressed', String(!presetSelected));
+  }
+
+  private hideColorPalette(): void {
+    if (this.colorPalette.matches(':popover-open')) this.colorPalette.hidePopover();
+  }
+
+  private readonly onSubmit = (event: SubmitEvent): void => {
+    event.preventDefault();
+    if (this.channel < 0) return;
+    const channel = this.channel;
+    const focus = this.focusField;
+    const opener = this.opener;
+    const mode = TRIGGER_MODES.find((candidate) =>
+      this.triggerOptions.get(candidate)?.input.checked) ?? DEFAULT_TRIGGER_MODE;
+    const config: ChannelConfiguration = {
+      name: this.nameInput.value.trim(), mode, color: this.selectedColor,
+    };
+
+    this.hideColorPalette();
+    this.channel = -1;
+    this.opener = null;
+    this.nameInput.value = '';
+    if (this.dialog.open) this.dialog.close();
+    this.onConfigure(channel, config);
+    this.onDismiss(channel, focus, opener);
+  };
+
+  private dismiss(restoreFocus: boolean): void {
+    const channel = this.channel;
+    const focus = this.focusField;
+    const opener = this.opener;
+    this.hideColorPalette();
+    this.channel = -1;
+    this.opener = null;
+    this.nameInput.value = '';
+    if (this.dialog.open) this.dialog.close();
+    if (restoreFocus) this.onDismiss(channel, focus, opener);
+  }
+}
 
 export class ChannelList {
   private dragFrom = -1;
   private readonly editor: HTMLDivElement;
   private editorAnchor: HTMLButtonElement | null = null;
-  private editorChannel = -1;
   private editorBusId: string | null = null;
+  private readonly settingsDialog: ChannelSettingsDialog;
 
   constructor(
     private readonly root: HTMLElement,
     private readonly cb: ChannelListCallbacks,
   ) {
-    // One shared quick-edit popover, not a modal per channel: trigger edge and colour
-    // are the two things edited often, and HSync's channel label exposes them in place.
+    this.settingsDialog = new ChannelSettingsDialog(this.cb.onConfigure,
+      (channel, focus, opener) => {
+        const target = opener?.isConnected === true ? opener
+          : this.root.querySelector<HTMLButtonElement>(
+            `${focus === 'trigger' ? '.ch-trigger' : '.ch-settings'}[data-channel="${channel}"]`);
+        target?.focus({ preventScroll: true });
+      });
+    // One shared popover, not a modal per bus row: the analog trigger menu is the only
+    // transient menu left here.
     this.editor = document.createElement('div');
     this.editor.className = 'ch-editor-popover';
     this.editor.hidden = true;
@@ -155,7 +460,6 @@ export class ChannelList {
     this.editor.replaceChildren();
     anchor?.setAttribute('aria-expanded', 'false');
     this.editorAnchor = null;
-    this.editorChannel = -1;
     this.editorBusId = null;
     if (restoreFocus && anchor?.isConnected) anchor.focus({ preventScroll: true });
   }
@@ -171,110 +475,9 @@ export class ChannelList {
       ? below : Math.max(8, rect.top - height - 6)}px`;
   }
 
-  private openEditor(anchor: HTMLButtonElement, cell: ChannelCell): void {
-    this.closeEditor(false);
-    this.editorAnchor = anchor;
-    this.editorChannel = cell.channel.index;
-    this.editorBusId = null;
-    const index = cell.channel.index;
-    const title = document.createElement('div');
-    title.className = 'ch-trigger-menu-head';
-    title.id = 'ch-editor-title';
-
-    // The colour the popover has applied so far; a trigger commit must carry it.
-    let committedColor = cell.channel.color;
-    let pendingColor: string | null = null;
-
-    // A menu, not a grid: the picture's six options, each with its glyph, the current
-    // one checked and tinted (None stays uncoloured), and the AND note at the foot.
-    const dot = document.createElement('span');
-    dot.className = 'ch-trigger-dot';
-    dot.style.background = cell.channel.color;
-    title.append(dot, document.createTextNode(t('channels.triggerOn', { name: cell.channel.name })));
-    const menu = document.createElement('div');
-    menu.className = 'ch-trigger-menu';
-    menu.setAttribute('role', 'menu');
-    menu.setAttribute('aria-labelledby', title.id);
-    for (const mode of TRIGGER_MODES_MENU) {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className = 'ch-trigger-item' +
-        (mode === cell.trigger.mode ? ' selected' : '') +
-        (mode === 'dont-care' ? ' none' : '');
-      item.setAttribute('role', 'menuitemradio');
-      item.setAttribute('aria-checked', String(mode === cell.trigger.mode));
-      item.disabled = cell.trigger.disabled;
-      const icon = document.createElement('span');
-      icon.className = 'ch-trigger-item-icon';
-      icon.appendChild(triggerIcon(mode, 'menu'));
-      const label = document.createElement('span');
-      label.className = 'ch-trigger-item-label';
-      label.textContent = triggerModeName(mode);
-      const check = document.createElement('span');
-      check.className = 'ch-trigger-item-check';
-      check.textContent = '✓';
-      check.setAttribute('aria-hidden', 'true');
-      item.append(icon, label, check);
-      item.addEventListener('click', () => {
-        this.commitEditor(index, cell.channel.name, mode, committedColor);
-      });
-      menu.appendChild(item);
-    }
-    const note = document.createElement('div');
-    note.className = 'ch-trigger-menu-note';
-    note.textContent = t('channels.triggerAllNote');
-
-    // Colour: the shared HSV picker, applied live but at most once per frame so a drag
-    // does not rebuild the rows on every pointer move.
-    const flushColor = (): void => {
-      const color = pendingColor;
-      pendingColor = null;
-      if (color === null || color === committedColor || this.editorChannel !== index) return;
-      committedColor = color;
-      this.cb.onConfigure(index, { name: cell.channel.name, mode: cell.trigger.mode, color });
-    };
-    const picker = new HsvPicker((hex) => {
-      const queued = pendingColor !== null;
-      pendingColor = hex;
-      if (!queued) requestAnimationFrame(flushColor);
-    });
-    picker.setColor(cell.channel.color);
-    const colorRow = document.createElement('div');
-    colorRow.className = 'ch-editor-color';
-    colorRow.setAttribute('role', 'group');
-    colorRow.setAttribute('aria-label', t('channels.color'));
-    const colorLabel = document.createElement('span');
-    colorLabel.className = 'ch-editor-label';
-    colorLabel.textContent = t('channels.color');
-    const colorReset = document.createElement('button');
-    colorReset.type = 'button';
-    colorReset.className = 'ch-editor-reset';
-    colorReset.textContent = '↺';
-    colorReset.title = t('channels.resetColor', { index });
-    colorReset.setAttribute('aria-label', colorReset.title);
-    colorReset.addEventListener('click', () => {
-      const fallback = channelColor(index);
-      picker.setColor(fallback);
-      pendingColor = fallback;
-      flushColor();
-    });
-    colorRow.append(colorLabel, picker.element, colorReset);
-
-    this.editor.replaceChildren(title, menu, note, colorRow);
-    this.editor.setAttribute('role', 'dialog');
-    this.editor.setAttribute('aria-modal', 'false');
-    this.editor.setAttribute('aria-labelledby', title.id);
-    this.editor.hidden = false;
-    anchor.setAttribute('aria-expanded', 'true');
-    this.positionEditor(anchor);
-    (this.editor.querySelector<HTMLButtonElement>('.ch-trigger-item[aria-checked="true"]')
-      ?? this.editor.querySelector<HTMLButtonElement>('.ch-trigger-item'))?.focus();
-  }
-
   private openAnalogTriggerMenu(anchor: HTMLButtonElement, cell: BusCell): void {
     this.closeEditor(false);
     this.editorAnchor = anchor;
-    this.editorChannel = -1;
     this.editorBusId = cell.id;
     const title = document.createElement('div');
     title.className = 'ch-trigger-menu-head';
@@ -397,16 +600,6 @@ export class ChannelList {
     this.positionEditor(anchor);
     (menu.querySelector<HTMLButtonElement>('.ch-trigger-item[aria-checked="true"]')
       ?? menu.querySelector<HTMLButtonElement>('.ch-trigger-item'))?.focus();
-  }
-
-  private commitEditor(index: number, name: string, mode: TriggerMode, color: string): void {
-    this.closeEditor(false);
-    this.cb.onConfigure(index, { name, mode, color });
-    // The app rebuilds the rows synchronously; return focus to the same row's trigger.
-    queueMicrotask(() => {
-      this.root.querySelector<HTMLButtonElement>(`.ch-trigger[data-channel="${index}"]`)
-        ?.focus({ preventScroll: true });
-    });
   }
 
   /**
@@ -564,12 +757,10 @@ export class ChannelList {
   }
 
   render(cells: readonly ChannelCell[]): void {
-    const keepDigitalDraft = !this.editor.hidden && this.editorChannel >= 0 &&
-      cells.some((cell) => cell.channel.index === this.editorChannel) &&
-      this.editor.contains(document.activeElement);
     const keepAnalogDraft = !this.editor.hidden && this.editorBusId !== null &&
       this.editor.contains(document.activeElement);
-    if (!keepDigitalDraft && !keepAnalogDraft) this.closeEditor();
+    if (!keepAnalogDraft) this.closeEditor();
+    this.settingsDialog.closeUnless(cells.map((cell) => cell.channel.index));
     this.root.replaceChildren();
     cells.forEach((cell, pos) => {
       const el = document.createElement('div');
@@ -631,11 +822,10 @@ export class ChannelList {
       });
       trigger.setAttribute('aria-label', trigger.title);
       trigger.setAttribute('aria-haspopup', 'dialog');
-      trigger.setAttribute('aria-expanded', 'false');
       trigger.appendChild(triggerIcon(cell.trigger.mode));
       trigger.addEventListener('click', (event) => {
         event.stopPropagation();
-        this.openEditor(trigger, cell);
+        this.settingsDialog.open(trigger, cell, 'trigger');
       });
       trigger.addEventListener('mousedown', () => { el.draggable = false; });
       trigger.addEventListener('mouseup', () => { el.draggable = true; });
@@ -647,7 +837,22 @@ export class ChannelList {
       original.className = 'ch-original-id';
       original.textContent = `D${cell.channel.index}`;
       original.hidden = cell.channel.name === defaultChannelName(cell.channel.index);
-      head.append(tag, original, trigger);
+
+      const settings = document.createElement('button');
+      settings.type = 'button';
+      settings.className = 'ch-settings';
+      settings.dataset['channel'] = String(cell.channel.index);
+      settings.title = t('channels.settings', { index: cell.channel.index });
+      settings.setAttribute('aria-label', settings.title);
+      settings.setAttribute('aria-haspopup', 'dialog');
+      settings.appendChild(settingsIcon());
+      settings.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.settingsDialog.open(settings, cell, 'name');
+      });
+      settings.addEventListener('mousedown', () => { el.draggable = false; });
+      settings.addEventListener('mouseup', () => { el.draggable = true; });
+      head.append(tag, original, trigger, settings);
       body.appendChild(head);
 
       const chips = document.createElement('div');
@@ -697,22 +902,12 @@ export class ChannelList {
 
       this.root.appendChild(el);
     });
-    if (keepDigitalDraft) {
-      const anchor = this.root.querySelector<HTMLButtonElement>(
-        `.ch-trigger[data-channel="${this.editorChannel}"]`);
-      if (anchor) {
-        this.editorAnchor = anchor;
-        anchor.setAttribute('aria-expanded', 'true');
-        this.positionEditor(anchor);
-      } else {
-        this.closeEditor();
-      }
-    }
   }
 
   /** Close before the toolbar opens its separate transient overlay. */
   closeDialog(): void {
     this.closeEditor();
+    this.settingsDialog.close();
   }
 
   private idleNote: HTMLButtonElement | null = null;
@@ -785,6 +980,24 @@ function triggerIcon(mode: TriggerMode, place: 'slot' | 'menu' = 'slot'): SVGSVG
   return svg;
 }
 
+function resetNameIcon(): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  const arc = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  arc.setAttribute('d', 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8');
+  const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  arrow.setAttribute('d', 'M3 3v5h5');
+  for (const path of [arc, arrow]) {
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+  }
+  svg.append(arc, arrow);
+  return svg;
+}
 
 /** Lucide's Settings geometry, realized with the existing no-icon-library SVG idiom. */
 function settingsIcon(): SVGSVGElement {

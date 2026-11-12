@@ -856,7 +856,8 @@ const baseSettings: CaptureSettings = {
 
 {
   const retired = [
-    'channels.dialogDescription', 'channels.moreColors', 'channels.renameHint', 'bus.fixedBits',
+    'channels.dialogDescription', 'channels.moreColors', 'channels.renameHint',
+    'channels.triggerAllNote', 'bus.fixedBits',
     'bus.dragToOrder',
     'bus.bankEnabledNote', 'bus.bankDisableNote', 'bus.bankDisabledNote',
     'bus.bankDialogTitle', 'bus.enableBank', 'bus.channelOrder',

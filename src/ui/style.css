@@ -606,7 +606,6 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
 }
 .ch-trigger {
   flex: none;
-  margin-left: auto;
   align-self: center;
   display: flex;
   align-items: center;
@@ -673,6 +672,34 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
   flex: none; margin-left: 4px; font-size: 10px; color: var(--text50);
   font-variant-numeric: tabular-nums;
 }
+.ch-settings {
+  flex: none;
+  margin-left: auto;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border-low);
+  border-radius: 3px;
+  background: var(--bg20);
+  color: var(--text50);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
+}
+.ch-settings:hover { border-color: var(--accent); color: var(--text80); }
+.ch-settings svg { display: block; width: 14px; height: 14px; }
+
+/* Dark theme: the compact gear follows the same secondary-control roles as the other
+   icon buttons while keeping the established 18 CSS px channel-head height. */
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-settings {
+  background: var(--background); border-color: var(--input);
+  color: var(--muted-foreground); border-radius: calc(var(--radius) - 4px);
+}
+:is(html[data-theme="dark"], html[data-theme="light"]) .ch-settings:hover { border-color: var(--primary); color: var(--foreground); }
+
 .ch-trigger-menu-head {
   display: flex; align-items: center; gap: 6px; padding: 0 2px 6px;
   font-size: 11px; color: var(--text80);
@@ -697,7 +724,7 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
   margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border-low);
   font-size: 10px; line-height: 1.4; color: var(--text50);
 }
-/* The inline quick editor: a small popover, never a modal. */
+/* The analog trigger menu: a small popover, never a modal. */
 .ch-editor-popover {
   position: fixed; z-index: 60; width: 236px; padding: 10px;
   display: flex; flex-direction: column; gap: 8px;
@@ -707,27 +734,6 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
   max-height: calc(100vh - 16px); overflow-y: auto;
 }
 .ch-editor-popover[hidden] { display: none; }
-.ch-editor-title { font-size: 11px; color: var(--text50); }
-.ch-editor-name { display: flex; flex-direction: column; gap: 4px; font-size: 10px; color: var(--text50); }
-.ch-editor-name input {
-  height: 26px; padding: 2px 6px; font: inherit; color: var(--foreground);
-  background: var(--background); border: 1px solid var(--border); border-radius: var(--radius);
-}
-.ch-editor-reset {
-  align-self: flex-start; height: 22px; padding: 0 7px; font: inherit; font-size: 11px;
-  color: var(--text80); background: var(--bg20); border: 1px solid var(--border-low);
-  border-radius: var(--radius); cursor: pointer;
-}
-.ch-editor-label { font-size: 10px; color: var(--text50); }
-.ch-editor-trigger-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
-.ch-editor-trigger {
-  height: 26px; padding: 0; display: flex; align-items: center; justify-content: center;
-  color: var(--text50); background: var(--bg20); border: 1px solid var(--border-low);
-  border-radius: 3px; cursor: pointer;
-}
-.ch-editor-trigger svg { width: 15px; height: 15px; }
-.ch-editor-trigger[aria-pressed="true"] { background: var(--primary); color: var(--bg10); border-color: var(--primary); }
-.ch-editor-trigger:disabled { opacity: .45; cursor: default; }
 
 /* Dark theme: the channel cell renders as one rounded Item-style card (the shadcn
    Item anatomy: strip = media, tag+name = content, settings = action). The cell box
@@ -2756,8 +2762,3 @@ html[data-theme="light"] .bus-dialog::backdrop { background: var(--backdrop); }
 
 /* index.html's static "Starting…" line, removed by main.ts once App has constructed. */
 .empty-hint-starting { font-size: 12px; opacity: 0.8; color: var(--text50); }
-/* The channel settings popover's colour group: label, the shared HSV picker, reset. */
-.ch-editor-color {
-  display: flex; flex-direction: column; gap: 6px;
-  padding-top: 8px; border-top: 1px solid var(--border-low);
-}
