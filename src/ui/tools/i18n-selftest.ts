@@ -902,6 +902,7 @@ const baseSettings: CaptureSettings = {
 
 const SETTINGS_TOGGLE_COPY: ReadonlyArray<readonly [keyof Messages, keyof Messages]> = [
   ['settings.detailedLabels', 'settings.detailedLabelsHelp'],
+  ['settings.quickScroll', 'settings.quickScrollHelp'],
   ['settings.wheelZooms', 'settings.wheelZoomsHelp'],
   ['settings.fitRows', 'settings.fitRowsHelp'],
   ['settings.compactRows', 'settings.compactRowsHelp'],
@@ -935,6 +936,44 @@ function settingsToggleCopyFailures(dicts: Record<string, Messages>): string[] {
     failures.length === 0
       ? `${SETTINGS_TOGGLE_COPY.length} options x ${Object.keys(SETTINGS_TOGGLE_CATALOGS).length} catalogs`
       : failures.join('; '));
+}
+
+const QUICK_SCROLL_EN_LABEL = 'Keep scrolling after a quick drag';
+
+const QUICK_SCROLL_DRAG = /\bdrag(?:ged|ging|s)?\b/i;
+const QUICK_SCROLL_CONTINUED_PAN =
+  /\b(?:keeps?|keeping)\s+(?:panning|scrolling|moving)\b|\bcontinues?\s+to\s+(?:pan|scroll|move)\b/i;
+const QUICK_SCROLL_GRADUAL_DECAY = /\bgradual(?:ly)?\b|\bdecay(?:s|ing)?\b|\bslow(?:s|ing|ly)?\b/i;
+const QUICK_SCROLL_DENIES_MOTION =
+  /\b(?:no longer|never|nothing|does not|doesn't|stays? (?:frozen|still)|frozen|freezes|until the (?:capture|acquisition|recording) (?:stops|ends|finishes))\b/i;
+
+function quickScrollHelpIsTruthful(help: string): boolean {
+  return QUICK_SCROLL_DRAG.test(help) &&
+    QUICK_SCROLL_CONTINUED_PAN.test(help) &&
+    QUICK_SCROLL_GRADUAL_DECAY.test(help) &&
+    !QUICK_SCROLL_DENIES_MOTION.test(help);
+}
+
+{
+  const label = en['settings.quickScroll'];
+  const help = en['settings.quickScrollHelp'];
+  check('the English quick-scroll row keeps its pinned label and a help that promises continuing pan after a fast drag that gradually slows',
+    label === QUICK_SCROLL_EN_LABEL && quickScrollHelpIsTruthful(help),
+    `label=${JSON.stringify(label)}, help=${JSON.stringify(help)}`);
+}
+
+{
+  const zoomClaim = 'Zooms the view after a quick drag.';
+  const jumpClaim = 'Jumps to the end of the capture after a drag.';
+  const captureStopClaim = 'After a quick drag the view keeps panning until the capture stops.';
+  const frozenClaim =
+    'After a quick drag the view stays frozen; it does not keep panning or gradually slow down.';
+  const results = [zoomClaim, jumpClaim, captureStopClaim, frozenClaim]
+    .map((claim) => quickScrollHelpIsTruthful(claim));
+  check('control: help that promises a zoom, a jump, a pan that merely ends with the capture or a frozen view fails the same truthfulness predicate',
+    results.every((passes) => passes === false) && quickScrollHelpIsTruthful(en['settings.quickScrollHelp']),
+    `zoom=${results[0]}, jump=${results[1]}, captureStop=${results[2]}, frozen=${results[3]}, ` +
+    `real=${quickScrollHelpIsTruthful(en['settings.quickScrollHelp'])}`);
 }
 
 {
@@ -1174,6 +1213,7 @@ function resetCopyFailures(dicts: Record<string, Messages>): string[] {
   const probes: (keyof Messages)[] = [
     'toolbar.start', 'settings.language', 'settings.theme',
     'settings.detailedLabels', 'settings.detailedLabelsHelp',
+    'settings.quickScroll', 'settings.quickScrollHelp',
     'settings.wheelZooms', 'settings.wheelZoomsHelp',
     'settings.fitRows', 'settings.fitRowsHelp',
     'settings.compactRows', 'settings.compactRowsHelp',

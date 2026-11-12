@@ -735,6 +735,8 @@ export class App {
     this.settingsDialog = new SettingsDialog({
       detailedLabels: () => this.detailedLabels,
       setDetailedLabels: (on) => this.setDetailedLabels(on),
+      quickScroll: () => this.quickScroll,
+      setQuickScroll: (on) => this.setQuickScroll(on),
       wheelZooms: () => this.wheelZooms,
       setWheelZooms: (on) => this.setWheelZooms(on),
       fitRows: () => this.fitRows,
@@ -4340,6 +4342,11 @@ export class App {
     this.reflectDetailedLabels();
     this.persistWorkspace();
     this.relayout();
+  }
+
+  private setQuickScroll(on: boolean): void {
+    this.quickScroll = on;
+    this.persistWorkspace();
   }
 
   private setWheelZooms(on: boolean): void {

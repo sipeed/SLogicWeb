@@ -834,6 +834,8 @@ export const en = {
   'settings.titleHint': 'Display preferences',
   'settings.detailedLabels': 'Detailed labels',
   'settings.detailedLabelsHelp': 'Show text labels below toolbar buttons. Turn this off to use an icon-only toolbar.',
+  'settings.quickScroll': 'Keep scrolling after a quick drag',
+  'settings.quickScrollHelp': 'After a fast waveform drag the view keeps panning in small steps that gradually slow to a stop.',
   'settings.wheelZooms': 'Wheel zooms',
   'settings.wheelZoomsHelp': 'The plain wheel zooms too. Ctrl/Command+wheel keeps zooming and Shift+wheel always pans.',
   'settings.fitRows': 'Fit waveform heights to the window',

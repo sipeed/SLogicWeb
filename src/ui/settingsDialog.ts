@@ -47,6 +47,8 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 export interface SettingsDialogHost {
   detailedLabels(): boolean;
   setDetailedLabels(on: boolean): void;
+  quickScroll(): boolean;
+  setQuickScroll(on: boolean): void;
   wheelZooms(): boolean;
   setWheelZooms(on: boolean): void;
   fitRows(): boolean;
@@ -201,7 +203,7 @@ export class SettingsDialog {
       case 'appearance':
         return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];
       case 'behaviour':
-        return [this.wheelZoomsRow(), this.fitRowsRow()];
+        return [this.quickScrollRow(), this.wheelZoomsRow(), this.fitRowsRow()];
       case 'shortcuts':
         return this.shortcutBlocks();
       case 'developer':
@@ -331,6 +333,11 @@ export class SettingsDialog {
   private labelsRow(): HTMLDivElement {
     return this.toggleRow('detailed-labels', 'settings.detailedLabels', this.host.detailedLabels(),
       (on) => this.host.setDetailedLabels(on), 'settings.detailedLabelsHelp');
+  }
+
+  private quickScrollRow(): HTMLDivElement {
+    return this.toggleRow('quick-scroll', 'settings.quickScroll', this.host.quickScroll(),
+      (on) => this.host.setQuickScroll(on), 'settings.quickScrollHelp');
   }
 
   private wheelZoomsRow(): HTMLDivElement {

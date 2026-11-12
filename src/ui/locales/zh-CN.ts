@@ -779,6 +779,8 @@ export const zhCN: Messages = {
   'settings.titleHint': '显示偏好',
   'settings.detailedLabels': '详细标签',
   'settings.detailedLabelsHelp': '在工具栏按钮下方显示文字标签。关闭后工具栏只显示图标。',
+  'settings.quickScroll': '快速拖拽后继续滚动',
+  'settings.quickScrollHelp': '快速拖拽波形后，视图会继续小幅平移，并逐渐减速直至停下。',
   'settings.wheelZooms': '滚轮直接缩放',
   'settings.wheelZoomsHelp': '滚轮也能直接缩放；Ctrl/Command+滚轮仍然缩放，Shift+滚轮始终平移视图。',
   'settings.fitRows': '让波形高度适应窗口',

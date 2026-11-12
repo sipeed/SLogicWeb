@@ -833,6 +833,8 @@ export const fr: Messages = {
   'settings.titleHint': 'Préférences d’affichage',
   'settings.detailedLabels': 'Libellés détaillés',
   'settings.detailedLabelsHelp': 'Afficher les libellés sous les boutons de la barre d’outils. Désactivé, la barre n’affiche plus que des icônes.',
+  'settings.quickScroll': 'Continuer le défilement après un glissement rapide',
+  'settings.quickScrollHelp': 'Après un glissement rapide de la forme d’onde, la vue continue de défiler par petits pas en ralentissant progressivement jusqu’à l’arrêt.',
   'settings.wheelZooms': 'La molette zoome',
   'settings.wheelZoomsHelp': 'La molette simple zoome aussi ; Ctrl/Command+molette continue de zoomer et Maj+molette décale toujours la vue.',
   'settings.fitRows': 'Ajuster la hauteur des formes d’onde à la fenêtre',
