@@ -56,6 +56,9 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Test Kodo publisher
+        run: node --test .github/scripts/upload-qiniu.test.mjs
+
       - name: Install dependencies
         run: npm ci
 
@@ -93,6 +96,8 @@ jobs:
                 sub_service/ota/firmware.json \
                 sub_service/ota/src \
                 dist/ota/
+          # Preserve /ota without a slash on Kodo, which has no directory redirect.
+          cp .github/scripts/ota-redirect.html dist/ota-redirect.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -110,9 +115,8 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-  # Mainland visitors reach slogic.sipeed.com through Qiniu, which caches the origin's
-  # pages far longer than their max-age. Purge the unhashed URLs once Pages is live and
-  # wait until an edge serves this build; see .github/scripts/purge-qiniu-cdn.sh.
+  # Keep Pages for overseas users/rollback. Publish the SAME artifact to Kodo before
+  # purging the mainland CDN; never refresh an origin that still has the old release.
   purge-cdn:
     needs: deploy
     runs-on: ubuntu-latest
@@ -131,6 +135,18 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/site"
           tar -xf "$RUNNER_TEMP/pages/artifact.tar" -C "$RUNNER_TEMP/site"
+
+      - name: Set up Node for Kodo upload
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Upload the same artifact to the Qiniu origin bucket
+        env:
+          QINIU_ACCESS_KEY: ${{ secrets.QINIU_ACCESS_KEY }}
+          QINIU_SECRET_KEY: ${{ secrets.QINIU_SECRET_KEY }}
+          QINIU_BUCKET: ${{ vars.QINIU_BUCKET }}
+        run: node .github/scripts/upload-qiniu.mjs "$RUNNER_TEMP/site"
 
       - name: Purge the Qiniu CDN and verify an edge
         env:

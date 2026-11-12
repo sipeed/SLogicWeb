@@ -1,169 +1,38 @@
-# Deploying to GitHub Pages
+# Deployment
 
-`.github/workflows/deploy-pages.yml` builds on every push to `main` and publishes the
-result to `https://slogic.sipeed.com/` (the custom domain in `public/CNAME`). There is no
-`gh-pages` branch and nothing built is committed.
+[The deployment workflow](../.github/workflows/deploy-pages.yml) builds on pushes to
+`main` and publishes the same artifact to GitHub Pages and Qiniu. It includes the
+analyzer, decoder runtime, offline shell, and OTA pages. Build output is not committed.
 
-`.github/workflows/pages.yml` is the upstream project-page workflow (`--base=/<repo>/`).
-It is **not** the publisher for the custom domain, it currently fails in
-`inlineEntryForFileOpen`, and it stages no `/ota/` (see below). Do not let it and
-`deploy-pages.yml` both deploy: they share the `pages` concurrency group but produce
-different bases, so whichever finishes last wins the site.
+## Configuration
 
-## One-time setup
+- Set GitHub Pages to **GitHub Actions** and allow deployments from `main`.
+- Set the repository variable `QINIU_BUCKET` to a public-read bucket in the uploader's
+  supported region (`z2`).
+- Add repository secrets `QINIU_ACCESS_KEY` and `QINIU_SECRET_KEY`.
 
-1. Create the repo on GitHub and push `main`.
-2. Settings -> Pages -> Build and deployment -> **Source: GitHub Actions**.
+The workflow checks out submodules, vendors runtime assets, runs checks, and stages
+`sub_service/ota` under `/ota/`. Refer to the workflow for the exact build commands.
+The hosted build uses an absolute base of `/`.
 
-That is all. The first push to `main` deploys to
-`https://<owner>.github.io/<repo>/`.
+## Hosting requirements
 
-## Why CI builds instead of committing the output
+- Use HTTPS for WebUSB. Serve `.wasm` as `application/wasm` and JavaScript modules
+  with a JavaScript MIME type.
+- Keep HTML, `sw.js`, manifests, and other mutable entry points fresh. Content-hashed
+  assets may be cached; retain old hashed files so open tabs remain usable.
+- Serve `/ota/` as a directory. The bare `/ota` URL must navigate there before its
+  relative scripts and styles load. Missing assets must return 404.
 
-The two runtime assets - 13 MB of Pyodide and the sigrok decoder tree - are gitignored
-(see `.gitignore`) and staged by `npm run vendor`. Publishing from a `gh-pages` branch
-would mean committing those third-party binaries into this repository's history, which is
-exactly what the vendor script exists to avoid. The Actions path builds them fresh and
-uploads the tree directly.
+[The publisher](../.github/scripts/upload-qiniu.mjs) uploads resources before HTML
+and the service worker, then the workflow refreshes and verifies CDN content.
+Incomplete uploads fail the job.
 
-It also means the published site can never drift from `main`: there is no second branch
-to forget to update.
+## Verification
 
-## The base path
-
-A project page is served from a subdirectory, `https://<owner>.github.io/<repo>/`, not
-from the domain root. Anything the app resolves as an absolute URL at run time has to
-carry that prefix - see the `BASE_URL` comment in `src/decode/worker.ts`, which is there
-because `/pyodide/` and `/decoders/decoders.zip` were once hardcoded and 404'd under any
-subdirectory while the rest of the app looked healthy.
-
-The workflow computes the prefix from the repo name and passes it as `vite build --base`.
-A user/org page (a repo literally named `<owner>.github.io`) is served at the domain root
-and gets a plain `/`, which is also the default when you build locally.
-
-To reproduce a project-page build by hand:
-
-```
-npm run build -- --base=/slogicweb/
+```sh
+node --test .github/scripts/upload-qiniu.test.mjs
 ```
 
-## The firmware-update pages under `/ota/`
-
-`sub_service/ota` is a submodule (`sipeed/slogic_ota_server`) holding the WebUSB
-firmware-update pages. The build copies it into `dist/ota/`, so the updater is published
-from the same origin as the analyser:
-
-| URL | Page |
-|---|---|
-| `https://slogic.sipeed.com/ota/` | one board |
-| `https://slogic.sipeed.com/ota/batch.html` | production batch update |
-
-No base rewriting is needed. Those pages link everything relatively and carry a relative
-import map, so they resolve identically from a subdirectory - their own Pages deployment
-already serves them from `https://sipeed.github.io/slogic_ota_server/`. The batch page's
-browser policy names the **origin**, not a path (`STATION_ORIGIN` in
-`sub_service/ota/src/station.js`, already `https://slogic.sipeed.com`), so `/ota/batch.html`
-is covered by the policy the "Station setup" section installs.
-
-Two things keep it working:
-
-- The checkout uses `submodules: true`. A plain checkout leaves `sub_service/ota` empty,
-  and the staging step then fails on the missing `index.html` rather than silently
-  publishing a site without `/ota/`.
-- The submodule's own suite runs before the build, so a stale asset stamp in its import
-  map (or a broken update flow) fails the deploy instead of shipping a page that mixes
-  cached old modules with new ones.
-
-To stage the same tree by hand, after `npx vite build --base=/`:
-
-```
-mkdir -p dist/ota
-cp -r sub_service/ota/{index.html,batch.html,style.css,favicon.svg,firmware.json,src} dist/ota/
-```
-
-## The decoder pin
-
-`LIBSIGROKDECODE_REF` in the workflow is a commit, not `master`. `npm run vendor`
-regenerates `src/decode/decoders/manifest.ts`, and that file **is** committed, so tracking
-a moving branch would let the bundled decoder set drift away from the manifest the UI
-reads with nothing to signal it. The workflow runs `git diff --exit-code` on the manifest
-straight after vendoring, so drift fails the build rather than shipping a decoder list
-that does not match the zip.
-
-Bumping it is deliberate: change the ref, run `npm run vendor -- <libsigrokdecode/decoders>`,
-and commit the regenerated manifest in the same change.
-
-## The offline shell (`sw.js`, `manifest.webmanifest`)
-
-A hosted build emits a service worker and a web manifest (`src/pwa/`, policy in
-ARCHITECTURE.md §7.2), so the installed or revisited page starts without the network.
-Every file it serves has a content-hashed name except `index.html`, `sw.js`, the manifest
-and the icons, and the worker refetches the last three itself on each new version. The
-deploy workflow's `purge-cdn` job purges all of them (`PATHS` in
-`.github/scripts/purge-qiniu-cdn.sh`) and checks an edge serves the new bytes; a manual
-deploy must purge at least **`index.html` and `sw.js`**. A stale `sw.js` only delays the
-update; a stale `index.html` makes the new worker's install fail (it checks the
-`slogicweb-build` stamp) until the purge lands. Open tabs then show "A new version is ready"
-and reload only when the user clicks.
-
-The worker's scope is the site root, so it also sees `/ota/` requests, but it answers only
-the app document and the files its build listed; everything else, `/ota/` included, goes to
-the network untouched. The portable single-file build has no worker and no manifest.
-
-## What was verified, and the one thing that will break it
-
-Measured against a build served from a `/slogicweb/` subdirectory in headless Brave:
-
-| | |
-|---|---|
-| App boots, decode worker warms | yes |
-| `pyodide.asm.wasm`, `python_stdlib.zip`, `decoders.zip` fetched under the prefix | yes |
-| 404s | none |
-| `isSecureContext` | true - WebUSB needs this, and Pages is HTTPS |
-| `crossOriginIsolated` / `SharedArrayBuffer` | **false** |
-
-The 404 that used to be in that table was `/favicon.ico`, and it was worth more than it
-looked: a page that declares no icon makes the browser probe `/favicon.ico` at the
-**domain** root, not under the base path. For a project page that root belongs to
-`<owner>.github.io`, not to this site, so it can never be satisfied from this repository.
-`index.html` now declares `public/favicon.svg`, which stops the probe happening at all.
-
-**The wasm MIME type is a hard dependency, not a nicety.** Serving `pyodide.asm.wasm` as
-`application/octet-stream` does not degrade to a slower path - Pyodide fails to
-instantiate and the decode worker never warms up at all:
-
-```
-wasm instantiation failed!
-TypeError: Failed to execute 'compile' on 'WebAssembly':
-  Incorrect response MIME type. Expected 'application/wasm'.
-```
-
-GitHub Pages gets this right (verified: `content-type: application/wasm`). Any other host
-must be checked before assuming it does, because the symptom is "decoding silently never
-becomes ready", not a 404.
-
-`.nojekyll` is copied into the build from `public/`. The Actions deployment publishes the
-artifact as-is and never runs Jekyll, so it only matters if the repo is switched back to
-deploying from a branch - at which point Jekyll would drop any file whose name starts with
-an underscore.
-
-## `crossOriginIsolated` is false, and stays false
-
-GitHub Pages cannot set the COOP/COEP response headers that
-`crossOriginIsolated` requires, so `SharedArrayBuffer` is unavailable and the decode
-worker's interrupt buffer is null. This is **not** a regression introduced by hosting:
-the same is true under `vite dev` and `vite preview`, so the no-SAB path is the only one
-this app has ever taken. The consequence is the one already documented in
-`src/decode/NOTES.md` - cancelling a decode terminates the worker rather than
-interrupting it, and the client counts that as a hard cancel.
-
-## Browser support is unchanged
-
-WebUSB is Chromium-only. Chrome, Edge, Brave and Opera can drive the device; Firefox and
-Safari can still open `.sr` and `.lwcap` files and decode them. HTTPS from Pages satisfies
-the secure-context requirement, so capture works on a deployed site exactly as it does on
-`http://127.0.0.1`.
-
-A browser without WebGL2 (GPU-blocklisted Chrome, a VM without pass-through) no longer
-fails to boot: the waveform canvases fall back to a Canvas 2D rasteriser that draws the
-same picture, slower per frame.
+Before publishing, check that the analyzer and both OTA pages load, decoder assets
+have the correct MIME types, and refreshed entry points match the build artifact.
