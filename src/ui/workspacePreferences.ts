@@ -81,6 +81,7 @@ export interface WorkspaceSnapshotV1 {
   compactRows?: boolean;
   /** "Hide idle channels": rows with no edge in the capture are hidden; absent means off. */
   hideIdleChannels?: boolean;
+  fitRows?: boolean;
   channels?: PersistedChannel[];
   order?: number[];
   capture?: PersistedCaptureSettings;
@@ -448,6 +449,7 @@ export function parseWorkspaceSnapshot(
     ...(parsed.developerTools === true ? { developerTools: true } : {}),
     ...(parsed.compactRows === true ? { compactRows: true } : {}),
     ...(parsed.hideIdleChannels === true ? { hideIdleChannels: true } : {}),
+    ...(parsed.fitRows === false ? { fitRows: false } : {}),
     channels,
     order: restoreOrder(parsed.order, channels.length),
     capture: restoreCapture(parsed.capture, channels.length),
@@ -486,6 +488,7 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
   if (snapshot.developerTools === true) serialized.developerTools = true;
   if (snapshot.compactRows === true) serialized.compactRows = true;
   if (snapshot.hideIdleChannels === true) serialized.hideIdleChannels = true;
+  if (snapshot.fitRows === false) serialized.fitRows = false;
   if (snapshot.channels) {
     serialized.channels = snapshot.channels.map(({ name, color, enabled }) => ({ name, color, enabled }));
   }

@@ -119,6 +119,27 @@ check('literal false and true survive parsing without coercion',
 }
 
 {
+  const base = { version: WORKSPACE_SCHEMA_VERSION, detailedLabels: true } as const;
+  const defaultRaw = serializeWorkspaceSnapshot(base);
+  const offRaw = serializeWorkspaceSnapshot({ ...base, fitRows: false });
+  const off = parseWorkspaceSnapshot(offRaw);
+  const onRaw = serializeWorkspaceSnapshot({ ...base, fitRows: true });
+  const defaultRestored = parseWorkspaceSnapshot(defaultRaw);
+  const literalTrue = parseWorkspaceSnapshot(JSON.stringify({ ...base, fitRows: true }));
+  const invalid = ['yes', 1, 0, null, 'false', {}, []].map((fitRows) =>
+    parseWorkspaceSnapshot(JSON.stringify({ ...base, fitRows }))?.fitRows);
+  check('fit rows writes only literal false, restores off from it, and keeps every other value default-on',
+    defaultRaw === '{"version":1,"detailedLabels":true,"analyzers":[]}' &&
+      offRaw === '{"version":1,"detailedLabels":true,"fitRows":false,"analyzers":[]}' &&
+      off !== null && serializeWorkspaceSnapshot(off).includes('"fitRows":false') &&
+      parseWorkspaceSnapshot(serializeWorkspaceSnapshot(off))?.fitRows === false &&
+      onRaw === defaultRaw &&
+      defaultRestored?.fitRows === undefined && literalTrue?.fitRows === undefined &&
+      invalid.every((value) => value === undefined),
+    `default=${defaultRaw}, off=${offRaw}, restored=${defaultRestored?.fitRows}, true=${literalTrue?.fitRows}, invalid=${invalid.join('/')}`);
+}
+
+{
   defineStorage({
     getItem: () => { throw new Error('blocked read'); },
     setItem: () => { throw new Error('blocked write'); },
@@ -1338,6 +1359,33 @@ check('the App snapshot boundary serializes canonical labels/channels/order and 
   constructorBody.includes('this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(this.workspaceSnapshot());') &&
   !app.includes('localStorage'),
   persistBody.replace(/\s+/g, ' ').trim());
+
+{
+  const fitReadAt = app.indexOf('const workspace = readWorkspaceSnapshot();');
+  const fitRestoreAt = app.indexOf('this.fitRows = workspace.fitRows !== false;');
+  const fitBaselineAt = app.indexOf('this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(');
+  const fitCaptureAt = snapshotBody.indexOf('fitRows: this.fitRows,');
+  const wiring = (source: string, catalog: string): boolean =>
+    source.includes('  private fitRows = true;') &&
+    source.includes('this.fitRows = workspace.fitRows !== false;') &&
+    fitCaptureAt >= 0 &&
+    catalog.includes('parsed.fitRows === false') &&
+    catalog.includes('snapshot.fitRows === false') &&
+    !source.includes('workspace.fitRows === true') &&
+    !catalog.includes('parsed.fitRows === true') &&
+    !catalog.includes('snapshot.fitRows === true');
+  const flippedDefault = app.replace('  private fitRows = true;', '  private fitRows = false;');
+  const flippedRestore = app.replace(
+    'this.fitRows = workspace.fitRows !== false;', 'this.fitRows = workspace.fitRows === true;');
+  const flippedParse = preferences.replace('parsed.fitRows === false', 'parsed.fitRows === true');
+  const flippedWrite = preferences.replace('snapshot.fitRows === false', 'snapshot.fitRows === true');
+  check('fit rows defaults on, restores only literal false before the baseline and projects the boolean',
+    fitReadAt >= 0 && fitRestoreAt > fitReadAt && fitBaselineAt > fitRestoreAt &&
+    wiring(app, preferences) &&
+    !wiring(flippedDefault, preferences) && !wiring(flippedRestore, preferences) &&
+    !wiring(app, flippedParse) && !wiring(app, flippedWrite),
+    `read=${fitReadAt}, restore=${fitRestoreAt}, baseline=${fitBaselineAt}, projection=${fitCaptureAt}`);
+}
 
 const analyzerProjectionAt = snapshotBody.indexOf('analyzers: this.analyzers');
 const analyzerProjection = analyzerProjectionAt >= 0 ? snapshotBody.slice(analyzerProjectionAt) : '';
