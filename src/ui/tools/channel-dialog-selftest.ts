@@ -14,7 +14,7 @@ import {
 import { setLocale, t } from '../i18n.js';
 import { CHANNEL_COLOR_PRESETS } from '../metrics.js';
 import {
-  channelColor, defaultChannelName, type ChannelState, type TriggerMode,
+  channelColor, defaultChannelName, type AnalyzerState, type ChannelState, type TriggerMode,
 } from '../state.js';
 
 const nodeProcess = (() => {
@@ -60,10 +60,23 @@ function makeCell(index: number, options: CellOptions = {}): ChannelCell {
   };
 }
 
+const analyzerState = (id: string, label: string): AnalyzerState => ({
+  id,
+  decoderId: 'i2c',
+  label,
+  color: '#9A7B2E',
+  channels: { 0: 0, 1: 1 },
+  options: {},
+  laneChannel: 0,
+  result: null,
+  index: null,
+  status: 'idle',
+  note: { kind: 'pending' },
+});
+
 interface Calls {
   configure: [number, ChannelConfiguration][];
   reorder: [number, number][];
-  remove: string[];
 }
 
 interface Harness {
@@ -79,7 +92,7 @@ function setup(cells: readonly ChannelCell[]): Harness {
   const root = doc.createElement('div');
   root.className = 'channel-list';
   doc.body.appendChild(root);
-  const calls: Calls = { configure: [], reorder: [], remove: [] };
+  const calls: Calls = { configure: [], reorder: [] };
   let current = [...cells];
   const list: ChannelList = new ChannelList(root as unknown as HTMLElement, {
     onConfigure: (index, config) => {
@@ -98,7 +111,6 @@ function setup(cells: readonly ChannelCell[]): Harness {
       list.render(current);
     },
     onReorder: (from, to) => calls.reorder.push([from, to]),
-    onRemoveAnalyzer: (id) => calls.remove.push(id),
   });
   const harness: Harness = {
     list,
@@ -183,6 +195,21 @@ function chooseMode(mode: TriggerMode): void {
     `focused=${doc.activeElement === nameInput()}, label=${opener?.getAttribute('aria-label')}`);
 }
 
+{
+  const h = setup([{ ...makeCell(0), analyzers: [
+    analyzerState('i2c-0', 'I2C-1'), analyzerState('i2c-1', 'I2C-2'),
+  ] }]);
+  const chipShapes = h.root.querySelectorAll('.ch-analyzer').map((chip) =>
+    `${chip.children.map((kid) => kid.className || kid.localName).join('+')}:` +
+    `${chip.children[1]?.textContent}:${chip.children.length}`);
+  const chipButtons = h.root.querySelectorAll('.ch-analyzer button').length;
+  check('a decoder chip is a colour square plus its name and offers no removal control',
+    chipShapes.length === 2 &&
+    chipShapes[0] === 'ch-analyzer-sq+span:I2C-1:2' && chipShapes[1] === 'ch-analyzer-sq+span:I2C-2:2' &&
+    chipButtons === 0,
+    `chips=${JSON.stringify(chipShapes)}, buttons=${chipButtons}`);
+}
+
 // The trigger glyph is a preview, not an entry: clicking it opens nothing, and the gear
 // stays the one way into the dialog.
 {
@@ -235,8 +262,7 @@ function chooseMode(mode: TriggerMode): void {
   glyph?.click();
   const idle = glyph !== null && settingsDialog()?.open === false &&
     doc.activeElement === doc.body &&
-    h.calls.configure.length === 0 && h.calls.reorder.length === 0 &&
-    h.calls.remove.length === 0;
+    h.calls.configure.length === 0 && h.calls.reorder.length === 0;
   check('the trigger preview ignores pointer and key input and emits nothing',
     idle, `open=${settingsDialog()?.open}, focused=${doc.activeElement?.className}, ` +
     `configure=${h.calls.configure.length}, reorder=${h.calls.reorder.length}`);

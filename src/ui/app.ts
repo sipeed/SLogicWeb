@@ -790,7 +790,6 @@ export class App {
     this.channelList = new ChannelList(this.el.channelList, {
       onConfigure: (channel, config) => this.configureChannel(channel, config),
       onReorder: (from, to) => this.reorder(from, to),
-      onRemoveAnalyzer: (id) => this.removeAnalyzer(id),
       onEditBus: (id) => this.editBus(id),
       onBusScope: (id, patch, commit) => this.configureBusScope(id, patch, commit),
       onBusTrigger: (id, kind, volts) => this.configureAnalogTrigger(id, kind, volts),

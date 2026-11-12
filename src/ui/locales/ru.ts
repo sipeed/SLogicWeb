@@ -459,7 +459,6 @@ export const ru: Messages = {
   'channels.hue': 'Оттенок',
   'channels.triggerMode': 'Режим триггера',
   'channels.cancel': 'Отмена',
-  'channels.removeAnalyzer': 'Удалить {label}',
   'channels.triggerHigh': 'Высокий уровень',
   'channels.triggerLow': 'Низкий уровень',
   'channels.triggerAny': 'Любое значение (X)',

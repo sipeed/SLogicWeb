@@ -469,7 +469,6 @@ export const en = {
   'channels.hue': 'Hue',
   'channels.triggerMode': 'Trigger mode',
   'channels.cancel': 'Cancel',
-  'channels.removeAnalyzer': 'Remove {label}',
   'channels.triggerHigh': 'High level',
   'channels.triggerLow': 'Low level',
   'channels.triggerAny': 'Any value (X)',

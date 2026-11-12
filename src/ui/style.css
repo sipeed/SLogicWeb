@@ -1358,12 +1358,6 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
   width: 7px; height: 7px; border-radius: 1px; display: inline-block; flex: none;
 }
 .ch-analyzer span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ch-analyzer-x {
-  background: none; border: none; color: var(--text50); cursor: pointer;
-  padding: 0 2px; font-size: 11px; line-height: 1;
-  transition: color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
-}
-.ch-analyzer-x:hover { color: var(--negative); }
 
 /* ---------------------------------------------------------------- plot */
 

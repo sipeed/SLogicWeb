@@ -416,7 +416,6 @@ export const zhCN: Messages = {
   'channels.hue': '色相',
   'channels.triggerMode': '触发模式',
   'channels.cancel': '取消',
-  'channels.removeAnalyzer': '移除 {label}',
   'channels.triggerHigh': '高电平',
   'channels.triggerLow': '低电平',
   'channels.triggerAny': '任意值（X）',

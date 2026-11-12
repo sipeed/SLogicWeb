@@ -80,7 +80,6 @@ export interface ChannelListCallbacks {
   onConfigure(index: number, config: ChannelConfiguration): void;
   /** Move the channel at `from` in display order to `to`. */
   onReorder(from: number, to: number): void;
-  onRemoveAnalyzer(id: string): void;
   /** Open the editor for a parallel-bus view (its cell's gear). */
   onEditBus?(id: string): void;
   /** Analog scope controls: preview while dragging (`commit` false), then persist. */
@@ -853,12 +852,6 @@ export class ChannelList {
         txt.textContent = a.label;
         txt.classList.toggle('error', a.status === 'error');
         chip.appendChild(txt);
-        const x = document.createElement('button');
-        x.className = 'ch-analyzer-x';
-        x.textContent = '×';
-        x.title = t('channels.removeAnalyzer', { label: a.label });
-        x.addEventListener('click', () => this.cb.onRemoveAnalyzer(a.id));
-        chip.appendChild(x);
         chip.title = formatAnalyzerNote(a.note) || a.label;
         chips.appendChild(chip);
       }

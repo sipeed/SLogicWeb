@@ -468,7 +468,6 @@ export const fr: Messages = {
   'channels.hue': 'Teinte',
   'channels.triggerMode': 'Mode de déclenchement',
   'channels.cancel': 'Annuler',
-  'channels.removeAnalyzer': 'Retirer {label}',
   'channels.triggerHigh': 'Niveau haut',
   'channels.triggerLow': 'Niveau bas',
   'channels.triggerAny': 'Valeur quelconque (X)',
