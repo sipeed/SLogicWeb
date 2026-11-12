@@ -21,10 +21,12 @@ export function computeChannelRowHeight(
   channelCount: number,
   laneCount: number,
   compact = false,
+  fitRows = true,
 ): number {
+  const floor = compact ? ROWS.compactMinRowHeight : ROWS.minRowHeight;
+  if (!fitRows) return floor;
   const available = plotHeightCss - laneCount * ROWS.laneHeight;
   const fit = Math.floor(available / channelCount);
-  const floor = compact ? ROWS.compactMinRowHeight : ROWS.minRowHeight;
   return Math.max(floor, Math.min(ROWS.maxRowHeight, fit));
 }
 

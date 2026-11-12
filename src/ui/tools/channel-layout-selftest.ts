@@ -111,6 +111,73 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `fits=${fits}`);
 }
 
+{
+  const fitting = (plot: number, channels: number, lanes: number, compact: boolean): number => {
+    const available = plot - lanes * ROWS.laneHeight;
+    const fit = Math.floor(available / channels);
+    const floor = compact ? ROWS.compactMinRowHeight : ROWS.minRowHeight;
+    return Math.max(floor, Math.min(ROWS.maxRowHeight, fit));
+  };
+  const floorOf = (compact: boolean): number =>
+    compact ? ROWS.compactMinRowHeight : ROWS.minRowHeight;
+  const rows: Array<{
+    label: string; plot: number; channels: number; lanes: number; compact: boolean; on: number;
+  }> = [
+    { label: 'tall 10-row plot', plot: 600, channels: 10, lanes: 0, compact: false, on: 60 },
+    { label: '8 channels in a tall plot', plot: 600, channels: 8, lanes: 0, compact: false, on: 72 },
+    { label: 'one sparse row stops growing', plot: 1000, channels: 1, lanes: 0, compact: false, on: 72 },
+    { label: 'four rows left after hiding idle channels', plot: 2000, channels: 4, lanes: 0, compact: false, on: 72 },
+    { label: 'two lanes split the divisible height', plot: 900, channels: 10, lanes: 2, compact: false, on: 72 },
+    { label: 'short 32-row plot', plot: 120, channels: 32, lanes: 0, compact: false, on: 48 },
+    { label: 'lanes cannot push rows below the floor', plot: 200, channels: 32, lanes: 3, compact: false, on: 48 },
+    { label: 'zero-height plot', plot: 0, channels: 8, lanes: 0, compact: false, on: 48 },
+    { label: 'tall compact 10-row plot', plot: 600, channels: 10, lanes: 0, compact: true, on: 60 },
+    { label: 'one compact row stops growing', plot: 1000, channels: 1, lanes: 0, compact: true, on: 72 },
+    { label: 'compact 32 rows exactly fitting 768px', plot: 768, channels: 32, lanes: 0, compact: true, on: 24 },
+    { label: 'compact lanes cannot drop below 24', plot: 200, channels: 32, lanes: 3, compact: true, on: 24 },
+    { label: 'compact lanes on a tall plot', plot: 900, channels: 10, lanes: 2, compact: true, on: 72 },
+  ];
+  const describe = (label: string, expected: number, actual: number): string =>
+    `${label}: expected=${expected}, actual=${actual}`;
+
+  const offBad = rows
+    .filter((r) => computeChannelRowHeight(r.plot, r.channels, r.lanes, r.compact, false) !== floorOf(r.compact))
+    .map((r) => describe(r.label,
+      floorOf(r.compact), computeChannelRowHeight(r.plot, r.channels, r.lanes, r.compact, false)));
+  check('fit off floors every row at 48px, or 24px with compact rows, whatever the lanes and height',
+    offBad.length === 0 && floorOf(false) === 48 && floorOf(true) === 24,
+    offBad.length === 0
+      ? `${rows.length} literal cases: ${rows.map((r) => `${r.label}=${floorOf(r.compact)}`).join(', ')}`
+      : offBad.join('; '));
+
+  const onBad = rows
+    .filter((r) => computeChannelRowHeight(r.plot, r.channels, r.lanes, r.compact, true) !== r.on ||
+      computeChannelRowHeight(r.plot, r.channels, r.lanes, r.compact, true) !==
+        fitting(r.plot, r.channels, r.lanes, r.compact))
+    .map((r) => describe(r.label, r.on,
+      computeChannelRowHeight(r.plot, r.channels, r.lanes, r.compact, true)));
+  const defaultBad = rows
+    .filter((r) => computeChannelRowHeight(r.plot, r.channels, r.lanes, r.compact) !== r.on)
+    .map((r) => describe(r.label, r.on, computeChannelRowHeight(r.plot, r.channels, r.lanes, r.compact)));
+  check('fit on keeps the pre-flag fitting arithmetic literal for literal, and is the default',
+    onBad.length === 0 && defaultBad.length === 0,
+    onBad.length === 0 && defaultBad.length === 0
+      ? `${rows.length} cases match both literals and the pre-flag formula; 4-arg calls equal fit on`
+      : [...onBad, ...defaultBad].join('; '));
+
+  const distinguishing = rows.filter((r) => r.on !== floorOf(r.compact));
+  const coinciding = rows.filter((r) => r.on === floorOf(r.compact));
+  const offMutantCaught = distinguishing.every((r) =>
+    computeChannelRowHeight(r.plot, r.channels, r.lanes, r.compact, false) !==
+      fitting(r.plot, r.channels, r.lanes, r.compact));
+  const onMutantCaught = distinguishing.every((r) =>
+    computeChannelRowHeight(r.plot, r.channels, r.lanes, r.compact, true) !== floorOf(r.compact));
+  check('the fit flag is falsifiable: dropping either branch disagrees on every distinguishing case',
+    distinguishing.length >= 8 && coinciding.length > 0 && offMutantCaught && onMutantCaught,
+    `distinguishing=${distinguishing.length}, coinciding=${coinciding.length}, ` +
+    `alwaysFit=${offMutantCaught}, alwaysFloor=${onMutantCaught}`);
+}
+
 // "Hide idle channels": a whole-capture column per channel decides idle exactly.
 {
   const store = new PlanarSampleStore({ channelCount: 8, samplerate: 1e6 });
