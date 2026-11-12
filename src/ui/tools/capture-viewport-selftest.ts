@@ -159,7 +159,7 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
     debugViewport.includes('this.noteExplicitViewport();') &&
     debugZoom.includes('this.noteExplicitViewport();');
   const overviewIntent = (between(app, 'this.overview = new OverviewStrip(',
-    'this.stack.setBaseTheme').match(/onIntent: \(\) => \{ this\.beginViewportGesture\(\); \}/g) ?? []).length === 1 &&
+    'this.stack.setBaseTheme').match(/onIntent: \(\) => \{ this\.stopQuickScroll\(\); this\.beginViewportGesture\(\); \}/g) ?? []).length === 1 &&
     (between(app, 'private centerOverview', 'private captureFixedView')
       .match(/this\.clampLockView\(\);/g) ?? []).length === 3 &&
     !between(app, 'private centerOverview', 'private captureFixedView').includes('noteLockGesture');
@@ -171,8 +171,9 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
   const fitBody = between(app, 'private fitViewport()', 'private centerOverview');
   check('each explicit viewport action is recorded as user intent',
     app.includes('private noteViewportIntent(): void') &&
-    // wheel, pinch, drag, axis drag, cursor focus, and the +/- and arrow-key steps.
-    intentCalls === 7 && explicitCalls === 3 && fitCalls === 1 && gestures &&
+    // wheel, pinch, drag, axis drag, cursor focus, the +/- and arrow-key steps, each
+    // quick-scroll frame.
+    intentCalls === 8 && explicitCalls === 3 && fitCalls === 1 && gestures &&
     between(app, 'private keyZoom(', 'private keyPan(').includes('this.noteViewportIntent();') &&
     between(app, 'private keyPan(', 'private beginViewportGesture(').includes('this.noteViewportIntent();') &&
     overviewIntent &&

@@ -182,7 +182,7 @@ function mediaOverrides(selector: string, prop: string): string[] {
   // Rows auto-fit the *viewport* (not the grown column) and the label column keeps native
   // wheel scrolling through #scroll-area, with no wheel listener of its own.
   const fit = app.includes('const plotH = Math.max(120, (this.el.scroll.clientHeight || 630) - axisH - overviewH - analogH);');
-  const allowed = ['bar', 'drag', 'plot', 'this.el.axis', 'this.el.cornerFit'].sort();
+  const allowed = ['bar', 'drag', 'plot', 'this.el.axis', 'this.el.cornerFit', 'this.el.overview'].sort();
 
   const stripComments = (source: string): string => {
     let out = '';
@@ -290,7 +290,7 @@ function mediaOverrides(selector: string, prop: string): string[] {
   const unrelatedOk = unrelatedWheel.length === wheel.length && exactTargets(unrelatedWheel);
   const probes = [...escapeProbes, { name: 'unrelated', ok: unrelatedOk, detail: `unrelated ignored=${unrelatedOk}` }];
 
-  check('row fit reads the scroll viewport, the label column scrolls natively in #scroll-area, and only the scope bar, scope drag, plot, axis and corner Fit receive wheel input',
+  check('row fit reads the scroll viewport, the label column scrolls natively in #scroll-area, and only the scope bar, scope drag, plot, axis, corner Fit and overview strip receive wheel input',
     fit && wheelOk && overflow && nested && overflowControl && nestedControl &&
       receiverControl && probes.every((p) => p.ok),
     `fit=${fit}, wheel=${wheel.join(',')}, allowed=${allowed.join(',')}, wheelOk=${wheelOk}, ` +

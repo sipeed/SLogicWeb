@@ -132,6 +132,9 @@ import { chordOf } from './chords.js';
 import {
   fitWheelAction, wheelAction, type WheelAction, type WheelModifiers,
 } from './wheelGesture.js';
+import {
+  flingStep, QUICK_SCROLL_RECENT_MS, releaseVelocity, startsFling, type QuickScrollSample,
+} from './quickScroll.js';
 import { cornerView, cornerViewEqual, type CornerView } from './cornerCell.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
 import { TOUCH_TARGET_PX } from './presenters.js';
@@ -397,6 +400,8 @@ export class App {
   private hideIdleChannels = false;
   private fitRows = true;
   private quickScroll = true;
+  private quickScrollVelocity: number | null = null;
+  private quickScrollAt = 0;
   /** The idle-channel scan of one store at one length (`idleChannelSet`). */
   private idleCache: { store: SampleStore; length: number; idle: ReadonlySet<number> } | null = null;
   /** Pointer x minus the grabbed cursor's line during an axis-chip drag. */
@@ -774,7 +779,7 @@ export class App {
     this.overview = new OverviewStrip(this.el.overview, {
       // Any strip gesture leaves follow mode. The lock is not released: the strip moves
       // only the user's ViewWindow inside D, and V is clamped afterwards.
-      onIntent: () => { this.beginViewportGesture(); },
+      onIntent: () => { this.stopQuickScroll(); this.beginViewportGesture(); },
       onCenter: (sample) => this.centerOverview(sample),
       onPan: (samples) => this.panOverview(samples),
       onZoom: (anchor, factor) => this.zoomOverview(anchor, factor),
@@ -2370,6 +2375,7 @@ export class App {
   private frame = (): void => {
     requestAnimationFrame(this.frame);
     const now = performance.now();
+    if (this.advanceQuickScroll(now)) this.dirty = true;
     const highRateLoop = this.running && this.captureIsLoop &&
       this.store.samplerate * bytesPerSampleForChannels(this.store.channelCount) >= LOOP_BUILD_SUSPEND_BYTES_PER_SEC;
     // Bus overviews are background work: skip them on the fastest loop streams so the
@@ -2437,6 +2443,30 @@ export class App {
       this.recordFrameCost(performance.now() - drawStartedAt, liveDue);
     }
   };
+
+  private startQuickScroll(velocity: number): void {
+    this.quickScrollVelocity = velocity;
+    this.quickScrollAt = performance.now();
+    this.beginViewportGesture();
+  }
+
+  private stopQuickScroll(): void {
+    this.quickScrollVelocity = null;
+  }
+
+  private advanceQuickScroll(now: number): boolean {
+    const velocity = this.quickScrollVelocity;
+    if (velocity === null) return false;
+    const step = flingStep(velocity, now - this.quickScrollAt);
+    this.quickScrollAt = now;
+    const before = this.stack.view.start;
+    this.stack.panPixels(step.panCss * (globalThis.devicePixelRatio || 1));
+    this.quickScrollVelocity = step.done ? null : step.velocity;
+    this.noteViewportIntent();
+    const panned = this.stack.view.start !== before;
+    if (step.panCss !== 0 && !panned) this.quickScrollVelocity = null;
+    return panned;
+  }
 
   private recordFrameCost(ms: number, live: boolean): void {
     this.lastFrameCostMs = ms;
@@ -2862,6 +2892,7 @@ export class App {
     // "wheel zooms" preference turns plain-wheel zoom on; Ctrl/⌘ zooms time either way and
     // Shift pans it.
     const wheelNavigate = (e: WheelEvent, left: number, target: 'rows' | 'fit' = 'rows'): void => {
+      this.stopQuickScroll();
       const action = this.wheelActionFor(e, target);
       if (action === 'native') return;
       // The browser's own Ctrl+wheel page zoom must be stopped even before any capture
@@ -2899,6 +2930,9 @@ export class App {
     this.el.cornerFit.addEventListener('wheel', (e) => {
       wheelNavigate(e, e.clientX - this.el.plot.clientWidth / 2, 'fit');
     }, { passive: false });
+    this.el.overview.addEventListener('pointerdown', () => { this.stopQuickScroll(); }, true);
+    this.el.overview.addEventListener('wheel', () => { this.stopQuickScroll(); },
+      { capture: true, passive: true });
 
     // One pointer drags (pan) or grabs a cursor; two pointers pinch-zoom around their
     // midpoint. Touch is pointer events here too - #plot carries `touch-action: pan-y`,
@@ -2907,6 +2941,9 @@ export class App {
     let pinch: { dist: number; midX: number } | null = null;
     let dragging = false;
     let lastX = 0;
+    let pressX = 0;
+    let pinched = false;
+    const quickSamples: QuickScrollSample[] = [];
     this.releaseMarkerPointer = () => {
       const cursor = this.draggingCursor();
       const id = cursor?.marker.pointerId ?? null;
@@ -2920,6 +2957,7 @@ export class App {
       this.syncAxisCursor(null);
     };
     plot.addEventListener('pointerdown', (e) => {
+      this.stopQuickScroll();
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       plot.setPointerCapture(e.pointerId);
@@ -2928,12 +2966,18 @@ export class App {
         this.cancelMarkerDrags();
         pinch = { dist: Math.hypot(a.x - b.x, a.y - b.y), midX: (a.x + b.x) / 2 };
         dragging = false;
+        pinched = true;
+        quickSamples.length = 0;
       } else if (pointers.size === 1) {
         this.syncPlotSize();
         const rect = plot.getBoundingClientRect();
         const grabbed = this.tryGrabMarker(e, rect);
         dragging = !grabbed;
         lastX = e.clientX;
+        pressX = e.clientX;
+        pinched = false;
+        quickSamples.length = 0;
+        quickSamples.push({ x: e.clientX, timeStamp: e.timeStamp });
         if (grabbed) {
           this.hover = null;
           this.syncMarkerCursor(e.clientX - rect.left);
@@ -2984,6 +3028,9 @@ export class App {
         const dx = e.clientX - lastX;
         lastX = e.clientX;
         this.stack.panPixels(-dx * dpr);
+        quickSamples.push({ x: e.clientX, timeStamp: e.timeStamp });
+        while (quickSamples.length > 1 &&
+          quickSamples[0]!.timeStamp < e.timeStamp - 2 * QUICK_SCROLL_RECENT_MS) quickSamples.shift();
         // Any real pan ends a trigger-locked follow window; the lock itself only clamps
         // the user's ViewWindow inside the data window.
         this.noteViewportIntent();
@@ -3009,10 +3056,22 @@ export class App {
       } else if (pinch) {
         pinch = null;
         const rest = [...pointers.values()][0];
-        if (rest) { dragging = true; lastX = rest.x; }
+        if (rest) {
+          dragging = true;
+          lastX = rest.x;
+          pressX = rest.x;
+          pinched = true;
+          quickSamples.length = 0;
+        }
       }
       if (!dragging || pointers.size > 0) return;
       dragging = false;
+      if (e.type !== 'pointerup' || pinched) { quickSamples.length = 0; return; }
+      const travel = Math.abs(e.clientX - pressX);
+      const velocity = releaseVelocity(
+        [...quickSamples, { x: e.clientX, timeStamp: e.timeStamp }], e.timeStamp);
+      quickSamples.length = 0;
+      if (this.quickScroll && startsFling(travel, velocity)) this.startQuickScroll(velocity);
     };
     plot.addEventListener('pointerup', end);
     plot.addEventListener('pointercancel', end);
@@ -3042,6 +3101,7 @@ export class App {
     let axisDrag = false;
     let axisLast = 0;
     this.el.axis.addEventListener('pointerdown', (e) => {
+      this.stopQuickScroll();
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       this.el.axis.setPointerCapture(e.pointerId);
       if (this.draggingCursor() === null && this.tryGrabAxisChip(e)) {
@@ -3163,6 +3223,7 @@ export class App {
         this.primaryAction();
         return true;
       case 'view.fit':
+        this.stopQuickScroll();
         this.beginViewportGesture();
         if (!this.fitLockedViewport()) this.stack.zoomToFit();
         this.dirty = true;
@@ -3550,6 +3611,7 @@ export class App {
   }
 
   private focusCursor(id: number): void {
+    this.stopQuickScroll();
     const cursor = this.cursorById(id);
     const sample = cursor?.marker.sample ?? null;
     if (sample === null) return;
@@ -3706,6 +3768,7 @@ export class App {
   /** `+`/`-`: zoom one wheel notch around the centre of the plot. */
   private keyZoom(direction: 1 | -1): void {
     if (this.store.length === 0) return;
+    this.stopQuickScroll();
     this.stack.zoomAt(this.stack.widthDevicePx / 2, direction > 0 ? Math.SQRT1_2 : Math.SQRT2);
     this.noteViewportIntent();
     this.dirty = true;
@@ -3714,6 +3777,7 @@ export class App {
   /** Arrows: pan a tenth of the visible span; with Shift, half of it. */
   private keyPan(direction: 1 | -1, big: boolean): void {
     if (this.store.length === 0) return;
+    this.stopQuickScroll();
     this.stack.panPixels(direction * this.stack.widthDevicePx * (big ? 0.5 : 0.1));
     this.noteViewportIntent();
     this.dirty = true;
@@ -3762,6 +3826,7 @@ export class App {
 
   /** Explicit viewport command (assistant/screenshot driver): clamp like a gesture. */
   private noteExplicitViewport(): void {
+    this.stopQuickScroll();
     this.beginViewportGesture();
     this.clampLockView();
   }
@@ -3771,6 +3836,7 @@ export class App {
    * only: the data window, T and the trigger lock are untouched.
    */
   private fitViewport(): void {
+    this.stopQuickScroll();
     this.beginViewportGesture();
     if (!this.fitLockedViewport()) this.stack.zoomToFit();
     this.dirty = true;
@@ -4347,6 +4413,7 @@ export class App {
   private setQuickScroll(on: boolean): void {
     this.quickScroll = on;
     this.persistWorkspace();
+    if (!on) this.stopQuickScroll();
   }
 
   private setWheelZooms(on: boolean): void {
@@ -5449,6 +5516,7 @@ export class App {
   }
 
   private adoptCapture(store: SampleStore, names: string[], label: CaptureLabel): void {
+    this.stopQuickScroll();
     this.repeatTimer.cancel();
     this.settleHeldCaptureStart();
     this.discardDecodeState();
@@ -5905,6 +5973,7 @@ export class App {
   }
 
   private async startCapture(origin: CaptureStartOrigin = 'manual'): Promise<void> {
+    this.stopQuickScroll();
     if (this.resetting || this.running || this.stopping || this.repeatTimer.pending) return;
     this.settledHeldCapture = false;
     this.pendingCaptureStore = null;
@@ -6938,6 +7007,7 @@ export class App {
   }
 
   private async stopCapture(reason: CaptureStopReason = 'manual'): Promise<void> {
+    this.stopQuickScroll();
     if (!this.running && !this.stopping && this.repeatTimer.pending) {
       this.repeatTimer.cancel();
       // A miss leaves the previous wave held while the retry timer runs; stopping here
@@ -6984,6 +7054,7 @@ export class App {
   }
 
   private async teardownDevice(device: Device | null): Promise<void> {
+    this.stopQuickScroll();
     try {
       await device?.stop();
     } catch (e) {

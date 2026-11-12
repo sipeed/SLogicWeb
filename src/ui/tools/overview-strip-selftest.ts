@@ -153,7 +153,7 @@ function check(name: string, pass: boolean, detail: string): void {
     sheet.includes('height: calc(var(--axis-h) + var(--overview-h))');
   const wired = app.includes("overview: must<HTMLCanvasElement>('overview')") &&
     app.includes('this.overview = new OverviewStrip(this.el.overview, {') &&
-    app.includes('onIntent: () => { this.beginViewportGesture(); }') &&
+    app.includes('onIntent: () => { this.stopQuickScroll(); this.beginViewportGesture(); }') &&
     app.includes('this.overview.syncSize();') &&
     app.includes('const overviewH = this.el.overview.offsetHeight || 56;') &&
     app.includes('this.el.scroll.clientHeight || 630) - axisH - overviewH - analogH') &&

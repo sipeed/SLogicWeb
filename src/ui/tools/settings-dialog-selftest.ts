@@ -925,7 +925,7 @@ function appSetterFollows(source: string, name: string, order: readonly string[]
 }
 
 const SETTER_EFFECTS: ReadonlyArray<readonly [string, readonly string[]]> = [
-  ['setQuickScroll', ['this.quickScroll = on;', 'this.persistWorkspace();']],
+  ['setQuickScroll', ['this.quickScroll = on;', 'this.persistWorkspace();', 'if (!on) this.stopQuickScroll();']],
   ['setWheelZooms', ['this.wheelZooms = on;', 'this.persistWorkspace();', 'this.renderInteractionBar(true);']],
   ['setFitRows', ['this.fitRows = on;', 'this.persistWorkspace();', 'this.relayout();']],
   ['setCompactRows', ['this.compactRows = on;', 'this.persistWorkspace();', 'this.relayout();']],
@@ -1020,6 +1020,7 @@ function setterEffectBound(source: string, name: string, order: readonly string[
   const quickThenWheel = '  private setQuickScroll(on: boolean): void {\n' +
     '    this.quickScroll = on;\n' +
     '    this.persistWorkspace();\n' +
+    '    if (!on) this.stopQuickScroll();\n' +
     '  }\n\n' +
     '  private setWheelZooms(on: boolean): void {';
   const setterOrder = (source: string): boolean => source.includes(quickThenWheel) &&

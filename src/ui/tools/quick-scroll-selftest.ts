@@ -434,6 +434,519 @@ const unguardedStep = (velocity: number, dtMs: number): number =>
     'a fling-owned loop would double the pan rate');
 }
 
+const appSourceText = (): string => fs.readFileSync('src/ui/app.ts', 'utf8');
+
+const occurrences = (text: string, needle: string): number => text.split(needle).length - 1;
+
+const between = (source: string, from: string, to: string): string => {
+  const start = source.indexOf(from);
+  if (start < 0) return '';
+  const end = source.indexOf(to, start + from.length);
+  return end < 0 ? '' : source.slice(start, end);
+};
+
+const plotPress = (source: string): string =>
+  between(source, "plot.addEventListener('pointerdown'", "plot.addEventListener('pointermove'");
+
+const dragMove = (source: string): string => between(source, '      if (dragging) {', 'this.updateHover');
+
+const pointerRelease = (source: string): string =>
+  between(source, 'const end = (e: PointerEvent) => {', "plot.addEventListener('pointerup', end);");
+
+const frameBody = (source: string): string =>
+  between(source, 'private frame = (): void => {', 'private startQuickScroll(');
+
+const advanceBody = (source: string): string =>
+  between(source, 'private advanceQuickScroll(now: number): boolean {', 'private recordFrameCost(');
+
+const BUTTON_GUARD = "if (e.pointerType === 'mouse' && e.button !== 0) return;";
+
+const OVERVIEW_PRESS_CANCEL =
+  "this.el.overview.addEventListener('pointerdown', () => { this.stopQuickScroll(); }, true);";
+const OVERVIEW_WHEEL_CANCEL =
+  "this.el.overview.addEventListener('wheel', () => { this.stopQuickScroll(); },\n" +
+  '      { capture: true, passive: true });';
+
+const pressCancels = (source: string): boolean => {
+  const down = plotPress(source);
+  const cancelAt = down.indexOf('this.stopQuickScroll();');
+  return cancelAt >= 0 && cancelAt < down.indexOf(BUTTON_GUARD) &&
+    cancelAt < down.indexOf('pointers.set(') &&
+    down.indexOf('pressX = e.clientX;') > cancelAt;
+};
+
+const axisCancels = (source: string): boolean => {
+  const down = between(source, "this.el.axis.addEventListener('pointerdown'", '    });');
+  const cancelAt = down.indexOf('this.stopQuickScroll();');
+  return cancelAt >= 0 && cancelAt < down.indexOf(BUTTON_GUARD) &&
+    cancelAt < down.indexOf('this.tryGrabAxisChip(e)');
+};
+
+const overviewCancels = (source: string): boolean => {
+  const wire = between(source, 'private wirePlot(): void {', '    // One pointer drags (pan)');
+  return wire.includes(OVERVIEW_PRESS_CANCEL) && wire.includes(OVERVIEW_WHEEL_CANCEL);
+};
+
+const intentBeforeMeasurement = (advance: string): boolean => {
+  const beforeAt = advance.indexOf('const before = this.stack.view.start;');
+  const panAt = advance.indexOf(
+    'this.stack.panPixels(step.panCss * (globalThis.devicePixelRatio || 1));');
+  const intentAt = advance.indexOf('this.noteViewportIntent();');
+  const pannedAt = advance.indexOf('const panned = this.stack.view.start !== before;');
+  const clampStopAt = advance.indexOf(
+    'if (step.panCss !== 0 && !panned) this.quickScrollVelocity = null;');
+  return beforeAt >= 0 && panAt > beforeAt && intentAt > panAt && pannedAt > intentAt &&
+    clampStopAt > pannedAt;
+};
+
+const pressAnchors = (source: string): boolean => {
+  const down = plotPress(source);
+  const single = between(down, '} else if (pointers.size === 1) {', '    });');
+  const pinchBranch = between(down, 'if (pointers.size === 2) {', '} else if (pointers.size === 1) {');
+  return single.includes('pressX = e.clientX;') && single.includes('pinched = false;') &&
+    single.includes('quickSamples.length = 0;') &&
+    single.includes('quickSamples.push({ x: e.clientX, timeStamp: e.timeStamp });') &&
+    pinchBranch.includes('pinched = true;') && pinchBranch.includes('quickSamples.length = 0;');
+};
+
+const dragFollowsPointer = (source: string): boolean => {
+  const drag = dragMove(source);
+  return drag.includes('this.stack.panPixels(-dx * dpr);') &&
+    drag.includes('quickSamples.push({ x: e.clientX, timeStamp: e.timeStamp });') &&
+    drag.includes('quickSamples[0]!.timeStamp < e.timeStamp - 2 * QUICK_SCROLL_RECENT_MS') &&
+    !drag.includes('this.quickScroll');
+};
+
+const resumeExcluded = (source: string): boolean => {
+  const end = pointerRelease(source);
+  const resume = between(end, '} else if (pinch) {', '      if (!dragging || pointers.size > 0) return;');
+  return resume.includes('pinched = true;') && resume.includes('quickSamples.length = 0;') &&
+    resume.includes('pressX = rest.x;') && resume.includes('lastX = rest.x;');
+};
+
+const frameDirtyFollowsAdvance = (source: string): boolean => {
+  const frame = frameBody(source);
+  return occurrences(frame, 'this.advanceQuickScroll(now)') === 1 &&
+    frame.includes('if (this.advanceQuickScroll(now)) this.dirty = true;') &&
+    !frame.includes('this.advanceQuickScroll(now); this.dirty = true;');
+};
+
+const releaseFlings = (source: string): boolean => {
+  const end = pointerRelease(source);
+  return end.includes("if (e.type !== 'pointerup' || pinched) { quickSamples.length = 0; return; }") &&
+    end.includes('const travel = Math.abs(e.clientX - pressX);') &&
+    end.includes('[...quickSamples, { x: e.clientX, timeStamp: e.timeStamp }], e.timeStamp);') &&
+    end.includes('if (this.quickScroll && startsFling(travel, velocity)) this.startQuickScroll(velocity);');
+};
+
+const frameAdvances = (source: string): boolean => {
+  const frame = frameBody(source);
+  const nowAt = frame.indexOf('const now = performance.now();');
+  const advanceAt = frame.indexOf('if (this.advanceQuickScroll(now)) this.dirty = true;');
+  const liveAt = frame.indexOf('let liveDue = false;');
+  const dueAt = frame.indexOf('if (!this.dirty && !liveDue) return;');
+  return nowAt >= 0 && advanceAt > nowAt && liveAt > advanceAt && dueAt > advanceAt;
+};
+
+interface FlingRun {
+  readonly frames: number;
+  readonly start: number;
+  readonly end: number;
+}
+
+const simulateFling = (
+  velocity: number, length: number, start: number, span: number, dtMs: number,
+  stopOnClamp: boolean,
+): FlingRun => {
+  const view = new ViewTransform(1600, start, start + span);
+  view.clampTo(length);
+  let state: number | null = velocity;
+  let frames = 0;
+  while (state !== null && frames < 5000) {
+    const step = flingStep(state, dtMs);
+    const before = view.start;
+    view.panPixels(step.panCss);
+    view.clampTo(length);
+    const panned = view.start !== before;
+    state = step.done ? null : step.velocity;
+    if (stopOnClamp && step.panCss !== 0 && !panned) state = null;
+    frames += 1;
+  }
+  return { frames, start: view.start, end: view.end };
+};
+
+const simulateLockClampedFling = (
+  velocity: number, start: number, span: number, lock: { start: number; end: number },
+  dtMs: number, clampBeforeMeasuring: boolean,
+): FlingRun => {
+  const view = new ViewTransform(1600, start, start + span);
+  let state: number | null = velocity;
+  let frames = 0;
+  while (state !== null && frames < 5000) {
+    const step = flingStep(state, dtMs);
+    const before = view.start;
+    view.panPixels(step.panCss);
+    const movedBeforeClamp = view.start !== before;
+    if (view.start < lock.start) view.set(lock.start, lock.start + span);
+    else if (view.end > lock.end) view.set(lock.end - span, lock.end);
+    const panned = clampBeforeMeasuring ? view.start !== before : movedBeforeClamp;
+    state = step.done ? null : step.velocity;
+    if (step.panCss !== 0 && !panned) state = null;
+    frames += 1;
+  }
+  return { frames, start: view.start, end: view.end };
+};
+
+{
+  const app = appSourceText();
+  const down = plotPress(app);
+  const single = between(down, '} else if (pointers.size === 1) {', '    });');
+  const pinchBranch = between(down, 'if (pointers.size === 2) {', '} else if (pointers.size === 1) {');
+  check('a new plot press cancels any running fling before the button guard and the gesture record',
+    pressCancels(app) && down.indexOf('this.stopQuickScroll();') < down.indexOf(BUTTON_GUARD) &&
+    down.indexOf(BUTTON_GUARD) < down.indexOf('pointers.set('),
+    `cancel=${down.indexOf('this.stopQuickScroll();')}, ` +
+    `guard=${down.indexOf(BUTTON_GUARD)}, map=${down.indexOf('pointers.set(')}`);
+
+  const noCancel = down.replace('this.stopQuickScroll();\n', '');
+  check('control: a press without the cancel leaves the glide running into the new gesture',
+    noCancel !== down && occurrences(down, 'this.stopQuickScroll();') === 1 &&
+    occurrences(noCancel, 'this.stopQuickScroll();') === 0,
+    `real=${occurrences(down, 'this.stopQuickScroll();')}, ` +
+    `stripped=${occurrences(noCancel, 'this.stopQuickScroll();')}`);
+
+  const belowGuard = down.replace(
+    `this.stopQuickScroll();\n      ${BUTTON_GUARD}`,
+    `${BUTTON_GUARD}\n      this.stopQuickScroll();`);
+  check('control: a cancel placed below the button guard misses a right-button press',
+    belowGuard !== down && pressCancels(app) &&
+    !pressCancels(app.replace(down, belowGuard)),
+    `mutated=${pressCancels(app.replace(down, belowGuard))}, real=${pressCancels(app)}`);
+
+  check('every new press restarts the release sample window and the travel anchor',
+    pressAnchors(app),
+    `press=${single.includes('pressX = e.clientX;')}, ` +
+    `pressSamples=${single.includes('quickSamples.length = 0;')}, ` +
+    `pinch=${pinchBranch.includes('pinched = true;')}, ` +
+    `pinchSamples=${pinchBranch.includes('quickSamples.length = 0;')}`);
+
+  const lostAnchor = app.replace('        lastX = e.clientX;\n        pressX = e.clientX;\n',
+    '        lastX = e.clientX;\n');
+  const lostReset = app.replace(
+    '        pinched = false;\n        quickSamples.length = 0;\n',
+    '        pinched = false;\n');
+  check('control: without the anchor or the reset a stale pre-gesture sample would decide the speed',
+    pressAnchors(app) && !pressAnchors(lostAnchor) && !pressAnchors(lostReset) &&
+    lostAnchor !== app && lostReset !== app,
+    `anchor=${pressAnchors(lostAnchor)}, reset=${pressAnchors(lostReset)}, ` +
+    `real=${pressAnchors(app)}`);
+
+  const drag = dragMove(app);
+  check('the drag move keeps a bounded timestamped sample window beside its direct pan',
+    dragFollowsPointer(app),
+    `pan=${drag.includes('this.stack.panPixels(-dx * dpr);')}, ` +
+    `push=${drag.includes('quickSamples.push({ x: e.clientX, timeStamp: e.timeStamp });')}, ` +
+    `trim=${drag.includes('2 * QUICK_SCROLL_RECENT_MS')}, gated=${drag.includes('this.quickScroll')}`);
+
+  const ungatedDrag = app.replace('this.stack.panPixels(-dx * dpr);',
+    'if (this.quickScroll) this.stack.panPixels(-dx * dpr);');
+  check('control: gating the direct drag on the preference would break drag-only panning',
+    ungatedDrag !== app && dragFollowsPointer(app) && !dragFollowsPointer(ungatedDrag),
+    `mutated=${dragFollowsPointer(ungatedDrag)}, real=${dragFollowsPointer(app)}`);
+}
+
+{
+  const app = appSourceText();
+  const end = pointerRelease(app);
+  const markerAt = end.indexOf('if (markerEnded) {');
+  const teardownAt = end.indexOf('dragging = false;');
+  const releaseAt = end.indexOf('const travel = Math.abs(e.clientX - pressX);');
+  const resume = between(end, '} else if (pinch) {', '      if (!dragging || pointers.size > 0) return;');
+  check('a release samples speed only after the marker early return and the drag teardown',
+    markerAt >= 0 && teardownAt > markerAt && releaseAt > teardownAt &&
+    end.indexOf('if (e.type !== \'pointerup\' || pinched)') > teardownAt &&
+    releaseFlings(app),
+    `marker=${markerAt}, teardown=${teardownAt}, gate=${end.indexOf('pinched)')}, ` +
+    `release=${releaseAt}`);
+
+  const releaseWithoutPinch = app.replace(
+    "if (e.type !== 'pointerup' || pinched) { quickSamples.length = 0; return; }",
+    "if (e.type !== 'pointerup') { quickSamples.length = 0; return; }");
+  const releaseWithoutType = app.replace(
+    "if (e.type !== 'pointerup' || pinched) { quickSamples.length = 0; return; }",
+    'if (pinched) { quickSamples.length = 0; return; }');
+  const releaseWithoutOption = app.replace(
+    'if (this.quickScroll && startsFling(travel, velocity)) this.startQuickScroll(velocity);',
+    'if (startsFling(travel, velocity)) this.startQuickScroll(velocity);');
+  check('control: dropping the cancel guard, the release type, or the preference all fail the release predicate',
+    releaseWithoutPinch !== app && !releaseFlings(releaseWithoutPinch) &&
+    releaseWithoutType !== app && !releaseFlings(releaseWithoutType) &&
+    releaseWithoutOption !== app && !releaseFlings(releaseWithoutOption),
+    `pinch=${releaseFlings(releaseWithoutPinch)}, type=${releaseFlings(releaseWithoutType)}, ` +
+    `option=${releaseFlings(releaseWithoutOption)}`);
+
+  check('a pinch never flings: the resumed drag restarts the window and stays excluded',
+    resumeExcluded(app),
+    `pinched=${resume.includes('pinched = true;')}, ` +
+    `samples=${resume.includes('quickSamples.length = 0;')}, ` +
+    `anchor=${resume.includes('pressX = rest.x;')}`);
+
+  const resumeWithoutPinch = app.replace(
+    '          pressX = rest.x;\n          pinched = true;\n',
+    '          pressX = rest.x;\n');
+  check('control: a resumed pinch without the flag would release a full-speed fling',
+    resumeWithoutPinch !== app && resumeExcluded(app) && !resumeExcluded(resumeWithoutPinch),
+    `mutated=${resumeExcluded(resumeWithoutPinch)}, real=${resumeExcluded(app)}`);
+
+  const axisEnd = between(app, 'const axisEnd = (e: PointerEvent) => {',
+    "this.el.axis.addEventListener('pointerup'");
+  const axisDown = between(app, "this.el.axis.addEventListener('pointerdown'", '    });');
+  check('the ruler pans directly, cancels a glide on press before the button guard, and never releases one of its own',
+    axisEnd.length > 0 && !axisEnd.includes('startQuickScroll') &&
+    !axisEnd.includes('quickSamples') && axisCancels(app) &&
+    axisDown.indexOf('this.stopQuickScroll();') < axisDown.indexOf('this.tryGrabAxisChip(e)'),
+    `end=${axisEnd.length}, ` +
+    `fling=${axisEnd.includes('startQuickScroll')}, ` +
+    `cancel=${axisDown.indexOf('this.stopQuickScroll();')}, ` +
+    `guard=${axisDown.indexOf(BUTTON_GUARD)}, ` +
+    `grab=${axisDown.indexOf('this.tryGrabAxisChip(e)')}`);
+
+  const axisBelowGuard = axisDown.replace(
+    `this.stopQuickScroll();\n      ${BUTTON_GUARD}`,
+    `${BUTTON_GUARD}\n      this.stopQuickScroll();`);
+  check('control: a ruler cancel below the button guard misses a right-button press',
+    axisBelowGuard !== axisDown && axisCancels(app) &&
+    !axisCancels(app.replace(axisDown, axisBelowGuard)),
+    `mutated=${axisCancels(app.replace(axisDown, axisBelowGuard))}, real=${axisCancels(app)}`);
+}
+
+{
+  const app = appSourceText();
+  const wire = between(app, 'private wirePlot(): void {', '    // One pointer drags (pan)');
+  check('the overview strip cancels a glide from capture-phase press and wheel listeners',
+    overviewCancels(app) && wire.indexOf(OVERVIEW_PRESS_CANCEL) >= 0 &&
+    wire.indexOf(OVERVIEW_WHEEL_CANCEL) >= 0,
+    `press=${wire.indexOf(OVERVIEW_PRESS_CANCEL)}, ` +
+    `wheel=${wire.indexOf(OVERVIEW_WHEEL_CANCEL)}`);
+
+  const bubblePress = app.replace(OVERVIEW_PRESS_CANCEL,
+    "this.el.overview.addEventListener('pointerdown', () => { this.stopQuickScroll(); });");
+  const bubbleWheel = app.replace(OVERVIEW_WHEEL_CANCEL,
+    "this.el.overview.addEventListener('wheel', () => { this.stopQuickScroll(); },\n" +
+    '      { passive: true });');
+  check('control: bubble-phase overview listeners would run after the strip decided eligibility',
+    bubblePress !== app && !overviewCancels(bubblePress) &&
+    bubbleWheel !== app && !overviewCancels(bubbleWheel),
+    `bubblePress=${overviewCancels(bubblePress)}, bubbleWheel=${overviewCancels(bubbleWheel)}`);
+
+  const busyPress = app.replace(OVERVIEW_PRESS_CANCEL,
+    "this.el.overview.addEventListener('pointerdown', () => { this.stopQuickScroll(); " +
+    'this.beginViewportGesture(); }, true);');
+  check('control: an overview listener that does more than cancel misses the contract',
+    busyPress !== app && overviewCancels(app) && !overviewCancels(busyPress),
+    `mutated=${overviewCancels(busyPress)}, real=${overviewCancels(app)}`);
+}
+
+{
+  const app = appSourceText();
+  const start = between(app, 'private startQuickScroll(velocity: number): void {',
+    'private stopQuickScroll(): void {');
+  const stop = between(app, 'private stopQuickScroll(): void {', 'private advanceQuickScroll(');
+  const advance = advanceBody(app);
+  check('the fling state is nullable, armed only by a release, and schedules nothing itself',
+    app.includes('private quickScrollVelocity: number | null = null;') &&
+    app.includes('private quickScrollAt = 0;') &&
+    start.includes('this.quickScrollVelocity = velocity;') &&
+    start.includes('this.quickScrollAt = performance.now();') &&
+    start.includes('this.beginViewportGesture();') &&
+    stop.includes('this.quickScrollVelocity = null;') &&
+    !/requestAnimationFrame|setInterval|setTimeout/.test(start + stop + advance),
+    `armed=${start.includes('this.quickScrollVelocity = velocity;')}, ` +
+    `off=${stop.includes('this.quickScrollVelocity = null;')}, ` +
+    `clock=${/requestAnimationFrame|setInterval|setTimeout/.test(advance)}`);
+
+  const beforeAt = advance.indexOf('const before = this.stack.view.start;');
+  const panAt = advance.indexOf(
+    'this.stack.panPixels(step.panCss * (globalThis.devicePixelRatio || 1));');
+  const pannedAt = advance.indexOf('const panned = this.stack.view.start !== before;');
+  const clampStopAt = advance.indexOf('if (step.panCss !== 0 && !panned) this.quickScrollVelocity = null;');
+  const intentAt = advance.indexOf('this.noteViewportIntent();');
+  check('each frame pans in CSS px via DPR, clamps through the intent, then measures the movement',
+    advance.includes('flingStep(velocity, now - this.quickScrollAt)') &&
+    intentBeforeMeasurement(advance) &&
+    beforeAt >= 0 && beforeAt < panAt && panAt < intentAt && intentAt < pannedAt &&
+    pannedAt < clampStopAt &&
+    occurrences(advance, 'this.noteViewportIntent();') === 1 &&
+    occurrences(advance, 'this.dirty = true;') === 0,
+    `before=${beforeAt}, pan=${panAt}, intent=${intentAt}, panned=${pannedAt}, ` +
+    `clamp=${clampStopAt}, intents=${occurrences(advance, 'this.noteViewportIntent();')}`);
+
+  const measuredFirst = advance
+    .replace('    this.noteViewportIntent();\n    const panned', '    const panned')
+    .replace('    if (step.panCss !== 0 && !panned) this.quickScrollVelocity = null;\n',
+      '    if (step.panCss !== 0 && !panned) this.quickScrollVelocity = null;\n' +
+      '    this.noteViewportIntent();\n');
+  check('control: measuring the pan before the intent clamp misses the frame ordering',
+    measuredFirst !== advance && intentBeforeMeasurement(advance) &&
+    !intentBeforeMeasurement(measuredFirst),
+    `mutated=${intentBeforeMeasurement(measuredFirst)}, real=${intentBeforeMeasurement(advance)}`);
+
+  const noDpr = advance.replace('step.panCss * (globalThis.devicePixelRatio || 1)', 'step.panCss');
+  const noIntent = advance.replace('this.noteViewportIntent();', '');
+  check('control: a DPR-free pan or a step without the re-armed intent misses the frame contract',
+    noDpr !== advance && !noDpr.includes('devicePixelRatio') &&
+    noIntent !== advance && occurrences(noIntent, 'this.noteViewportIntent();') === 0,
+    `dpr=${noDpr.includes('devicePixelRatio')}, intents=${occurrences(noIntent, 'this.noteViewportIntent();')}`);
+
+  const frame = frameBody(app);
+  const nowAt = frame.indexOf('const now = performance.now();');
+  const advanceAt = frame.indexOf('if (this.advanceQuickScroll(now)) this.dirty = true;');
+  check('the fling advances immediately after the frame clock, before every early return',
+    frameAdvances(app) && nowAt >= 0 && advanceAt > nowAt &&
+    occurrences(app, 'this.advanceQuickScroll(') === 1,
+    `now=${nowAt}, advance=${advanceAt}, ` +
+    `calls=${occurrences(app, 'this.advanceQuickScroll(')}`);
+
+  const movedBelow = app
+    .replace('    if (this.advanceQuickScroll(now)) this.dirty = true;\n', '')
+    .replace('    if (!this.dirty && !liveDue) return;\n',
+      '    if (!this.dirty && !liveDue) return;\n    if (this.advanceQuickScroll(now)) this.dirty = true;\n');
+  const droppedAdvance = app.replace(
+    '    if (this.advanceQuickScroll(now)) this.dirty = true;\n', '');
+  check('control: advancing after the dirty/live early return, or not at all, fails the seam predicate',
+    movedBelow !== app && !frameAdvances(movedBelow) &&
+    droppedAdvance !== app && !frameAdvances(droppedAdvance),
+    `below=${frameAdvances(movedBelow)}, dropped=${frameAdvances(droppedAdvance)}`);
+
+  const unguardedDirty = app.replace(
+    'if (this.advanceQuickScroll(now)) this.dirty = true;',
+    'this.advanceQuickScroll(now); this.dirty = true;');
+  check('control: marking dirty on every frame would keep the single clock redrawing forever',
+    unguardedDirty !== app && frameDirtyFollowsAdvance(app) &&
+    !frameDirtyFollowsAdvance(unguardedDirty),
+    `mutated=${frameDirtyFollowsAdvance(unguardedDirty)}, real=${frameDirtyFollowsAdvance(app)}`);
+}
+
+{
+  const app = appSourceText();
+  const advance = advanceBody(app);
+  const middle = simulateFling(6, 100_000, 45_000, 10_000, 1000 / 60, true);
+  const middleControl = simulateFling(6, 100_000, 45_000, 10_000, 1000 / 60, false);
+  check('a free-running glide keeps stepping until the stop speed, then stops for good',
+    middle.frames > 10 && middle.frames === middleControl.frames && middle.start < 45_000,
+    `frames=${middle.frames}, control=${middleControl.frames}, start=${middle.start}`);
+
+  const whole = simulateFling(6, 1000, 0, 1000, 1000 / 60, true);
+  const wholeControl = simulateFling(6, 1000, 0, 1000, 1000 / 60, false);
+  check('a fully visible capture stops on its first step instead of panning into blank space',
+    whole.frames === 1 && whole.start === 0 && whole.end === 1000 && wholeControl.frames > 1,
+    `frames=${whole.frames}, control=${wholeControl.frames}, view=${whole.start}..${whole.end}`);
+
+  const leftEdge = simulateFling(6, 100_000, 0, 10_000, 1000 / 60, true);
+  const rightEdge = simulateFling(-6, 100_000, 90_000, 10_000, 1000 / 60, true);
+  check('a glide into either data edge stops on the clamped step instead of grinding on',
+    leftEdge.frames === 1 && leftEdge.start === 0 &&
+    rightEdge.frames === 1 && rightEdge.end === 100_000,
+    `left=${leftEdge.frames}@${leftEdge.start}, right=${rightEdge.frames}@${rightEdge.end}`);
+
+  check('the frame contract tests the exact clamped start, not an approximate distance',
+    advance.includes('const before = this.stack.view.start;') &&
+    advance.includes('const panned = this.stack.view.start !== before;') &&
+    !advance.includes('< 0.5') && !advance.includes('Math.abs(this.stack.view'),
+    `exact=${advance.includes('const panned = this.stack.view.start !== before;')}`);
+}
+
+{
+  const app = appSourceText();
+  const advance = advanceBody(app);
+  const lock = { start: 50_000, end: 60_000 };
+  const stopped = simulateLockClampedFling(6, 50_000, 10_000, lock, 1000 / 60, true);
+  const grinding = simulateLockClampedFling(6, 50_000, 10_000, lock, 1000 / 60, false);
+  check('a pan rejected only by the lock clamp stops on the first step, not after the decay',
+    stopped.frames === 1 && stopped.start === lock.start && stopped.end === lock.end &&
+    grinding.frames > 50 && grinding.frames < 5000 &&
+    grinding.start === lock.start && grinding.end === lock.end &&
+    intentBeforeMeasurement(advance),
+    `stopped=${stopped.frames}@${stopped.start}..${stopped.end}, ` +
+    `control=${grinding.frames}@${grinding.start}..${grinding.end}, ` +
+    `ordering=${intentBeforeMeasurement(advance)}`);
+
+  const free = simulateLockClampedFling(6, 50_000, 10_000, { start: 0, end: 100_000 },
+    1000 / 60, true);
+  check('control: without a rejecting lock the same release keeps travelling frame by frame',
+    free.frames > 50 && free.start < lock.start &&
+    free.frames === grinding.frames && stopped.frames !== free.frames,
+    `frames=${free.frames}, start=${free.start}, stopped=${stopped.frames}`);
+}
+
+{
+  const app = appSourceText();
+  const advance = advanceBody(app);
+  const slices: readonly (readonly [string, string])[] = [
+    ['the wheel decision', between(app, 'const wheelNavigate = (e: WheelEvent', "plot.addEventListener('wheel'")],
+    ['a new plot press', plotPress(app)],
+    ['a new axis press', between(app, "this.el.axis.addEventListener('pointerdown'", '    });')],
+    ['the zoom keys', between(app, 'private keyZoom(', 'private keyPan(')],
+    ['the pan keys', between(app, 'private keyPan(', 'private beginViewportGesture(')],
+    ['the corner Fit command', between(app, 'private fitViewport()', 'private fitLockedViewport(')],
+    ['the Fit shortcut', between(app, "case 'view.fit':", "case 'cursors.clear':")],
+    ['the cursor order-chip jump', between(app, 'private focusCursor(', 'private removeCursor(')],
+    ['an explicit viewport command', between(app, 'private noteExplicitViewport(', 'private fitViewport()')],
+  ];
+  const missing = slices.filter(([, body]) =>
+    body.length === 0 || !body.includes('this.stopQuickScroll();')).map(([name]) => name);
+
+  const lifecycle: readonly (readonly [string, string])[] = [
+    ['capture start',
+      "private async startCapture(origin: CaptureStartOrigin = 'manual'): Promise<void> {\n    this.stopQuickScroll();"],
+    ['capture stop',
+      "private async stopCapture(reason: CaptureStopReason = 'manual'): Promise<void> {\n    this.stopQuickScroll();"],
+    ['file adoption',
+      'private adoptCapture(store: SampleStore, names: string[], label: CaptureLabel): void {\n    this.stopQuickScroll();'],
+    ['device teardown',
+      'private async teardownDevice(device: Device | null): Promise<void> {\n    this.stopQuickScroll();'],
+    ['the option disable',
+      'this.quickScroll = on;\n    this.persistWorkspace();\n    if (!on) this.stopQuickScroll();'],
+    ['the overview intent', 'onIntent: () => { this.stopQuickScroll(); this.beginViewportGesture(); },'],
+    ['the overview press cancel', OVERVIEW_PRESS_CANCEL],
+    ['the overview wheel cancel', OVERVIEW_WHEEL_CANCEL],
+  ];
+  const lost = lifecycle.filter(([, needle]) => !app.includes(needle)).map(([name]) => name);
+  const cancelSites = occurrences(app, 'this.stopQuickScroll();');
+  check('every named interaction and lifecycle path cancels an active fling',
+    missing.length === 0 && lost.length === 0 && cancelSites === 17,
+    `missing=${JSON.stringify(missing)}, lost=${JSON.stringify(lost)}, sites=${cancelSites}`);
+
+  const extraSite = `${app}\n  private extraCancel(): void { this.stopQuickScroll(); }\n`;
+  check('control: the inventory counts any added or removed cancellation site',
+    occurrences(extraSite, 'this.stopQuickScroll();') === cancelSites + 1 &&
+    occurrences(app.replace('    this.stopQuickScroll();\n    if (!this.running', '    if (!this.running'),
+      'this.stopQuickScroll();') === cancelSites - 1,
+    `added=${occurrences(extraSite, 'this.stopQuickScroll();')}, ` +
+    `removed=${occurrences(app.replace('    this.stopQuickScroll();\n    if (!this.running', '    if (!this.running'), 'this.stopQuickScroll();')}`);
+
+  const begin = between(app, 'private beginViewportGesture(): void {', 'private noteViewportIntent(): void {');
+  const note = between(app, 'private noteViewportIntent(): void {', 'private clampLockView(');
+  check('the fling re-arms the shared gesture path instead of cancelling itself through it',
+    begin.length > 0 && note.length > 0 &&
+    !begin.includes('stopQuickScroll') && !note.includes('stopQuickScroll') &&
+    note.includes('this.beginViewportGesture();') &&
+    advance.includes('this.noteViewportIntent();'),
+    `begin=${begin.includes('stopQuickScroll')}, note=${note.includes('stopQuickScroll')}, ` +
+    `step=${advance.includes('this.noteViewportIntent();')}`);
+
+  const sabotage = app.replace('private beginViewportGesture(): void {\n',
+    'private beginViewportGesture(): void {\n    this.stopQuickScroll();\n');
+  check('control: cancelling inside the shared gesture entry kills the glide on its first step',
+    sabotage !== app &&
+    between(sabotage, 'private beginViewportGesture(): void {', 'private noteViewportIntent(): void {')
+      .includes('stopQuickScroll') &&
+    app.includes('private advanceQuickScroll(now: number): boolean {') &&
+    !between(app, 'private beginViewportGesture(): void {', 'private noteViewportIntent(): void {')
+      .includes('stopQuickScroll'),
+    `mutated=${sabotage !== app}`);
+}
+
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
