@@ -224,6 +224,10 @@ export class FakeElement {
   append(...nodes: (FakeChild | string)[]): void {
     for (const node of nodes) this.childNodes.push(this.adopt(node));
   }
+  prepend(...nodes: (FakeChild | string)[]): void {
+    const heads = nodes.map((node) => this.adopt(node));
+    this.childNodes.unshift(...heads);
+  }
   appendChild<T extends FakeChild>(node: T): T {
     this.append(node);
     return node;
@@ -277,7 +281,11 @@ export class FakeElement {
   }
   dispatchEvent(event: FakeEvent): boolean {
     event.target ??= this;
-    for (const listener of [...(this.listeners.get(event.type) ?? [])]) listener(event);
+    for (let at: FakeElement | null = this; at; at = at.parentNode) {
+      for (const listener of [...(at.listeners.get(event.type) ?? [])]) listener(event);
+      if (event.propagationStopped) break;
+    }
+    if (!event.propagationStopped && this.isConnected) this.doc.dispatchEvent(event);
     return !event.defaultPrevented;
   }
 
@@ -290,6 +298,7 @@ export class FakeElement {
   blur(): void { if (this.doc.activeElement === this) this.doc.setFocus(this.doc.body); }
 
   // input
+  select(): void {}
   setCustomValidity(message: string): void { this.validationMessage = message; }
   reportValidity(): boolean {
     this.reported++;
@@ -303,15 +312,37 @@ export class FakeElement {
   close(): void { this.open = false; }
   showPopover(): void {}
   hidePopover(): void {}
+
+  getBoundingClientRect(): {
+    x: number; y: number; width: number; height: number;
+    top: number; left: number; right: number; bottom: number;
+  } {
+    return { x: 0, y: 0, width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 };
+  }
 }
 
 export class FakeDocument {
   readonly body: FakeElement;
   activeElement: FakeElement;
+  private readonly listeners = new Map<string, Listener[]>();
 
   constructor() {
     this.body = new FakeElement(this, 'body');
     this.activeElement = this.body;
+  }
+
+  addEventListener(type: string, listener: Listener): void {
+    const list = this.listeners.get(type) ?? [];
+    list.push(listener);
+    this.listeners.set(type, list);
+  }
+  removeEventListener(type: string, listener: Listener): void {
+    this.listeners.set(type, (this.listeners.get(type) ?? []).filter((l) => l !== listener));
+  }
+  dispatchEvent(event: FakeEvent): boolean {
+    event.target ??= this.body;
+    for (const listener of [...(this.listeners.get(event.type) ?? [])]) listener(event);
+    return !event.defaultPrevented;
   }
 
   createElement(tag: string): FakeElement { return new FakeElement(this, tag); }

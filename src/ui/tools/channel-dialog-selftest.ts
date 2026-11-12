@@ -1,0 +1,371 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+/**
+ * A channel card's read-only name and its one settings dialog: the gear and the trigger
+ * glyph open the same modal over name, trigger mode and colour, Save emits exactly one
+ * `onConfigure`, and Cancel, Escape and a backdrop press emit nothing. Built on the fake
+ * DOM (`fakeDom.ts`) and driven the way the card listens: button clicks, the form's
+ * `submit`, the dialog's `cancel` and `pointerdown`.
+ */
+
+import { fakeEvent, installFakeDom, type FakeElement } from './fakeDom.js';
+import {
+  ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration,
+} from '../channelList.js';
+import { CHANNEL_COLOR_PRESETS } from '../metrics.js';
+import {
+  channelColor, defaultChannelName, type ChannelState, type TriggerMode,
+} from '../state.js';
+
+const nodeProcess = (() => {
+  const p = (globalThis as { process?: { exit(code: number): never } }).process;
+  if (!p || typeof p.exit !== 'function') throw new Error('this entry point only runs under node');
+  return p;
+})();
+
+interface TestResult { name: string; pass: boolean; detail: string }
+const results: TestResult[] = [];
+function check(name: string, pass: boolean, detail: string): void {
+  results.push({ name, pass, detail });
+}
+
+const doc = installFakeDom();
+(globalThis as Record<string, unknown>)['window'] = { innerWidth: 1200, innerHeight: 800 };
+
+interface CellOptions {
+  name?: string;
+  mode?: TriggerMode;
+  disabled?: boolean;
+  color?: string;
+}
+
+function makeCell(index: number, options: CellOptions = {}): ChannelCell {
+  const channel: ChannelState = {
+    index,
+    name: options.name ?? defaultChannelName(index),
+    color: options.color ?? channelColor(index),
+    enabled: true,
+  };
+  return {
+    channel,
+    heightCss: 72,
+    laneCss: 0,
+    analyzers: [],
+    trigger: {
+      mode: options.mode ?? 'dont-care',
+      armed: false,
+      disabled: options.disabled ?? false,
+    },
+  };
+}
+
+interface Calls {
+  configure: [number, ChannelConfiguration][];
+  reorder: [number, number][];
+  remove: string[];
+}
+
+interface Harness {
+  list: ChannelList;
+  root: FakeElement;
+  calls: Calls;
+  render(cells: readonly ChannelCell[]): void;
+  renderBuses(cells: readonly BusCell[]): void;
+}
+
+function setup(cells: readonly ChannelCell[]): Harness {
+  doc.body.replaceChildren();
+  const root = doc.createElement('div');
+  root.className = 'channel-list';
+  doc.body.appendChild(root);
+  const calls: Calls = { configure: [], reorder: [], remove: [] };
+  let current = [...cells];
+  const list: ChannelList = new ChannelList(root as unknown as HTMLElement, {
+    onConfigure: (index, config) => {
+      calls.configure.push([index, config]);
+      current = current.map((cell) => (cell.channel.index === index
+        ? {
+          ...cell,
+          channel: {
+            ...cell.channel,
+            name: config.name.trim() || defaultChannelName(index),
+            color: config.color,
+          },
+          trigger: { ...cell.trigger, mode: config.mode },
+        }
+        : cell));
+      list.render(current);
+    },
+    onReorder: (from, to) => calls.reorder.push([from, to]),
+    onRemoveAnalyzer: (id) => calls.remove.push(id),
+  });
+  const harness: Harness = {
+    list,
+    root,
+    calls,
+    render: (next) => { current = [...next]; list.render(current); },
+    renderBuses: (buses) => list.renderBuses(buses),
+  };
+  harness.render(current);
+  return harness;
+}
+
+const settingsDialog = (): FakeElement | null =>
+  doc.body.querySelector('dialog.channel-settings-dialog');
+const form = (): FakeElement | null => settingsDialog()?.querySelector('.channel-settings-form') ?? null;
+const titleOf = (): string | null => settingsDialog()?.querySelector('h2')?.textContent ?? null;
+const nameInput = (): FakeElement | null => settingsDialog()?.querySelector('.channel-settings-name') ?? null;
+const triggerSet = (): FakeElement | null => settingsDialog()?.querySelector('.channel-trigger-options') ?? null;
+const radios = (): FakeElement[] =>
+  settingsDialog()?.querySelectorAll('.channel-trigger-option input') ?? [];
+const checkedMode = (): string => radios().filter((r) => r.checked).map((r) => r.value).join(',');
+const save = (): FakeElement | null => settingsDialog()?.querySelector('.channel-settings-actions .primary') ?? null;
+const cancel = (): FakeElement | null => settingsDialog()?.querySelector('.channel-settings-cancel') ?? null;
+const colorReset = (): FakeElement | null =>
+  settingsDialog()?.querySelector('.channel-color-palette .channel-name-reset') ?? null;
+const nameReset = (): FakeElement | null =>
+  settingsDialog()?.querySelector('.channel-settings-name-control .channel-name-reset') ?? null;
+const presets = (): FakeElement[] => settingsDialog()?.querySelectorAll('.channel-color-preset') ?? [];
+const presetOf = (color: string): FakeElement | null =>
+  presets().find((el) => el.title.toLowerCase() === color.toLowerCase()) ?? null;
+const gear = (root: FakeElement, channel: number): FakeElement | null =>
+  root.querySelector(`.ch-settings[data-channel="${channel}"]`);
+const glyph = (root: FakeElement, channel: number): FakeElement | null =>
+  root.querySelector(`.ch-trigger[data-channel="${channel}"]`);
+const popover = (): FakeElement | null => doc.body.querySelector('.ch-editor-popover');
+
+function submit(): void {
+  form()?.dispatchEvent(fakeEvent('submit'));
+}
+function chooseMode(mode: TriggerMode): void {
+  for (const radio of radios()) radio.checked = radio.value === mode;
+}
+
+// The head is read-only name, D-index, trigger glyph and gear, and the gear opens the
+// dialog on its name field.
+{
+  const h = setup([makeCell(0, { name: 'CLK' }), makeCell(1)]);
+  const head = h.root.querySelector('.ch-head');
+  const kids = head?.children ?? [];
+  const readOnly = kids[0]?.className === 'ch-tag ch-tag--name' && kids[0]?.textContent === 'CLK' &&
+    !(kids[0]?.className ?? '').includes('ch-tag--editable') &&
+    kids[0]?.getAttribute('role') === null && kids[0]?.getAttribute('contenteditable') === null;
+  kids[0]?.dispatchEvent(fakeEvent('dblclick'));
+  kids[0]?.dispatchEvent(fakeEvent('keydown', { key: 'F2' }));
+  kids[0]?.dispatchEvent(fakeEvent('keydown', { key: 'Enter' }));
+  const noInlineEntry = h.root.querySelectorAll('input').length === 0 &&
+    settingsDialog()?.open === false;
+  const order = kids.length === 4 &&
+    kids[1]?.className === 'ch-original-id' && kids[1]?.textContent === 'D0' &&
+    kids[1]?.hidden === false &&
+    kids[2]?.localName === 'button' && kids[2]?.className === 'ch-trigger' &&
+    kids[3]?.localName === 'button' && kids[3]?.className === 'ch-settings';
+  check('a channel head renders a read-only name, the D-index, the trigger glyph and the gear',
+    readOnly && noInlineEntry && order,
+    `readOnly=${readOnly}, inlineEntry=${!noInlineEntry}, order=${order}, ` +
+    `kids=${kids.map((k) => k.className).join('|')}`);
+
+  const opener = gear(h.root, 0);
+  opener?.click();
+  const opened = settingsDialog()?.open === true && titleOf() === 'D0 settings' &&
+    nameInput()?.value === 'CLK' && doc.activeElement === nameInput() && nameReset() !== null &&
+    opener?.getAttribute('aria-haspopup') === 'dialog' &&
+    opener?.getAttribute('aria-label') === 'D0 settings';
+  check('the gear opens the dialog focused on the channel name, prefilled and titled by index',
+    opened,
+    `open=${settingsDialog()?.open}, title=${titleOf()}, value=${nameInput()?.value}, ` +
+    `focused=${doc.activeElement === nameInput()}, label=${opener?.getAttribute('aria-label')}`);
+}
+
+// The trigger glyph opens the same dialog on the trigger field.
+{
+  const h = setup([makeCell(0, { name: 'CLK', mode: 'falling' })]);
+  const opener = glyph(h.root, 0);
+  opener?.click();
+  const focused = doc.activeElement;
+  check('the row trigger glyph opens the same dialog focused on the checked trigger mode',
+    settingsDialog()?.open === true &&
+      opener?.getAttribute('aria-haspopup') === 'dialog' &&
+      focused !== null && focused.localName === 'input' && focused.checked === true &&
+      focused.value === 'falling' && checkedMode() === 'falling',
+    `open=${settingsDialog()?.open}, checked=${checkedMode()}, ` +
+    `focused=${focused?.localName}:${focused?.value}`);
+}
+
+// Six modes, the cell's mode checked, and the capture lock confined to the trigger field.
+{
+  const h = setup([makeCell(0, { mode: 'edge', disabled: true })]);
+  gear(h.root, 0)?.click();
+  const values = radios().map((r) => r.value);
+  const locked = triggerSet()?.disabled === true && nameInput()?.disabled === false &&
+    save()?.disabled === false;
+  check('all six trigger modes are offered, the cell\'s mode is checked, and only the trigger field locks while stopping',
+    JSON.stringify(values) === JSON.stringify(['dont-care', 'rising', 'falling', 'edge', 'high', 'low']) &&
+      checkedMode() === 'edge' && locked,
+    `values=${values.join(',')}, checked=${checkedMode()}, fieldset=${triggerSet()?.disabled}, ` +
+    `name=${nameInput()?.disabled}, save=${save()?.disabled}`);
+
+  const unlocked = setup([makeCell(0, { mode: 'low', disabled: false })]);
+  gear(unlocked.root, 0)?.click();
+  check('a running matcher keeps the trigger modes enabled',
+    triggerSet()?.disabled === false && nameInput()?.disabled === false,
+    `fieldset=${triggerSet()?.disabled}`);
+
+  chooseMode('high');
+  submit();
+  check('Save emits one configuration carrying the chosen trigger mode',
+    unlocked.calls.configure.length === 1 && unlocked.calls.configure[0]?.[1].mode === 'high',
+    `calls=${JSON.stringify(unlocked.calls.configure.map(([i, c]) => [i, c.mode]))}`);
+}
+
+// Save commits once with the trimmed name and hands focus back to the rebuilt gear.
+{
+  const h = setup([makeCell(0, { name: 'CLK' })]);
+  const opener = gear(h.root, 0);
+  opener?.click();
+  const input = nameInput()!;
+  input.value = '  DATA  ';
+  submit();
+  const committed = h.calls.configure[0]?.[1];
+  const restored = gear(h.root, 0);
+  check('Save emits exactly one trimmed name, closes the dialog and focuses the rebuilt gear',
+    h.calls.configure.length === 1 && h.calls.configure[0]?.[0] === 0 &&
+      committed?.name === 'DATA' && committed?.mode === 'dont-care' &&
+      settingsDialog()?.open === false && opener?.isConnected === false &&
+      restored !== null && restored !== opener && doc.activeElement === restored,
+    `calls=${h.calls.configure.length}, name=${committed?.name}, open=${settingsDialog()?.open}, ` +
+    `restored=${restored !== null}, focused=${doc.activeElement === restored}`);
+}
+
+// App owns the default-name fallback, so a whitespace-only name is emitted as ''.
+{
+  const h = setup([makeCell(0, { name: 'CLK' })]);
+  gear(h.root, 0)?.click();
+  nameInput()!.value = '   ';
+  submit();
+  check('a whitespace-only name is emitted as an empty string, not as the old name',
+    h.calls.configure.length === 1 && h.calls.configure[0]?.[1].name === '',
+    `name=${JSON.stringify(h.calls.configure[0]?.[1].name)}`);
+  check('the column re-renders from the committed values (App supplies the default name)',
+    h.root.querySelector('.ch-tag--name')?.textContent === 'D0' &&
+      h.root.querySelector('.ch-original-id')?.hidden === true,
+    `name=${h.root.querySelector('.ch-tag--name')?.textContent}`);
+}
+
+// Cancel, Escape and a backdrop press emit nothing; a press inside the form is not a
+// dismissal.
+{
+  const h = setup([makeCell(0, { name: 'CLK' })]);
+  const opener = gear(h.root, 0);
+  opener?.click();
+  nameInput()!.value = 'typed';
+  cancel()?.click();
+  const cancelled = h.calls.configure.length === 0 && settingsDialog()?.open === false &&
+    doc.activeElement === opener;
+
+  opener?.click();
+  nameInput()!.value = 'typed';
+  const escape = fakeEvent('cancel');
+  settingsDialog()?.dispatchEvent(escape);
+  const escaped = h.calls.configure.length === 0 && settingsDialog()?.open === false &&
+    escape.defaultPrevented && doc.activeElement === opener;
+
+  opener?.click();
+  nameInput()!.value = 'typed';
+  settingsDialog()?.dispatchEvent(fakeEvent('pointerdown'));
+  const backdrop = h.calls.configure.length === 0 && settingsDialog()?.open === false &&
+    doc.activeElement === opener;
+
+  opener?.click();
+  nameInput()!.value = 'typed';
+  form()?.dispatchEvent(fakeEvent('pointerdown'));
+  const inside = h.calls.configure.length === 0 && settingsDialog()?.open === true &&
+    nameInput()?.value === 'typed';
+
+  check('Cancel returns focus to the opener; Escape and a backdrop press close without committing',
+    cancelled && escaped && backdrop,
+    `cancel=${cancelled}, escape=${escaped}, backdrop=${backdrop}`);
+  check('a pointerdown inside the dialog form leaves the draft open',
+    inside, `open=${settingsDialog()?.open}, value=${nameInput()?.value}`);
+}
+
+// Colour is a draft: a preset click changes nothing until Save, and the reset glyph
+// selects the channel's default colour.
+{
+  const h = setup([makeCell(0, { name: 'CLK' })]);
+  gear(h.root, 0)?.click();
+  const chosen = CHANNEL_COLOR_PRESETS[CHANNEL_COLOR_PRESETS.length - 1]!;
+  const swatch = presetOf(chosen);
+  swatch?.click();
+  const drafted = h.calls.configure.length === 0 && settingsDialog()?.open === true &&
+    swatch?.getAttribute('aria-pressed') === 'true' &&
+    presetOf(channelColor(0))?.getAttribute('aria-pressed') === 'false';
+  submit();
+  check('a colour preset is a draft that Save commits, never applied on click',
+    drafted && h.calls.configure.length === 1 &&
+      h.calls.configure[0]?.[1].color === chosen,
+    `drafted=${drafted}, color=${h.calls.configure[0]?.[1].color}`);
+
+  gear(h.root, 0)?.click();
+  presetOf(chosen)?.click();
+  colorReset()?.click();
+  const resetSelected = presetOf(channelColor(0))?.getAttribute('aria-pressed') === 'true' &&
+    colorReset()?.title === 'Reset color of D0 to its default';
+  submit();
+  check('the colour reset glyph drafts the channel\'s default colour',
+    resetSelected && h.calls.configure.length === 2 &&
+      h.calls.configure[1]?.[1].color.toLowerCase() === channelColor(0).toLowerCase(),
+    `selected=${resetSelected}, color=${h.calls.configure[1]?.[1].color}`);
+
+  const custom = setup([makeCell(0, { color: '#123456' })]);
+  gear(custom.root, 0)?.click();
+  const customSwatch = settingsDialog()?.querySelector('.channel-color-custom');
+  const customSelected = customSwatch?.getAttribute('aria-pressed') === 'true' &&
+    presets().every((preset) => preset.getAttribute('aria-pressed') === 'false');
+  submit();
+  check('a colour outside the presets selects the custom swatch and is kept as the draft',
+    customSelected && custom.calls.configure[0]?.[1].color === '#123456',
+    `custom=${customSwatch?.getAttribute('aria-pressed')}, ` +
+    `color=${custom.calls.configure[0]?.[1].color}`);
+}
+
+// The dialog outlives a re-render of its own row, and closes when its channel goes away.
+{
+  const cells = [makeCell(0, { name: 'CLK' }), makeCell(1)];
+  const h = setup(cells);
+  gear(h.root, 0)?.click();
+  nameInput()!.value = 'typed';
+  h.render(cells);
+  const kept = settingsDialog()?.open === true && nameInput()?.value === 'typed';
+  h.render([cells[1]!]);
+  const closed = settingsDialog()?.open === false && h.calls.configure.length === 0;
+  check('a re-render keeps the open dialog and its name draft; losing the channel closes it uncommitted',
+    kept && closed, `kept=${kept}, closed=${closed}, value=${nameInput()?.value}`);
+
+  h.render(cells);
+  gear(h.root, 0)?.click();
+  const openAgain = settingsDialog()?.open === true;
+  h.list.closeDialog();
+  check('closeDialog() closes the modal for a competing overlay',
+    openAgain && settingsDialog()?.open === false && h.calls.configure.length === 0,
+    `openAgain=${openAgain}, open=${settingsDialog()?.open}`);
+}
+
+// The analog bus row keeps its own popover trigger menu, not the channel dialog.
+{
+  const h = setup([makeCell(0)]);
+  h.renderBuses([{
+    id: 'bus-a1', name: 'A1', summary: 'D0-D7', color: '#48C860', heightCss: 160, analog: true,
+  }]);
+  h.root.querySelector('.bus-trigger[data-bus-id="bus-a1"]')?.click();
+  const menu = popover();
+  check('an analog bus trigger opens its own popover menu and never the channel dialog',
+    settingsDialog()?.open === false && menu !== null && menu.hidden === false &&
+      menu.querySelector('.ch-trigger-menu') !== null && menu.getAttribute('role') === 'dialog',
+    `dialogOpen=${settingsDialog()?.open}, hidden=${menu?.hidden}, ` +
+    `menu=${menu?.querySelector('.ch-trigger-menu') !== null}`);
+}
+
+console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
+const failed = results.filter((r) => !r.pass).length;
+console.log(`\n${failed === 0 ? 'all' : results.length - failed}/${results.length} passed`);
+nodeProcess.exit(failed === 0 ? 0 : 1);
