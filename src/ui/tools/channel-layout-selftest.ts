@@ -297,13 +297,22 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
   const importsPolicy = /import {[^}]*\bcomputeChannelRowHeight\b[^}]*} from '.\/channelLayout.js';/.test(app);
-  const delegates = app.includes(
-    'const base = computeChannelRowHeight(plotH, shown.length, this.lanes.length, this.compactRows);',
-  );
+  const delegates = (source: string): boolean => source.includes(
+    'const base = computeChannelRowHeight(\n' +
+    '      plotH, shown.length, this.lanes.length, this.compactRows, this.fitRows);');
+  const fourArgument = app.replace(
+    '      plotH, shown.length, this.lanes.length, this.compactRows, this.fitRows);',
+    '      plotH, shown.length, this.lanes.length, this.compactRows);');
+  const droppedFit = app.replace(
+    'this.lanes.length, this.compactRows, this.fitRows);',
+    'this.lanes.length, this.compactRows, true);');
   const duplicateClamp = app.includes('Math.max(ROWS.minRowHeight');
-  check('App.relayout delegates to the tested policy without a duplicate clamp',
-    importsPolicy && delegates && !duplicateClamp,
-    `import=${importsPolicy}, delegates=${delegates}, duplicateClamp=${duplicateClamp}`);
+  check('App.relayout delegates to the tested policy with the app state and without a duplicate clamp',
+    importsPolicy && delegates(app) && fourArgument !== app && !delegates(fourArgument) &&
+    droppedFit !== app && !delegates(droppedFit) && !duplicateClamp,
+    `import=${importsPolicy}, delegates=${delegates(app)}, ` +
+    `fourArgument=${delegates(fourArgument)}, droppedFit=${delegates(droppedFit)}, ` +
+    `duplicateClamp=${duplicateClamp}`);
 
   const configureStart = app.indexOf('private configureChannel(');
   const configureEnd = configureStart >= 0

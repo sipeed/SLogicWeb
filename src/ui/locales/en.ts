@@ -836,6 +836,8 @@ export const en = {
   'settings.detailedLabelsHelp': 'Show text labels below toolbar buttons. Turn this off to use an icon-only toolbar.',
   'settings.wheelZooms': 'Wheel zooms',
   'settings.wheelZoomsHelp': 'The plain wheel zooms too. Ctrl/Command+wheel keeps zooming and Shift+wheel always pans.',
+  'settings.fitRows': 'Fit waveform heights to the window',
+  'settings.fitRowsHelp': 'When off, digital rows keep their minimum height; rows beyond the window remain reachable by scrolling.',
   'settings.compactRows': 'Compact rows',
   'settings.compactRowsHelp': 'Lower digital rows to 24 px and show only the channel head. Analog rows and decoder lanes keep their sizes.',
   'settings.hideIdle': 'Hide idle channels',

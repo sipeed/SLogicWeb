@@ -903,6 +903,7 @@ const baseSettings: CaptureSettings = {
 const SETTINGS_TOGGLE_COPY: ReadonlyArray<readonly [keyof Messages, keyof Messages]> = [
   ['settings.detailedLabels', 'settings.detailedLabelsHelp'],
   ['settings.wheelZooms', 'settings.wheelZoomsHelp'],
+  ['settings.fitRows', 'settings.fitRowsHelp'],
   ['settings.compactRows', 'settings.compactRowsHelp'],
   ['settings.hideIdle', 'settings.hideIdleHelp'],
 ];
@@ -1174,6 +1175,7 @@ function resetCopyFailures(dicts: Record<string, Messages>): string[] {
     'toolbar.start', 'settings.language', 'settings.theme',
     'settings.detailedLabels', 'settings.detailedLabelsHelp',
     'settings.wheelZooms', 'settings.wheelZoomsHelp',
+    'settings.fitRows', 'settings.fitRowsHelp',
     'settings.compactRows', 'settings.compactRowsHelp',
     'settings.hideIdle', 'settings.hideIdleHelp',
     'settings.developerTools', 'settings.close', 'settings.sections.appearance',

@@ -431,6 +431,7 @@ const TOGGLE_ROWS: readonly ToggleRow[] = [
   { row: 'compactRowsRow', kebab: 'compact-rows', label: 'settings.compactRows', getter: 'compactRows', field: 'compactRows', setter: 'setCompactRows' },
   { row: 'hideIdleRow', kebab: 'hide-idle', label: 'settings.hideIdle', getter: 'hideIdle', field: 'hideIdleChannels', setter: 'setHideIdle' },
   { row: 'wheelZoomsRow', kebab: 'wheel-zooms', label: 'settings.wheelZooms', getter: 'wheelZooms', field: 'wheelZooms', setter: 'setWheelZooms' },
+  { row: 'fitRowsRow', kebab: 'fit-rows', label: 'settings.fitRows', getter: 'fitRows', field: 'fitRows', setter: 'setFitRows' },
   { row: 'developerToolsRow', kebab: 'developer-tools', label: 'settings.developerTools', getter: 'developerTools', field: 'developerTools', setter: 'setDeveloperTools' },
 ];
 
@@ -454,7 +455,7 @@ const REFERENCE_NEEDLES: readonly string[] = [
 
 const PANE_CASES: ReadonlyArray<readonly [string, string]> = [
   ['appearance', 'return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];'],
-  ['behaviour', 'return [this.wheelZoomsRow()];'],
+  ['behaviour', 'return [this.wheelZoomsRow(), this.fitRowsRow()];'],
   ['shortcuts', 'return this.shortcutBlocks();'],
   ['developer', 'return [this.developerToolsRow(), this.clearCacheRow()];'],
   ['about', 'return [this.aboutBlock()];'],
@@ -476,7 +477,7 @@ function paneComposition(source: string): boolean {
 }
 
 {
-  check('the appearance pane is the three display toggles in order, the behaviour pane is the wheel row, the shortcuts pane is the reference, the developer pane is the console toggle then the saved-data action and About holds its own block',
+  check('the appearance pane is the three display toggles in order, the behaviour pane is the wheel row then the fit row, the shortcuts pane is the reference, the developer pane is the console toggle then the saved-data action and About holds its own block',
     SETTINGS_SECTIONS.join(',') === PANE_CASES.map(([section]) => section).join(',') &&
     paneComposition(dialogSource),
     `ok=${paneComposition(dialogSource)}, ` +
@@ -493,9 +494,14 @@ function paneComposition(source: string): boolean {
     '        return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];');
   const duplicated = dialogSource.replace(appearanceRows,
     '        return [this.labelsRow(), this.compactRowsRow(), this.compactRowsRow(), this.hideIdleRow()];');
+  const behaviourRows = '        return [this.wheelZoomsRow(), this.fitRowsRow()];';
   const behaviourDropped = dialogSource.replace(
-    "      case 'behaviour':\n        return [this.wheelZoomsRow()];\n",
+    "      case 'behaviour':\n        return [this.wheelZoomsRow(), this.fitRowsRow()];\n",
     '');
+  const fitDropped = dialogSource.replace(behaviourRows,
+    '        return [this.wheelZoomsRow()];');
+  const fitFirst = dialogSource.replace(behaviourRows,
+    '        return [this.fitRowsRow(), this.wheelZoomsRow()];');
   const merged = dialogSource.replace(
     "      case 'developer':\n        return [this.developerToolsRow(), this.clearCacheRow()];\n      case 'about':\n        return [this.aboutBlock()];",
     "      case 'developer':\n        return [this.aboutBlock()];\n      case 'about':\n        return [this.aboutBlock()];");
@@ -511,12 +517,14 @@ function paneComposition(source: string): boolean {
   const actionFirst = dialogSource.replace(
     '        return [this.developerToolsRow(), this.clearCacheRow()];',
     '        return [this.clearCacheRow(), this.developerToolsRow()];');
-  check('control: dropping or reordering an appearance row, leaving the wheel row in Appearance, duplicating a pane row, dropping the behaviour case, merging two sections, dropping a case, re-nesting a general case, dropping the saved-data action or leading the developer pane with it fails the same composition predicate',
+  check('control: dropping or reordering an appearance row, leaving the wheel row in Appearance, duplicating a pane row, dropping the behaviour case, dropping the fit row or leading the behaviour pane with it, merging two sections, dropping a case, re-nesting a general case, dropping the saved-data action or leading the developer pane with it fails the same composition predicate',
     dropped !== dialogSource && !paneComposition(dropped) &&
     swapped !== dialogSource && !paneComposition(swapped) &&
     wheelLeft !== dialogSource && !paneComposition(wheelLeft) &&
     duplicated !== dialogSource && !paneComposition(duplicated) &&
     behaviourDropped !== dialogSource && !paneComposition(behaviourDropped) &&
+    fitDropped !== dialogSource && !paneComposition(fitDropped) &&
+    fitFirst !== dialogSource && !paneComposition(fitFirst) &&
     merged !== dialogSource && !paneComposition(merged) &&
     missingCase !== dialogSource && !paneComposition(missingCase) &&
     generalAgain !== dialogSource && !paneComposition(generalAgain) &&
@@ -526,6 +534,7 @@ function paneComposition(source: string): boolean {
     `dropped=${paneComposition(dropped)}, swapped=${paneComposition(swapped)}, ` +
     `wheelLeft=${paneComposition(wheelLeft)}, duplicated=${paneComposition(duplicated)}, ` +
     `behaviourDropped=${paneComposition(behaviourDropped)}, ` +
+    `fitDropped=${paneComposition(fitDropped)}, fitFirst=${paneComposition(fitFirst)}, ` +
     `merged=${paneComposition(merged)}, missing=${paneComposition(missingCase)}, ` +
     `general=${paneComposition(generalAgain)}, actionDropped=${paneComposition(actionDropped)}, ` +
     `actionFirst=${paneComposition(actionFirst)}, real=${paneComposition(dialogSource)}`);
@@ -793,7 +802,7 @@ const camelOf = (kebab: string): string => kebab
 {
   const wrong = TOGGLE_ROWS.filter((entry) => camelOf(entry.kebab) !== entry.getter);
   check('every toggle row spells one key twice: a kebab id and its camelCase settings key',
-    TOGGLE_ROWS.length === 5 && wrong.length === 0 &&
+    TOGGLE_ROWS.length === 6 && wrong.length === 0 &&
     dialogSource.includes('function camelKey(kebab: string): string {') &&
     dialogSource.includes('return kebab.replace(/-([a-z0-9])/g, (_match: string, letter: string) => letter.toUpperCase());'),
     `rows=${TOGGLE_ROWS.length}, wrong=${JSON.stringify(wrong.map((entry) => entry.kebab))}`);
@@ -810,7 +819,7 @@ function rowWiredToHost(source: string, entry: ToggleRow): boolean {
   const broken = TOGGLE_ROWS.filter((entry) => !rowWiredToHost(dialogSource, entry))
     .map((entry) => entry.row);
   check('each toggle row renders from its own host state and writes back through its own host pair',
-    broken.length === 0 && TOGGLE_ROWS.length === 5,
+    broken.length === 0 && TOGGLE_ROWS.length === 6,
     `broken=${JSON.stringify(broken)}`);
 }
 
@@ -877,8 +886,8 @@ function keyedControls(source: string): number {
 
 {
   const keyed = keyedControls(dialogSource);
-  check('the window keys one control per tab, five toggles, the clear-cache action, the About block and the shared reference row: thirteen today',
-    keyed === 13 && SETTINGS_SECTIONS.length === 5 && toggleRowCalls(dialogSource) === 5 &&
+  check('the window keys one control per tab, six toggles, the clear-cache action, the About block and the shared reference row: fourteen today',
+    keyed === 14 && SETTINGS_SECTIONS.length === 5 && toggleRowCalls(dialogSource) === 6 &&
     aboutKeyedBlocks(dialogSource) === 1 && referenceKeyedRows(dialogSource) === 1 &&
     actionKeyedControls(dialogSource) === 1,
     `keyed=${keyed}, tabs=${SETTINGS_SECTIONS.length}, toggles=${toggleRowCalls(dialogSource)}, ` +
@@ -892,11 +901,11 @@ function keyedControls(source: string): number {
     "      case 'developer':\n        return [this.toggleRow('extra', 'settings.detailedLabels', false, () => {}), this.developerToolsRow(), this.clearCacheRow()];");
   const droppedReference = dialogSource.replace('    row.dataset.settingsKey = key;\n', '');
   const droppedAction = dialogSource.replace("    action.dataset.settingsKey = 'clear-cache';\n", '');
-  check('control: a sixth toggle, a reference row without its settings key or an action without its key moves the keyed-control count',
-    extraToggle !== dialogSource && keyedControls(extraToggle) === 14 &&
-    droppedReference !== dialogSource && keyedControls(droppedReference) === 12 &&
-    droppedAction !== dialogSource && keyedControls(droppedAction) === 12 &&
-    keyedControls(dialogSource) === 13,
+  check('control: a seventh toggle, a reference row without its settings key or an action without its key moves the keyed-control count',
+    extraToggle !== dialogSource && keyedControls(extraToggle) === 15 &&
+    droppedReference !== dialogSource && keyedControls(droppedReference) === 13 &&
+    droppedAction !== dialogSource && keyedControls(droppedAction) === 13 &&
+    keyedControls(dialogSource) === 14,
     `extra=${keyedControls(extraToggle)}, reference=${keyedControls(droppedReference)}, ` +
     `action=${keyedControls(droppedAction)}, real=${keyedControls(dialogSource)}`);
 }
@@ -909,6 +918,7 @@ function appSetterFollows(source: string, name: string, order: readonly string[]
 
 const SETTER_EFFECTS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ['setWheelZooms', ['this.wheelZooms = on;', 'this.persistWorkspace();', 'this.renderInteractionBar(true);']],
+  ['setFitRows', ['this.fitRows = on;', 'this.persistWorkspace();', 'this.relayout();']],
   ['setCompactRows', ['this.compactRows = on;', 'this.persistWorkspace();', 'this.relayout();']],
   ['setHideIdle', ['this.hideIdleChannels = on;', 'this.persistWorkspace();', 'this.relayout();', 'this.renderPanels();']],
   ['setDeveloperTools', ['this.developerTools = on;', 'this.persistWorkspace();', 'this.renderPanels();']],
@@ -940,7 +950,7 @@ function setterEffectBound(source: string, name: string, order: readonly string[
   const unbounded = SETTER_EFFECTS.filter(([name, order]) => !setterEffectBound(appSource, name, order))
     .map(([name]) => name);
   check('each App setter keeps the workspace write and the refresh upstream ran for its menu entry',
-    broken.length === 0 && unbounded.length === 0 && SETTER_EFFECTS.length === 4,
+    broken.length === 0 && unbounded.length === 0 && SETTER_EFFECTS.length === 5,
     `broken=${JSON.stringify(broken)}, unbounded=${JSON.stringify(unbounded)}`);
 }
 
@@ -984,6 +994,36 @@ function setterEffectBound(source: string, name: string, order: readonly string[
     bound(appSource),
     `double=${bound(doubleWrite)}, panels=${bound(strayPanels)}, ` +
     `hint=${bound(strayHint)}, real=${bound(appSource)}`);
+}
+
+{
+  const wheelThenFit = '  private setWheelZooms(on: boolean): void {\n' +
+    '    this.wheelZooms = on;\n' +
+    '    this.persistWorkspace();\n' +
+    '    this.renderInteractionBar(true);\n' +
+    '  }\n\n' +
+    '  private setFitRows(on: boolean): void {\n' +
+    '    this.fitRows = on;\n' +
+    '    this.persistWorkspace();\n' +
+    '    this.relayout();\n' +
+    '  }\n\n' +
+    '  private setCompactRows(on: boolean): void {';
+  const setterOrder = (source: string): boolean => source.includes(wheelThenFit);
+  const movedBeforeWheel = appSource.replace(wheelThenFit,
+    '  private setFitRows(on: boolean): void {\n' +
+    '    this.fitRows = on;\n' +
+    '    this.persistWorkspace();\n' +
+    '    this.relayout();\n' +
+    '  }\n\n' +
+    '  private setWheelZooms(on: boolean): void {\n' +
+    '    this.wheelZooms = on;\n' +
+    '    this.persistWorkspace();\n' +
+    '    this.renderInteractionBar(true);\n' +
+    '  }\n\n' +
+    '  private setCompactRows(on: boolean): void {');
+  check('the fit-rows setter sits immediately after the wheel setter and before compact rows',
+    setterOrder(appSource) && movedBeforeWheel !== appSource && !setterOrder(movedBeforeWheel),
+    `order=${setterOrder(appSource)}, moved=${setterOrder(movedBeforeWheel)}`);
 }
 
 {
@@ -2384,6 +2424,7 @@ const HINTED_TOGGLE_ROWS: readonly HintedToggleRow[] = [
   { row: 'compactRowsRow', label: 'settings.compactRows', hint: 'settings.compactRowsHelp' },
   { row: 'hideIdleRow', label: 'settings.hideIdle', hint: 'settings.hideIdleHelp' },
   { row: 'wheelZoomsRow', label: 'settings.wheelZooms', hint: 'settings.wheelZoomsHelp' },
+  { row: 'fitRowsRow', label: 'settings.fitRows', hint: 'settings.fitRowsHelp' },
 ];
 
 function hintedRowBodies(source: string): string[] {
@@ -2394,7 +2435,7 @@ function hintedRowBodies(source: string): string[] {
 function hintedHelpWiring(source: string): boolean {
   const hints = HINTED_TOGGLE_ROWS.map((entry) => entry.hint);
   const bodies = hintedRowBodies(source);
-  return HINTED_TOGGLE_ROWS.length === 4 && new Set(hints).size === hints.length &&
+  return HINTED_TOGGLE_ROWS.length === 5 && new Set(hints).size === hints.length &&
     HINTED_TOGGLE_ROWS.every((entry, index) => {
       const body = bodies[index] ?? '';
       const own = `'${entry.hint}'`;

@@ -781,6 +781,8 @@ export const zhCN: Messages = {
   'settings.detailedLabelsHelp': '在工具栏按钮下方显示文字标签。关闭后工具栏只显示图标。',
   'settings.wheelZooms': '滚轮直接缩放',
   'settings.wheelZoomsHelp': '滚轮也能直接缩放；Ctrl/Command+滚轮仍然缩放，Shift+滚轮始终平移视图。',
+  'settings.fitRows': '让波形高度适应窗口',
+  'settings.fitRowsHelp': '关闭后，数字通道行保持最小高度；超出窗口的行仍可通过滚动查看。',
   'settings.compactRows': '紧凑行高',
   'settings.compactRowsHelp': '数字通道行最低 24 px，并且只显示通道标题。模拟通道行和解码标注行保持原有尺寸。',
   'settings.hideIdle': '隐藏无跳变通道',

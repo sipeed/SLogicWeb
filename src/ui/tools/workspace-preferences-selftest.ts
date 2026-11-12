@@ -1474,8 +1474,8 @@ const expectedWriters = [
   'adoptCapture', 'adoptDeviceChannels', 'afterChannelChange', 'applySettings', 'applySidebar',
   'attachAnalyzer', 'configureAnalogGain', 'configureBusScope', 'configureChannel', 'dragScopeTrigger',
   'finishCapture',
-  'removeAnalyzer', 'reorder', 'setCompactRows', 'setDetailedLabels', 'setDeveloperTools', 'setHideIdle',
-  'setWheelZooms', 'showIdleChannels', 'startCapture', 'updateAnalyzer',
+  'removeAnalyzer', 'reorder', 'setCompactRows', 'setDetailedLabels', 'setDeveloperTools',
+  'setFitRows', 'setHideIdle', 'setWheelZooms', 'showIdleChannels', 'startCapture', 'updateAnalyzer',
 ].sort();
 const quietMethods = ['runDecode', 'discardDecodeState', 'renderPanels', 'relayout', 'retranslate'];
 const quiet = quietMethods.map((name) => ({ name, body: appMethodBody(name) }));

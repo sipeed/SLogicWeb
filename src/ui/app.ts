@@ -735,6 +735,8 @@ export class App {
       setDetailedLabels: (on) => this.setDetailedLabels(on),
       wheelZooms: () => this.wheelZooms,
       setWheelZooms: (on) => this.setWheelZooms(on),
+      fitRows: () => this.fitRows,
+      setFitRows: (on) => this.setFitRows(on),
       compactRows: () => this.compactRows,
       setCompactRows: (on) => this.setCompactRows(on),
       hideIdle: () => this.hideIdleChannels,
@@ -2188,7 +2190,8 @@ export class App {
       return;
     }
 
-    const base = computeChannelRowHeight(plotH, shown.length, this.lanes.length, this.compactRows);
+    const base = computeChannelRowHeight(
+      plotH, shown.length, this.lanes.length, this.compactRows, this.fitRows);
 
     const rows: RowSpec[] = [...analogRows];
     const cells: ChannelCell[] = [];
@@ -4341,6 +4344,12 @@ export class App {
     this.wheelZooms = on;
     this.persistWorkspace();
     this.renderInteractionBar(true);
+  }
+
+  private setFitRows(on: boolean): void {
+    this.fitRows = on;
+    this.persistWorkspace();
+    this.relayout();
   }
 
   private setCompactRows(on: boolean): void {

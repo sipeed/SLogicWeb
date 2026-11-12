@@ -835,6 +835,8 @@ export const fr: Messages = {
   'settings.detailedLabelsHelp': 'Afficher les libellés sous les boutons de la barre d’outils. Désactivé, la barre n’affiche plus que des icônes.',
   'settings.wheelZooms': 'La molette zoome',
   'settings.wheelZoomsHelp': 'La molette simple zoome aussi ; Ctrl/Command+molette continue de zoomer et Maj+molette décale toujours la vue.',
+  'settings.fitRows': 'Ajuster la hauteur des formes d’onde à la fenêtre',
+  'settings.fitRowsHelp': 'Lorsque cette option est désactivée, les rangées des canaux numériques conservent leur hauteur minimale ; celles qui dépassent la fenêtre restent accessibles par défilement.',
   'settings.compactRows': 'Lignes compactes',
   'settings.compactRowsHelp': 'Réduire les voies logiques à 24 px et n’afficher que l’en-tête de voie. Les voies analogiques et les pistes de décodeur gardent leur taille.',
   'settings.hideIdle': 'Masquer les voies inactives',

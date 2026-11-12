@@ -49,6 +49,8 @@ export interface SettingsDialogHost {
   setDetailedLabels(on: boolean): void;
   wheelZooms(): boolean;
   setWheelZooms(on: boolean): void;
+  fitRows(): boolean;
+  setFitRows(on: boolean): void;
   compactRows(): boolean;
   setCompactRows(on: boolean): void;
   hideIdle(): boolean;
@@ -199,7 +201,7 @@ export class SettingsDialog {
       case 'appearance':
         return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];
       case 'behaviour':
-        return [this.wheelZoomsRow()];
+        return [this.wheelZoomsRow(), this.fitRowsRow()];
       case 'shortcuts':
         return this.shortcutBlocks();
       case 'developer':
@@ -334,6 +336,11 @@ export class SettingsDialog {
   private wheelZoomsRow(): HTMLDivElement {
     return this.toggleRow('wheel-zooms', 'settings.wheelZooms', this.host.wheelZooms(),
       (on) => this.host.setWheelZooms(on), 'settings.wheelZoomsHelp');
+  }
+
+  private fitRowsRow(): HTMLDivElement {
+    return this.toggleRow('fit-rows', 'settings.fitRows', this.host.fitRows(),
+      (on) => this.host.setFitRows(on), 'settings.fitRowsHelp');
   }
 
   private compactRowsRow(): HTMLDivElement {
