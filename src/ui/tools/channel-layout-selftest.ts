@@ -514,6 +514,129 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
 {
   const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
   if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
+  const themed = ':is(html[data-theme="dark"], html[data-theme="light"])';
+  const ruleOf = (source: string, selector: string): string => {
+    const at = source.indexOf(`\n${selector} {`);
+    if (at < 0) return '';
+    const end = source.indexOf('}', at);
+    return end < 0 ? '' : source.slice(at, end);
+  };
+  const declared = (rule: string, prop: string): string => {
+    const hit = rule.match(new RegExp(`(?:^|[;{\\s])${prop}:[ \\t]*([^;]+)`));
+    return hit ? hit[1]!.trim() : '';
+  };
+  const toPx = (value: string): number => {
+    const hit = value.match(/^(-?[\d.]+)(?:px)?$/);
+    return hit ? Number(hit[1]) : Number.NaN;
+  };
+  const sides = (rule: string): number[] =>
+    declared(rule, 'padding').split(/\s+/).filter((token) => token !== '').map(toPx);
+  const padV = (rule: string): number => {
+    const box = sides(rule);
+    const top = declared(rule, 'padding-top');
+    const bottom = declared(rule, 'padding-bottom');
+    const topPx = top === '' ? box[0] ?? Number.NaN : toPx(top);
+    const bottomPx = bottom === '' ? box[2] ?? box[0] ?? Number.NaN : toPx(bottom);
+    return topPx + bottomPx;
+  };
+  const padTop = (rule: string): number => {
+    const top = declared(rule, 'padding-top');
+    return top === '' ? sides(rule)[0] ?? Number.NaN : toPx(top);
+  };
+  const length = (rule: string, prop: string): number => toPx(declared(rule, prop));
+  const edge = (rule: string): number => toPx(declared(rule, 'border').split(/\s+/)[0] ?? '');
+  const tracks = (rule: string): number[] =>
+    declared(rule, 'grid-template-rows').split(/\s+/).filter((token) => token !== '').map(toPx);
+  const total = (values: readonly number[]): number => values.reduce((a, b) => a + b, 0);
+  const rewritten = (source: string, selector: string, from: string, to: string): string => {
+    const rule = ruleOf(source, selector);
+    return rule === '' ? source : source.replace(rule, rule.replace(from, to));
+  };
+
+  const column = (source: string) => {
+    const gear = ruleOf(source, '.ch-settings');
+    const badge = ruleOf(source, '.ch-trigger-preview');
+    return {
+      nameLine: length(ruleOf(source, '.ch-tag--name'), 'line-height'),
+      gearWidth: length(gear, 'width'),
+      gearHeight: length(gear, 'height'),
+      badgeWidth: length(badge, 'width'),
+      badgeHeight: length(badge, 'height'),
+      gap: length(ruleOf(source, '.ch-main'), 'gap'),
+      strip: length(ruleOf(source, `${themed} .ch-analyzers`), 'min-height'),
+      tracks: tracks(ruleOf(source, '.ch-actions')),
+    };
+  };
+  const headSum = (source: string): number => {
+    const m = column(source);
+    return m.nameLine + m.gap + m.strip;
+  };
+  const stacked = (source: string): boolean => {
+    const m = column(source);
+    return m.nameLine === 18 && m.gap === 2 && m.strip === 14 &&
+      m.gearHeight === 18 && m.gearWidth === 24 &&
+      m.badgeWidth === 18 && m.badgeHeight === 16 &&
+      m.tracks.length === 2 && m.tracks[0] === m.gearHeight && m.tracks[1] === m.badgeHeight &&
+      headSum(source) === total(m.tracks) && total(m.tracks) === 34;
+  };
+  const budget = (source: string): number => {
+    const card = ruleOf(source, `${themed} .ch-card`);
+    return ROWS.minRowHeight - padV(ruleOf(source, `${themed} .ch-cell`)) - 2 * edge(card) -
+      padTop(ruleOf(source, '.ch-body'));
+  };
+  const budgetFits = (source: string): boolean =>
+    budget(source) >= headSum(source) &&
+    ruleOf(source, `${themed} .ch-card`).includes('overflow: hidden');
+
+  const tracksMutant = rewritten(sheet, '.ch-actions',
+    'grid-template-rows: 18px 16px', 'grid-template-rows: 18px 18px');
+  const gapMutant = rewritten(sheet, '.ch-main', 'gap: 2px', 'gap: 4px');
+  const stripMutant = rewritten(sheet, `${themed} .ch-analyzers`,
+    'min-height: 14px', 'min-height: 20px');
+  const bodyMutant = rewritten(sheet, '.ch-body',
+    'padding: 4px 4px 0 6px', 'padding: 8px 4px 0 6px');
+  const applied = [tracksMutant, gapMutant, stripMutant, bodyMutant].every((m) => m !== sheet);
+  check('the themed head line, gap and strip equal the reserved action-column tracks',
+    applied && stacked(sheet) && budgetFits(sheet) &&
+    !stacked(tracksMutant) && !stacked(gapMutant) && !stacked(stripMutant) &&
+    !budgetFits(bodyMutant),
+    `head=${headSum(sheet)}, tracks=${total(column(sheet).tracks)}, budget=${budget(sheet)}, ` +
+    `applied=${applied}, controls=${!stacked(tracksMutant)}/${!stacked(gapMutant)}/` +
+    `${!stacked(stripMutant)}/${!budgetFits(bodyMutant)}`);
+
+  const compactFloor = (floor: number, source: string): boolean => {
+    const actions = ruleOf(source, '.ch-cell.compact .ch-actions');
+    const body = ruleOf(source, '.ch-cell.compact .ch-body');
+    const analyzers = ruleOf(source, '.ch-cell.compact .ch-analyzers');
+    const content = floor - padV(ruleOf(source, `${themed} .ch-cell.compact`));
+    return floor === ROWS.compactMinRowHeight &&
+      declared(actions, 'display') === 'flex' &&
+      declared(actions, 'flex-direction') === 'row-reverse' &&
+      declared(actions, 'align-items') === 'center' &&
+      declared(body, 'padding-top') === '0' &&
+      declared(analyzers, 'display') === 'none' &&
+      content >= length(ruleOf(source, '.ch-settings'), 'height') &&
+      content < total(column(source).tracks);
+  };
+  const directionMutant = rewritten(sheet, '.ch-cell.compact .ch-actions',
+    'flex-direction: row-reverse', 'flex-direction: column');
+  const droppedCompact = sheet.replace(ruleOf(sheet, '.ch-cell.compact .ch-actions'), '');
+  const compactDropped = compactFloor(ROWS.compactMinRowHeight, droppedCompact);
+  const compactColumn = compactFloor(ROWS.compactMinRowHeight, directionMutant);
+  const compactTall = compactFloor(34, sheet);
+  check('compact rows fall back to one inline gear-and-badge line inside the 24px floor',
+    directionMutant !== sheet && droppedCompact !== sheet &&
+    compactFloor(ROWS.compactMinRowHeight, sheet) && !compactColumn && !compactDropped && !compactTall,
+    `floor=${ROWS.compactMinRowHeight}, ` +
+    `content=${ROWS.compactMinRowHeight - padV(ruleOf(sheet, `${themed} .ch-cell.compact`))}, ` +
+    `applied=${directionMutant !== sheet}/${droppedCompact !== sheet}, ` +
+    `controls=${!compactColumn}/${!compactDropped}/${!compactTall}`);
+}
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
   const overlay = fs.readFileSync('src/ui/overlay.ts', 'utf8');
   const noLegacyColorReads = !/\bCOLORS\./.test(overlay);
   const gridReads = overlay.match(/\bGRID\./g) ?? [];
