@@ -397,14 +397,20 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     rowSource.includes("settings.setAttribute('aria-haspopup', 'dialog')") &&
     rowSource.includes("settings.title = t('channels.settings', { index: cell.channel.index })") &&
     rowSource.includes('settings.appendChild(settingsIcon())') &&
-    rowSource.includes("this.settingsDialog.open(settings, cell, 'name')") &&
-    rowSource.includes("this.settingsDialog.open(trigger, cell, 'trigger')") &&
-    rowSource.includes('head.append(tag, original, trigger, settings)') &&
+    rowSource.includes('this.settingsDialog.open(settings, cell)') &&
+    rowSource.includes("cell.trigger.mode !== 'dont-care'") &&
+    rowSource.includes("preview.className = 'ch-trigger-preview'") &&
+    rowSource.includes("preview.setAttribute('role', 'img')") &&
+    !rowSource.includes('preview.addEventListener') &&
+    !rowSource.includes("'ch-trigger'") &&
+    rowSource.includes('head.append(tag, original)') &&
+    rowSource.includes('if (preview !== null) head.append(preview)') &&
+    rowSource.includes('head.append(settings)') &&
     rowSource.includes("settings.addEventListener('mousedown', () => { el.draggable = false; })") &&
     rowSource.includes('this.settingsDialog.closeUnless(cells.map((cell) => cell.channel.index))') &&
     !rowSource.includes('nameInput') &&
     rowSource.includes("this.editor.className = 'ch-editor-popover'");
-  check('the row head keeps the trigger glyph and puts the settings gear right-most',
+  check('the row head shows the read-only trigger preview and puts the settings gear right-most',
     rowStart >= 0 && dialogSource.length > 0 && gearEntry,
     `rowStart=${rowStart}, dialog=${dialogSource.length}, gear=${gearEntry}`);
 
@@ -417,10 +423,10 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   };
   const settingsBlock = block('.ch-settings');
   const trailingSlot = settingsBlock.includes('margin-left: auto') &&
-    !block('.ch-trigger').includes('margin-left: auto');
+    !block('.ch-trigger-preview').includes('margin-left: auto');
   check('the settings gear owns the trailing slot so the head cannot slide with its children',
     trailingSlot, `settings=${settingsBlock.includes('margin-left: auto')}, ` +
-    `trigger=${block('.ch-trigger').includes('margin-left: auto')}`);
+    `trigger=${block('.ch-trigger-preview').includes('margin-left: auto')}`);
 
   const dialogFields = dialogSource.includes("this.dialog.className = 'channel-settings-dialog'") &&
     dialogSource.includes("form.className = 'channel-settings-form'") &&
@@ -462,7 +468,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     dialogSource.includes('this.onConfigure(channel, config)') &&
     dialogSource.includes("this.dialog.addEventListener('cancel'") &&
     dialogSource.includes('if (event.target === this.dialog)') &&
-    dialogSource.includes('if (restoreFocus) this.onDismiss(channel, focus, opener)') &&
+    dialogSource.includes('if (restoreFocus) this.onDismiss(channel, opener)') &&
     dialogSource.includes('if (this.dialog.open) this.dialog.close()');
   check('the dialog commits once on submit while Escape, the backdrop and Cancel discard',
     commits, `commits=${commits}`);

@@ -143,25 +143,37 @@ function cssRules(selector: string): string[] {
     app.includes("armed: this.settings.triggerEnableMask && this.settings.triggerSource === 'digital'") &&
     app.includes("triggerActive: this.settings.triggerEnableMask &&") &&
     app.includes("this.settings.triggerSource === 'analog'");
-  const configured = ['.ch-trigger.configured', '.bus-trigger.configured'].map(cssRules);
-  const neutral = configured.every((rules) => rules.length > 0 && rules.every((rule) =>
-    rule.includes('color: var(--text80)') && rule.includes('border-color: var(--border-high)') &&
-    !rule.includes('var(--accent)') && !rule.includes('var(--primary)') &&
-    !rule.includes('var(--warning)')));
-  const digitalArmed = cssRules('.ch-trigger.armed');
+  const previewBase = cssRules('.ch-trigger-preview');
+  const previewNeutral = cssRules('.ch-trigger-preview.configured');
+  const previewArmed = cssRules('.ch-trigger-preview.armed');
+  const previewStates = previewBase.length === 1 && previewNeutral.length > 0 &&
+    previewArmed.length > 0 &&
+    previewBase.every((rule) => rule.includes('color: var(--text50)') &&
+      !rule.includes('border') && !rule.includes('background') &&
+      !rule.includes('cursor')) &&
+    previewNeutral.every((rule) => rule.includes('color: var(--text80)') &&
+      !rule.includes('border') && !rule.includes('background') &&
+      !rule.includes('var(--accent)') && !rule.includes('var(--primary)') &&
+      !rule.includes('var(--warning)')) &&
+    previewArmed.every((rule) => rule.includes('color: var(--warning)') &&
+      !rule.includes('border') && !rule.includes('background'));
+  const analogConfigured = cssRules('.bus-trigger.configured');
   const analogArmed = cssRules('.bus-trigger.armed');
-  const bright = digitalArmed.length > 0 &&
-    JSON.stringify(digitalArmed) === JSON.stringify(analogArmed) &&
-    digitalArmed.every((rule) => rule.includes('color: var(--warning)') &&
+  const analogStates = analogConfigured.length > 0 && analogArmed.length > 0 &&
+    analogConfigured.every((rule) => rule.includes('color: var(--text80)') &&
+      !rule.includes('var(--accent)') && !rule.includes('var(--primary)') &&
+      !rule.includes('var(--warning)')) &&
+    analogArmed.every((rule) => rule.includes('color: var(--warning)') &&
       rule.includes('border-color: var(--warning)'));
   const draft = channel.includes("let selected: 'rising' | 'falling' | null") &&
     channel.includes('const syncSelected = (): void =>') &&
     channel.includes('selected = kind;') && channel.includes('level.focus();') &&
     channel.includes('const commitSelected = (): void =>') &&
     channel.includes("apply.textContent = t('bus.confirm')");
-  check('digital and analog rows share neutral configured and bright selected-source states',
-    active && neutral && bright && draft,
-    `active=${active}, neutral=${neutral}, bright=${bright}, draft=${draft}`);
+  check('the row preview and the analog trigger keep neutral configured and bright selected-source states',
+    active && previewStates && analogStates && draft,
+    `active=${active}, preview=${previewStates}, base=${JSON.stringify(previewBase)}, ` +
+    `analog=${analogStates}, draft=${draft}`);
 }
 
 {

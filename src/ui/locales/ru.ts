@@ -449,6 +449,7 @@ export const ru: Messages = {
   'channels.triggerOn': 'Запуск по {name}',
   'channels.triggerLevel': 'Уровень',
   'channels.triggerTip': 'Запуск по {name}: {mode}. Нажмите для настройки',
+  'channels.triggerPreview': 'Запуск: {mode}',
   'channels.idleHidden': 'Скрыто каналов без фронтов: {count} · Показать',
   'channels.idleHiddenTip': 'В этих каналах нет ни одного фронта в текущем захвате. Щёлкните, чтобы снова показать их (отключает «Скрыть неактивные каналы»).',
   'channels.name': 'Имя канала',

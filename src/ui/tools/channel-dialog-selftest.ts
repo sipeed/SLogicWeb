@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
- * A channel card's read-only name and its one settings dialog: the gear and the trigger
- * glyph open the same modal over name, trigger mode and colour, Save emits exactly one
- * `onConfigure`, and Cancel, Escape and a backdrop press emit nothing. Built on the fake
- * DOM (`fakeDom.ts`) and driven the way the card listens: button clicks, the form's
- * `submit`, the dialog's `cancel` and `pointerdown`.
+ * A channel card's read-only name and its one settings dialog: the gear opens the modal
+ * over name, trigger mode and colour, Save emits exactly one `onConfigure`, and Cancel,
+ * Escape and a backdrop press emit nothing. Built on the fake DOM (`fakeDom.ts`) and
+ * driven the way the card listens: button clicks, the form's `submit`, the dialog's
+ * `cancel` and `pointerdown`.
  */
 
 import { fakeEvent, installFakeDom, type FakeElement } from './fakeDom.js';
@@ -129,8 +129,8 @@ const presetOf = (color: string): FakeElement | null =>
   presets().find((el) => el.title.toLowerCase() === color.toLowerCase()) ?? null;
 const gear = (root: FakeElement, channel: number): FakeElement | null =>
   root.querySelector(`.ch-settings[data-channel="${channel}"]`);
-const glyph = (root: FakeElement, channel: number): FakeElement | null =>
-  root.querySelector(`.ch-trigger[data-channel="${channel}"]`);
+const preview = (root: FakeElement): FakeElement | null =>
+  root.querySelector('.ch-trigger-preview');
 const popover = (): FakeElement | null => doc.body.querySelector('.ch-editor-popover');
 
 function submit(): void {
@@ -140,10 +140,10 @@ function chooseMode(mode: TriggerMode): void {
   for (const radio of radios()) radio.checked = radio.value === mode;
 }
 
-// The head is read-only name, D-index, trigger glyph and gear, and the gear opens the
+// The head is read-only name, D-index, trigger preview and gear, and the gear opens the
 // dialog on its name field.
 {
-  const h = setup([makeCell(0, { name: 'CLK' }), makeCell(1)]);
+  const h = setup([makeCell(0, { name: 'CLK', mode: 'rising' }), makeCell(1)]);
   const head = h.root.querySelector('.ch-head');
   const kids = head?.children ?? [];
   const readOnly = kids[0]?.className === 'ch-tag ch-tag--name' && kids[0]?.textContent === 'CLK' &&
@@ -157,9 +157,9 @@ function chooseMode(mode: TriggerMode): void {
   const order = kids.length === 4 &&
     kids[1]?.className === 'ch-original-id' && kids[1]?.textContent === 'D0' &&
     kids[1]?.hidden === false &&
-    kids[2]?.localName === 'button' && kids[2]?.className === 'ch-trigger' &&
+    kids[2]?.localName === 'span' && kids[2]?.className === 'ch-trigger-preview configured' &&
     kids[3]?.localName === 'button' && kids[3]?.className === 'ch-settings';
-  check('a channel head renders a read-only name, the D-index, the trigger glyph and the gear',
+  check('a channel head renders a read-only name, the D-index, the trigger preview and the gear',
     readOnly && noInlineEntry && order,
     `readOnly=${readOnly}, inlineEntry=${!noInlineEntry}, order=${order}, ` +
     `kids=${kids.map((k) => k.className).join('|')}`);
@@ -176,19 +176,27 @@ function chooseMode(mode: TriggerMode): void {
     `focused=${doc.activeElement === nameInput()}, label=${opener?.getAttribute('aria-label')}`);
 }
 
-// The trigger glyph opens the same dialog on the trigger field.
+// The trigger glyph is a preview, not an entry: clicking it opens nothing, and the gear
+// stays the one way into the dialog.
 {
   const h = setup([makeCell(0, { name: 'CLK', mode: 'falling' })]);
-  const opener = glyph(h.root, 0);
-  opener?.click();
-  const focused = doc.activeElement;
-  check('the row trigger glyph opens the same dialog focused on the checked trigger mode',
-    settingsDialog()?.open === true &&
-      opener?.getAttribute('aria-haspopup') === 'dialog' &&
-      focused !== null && focused.localName === 'input' && focused.checked === true &&
-      focused.value === 'falling' && checkedMode() === 'falling',
-    `open=${settingsDialog()?.open}, checked=${checkedMode()}, ` +
-    `focused=${focused?.localName}:${focused?.value}`);
+  const glyph = preview(h.root);
+  glyph?.click();
+  const inert = glyph !== null && glyph.localName === 'span' &&
+    glyph.getAttribute('role') === 'img' &&
+    glyph.getAttribute('aria-haspopup') === null &&
+    glyph.getAttribute('tabindex') === null &&
+    !('tabIndex' in glyph) &&
+    glyph.title === 'Trigger: Falling edge' &&
+    glyph.getAttribute('aria-label') === 'Trigger: Falling edge' &&
+    settingsDialog()?.open === false && h.calls.configure.length === 0;
+  gear(h.root, 0)?.click();
+  const gearOnly = settingsDialog()?.open === true && doc.activeElement === nameInput() &&
+    nameInput()?.value === 'CLK' && checkedMode() === 'falling';
+  check('the row trigger is a read-only preview; the gear is the one way into the dialog',
+    inert && gearOnly,
+    `inert=${inert}, open=${settingsDialog()?.open}, checked=${checkedMode()}, ` +
+    `focused=${doc.activeElement === nameInput()}, label=${glyph?.getAttribute('aria-label')}`);
 }
 
 // Six modes, the cell's mode checked, and the capture lock confined to the trigger field.

@@ -19,9 +19,8 @@
  *
  * Names are read-only in the row. One gear button opens a native modal whose shadcn-style
  * header / field group / footer owns name, trigger and color editing, so the card no
- * longer carries three independent editing controls. The trigger glyph stays as the
- * armed/configured indicator and opens the same dialog on its trigger field; analog bus
- * rows keep their own trigger menu.
+ * longer carries three independent editing controls. The trigger glyph stays as a
+ * read-only armed/configured preview; analog bus rows keep their own trigger menu.
  */
 
 import { ANALOG_HEIGHTS, analogHeightIndex, stepAnalogHeight } from './busView.js';
@@ -119,8 +118,6 @@ export interface BusScopePatch {
 
 const TRIGGER_MODES: readonly TriggerMode[] = ['dont-care', 'rising', 'falling', 'edge', 'high', 'low'];
 
-type ChannelSettingsFocus = 'name' | 'trigger';
-
 interface TriggerOption {
   label: HTMLLabelElement;
   input: HTMLInputElement;
@@ -145,13 +142,12 @@ class ChannelSettingsDialog {
   private readonly saveButton: HTMLButtonElement;
   private selectedColor = '#000000';
   private channel = -1;
-  private focusField: ChannelSettingsFocus = 'name';
   private opener: HTMLButtonElement | null = null;
 
   constructor(
     private readonly onConfigure: ChannelListCallbacks['onConfigure'],
     private readonly onDismiss: (
-      channel: number, focus: ChannelSettingsFocus, opener: HTMLButtonElement | null,
+      channel: number, opener: HTMLButtonElement | null,
     ) => void,
   ) {
     this.dialog = document.createElement('dialog');
@@ -305,11 +301,10 @@ class ChannelSettingsDialog {
     });
   }
 
-  open(opener: HTMLButtonElement, cell: ChannelCell, focus: ChannelSettingsFocus): void {
+  open(opener: HTMLButtonElement, cell: ChannelCell): void {
     if (this.dialog.open) this.close();
     this.channel = cell.channel.index;
     this.opener = opener;
-    this.focusField = focus;
     this.renderStrings(cell.channel.index);
     this.nameInput.value = cell.channel.name;
     this.selectedColor = cell.channel.color;
@@ -320,14 +315,8 @@ class ChannelSettingsDialog {
       option.input.checked = mode === cell.trigger.mode;
     }
     this.dialog.showModal();
-    if (focus === 'trigger') {
-      const chosen = this.triggerOptions.get(cell.trigger.mode)
-        ?? this.triggerOptions.values().next().value;
-      chosen?.input.focus();
-    } else {
-      this.nameInput.focus();
-      this.nameInput.select();
-    }
+    this.nameInput.focus();
+    this.nameInput.select();
   }
 
   close(): void {
@@ -384,7 +373,6 @@ class ChannelSettingsDialog {
     event.preventDefault();
     if (this.channel < 0) return;
     const channel = this.channel;
-    const focus = this.focusField;
     const opener = this.opener;
     const mode = TRIGGER_MODES.find((candidate) =>
       this.triggerOptions.get(candidate)?.input.checked) ?? DEFAULT_TRIGGER_MODE;
@@ -398,19 +386,18 @@ class ChannelSettingsDialog {
     this.nameInput.value = '';
     if (this.dialog.open) this.dialog.close();
     this.onConfigure(channel, config);
-    this.onDismiss(channel, focus, opener);
+    this.onDismiss(channel, opener);
   };
 
   private dismiss(restoreFocus: boolean): void {
     const channel = this.channel;
-    const focus = this.focusField;
     const opener = this.opener;
     this.hideColorPalette();
     this.channel = -1;
     this.opener = null;
     this.nameInput.value = '';
     if (this.dialog.open) this.dialog.close();
-    if (restoreFocus) this.onDismiss(channel, focus, opener);
+    if (restoreFocus) this.onDismiss(channel, opener);
   }
 }
 
@@ -426,10 +413,10 @@ export class ChannelList {
     private readonly cb: ChannelListCallbacks,
   ) {
     this.settingsDialog = new ChannelSettingsDialog(this.cb.onConfigure,
-      (channel, focus, opener) => {
+      (channel, opener) => {
         const target = opener?.isConnected === true ? opener
           : this.root.querySelector<HTMLButtonElement>(
-            `${focus === 'trigger' ? '.ch-trigger' : '.ch-settings'}[data-channel="${channel}"]`);
+            `.ch-settings[data-channel="${channel}"]`);
         target?.focus({ preventScroll: true });
       });
     // One shared popover, not a modal per bus row: the analog trigger menu is the only
@@ -812,23 +799,17 @@ export class ChannelList {
       const head = document.createElement('div');
       head.className = 'ch-head';
 
-      const trigger = document.createElement('button');
-      trigger.type = 'button';
-      trigger.className = 'ch-trigger' + (cell.trigger.mode === 'dont-care' ? ''
-        : cell.trigger.armed ? ' armed' : ' configured');
-      trigger.dataset['channel'] = String(cell.channel.index);
-      trigger.title = t('channels.triggerTip', {
-        name: cell.channel.name, mode: triggerModeName(cell.trigger.mode),
-      });
-      trigger.setAttribute('aria-label', trigger.title);
-      trigger.setAttribute('aria-haspopup', 'dialog');
-      trigger.appendChild(triggerIcon(cell.trigger.mode));
-      trigger.addEventListener('click', (event) => {
-        event.stopPropagation();
-        this.settingsDialog.open(trigger, cell, 'trigger');
-      });
-      trigger.addEventListener('mousedown', () => { el.draggable = false; });
-      trigger.addEventListener('mouseup', () => { el.draggable = true; });
+      let preview: HTMLSpanElement | null = null;
+      if (cell.trigger.mode !== 'dont-care') {
+        preview = document.createElement('span');
+        preview.className = 'ch-trigger-preview' +
+          (cell.trigger.armed ? ' armed' : ' configured');
+        const label = t('channels.triggerPreview', { mode: triggerModeName(cell.trigger.mode) });
+        preview.title = label;
+        preview.setAttribute('role', 'img');
+        preview.setAttribute('aria-label', label);
+        preview.appendChild(triggerIcon(cell.trigger.mode));
+      }
 
       const tag = document.createElement('span');
       tag.className = 'ch-tag ch-tag--name';
@@ -848,11 +829,13 @@ export class ChannelList {
       settings.appendChild(settingsIcon());
       settings.addEventListener('click', (event) => {
         event.stopPropagation();
-        this.settingsDialog.open(settings, cell, 'name');
+        this.settingsDialog.open(settings, cell);
       });
       settings.addEventListener('mousedown', () => { el.draggable = false; });
       settings.addEventListener('mouseup', () => { el.draggable = true; });
-      head.append(tag, original, trigger, settings);
+      head.append(tag, original);
+      if (preview !== null) head.append(preview);
+      head.append(settings);
       body.appendChild(head);
 
       const chips = document.createElement('div');

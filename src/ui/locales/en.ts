@@ -459,6 +459,7 @@ export const en = {
   'channels.triggerOn': 'Trigger on {name}',
   'channels.triggerLevel': 'Level',
   'channels.triggerTip': 'Trigger on {name}: {mode}. Click to set',
+  'channels.triggerPreview': 'Trigger: {mode}',
   'channels.idleHidden': '{count} idle channels hidden (no edges) · Show',
   'channels.idleHiddenTip': 'These channels have no edge in this capture. Click to show them again (turns off "Hide idle channels").',
   'channels.name': 'Channel name',

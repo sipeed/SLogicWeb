@@ -604,25 +604,18 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
   flex: 1; min-width: 0; padding: 0 2px; line-height: 18px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ch-trigger {
+.ch-trigger-preview {
   flex: none;
   align-self: center;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
+  width: 18px;
   height: 18px;
-  padding: 0;
-  border: 1px solid var(--border-low);
-  border-radius: 3px;
-  background: var(--bg20);
   color: var(--text50);
-  cursor: pointer;
-  transition: background-color var(--motion-fast) var(--motion-ease), color var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
 }
-.ch-trigger:hover { border-color: var(--accent); color: var(--text80); }
-.ch-trigger.configured { color: var(--text80); border-color: var(--border-high); }
-.ch-trigger.armed,
+.ch-trigger-preview.configured { color: var(--text80); }
+.ch-trigger-preview.armed { color: var(--warning); }
 .bus-trigger.armed {
   color: var(--warning); border-color: var(--warning);
   background: color-mix(in oklab, var(--warning) 14%, var(--bg20));
@@ -645,24 +638,20 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
   border: 1px solid var(--border); border-radius: var(--radius);
 }
 
-.ch-trigger svg { display: block; width: 14px; height: 14px; }
+.ch-trigger-preview svg { display: block; width: 14px; height: 14px; }
 
-/* Dark theme: the compact trigger button follows the same secondary-control roles as
-   the other icon buttons while keeping the established 18 CSS px head height. */
-:is(html[data-theme="dark"], html[data-theme="light"]) .ch-trigger,
+/* Dark theme: the compact analog bus trigger button follows the same secondary-control
+   roles as the other icon buttons while keeping the established 18 CSS px head height. */
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-trigger {
   background: var(--background); border-color: var(--input);
   color: var(--muted-foreground); border-radius: calc(var(--radius) - 4px);
 }
-:is(html[data-theme="dark"], html[data-theme="light"]) .ch-trigger:hover,
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-trigger:hover {
   border-color: var(--primary); color: var(--foreground);
 }
-:is(html[data-theme="dark"], html[data-theme="light"]) .ch-trigger.configured,
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-trigger.configured {
   border-color: var(--border-high); color: var(--text80);
 }
-:is(html[data-theme="dark"], html[data-theme="light"]) .ch-trigger.armed,
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-trigger.armed {
   border-color: var(--warning); color: var(--warning);
   background: color-mix(in oklab, var(--warning) 14%, var(--background));

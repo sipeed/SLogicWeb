@@ -458,6 +458,7 @@ export const fr: Messages = {
   'channels.triggerOn': 'Déclenchement sur {name}',
   'channels.triggerLevel': 'Niveau',
   'channels.triggerTip': 'Déclenchement sur {name} : {mode}. Cliquez pour définir',
+  'channels.triggerPreview': 'Déclenchement : {mode}',
   'channels.idleHidden': '{count} voies inactives masquées (aucun front) · Afficher',
   'channels.idleHiddenTip': 'Ces voies n’ont aucun front dans cette acquisition. Cliquez pour les afficher à nouveau (désactive « Masquer les voies inactives »).',
   'channels.name': 'Nom du canal',
