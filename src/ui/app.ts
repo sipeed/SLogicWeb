@@ -113,6 +113,7 @@ import {
 } from './interactionHints.js';
 import { getMode, getTheme, onThemeChange, setMode, THEME_MODES, THEME_MODE_LABEL_KEYS,
   type ThemeId } from './theme.js';
+import { applyToolbarHints } from './toolbarHints.js';
 import {
   analyzerStatesFrom, nextAnalyzerSequence, readWorkspaceSnapshot, restoreOrder, serializeWorkspaceSnapshot,
   WORKSPACE_SCHEMA_VERSION, writeWorkspaceSnapshot,
@@ -4569,6 +4570,7 @@ export class App {
   private reflectDetailedLabels(): void {
     if (this.detailedLabels) document.documentElement.removeAttribute('data-toolbar-labels');
     else document.documentElement.setAttribute('data-toolbar-labels', 'off');
+    applyToolbarHints(document, this.detailedLabels);
   }
 
   private workspaceSnapshot(): WorkspaceSnapshotV1 {

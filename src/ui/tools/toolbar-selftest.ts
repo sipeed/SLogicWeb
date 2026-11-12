@@ -974,6 +974,40 @@ check(
   `rows=${settingsRowsScoped}, reference=${referenceInPane}`,
 );
 
+function toolbarHintsReconciled(source: string): boolean {
+  const start = source.indexOf('private reflectDetailedLabels(): void {');
+  const end = start >= 0 ? source.indexOf('\n  }', start) : -1;
+  const body = start >= 0 && end > start ? source.slice(start, end) : '';
+  const call = body.indexOf('applyToolbarHints(document, this.detailedLabels);');
+  const modeWrites = [
+    "removeAttribute('data-toolbar-labels')",
+    "setAttribute('data-toolbar-labels', 'off')",
+  ].map((needle) => body.indexOf(needle));
+  return /import \{ applyToolbarHints \} from '\.\/toolbarHints\.js';/.test(source) &&
+    call >= 0 && (body.match(/applyToolbarHints\(/g)?.length ?? 0) === 1 &&
+    modeWrites.every((at) => at >= 0 && at < call) &&
+    !/localStorage|sessionStorage|persistWorkspace/.test(body);
+}
+const reflectBody = methodBody('private reflectDetailedLabels(): void {');
+const hintsReconciled = toolbarHintsReconciled(app);
+const reflectLines = reflectBody.split('\n');
+const hintsCallLine = reflectLines.findIndex((line) =>
+  line.trim() === 'applyToolbarHints(document, this.detailedLabels);');
+const hintsCallRemoved = app.replace(
+  '    applyToolbarHints(document, this.detailedLabels);\n', '');
+const hintsCallMovedEarly = hintsCallLine < 0 ? app : app.replace(reflectBody, [
+  reflectLines[0], reflectLines[hintsCallLine],
+  ...reflectLines.slice(1).filter((_, offset) => offset + 1 !== hintsCallLine),
+].join('\n'));
+const hintsMutationsFail = hintsCallLine >= 0 && hintsCallRemoved !== app &&
+  hintsCallMovedEarly !== app && !toolbarHintsReconciled(hintsCallRemoved) &&
+  !toolbarHintsReconciled(hintsCallMovedEarly);
+check(
+  'the label-mode reflection reconciles toolbar hints after publishing the toolbar label mode',
+  hintsReconciled && hintsMutationsFail,
+  `reconciled=${hintsReconciled}, mutationsFail=${hintsMutationsFail}`,
+);
+
 const viewportRestoreOrder = [
   'const { start, end } = this.stack.view;',
   'const follow = this.stack.followLatest;',
