@@ -180,10 +180,14 @@ check(
   `debug=${debugDemoDelegates}, retired=${JSON.stringify(retiredConnectFirst)}`,
 );
 
+function bodyOf(source: string, marker: string): string {
+  const start = source.indexOf(marker);
+  const end = start >= 0 ? source.indexOf('\n  }', start) : -1;
+  return start >= 0 && end > start ? source.slice(start, end) : '';
+}
+
 function methodBody(marker: string): string {
-  const start = app.indexOf(marker);
-  const end = start >= 0 ? app.indexOf('\n  }', start) : -1;
-  return start >= 0 && end > start ? app.slice(start, end) : '';
+  return bodyOf(app, marker);
 }
 
 const discardBody = methodBody('private discardDecodeState(): void {');
@@ -1006,6 +1010,72 @@ check(
   'the label-mode reflection reconciles toolbar hints after publishing the toolbar label mode',
   hintsReconciled && hintsMutationsFail,
   `reconciled=${hintsReconciled}, mutationsFail=${hintsMutationsFail}`,
+);
+
+const RENDER_TOOLBAR_MARKER = 'private renderToolbarState(): void {';
+const HINTS_RENDER_CALL = 'applyToolbarHints(document, this.detailedLabels);';
+const HINTS_TAIL_WRITER = /(\.title\b|setAttribute\(\s*'title'|removeAttribute\(\s*'title')/;
+
+function toolbarHintsRendered(source: string): boolean {
+  const body = bodyOf(source, RENDER_TOOLBAR_MARKER);
+  const deviceBody = bodyOf(source, 'private renderDeviceCommand(): void {');
+  const call = body.indexOf(HINTS_RENDER_CALL);
+  const command = body.indexOf('this.renderDeviceCommand();');
+  const tail = call >= 0 ? body.slice(call + HINTS_RENDER_CALL.length) : body;
+  return /import \{ applyToolbarHints \} from '\.\/toolbarHints\.js';/.test(source) &&
+    call >= 0 && (body.match(/applyToolbarHints\(/g)?.length ?? 0) === 1 &&
+    command >= 0 && command < call &&
+    !HINTS_TAIL_WRITER.test(tail) &&
+    !deviceBody.includes('applyToolbarHints(');
+}
+
+function mutateRenderToolbarBody(source: string, mutate: (body: string) => string): string {
+  const body = bodyOf(source, RENDER_TOOLBAR_MARKER);
+  if (!body) return source;
+  const next = mutate(body);
+  return next === body ? source : source.replace(body, next);
+}
+
+const renderHintsCallLine = (lines: readonly string[]): number =>
+  lines.findIndex((line) => line.trim() === HINTS_RENDER_CALL);
+
+const renderHintsRemoved = mutateRenderToolbarBody(app, (body) => {
+  const lines = body.split('\n');
+  const at = renderHintsCallLine(lines);
+  return at < 0 ? body : lines.filter((_, offset) => offset !== at).join('\n');
+});
+const renderHintsMovedFirst = mutateRenderToolbarBody(app, (body) => {
+  const lines = body.split('\n');
+  const at = renderHintsCallLine(lines);
+  if (at < 0) return body;
+  const moved = lines.filter((_, offset) => offset !== at);
+  const command = moved.findIndex((line) => line.trim() === 'this.renderDeviceCommand();');
+  if (command < 0) return body;
+  moved.splice(command, 0, lines[at]);
+  return moved.join('\n');
+});
+const renderHintsModeTrue = mutateRenderToolbarBody(app, (body) => body.replace(
+  HINTS_RENDER_CALL, 'applyToolbarHints(document, true);'));
+const renderHintsTitleAppended = mutateRenderToolbarBody(app, (body) =>
+  `${body}\n    btn.setAttribute('title', 'x');`);
+const renderHintsDuplicatedInDevice = (() => {
+  const deviceBody = bodyOf(app, 'private renderDeviceCommand(): void {');
+  if (!deviceBody) return app;
+  return app.replace(deviceBody, `${deviceBody}\n    ${HINTS_RENDER_CALL}`);
+})();
+const renderHintsWired = toolbarHintsRendered(app);
+const renderHintsMutationsFail = renderHintsRemoved !== app &&
+  renderHintsMovedFirst !== app && renderHintsModeTrue !== app &&
+  renderHintsTitleAppended !== app && renderHintsDuplicatedInDevice !== app &&
+  !toolbarHintsRendered(renderHintsRemoved) &&
+  !toolbarHintsRendered(renderHintsMovedFirst) &&
+  !toolbarHintsRendered(renderHintsModeTrue) &&
+  !toolbarHintsRendered(renderHintsTitleAppended) &&
+  !toolbarHintsRendered(renderHintsDuplicatedInDevice);
+check(
+  'the toolbar render reconciles hints last, after the transport, fullscreen and device writers',
+  renderHintsWired && renderHintsMutationsFail,
+  `wired=${renderHintsWired}, mutationsFail=${renderHintsMutationsFail}`,
 );
 
 const viewportRestoreOrder = [

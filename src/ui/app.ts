@@ -5076,6 +5076,7 @@ export class App {
     btn.title = this.stopping ? t('toolbar.stoppingTitle')
       : showStop ? t('toolbar.stopTitle')
         : this.device ? t('toolbar.startTitle') : t('toolbar.connectHint');
+    applyToolbarHints(document, this.detailedLabels);
   }
 
   /**
