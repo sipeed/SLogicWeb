@@ -11,6 +11,7 @@ import { fakeEvent, installFakeDom, type FakeElement } from './fakeDom.js';
 import {
   ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration,
 } from '../channelList.js';
+import { setLocale, t } from '../i18n.js';
 import { CHANNEL_COLOR_PRESETS } from '../metrics.js';
 import {
   channelColor, defaultChannelName, type ChannelState, type TriggerMode,
@@ -34,6 +35,7 @@ const doc = installFakeDom();
 interface CellOptions {
   name?: string;
   mode?: TriggerMode;
+  armed?: boolean;
   disabled?: boolean;
   color?: string;
 }
@@ -52,7 +54,7 @@ function makeCell(index: number, options: CellOptions = {}): ChannelCell {
     analyzers: [],
     trigger: {
       mode: options.mode ?? 'dont-care',
-      armed: false,
+      armed: options.armed ?? false,
       disabled: options.disabled ?? false,
     },
   };
@@ -197,6 +199,98 @@ function chooseMode(mode: TriggerMode): void {
     inert && gearOnly,
     `inert=${inert}, open=${settingsDialog()?.open}, checked=${checkedMode()}, ` +
     `focused=${doc.activeElement === nameInput()}, label=${glyph?.getAttribute('aria-label')}`);
+}
+
+// An unset trigger renders no preview element at all, so nothing can be mistaken for a
+// control; the gear stays the head's last child.
+{
+  const h = setup([makeCell(0, { mode: 'dont-care' })]);
+  const kids = h.root.querySelector('.ch-head')?.children ?? [];
+  const absent = preview(h.root) === null &&
+    h.root.querySelectorAll('.ch-trigger-preview').length === 0 &&
+    kids.length === 3 &&
+    kids[0]?.className === 'ch-tag ch-tag--name' && kids[0]?.textContent === 'D0' &&
+    kids[1]?.className === 'ch-original-id' && kids[1]?.textContent === 'D0' &&
+    kids[2]?.localName === 'button' && kids[2]?.className === 'ch-settings';
+  check('a dont-care row renders no trigger preview and the head still ends with the gear',
+    absent, `kids=${kids.map((k) => k.className).join('|')}, ` +
+    `preview=${preview(h.root) !== null}`);
+}
+
+// Every pointer and key path over the preview is inert: no dialog, no callback.
+{
+  const h = setup([makeCell(0, { name: 'CLK', mode: 'edge' })]);
+  const glyph = preview(h.root);
+  glyph?.dispatchEvent(fakeEvent('pointerdown'));
+  glyph?.dispatchEvent(fakeEvent('mousedown'));
+  glyph?.dispatchEvent(fakeEvent('keydown', { key: 'Enter' }));
+  glyph?.click();
+  const idle = glyph !== null && settingsDialog()?.open === false &&
+    doc.activeElement === doc.body &&
+    h.calls.configure.length === 0 && h.calls.reorder.length === 0 &&
+    h.calls.remove.length === 0;
+  check('the trigger preview ignores pointer and key input and emits nothing',
+    idle, `open=${settingsDialog()?.open}, focused=${doc.activeElement?.className}, ` +
+    `configure=${h.calls.configure.length}, reorder=${h.calls.reorder.length}`);
+}
+
+// The state class follows the cell's armed flag across a re-render, and the accessible
+// label is composed from the catalog rather than stored as text.
+{
+  const h = setup([makeCell(0, { mode: 'high', armed: true })]);
+  const armed = preview(h.root);
+  const armedState = armed?.className === 'ch-trigger-preview armed';
+  h.render([makeCell(0, { mode: 'high' })]);
+  const configured = preview(h.root);
+  const configuredState = armed !== null && configured !== null && configured !== armed &&
+    armed.isConnected === false && configured.isConnected === true &&
+    configured.className === 'ch-trigger-preview configured';
+  const english = t('channels.triggerPreview', { mode: t('channels.triggerHigh') });
+  const labelled = configured?.title === english &&
+    configured?.getAttribute('aria-label') === english;
+  check('the preview class follows the cell\'s armed flag across a re-render and names the mode',
+    armedState && configuredState && labelled,
+    `armed=${armed?.className}, configured=${configured?.className}, ` +
+    `title=${configured?.title}`);
+
+  const rootLang = { lang: '' };
+  (doc as unknown as { documentElement?: typeof rootLang }).documentElement = rootLang;
+  await setLocale('zh-CN');
+  h.render([makeCell(0, { mode: 'high', armed: true })]);
+  const translated = preview(h.root);
+  const zh = t('channels.triggerPreview', { mode: t('channels.triggerHigh') });
+  const localized = translated !== null && zh !== english &&
+    translated.title === zh && translated.getAttribute('aria-label') === zh &&
+    translated.className.startsWith('ch-trigger-preview ') && rootLang.lang === 'zh-CN';
+  await setLocale('en');
+  delete (doc as unknown as { documentElement?: typeof rootLang }).documentElement;
+  check('the preview label is translated with the locale, not frozen in English',
+    localized, `en=${english}, zh=${translated?.title}`);
+}
+
+// Opening and closing the dialog leaves the row's DOM alone - the preview is the same
+// node, the head's children are unchanged - and the name field is focused and selected.
+{
+  const h = setup([makeCell(0, { name: 'CLK', mode: 'rising' })]);
+  const glyph = preview(h.root);
+  const head = h.root.querySelector('.ch-head');
+  const before = head?.children ?? [];
+  const input = nameInput()!;
+  let selects = 0;
+  input.select = () => { selects += 1; };
+  gear(h.root, 0)?.click();
+  const untouched = (): boolean => preview(h.root) === glyph && glyph?.isConnected === true &&
+    (head?.children ?? []).length === before.length &&
+    (head?.children ?? []).every((kid, at) => kid === before[at]);
+  const opened = settingsDialog()?.open === true && doc.activeElement === input &&
+    selects === 1 && untouched();
+  cancel()?.click();
+  const closed = settingsDialog()?.open === false && untouched();
+  h.render([makeCell(0, { name: 'CLK', mode: 'rising' })]);
+  const rebuilt = preview(h.root) !== glyph && glyph?.isConnected === false;
+  check('the gear opens the dialog on the selected name field without re-rendering the row',
+    opened && closed && rebuilt,
+    `open=${opened}, closed=${closed}, selects=${selects}, rebuilt=${rebuilt}`);
 }
 
 // Six modes, the cell's mode checked, and the capture lock confined to the trigger field.
