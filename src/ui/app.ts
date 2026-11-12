@@ -32,6 +32,7 @@ import type { ChannelEdges, DecodeRequest, DecodeResult } from '../decode/index.
 import type { AssistantHost, CaptureOutcome } from '../assistant/tools.js';
 
 import { reconcileAnalyzers } from './analyzerForm.js';
+import { analyzerLabelFrom, nextAnalyzerOrdinal } from './analyzerNaming.js';
 import { AnalyzerPanel } from './analyzerPanel.js';
 import { BusBuilder, validateBusSpec } from '../data/busValue.js';
 import { BusPanel, cloneBusConfig, defaultBusConfig, type BusPanelView } from './busPanel.js';
@@ -7179,10 +7180,12 @@ export class App {
     await hydrateDecoders();
     const info = getDecoder(decoderId);
     const laneChannel = analyzerLaneChannel(channels);
+    const ordinal = nextAnalyzerOrdinal(this.analyzers, decoderId);
     const a: AnalyzerState = {
       id: `${decoderId}-${this.nextAnalyzer++}`,
       decoderId,
-      label: info.name,
+      label: analyzerLabelFrom('', info.name, ordinal),
+      ordinal,
       color: analyzerColor(this.analyzers.length),
       channels,
       options,

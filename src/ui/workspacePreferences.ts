@@ -13,6 +13,7 @@ import {
 const LEGACY_ANALOG_FULL_SCALE_V = 30;
 const LEGACY_ANALOG_OFFSET_V = -15;
 import { cloneBusConfig, defaultBusConfig, normalizeBankBusConfig } from './busPanel.js';
+import { nextAnalyzerOrdinal } from './analyzerNaming.js';
 import { ANALOG_HEIGHTS, BUS_HEIGHTS, type BusBitOrder, type BusViewConfig } from './busView.js';
 import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannelName, defaultChannels,
@@ -551,19 +552,24 @@ export function writeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): boolean {
 }
 
 export function analyzerStatesFrom(persisted: readonly PersistedAnalyzer[]): AnalyzerState[] {
-  return persisted.map((analyzer) => ({
-    id: analyzer.id,
-    decoderId: analyzer.decoderId,
-    label: analyzer.label,
-    color: analyzer.color,
-    channels: { ...analyzer.channels },
-    options: { ...analyzer.options },
-    laneChannel: analyzer.laneChannel,
-    result: null,
-    index: null,
-    status: 'idle',
-    note: { kind: 'pending' },
-  }));
+  const states: AnalyzerState[] = [];
+  for (const analyzer of persisted) {
+    states.push({
+      id: analyzer.id,
+      decoderId: analyzer.decoderId,
+      label: analyzer.label,
+      ordinal: nextAnalyzerOrdinal(states, analyzer.decoderId),
+      color: analyzer.color,
+      channels: { ...analyzer.channels },
+      options: { ...analyzer.options },
+      laneChannel: analyzer.laneChannel,
+      result: null,
+      index: null,
+      status: 'idle',
+      note: { kind: 'pending' },
+    });
+  }
+  return states;
 }
 
 export function nextAnalyzerSequence(analyzers: readonly { id: string }[]): number {

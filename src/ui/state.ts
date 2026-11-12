@@ -47,6 +47,7 @@ export interface AnalyzerState {
   decoderId: string;
   /** Short display name, e.g. "I2C". */
   label: string;
+  ordinal: number;
   color: string;
   /** decoder channel index -> capture channel index */
   channels: Record<number, number>;

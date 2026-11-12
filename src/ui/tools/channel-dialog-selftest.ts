@@ -60,10 +60,11 @@ function makeCell(index: number, options: CellOptions = {}): ChannelCell {
   };
 }
 
-const analyzerState = (id: string, label: string): AnalyzerState => ({
+const analyzerState = (id: string, label: string, ordinal: number): AnalyzerState => ({
   id,
   decoderId: 'i2c',
   label,
+  ordinal,
   color: '#9A7B2E',
   channels: { 0: 0, 1: 1 },
   options: {},
@@ -197,7 +198,7 @@ function chooseMode(mode: TriggerMode): void {
 
 {
   const h = setup([{ ...makeCell(0), analyzers: [
-    analyzerState('i2c-0', 'I2C-1'), analyzerState('i2c-1', 'I2C-2'),
+    analyzerState('i2c-0', 'I2C-1', 1), analyzerState('i2c-1', 'I2C-2', 2),
   ] }]);
   const chipShapes = h.root.querySelectorAll('.ch-analyzer').map((chip) =>
     `${chip.children.map((kid) => kid.className || kid.localName).join('+')}:` +
