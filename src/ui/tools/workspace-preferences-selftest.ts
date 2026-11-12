@@ -140,6 +140,33 @@ check('literal false and true survive parsing without coercion',
 }
 
 {
+  const base = { version: WORKSPACE_SCHEMA_VERSION, detailedLabels: true } as const;
+  const defaultRaw = serializeWorkspaceSnapshot(base);
+  const offRaw = serializeWorkspaceSnapshot({ ...base, quickScroll: false });
+  const off = parseWorkspaceSnapshot(offRaw);
+  const onRaw = serializeWorkspaceSnapshot({ ...base, quickScroll: true });
+  const defaultRestored = parseWorkspaceSnapshot(defaultRaw);
+  const literalTrue = parseWorkspaceSnapshot(JSON.stringify({ ...base, quickScroll: true }));
+  const invalid = ['yes', 1, 0, null, 'false', {}, []].map((quickScroll) =>
+    parseWorkspaceSnapshot(JSON.stringify({ ...base, quickScroll }))?.quickScroll);
+  check('quick scroll writes only literal false, restores off from it, and keeps every other value default-on',
+    defaultRaw === '{"version":1,"detailedLabels":true,"analyzers":[]}' &&
+      offRaw === '{"version":1,"detailedLabels":true,"quickScroll":false,"analyzers":[]}' &&
+      off !== null && serializeWorkspaceSnapshot(off).includes('"quickScroll":false') &&
+      parseWorkspaceSnapshot(serializeWorkspaceSnapshot(off))?.quickScroll === false &&
+      onRaw === defaultRaw &&
+      defaultRestored?.quickScroll === undefined && literalTrue?.quickScroll === undefined &&
+      invalid.every((value) => value === undefined),
+    `default=${defaultRaw}, off=${offRaw}, restored=${defaultRestored?.quickScroll}, true=${literalTrue?.quickScroll}, invalid=${invalid.join('/')}`);
+  const bothOff = serializeWorkspaceSnapshot({ ...base, fitRows: false, quickScroll: false });
+  const bothParsed = parseWorkspaceSnapshot(bothOff);
+  check('quick scroll serializes immediately after the optional fit-rows field and both survive a round trip',
+    bothOff === '{"version":1,"detailedLabels":true,"fitRows":false,"quickScroll":false,"analyzers":[]}' &&
+      bothParsed?.fitRows === false && bothParsed?.quickScroll === false,
+    `both=${bothOff}, restored=${bothParsed?.fitRows}/${bothParsed?.quickScroll}`);
+}
+
+{
   defineStorage({
     getItem: () => { throw new Error('blocked read'); },
     setItem: () => { throw new Error('blocked write'); },
@@ -1385,6 +1412,37 @@ check('the App snapshot boundary serializes canonical labels/channels/order and 
     !wiring(flippedDefault, preferences) && !wiring(flippedRestore, preferences) &&
     !wiring(app, flippedParse) && !wiring(app, flippedWrite),
     `read=${fitReadAt}, restore=${fitRestoreAt}, baseline=${fitBaselineAt}, projection=${fitCaptureAt}`);
+}
+
+{
+  const quickReadAt = app.indexOf('const workspace = readWorkspaceSnapshot();');
+  const quickRestoreAt = app.indexOf('this.quickScroll = workspace.quickScroll !== false;');
+  const quickBaselineAt = app.indexOf('this.lastWorkspaceSnapshot = serializeWorkspaceSnapshot(');
+  const quickCaptureAt = snapshotBody.indexOf('quickScroll: this.quickScroll,');
+  const fitRestoreAt = app.indexOf('this.fitRows = workspace.fitRows !== false;');
+  const fitCaptureAt = snapshotBody.indexOf('fitRows: this.fitRows,');
+  const wiring = (source: string, catalog: string): boolean =>
+    source.includes('  private quickScroll = true;') &&
+    source.includes('this.quickScroll = workspace.quickScroll !== false;') &&
+    quickCaptureAt >= 0 &&
+    catalog.includes('parsed.quickScroll === false') &&
+    catalog.includes('snapshot.quickScroll === false') &&
+    !source.includes('workspace.quickScroll === true') &&
+    !catalog.includes('parsed.quickScroll === true') &&
+    !catalog.includes('snapshot.quickScroll === true');
+  const flippedDefault = app.replace('  private quickScroll = true;', '  private quickScroll = false;');
+  const flippedRestore = app.replace(
+    'this.quickScroll = workspace.quickScroll !== false;', 'this.quickScroll = workspace.quickScroll === true;');
+  const flippedParse = preferences.replace('parsed.quickScroll === false', 'parsed.quickScroll === true');
+  const flippedWrite = preferences.replace('snapshot.quickScroll === false', 'snapshot.quickScroll === true');
+  check('quick scroll defaults on, restores only literal false after fit rows and before the baseline, then projects the boolean',
+    quickReadAt >= 0 && quickRestoreAt > quickReadAt && quickBaselineAt > quickRestoreAt &&
+    fitRestoreAt >= 0 && quickRestoreAt > fitRestoreAt &&
+    fitCaptureAt >= 0 && quickCaptureAt > fitCaptureAt &&
+    wiring(app, preferences) &&
+    !wiring(flippedDefault, preferences) && !wiring(flippedRestore, preferences) &&
+    !wiring(app, flippedParse) && !wiring(app, flippedWrite),
+    `read=${quickReadAt}, restore=${quickRestoreAt}, baseline=${quickBaselineAt}, projection=${quickCaptureAt}`);
 }
 
 const analyzerProjectionAt = snapshotBody.indexOf('analyzers: this.analyzers');

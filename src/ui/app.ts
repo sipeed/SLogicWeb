@@ -396,6 +396,7 @@ export class App {
   /** "Hide idle channels" (DESIGN §5.4): rows with no edge in the capture hide; default off. */
   private hideIdleChannels = false;
   private fitRows = true;
+  private quickScroll = true;
   /** The idle-channel scan of one store at one length (`idleChannelSet`). */
   private idleCache: { store: SampleStore; length: number; idle: ReadonlySet<number> } | null = null;
   /** Pointer x minus the grabbed cursor's line during an axis-chip drag. */
@@ -692,6 +693,7 @@ export class App {
       this.compactRows = workspace.compactRows === true;
       this.hideIdleChannels = workspace.hideIdleChannels === true;
       this.fitRows = workspace.fitRows !== false;
+      this.quickScroll = workspace.quickScroll !== false;
       this.developerTools = workspace.developerTools === true;
       this.channels = (workspace.channels ?? defaultChannels(16)).map((channel, index) => ({ ...channel, index }));
       this.order = workspace.order ?? this.channels.map((channel) => channel.index);
@@ -4504,6 +4506,7 @@ export class App {
       compactRows: this.compactRows,
       hideIdleChannels: this.hideIdleChannels,
       fitRows: this.fitRows,
+      quickScroll: this.quickScroll,
       // An opened file's rows are the viewed capture; the device layout is what persists.
       channels: (this.deviceLayout?.channels ?? this.channels)
         .map(({ name, color, enabled }) => ({ name, color, enabled })),
