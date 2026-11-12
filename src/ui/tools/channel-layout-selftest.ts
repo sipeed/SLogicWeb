@@ -405,12 +405,17 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     !rowSource.includes("'ch-trigger'") &&
     rowSource.includes('head.append(tag, original)') &&
     rowSource.includes('if (preview !== null) head.append(preview)') &&
-    rowSource.includes('head.append(settings)') &&
+    rowSource.includes("const main = div('ch-main')") &&
+    rowSource.includes('main.appendChild(head)') &&
+    rowSource.includes('main.appendChild(chips)') &&
+    rowSource.includes("const actions = div('ch-actions')") &&
+    rowSource.includes('actions.appendChild(settings)') &&
+    rowSource.includes('body.append(main, actions)') &&
     rowSource.includes("settings.addEventListener('mousedown', () => { el.draggable = false; })") &&
     rowSource.includes('this.settingsDialog.closeUnless(cells.map((cell) => cell.channel.index))') &&
     !rowSource.includes('nameInput') &&
     rowSource.includes("this.editor.className = 'ch-editor-popover'");
-  check('the row head shows the read-only trigger preview and puts the settings gear right-most',
+  check('the row head shows the read-only trigger preview and the gear sits in the body actions column',
     rowStart >= 0 && dialogSource.length > 0 && gearEntry,
     `rowStart=${rowStart}, dialog=${dialogSource.length}, gear=${gearEntry}`);
 
@@ -422,10 +427,12 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     return end < 0 ? '' : sheet.slice(at, end);
   };
   const settingsBlock = block('.ch-settings');
-  const trailingSlot = settingsBlock.includes('margin-left: auto') &&
+  const trailingSlot = block('.ch-actions').includes('flex: none') &&
+    !settingsBlock.includes('margin-left: auto') &&
     !block('.ch-trigger-preview').includes('margin-left: auto');
-  check('the settings gear owns the trailing slot so the head cannot slide with its children',
-    trailingSlot, `settings=${settingsBlock.includes('margin-left: auto')}, ` +
+  check('the actions column owns the trailing slot so the head cannot slide with its children',
+    trailingSlot, `actions=${block('.ch-actions').includes('flex: none')}, ` +
+    `settings=${settingsBlock.includes('margin-left: auto')}, ` +
     `trigger=${block('.ch-trigger-preview').includes('margin-left: auto')}`);
 
   const dialogFields = dialogSource.includes("this.dialog.className = 'channel-settings-dialog'") &&

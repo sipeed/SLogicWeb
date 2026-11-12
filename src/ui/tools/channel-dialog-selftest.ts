@@ -133,6 +133,7 @@ const gear = (root: FakeElement, channel: number): FakeElement | null =>
   root.querySelector(`.ch-settings[data-channel="${channel}"]`);
 const preview = (root: FakeElement): FakeElement | null =>
   root.querySelector('.ch-trigger-preview');
+const actions = (root: FakeElement): FakeElement | null => root.querySelector('.ch-actions');
 const popover = (): FakeElement | null => doc.body.querySelector('.ch-editor-popover');
 
 function submit(): void {
@@ -142,8 +143,8 @@ function chooseMode(mode: TriggerMode): void {
   for (const radio of radios()) radio.checked = radio.value === mode;
 }
 
-// The head is read-only name, D-index, trigger preview and gear, and the gear opens the
-// dialog on its name field.
+// The head is read-only name, D-index and trigger preview, the gear opens the dialog on
+// its name field from the body's actions column.
 {
   const h = setup([makeCell(0, { name: 'CLK', mode: 'rising' }), makeCell(1)]);
   const head = h.root.querySelector('.ch-head');
@@ -156,15 +157,18 @@ function chooseMode(mode: TriggerMode): void {
   kids[0]?.dispatchEvent(fakeEvent('keydown', { key: 'Enter' }));
   const noInlineEntry = h.root.querySelectorAll('input').length === 0 &&
     settingsDialog()?.open === false;
-  const order = kids.length === 4 &&
+  const order = kids.length === 3 &&
     kids[1]?.className === 'ch-original-id' && kids[1]?.textContent === 'D0' &&
     kids[1]?.hidden === false &&
     kids[2]?.localName === 'span' && kids[2]?.className === 'ch-trigger-preview configured' &&
-    kids[3]?.localName === 'button' && kids[3]?.className === 'ch-settings';
-  check('a channel head renders a read-only name, the D-index, the trigger preview and the gear',
+    (actions(h.root)?.children ?? []).length === 1 &&
+    actions(h.root)?.children[0]?.localName === 'button' &&
+    actions(h.root)?.children[0]?.className === 'ch-settings';
+  check('a channel head renders a read-only name, the D-index and the trigger preview; the gear sits in the actions column',
     readOnly && noInlineEntry && order,
     `readOnly=${readOnly}, inlineEntry=${!noInlineEntry}, order=${order}, ` +
-    `kids=${kids.map((k) => k.className).join('|')}`);
+    `kids=${kids.map((k) => k.className).join('|')}, ` +
+    `actions=${(actions(h.root)?.children ?? []).map((k) => k.className).join('|')}`);
 
   const opener = gear(h.root, 0);
   opener?.click();
@@ -202,18 +206,21 @@ function chooseMode(mode: TriggerMode): void {
 }
 
 // An unset trigger renders no preview element at all, so nothing can be mistaken for a
-// control; the gear stays the head's last child.
+// control; the actions column keeps the gear alone.
 {
   const h = setup([makeCell(0, { mode: 'dont-care' })]);
   const kids = h.root.querySelector('.ch-head')?.children ?? [];
+  const column = actions(h.root)?.children ?? [];
   const absent = preview(h.root) === null &&
     h.root.querySelectorAll('.ch-trigger-preview').length === 0 &&
-    kids.length === 3 &&
+    kids.length === 2 &&
     kids[0]?.className === 'ch-tag ch-tag--name' && kids[0]?.textContent === 'D0' &&
     kids[1]?.className === 'ch-original-id' && kids[1]?.textContent === 'D0' &&
-    kids[2]?.localName === 'button' && kids[2]?.className === 'ch-settings';
-  check('a dont-care row renders no trigger preview and the head still ends with the gear',
+    column.length === 1 && column[0]?.localName === 'button' &&
+    column[0]?.className === 'ch-settings';
+  check('a dont-care row renders no trigger preview and the actions column still holds the gear',
     absent, `kids=${kids.map((k) => k.className).join('|')}, ` +
+    `actions=${column.map((k) => k.className).join('|')}, ` +
     `preview=${preview(h.root) !== null}`);
 }
 

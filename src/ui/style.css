@@ -560,7 +560,7 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
 /* "Compact rows" (DESIGN §5.4): below the 48 px card floor a cell keeps only its head
    line (name + trigger slot); the reserved decoder strip goes - an attached decoder
    still has its own lane row above the trace. */
-.ch-cell.compact .ch-body { padding-top: 0; padding-bottom: 0; gap: 0; }
+.ch-cell.compact .ch-body { padding-top: 0; padding-bottom: 0; }
 .ch-cell.compact .ch-analyzers { display: none; }
 :is(html[data-theme="dark"], html[data-theme="light"]) .ch-cell.compact { padding-top: 1px; padding-bottom: 1px; }
 :is(html[data-theme="dark"], html[data-theme="light"]) .ch-cell.compact .ch-analyzers { display: none; }
@@ -592,9 +592,25 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
   min-width: 0;
   padding: 4px 4px 0 6px;
   display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ch-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 2px;
+}
+
+.ch-actions {
+  flex: none;
+  display: grid;
+  grid-template-rows: 18px 16px;
+  align-content: center;
+  justify-items: center;
 }
 
 .ch-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
@@ -663,7 +679,6 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
 }
 .ch-settings {
   flex: none;
-  margin-left: auto;
   align-self: center;
   display: flex;
   align-items: center;

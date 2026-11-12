@@ -653,7 +653,9 @@ export class ChannelList {
         })
         : cell.summary;
       if (cell.analog === true) sub.dataset.analogGain = String(gain);
-      body.append(head, sub);
+      const main = div('ch-main');
+      main.append(head, sub);
+      body.appendChild(main);
       if (cell.analog) {
         // Scale, zero and trigger readouts live on the plot's right ruler. The left
         // column keeps only the trigger editor and the row-height handle, which snaps to
@@ -835,8 +837,8 @@ export class ChannelList {
       settings.addEventListener('mouseup', () => { el.draggable = true; });
       head.append(tag, original);
       if (preview !== null) head.append(preview);
-      head.append(settings);
-      body.appendChild(head);
+      const main = div('ch-main');
+      main.appendChild(head);
 
       const chips = document.createElement('div');
       chips.className = 'ch-analyzers';
@@ -861,7 +863,11 @@ export class ChannelList {
         chip.title = formatAnalyzerNote(a.note) || a.label;
         chips.appendChild(chip);
       }
-      body.appendChild(chips);
+      main.appendChild(chips);
+
+      const actions = div('ch-actions');
+      actions.appendChild(settings);
+      body.append(main, actions);
 
       card.appendChild(body);
 
