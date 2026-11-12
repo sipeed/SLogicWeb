@@ -380,8 +380,8 @@ check(
 
 const ownershipAbsent = !app.includes('demoAnalyzers') && !app.includes('demoOwned');
 const manualAttachUnmarked = app.includes(
-  "onAttach: (id, ch, opts) => void this.attachAnalyzer(id, ch, opts)") &&
-  app.includes('this.attachAnalyzer(id, ch, opts),');
+  "onAttach: (id, ch, opts, name) => void this.attachAnalyzer(id, ch, opts, name)") &&
+  app.includes("this.attachAnalyzer(id, ch, opts, ''),");
 check(
   'analyzer mounts carry no demo ownership',
   ownershipAbsent && manualAttachUnmarked,

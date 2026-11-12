@@ -4712,7 +4712,7 @@ export class App {
       busRoot.className = 'side-body';
       container.append(analyzerRoot, resultsRoot, busRoot);
       this.analyzerPanel = new AnalyzerPanel(analyzerRoot, {
-        onAttach: (id, ch, opts) => void this.attachAnalyzer(id, ch, opts),
+        onAttach: (id, ch, opts, name) => void this.attachAnalyzer(id, ch, opts, name),
         onUpdate: (id, ch, opts) => void this.updateAnalyzer(id, ch, opts),
         onSelect: (id) => { this.selectedAnalyzer = id; this.renderPanels(); },
         onRemove: (id) => this.removeAnalyzer(id),
@@ -7176,6 +7176,7 @@ export class App {
 
   private async attachAnalyzer(
     decoderId: string, channels: Record<number, number>, options: Record<string, string | number>,
+    name: string,
   ): Promise<void> {
     await hydrateDecoders();
     const info = getDecoder(decoderId);
@@ -7184,7 +7185,7 @@ export class App {
     const a: AnalyzerState = {
       id: `${decoderId}-${this.nextAnalyzer++}`,
       decoderId,
-      label: analyzerLabelFrom('', info.name, ordinal),
+      label: analyzerLabelFrom(name, info.name, ordinal),
       ordinal,
       color: analyzerColor(this.analyzers.length),
       channels,
@@ -7452,7 +7453,7 @@ export class App {
         return outcome;
       },
       stop: () => { this.cancelPendingTriggerRestart(); return this.stopCapture(); },
-      attach: (id, channels, options) => this.attachAnalyzer(id, channels, options),
+      attach: (id, channels, options) => this.attachAnalyzer(id, channels, options, ''),
       removeAnalyzer: (index) => {
         const a = this.analyzers[index];
         if (!a) return false;
@@ -7503,7 +7504,7 @@ export class App {
     start: () => this.startCapture(),
     stop: () => { this.cancelPendingTriggerRestart(); return this.stopCapture(); },
     attach: (id: string, ch: Record<number, number>, opts: Record<string, string | number> = {}) =>
-      this.attachAnalyzer(id, ch, opts),
+      this.attachAnalyzer(id, ch, opts, ''),
     setSettings: (s: Partial<CaptureSettings>) => {
       this.applySettings({ ...this.settings, ...s });
     },

@@ -114,6 +114,33 @@ const twoI2c = entries('i2c', [1, 2]);
 }
 
 {
+  const attached: AnalyzerOrdinal[] = [];
+  const attach = (name: string): string => {
+    const ordinal = nextAnalyzerOrdinal(attached, 'i2c');
+    attached.push({ decoderId: 'i2c', ordinal });
+    return analyzerLabelFrom(name, 'I²C', ordinal);
+  };
+  const first = attach('MyI2C');
+  const second = attach('');
+  const third = attach('');
+  const labelDerivedNext = ((): number => {
+    const used = [first].map((label) => /^.*-(\d+)$/.exec(label)?.[1]).map(Number);
+    let ordinal = 1;
+    while (used.includes(ordinal)) ordinal++;
+    return ordinal;
+  })();
+  const controls = [
+    labelDerivedNext === 1,
+    analyzerLabelFrom('', 'I²C', labelDerivedNext) !== second,
+    attached.length === 3 && attached[2]?.ordinal === 3,
+  ];
+  check('a custom name keeps its ordinal, so the next attach of that decoder is still -2',
+    first === 'MyI2C' && second === 'I²C-2' && third === 'I²C-3' &&
+    controls.every((pass) => pass),
+    `first=${first}, second=${second}, third=${third}, controls=${JSON.stringify(controls)}`);
+}
+
+{
   const source = fs.readFileSync('src/ui/analyzerNaming.ts', 'utf8');
   const forbidden = ['import ', 'document', 'window', '../decode', 'localStorage', '//', '/*'];
   const hits = forbidden.filter((token) => source.includes(token));
@@ -126,10 +153,11 @@ const twoI2c = entries('i2c', [1, 2]);
 {
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
   const start = app.indexOf('private async attachAnalyzer(');
-  const body = start >= 0 ? app.slice(start, start + 1400) : '';
+  const body = start >= 0 ? app.slice(start, start + 1600) : '';
   const needles = [
+    'name: string,',
     'const ordinal = nextAnalyzerOrdinal(this.analyzers, decoderId);',
-    "label: analyzerLabelFrom('', info.name, ordinal),",
+    "label: analyzerLabelFrom(name, info.name, ordinal),",
     'ordinal,',
   ];
   const missing = needles.filter((needle) => !body.includes(needle));
@@ -138,7 +166,8 @@ const twoI2c = entries('i2c', [1, 2]);
   const orderIndex = order.map((needle) => body.indexOf(needle));
   const orderOk = orderIndex.every((index, i) => index >= 0 && (i === 0 || index > orderIndex[i - 1]));
   check('attachAnalyzer assigns the per-decoder ordinal and keeps the pinned mutation order',
-    missing.length === 0 && orderOk && !body.includes('label: info.name,'),
+    missing.length === 0 && orderOk && !body.includes('label: info.name,') &&
+    !body.includes("analyzerLabelFrom('',"),
     `missing=${JSON.stringify(missing)}, order=${JSON.stringify(orderIndex)}`);
 }
 

@@ -171,6 +171,59 @@ check(
   `resolved=${panel.includes(DESCRIPTION_CALL)}, import=${panel.includes(DECODER_I18N_IMPORT)}, raw=${panel.includes(RAW_DESCRIPTION_CALL)}`,
 );
 
+const NAME_LABEL = "labelled(t('analyzerPanel.name'), nameField)";
+const NAME_MAX = 'nameField.maxLength = MAX_ANALYZER_LABEL_LENGTH;';
+const NAME_VALUE = 'nameField.value = this.draftName;';
+const NAME_PLACEHOLDER =
+  'label: defaultAnalyzerLabel(info.name, nextAnalyzerOrdinal(v.analyzers, this.chosen)),';
+const NAME_INPUT =
+  "nameField.addEventListener('input', () => { this.draftName = nameField.value; });";
+const NAME_FIELD_GUARD = 'if (this.editing === null) {';
+const ATTACH_NAME_ARG = 'changedOptions(info, this.draftOptions), name)';
+const nameFieldPredicate = (source: string): boolean => {
+  const field = source.indexOf('const nameField = document.createElement(');
+  const guard = source.lastIndexOf(NAME_FIELD_GUARD, field);
+  const longName = source.indexOf("const longName = div('decoder-detail');");
+  return field >= 0 && guard >= 0 && guard < field && field < longName &&
+    source.includes(NAME_LABEL) && source.includes(NAME_MAX) &&
+    source.includes(NAME_VALUE) && source.includes(NAME_PLACEHOLDER) &&
+    source.includes(NAME_INPUT) && source.includes('name: string,') &&
+    source.includes("private draftName = '';") &&
+    count(source, /this\.draftName = '';/g) === 2 &&
+    source.includes('defaultAnalyzerLabel, MAX_ANALYZER_LABEL_LENGTH, nextAnalyzerOrdinal,') &&
+    source.includes("from './analyzerNaming.js';") && source.includes(ATTACH_NAME_ARG);
+};
+const nameFieldControls = [
+  !nameFieldPredicate(panel.replace(NAME_PLACEHOLDER, 'label: info.name,')),
+  !nameFieldPredicate(panel.replace(ATTACH_NAME_ARG, 'changedOptions(info, this.draftOptions))')),
+  !nameFieldPredicate(panel.replace(NAME_FIELD_GUARD, 'if (this.editing !== null) {')),
+  !nameFieldPredicate(panel.replace(NAME_MAX, 'nameField.maxLength = 128;')),
+];
+check(
+  'the add form takes one optional name field, capped and showing the ordinal default',
+  nameFieldPredicate(panel) && nameFieldControls.every((pass) => pass),
+  `field=${panel.indexOf('const nameField = document.createElement(')}, ` +
+    `guard=${panel.lastIndexOf(NAME_FIELD_GUARD, panel.indexOf('const nameField = document.createElement('))}, ` +
+    `controls=${JSON.stringify(nameFieldControls)}`,
+);
+
+const nameCopy = Object.entries(catalogs).map(([locale, dict]) => {
+  const placeholder = dict['analyzerPanel.namePlaceholder'];
+  const translated = locale === 'en'
+    ? placeholder === '{label} (default)'
+    : placeholder !== en['analyzerPanel.namePlaceholder'] &&
+      dict['analyzerPanel.name'] !== en['analyzerPanel.name'];
+  return `${locale}:${placeholder.includes('{label}') && dict['analyzerPanel.name'] && translated ? 'ok' : 'bad'}`;
+});
+check(
+  'the name field copy names the field and previews the default in every catalog',
+  nameCopy.every((entry) => entry.endsWith(':ok')) &&
+    formatMessage(en['analyzerPanel.namePlaceholder'], { label: 'I²C-2' }) === 'I²C-2 (default)' &&
+    formatMessage(zhCN['analyzerPanel.namePlaceholder'], { label: 'I²C-2' }) === 'I²C-2（默认）' &&
+    formatMessage(en['analyzerPanel.namePlaceholder'], { label: 'I²C-2' }) !== 'I²C-2',
+  `${nameCopy.join(', ')}, en=${formatMessage(en['analyzerPanel.namePlaceholder'], { label: 'I²C-2' })}`,
+);
+
 const DETAIL_CLASS = "div('decoder-detail')";
 const DETAIL_CALL = 'longName.textContent = decoderLongNameText(info);';
 const detailIndex = panel.indexOf(DETAIL_CLASS);

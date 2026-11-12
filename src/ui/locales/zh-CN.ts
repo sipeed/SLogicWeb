@@ -604,6 +604,8 @@ export const zhCN: Messages = {
   'analyzerPanel.cancelDecode': '取消解码',
   'analyzerPanel.add': '添加',
   'analyzerPanel.decoder': '解码器',
+  'analyzerPanel.name': '名称',
+  'analyzerPanel.namePlaceholder': '{label}（默认）',
   'analyzerPanel.decoderSearchLabel': '搜索协议',
   'analyzerPanel.decoderSearchPlaceholder': '输入关键字以筛选协议',
   'analyzerPanel.decoderNoMatch': '没有与 "{query}" 匹配的协议',

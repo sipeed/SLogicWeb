@@ -658,6 +658,8 @@ export const fr: Messages = {
   'analyzerPanel.cancelDecode': 'Annuler le décodage',
   'analyzerPanel.add': 'Ajouter',
   'analyzerPanel.decoder': 'Décodeur',
+  'analyzerPanel.name': 'Nom',
+  'analyzerPanel.namePlaceholder': '{label} (par défaut)',
   'analyzerPanel.decoderSearchLabel': 'Rechercher un protocole',
   'analyzerPanel.decoderSearchPlaceholder': 'Tapez pour filtrer les protocoles',
   'analyzerPanel.decoderNoMatch': 'Aucun protocole ne correspond à « {query} »',

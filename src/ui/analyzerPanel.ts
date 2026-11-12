@@ -30,6 +30,9 @@ import {
   changedOptions, isOffSentinelOption, mapsNoChannel, optionFieldRaw, optionFieldText,
   seedChannelMapping, splitDecoderOptions,
 } from './analyzerForm.js';
+import {
+  defaultAnalyzerLabel, MAX_ANALYZER_LABEL_LENGTH, nextAnalyzerOrdinal,
+} from './analyzerNaming.js';
 import { button, div, labelled, section } from './capturePanel.js';
 import {
   decoderDescriptionText, decoderLongNameText, decoderOptionLabel, decoderOptionValueTuples,
@@ -41,7 +44,10 @@ import { selectControl, type SelectOptionTuple } from './select.js';
 import { defaultChannelName, type AnalyzerState, type ChannelState } from './state.js';
 
 export interface AnalyzerPanelCallbacks {
-  onAttach(decoderId: string, channels: Record<number, number>, options: Record<string, string | number>): void;
+  onAttach(
+    decoderId: string, channels: Record<number, number>, options: Record<string, string | number>,
+    name: string,
+  ): void;
   /** Apply an edited mapping/options to an attached analyzer; the app re-decodes it. */
   onUpdate(id: string, channels: Record<number, number>, options: Record<string, string | number>): void;
   /** The analyzer whose results the list shows (clicking its name). */
@@ -72,6 +78,7 @@ export class AnalyzerPanel {
   private chosen = 'i2c';
   private draftChannels: Record<number, number> = {};
   private draftOptions: Record<string, string | number> = {};
+  private draftName = '';
   /** False until the draft mapping got its defaults for `chosen`. */
   private mappingSeeded = false;
   /**
@@ -137,6 +144,7 @@ export class AnalyzerPanel {
     this.editing = null;
     this.draftChannels = {};
     this.draftOptions = {};
+    this.draftName = '';
     this.mappingSeeded = false;
     this.touched.clear();
     this.nameMatched = [];
@@ -284,6 +292,18 @@ export class AnalyzerPanel {
       add.body.appendChild(warn);
     }
 
+    if (this.editing === null) {
+      const nameField = document.createElement('input');
+      nameField.type = 'text';
+      nameField.maxLength = MAX_ANALYZER_LABEL_LENGTH;
+      nameField.value = this.draftName;
+      nameField.placeholder = t('analyzerPanel.namePlaceholder', {
+        label: defaultAnalyzerLabel(info.name, nextAnalyzerOrdinal(v.analyzers, this.chosen)),
+      });
+      nameField.addEventListener('input', () => { this.draftName = nameField.value; });
+      add.body.appendChild(labelled(t('analyzerPanel.name'), nameField));
+    }
+
     const longName = div('decoder-detail');
     longName.textContent = decoderLongNameText(info);
     add.body.appendChild(longName);
@@ -379,8 +399,12 @@ export class AnalyzerPanel {
     } else {
       const attach = button(t('analyzerPanel.attach'), 'primary');
       attach.disabled = problems.length > 0;
-      attach.addEventListener('click', () =>
-        this.cb.onAttach(this.chosen, { ...this.draftChannels }, changedOptions(info, this.draftOptions)));
+      attach.addEventListener('click', () => {
+        const name = this.draftName;
+        this.draftName = '';
+        this.cb.onAttach(
+          this.chosen, { ...this.draftChannels }, changedOptions(info, this.draftOptions), name);
+      });
       actions.appendChild(attach);
     }
     add.body.appendChild(actions);

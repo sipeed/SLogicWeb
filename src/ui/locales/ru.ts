@@ -649,6 +649,8 @@ export const ru: Messages = {
   'analyzerPanel.cancelDecode': 'Отменить декодирование',
   'analyzerPanel.add': 'Добавить',
   'analyzerPanel.decoder': 'Декодер',
+  'analyzerPanel.name': 'Имя',
+  'analyzerPanel.namePlaceholder': '{label} (по умолчанию)',
   'analyzerPanel.decoderSearchLabel': 'Поиск протоколов',
   'analyzerPanel.decoderSearchPlaceholder': 'Введите текст для фильтрации протоколов',
   'analyzerPanel.decoderNoMatch': 'Нет протокола, соответствующего «{query}»',

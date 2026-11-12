@@ -659,6 +659,8 @@ export const en = {
   'analyzerPanel.cancelDecode': 'Cancel decode',
   'analyzerPanel.add': 'Add',
   'analyzerPanel.decoder': 'Decoder',
+  'analyzerPanel.name': 'Name',
+  'analyzerPanel.namePlaceholder': '{label} (default)',
   'analyzerPanel.decoderSearchLabel': 'Search protocols',
   'analyzerPanel.decoderSearchPlaceholder': 'Type to filter protocols',
   'analyzerPanel.decoderNoMatch': 'No protocol matches "{query}"',
