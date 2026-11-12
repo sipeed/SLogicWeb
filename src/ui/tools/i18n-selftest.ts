@@ -856,7 +856,8 @@ const baseSettings: CaptureSettings = {
 
 {
   const retired = [
-    'channels.dialogDescription', 'channels.moreColors', 'bus.fixedBits', 'bus.dragToOrder',
+    'channels.dialogDescription', 'channels.moreColors', 'channels.renameHint', 'bus.fixedBits',
+    'bus.dragToOrder',
     'bus.bankEnabledNote', 'bus.bankDisableNote', 'bus.bankDisabledNote',
     'bus.bankDialogTitle', 'bus.enableBank', 'bus.channelOrder',
     'capturePanel.oscilloscopeConfig', 'capturePanel.oscilloscopeEnabled',
@@ -881,6 +882,7 @@ const baseSettings: CaptureSettings = {
     'shortcuts.keyboard', 'shortcuts.input.arrows', 'about.title',
     'settings.developerToolsNote', 'settings.developerToolsOpen',
     'hints.wheel.scrollRows',
+    'hints.labels.rename',
     'emptyHint.example',
   ];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };

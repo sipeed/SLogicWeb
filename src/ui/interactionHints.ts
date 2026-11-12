@@ -200,13 +200,11 @@ function wheelVariant(context: InteractionContext): WheelVariant {
 
 const LABELS_CAPTURE = Object.freeze([
   hint('hints.labels.scroll', 'wheel'),
-  hint('hints.labels.rename', 'left'),
   hint('hints.labels.trigger', 'left'),
 ]);
 
 const LABELS_NO_CAPTURE = Object.freeze([
   hint('hints.labels.scroll', 'wheel'),
-  hint('hints.labels.rename', 'left'),
   hint('hints.labels.trigger', 'left'),
 ]);
 

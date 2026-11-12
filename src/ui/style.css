@@ -604,7 +604,6 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
   flex: 1; min-width: 0; padding: 0 2px; line-height: 18px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ch-tag--editable { cursor: text; }
 .ch-trigger {
   flex: none;
   margin-left: auto;

@@ -71,7 +71,7 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
       'wheel:hints.overview.scroll|Ctrl+wheel:hints.overview.zoom|' +
       'Shift+wheel:hints.overview.pan|left:hints.overview.center'],
     ['labels',
-      'wheel:hints.labels.scroll|left:hints.labels.rename|left:hints.labels.trigger'],
+      'wheel:hints.labels.scroll|left:hints.labels.trigger'],
     ['side-panel', 'wheel:hints.sidePanel.scroll'],
     ['toolbar', 'left:hints.toolbar.activate'],
     ['corner',
@@ -109,10 +109,9 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
 
   function expectedStillWorks(area: InteractionArea, specs: readonly HintSpec[]): boolean {
     if (area === 'labels') {
-      // Rename and trigger-slot editing work before a capture; only zoom/pan/cursor
-      // hints are capture-dependent.
-      return specs.some((spec) => spec.key === 'hints.labels.rename') &&
-        specs.some((spec) => spec.key === 'hints.labels.trigger') &&
+      // Trigger-slot editing works before a capture; only zoom/pan/cursor hints are
+      // capture-dependent.
+      return specs.some((spec) => spec.key === 'hints.labels.trigger') &&
         specs.some((spec) => spec.mouse === 'wheel');
     }
     if (area === 'corner') {

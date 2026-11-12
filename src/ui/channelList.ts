@@ -17,11 +17,10 @@
  * `.ch-card`), all cards exactly the trace-band height thanks to the `--ch-lane-offset`
  * margin and a reserved one-line decoder strip - see src/ui/NOTES.md section 13.
  *
- * The row itself is the editor: double-click the name (the row entry) for the channel's
- * settings popover - name and colour - or click the trigger glyph for the edge menu, in a
- * small popover rather than a modal. A colour change applies live (coalesced to one
- * commit per frame) and persists with the workspace like a name; Esc discards only an
- * uncommitted name draft. DESIGN §5.1 keeps the row at two inline controls.
+ * The head shows the channel name as read-only text and the trigger glyph as its one
+ * inline control: the glyph opens the trigger popover, whose mode choice commits through
+ * `onConfigure`. A colour change applies live (coalesced to one commit per frame) and
+ * persists with the workspace. Analog bus rows keep their own trigger menu.
  */
 
 import { ANALOG_HEIGHTS, analogHeightIndex, stepAnalogHeight } from './busView.js';
@@ -128,8 +127,8 @@ export class ChannelList {
     private readonly root: HTMLElement,
     private readonly cb: ChannelListCallbacks,
   ) {
-    // One shared quick-edit popover, not a modal per channel: name + trigger edge are
-    // the two things edited often, and HSync's channel label exposes them in place.
+    // One shared quick-edit popover, not a modal per channel: trigger edge and colour
+    // are the two things edited often, and HSync's channel label exposes them in place.
     this.editor = document.createElement('div');
     this.editor.className = 'ch-editor-popover';
     this.editor.hidden = true;
@@ -172,149 +171,104 @@ export class ChannelList {
       ? below : Math.max(8, rect.top - height - 6)}px`;
   }
 
-  private openEditor(
-    anchor: HTMLButtonElement, cell: ChannelCell, focus: 'name' | 'trigger',
-  ): void {
+  private openEditor(anchor: HTMLButtonElement, cell: ChannelCell): void {
     this.closeEditor(false);
     this.editorAnchor = anchor;
     this.editorChannel = cell.channel.index;
     this.editorBusId = null;
     const index = cell.channel.index;
     const title = document.createElement('div');
-    title.className = 'ch-editor-title';
+    title.className = 'ch-trigger-menu-head';
     title.id = 'ch-editor-title';
-    title.textContent = t('channels.settings', { index });
 
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.value = cell.channel.name;
-    nameInput.spellcheck = false;
-    nameInput.autocomplete = 'off';
-    nameInput.setAttribute('aria-label', t('channels.name'));
-
-    // The colour the settings popover has applied so far; a name commit must carry it.
+    // The colour the popover has applied so far; a trigger commit must carry it.
     let committedColor = cell.channel.color;
     let pendingColor: string | null = null;
-    const commitName = (): void => {
-      this.commitEditor(index, nameInput.value, cell.trigger.mode, pendingColor ?? committedColor);
-    };
 
-    if (focus === 'name') {
-      const nameRow = document.createElement('label');
-      nameRow.className = 'ch-editor-name';
-      const nameLabel = document.createElement('span');
-      nameLabel.textContent = t('channels.name');
-      nameRow.append(nameLabel, nameInput);
-      const reset = document.createElement('button');
-      reset.type = 'button';
-      reset.className = 'ch-editor-reset';
-      reset.textContent = '↺';
-      reset.title = t('channels.resetName', { index });
-      reset.setAttribute('aria-label', reset.title);
-      reset.addEventListener('click', () => {
-        // Reset in place: the user still chooses Enter to commit.
-        nameInput.value = defaultChannelName(index);
-        nameInput.focus();
-        nameInput.select();
+    // A menu, not a grid: the picture's six options, each with its glyph, the current
+    // one checked and tinted (None stays uncoloured), and the AND note at the foot.
+    const dot = document.createElement('span');
+    dot.className = 'ch-trigger-dot';
+    dot.style.background = cell.channel.color;
+    title.append(dot, document.createTextNode(t('channels.triggerOn', { name: cell.channel.name })));
+    const menu = document.createElement('div');
+    menu.className = 'ch-trigger-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-labelledby', title.id);
+    for (const mode of TRIGGER_MODES_MENU) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'ch-trigger-item' +
+        (mode === cell.trigger.mode ? ' selected' : '') +
+        (mode === 'dont-care' ? ' none' : '');
+      item.setAttribute('role', 'menuitemradio');
+      item.setAttribute('aria-checked', String(mode === cell.trigger.mode));
+      item.disabled = cell.trigger.disabled;
+      const icon = document.createElement('span');
+      icon.className = 'ch-trigger-item-icon';
+      icon.appendChild(triggerIcon(mode, 'menu'));
+      const label = document.createElement('span');
+      label.className = 'ch-trigger-item-label';
+      label.textContent = triggerModeName(mode);
+      const check = document.createElement('span');
+      check.className = 'ch-trigger-item-check';
+      check.textContent = '✓';
+      check.setAttribute('aria-hidden', 'true');
+      item.append(icon, label, check);
+      item.addEventListener('click', () => {
+        this.commitEditor(index, cell.channel.name, mode, committedColor);
       });
-      nameInput.addEventListener('keydown', (event) => {
-        if (event.isComposing) return;
-        if (event.key === 'Enter') { event.preventDefault(); commitName(); }
-      });
-      title.textContent = t('channels.settings', { index });
-      // Colour: the shared HSV picker, applied live but at most once per frame so a drag
-      // does not rebuild the rows on every pointer move. The name draft is left alone.
-      const flushColor = (): void => {
-        const color = pendingColor;
-        pendingColor = null;
-        if (color === null || color === committedColor || this.editorChannel !== index) return;
-        committedColor = color;
-        this.cb.onConfigure(index, { name: cell.channel.name, mode: cell.trigger.mode, color });
-      };
-      const picker = new HsvPicker((hex) => {
-        const queued = pendingColor !== null;
-        pendingColor = hex;
-        if (!queued) requestAnimationFrame(flushColor);
-      });
-      picker.setColor(cell.channel.color);
-      const colorRow = document.createElement('div');
-      colorRow.className = 'ch-editor-color';
-      colorRow.setAttribute('role', 'group');
-      colorRow.setAttribute('aria-label', t('channels.color'));
-      const colorLabel = document.createElement('span');
-      colorLabel.className = 'ch-editor-label';
-      colorLabel.textContent = t('channels.color');
-      const colorReset = document.createElement('button');
-      colorReset.type = 'button';
-      colorReset.className = 'ch-editor-reset';
-      colorReset.textContent = '↺';
-      colorReset.title = t('channels.resetColor', { index });
-      colorReset.setAttribute('aria-label', colorReset.title);
-      colorReset.addEventListener('click', () => {
-        const fallback = channelColor(index);
-        picker.setColor(fallback);
-        pendingColor = fallback;
-        flushColor();
-      });
-      colorRow.append(colorLabel, picker.element, colorReset);
-      this.editor.replaceChildren(title, nameRow, reset, colorRow);
-      this.editor.setAttribute('role', 'dialog');
-    } else {
-      // A menu, not a grid: the picture's six options, each with its glyph, the current
-      // one checked and tinted (None stays uncoloured), and the AND note at the foot.
-      const dot = document.createElement('span');
-      dot.className = 'ch-trigger-dot';
-      dot.style.background = cell.channel.color;
-      title.className = 'ch-trigger-menu-head';
-      title.textContent = '';
-      title.append(dot, document.createTextNode(t('channels.triggerOn', { name: cell.channel.name })));
-      const menu = document.createElement('div');
-      menu.className = 'ch-trigger-menu';
-      menu.setAttribute('role', 'menu');
-      menu.setAttribute('aria-labelledby', title.id);
-      for (const mode of TRIGGER_MODES_MENU) {
-        const item = document.createElement('button');
-        item.type = 'button';
-        item.className = 'ch-trigger-item' +
-          (mode === cell.trigger.mode ? ' selected' : '') +
-          (mode === 'dont-care' ? ' none' : '');
-        item.setAttribute('role', 'menuitemradio');
-        item.setAttribute('aria-checked', String(mode === cell.trigger.mode));
-        item.disabled = cell.trigger.disabled;
-        const icon = document.createElement('span');
-        icon.className = 'ch-trigger-item-icon';
-        icon.appendChild(triggerIcon(mode, 'menu'));
-        const label = document.createElement('span');
-        label.className = 'ch-trigger-item-label';
-        label.textContent = triggerModeName(mode);
-        const check = document.createElement('span');
-        check.className = 'ch-trigger-item-check';
-        check.textContent = '✓';
-        check.setAttribute('aria-hidden', 'true');
-        item.append(icon, label, check);
-        item.addEventListener('click', () => {
-          this.commitEditor(index, cell.channel.name, mode, cell.channel.color);
-        });
-        menu.appendChild(item);
-      }
-      const note = document.createElement('div');
-      note.className = 'ch-trigger-menu-note';
-      note.textContent = t('channels.triggerAllNote');
-      this.editor.replaceChildren(title, menu, note);
-      this.editor.setAttribute('role', 'dialog');
+      menu.appendChild(item);
     }
+    const note = document.createElement('div');
+    note.className = 'ch-trigger-menu-note';
+    note.textContent = t('channels.triggerAllNote');
+
+    // Colour: the shared HSV picker, applied live but at most once per frame so a drag
+    // does not rebuild the rows on every pointer move.
+    const flushColor = (): void => {
+      const color = pendingColor;
+      pendingColor = null;
+      if (color === null || color === committedColor || this.editorChannel !== index) return;
+      committedColor = color;
+      this.cb.onConfigure(index, { name: cell.channel.name, mode: cell.trigger.mode, color });
+    };
+    const picker = new HsvPicker((hex) => {
+      const queued = pendingColor !== null;
+      pendingColor = hex;
+      if (!queued) requestAnimationFrame(flushColor);
+    });
+    picker.setColor(cell.channel.color);
+    const colorRow = document.createElement('div');
+    colorRow.className = 'ch-editor-color';
+    colorRow.setAttribute('role', 'group');
+    colorRow.setAttribute('aria-label', t('channels.color'));
+    const colorLabel = document.createElement('span');
+    colorLabel.className = 'ch-editor-label';
+    colorLabel.textContent = t('channels.color');
+    const colorReset = document.createElement('button');
+    colorReset.type = 'button';
+    colorReset.className = 'ch-editor-reset';
+    colorReset.textContent = '↺';
+    colorReset.title = t('channels.resetColor', { index });
+    colorReset.setAttribute('aria-label', colorReset.title);
+    colorReset.addEventListener('click', () => {
+      const fallback = channelColor(index);
+      picker.setColor(fallback);
+      pendingColor = fallback;
+      flushColor();
+    });
+    colorRow.append(colorLabel, picker.element, colorReset);
+
+    this.editor.replaceChildren(title, menu, note, colorRow);
+    this.editor.setAttribute('role', 'dialog');
     this.editor.setAttribute('aria-modal', 'false');
     this.editor.setAttribute('aria-labelledby', title.id);
     this.editor.hidden = false;
     anchor.setAttribute('aria-expanded', 'true');
     this.positionEditor(anchor);
-    if (focus === 'name') {
-      nameInput.focus();
-      nameInput.select();
-    } else {
-      (this.editor.querySelector<HTMLButtonElement>('.ch-trigger-item[aria-checked="true"]')
-        ?? this.editor.querySelector<HTMLButtonElement>('.ch-trigger-item'))?.focus();
-    }
+    (this.editor.querySelector<HTMLButtonElement>('.ch-trigger-item[aria-checked="true"]')
+      ?? this.editor.querySelector<HTMLButtonElement>('.ch-trigger-item'))?.focus();
   }
 
   private openAnalogTriggerMenu(anchor: HTMLButtonElement, cell: BusCell): void {
@@ -681,31 +635,14 @@ export class ChannelList {
       trigger.appendChild(triggerIcon(cell.trigger.mode));
       trigger.addEventListener('click', (event) => {
         event.stopPropagation();
-        this.openEditor(trigger, cell, 'trigger');
+        this.openEditor(trigger, cell);
       });
       trigger.addEventListener('mousedown', () => { el.draggable = false; });
       trigger.addEventListener('mouseup', () => { el.draggable = true; });
 
       const tag = document.createElement('span');
-      tag.className = 'ch-tag ch-tag--name ch-tag--editable';
+      tag.className = 'ch-tag ch-tag--name';
       tag.textContent = cell.channel.name;
-      tag.title = t('channels.renameHint');
-      tag.tabIndex = 0;
-      tag.setAttribute('role', 'button');
-      tag.setAttribute('aria-haspopup', 'dialog');
-      tag.setAttribute('aria-expanded', 'false');
-      tag.setAttribute('aria-label',
-        `${cell.channel.name}: ${t('channels.renameHint')}`);
-      tag.addEventListener('dblclick', (event) => {
-        event.stopPropagation();
-        this.openEditor(trigger, cell, 'name');
-      });
-      tag.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter' && event.key !== 'F2' && event.key !== ' ') return;
-        event.preventDefault();
-        event.stopPropagation();
-        this.openEditor(trigger, cell, 'name');
-      });
       const original = document.createElement('span');
       original.className = 'ch-original-id';
       original.textContent = `D${cell.channel.index}`;

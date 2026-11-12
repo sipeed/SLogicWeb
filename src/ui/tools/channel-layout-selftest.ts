@@ -369,48 +369,61 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const channelList = fs.readFileSync('src/ui/channelList.ts', 'utf8');
   const rowStart = channelList.indexOf('export class ChannelList');
   const rowSource = channelList.slice(rowStart, channelList.indexOf('function triggerModeName'));
-  const inlineEntry = rowSource.includes("trigger.className = 'ch-trigger'") &&
-    rowSource.includes("this.openEditor(trigger, cell, 'trigger')") &&
-    rowSource.includes("tag.addEventListener('dblclick'") &&
-    rowSource.includes("this.openEditor(trigger, cell, 'name')") &&
+  const readOnlyName = rowSource.includes("tag.className = 'ch-tag ch-tag--name'") &&
+    rowSource.includes('tag.textContent = cell.channel.name') &&
     rowSource.includes('triggerIcon(cell.trigger.mode)') &&
-    !rowSource.includes('ch-settings') && !rowSource.includes('settingsDialog');
-  check('channel rows expose a name double-click and a trigger glyph as one inline editor',
-    rowStart >= 0 && inlineEntry, `rowStart=${rowStart}, inline=${inlineEntry}`);
+    !rowSource.includes('ch-tag--editable') &&
+    !rowSource.includes('tag.addEventListener') &&
+    !rowSource.includes("tag.setAttribute('role', 'button')") &&
+    !rowSource.includes('tag.tabIndex') &&
+    !rowSource.includes('tag.title') &&
+    !rowSource.includes('contentEditable') &&
+    !rowSource.includes("this.openEditor(trigger, cell, 'name')");
+  check('the channel row head renders a read-only name with no name-editing entry',
+    rowStart >= 0 && readOnlyName,
+    `rowStart=${rowStart}, text=${rowSource.includes('tag.textContent = cell.channel.name')}, ` +
+    `listener=${rowSource.includes('tag.addEventListener')}, ` +
+    `role=${rowSource.includes("tag.setAttribute('role', 'button')")}, ` +
+    `tabIndex=${rowSource.includes('tag.tabIndex')}, ` +
+    `title=${rowSource.includes('tag.title')}, ` +
+    `contentEditable=${rowSource.includes('contentEditable')}, ` +
+    `nameBranch=${rowSource.includes("this.openEditor(trigger, cell, 'name')")}, ` +
+    `editableClass=${rowSource.includes('ch-tag--editable')}`);
 
   const popover = rowSource.includes("this.editor.className = 'ch-editor-popover'") &&
     rowSource.includes("this.editor.setAttribute('role', 'dialog')") &&
     rowSource.includes("if (event.isComposing) return;") &&
-    rowSource.includes('nameInput.select();') &&
     rowSource.includes("this.editor.contains(document.activeElement)") &&
     rowSource.includes('this.editor.hidden = false') &&
     rowSource.includes('private commitEditor(index: number, name: string, mode: TriggerMode, color: string)') &&
     rowSource.includes('this.cb.onConfigure(index, { name, mode, color })') &&
     rowSource.includes('this.closeEditor();') &&
     rowSource.includes("if (event.key === 'Escape'") &&
-    rowSource.includes('nameInput.select()');
+    !rowSource.includes('nameInput');
   const sixModes = rowSource.includes('for (const mode of TRIGGER_MODES_MENU)') &&
     rowSource.includes("item.setAttribute('aria-checked'") &&
     rowSource.includes('item.disabled = cell.trigger.disabled') &&
     rowSource.includes("mode === 'dont-care' ? ' none'") &&
     rowSource.includes("t('channels.triggerAllNote')") &&
     rowSource.includes("className = 'ch-original-id'");
-  check('the inline popover offers all six trigger modes and dismisses a name draft on Escape',
-    popover && sixModes, `popover=${popover}, modes=${sixModes}`);
+  check('the trigger popover offers all six trigger modes and carries no name draft',
+    popover && sixModes,
+    `popover=${popover}, modes=${sixModes}, nameDraft=${rowSource.includes('nameInput')}`);
 
-  // Colour is edited from the row entry's settings popover with the shared HSV picker
-  // (DESIGN §5.1), coalesced to one commit per frame, never a native input or a modal.
+  // Colour is edited from the trigger popover's shared HSV picker, coalesced to one
+  // commit per frame, never a native input or a modal.
   const colorEntry = channelList.includes('new HsvPicker(') &&
     rowSource.includes('requestAnimationFrame(flushColor)') &&
-    rowSource.includes('pendingColor ?? committedColor') &&
+    rowSource.includes('let pendingColor: string | null = null') &&
     rowSource.includes('picker.setColor(cell.channel.color)') &&
     rowSource.includes('channelColor(index)') &&
+    rowSource.includes('this.commitEditor(index, cell.channel.name, mode, committedColor)') &&
     !channelList.includes('channel-settings-dialog') &&
     !channelList.includes("type = 'color'");
-  const resetToNumber = rowSource.includes('nameInput.value = defaultChannelName(index)') &&
-    rowSource.includes("event.key === 'Enter'");
-  check('the name popover edits colour live; rename resets to D{index} and commits on Enter',
-    colorEntry && resetToNumber, `color=${colorEntry}, reset=${resetToNumber}`);
+  const resetRetired = !rowSource.includes('nameInput.value = defaultChannelName(index)') &&
+    !rowSource.includes('resetName');
+  check('the trigger popover keeps live colour editing while the name reset is retired',
+    colorEntry && resetRetired, `color=${colorEntry}, nameResetRetired=${resetRetired}`);
 
   const anyEdgeGlyph = channelList.includes("mode === 'edge' ? t('trigger.anyEdge')") &&
     channelList.includes("mode === 'edge' ? 'M1 4H6L18 12H23M1 12H6L18 4H23'") &&
