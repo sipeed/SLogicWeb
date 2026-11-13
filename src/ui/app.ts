@@ -200,7 +200,8 @@ import {
 } from './cursorDistance.js';
 import {
   addEdgeRow as appendEdgeRow, assignEdgeChannel, assignEdgeCursor, clearEdgeCursors, countCursorEdges,
-  CURSOR_EDGE_EMPTY_RESULT, pruneEdgeChannels, pruneEdgeCursors, removeEdgeRow as dropEdgeRow,
+  CURSOR_EDGE_DEFERRED_RESULT, CURSOR_EDGE_EMPTY_RESULT, pruneEdgeChannels, pruneEdgeCursors,
+  removeEdgeRow as dropEdgeRow,
   type CursorEdgeRow,
 } from './cursorEdges.js';
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
@@ -3606,11 +3607,14 @@ export class App {
       if (sample !== null && Number.isFinite(sample)) samples.set(cursor.id, sample);
     }
     const channels = new Set(this.edgeChannels());
+    const locked = this.cursorReadOnly();
     return this.edgeRows.map((row, index) => {
       let result = CURSOR_EDGE_EMPTY_RESULT;
       const aSample = row.a === null ? undefined : samples.get(row.a);
       const bSample = row.b === null ? undefined : samples.get(row.b);
-      if (this.store.length > 0 && row.channel !== null && channels.has(row.channel) &&
+      if (locked) {
+        result = CURSOR_EDGE_DEFERRED_RESULT;
+      } else if (this.store.length > 0 && row.channel !== null && channels.has(row.channel) &&
           aSample !== undefined && bSample !== undefined &&
           aSample <= this.store.length && bSample <= this.store.length) {
         result = countCursorEdges(this.store, row.channel, aSample, bSample).cell;

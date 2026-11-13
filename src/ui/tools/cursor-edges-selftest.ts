@@ -1,5 +1,6 @@
 import {
-  CURSOR_EDGE_EMPTY_RESULT, CURSOR_EDGE_QUERY_WINDOW, MAX_CURSOR_EDGE_ROWS, addEdgeRow,
+  CURSOR_EDGE_DEFERRED_RESULT, CURSOR_EDGE_EMPTY_RESULT, CURSOR_EDGE_QUERY_WINDOW,
+  MAX_CURSOR_EDGE_ROWS, addEdgeRow,
   assignEdgeChannel, assignEdgeCursor, clearEdgeCursors, countCursorEdges, pruneEdgeChannels,
   pruneEdgeCursors, removeEdgeRow, type CursorEdgeRow, type EdgeCounts, type EdgeSampleSource,
 } from '../cursorEdges.js';
@@ -368,6 +369,15 @@ check('an incomplete measurement has a distinct placeholder rather than a fabric
   `placeholder=${CURSOR_EDGE_EMPTY_RESULT}`);
 
 {
+  const deferred: string = CURSOR_EDGE_DEFERRED_RESULT;
+  const empty: string = CURSOR_EDGE_EMPTY_RESULT;
+  check('a deferred measurement has its own cell, distinct from both incomplete and zero',
+    deferred === '\u2026' && deferred.length === 1 && deferred !== empty &&
+    deferred !== ['0', '0', '0'].join('/'),
+    `deferred=${json(deferred)}, empty=${empty}`);
+}
+
+{
   const levels = togglingWaveform(31, [10, 20, 30]);
   const source = new WaveformSource(levels);
   const cases: readonly [number, number, string][] = [
@@ -539,6 +549,43 @@ check('an incomplete measurement has a distinct placeholder rather than a fabric
       guardFirst(withoutGuard(app, signature), signature, texts)).length}, ` +
     `shared=${app.includes('return cursorsLocked({ running: this.running, stopping: this.stopping });')}, ` +
     `derivations=${(app.match(/private cursorReadOnly\(\): boolean \{/g) ?? []).length}`);
+}
+
+{
+  const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const slice = (source: string, from: string, to: string): string => {
+    const start = source.indexOf(from);
+    if (start < 0) return '';
+    const end = source.indexOf(to, start + from.length);
+    return end < 0 ? '' : source.slice(start, end);
+  };
+  const body = slice(app, 'private cursorEdgeRows(): CursorEdgeRowView[] {',
+    'private focusCursor(id: number): void {');
+  const defersWhileLocked = (source: string): boolean => {
+    const lockedAt = source.indexOf('if (locked) {');
+    const deferredAt = source.indexOf('result = CURSOR_EDGE_DEFERRED_RESULT;');
+    const elseAt = source.indexOf('} else if (');
+    const countAt = source.indexOf('countCursorEdges(');
+    return source !== '' &&
+      source.includes('const locked = this.cursorReadOnly();') &&
+      lockedAt >= 0 && deferredAt > lockedAt && elseAt > deferredAt && countAt > elseAt &&
+      (source.split('countCursorEdges(').length - 1) === 1;
+  };
+  check('a locked cursor set defers every edge cell and reaches the counter only when unlocked',
+    defersWhileLocked(body),
+    `source=${body.length} chars, locked=${body.indexOf('if (locked) {')}, ` +
+    `count=${body.indexOf('countCursorEdges(')}, ` +
+    `sites=${body.split('countCursorEdges(').length - 1}`);
+
+  const countingWhileLocked = body.replace('result = CURSOR_EDGE_DEFERRED_RESULT;',
+    'result = countCursorEdges(this.store, row.channel!, aSample!, bSample!).cell;');
+  const armDropped = body.replace(
+    'if (locked) {\n        result = CURSOR_EDGE_DEFERRED_RESULT;\n      } else if (', 'if (');
+  check('the deferral branch is load-bearing: counting while locked or dropping the arm fails',
+    countingWhileLocked !== body && armDropped !== body &&
+    !defersWhileLocked(countingWhileLocked) && !defersWhileLocked(armDropped),
+    `countingWhileLocked=${defersWhileLocked(countingWhileLocked)}, ` +
+    `armDropped=${defersWhileLocked(armDropped)}`);
 }
 
 const failed = results.filter((r) => !r.pass).length;

@@ -11,6 +11,7 @@ export interface CursorEdgeRow {
 export const MAX_CURSOR_EDGE_ROWS = 15;
 export const CURSOR_EDGE_QUERY_WINDOW = 262_144;
 export const CURSOR_EDGE_EMPTY_RESULT = '-/-/-';
+export const CURSOR_EDGE_DEFERRED_RESULT = '…';
 
 export interface EdgeSampleSource {
   readonly length: number;

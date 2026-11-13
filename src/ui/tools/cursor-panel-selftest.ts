@@ -1696,6 +1696,54 @@ const edgeMethodsSource = slice(app,
 }
 
 {
+  const callSite = 'this.capturePanel.updateCursorEdges(this.cursorEdgeRows());';
+  const liveEdgeRefreshes = (source: string): boolean => {
+    const sites = source.split('updateCursorEdges(').length - 1;
+    return sites === 2 && source.split(callSite).length - 1 === 2 &&
+      source.split('countCursorEdges(').length - 1 === 1;
+  };
+  const firstSite = app.indexOf(callSite);
+  const detachedSite = app.slice(0, firstSite) + 'this.capturePanel.updateCursorEdges([]);' +
+    app.slice(firstSite + callSite.length);
+  const secondCountPath = app.replace('private cursorEdgeRows(): CursorEdgeRowView[] {',
+    'private cursorEdgeRows(): CursorEdgeRowView[] {\n    countCursorEdges(this.store, 0, 0, 1);');
+  check('both live edge refreshes derive their cells from the single locked-aware counter path',
+    liveEdgeRefreshes(app) && !liveEdgeRefreshes(detachedSite) &&
+    !liveEdgeRefreshes(secondCountPath),
+    `sites=${app.split('updateCursorEdges(').length - 1}, ` +
+    `detached=${liveEdgeRefreshes(detachedSite)}, ` +
+    `secondPath=${liveEdgeRefreshes(secondCountPath)}`);
+
+  const stop = slice(app, 'private async stopCapture(', 'private async teardownDevice(');
+  const finishing = slice(app, 'private finishCapture(reason: CaptureStopReason',
+    'private discardDecodeState(): void {');
+  const plainBranchAt = finishing.indexOf('    } else {\n      this.session = null;');
+  const plainBranch = plainBranchAt < 0 ? '' : finishing.slice(plainBranchAt);
+  const stoppedFirst = (source: string): boolean => {
+    const stopped = source.indexOf('this.stopping = false;');
+    const finished = source.indexOf('this.finishCapture(reason);');
+    return stopped >= 0 && finished > stopped;
+  };
+  const relayoutFirst = (branch: string): boolean => {
+    const relayout = branch.indexOf('this.relayout();');
+    const render = branch.indexOf('this.renderPanels();');
+    return relayout >= 0 && render > relayout;
+  };
+  const stopWithLock = stop.replace('this.stopping = false;', '');
+  const swapped = plainBranch.replace(
+    '      this.relayout();\n      this.renderPanels();',
+    '      this.renderPanels();\n      this.relayout();');
+  const unrendered = plainBranch.replace('      this.renderPanels();\n', '');
+  check('a finished capture renders panels after the lock clears, so the deferred cells refresh',
+    stoppedFirst(stop) && relayoutFirst(plainBranch) && stopWithLock !== stop &&
+    swapped !== plainBranch && unrendered !== plainBranch &&
+    !stoppedFirst(stopWithLock) && !relayoutFirst(swapped) && !relayoutFirst(unrendered),
+    `stop=${stop.length} chars, branch=${plainBranch.length} chars, ` +
+    `lockCleared=${stoppedFirst(stop)}, relayoutFirst=${relayoutFirst(plainBranch)}, ` +
+    `mutable=${stopWithLock !== stop && swapped !== plainBranch && unrendered !== plainBranch}`);
+}
+
+{
   const keys = [
     'capturePanel.cursorEdges', 'capturePanel.cursorEdgesFormat',
     'capturePanel.cursorEdgesEmpty', 'capturePanel.cursorEdgesNoRows',
