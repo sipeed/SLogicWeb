@@ -17,7 +17,9 @@
 
 import type { Stats, StartOptions } from './slogic16u3.js';
 import type { DiagnosticVars } from '../diagnostics.js';
-import type { CaptureConfig, SampleSink, TransportDeadReason } from './types.js';
+import type {
+  CaptureConfig, DieTemperatureReading, SampleSink, TransportDeadReason,
+} from './types.js';
 import type { TraceEntry } from './protocol.js';
 
 export interface DeviceFilter {
@@ -34,6 +36,7 @@ export type ToWorker =
   | { kind: 'stop' }
   | { kind: 'stats' }
   | { kind: 'console'; command: string }
+  | { kind: 'temperature' }
   | { kind: 'ack'; id: number };
 
 /**
@@ -77,6 +80,7 @@ export type FromWorker =
   | { kind: 'error'; message: string; code?: string; vars?: DiagnosticVars; payload?: string }
   | { kind: 'stats'; stats: Stats }
   | { kind: 'console'; result: string }
+  | { kind: 'temperature'; reading: DieTemperatureReading }
   | { kind: 'started' }
   | { kind: 'stopped' }
   | {

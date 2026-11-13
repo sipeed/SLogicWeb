@@ -303,6 +303,7 @@ export const en = {
   'diagnostic.device.workerNoDevice': 'the USB worker did not report a device',
   'diagnostic.device.workerTerminated': 'the USB worker transport was terminated',
   'diagnostic.device.workerNoStats': 'the USB worker answered with no statistics',
+  'diagnostic.device.workerNoTemperature': 'the USB worker answered with no temperature',
   'diagnostic.device.workerNoConsole': 'the USB worker answered with no console result',
   'diagnostic.device.workerUnclaimed':
     'the USB worker answered "{kind}" with nobody waiting',
@@ -644,7 +645,7 @@ export const en = {
   'capturePanel.usbWarning': 'Developer tool: write commands change device registers directly and can leave the board in a bad state.',
   'capturePanel.usbPlaceholder': 'read 0x000c 4',
   'capturePanel.usbSend': 'Send',
-  'capturePanel.usbHelp': 'Commands: read <addr> [len], write <addr> <byte>..., ctrl <value>, flags, clear-fifo, in <request> <value> <index> <len>, out <request> <value> <index> [byte]...',
+  'capturePanel.usbHelp': 'Commands: read <addr> [len], write <addr> <byte>..., ctrl <value>, flags, clear-fifo, temp, in <request> <value> <index> <len>, out <request> <value> <index> [byte]...',
   'capturePanel.consoleSeed': 'Enter help for commands. Numbers are decimal or 0x-prefixed hex.',
   'capturePanel.consoleError': 'error: {detail}',
 

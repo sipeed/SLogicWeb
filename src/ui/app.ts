@@ -20,6 +20,7 @@ import { DiagnosticError, diagnosticOf } from '../diagnostics.js';
 import {
   MAX_SAMPLERATE_HZ, SAMPLERATES_HZ, TransportDeadError, getGrantedDevicesOnBestThread,
   requestDeviceOnBestThread, vrefCode, type CaptureConfig, type Device,
+  type DieTemperatureReading,
 } from '../device/index.js';
 import { WorkerSlogicDevice, workerTransport } from '../device/workerTransport.js';
 import { wheelSpanFactor } from '../render/index.js';
@@ -5975,6 +5976,13 @@ export class App {
     return this.device.usbControl(command);
   }
 
+  /** One die-temperature read; null when the transport or image has no register. */
+  private async readTemperature(): Promise<DieTemperatureReading | null> {
+    const device = this.device;
+    if (!device?.readTemperature) return null;
+    return device.readTemperature();
+  }
+
   /** Grow the channel model when a wider SLogic board is connected. */
   private adoptDeviceChannels(device: Device): void {
     this.rateCeilings = device.maxSamplerateHz ?? MAX_SAMPLERATE_HZ;
@@ -7550,6 +7558,8 @@ export class App {
     setSettings: (s: Partial<CaptureSettings>) => {
       this.applySettings({ ...this.settings, ...s });
     },
+    /** R32_ADC_TEMP, live (202610300413+). */
+    readTemperature: () => this.readTemperature(),
     frameStats: (): FrameStatsSnapshot => this.frameStats(),
     resetFrameStats: (): void => this.resetFrameStats(),
     /** Add a parallel-bus view; missing fields take the panel's defaults. */

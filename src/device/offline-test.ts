@@ -27,6 +27,8 @@ import {
   configureTestMode,
   configureThreshold,
   decodeDeviceFlags,
+  decodeDieTemperature,
+  describeDieTemperature,
   MAX_SAMPLERATE_HZ,
   MAX_SAMPLERATE_HZ_SLOGIC32_U3,
   PID_SLOGIC16_U3,
@@ -2324,6 +2326,16 @@ async function main(): Promise<void> {
       device.name.includes('fake worker') && device.maxChannels === 32 &&
         device.maxSamplerateHz?.[32] === 200e6, `${device.name} ${device.maxChannels}`);
 
+    // The page's reply switch must know every new request kind; a missing case left the
+    // temperature poll timing out and showing "unavailable" (2026-11-12).
+    const tempPending = device.readTemperature();
+    const tempRequest = asking.sent.some((m) => m.kind === 'temperature');
+    asking.emit({ kind: 'temperature', reading: { celsius: 42.25, counter: 7, valid: true } });
+    const tempReading = await tempPending;
+    check('a worker temperature reply settles the page request',
+      tempRequest && tempReading.celsius === 42.25 && tempReading.counter === 7 &&
+        tempReading.valid, JSON.stringify(tempReading));
+
     const refused = new FakeWorker();
     const refusing = WorkerSlogicDevice.open(
       { vendorId: 0x359f, productId: 0x3032 },
@@ -3163,6 +3175,16 @@ async function main(): Promise<void> {
 
   console.log('\nR32_FLAG: the latch is cleared by the one register that can clear it');
   {
+    check('decodeDieTemperature splits counter, valid and signed Q2 degC',
+      (() => {
+        const warm = decodeDieTemperature(0x2a0100a9);
+        const cold = decodeDieTemperature(0x2b01fffe);
+        const old = decodeDieTemperature(0x00000000);
+        return warm.valid && warm.counter === 0x2a && warm.celsius === 42.25 &&
+          cold.valid && cold.celsius === -0.5 &&
+          !old.valid && old.celsius === 0 &&
+          describeDieTemperature(old).includes('202610300413+');
+      })());
     check('decodeDeviceFlags reads RDY/FIFO_OV/INNER_ERR apart',
       (() => {
         const f = decodeDeviceFlags(0x07);

@@ -300,6 +300,7 @@ export const fr: Messages = {
   'diagnostic.device.workerNoDevice': 'le worker USB n’a signalé aucun appareil',
   'diagnostic.device.workerTerminated': 'le transport du worker USB a été arrêté',
   'diagnostic.device.workerNoStats': 'le worker USB a répondu sans statistiques',
+  'diagnostic.device.workerNoTemperature': 'le worker USB a répondu sans température',
   'diagnostic.device.workerNoConsole': 'le worker USB a répondu sans résultat de console',
   'diagnostic.device.workerUnclaimed':
     'le worker USB a répondu « {kind} » alors que personne n’attendait',
@@ -643,7 +644,7 @@ export const fr: Messages = {
   'capturePanel.usbWarning': 'Outil développeur : les commandes write modifient directement les registres de l’appareil et peuvent dérégler la carte.',
   'capturePanel.usbPlaceholder': 'read 0x000c 4',
   'capturePanel.usbSend': 'Envoyer',
-  'capturePanel.usbHelp': 'Commandes : read <addr> [len], write <addr> <byte>..., ctrl <value>, flags, clear-fifo, in <request> <value> <index> <len>, out <request> <value> <index> [byte]...',
+  'capturePanel.usbHelp': 'Commandes : read <addr> [len], write <addr> <byte>..., ctrl <value>, flags, clear-fifo, temp, in <request> <value> <index> <len>, out <request> <value> <index> [byte]...',
   'capturePanel.consoleSeed': 'Tapez help pour les commandes. Nombres décimaux ou hexadécimaux préfixés 0x.',
   'capturePanel.consoleError': 'erreur : {detail}',
 

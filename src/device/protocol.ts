@@ -415,6 +415,69 @@ export function describeDeviceFlags(f: DeviceFlags): string {
     `INNER_ERR=${f.innerError ? 1 : 0}`;
 }
 
+/** Die temperature (R32_ADC_TEMP, 0x0048), firmware 202610300413 and later. */
+export const R32_ADC_TEMP = 0x0048;
+
+export interface DieTemperature {
+  readonly raw: number;
+  /** [31:24] conversion counter, advancing continuously. */
+  readonly counter: number;
+  /** [16] sticky valid bit; false means this image does not implement the register. */
+  readonly valid: boolean;
+  /** [15:0] signed Q2 degC (0.25 degC per LSB). */
+  readonly celsius: number;
+}
+
+/**
+ * Decode one R32_ADC_TEMP word. The upper half is diagnostics, not temperature: a
+ * single read of an old image reads zero and would look like -0 degC, so the valid bit
+ * is part of the value, and an advancing counter is what proves a live conversion.
+ */
+export function decodeDieTemperature(raw: number): DieTemperature {
+  const word = raw >>> 0;
+  const code = (word << 16) >> 16;
+  return {
+    raw: word,
+    counter: (word >>> 24) & 0xff,
+    valid: ((word >>> 16) & 1) === 1,
+    celsius: code / 4,
+  };
+}
+
+export function describeDieTemperature(t: DieTemperature): string {
+  return t.valid
+    ? `R32_ADC_TEMP=0x${t.raw.toString(16).padStart(8, '0')} ${t.celsius.toFixed(2)} degC ` +
+      `(counter ${t.counter})`
+    : `R32_ADC_TEMP=0x${t.raw.toString(16).padStart(8, '0')} unsupported (valid=0; ` +
+      'requires firmware 202610300413+)';
+}
+
+/** One R32_ADC_TEMP read, decoded. Safe while a capture is running. */
+export async function readDieTemperatureOnce(bus: RegisterBus): Promise<DieTemperature> {
+  const word = await bus.read(R32_ADC_TEMP, 4);
+  return decodeDieTemperature(
+    (word[0] ?? 0) | ((word[1] ?? 0) << 8) | ((word[2] ?? 0) << 16) |
+      ((word[3] ?? 0) << 24),
+  );
+}
+
+/**
+ * Read the die temperature twice and report whether the conversion counter advanced.
+ * The canonical spec asks for exactly that: a frozen PLL leaves the counter frozen too,
+ * so one read cannot tell a live 0 degC from a dead register.
+ */
+export async function readDieTemperature(
+  bus: RegisterBus,
+  trace: Tracer = () => {},
+): Promise<{ first: DieTemperature; second: DieTemperature; advanced: boolean }> {
+  const first = await readDieTemperatureOnce(bus);
+  // The conversion runs at its own pace; give it time to produce one more count.
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  const second = await readDieTemperatureOnce(bus);
+  trace({ dir: 'info', note: describeDieTemperature(second) });
+  return { first, second, advanced: second.counter !== first.counter };
+}
+
 /** Read and decode R32_FLAG. One 4-byte control read at 0x08. */
 export async function readDeviceFlags(
   bus: RegisterBus,

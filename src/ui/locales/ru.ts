@@ -297,6 +297,7 @@ export const ru: Messages = {
   'diagnostic.device.workerNoDevice': 'воркер USB не сообщил об устройстве',
   'diagnostic.device.workerTerminated': 'транспорт фонового воркера USB был остановлен',
   'diagnostic.device.workerNoStats': 'воркер USB ответил без статистики',
+  'diagnostic.device.workerNoTemperature': 'воркер USB ответил без температуры',
   'diagnostic.device.workerNoConsole': 'воркер USB ответил без результата консоли',
   'diagnostic.device.workerUnclaimed': 'воркер USB ответил «{kind}», когда ответ никто не ждал',
   'diagnostic.device.stopTimedOut':
@@ -634,7 +635,7 @@ export const ru: Messages = {
   'capturePanel.usbWarning': 'Инструмент разработчика: команды write напрямую меняют регистры устройства и могут привести плату в неверное состояние.',
   'capturePanel.usbPlaceholder': 'read 0x000c 4',
   'capturePanel.usbSend': 'Отправить',
-  'capturePanel.usbHelp': 'Команды: read <addr> [len], write <addr> <byte>..., ctrl <value>, flags, clear-fifo, in <request> <value> <index> <len>, out <request> <value> <index> [byte]...',
+  'capturePanel.usbHelp': 'Команды: read <addr> [len], write <addr> <byte>..., ctrl <value>, flags, clear-fifo, temp, in <request> <value> <index> <len>, out <request> <value> <index> [byte]...',
   'capturePanel.consoleSeed': 'Введите help для списка команд. Числа десятичные или шестнадцатеричные с префиксом 0x.',
   'capturePanel.consoleError': 'ошибка: {detail}',
 

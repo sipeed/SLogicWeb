@@ -6,7 +6,9 @@ import { PID_SLOGIC16_U3, PID_SLOGIC32_U3, USB_VID_SIPEED } from './protocol.js'
 import { USB_FILTERS } from './usbCore.js';
 import { workerTransport } from './workerTransport.js';
 
-export type { CaptureConfig, CaptureStartOptions, Device, SampleSink } from './types.js';
+export type {
+  CaptureConfig, CaptureStartOptions, Device, DieTemperatureReading, SampleSink,
+} from './types.js';
 export {
   PROFILES,
   SLOGIC16U3_PROFILE,

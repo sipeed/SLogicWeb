@@ -276,6 +276,7 @@ export const zhCN: Messages = {
   'diagnostic.device.workerNoDevice': 'USB 工作线程未报告设备',
   'diagnostic.device.workerTerminated': 'USB 工作线程传输已终止',
   'diagnostic.device.workerNoStats': 'USB 工作线程未返回统计数据',
+  'diagnostic.device.workerNoTemperature': 'USB 工作线程未返回温度',
   'diagnostic.device.workerNoConsole': 'USB 工作线程未返回控制台结果',
   'diagnostic.device.workerUnclaimed': 'USB 工作线程返回“{kind}”时没有任何请求在等待',
   'diagnostic.device.stopTimedOut': '采集未在 {ms} ms 内停止；USB 传输已重置',
@@ -589,7 +590,7 @@ export const zhCN: Messages = {
   'capturePanel.usbWarning': '开发者工具：write 命令会直接修改设备寄存器，可能让板子进入异常状态。',
   'capturePanel.usbPlaceholder': 'read 0x000c 4',
   'capturePanel.usbSend': '发送',
-  'capturePanel.usbHelp': '命令：read <addr> [len]、write <addr> <byte>...、ctrl <value>、flags、clear-fifo、in <request> <value> <index> <len>、out <request> <value> <index> [byte]...',
+  'capturePanel.usbHelp': '命令：read <addr> [len]、write <addr> <byte>...、ctrl <value>、flags、clear-fifo、temp、in <request> <value> <index> <len>、out <request> <value> <index> [byte]...',
   'capturePanel.consoleSeed': '输入 help 查看命令。数字为十进制或 0x 前缀的十六进制。',
   'capturePanel.consoleError': '错误：{detail}',
 

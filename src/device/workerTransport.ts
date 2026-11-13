@@ -232,6 +232,18 @@ export class WorkerSlogicDevice implements Device {
     };
   }
 
+  /** Die temperature, live; a control read that does not disturb the pipe. */
+  async readTemperature(): Promise<import('./types.js').DieTemperatureReading> {
+    const message = await this.request(
+      { kind: 'temperature' }, 'temperature', this.timeouts.requestTimeoutMs,
+    );
+    if (message.kind === 'failed') throw failedReply(message);
+    if (message.kind !== 'temperature') {
+      throw new DiagnosticError('device.workerNoTemperature');
+    }
+    return message.reading;
+  }
+
   async usbControl(command: string): Promise<string> {
     // `bench` is the one command that measures rather than configures, and it runs the
     // read loop over there. The reply's thread numbers are therefore the worker's, and the
@@ -335,7 +347,9 @@ export class WorkerSlogicDevice implements Device {
       case 'failed': {
         // A failure answers whatever the page is waiting for; with nothing outstanding it
         // is a transport-level error and belongs on the same path as `error`.
-        for (const kind of ['opened', 'started', 'stopped', 'stats', 'console']) {
+        for (const kind of [
+          'opened', 'started', 'stopped', 'stats', 'console', 'temperature',
+        ]) {
           if (this.settle(kind, message)) return;
         }
         this.onError?.(failedReply(message));
@@ -346,6 +360,7 @@ export class WorkerSlogicDevice implements Device {
       case 'stopped':
       case 'stats':
       case 'console':
+      case 'temperature':
         if (!this.settle(message.kind, message)) {
           this.onError?.(new DiagnosticError('device.workerUnclaimed', { kind: message.kind }));
         }

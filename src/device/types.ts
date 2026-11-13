@@ -72,6 +72,13 @@ export type SampleSink = (chunk: Uint8Array) => void | Promise<void>;
  */
 export type DropoutSink = (samplePosition: number, missingSamples: number) => void;
 
+/** One R32_ADC_TEMP reading; `counter` proves the conversion is live. */
+export interface DieTemperatureReading {
+  readonly celsius: number;
+  readonly counter: number;
+  readonly valid: boolean;
+}
+
 export type TransportDeadReason =
   | 'loop-unsettled'
   | 'reclaim-failed'
@@ -107,6 +114,8 @@ export interface Device {
   readonly recommendedSamplerateHz?: Readonly<Record<number, number>>;
   /** Advanced, idle-only USB/register console. */
   usbControl?(command: string): Promise<string>;
+  /** Die temperature; readable during a capture (R32_ADC_TEMP). */
+  readTemperature?(): Promise<DieTemperatureReading>;
   start(
     cfg: CaptureConfig, sink: SampleSink, onDropout?: DropoutSink,
     options?: CaptureStartOptions,

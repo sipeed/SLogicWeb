@@ -21,7 +21,9 @@
  */
 
 import { TransportDeadError } from './types.js';
-import type { CaptureConfig, CaptureStartOptions, Device, DropoutSink, SampleSink } from './types.js';
+import type {
+  CaptureConfig, CaptureStartOptions, Device, DieTemperatureReading, DropoutSink, SampleSink,
+} from './types.js';
 import { DiagnosticError } from '../diagnostics.js';
 import type { DiagnosticCode } from '../diagnostics.js';
 import { SoftwareTrigger, type SoftwareTriggerConfig } from '../data/softwareTrigger.js';
@@ -48,7 +50,10 @@ import {
   configureThreshold,
   clearFifoOverflow,
   describeDeviceFlags,
+  describeDieTemperature,
   readDeviceFlags,
+  readDieTemperature,
+  readDieTemperatureOnce,
   readSampleLength,
   programCtrl,
   writeSampleLength,
@@ -2039,6 +2044,13 @@ export class Slogic16U3 implements Device {
    *   out <request> <value> <index> [byte]...
    * Numbers accept decimal or 0x-prefixed hexadecimal notation.
    */
+  /** Die temperature; a control read, so it is safe while the pipe is running. */
+  async readTemperature(): Promise<DieTemperatureReading> {
+    if (!this.bus || !this.usb.opened) throw new DiagnosticError('device.notOpen');
+    const t = await readDieTemperatureOnce(this.bus);
+    return { celsius: t.celsius, counter: t.counter, valid: t.valid };
+  }
+
   async usbControl(command: string): Promise<string> {
     if (this.running || this.stopping || this.loopDone) {
       throw new DiagnosticError('device.consoleBusy');
@@ -2048,7 +2060,7 @@ export class Slogic16U3 implements Device {
     const op = tokens.shift()?.toLowerCase();
     if (!op || op === 'help') {
       return 'read <addr> [len] | write <addr> <byte>... | ctrl <value> | ' +
-        'flags | clear-fifo | sample-len [value] | ' +
+        'flags | clear-fifo | temp | sample-len [value] | ' +
         'bench [seconds] [channels] [MHz] [depth] [transferBytes] [normal|usbmax|simulator] | ' +
         'in <request> <value> <index> <len> | out <request> <value> <index> [byte]...';
     }
@@ -2065,6 +2077,13 @@ export class Slogic16U3 implements Device {
       if (tokens.length) throw new Error(`unexpected argument(s): ${tokens.join(' ')}`);
     };
 
+    if (op === 'temp') {
+      noExtra();
+      const t = await readDieTemperature(this.bus);
+      return describeDieTemperature(t.second) +
+        ` counter ${t.first.counter}->${t.second.counter}` +
+        (t.advanced ? '' : ' (not advancing)');
+    }
     if (op === 'read') {
       const addr = take('register address', 0xffff);
       const length = tokens.length ? take('length', 4096) : 4;

@@ -62,6 +62,7 @@ export const DIAGNOSTIC_CODES = [
   'device.workerNoDevice',
   'device.workerTerminated',
   'device.workerNoStats',
+  'device.workerNoTemperature',
   'device.workerNoConsole',
   'device.workerUnclaimed',
   'device.stopTimedOut',

@@ -69,6 +69,25 @@ async function regRead(dev, addr, len) {         // len % 4 == 0
 | `R32_CTRL` | `0x0004` | `{0x01,0,0,0}` run, `{0x00,0,0,0}` stop, `{0x02,0,0,0}` then `{0x00,..}` reset |
 | `R32_FLAG` | `0x0008` | declared, unused by the driver |
 | `R32_AUX`  | `0x000c` | command selector (4 bytes) followed by payload at `0x0010` |
+| `R32_LOCUS_A` | `0x0018` | readback diagnostics (202610300413+) |
+| `R32_LOCUS_B` | `0x001c` | readback diagnostics / debug control (write: diagnostic only) |
+| `R32_REREAD` | `0x0020` | readback diagnostics (202610300413+) |
+| `R32_ADC_TEMP` | `0x0048` | die temperature (202610300413+) |
+| `R32_DBG_STATE` | `0x004c` | `[2]` vbus, `[1]` ddr_off, `[0]` pll_off (202610300413+) |
+
+### Die temperature (202610300413+)
+
+`R32_ADC_TEMP` is one 32-bit read: `[31:24]` conversion counter (advances
+continuously, frozen when the PLL is forced off), `[16]` sticky valid, `[15:0]`
+signed Q2 degC (0.25 degC/LSB). Read twice and check the counter advanced;
+`valid = 0` means the image does not implement it. Older images
+(202609240213, 202610140927, 202610150528, 202610191328) define only
+`R32_FLAG[2:0]`; `0x0018`-`0x004c` read 0.
+
+There is no temperature-compensation or calibration trigger register: the AUX
+commands are still `1` channels, `2` samplerate, `3` vref and `5` test mode.
+The only resets are `R32_CTRL[1]` (module RST, never written by a capture) and
+`R32_FLAG[1]` (FIFO overflow, write-1-to-clear).
 
 ## The aux protocol
 
