@@ -190,7 +190,7 @@ import {
   markerEdgeWindow, markerPointerCursor, markerSnapRadii, nearestMarkerEdge, type MarkerCursor,
 } from './markerGeometry.js';
 import {
-  cursorColor, cursorLabels, defaultCursorPair, hitCursorChip, layoutCursorChips,
+  cursorColor, cursorLabels, cursorsLocked, defaultCursorPair, hitCursorChip, layoutCursorChips,
   nearestCursorGrab, type CursorChip, type MeasuredCursorChip, type CursorGrabCandidate, type PlacedCursorChip,
 } from './cursorSet.js';
 import {
@@ -3411,7 +3411,12 @@ export class App {
     };
   }
 
+  private cursorReadOnly(): boolean {
+    return cursorsLocked({ running: this.running, stopping: this.stopping });
+  }
+
   private placeCursorAt(raw: number, cssY: number): void {
+    if (this.cursorReadOnly()) return;
     this.addCursor(this.snapPlacement(raw, cssY) ?? raw);
   }
 

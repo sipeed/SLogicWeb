@@ -1,6 +1,7 @@
 import {
-  CURSOR_CHIP_EDGE, CURSOR_CHIP_ROWS, cursorColor, cursorLabels, defaultCursorPair, layoutCursorChips, nearestCursorGrab,
-  type CursorChip, type PlacedCursorChip,
+  CURSOR_CHIP_EDGE, CURSOR_CHIP_ROWS, cursorColor, cursorLabels, cursorsLocked, defaultCursorPair,
+  layoutCursorChips, nearestCursorGrab,
+  type CursorChip, type CursorLockState, type PlacedCursorChip,
 } from '../cursorSet.js';
 
 interface FsLike {
@@ -123,6 +124,24 @@ function placementFailures(
   check('a fractional count floors to the whole labels it can represent',
     cursorLabels(2.9).join(',') === '1,2',
     `2.9=${cursorLabels(2.9).join(',')}`);
+}
+
+{
+  const rows: readonly (readonly [CursorLockState, boolean])[] = [
+    [{ running: false, stopping: false }, false],
+    [{ running: true, stopping: false }, true],
+    [{ running: false, stopping: true }, true],
+    [{ running: true, stopping: true }, true],
+  ];
+  const mapped = rows.map(([state, expected]) => cursorsLocked(state) === expected);
+  check('cursors are locked while running, while stopping, and while both, and only unlocked when idle',
+    mapped.every(Boolean), `rows=${mapped.map((ok) => (ok ? 'ok' : 'x')).join(',')}`);
+
+  const broken = (state: CursorLockState): boolean => state.running;
+  const brokenMapped = rows.map(([state, expected]) => broken(state) === expected);
+  check('control: a running-only predicate fails the stopping rows',
+    brokenMapped.some((ok) => !ok),
+    `rows=${brokenMapped.map((ok) => (ok ? 'ok' : 'x')).join(',')}`);
 }
 
 {

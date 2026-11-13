@@ -19,6 +19,15 @@ export function cursorLabels(count: number): string[] {
   return labels;
 }
 
+export interface CursorLockState {
+  readonly running: boolean;
+  readonly stopping: boolean;
+}
+
+export function cursorsLocked(state: CursorLockState): boolean {
+  return state.running || state.stopping;
+}
+
 export interface PlacedCursor {
   readonly id: number;
   readonly sample: number | null;

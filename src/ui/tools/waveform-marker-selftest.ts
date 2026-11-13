@@ -1203,6 +1203,23 @@ function between(source: string, start: string, end: string): string {
     (appSource.match(/this\.snapContext\(/g) ?? []).length === 3,
     `contexts=${(appSource.match(/this\.snapContext\(/g) ?? []).length}`);
 
+  const placementGuardLine = 'if (this.cursorReadOnly()) return;';
+  const placementGuarded = (body: string): boolean => {
+    const guardAt = body.indexOf(placementGuardLine);
+    const addAt = body.indexOf('this.addCursor(this.snapPlacement(raw, cssY) ?? raw);');
+    const snapAt = body.indexOf('this.snapPlacement(');
+    return guardAt >= 0 && addAt > guardAt && snapAt > guardAt;
+  };
+  check('a refused placement returns before any snap work and before adding a cursor',
+    placementGuarded(placementSource) && !placementGuarded(placementSource.replace(placementGuardLine, '')),
+    `guarded=${placementGuarded(placementSource)}, ` +
+    `control=${placementGuarded(placementSource.replace(placementGuardLine, ''))}`);
+  check('the placement lock derives from the one shared cursor rule',
+    between(appSource, 'private cursorReadOnly(', 'private placeCursorAt(').includes(
+      'return cursorsLocked({ running: this.running, stopping: this.stopping });') &&
+    placementSource.includes(placementGuardLine),
+    `helper=${appSource.includes('return cursorsLocked({ running: this.running, stopping: this.stopping });')}`);
+
   check('the press grabs the nearest cursor in band and calls tryGrab on that cursor only',
     grabMarkerSource.includes('const candidate = nearestCursorGrab(this.grabCandidates(), pointerCssX);') &&
     grabMarkerSource.includes('if (candidate === null) return false;') &&
