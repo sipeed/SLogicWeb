@@ -39,10 +39,11 @@
  *     rather than advertising gestures that would be no-ops.
  *   - `right` is part of `MousePart` for completeness; no area implements a right-click
  *     gesture today, so no mapping returns it.
- *   - `running` is accepted because callers know it, but no current hint depends on it:
- *     the same gestures stay available while a capture runs.
+ *   - while `running`/`stopping` the cursor set is read-only, so the cursor gestures are
+ *     not advertised.
  */
 
+import { cursorsLocked } from './cursorSet.js';
 import type { MessageKey } from './i18n.js';
 import { fitWheelAction, wheelAction } from './wheelGesture.js';
 
@@ -60,8 +61,9 @@ export type MouseModifier = 'Ctrl' | 'Shift';
 
 export interface InteractionContext {
   readonly hasCapture: boolean;
-  /** Accepted for callers that want state-dependent hints later; currently unused. */
+  /** While capturing the cursor set is read-only, so the plot and axis drop their cursor hints. */
   readonly running?: boolean;
+  readonly stopping?: boolean;
   /** The "wheel zooms without Ctrl" preference; default off. */
   readonly wheelZooms?: boolean;
 }
@@ -169,8 +171,16 @@ const POINTER_HINTS: Readonly<Record<WheelArea, readonly HintSpec[]>> = {
   overview: [hint('hints.overview.center', 'left')],
 };
 
+const LOCKED_POINTER_HINTS: Readonly<Record<WheelArea, readonly HintSpec[]>> = {
+  plot: [hint('hints.plot.dragPan', 'left')],
+  axis: [hint('hints.axis.dragPan', 'left')],
+  overview: POINTER_HINTS.overview,
+};
+
 /** The wheel hints for one area and variant, read off `wheelAction` itself. */
-function wheelHints(area: WheelArea, variant: WheelVariant): readonly HintSpec[] {
+function wheelHints(
+  area: WheelArea, variant: WheelVariant, locked = false,
+): readonly HintSpec[] {
   const ctx = { hasCapture: true, wheelZooms: variant === 'wheelZooms' };
   const keys = WHEEL_KEYS[area];
   const out: HintSpec[] = [];
@@ -182,17 +192,29 @@ function wheelHints(area: WheelArea, variant: WheelVariant): readonly HintSpec[]
   if (wheelAction({ ctrlKey: false, shiftKey: true }, ctx) === 'pan') {
     out.push(hint(keys.pan, 'wheel', 'Shift'));
   }
-  return Object.freeze([...out, ...POINTER_HINTS[area]]);
+  return Object.freeze([...out, ...(locked ? LOCKED_POINTER_HINTS[area] : POINTER_HINTS[area])]);
 }
 
-const WHEEL_CAPTURE: Readonly<Record<WheelArea, Readonly<Record<WheelVariant, readonly HintSpec[]>>>> =
-  Object.freeze(Object.fromEntries((['plot', 'axis', 'overview'] as const).map((area) => [
+type WheelCaptureTable =
+  Readonly<Record<WheelArea, Readonly<Record<WheelVariant, readonly HintSpec[]>>>>;
+
+function wheelCaptureTable(locked: boolean): WheelCaptureTable {
+  return Object.freeze(Object.fromEntries((['plot', 'axis', 'overview'] as const).map((area) => [
     area,
     Object.freeze({
-      scroll: wheelHints(area, 'scroll'),
-      wheelZooms: wheelHints(area, 'wheelZooms'),
+      scroll: wheelHints(area, 'scroll', locked),
+      wheelZooms: wheelHints(area, 'wheelZooms', locked),
     }),
   ])) as Record<WheelArea, Record<WheelVariant, readonly HintSpec[]>>);
+}
+
+const WHEEL_CAPTURE = wheelCaptureTable(false);
+const WHEEL_CAPTURE_LOCKED = wheelCaptureTable(true);
+
+function captureWheelTable(context: InteractionContext): WheelCaptureTable {
+  const locked = cursorsLocked({ running: context.running === true, stopping: context.stopping === true });
+  return locked ? WHEEL_CAPTURE_LOCKED : WHEEL_CAPTURE;
+}
 
 function wheelVariant(context: InteractionContext): WheelVariant {
   return context.wheelZooms === true ? 'wheelZooms' : 'scroll';
@@ -253,9 +275,11 @@ export function interactionHints(
 ): readonly HintSpec[] {
   switch (area) {
     case 'plot':
-      return context.hasCapture ? WHEEL_CAPTURE.plot[wheelVariant(context)] : PLOT_NO_CAPTURE;
+      return context.hasCapture
+        ? captureWheelTable(context).plot[wheelVariant(context)] : PLOT_NO_CAPTURE;
     case 'axis':
-      return context.hasCapture ? WHEEL_CAPTURE.axis[wheelVariant(context)] : AXIS_NO_CAPTURE;
+      return context.hasCapture
+        ? captureWheelTable(context).axis[wheelVariant(context)] : AXIS_NO_CAPTURE;
     case 'overview':
       return context.hasCapture ? WHEEL_CAPTURE.overview[wheelVariant(context)] : OVERVIEW_NO_CAPTURE;
     case 'labels': return context.hasCapture ? LABELS_CAPTURE : LABELS_NO_CAPTURE;

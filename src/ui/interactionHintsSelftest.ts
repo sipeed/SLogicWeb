@@ -168,10 +168,89 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
 }
 
 {
-  const before = INTERACTION_AREAS.map((area) => signatures(area, true));
-  const after = INTERACTION_AREAS.map((area) => signatures(area, true, true));
-  check('a running capture does not silently change the advertised gestures',
-    before.join('\n') === after.join('\n'), `areas=${INTERACTION_AREAS.length}`);
+  const cursorHint = new Map<InteractionArea, HintSpec['key']>([
+    ['plot', 'hints.plot.addCursor'],
+    ['axis', 'hints.axis.dragCursor'],
+  ]);
+  const state = (
+    area: InteractionArea, running: boolean, stopping: boolean, wheelZooms = false,
+  ): readonly HintSpec[] => interactionHints(
+    area, { hasCapture: true, running, stopping, wheelZooms });
+  const runningHints = (area: InteractionArea, wheelZooms: boolean): readonly HintSpec[] =>
+    state(area, true, false, wheelZooms);
+  const stoppingHints = (area: InteractionArea, wheelZooms: boolean): readonly HintSpec[] =>
+    state(area, false, true, wheelZooms);
+  const unlockedOf = (area: InteractionArea, wheelZooms: boolean): readonly HintSpec[] =>
+    interactionHints(area, { hasCapture: true, wheelZooms });
+  const locksExactly = (
+    lockedOf: (area: InteractionArea, wheelZooms: boolean) => readonly HintSpec[],
+  ): boolean => INTERACTION_AREAS.every((area) => [false, true].every((wheelZooms) => {
+    const open = unlockedOf(area, wheelZooms).map(signature);
+    const want = unlockedOf(area, wheelZooms)
+      .filter((spec) => spec.key !== cursorHint.get(area)).map(signature);
+    const got = lockedOf(area, wheelZooms).map(signature);
+    return got.join('|') === want.join('|') &&
+      got.length === open.length - (cursorHint.has(area) ? 1 : 0);
+  }));
+  const runningIsStopping = INTERACTION_AREAS.every((area) => [false, true].every((wheelZooms) =>
+    runningHints(area, wheelZooms).map(signature).join('|') ===
+      stoppingHints(area, wheelZooms).map(signature).join('|')));
+  const variantsDiffer = (['plot', 'axis'] as const).every((area) =>
+    runningHints(area, true).map(signature).join('|') !==
+      runningHints(area, false).map(signature).join('|'));
+  check('a capture hides exactly the cursor gesture hints in the plot and the axis',
+    locksExactly(runningHints) && locksExactly(stoppingHints) && runningIsStopping &&
+      variantsDiffer && !locksExactly(unlockedOf),
+    `areas=${INTERACTION_AREAS.length}x2, running=${locksExactly(runningHints)}, ` +
+    `stopping=${locksExactly(stoppingHints)}, same=${runningIsStopping}, ` +
+    `variants=${variantsDiffer}, control=${!locksExactly(unlockedOf)}`);
+}
+
+{
+  const lockStates = [
+    { running: false, stopping: false },
+    { running: true, stopping: false },
+    { running: false, stopping: true },
+    { running: true, stopping: true },
+  ] as const;
+  const rows = (hasCapture: boolean): readonly string[] => INTERACTION_AREAS.flatMap((area) =>
+    [false, true].map((wheelZooms) => lockStates.map((lock) =>
+      interactionHints(area, { hasCapture, ...lock, wheelZooms }).map(signature).join('|'))
+      .join('~')));
+  const immune = (hasCapture: boolean): boolean => {
+    const table = rows(hasCapture);
+    return table.every((row) => {
+      const cells = row.split('~');
+      return cells.every((cell) => cell === cells[0]);
+    });
+  };
+  const populated = rows(false).every((row) => row.split('~').every((cell) => cell !== ''));
+  const cursorKeys = rows(false).join('~').includes('hints.plot.addCursor') ||
+    rows(false).join('~').includes('hints.axis.dragCursor');
+  check('the lock never changes a hint list that carries no cursor gesture',
+    immune(false) && populated && !cursorKeys && !immune(true),
+    `no-capture=${immune(false)}, populated=${populated}, cursor=${cursorKeys}, ` +
+    `control=${!immune(true)} rows=${rows(false).length}`);
+}
+
+{
+  const source = readSource('src/ui/interactionHints.ts');
+  const rule = (text: string): boolean => {
+    const flat = text.replace(/\s+/g, ' ');
+    return flat.includes("import { cursorsLocked } from './cursorSet.js';") &&
+      flat.includes('cursorsLocked({ running: context.running === true, ' +
+        'stopping: context.stopping === true })') &&
+      !flat.includes('context.running ||') && !flat.includes('context.stopping ||');
+  };
+  const replaced = source.replace(
+    'cursorsLocked({ running: context.running === true, stopping: context.stopping === true })',
+    'context.running || context.stopping',
+  );
+  const withLocalOr = `${source}\nconst lock = context.running || context.stopping;\n`;
+  check('the hint lock is the shared cursor rule, not a local re-derivation',
+    rule(source) && !rule(replaced) && !rule(withLocalOr),
+    `shared=${rule(source)}, control-replaced=${replaced !== source && !rule(replaced)}, ` +
+    `control-local=${!rule(withLocalOr)}`);
 }
 
 {
@@ -276,9 +355,12 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
     app.indexOf('private renderInteractionBar('),
     app.indexOf('private interactionHintItem('),
   );
+  const renderFlat = render.replace(/\s+/g, '');
   const appContract = wire.length > 0 && wire.includes('interactionAreaOf(target)') &&
     wire.includes('{ passive: true }') && wire.includes('this.el.interactionBar.contains(target)') &&
-    render.includes('interactionHints(area, { hasCapture, running: this.running, wheelZooms })') &&
+    renderFlat.includes(
+      'interactionHints(area,{hasCapture,running:this.running,stopping:this.stopping,wheelZooms,})') &&
+    renderFlat.includes('locked===this.renderedInteractionLocked') &&
     render.includes('this.el.interactionHints.replaceChildren(') &&
     render.includes('area === this.renderedInteractionArea') &&
     app.includes('this.renderInteractionBar(true)') &&
@@ -289,6 +371,20 @@ const signatures = (area: InteractionArea, hasCapture: boolean, running = false)
     appContract,
     `wire=${wire.length}, render=${render.length}, ` +
     `passive=${wire.includes('{ passive: true }')}`);
+
+  const stop = app.slice(
+    app.indexOf('private async stopCapture('),
+    app.indexOf('private async teardownDevice('),
+  ).replace(/\s+/g, ' ');
+  const lockCall = 'this.running = false; this.stopping = true; this.renderInteractionBar();';
+  const missingCall = stop.replace(' this.renderInteractionBar();', '');
+  const movedCall = stop.replace(lockCall,
+    'this.renderInteractionBar(); this.running = false; this.stopping = true;');
+  check('stopCapture reconciles the hint bar as soon as the lock flips',
+    stop.length > 0 && stop.includes(lockCall) && !missingCall.includes(lockCall) &&
+      !movedCall.includes(lockCall),
+    `stop=${stop.length}, removed=${missingCall !== stop && !missingCall.includes(lockCall)}, ` +
+    `moved=${movedCall !== stop && !movedCall.includes(lockCall)}`);
 
   const banner = app.slice(
     app.indexOf('private renderErrorBanner('),

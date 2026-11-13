@@ -582,6 +582,7 @@ export class App {
   /** Last area/capture state drawn, so pointer moves do not rebuild the bar. */
   private renderedInteractionArea: InteractionArea | null = null;
   private renderedInteractionHasCapture: boolean | null = null;
+  private renderedInteractionLocked: boolean | null = null;
   /** The corner strings last written, so an unchanged frame skips the DOM. */
   private renderedCorner: CornerView | null = null;
   private decodeBusy = false;
@@ -5162,13 +5163,18 @@ export class App {
     this.statusRenders += 1;
     const area = this.hoveredInteractionArea;
     const hasCapture = this.store.length > 0;
+    const locked = this.cursorReadOnly();
     const wheelZooms = this.wheelZooms;
     if (!force && area === this.renderedInteractionArea &&
-        hasCapture === this.renderedInteractionHasCapture) return;
+        hasCapture === this.renderedInteractionHasCapture &&
+        locked === this.renderedInteractionLocked) return;
     this.renderedInteractionArea = area;
     this.renderedInteractionHasCapture = hasCapture;
+    this.renderedInteractionLocked = locked;
     this.el.interactionArea.textContent = t(interactionAreaLabelKey(area));
-    const hints = interactionHints(area, { hasCapture, running: this.running, wheelZooms });
+    const hints = interactionHints(area, {
+      hasCapture, running: this.running, stopping: this.stopping, wheelZooms,
+    });
     this.el.interactionHints.replaceChildren(
       ...hints.map((spec) => this.interactionHintItem(spec)));
   }
@@ -7066,6 +7072,7 @@ export class App {
     }
     this.running = false;
     this.stopping = true;
+    this.renderInteractionBar();
     if (!quietRepeatWave) this.renderPanels();
     const pending = this.teardownDevice(this.device);
     this.stopPending = pending;
