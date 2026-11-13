@@ -639,9 +639,6 @@ export const ru: Messages = {
   'capturePanel.consoleError': 'ошибка: {detail}',
 
   // ------------------------------------------------------ analyzer panel
-  'analyzerPanel.title': 'Анализаторы',
-  'analyzerPanel.subWarm': 'встроенных декодеров sigrok: {count}, готовы.',
-  'analyzerPanel.subCold': 'встроенных декодеров sigrok: {count}. Загрузка (около секунды, один раз за сессию).',
   'analyzerPanel.decoding': 'декодирование…',
   'analyzerPanel.attached': 'Подключённые',
   'analyzerPanel.decodeAction': 'Декодировать {label}',

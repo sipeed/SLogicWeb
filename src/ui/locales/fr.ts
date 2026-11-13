@@ -648,9 +648,6 @@ export const fr: Messages = {
   'capturePanel.consoleError': 'erreur : {detail}',
 
   // ------------------------------------------------------ analyzer panel
-  'analyzerPanel.title': 'Analyseurs',
-  'analyzerPanel.subWarm': 'décodeurs sigrok fournis : {count}, prêts.',
-  'analyzerPanel.subCold': 'décodeurs sigrok fournis : {count}. Chargement en cours (environ une seconde, une fois par session).',
   'analyzerPanel.decoding': 'décodage…',
   'analyzerPanel.attached': 'Attachés',
   'analyzerPanel.decodeAction': 'Décoder {label}',

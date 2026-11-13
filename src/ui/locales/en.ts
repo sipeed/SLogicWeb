@@ -649,9 +649,6 @@ export const en = {
   'capturePanel.consoleError': 'error: {detail}',
 
   // ------------------------------------------------------ analyzer panel
-  'analyzerPanel.title': 'Analyzers',
-  'analyzerPanel.subWarm': '{count} stock sigrok decoders, ready.',
-  'analyzerPanel.subCold': '{count} stock sigrok decoders. Loading them (about a second, once per session).',
   'analyzerPanel.decoding': 'decoding…',
   'analyzerPanel.attached': 'Attached',
   'analyzerPanel.decodeAction': 'Decode {label}',

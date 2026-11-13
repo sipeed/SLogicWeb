@@ -594,9 +594,6 @@ export const zhCN: Messages = {
   'capturePanel.consoleError': '错误：{detail}',
 
   // ------------------------------------------------------ analyzer panel
-  'analyzerPanel.title': '分析器',
-  'analyzerPanel.subWarm': 'sigrok 内置解码器：{count} 个，已就绪。',
-  'analyzerPanel.subCold': 'sigrok 内置解码器：{count} 个。正在加载（约 1 秒，每次会话一次）。',
   'analyzerPanel.decoding': '解码中…',
   'analyzerPanel.attached': '已添加',
   'analyzerPanel.decodeAction': '解码 {label}',

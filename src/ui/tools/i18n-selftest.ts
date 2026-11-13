@@ -885,6 +885,7 @@ const baseSettings: CaptureSettings = {
     'hints.wheel.scrollRows',
     'hints.labels.rename',
     'emptyHint.example',
+    'analyzerPanel.title', 'analyzerPanel.subWarm', 'analyzerPanel.subCold',
   ];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const present = Object.entries(dicts).filter(([, dict]) =>
