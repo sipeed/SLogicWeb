@@ -624,6 +624,13 @@ export const ru: Messages = {
   'capturePanel.cursorEdgesChannel': 'Выбрать канал для строки фронтов {row}',
   'capturePanel.cursorEdgesUnset': '–',
   'capturePanel.advanced': 'Расширенные',
+  'capturePanel.temperature': 'Температура кристалла',
+  'capturePanel.tempRate': 'Обновление',
+  'capturePanel.tempRate1': '1 Hz',
+  'capturePanel.tempRate10': '10 Hz',
+  'capturePanel.tempUnsupported': 'не поддерживается (прошивка 202610300413+)',
+  'capturePanel.tempUnavailable': 'недоступно',
+  'capturePanel.tempCounterStalled': '(счётчик не растёт)',
   'capturePanel.testMode': 'Тестовый режим устройства (для следующего захвата)',
   'capturePanel.testModeHelp':
     'Заменяет живой вход сгенерированными данными, чтобы проверить приложение без платы. Это не измерение; выбор применяется к следующему захвату.',

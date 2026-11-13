@@ -2065,6 +2065,18 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
   user-select: none;
 }
 .advanced-body { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px; }
+
+.temperature-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.temperature-label { color: var(--text50); font-size: 10px; }
+.temperature-value {
+  min-width: 6.5em;
+  font-variant-numeric: tabular-nums;
+}
 .advanced-console-label { font-size: 10px; color: var(--text50); }
 .usb-console-output {
   height: 132px; margin: 0; padding: 6px; overflow: auto;

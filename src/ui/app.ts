@@ -318,6 +318,12 @@ export class App {
   private scopeWheelPersist: number | null = null;
   private readonly channelList: ChannelList;
   private capturePanel!: CapturePanel;
+  /** App-owned die-temperature poll (Advanced panel); the panel only renders its text. */
+  private tempText = '';
+  private tempRateMs = 1000;
+  private tempLastCounter: number | null = null;
+  private tempTimer: number | null = null;
+  private tempPanelOpen = false;
   private analyzerPanel!: AnalyzerPanel;
   private decodeResultsPanel!: DecodeResultsPanel;
   /** The analyzer the results list shows; null follows the first one with a result. */
@@ -4717,6 +4723,8 @@ export class App {
         onAnalogGain: (start, gain) => this.configureAnalogGain(start, gain),
         onChannelWidth: (n) => this.setChannelWidth(n),
         onUsbControl: (command) => this.usbControl(command),
+        onTemperatureOpen: (open) => this.setTemperatureOpen(open),
+        onTemperatureRate: (ms) => this.setTemperatureRate(ms),
         onRemoveCursor: (id) => this.removeCursor(id),
         onFocusCursor: (id) => this.focusCursor(id),
         onAddCursorDistance: () => this.addDistanceRow(),
@@ -4998,6 +5006,8 @@ export class App {
       savePercent: this.savePercent,
       analogGroups: this.analogGroups(),
       deviceName: this.device?.name ?? null,
+      temperature: this.tempText,
+      tempRateMs: this.tempRateMs,
       developerTools: this.developerTools,
       running: this.running,
       stopping: this.stopping,
@@ -5981,6 +5991,49 @@ export class App {
     const device = this.device;
     if (!device?.readTemperature) return null;
     return device.readTemperature();
+  }
+
+  /** The Advanced section owns the temperature poll's visibility, not its timer. */
+  private setTemperatureOpen(open: boolean): void {
+    this.tempPanelOpen = open;
+    if (open) this.startTemperaturePoll();
+    else this.stopTemperaturePoll();
+  }
+
+  private setTemperatureRate(ms: number): void {
+    this.tempRateMs = ms === 100 ? 100 : 1000;
+    if (this.tempPanelOpen) this.startTemperaturePoll();
+  }
+
+  private startTemperaturePoll(): void {
+    this.stopTemperaturePoll();
+    this.tempLastCounter = null;
+    const tick = async (): Promise<void> => {
+      const reading = await this.readTemperature().catch(() => null);
+      if (reading === null) {
+        this.tempText = t('capturePanel.tempUnavailable');
+        this.tempLastCounter = null;
+      } else if (!reading.valid) {
+        this.tempText = t('capturePanel.tempUnsupported');
+        this.tempLastCounter = null;
+      } else {
+        const previous = this.tempLastCounter;
+        this.tempLastCounter = reading.counter;
+        const stalled = previous !== null && reading.counter === previous;
+        this.tempText = `${reading.celsius.toFixed(2)} °C` +
+          (stalled ? ` ${t('capturePanel.tempCounterStalled')}` : '');
+      }
+      this.capturePanel?.updateTemperature(this.tempText);
+    };
+    void tick();
+    this.tempTimer = window.setInterval(() => void tick(), this.tempRateMs);
+  }
+
+  private stopTemperaturePoll(): void {
+    if (this.tempTimer !== null) {
+      window.clearInterval(this.tempTimer);
+      this.tempTimer = null;
+    }
   }
 
   /** Grow the channel model when a wider SLogic board is connected. */

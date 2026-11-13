@@ -72,6 +72,10 @@ export interface CapturePanelCallbacks {
   onAnalogGain(start: number, gain: number): void;
   onChannelWidth(channels: number): void;
   onUsbControl(command: string): Promise<string>;
+  /** The Advanced section opened or closed; the App owns the poll timer. */
+  onTemperatureOpen(open: boolean): void;
+  /** The user picked 1 Hz (1000) or 10 Hz (100). */
+  onTemperatureRate(ms: number): void;
   onRemoveCursor(id: number): void;
   onFocusCursor(id: number): void;
   onAddCursorDistance(): void;
@@ -142,6 +146,10 @@ export interface CapturePanelView {
   /** Analog groups (A0–A3) the current device and width expose; 0 disables the buttons. */
   analogGroups: number;
   deviceName: string | null;
+  /** The App-owned temperature poll's last text; '—' before the first read. */
+  temperature?: string;
+  /** App-owned poll period, 1000 or 100 ms. */
+  tempRateMs?: number;
   /** Settings > Developer tools: shows the raw USB register console. Absent = off. */
   developerTools?: boolean;
   running: boolean;
@@ -243,6 +251,8 @@ export type TriggerStatusView = Pick<CapturePanelView,
 
 export class CapturePanel {
   private advancedOpen = false;
+  /** The live temperature span in the Advanced section, if it is mounted. */
+  private tempValue: HTMLElement | null = null;
   /** The custom gain ratio being typed, kept across re-renders; null when none is. */
   private gainEdit: { start: number; text: string } | null = null;
   /** The custom threshold being typed, kept across re-renders; null when none is. */
@@ -1524,11 +1534,37 @@ export class CapturePanel {
     const advanced = document.createElement('details');
     advanced.className = 'advanced';
     advanced.open = this.advancedOpen;
-    advanced.addEventListener('toggle', () => { this.advancedOpen = advanced.open; });
+    advanced.addEventListener('toggle', () => {
+      this.advancedOpen = advanced.open;
+      this.cb.onTemperatureOpen(advanced.open);
+    });
     const summary = document.createElement('summary');
     summary.textContent = t('capturePanel.advanced');
     advanced.appendChild(summary);
     const body = div('advanced-body');
+
+    // Live die temperature (R32_ADC_TEMP, firmware 202610300413+). It is a
+    // control-endpoint read and works during a capture; the poll runs only while this
+    // section is open.
+    const tempRow = div('temperature-row');
+    const tempLabel = document.createElement('span');
+    tempLabel.className = 'temperature-label';
+    tempLabel.textContent = t('capturePanel.temperature');
+    const tempValue = document.createElement('span');
+    tempValue.className = 'temperature-value';
+    tempValue.textContent = v.temperature ?? '—';
+    this.tempValue = tempValue;
+    const tempRateOptions: SelectOptionTuple[] = [
+      ['1000', t('capturePanel.tempRate1')],
+      ['100', t('capturePanel.tempRate10')],
+    ];
+    const tempRate = selectControl(
+      'capture.tempRate', t('capturePanel.tempRate'), tempRateOptions,
+      String(v.tempRateMs ?? 1000),
+    );
+    tempRate.addEventListener('change', () => this.cb.onTemperatureRate(Number(tempRate.value)));
+    tempRow.append(tempLabel, tempValue, tempRate.el);
+    body.appendChild(tempRow);
 
     const testModeOptions: SelectOptionTuple[] = [
       ['0', t('capturePanel.testNormal')],
@@ -1559,6 +1595,11 @@ export class CapturePanel {
     if (v.developerTools === true) this.renderUsbConsole(body, v);
     advanced.appendChild(body);
     capture.appendChild(advanced);
+  }
+
+  /** The App's temperature poll updates the mounted value without a render. */
+  updateTemperature(text: string): void {
+    if (this.tempValue?.isConnected) this.tempValue.textContent = text;
   }
 
   /** The raw USB register console (developer tools only). */

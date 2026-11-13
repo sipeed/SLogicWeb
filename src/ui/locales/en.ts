@@ -634,6 +634,13 @@ export const en = {
   'capturePanel.cursorEdgesChannel': 'Choose the channel for edge row {row}',
   'capturePanel.cursorEdgesUnset': '–',
   'capturePanel.advanced': 'Advanced',
+  'capturePanel.temperature': 'Die temperature',
+  'capturePanel.tempRate': 'Refresh',
+  'capturePanel.tempRate1': '1 Hz',
+  'capturePanel.tempRate10': '10 Hz',
+  'capturePanel.tempUnsupported': 'unsupported (firmware 202610300413+)',
+  'capturePanel.tempUnavailable': 'unavailable',
+  'capturePanel.tempCounterStalled': '(counter stalled)',
   'capturePanel.testMode': 'Device test mode (next capture)',
   'capturePanel.testModeHelp':
     'Replaces the live input with generated data so the app can be tried without a board. It is not a measurement; the choice applies to the next capture.',

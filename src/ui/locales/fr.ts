@@ -633,6 +633,13 @@ export const fr: Messages = {
   'capturePanel.cursorEdgesChannel': 'Choisir le canal de la ligne de fronts {row}',
   'capturePanel.cursorEdgesUnset': '–',
   'capturePanel.advanced': 'Avancé',
+  'capturePanel.temperature': 'Température de la puce',
+  'capturePanel.tempRate': 'Rafraîchissement',
+  'capturePanel.tempRate1': '1 Hz',
+  'capturePanel.tempRate10': '10 Hz',
+  'capturePanel.tempUnsupported': 'non pris en charge (micrologiciel 202610300413+)',
+  'capturePanel.tempUnavailable': 'indisponible',
+  'capturePanel.tempCounterStalled': '(compteur figé)',
   'capturePanel.testMode': 'Mode de test de l’appareil (prochaine capture)',
   'capturePanel.testModeHelp':
     'Remplace l’entrée réelle par des données générées pour essayer l’application sans carte. Ce n’est pas une mesure ; le choix s’applique à la prochaine capture.',

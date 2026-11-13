@@ -579,6 +579,13 @@ export const zhCN: Messages = {
   'capturePanel.cursorEdgesChannel': '选择边沿行 {row} 的通道',
   'capturePanel.cursorEdgesUnset': '–',
   'capturePanel.advanced': '高级',
+  'capturePanel.temperature': '芯片温度',
+  'capturePanel.tempRate': '刷新率',
+  'capturePanel.tempRate1': '1 Hz',
+  'capturePanel.tempRate10': '10 Hz',
+  'capturePanel.tempUnsupported': '固件不支持（需 202610300413+）',
+  'capturePanel.tempUnavailable': '不可用',
+  'capturePanel.tempCounterStalled': '（计数器未前进）',
   'capturePanel.testMode': '设备测试模式（下次采集生效）',
   'capturePanel.testModeHelp':
     '用生成的测试数据替代实时输入，无需设备即可试用本应用。这不是实际测量；选择将在下次采集生效。',
