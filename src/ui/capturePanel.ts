@@ -1623,7 +1623,8 @@ export class CapturePanel {
     input.type = 'text';
     input.spellcheck = false;
     input.placeholder = t('capturePanel.usbPlaceholder');
-    input.disabled = !v.deviceName || v.running;
+    // The driver rejects commands that are unsafe mid-capture; read-only ones run.
+    input.disabled = !v.deviceName;
     const send = button(t('capturePanel.usbSend'), 'mini');
     send.disabled = input.disabled;
     const execute = async (): Promise<void> => {
@@ -1642,7 +1643,7 @@ export class CapturePanel {
         }));
       } finally {
         this.consoleLines = this.consoleLines.slice(-80);
-        input.disabled = !v.deviceName || v.running;
+        input.disabled = !v.deviceName;
         send.disabled = input.disabled;
         renderOutput();
         input.focus();

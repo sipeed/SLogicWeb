@@ -2059,7 +2059,15 @@ export class Slogic16U3 implements Device {
   }
 
   async usbControl(command: string): Promise<string> {
-    if (this.running || this.stopping || this.loopDone) {
+    // Read-only commands are safe on the control endpoint while the pipe runs; anything
+    // that writes configuration, drains or benches must wait for an idle device.
+    const runtimeToken = command.trim().split(/\s+/)[0]?.toLowerCase();
+    const runtimeSafe = runtimeToken === 'temp' || runtimeToken === 'ddr-recal' ||
+      runtimeToken === 'read' || runtimeToken === 'flags' || runtimeToken === 'help';
+    // `loopDone` is the running read loop's promise, not a drained flag: while a capture
+    // runs it is non-null by definition, so it must only gate commands when `running`
+    // is already false (a draining tail). Read-only commands are safe mid-capture.
+    if (this.stopping || (this.running ? !runtimeSafe : this.loopDone !== null)) {
       throw new DiagnosticError('device.consoleBusy');
     }
     if (!this.bus || !this.usb.opened) throw new DiagnosticError('device.notOpen');

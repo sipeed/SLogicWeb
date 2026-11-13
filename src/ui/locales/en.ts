@@ -652,7 +652,7 @@ export const en = {
   'capturePanel.usbWarning': 'Developer tool: write commands change device registers directly and can leave the board in a bad state.',
   'capturePanel.usbPlaceholder': 'read 0x000c 4',
   'capturePanel.usbSend': 'Send',
-  'capturePanel.usbHelp': 'Commands: read <addr> [len], write <addr> <byte>..., ctrl <value>, flags, clear-fifo, temp, ddr-recal, in <request> <value> <index> <len>, out <request> <value> <index> [byte]...',
+  'capturePanel.usbHelp': 'Commands: read <addr> [len], write <addr> <byte>..., ctrl <value>, flags, clear-fifo, temp, ddr-recal, in <request> <value> <index> <len>, out <request> <value> <index> [byte]... Read, flags, temp, help and ddr-recal also work during a capture. ddr-recal stops the sample stream; stop and start the capture afterwards.',
   'capturePanel.consoleSeed': 'Enter help for commands. Numbers are decimal or 0x-prefixed hex.',
   'capturePanel.consoleError': 'error: {detail}',
 

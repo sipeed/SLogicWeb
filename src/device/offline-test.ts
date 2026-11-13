@@ -2232,8 +2232,15 @@ async function main(): Promise<void> {
     await live.start(cfg, () => {}, undefined, { tuning: { depth: 4, transferBytes: 1024 } });
     await expectDiagnostic('a second start while a capture is running is refused',
       () => live.start(cfg, () => {}), 'device.startRunning');
-    await expectDiagnostic('the advanced console is refused while a capture is running',
-      () => live.usbControl('help'), 'device.consoleBusy');
+    // `read` and `help` are control-endpoint only; `temp` is exercised elsewhere, and
+    // its two-read liveness wait needs a real macrotask gap the autoStream fake lacks.
+    const liveHelp = await live.usbControl('help');
+    const liveRead = await live.usbControl('read 0x48');
+    check('read-only console commands run while a capture is running',
+      liveHelp.includes('ddr-recal') && liveRead.trim().split(/\s+/).length === 4,
+      `help ${liveHelp.slice(0, 24)}, read ${liveRead}`);
+    await expectDiagnostic('a console command that configures the device is refused while a capture is running',
+      () => live.usbControl('ctrl 0'), 'device.consoleBusy');
     const stopping = live.stop();
     await expectDiagnostic('a start while the previous capture is stopping is refused',
       () => live.start(cfg, () => {}), 'device.startStopping');

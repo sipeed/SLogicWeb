@@ -642,7 +642,7 @@ export const ru: Messages = {
   'capturePanel.usbWarning': 'Инструмент разработчика: команды write напрямую меняют регистры устройства и могут привести плату в неверное состояние.',
   'capturePanel.usbPlaceholder': 'read 0x000c 4',
   'capturePanel.usbSend': 'Отправить',
-  'capturePanel.usbHelp': 'Команды: read <addr> [len], write <addr> <byte>..., ctrl <value>, flags, clear-fifo, temp, ddr-recal, in <request> <value> <index> <len>, out <request> <value> <index> [byte]...',
+  'capturePanel.usbHelp': 'Команды: read <addr> [len], write <addr> <byte>..., ctrl <value>, flags, clear-fifo, temp, ddr-recal, in <request> <value> <index> <len>, out <request> <value> <index> [byte]... read, flags, temp, help и ddr-recal работают и во время захвата; ddr-recal останавливает поток отсчётов — после него нужно остановить и снова запустить захват.',
   'capturePanel.consoleSeed': 'Введите help для списка команд. Числа десятичные или шестнадцатеричные с префиксом 0x.',
   'capturePanel.consoleError': 'ошибка: {detail}',
 
