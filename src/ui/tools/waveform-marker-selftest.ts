@@ -9,8 +9,15 @@ import {
   WaveformMarker, type MarkerPaintTarget, type MarkerSnapContext,
 } from '../waveformMarker.js';
 
+interface DirentLike {
+  name: string;
+  isDirectory(): boolean;
+  isFile(): boolean;
+}
+
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
+  readdirSync(path: string, options: { withFileTypes: true }): DirentLike[];
 }
 
 interface TestResult {
@@ -1393,7 +1400,10 @@ function between(source: string, start: string, end: string): string {
     `grab=${toggleGrab}, grabbing=${toggleGrabbing}, len=${syncBody.length}, ` +
     `dirty=${syncBody.includes('this.dirty')}, band=${syncBody.includes('Math.abs(')}`);
 
-  const syncCalls = appSource.match(/this\.syncMarkerCursor\(/g) ?? [];
+  const placementLockBody = between(
+    appSource, 'private syncCursorPlacementLock(', 'private renderInteractionBar(',
+  );
+  const syncCalls = appSource.replace(placementLockBody, '').match(/this\.syncMarkerCursor\(/g) ?? [];
   check('every pointer entry, exit, release, and wheel site resyncs the cursor',
     syncCalls.length === 7, `calls=${syncCalls.length}`);
 
@@ -1402,6 +1412,132 @@ function between(source: string, start: string, end: string): string {
     syncAt > appSource.indexOf('private setFollow(') &&
     syncAt < appSource.indexOf('private wireToolbar('),
     `sync=${syncAt}, follow=${appSource.indexOf('private setFollow(')}`);
+
+  const placementLockField = appSource.includes('private placementLocked = false;');
+  const lockBody = placementLockBody.replace(/\s+/g, ' ');
+  const lockArm = 'if (locked) { this.syncMarkerCursor(null); this.syncAxisCursor(null); }';
+  const lockAffordancesInArm = (body: string): boolean => {
+    const armAt = body.indexOf('if (locked) {');
+    const armEnd = armAt < 0 ? -1 : body.indexOf('}', armAt);
+    const markerAt = body.indexOf('this.syncMarkerCursor(null);');
+    const axisAt = body.indexOf('this.syncAxisCursor(null);');
+    const toggleAt = body.indexOf("this.el.plot.classList.toggle('cursor-locked', locked);");
+    const inArm = (at: number): boolean => armAt >= 0 && at > armAt && at < armEnd;
+    return inArm(markerAt) && inArm(axisAt) && toggleAt > armEnd;
+  };
+  const lockReconcilerPass = (body: string): boolean =>
+    body.includes('const locked = this.cursorReadOnly();') &&
+    body.includes('if (locked === this.placementLocked) return;') &&
+    body.includes('this.placementLocked = locked;') &&
+    lockAffordancesInArm(body) &&
+    !body.includes('getBoundingClientRect') && !body.includes('clientWidth') &&
+    !body.includes('offsetWidth') && !body.includes('getComputedStyle');
+  const lockReconciler = lockReconcilerPass(lockBody);
+  const lockGuardDropped = lockReconcilerPass(
+    lockBody.replace('if (locked === this.placementLocked) return;', ''),
+  );
+  const lockRuleDropped = lockReconcilerPass(
+    lockBody.replace('const locked = this.cursorReadOnly();', ''),
+  );
+  const lockToggleDropped = lockReconcilerPass(
+    lockBody.replace("this.el.plot.classList.toggle('cursor-locked', locked);", ''),
+  );
+  const lockMarkerDrop = lockReconcilerPass(
+    lockBody.replace('this.syncMarkerCursor(null);', ''),
+  );
+  const lockAxisDrop = lockReconcilerPass(
+    lockBody.replace('this.syncAxisCursor(null);', ''),
+  );
+  const lockArmMoved = lockReconcilerPass(
+    lockBody.replace(lockArm,
+      'this.syncMarkerCursor(null); this.syncAxisCursor(null); if (locked) { }'),
+  );
+  const lockArmInverted = lockReconcilerPass(
+    lockBody.replace('if (locked) {', 'if (!locked) {'),
+  );
+  check('the placement lock toggles one class and drops both grab affordances from the cached shared cursor rule',
+    placementLockField && lockReconciler && !lockGuardDropped && !lockRuleDropped &&
+      !lockToggleDropped && !lockMarkerDrop && !lockAxisDrop && !lockArmMoved &&
+      !lockArmInverted,
+    `field=${placementLockField}, reconciler=${lockReconciler}, ` +
+    `guardControl=${lockGuardDropped}, ruleControl=${lockRuleDropped}, ` +
+    `toggleControl=${lockToggleDropped}, markerControl=${lockMarkerDrop}, ` +
+    `axisControl=${lockAxisDrop}, movedControl=${lockArmMoved}, ` +
+    `invertedControl=${lockArmInverted}`);
+
+  const lockWiredInDraw = (source: string): boolean => {
+    const body = between(source, 'private draw(force = true): void {', 'private frameFingerprint(');
+    const calls = source.match(/this\.syncCursorPlacementLock\(\);/g) ?? [];
+    const at = body.indexOf('this.syncCursorPlacementLock();');
+    return calls.length === 1 && at > body.indexOf('this.renderOverview(force);') &&
+      at < body.indexOf('this.renderCorner();');
+  };
+  const lockDrawn = lockWiredInDraw(appSource);
+  const lockCallDropped = lockWiredInDraw(
+    appSource.replace('    this.syncCursorPlacementLock();\n', ''),
+  );
+  check('the placement lock is refreshed once per frame in the end-of-draw chrome block',
+    lockDrawn && !lockCallDropped,
+    `wired=${lockDrawn}, control=${lockCallDropped}`);
+
+  const markerGrabSuppressed = (source: string): boolean => {
+    const body = between(source, 'private syncMarkerCursor(', 'private wireToolbar(')
+      .replace(/\s+/g, ' ');
+    return body.includes('const locked = this.cursorReadOnly();') &&
+      body.includes('const nearest = pointerCssX === null || locked ? null : ' +
+        'nearestCursorGrab(this.grabCandidates(), pointerCssX);');
+  };
+  const axisGrabSuppressed = (source: string): boolean => {
+    const body = between(source, 'private syncAxisCursor(', 'private snapContext(')
+      .replace(/\s+/g, ' ');
+    return body.includes('const locked = this.cursorReadOnly();') &&
+      body.includes('const over = !dragging && !locked && e !== null') &&
+      body.includes("classList.toggle('marker-grabbing', dragging)") &&
+      body.includes("classList.toggle('marker-grab', over)");
+  };
+  const plotGrabQuiet = markerGrabSuppressed(appSource);
+  const axisGrabQuiet = axisGrabSuppressed(appSource);
+  check('neither the plot nor the ruler advertises a grab while the cursors are locked',
+    plotGrabQuiet && axisGrabQuiet &&
+      !markerGrabSuppressed(appSource.replace(' || locked', '')) &&
+      !axisGrabSuppressed(appSource.replace('&& !locked ', '')),
+    `plot=${plotGrabQuiet}, axis=${axisGrabQuiet}, ` +
+    `plotControl=${markerGrabSuppressed(appSource.replace(' || locked', ''))}, ` +
+    `axisControl=${axisGrabSuppressed(appSource.replace('&& !locked ', ''))}`);
+
+  const walkUi = (dir: string): string[] =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) return walkUi(path);
+      return entry.isFile() && path.endsWith('.ts') ? [path] : [];
+    });
+  const lockTokenBudget = (path: string): number => {
+    if (path === 'src/ui/app.ts') return 1;
+    if (path === 'src/ui/style.css') return 1;
+    if (/^src\/ui\/tools\/.*-selftest\.ts$/.test(path)) return Number.POSITIVE_INFINITY;
+    return 0;
+  };
+  const lockTokenViolations = (
+    files: readonly { path: string; text: string }[],
+  ): string[] => files
+    .filter(({ path, text }) =>
+      (text.match(/cursor-locked/g) ?? []).length > lockTokenBudget(path))
+    .map(({ path }) => path);
+  const uiFiles = walkUi('src/ui')
+    .map((path) => ({ path, text: fs.readFileSync(path, 'utf8') }));
+  const lockTokenFiles = [
+    ...uiFiles, { path: 'src/ui/style.css', text: cssSource },
+  ];
+  const lockTokenSurplus = lockTokenViolations(lockTokenFiles);
+  check('the locked class is declared once, toggled once, and reused nowhere else',
+    lockTokenSurplus.length === 0 &&
+      lockTokenViolations([
+        ...lockTokenFiles, { path: 'src/ui/capturePanel.ts', text: 'cursor-locked' },
+      ]).includes('src/ui/capturePanel.ts'),
+    `violations=${JSON.stringify(lockTokenSurplus)}, ` +
+    `control=${lockTokenViolations([
+      { path: 'src/ui/capturePanel.ts', text: 'cursor-locked' },
+    ]).length}`);
 
   const markerDebug = between(appSource, 'marker: () => {', 'cursors: () =>');
   check('the debug readout exposes the live cursor state',

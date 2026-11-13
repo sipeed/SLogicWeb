@@ -1519,6 +1519,7 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
   touch-action: pan-y;
 }
 
+#plot.cursor-locked { cursor: default; }
 #plot.marker-grab { cursor: grab; }
 #plot.marker-grabbing { cursor: grabbing; }
 

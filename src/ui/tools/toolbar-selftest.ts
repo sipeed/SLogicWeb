@@ -1323,6 +1323,29 @@ check(
   `inkAt=${haloInkAt}/${coreInkAt}, svgLen=${plotCursorSvg.length}`,
 );
 
+const cssCode = css.replace(/\/\*[\s\S]*?\*\//g, '');
+const plotLockOrder = (source: string): boolean => {
+  const lock = /#plot\.cursor-locked\s*\{\s*cursor:\s*default;\s*\}/.exec(source);
+  const grab = /#plot\.marker-grab\s*\{\s*cursor:\s*grab;\s*\}/.exec(source);
+  const grabbing = /#plot\.marker-grabbing\s*\{\s*cursor:\s*grabbing;\s*\}/.exec(source);
+  if (lock === null || grab === null || grabbing === null) return false;
+  return grab.index > lock.index && grabbing.index > lock.index;
+};
+const plotLockRule = /#plot\.cursor-locked\s*\{\s*cursor:\s*default;\s*\}/.exec(cssCode)?.[0] ?? '';
+const plotUnlockedCode = plotLockRule === '' ? cssCode : cssCode.replace(plotLockRule, '');
+const plotLockMovedAfterGrab = plotLockRule === '' ? plotUnlockedCode : plotUnlockedCode.replace(
+  /(#plot\.marker-grabbing\s*\{\s*cursor:\s*grabbing;\s*\})/,
+  `$1\n${plotLockRule}`,
+);
+check(
+  'the locked plot state retires the pointer affordance but keeps hover-over-cursor ordering',
+  plotLockRule !== '' && plotLockOrder(cssCode) &&
+    !plotLockOrder(plotUnlockedCode) && !plotLockOrder(plotLockMovedAfterGrab),
+  `rule=${JSON.stringify(plotLockRule)}, ordered=${plotLockOrder(cssCode)}, ` +
+  `missingControl=${plotLockOrder(plotUnlockedCode)}, ` +
+  `reversedControl=${plotLockOrder(plotLockMovedAfterGrab)}`,
+);
+
 const mobileBlockStart = css.indexOf('@media (max-width: 760px) {');
 const mobileBlockEnd = mobileBlockStart >= 0 ? css.indexOf('\n}', mobileBlockStart) : -1;
 const mobileBlock = mobileBlockStart >= 0 && mobileBlockEnd > mobileBlockStart

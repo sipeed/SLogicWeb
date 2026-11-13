@@ -602,6 +602,7 @@ export class App {
   private releaseMarkerPointer: () => void = () => {};
   private hover: HoverMeasurement | null = null;
   private markerCursor: MarkerCursor = null;
+  private placementLocked = false;
 
   private dirty = true;
   private sidebar: SidebarState = DEFAULT_SIDEBAR_STATE;
@@ -2674,6 +2675,7 @@ export class App {
     }
     this.layerFingerprint = fingerprint;
     this.renderOverview(force);
+    this.syncCursorPlacementLock();
     this.renderInteractionBar();
     this.renderCorner();
     this.recordDrawnWindow();
@@ -3393,8 +3395,9 @@ export class App {
   /** The ruler's pointer: grab over a chip, grabbing while one drags, else ew-resize. */
   private syncAxisCursor(e: PointerEvent | null): void {
     const dragging = e !== null && this.draggingCursor()?.marker.pointerId === e.pointerId;
-    const over = !dragging && e !== null && e.pointerType !== 'touch' && this.store.length > 0 &&
-      this.axisChipAt(e) !== null;
+    const locked = this.cursorReadOnly();
+    const over = !dragging && !locked && e !== null && e.pointerType !== 'touch' &&
+      this.store.length > 0 && this.axisChipAt(e) !== null;
     this.el.axis.classList.toggle('marker-grabbing', dragging);
     this.el.axis.classList.toggle('marker-grab', over);
   }
@@ -4318,7 +4321,8 @@ export class App {
   }
 
   private syncMarkerCursor(pointerCssX: number | null): void {
-    const nearest = pointerCssX === null
+    const locked = this.cursorReadOnly();
+    const nearest = pointerCssX === null || locked
       ? null : nearestCursorGrab(this.grabCandidates(), pointerCssX);
     const next = markerPointerCursor(
       pointerCssX, nearest?.cssX ?? null, this.draggingCursor() !== null,
@@ -5151,6 +5155,17 @@ export class App {
     (this.analyzerPanel as AnalyzerPanel | undefined)?.requestPickerFocus();
     this.selectPanel('analyzers');
     (this.analyzerPanel as AnalyzerPanel | undefined)?.requestPickerFocus();
+  }
+
+  private syncCursorPlacementLock(): void {
+    const locked = this.cursorReadOnly();
+    if (locked === this.placementLocked) return;
+    this.placementLocked = locked;
+    if (locked) {
+      this.syncMarkerCursor(null);
+      this.syncAxisCursor(null);
+    }
+    this.el.plot.classList.toggle('cursor-locked', locked);
   }
 
   /**
