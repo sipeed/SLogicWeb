@@ -3491,6 +3491,7 @@ export class App {
   }
 
   private addDistanceRow(): void {
+    if (this.cursorReadOnly()) return;
     const rows = appendDistanceRow(this.distanceRows, this.nextDistanceRowId, this.defaultCursorPair());
     if (rows === this.distanceRows) return;
     this.distanceRows = rows;
@@ -3499,11 +3500,13 @@ export class App {
   }
 
   private removeDistanceRow(rowId: number): void {
+    if (this.cursorReadOnly()) return;
     this.distanceRows = dropDistanceRow(this.distanceRows, rowId);
     this.renderPanels();
   }
 
   private pickDistanceCursor(rowId: number, side: DistanceSide, cursorId: number): void {
+    if (this.cursorReadOnly()) return;
     this.distanceRows = assignDistanceCursor(this.distanceRows, rowId, side, cursorId);
     this.renderPanels();
     const invoker = document.getElementById(cursorDistanceSideId(rowId, side));
@@ -3545,6 +3548,7 @@ export class App {
   }
 
   private addEdgeRow(): void {
+    if (this.cursorReadOnly()) return;
     const rows = appendEdgeRow(
       this.edgeRows, this.nextEdgeRowId, this.edgeChannels()[0] ?? null, this.defaultCursorPair());
     if (rows === this.edgeRows) return;
@@ -3554,11 +3558,13 @@ export class App {
   }
 
   private removeEdgeRow(rowId: number): void {
+    if (this.cursorReadOnly()) return;
     this.edgeRows = dropEdgeRow(this.edgeRows, rowId);
     this.renderPanels();
   }
 
   private pickEdgeCursor(rowId: number, side: DistanceSide, cursorId: number): void {
+    if (this.cursorReadOnly()) return;
     this.edgeRows = assignEdgeCursor(this.edgeRows, rowId, side, cursorId);
     this.renderPanels();
     const invoker = document.getElementById(cursorEdgeSideId(rowId, side));
@@ -3566,6 +3572,7 @@ export class App {
   }
 
   private pickEdgeChannel(rowId: number, channel: number | null): void {
+    if (this.cursorReadOnly()) return;
     this.edgeRows = assignEdgeChannel(this.edgeRows, rowId, channel);
     this.renderPanels();
   }

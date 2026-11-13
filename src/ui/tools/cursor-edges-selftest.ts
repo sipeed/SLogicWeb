@@ -12,11 +12,18 @@ interface TestResult {
 
 const nodeProcess = (() => {
   const p = (globalThis as {
-    process?: { exit(code: number): never };
+    process?: { exit(code: number): never; getBuiltinModule?(name: string): unknown };
   }).process;
   if (!p || typeof p.exit !== 'function') throw new Error('this entry point only runs under node');
   return p;
 })();
+
+interface FsLike {
+  readFileSync(path: string, encoding: 'utf8'): string;
+}
+
+const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
 
 const results: TestResult[] = [];
 
@@ -489,7 +496,52 @@ check('an incomplete measurement has a distinct placeholder rather than a fabric
     `requests=${requestText(invalidLevel.requests)}`);
 }
 
-console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
+{
+  const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const guard = 'if (this.cursorReadOnly()) return;';
+  const methodBody = (source: string, signature: string): string => {
+    const start = source.indexOf(signature);
+    return start < 0 ? '' : source.slice(start + signature.length);
+  };
+  const guardFirst = (source: string, signature: string, texts: readonly string[]): boolean => {
+    const body = methodBody(source, signature);
+    const at = body.indexOf(guard);
+    if (body === '' || at < 0 || body.slice(0, at).trim() !== '') return false;
+    return texts.every((text) => body.indexOf(text) > at);
+  };
+  const withoutGuard = (source: string, signature: string): string => {
+    const body = methodBody(source, signature);
+    if (body === '' || !body.includes(guard)) return source;
+    return source.slice(0, source.indexOf(signature) + signature.length) +
+      body.replace(guard, '');
+  };
+  const signatures: readonly (readonly [string, readonly string[]])[] = [
+    ['private addEdgeRow(): void {',
+      ['this.edgeRows = rows;', 'this.nextEdgeRowId++;']],
+    ['private removeEdgeRow(rowId: number): void {', ['this.edgeRows = dropEdgeRow(']],
+    ['private pickEdgeCursor(rowId: number, side: DistanceSide, cursorId: number): void {',
+      ['this.edgeRows = assignEdgeCursor(']],
+    ['private pickEdgeChannel(rowId: number, channel: number | null): void {',
+      ['this.edgeRows = assignEdgeChannel(']],
+  ];
+
+  check('every edge-row action refuses before touching rows, the channel, or the row id counter',
+    signatures.every(([signature, texts]) => guardFirst(app, signature, texts)),
+    signatures.map(([signature]) => `${signature.split('(')[0]}:` +
+      `${guardFirst(app, signature, [])}`).join(', '));
+
+  check('the edge-row lock is load-bearing: dropping the guard reopens every row action',
+    signatures.every(([signature, texts]) =>
+      !guardFirst(withoutGuard(app, signature), signature, texts)) &&
+    app.includes('return cursorsLocked({ running: this.running, stopping: this.stopping });') &&
+    (app.match(/private cursorReadOnly\(\): boolean \{/g) ?? []).length === 1,
+    `removed=${signatures.filter(([signature, texts]) =>
+      guardFirst(withoutGuard(app, signature), signature, texts)).length}, ` +
+    `shared=${app.includes('return cursorsLocked({ running: this.running, stopping: this.stopping });')}, ` +
+    `derivations=${(app.match(/private cursorReadOnly\(\): boolean \{/g) ?? []).length}`);
+}
+
 const failed = results.filter((r) => !r.pass).length;
+console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 console.log(`\n${results.length - failed}/${results.length} passed`);
 nodeProcess.exit(failed === 0 ? 0 : 1);

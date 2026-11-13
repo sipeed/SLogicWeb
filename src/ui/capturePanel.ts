@@ -1417,6 +1417,7 @@ export class CapturePanel {
         item.dataset.distanceId = String(row.id);
         const a = distanceSideControl(row, 'a', v.cursors,
           (cursorId) => this.cb.onPickCursorDistance(row.id, 'a', cursorId));
+        a.el.disabled = locked;
         const mark = document.createElement('span');
         mark.className = 'cursor-dist-mark';
         mark.setAttribute('aria-hidden', 'true');
@@ -1424,6 +1425,7 @@ export class CapturePanel {
         mark.textContent = '→';
         const b = distanceSideControl(row, 'b', v.cursors,
           (cursorId) => this.cb.onPickCursorDistance(row.id, 'b', cursorId));
+        b.el.disabled = locked;
         const delta = document.createElement('span');
         delta.className = 'cursor-dist-delta';
         delta.translate = false;
@@ -1432,6 +1434,7 @@ export class CapturePanel {
           t('capturePanel.cursorDistanceRemove', { row: row.row }),
           () => this.cb.onRemoveCursorDistance(row.id),
         );
+        remove.disabled = locked;
         const tail = div('cursor-dist-tail');
         tail.append(delta, remove);
         item.append(a.el, mark, b.el, tail, a.popover, b.popover);
@@ -1441,7 +1444,7 @@ export class CapturePanel {
     }
     const addRow = div('cursor-dist-add-row');
     addRow.appendChild(distanceAddButton(
-      v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,
+      v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS || locked,
       () => this.cb.onAddCursorDistance(),
     ));
     distanceSec.body.appendChild(addRow);
@@ -1466,12 +1469,14 @@ export class CapturePanel {
         item.dataset.edgeId = String(row.id);
         const a = edgeSideControl(row, 'a', v.cursors,
           (cursorId) => this.cb.onPickCursorEdge(row.id, 'a', cursorId));
+        a.el.disabled = locked;
         const mark = document.createElement('span');
         mark.className = 'cursor-dist-mark cursor-edge-mark';
         mark.setAttribute('aria-hidden', 'true');
         mark.textContent = '−';
         const b = edgeSideControl(row, 'b', v.cursors,
           (cursorId) => this.cb.onPickCursorEdge(row.id, 'b', cursorId));
+        b.el.disabled = locked;
         const at = document.createElement('span');
         at.className = 'cursor-dist-mark cursor-edge-mark';
         at.setAttribute('aria-hidden', 'true');
@@ -1487,6 +1492,7 @@ export class CapturePanel {
           row.channel === null ? '' : String(row.channel),
         );
         channel.el.classList.add('cursor-edge-channel');
+        channel.disabled = locked;
         channel.addEventListener('change', () => this.cb.onPickCursorEdgeChannel(
           row.id, channel.value === '' ? null : Number(channel.value),
         ));
@@ -1498,6 +1504,7 @@ export class CapturePanel {
           t('capturePanel.cursorEdgesRemove', { row: row.row }),
           () => this.cb.onRemoveCursorEdge(row.id),
         );
+        remove.disabled = locked;
         const tail = div('cursor-edge-tail');
         tail.append(result, remove);
         item.append(a.el, mark, b.el, at, channel.el, tail, a.popover, b.popover);
@@ -1507,7 +1514,7 @@ export class CapturePanel {
     }
     const edgeAddRow = div('cursor-edge-add-row');
     edgeAddRow.appendChild(edgeAddButton(
-      v.cursorEdges.length >= MAX_CURSOR_EDGE_ROWS,
+      v.cursorEdges.length >= MAX_CURSOR_EDGE_ROWS || locked,
       () => this.cb.onAddCursorEdge(),
     ));
     edgeSec.body.appendChild(edgeAddRow);

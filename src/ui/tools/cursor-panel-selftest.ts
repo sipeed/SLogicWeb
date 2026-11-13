@@ -310,6 +310,63 @@ const edgeMethodsSource = slice(app,
 }
 
 {
+  const distanceRowsLocked = (section: string): boolean =>
+    section.includes('a.el.disabled = locked;') &&
+    section.includes('b.el.disabled = locked;') &&
+    section.includes('remove.disabled = locked;') &&
+    section.indexOf('a.el.disabled = locked;') >
+      section.indexOf("const a = distanceSideControl(row, 'a', v.cursors,") &&
+    section.indexOf('b.el.disabled = locked;') >
+      section.indexOf("const b = distanceSideControl(row, 'b', v.cursors,") &&
+    section.indexOf('remove.disabled = locked;') >
+      section.indexOf('const remove = cursorRemoveButton(');
+  const edgeRowsLocked = (section: string): boolean =>
+    section.includes('a.el.disabled = locked;') &&
+    section.includes('b.el.disabled = locked;') &&
+    section.includes('channel.disabled = locked;') &&
+    section.includes('remove.disabled = locked;') &&
+    section.indexOf('a.el.disabled = locked;') >
+      section.indexOf("const a = edgeSideControl(row, 'a', v.cursors,") &&
+    section.indexOf('b.el.disabled = locked;') >
+      section.indexOf("const b = edgeSideControl(row, 'b', v.cursors,") &&
+    section.indexOf('channel.disabled = locked;') > section.indexOf('const channel = selectControl(') &&
+    section.indexOf('remove.disabled = locked;') >
+      section.indexOf('const remove = cursorRemoveButton(');
+  const addArgumentsLocked = (distanceAdd: string, edgeAdd: string): boolean =>
+    distanceAdd.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS || locked,') &&
+    edgeAdd.includes('v.cursorEdges.length >= MAX_CURSOR_EDGE_ROWS || locked,');
+
+  check('every mutating distance and edge control is disabled from the one shared lock',
+    distanceRowsLocked(distanceSection) && edgeRowsLocked(edgeSection) &&
+    addArgumentsLocked(addRowSource, edgeSection) &&
+    (distanceSection.match(/disabled = locked;/g) ?? []).length === 3 &&
+    (edgeSection.match(/disabled = locked;/g) ?? []).length === 4,
+    `distance=${distanceRowsLocked(distanceSection)}, edge=${edgeRowsLocked(edgeSection)}, ` +
+    `adds=${addArgumentsLocked(addRowSource, edgeSection)}, ` +
+    `distanceWrites=${(distanceSection.match(/disabled = locked;/g) ?? []).length}, ` +
+    `edgeWrites=${(edgeSection.match(/disabled = locked;/g) ?? []).length}`);
+
+  check('the cursor order chip stays enabled: the measurement lock never locks the jump',
+    !panel.includes('order.disabled') && !cursorSection.includes('order.disabled') &&
+    cursorSection.includes('order.addEventListener(\'click\', () => this.cb.onFocusCursor(row.id));') &&
+    (cursorSection.match(/disabled = locked;/g) ?? []).length === 1,
+    `order=${panel.includes('order.disabled')}, ` +
+    `cursorWrites=${(cursorSection.match(/disabled = locked;/g) ?? []).length}, ` +
+    `jump=${cursorSection.includes("this.cb.onFocusCursor(row.id)")}`);
+
+  check('the measurement-row lock is load-bearing: a dropped row write or a bare cap fails',
+    !distanceRowsLocked(distanceSection.replace('remove.disabled = locked;', '')) &&
+    !edgeRowsLocked(edgeSection.replace('channel.disabled = locked;', '')) &&
+    !addArgumentsLocked(addRowSource.replace(' || locked,', ','), edgeSection) &&
+    !addArgumentsLocked(addRowSource, edgeSection.replace(' || locked,', ',')) &&
+    !edgeRowsLocked(edgeSection.replace('b.el.disabled = locked;', '')),
+    `row=${distanceRowsLocked(distanceSection.replace('remove.disabled = locked;', ''))}, ` +
+    `channel=${edgeRowsLocked(edgeSection.replace('channel.disabled = locked;', ''))}, ` +
+    `side=${edgeRowsLocked(edgeSection.replace('b.el.disabled = locked;', ''))}, ` +
+    `cap=${addArgumentsLocked(addRowSource.replace(' || locked,', ','), edgeSection)}`);
+}
+
+{
   check('an empty list shows only the double-click hint in the same section',
     cursorSection.includes('if (v.cursors.length === 0) {') &&
     cursorSection.includes("hint.textContent = t('capturePanel.cursorEmpty');") &&
@@ -784,11 +841,11 @@ const edgeMethodsSource = slice(app,
 
 {
   check('the add control refuses the sixteenth row through the shared cap literal',
-    addRowSource.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,') &&
+    addRowSource.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS || locked,') &&
     addRowSource.includes('() => this.cb.onAddCursorDistance(),') &&
     panel.includes("from './cursorDistance.js';") &&
     MAX_CURSOR_DISTANCE_ROWS === 15,
-    `guard=${addRowSource.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,')}, ` +
+    `guard=${addRowSource.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS || locked,')}, ` +
     `callback=${addRowSource.includes('this.cb.onAddCursorDistance()')}, ` +
     `cap=${MAX_CURSOR_DISTANCE_ROWS}`);
 
@@ -813,14 +870,15 @@ const edgeMethodsSource = slice(app,
 
   const titleWrites = (addControlSource.match(/\.title = /g) ?? []).length;
   check('the capped add control keeps the add label as its single tooltip',
-    addRowSource.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS,') &&
+    addRowSource.includes('v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS || locked,') &&
     addControlSource.includes("const label = t('capturePanel.cursorDistanceAdd');") &&
     addControlSource.includes('b.disabled = disabled;') &&
     addControlSource.includes('b.title = label;') &&
     titleWrites === 1 &&
     !addControlSource.includes('disabled ?') &&
     !addControlSource.includes("'capturePanel.cursorDistanceAdd' +"),
-    `titles=${titleWrites}, cap=${addRowSource.includes('MAX_CURSOR_DISTANCE_ROWS,')}, ` +
+    `titles=${titleWrites}, ` +
+    `cap=${addRowSource.includes('>= MAX_CURSOR_DISTANCE_ROWS || locked,')}, ` +
     `conditional=${addControlSource.includes('disabled ?')}`);
 }
 
@@ -1339,7 +1397,7 @@ const edgeMethodsSource = slice(app,
   check('the bottom Edges add action is left aligned, capped at fifteen, and wired to App',
     addRowAt > listAt && addAt > addRowAt && bodyAddAt > addAt &&
     !edgeSection.slice(bodyAddAt + 1).includes('edgeSec.body.appendChild(') &&
-    edgeSection.includes('v.cursorEdges.length >= MAX_CURSOR_EDGE_ROWS,') &&
+    edgeSection.includes('v.cursorEdges.length >= MAX_CURSOR_EDGE_ROWS || locked,') &&
     edgeSection.includes('() => this.cb.onAddCursorEdge(),') &&
     MAX_CURSOR_EDGE_ROWS === 15 &&
     slice(css, '.cursor-edge-add-row {', '}').includes('justify-content: flex-start;'),

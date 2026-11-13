@@ -452,7 +452,58 @@ check('the row cap is the DSView Max_Measure_Limits literal',
     `any=${/\bany\b/.test(source)}`);
 }
 
-console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
+{
+  const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const guard = 'if (this.cursorReadOnly()) return;';
+  const methodBody = (source: string, signature: string): string => {
+    const start = source.indexOf(signature);
+    return start < 0 ? '' : source.slice(start + signature.length);
+  };
+  const guardFirst = (source: string, signature: string, texts: readonly string[]): boolean => {
+    const body = methodBody(source, signature);
+    const at = body.indexOf(guard);
+    if (body === '' || at < 0 || body.slice(0, at).trim() !== '') return false;
+    return texts.every((text) => body.indexOf(text) > at);
+  };
+  const withoutGuard = (source: string, signature: string): string => {
+    const body = methodBody(source, signature);
+    if (body === '' || !body.includes(guard)) return source;
+    return source.slice(0, source.indexOf(signature) + signature.length) +
+      body.replace(guard, '');
+  };
+  const privateCondition = (source: string, signature: string): string => {
+    const body = methodBody(source, signature);
+    if (body === '' || !body.includes(guard)) return source;
+    return source.slice(0, source.indexOf(signature) + signature.length) +
+      body.replace(guard, 'if (this.running) return;');
+  };
+  const signatures: readonly (readonly [string, readonly string[]])[] = [
+    ['private addDistanceRow(): void {',
+      ['this.distanceRows = rows;', 'this.nextDistanceRowId++;']],
+    ['private removeDistanceRow(rowId: number): void {',
+      ['this.distanceRows = dropDistanceRow(']],
+    ['private pickDistanceCursor(rowId: number, side: DistanceSide, cursorId: number): void {',
+      ['this.distanceRows = assignDistanceCursor(']],
+  ];
+
+  check('every distance-row action refuses before touching rows or the row id counter',
+    signatures.every(([signature, texts]) => guardFirst(app, signature, texts)),
+    signatures.map(([signature]) => `${signature.split('(')[0]}:` +
+      `${guardFirst(app, signature, [])}`).join(', '));
+
+  check('the distance-row lock is load-bearing: a removed guard or a private condition fails',
+    signatures.every(([signature, texts]) => !guardFirst(withoutGuard(app, signature), signature, texts)) &&
+    signatures.every(([signature, texts]) =>
+      !guardFirst(privateCondition(app, signature), signature, texts)) &&
+    (app.match(/private cursorReadOnly\(\): boolean \{/g) ?? []).length === 1,
+    `removed=${signatures.filter(([signature, texts]) =>
+      guardFirst(withoutGuard(app, signature), signature, texts)).length}, ` +
+    `private=${signatures.filter(([signature, texts]) =>
+      guardFirst(privateCondition(app, signature), signature, texts)).length}, ` +
+    `derivations=${(app.match(/private cursorReadOnly\(\): boolean \{/g) ?? []).length}`);
+}
+
 const failed = results.filter((r) => !r.pass).length;
+console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 console.log(`\n${results.length - failed}/${results.length} passed`);
 nodeProcess.exit(failed === 0 ? 0 : 1);
