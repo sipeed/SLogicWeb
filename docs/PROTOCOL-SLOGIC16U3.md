@@ -86,8 +86,15 @@ signed Q2 degC (0.25 degC/LSB). Read twice and check the counter advanced;
 
 There is no temperature-compensation or calibration trigger register: the AUX
 commands are still `1` channels, `2` samplerate, `3` vref and `5` test mode.
-The only resets are `R32_CTRL[1]` (module RST, never written by a capture) and
-`R32_FLAG[1]` (FIFO overflow, write-1-to-clear).
+The only resets are `R32_CTRL[1]` (module RST, never written by a capture),
+`R32_FLAG[1]` (FIFO overflow, write-1-to-clear) and the debug-only DDR3 reset
+at write `0x001c[1]`.
+
+Measured 2026-11-13 on S/N 202610300413: pulsing `0x001c[1]` while a capture is
+running stops the sample stream (the capture still reports running, and the
+sample count freezes) until it is stopped and started again. A pulse while idle
+is safe; the next capture streams normally. The console command reports this,
+and the Advanced help says so.
 
 ## The aux protocol
 

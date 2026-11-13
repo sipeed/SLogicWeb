@@ -152,6 +152,13 @@ async function handle(message: QueuedCommand): Promise<void> {
       return;
     }
 
+    case 'recalibrate-ddr': {
+      if (!device) throw new Error('recalibrate-ddr before open');
+      await device.recalibrateDdr();
+      post({ kind: 'ddr-calibrated' });
+      return;
+    }
+
     case 'console': {
       if (!device) throw new Error('console before open');
       post({ kind: 'console', result: await device.usbControl(message.command) });

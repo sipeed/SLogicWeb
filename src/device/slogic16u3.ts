@@ -54,6 +54,7 @@ import {
   readDeviceFlags,
   readDieTemperature,
   readDieTemperatureOnce,
+  recalibrateDdr,
   readSampleLength,
   programCtrl,
   writeSampleLength,
@@ -2051,6 +2052,12 @@ export class Slogic16U3 implements Device {
     return { celsius: t.celsius, counter: t.counter, valid: t.valid };
   }
 
+  /** Pulse the DDR3 recalibration reset; also safe while the pipe is running. */
+  async recalibrateDdr(): Promise<void> {
+    if (!this.bus || !this.usb.opened) throw new DiagnosticError('device.notOpen');
+    await recalibrateDdr(this.bus, (entry) => this.trace(entry));
+  }
+
   async usbControl(command: string): Promise<string> {
     if (this.running || this.stopping || this.loopDone) {
       throw new DiagnosticError('device.consoleBusy');
@@ -2060,7 +2067,7 @@ export class Slogic16U3 implements Device {
     const op = tokens.shift()?.toLowerCase();
     if (!op || op === 'help') {
       return 'read <addr> [len] | write <addr> <byte>... | ctrl <value> | ' +
-        'flags | clear-fifo | temp | sample-len [value] | ' +
+        'flags | clear-fifo | temp | ddr-recal | sample-len [value] | ' +
         'bench [seconds] [channels] [MHz] [depth] [transferBytes] [normal|usbmax|simulator] | ' +
         'in <request> <value> <index> <len> | out <request> <value> <index> [byte]...';
     }
@@ -2083,6 +2090,16 @@ export class Slogic16U3 implements Device {
       return describeDieTemperature(t.second) +
         ` counter ${t.first.counter}->${t.second.counter}` +
         (t.advanced ? '' : ' (not advancing)');
+    }
+    if (op === 'ddr-recal') {
+      noExtra();
+      await recalibrateDdr(this.bus, (entry) => this.trace(entry));
+      // Measured 2026-11-13 on S/N 202610300413: the DDR3 reset stops the sample path
+      // while the capture still reports running. The next start reconfigures it.
+      return this.running
+        ? 'R32_DBG_CTRL[1] pulsed: DDR3 recalibration triggered; the sample stream ' +
+          'stops until the capture is stopped and started again'
+        : 'R32_DBG_CTRL[1] pulsed: DDR3 recalibration triggered';
     }
     if (op === 'read') {
       const addr = take('register address', 0xffff);

@@ -2335,6 +2335,11 @@ async function main(): Promise<void> {
     check('a worker temperature reply settles the page request',
       tempRequest && tempReading.celsius === 42.25 && tempReading.counter === 7 &&
         tempReading.valid, JSON.stringify(tempReading));
+    const ddrPending = device.recalibrateDdr();
+    const ddrRequest = asking.sent.some((m) => m.kind === 'recalibrate-ddr');
+    asking.emit({ kind: 'ddr-calibrated' });
+    await ddrPending;
+    check('the worker DDR acknowledgement settles the page request', ddrRequest);
 
     const refused = new FakeWorker();
     const refusing = WorkerSlogicDevice.open(

@@ -651,7 +651,7 @@ export const fr: Messages = {
   'capturePanel.usbWarning': 'Outil développeur : les commandes write modifient directement les registres de l’appareil et peuvent dérégler la carte.',
   'capturePanel.usbPlaceholder': 'read 0x000c 4',
   'capturePanel.usbSend': 'Envoyer',
-  'capturePanel.usbHelp': 'Commandes : read <addr> [len], write <addr> <byte>..., ctrl <value>, flags, clear-fifo, temp, in <request> <value> <index> <len>, out <request> <value> <index> [byte]...',
+  'capturePanel.usbHelp': 'Commandes : read <addr> [len], write <addr> <byte>..., ctrl <value>, flags, clear-fifo, temp, ddr-recal, in <request> <value> <index> <len>, out <request> <value> <index> [byte]...',
   'capturePanel.consoleSeed': 'Tapez help pour les commandes. Nombres décimaux ou hexadécimaux préfixés 0x.',
   'capturePanel.consoleError': 'erreur : {detail}',
 

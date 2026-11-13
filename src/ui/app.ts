@@ -5993,6 +5993,14 @@ export class App {
     return device.readTemperature();
   }
 
+  /** Pulse the DDR3 recalibration reset. Allowed while a capture runs. */
+  private async recalibrateDdr(): Promise<void> {
+    const device = this.device;
+    if (!device) throw new DiagnosticError('device.notConnected');
+    if (!device.recalibrateDdr) throw new DiagnosticError('device.noConsole');
+    await device.recalibrateDdr();
+  }
+
   /** The Advanced section owns the temperature poll's visibility, not its timer. */
   private setTemperatureOpen(open: boolean): void {
     this.tempPanelOpen = open;
@@ -7613,6 +7621,8 @@ export class App {
     },
     /** R32_ADC_TEMP, live (202610300413+). */
     readTemperature: () => this.readTemperature(),
+    /** Pulse R32_DBG_CTRL[1] (DDR3 recalibration); works during a capture. */
+    recalibrateDdr: () => this.recalibrateDdr(),
     frameStats: (): FrameStatsSnapshot => this.frameStats(),
     resetFrameStats: (): void => this.resetFrameStats(),
     /** Add a parallel-bus view; missing fields take the panel's defaults. */

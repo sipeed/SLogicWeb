@@ -37,6 +37,7 @@ export type ToWorker =
   | { kind: 'stats' }
   | { kind: 'console'; command: string }
   | { kind: 'temperature' }
+  | { kind: 'recalibrate-ddr' }
   | { kind: 'ack'; id: number };
 
 /**
@@ -81,6 +82,7 @@ export type FromWorker =
   | { kind: 'stats'; stats: Stats }
   | { kind: 'console'; result: string }
   | { kind: 'temperature'; reading: DieTemperatureReading }
+  | { kind: 'ddr-calibrated' }
   | { kind: 'started' }
   | { kind: 'stopped' }
   | {

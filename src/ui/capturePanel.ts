@@ -1543,9 +1543,9 @@ export class CapturePanel {
     advanced.appendChild(summary);
     const body = div('advanced-body');
 
-    // Live die temperature (R32_ADC_TEMP, firmware 202610300413+). It is a
-    // control-endpoint read and works during a capture; the poll runs only while this
-    // section is open.
+    // Live die temperature (R32_ADC_TEMP, firmware 202610300413+) and the DDR3
+    // recalibration pulse. Both are control-endpoint accesses and work during a capture;
+    // the temperature poll runs only while this section is open.
     const tempRow = div('temperature-row');
     const tempLabel = document.createElement('span');
     tempLabel.className = 'temperature-label';

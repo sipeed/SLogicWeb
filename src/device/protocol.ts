@@ -478,6 +478,27 @@ export async function readDieTemperature(
   return { first, second, advanced: second.counter !== first.counter };
 }
 
+/** Debug control at write 0x001c; [1] forces the DDR3 reset used by recalibration. */
+export const R32_DBG_CTRL = 0x001c;
+export const DBG_CTRL_DDR_RESET = 0x02;
+
+/**
+ * Pulse the DDR3 reset so the controller re-trains its timing against the current part.
+ * A single write holds the DDR in reset; the trailing zero releases it, which is the
+ * recalibration. Diagnostic by the spec's intent, but the operator asked for it at
+ * runtime, and the write is one word on the control endpoint - it does not touch the
+ * sample pipe. The read side of 0x001c is R32_LOCUS_B, so a write is never a readback.
+ */
+export async function recalibrateDdr(
+  bus: RegisterBus,
+  trace: Tracer = () => {},
+): Promise<void> {
+  await bus.write(R32_DBG_CTRL, Uint8Array.of(DBG_CTRL_DDR_RESET, 0, 0, 0));
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await bus.write(R32_DBG_CTRL, Uint8Array.of(0, 0, 0, 0));
+  trace({ dir: 'info', note: 'R32_DBG_CTRL[1] pulsed: DDR3 recalibrated' });
+}
+
 /** Read and decode R32_FLAG. One 4-byte control read at 0x08. */
 export async function readDeviceFlags(
   bus: RegisterBus,

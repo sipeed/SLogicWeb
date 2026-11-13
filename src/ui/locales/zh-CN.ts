@@ -597,7 +597,7 @@ export const zhCN: Messages = {
   'capturePanel.usbWarning': '开发者工具：write 命令会直接修改设备寄存器，可能让板子进入异常状态。',
   'capturePanel.usbPlaceholder': 'read 0x000c 4',
   'capturePanel.usbSend': '发送',
-  'capturePanel.usbHelp': '命令：read <addr> [len]、write <addr> <byte>...、ctrl <value>、flags、clear-fifo、temp、in <request> <value> <index> <len>、out <request> <value> <index> [byte]...',
+  'capturePanel.usbHelp': '命令：read <addr> [len]、write <addr> <byte>...、ctrl <value>、flags、clear-fifo、temp、ddr-recal、in <request> <value> <index> <len>、out <request> <value> <index> [byte]...',
   'capturePanel.consoleSeed': '输入 help 查看命令。数字为十进制或 0x 前缀的十六进制。',
   'capturePanel.consoleError': '错误：{detail}',
 

@@ -116,6 +116,8 @@ export interface Device {
   usbControl?(command: string): Promise<string>;
   /** Die temperature; readable during a capture (R32_ADC_TEMP). */
   readTemperature?(): Promise<DieTemperatureReading>;
+  /** Pulse the DDR3 recalibration reset (R32_DBG_CTRL[1]); safe during a capture. */
+  recalibrateDdr?(): Promise<void>;
   start(
     cfg: CaptureConfig, sink: SampleSink, onDropout?: DropoutSink,
     options?: CaptureStartOptions,

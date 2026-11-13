@@ -244,6 +244,17 @@ export class WorkerSlogicDevice implements Device {
     return message.reading;
   }
 
+  /** Pulse the DDR3 recalibration reset; accepted while a capture runs. */
+  async recalibrateDdr(): Promise<void> {
+    const message = await this.request(
+      { kind: 'recalibrate-ddr' }, 'ddr-calibrated', this.timeouts.requestTimeoutMs,
+    );
+    if (message.kind === 'failed') throw failedReply(message);
+    if (message.kind !== 'ddr-calibrated') {
+      throw new DiagnosticError('device.workerNoTemperature');
+    }
+  }
+
   async usbControl(command: string): Promise<string> {
     // `bench` is the one command that measures rather than configures, and it runs the
     // read loop over there. The reply's thread numbers are therefore the worker's, and the
@@ -348,7 +359,7 @@ export class WorkerSlogicDevice implements Device {
         // A failure answers whatever the page is waiting for; with nothing outstanding it
         // is a transport-level error and belongs on the same path as `error`.
         for (const kind of [
-          'opened', 'started', 'stopped', 'stats', 'console', 'temperature',
+          'opened', 'started', 'stopped', 'stats', 'console', 'temperature', 'ddr-calibrated',
         ]) {
           if (this.settle(kind, message)) return;
         }
@@ -361,6 +372,7 @@ export class WorkerSlogicDevice implements Device {
       case 'stats':
       case 'console':
       case 'temperature':
+      case 'ddr-calibrated':
         if (!this.settle(message.kind, message)) {
           this.onError?.(new DiagnosticError('device.workerUnclaimed', { kind: message.kind }));
         }
