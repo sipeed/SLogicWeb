@@ -51,6 +51,7 @@ import { captureAbortDetail, type CaptureAbortCause } from './captureAbort.js';
 import { capturePostTriggerSamples } from './capturePolicy.js';
 import { MAX_CURSOR_DISTANCE_ROWS, type DistanceSide } from './cursorDistance.js';
 import { MAX_CURSOR_EDGE_ROWS } from './cursorEdges.js';
+import { cursorsLocked } from './cursorSet.js';
 import { acquisitionTimeControl } from './timeControl.js';
 import {
   triggerPanelNotes, triggerStatusNote, type PreTriggerFill, type TriggerNoteState,
@@ -622,6 +623,7 @@ export class CapturePanel {
     const s = v.settings;
     const capture = this.host.capture;
     const cursorPage = this.host.cursors;
+    const locked = cursorsLocked(v);
     // A ratio being typed survives a rebuild (a capture finishing mid-entry): its text is
     // kept in gainEdit and its field takes the focus back. The old field's blur, which
     // the removal may fire, must not apply or revert anything.
@@ -1388,6 +1390,7 @@ export class CapturePanel {
         pos.textContent = cursorCellText(row);
         const remove = cursorRemoveButton(t('capturePanel.removeCursor', { label: row.label }),
           () => this.cb.onRemoveCursor(row.id));
+        remove.disabled = locked;
         item.append(order, pos, remove);
         list.appendChild(item);
       }

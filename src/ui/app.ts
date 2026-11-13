@@ -3231,6 +3231,7 @@ export class App {
         return false;
       case 'cursors.clear':
         if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return false;
+        if (this.cursorReadOnly()) return false;
         this.releaseMarkerPointer();
         this.clearCursors();
         this.renderPanels();
@@ -3632,6 +3633,7 @@ export class App {
   }
 
   private removeCursor(id: number): void {
+    if (this.cursorReadOnly()) return;
     const index = this.cursors.findIndex((cursor) => cursor.id === id);
     if (index < 0) return;
     this.cursors.splice(index, 1);

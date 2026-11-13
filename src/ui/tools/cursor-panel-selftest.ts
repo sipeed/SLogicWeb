@@ -278,6 +278,38 @@ const edgeMethodsSource = slice(app,
 }
 
 {
+  const lockLine = 'const locked = cursorsLocked(v);';
+  const renderHead = slice(panel, 'render(v: CapturePanelView): void {', 'const chSec = section(');
+  const viewBody = slice(panel, 'export interface CapturePanelView {', 'export class CapturePanel');
+  const cursorCalls = (panel.match(/cursorsLocked\(/g) ?? []).length;
+  const disabledAt = cursorSection.indexOf('remove.disabled = locked;');
+  const chipAt = cursorSection.indexOf("order.className = 'cursor-idx'");
+  const removeAt = cursorSection.indexOf('cursorRemoveButton(');
+  const removeDisabled = (section: string): boolean =>
+    section.indexOf('remove.disabled = locked;') > section.indexOf('cursorRemoveButton(') &&
+    section.indexOf('remove.disabled = locked;') >= 0 &&
+    !section.includes('order.disabled');
+  const lockDerived = (head: string): boolean =>
+    head.includes(lockLine) && head.indexOf(lockLine) < head.indexOf('capture.replaceChildren();');
+  check('the cursor rows take the shared lock rule from the view and disable only the remove control',
+    panel.includes("import { cursorsLocked } from './cursorSet.js';") && cursorCalls === 1 &&
+    lockDerived(renderHead) &&
+    removeDisabled(cursorSection) && chipAt >= 0 && chipAt < removeAt &&
+    !viewBody.includes('locked') && !cursorSection.includes('v.running') &&
+    !cursorSection.includes('v.stopping'),
+    `import=${panel.includes("import { cursorsLocked } from './cursorSet.js';")}, ` +
+    `calls=${cursorCalls}, head=${lockDerived(renderHead)}, chip=${chipAt}, ` +
+    `remove=${disabledAt}, view=${viewBody.includes('locked')}`);
+  check('the cursor row lock is load-bearing: neither derivation nor disabled write can be dropped',
+    !removeDisabled(cursorSection.replace('remove.disabled = locked;', '')) &&
+    !lockDerived(renderHead.replace(lockLine, '')) &&
+    !cursorSection.includes('cursor-locked'),
+    `control=${removeDisabled(cursorSection.replace('remove.disabled = locked;', ''))}, ` +
+    `derivation=${lockDerived(renderHead.replace(lockLine, ''))}, ` +
+    `stray=${cursorSection.includes('cursor-locked')}`);
+}
+
+{
   check('an empty list shows only the double-click hint in the same section',
     cursorSection.includes('if (v.cursors.length === 0) {') &&
     cursorSection.includes("hint.textContent = t('capturePanel.cursorEmpty');") &&
@@ -921,8 +953,9 @@ const edgeMethodsSource = slice(app,
   const escapeBlock = slice(app, "case 'cursors.clear':", 'this.clearCursors();');
   check('an open picker hands Escape back to the browser before the cursor clear',
     escapeBlock.includes(
-      "        if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return false;\n" +
-      '        this.releaseMarkerPointer();') &&
+      "        if (document.querySelector('.cursor-dist-popover:popover-open') !== null) return false;") &&
+    escapeBlock.indexOf("'.cursor-dist-popover:popover-open'") <
+      escapeBlock.indexOf('this.releaseMarkerPointer();') &&
     !escapeBlock.includes('clearCursors'),
     `block=${escapeBlock.length} chars, clear=${escapeBlock.includes('clearCursors')}`);
 }

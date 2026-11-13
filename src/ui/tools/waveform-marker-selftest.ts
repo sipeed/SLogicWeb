@@ -1291,6 +1291,28 @@ function between(source: string, start: string, end: string): string {
     removeSource.includes('this.renumberCursors();') &&
     removeSource.includes('this.renderPanels();') && removeSource.includes('this.dirty = true;'),
     `len=${removeSource.length}`);
+
+  const clearGuardLine = 'if (this.cursorReadOnly()) return false;';
+  const removeGuardLine = 'if (this.cursorReadOnly()) return;';
+  const escapeLockGuarded = (body: string): boolean => {
+    const popoverAt = body.indexOf("'.cursor-dist-popover:popover-open'");
+    const guardAt = body.indexOf(clearGuardLine);
+    return popoverAt >= 0 && guardAt > popoverAt &&
+      body.indexOf('this.releaseMarkerPointer();') > guardAt &&
+      body.indexOf('this.clearCursors();') > guardAt;
+  };
+  const removeLockGuarded = (body: string): boolean =>
+    firstStatement(body).startsWith(removeGuardLine) &&
+    body.indexOf('this.cursors.findIndex(') > body.indexOf(removeGuardLine);
+  check('a refused clear and a refused row removal both return before mutating the list',
+    escapeLockGuarded(escapeSource) && removeLockGuarded(removeSource),
+    `escape=${escapeLockGuarded(escapeSource)}, remove=${removeLockGuarded(removeSource)}, ` +
+    `escapeLen=${escapeSource.length}, removeLen=${removeSource.length}`);
+  check('each cursor removal guard is load-bearing: removing it re-opens that removal',
+    !escapeLockGuarded(escapeSource.replace(clearGuardLine, '')) &&
+    !removeLockGuarded(removeSource.replace(removeGuardLine, '')),
+    `escapeControl=${escapeLockGuarded(escapeSource.replace(clearGuardLine, ''))}, ` +
+    `removeControl=${removeLockGuarded(removeSource.replace(removeGuardLine, ''))}`);
   const renumberSource = between(appSource, 'private renumberCursors(', 'private addCursor(');
   check('order labels and colours are recomputed from the list position on every mutation',
     renumberSource.includes('const labels = cursorLabels(this.cursors.length);') &&
