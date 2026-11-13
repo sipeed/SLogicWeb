@@ -64,7 +64,6 @@ export interface AnalyzerPanelView {
   analyzers: readonly AnalyzerState[];
   captureChannels: number;
   hasCapture: boolean;
-  warm: boolean;
   busy: boolean;
   /** The analyzer the results list shows. */
   selectedId: string | null;

@@ -4964,7 +4964,6 @@ export class App {
       analyzers: this.analyzers,
       captureChannels: this.captureStore.channelCount,
       hasCapture: this.captureStore.length > 0,
-      warm: this.decodeWarm,
       busy: this.decodeBusy,
       selectedId: this.selectedAnalyzer,
       autoDecode: this.autoDecode,
