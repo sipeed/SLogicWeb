@@ -22,7 +22,7 @@
  */
 
 import {
-  DecoderNotHydratedError, decoderCount, getDecoder, hydrateDecoders, isLogicDecoder,
+  DecoderNotHydratedError, getDecoder, hydrateDecoders, isLogicDecoder,
   listDecoders, validateStack,
 } from '../decode/index.js';
 import type { DecoderInfo, DecoderOptionInfo } from '../decode/index.js';
@@ -154,17 +154,6 @@ export class AnalyzerPanel {
   render(v: AnalyzerPanelView): void {
     this.root.replaceChildren();
     if (this.editing !== null && !v.analyzers.some((a) => a.id === this.editing)) this.stopEditing();
-
-    const head = div('panel-head');
-    const title = div('panel-title');
-    title.textContent = t('analyzerPanel.title');
-    head.appendChild(title);
-    const sub = div('panel-sub');
-    sub.textContent = v.warm
-      ? t('analyzerPanel.subWarm', { count: decoderCount })
-      : t('analyzerPanel.subCold', { count: decoderCount });
-    head.appendChild(sub);
-    this.root.appendChild(head);
 
     if (v.droppedNote !== null) {
       const note = div('panel-note analyzer-dropped');
