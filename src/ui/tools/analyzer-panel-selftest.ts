@@ -158,6 +158,32 @@ check(
   `mounted=${panel.includes(MOUNTED_STATUS)}, span=${panel.includes("st.className = 'analyzer-status';")}, generic=${panel.includes('formatAnalyzerNote(a.note)')}`,
 );
 
+const PAGE_HEAD_NEEDLES = ['panel-head', 'panel-title', 'panel-sub'];
+const RETIRED_HEADER_KEYS = [
+  'analyzerPanel.title', 'analyzerPanel.subWarm', 'analyzerPanel.subCold',
+];
+const ATTACHED_SECTION = "section(t('analyzerPanel.attached'))";
+const ADD_SECTION = "t('analyzerPanel.add')";
+const RENDER_OPENS = 'render(v: AnalyzerPanelView): void {';
+const headerlessPredicate = (source: string): boolean =>
+  PAGE_HEAD_NEEDLES.every((needle) => !source.includes(needle)) &&
+  RETIRED_HEADER_KEYS.every((key) => !source.includes(key)) &&
+  source.includes(ATTACHED_SECTION) && source.includes(ADD_SECTION);
+const headerControls = [
+  !headerlessPredicate(panel.replace(RENDER_OPENS, `${RENDER_OPENS}\n    const head = div('panel-head');`)),
+  !headerlessPredicate(panel.replace(RENDER_OPENS, `${RENDER_OPENS}\n    t('analyzerPanel.title');`)),
+  !headerlessPredicate(panel.replace(ATTACHED_SECTION, "section('attached')")),
+  !headerlessPredicate(panel.replace(ADD_SECTION, "'add'")),
+];
+check(
+  'the decoders page opens on the attached list and the add form, with no panel header',
+  headerlessPredicate(panel) && headerControls.every((pass) => pass),
+  `head=${PAGE_HEAD_NEEDLES.filter((n) => panel.includes(n)).join('|') || 'none'}, ` +
+    `keys=${RETIRED_HEADER_KEYS.filter((k) => panel.includes(k)).join('|') || 'none'}, ` +
+    `attached=${panel.includes(ATTACHED_SECTION)}, add=${panel.includes(ADD_SECTION)}, ` +
+    `controls=${JSON.stringify(headerControls)}`,
+);
+
 const DESCRIPTION_CALL = 'desc.textContent = decoderDescriptionText(info);';
 const DECODER_I18N_IMPORT = "} from './decoderI18n.js';";
 const DESCRIPTION_IMPORT =
