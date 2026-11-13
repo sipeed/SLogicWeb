@@ -1220,6 +1220,40 @@ function between(source: string, start: string, end: string): string {
     placementSource.includes(placementGuardLine),
     `helper=${appSource.includes('return cursorsLocked({ running: this.running, stopping: this.stopping });')}`);
 
+  const grabGuardLine = 'if (this.cursorReadOnly()) return false;';
+  const axisGrabSource = between(appSource, 'private tryGrabAxisChip(', 'private syncAxisCursor(');
+  const firstStatement = (body: string): string => body.slice(body.indexOf('{') + 1).trimStart();
+  const grabGuarded = (body: string, work: readonly string[]): boolean => {
+    const guardAt = body.indexOf(grabGuardLine);
+    return firstStatement(body).startsWith(grabGuardLine) && guardAt >= 0 &&
+      work.every((needle) => body.indexOf(needle) > guardAt);
+  };
+  const plotGrabGuarded = (body: string): boolean =>
+    grabGuarded(body, ['nearestCursorGrab(', 'cursor.marker.tryGrab(']);
+  const axisGrabGuarded = (body: string): boolean =>
+    grabGuarded(body, ['this.axisChipAt(', 'cursor.marker.tryGrab(']);
+  check('both cursor grab entries refuse before any nearest-grab or chip hit-test work',
+    plotGrabGuarded(grabMarkerSource) && axisGrabGuarded(axisGrabSource),
+    `plot=${plotGrabGuarded(grabMarkerSource)}, axis=${axisGrabGuarded(axisGrabSource)}, ` +
+    `plotLen=${grabMarkerSource.length}, axisLen=${axisGrabSource.length}`);
+  const axisDownSource = between(
+    appSource, "axis.addEventListener('pointerdown'", "axis.addEventListener('pointermove'");
+  check('a refused cursor grab leaves plot and ruler panning intact',
+    downSource.includes('const grabbed = this.tryGrabMarker(e, rect);') &&
+    downSource.includes('dragging = !grabbed;') &&
+    downSource.indexOf('dragging = !grabbed;') >
+      downSource.indexOf('const grabbed = this.tryGrabMarker(e, rect);') &&
+    axisDownSource.includes('if (this.draggingCursor() === null && this.tryGrabAxisChip(e)) {') &&
+    axisDownSource.includes('axisDrag = true; axisLast = e.clientX;'),
+    `grabbed=${downSource.includes('const grabbed = this.tryGrabMarker(e, rect);')}, ` +
+    `pan=${downSource.includes('dragging = !grabbed;')}, ` +
+    `axisBranch=${axisDownSource.includes('this.tryGrabAxisChip(e)) {')}`);
+  check('each cursor grab guard is load-bearing: removing it re-opens that grab',
+    !plotGrabGuarded(grabMarkerSource.replace(grabGuardLine, '')) &&
+    !axisGrabGuarded(axisGrabSource.replace(grabGuardLine, '')),
+    `plotControl=${plotGrabGuarded(grabMarkerSource.replace(grabGuardLine, ''))}, ` +
+    `axisControl=${axisGrabGuarded(axisGrabSource.replace(grabGuardLine, ''))}`);
+
   check('the press grabs the nearest cursor in band and calls tryGrab on that cursor only',
     grabMarkerSource.includes('const candidate = nearestCursorGrab(this.grabCandidates(), pointerCssX);') &&
     grabMarkerSource.includes('if (candidate === null) return false;') &&

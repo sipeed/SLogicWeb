@@ -3316,6 +3316,7 @@ export class App {
   }
 
   private tryGrabMarker(e: PointerEvent, rect: DOMRect): boolean {
+    if (this.cursorReadOnly()) return false;
     const pointerCssX = e.clientX - rect.left;
     const candidate = nearestCursorGrab(this.grabCandidates(), pointerCssX);
     if (candidate === null) return false;
@@ -3366,6 +3367,7 @@ export class App {
    * (`axisChipOffset`) so the cursor does not jump to the pointer.
    */
   private tryGrabAxisChip(e: PointerEvent): boolean {
+    if (this.cursorReadOnly()) return false;
     if (this.store.length === 0) return false;
     const chip = this.axisChipAt(e);
     if (chip === null) return false;
