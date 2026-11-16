@@ -26,6 +26,7 @@ import { AXIS, BUBBLE, GRID, ROWS } from './metrics.js';
 import {
   SCOPE_PAD_CSS, formatScopeVolts, scopeGeometry, scopeTickIndices,
 } from './scopeScale.js';
+import type { PersistenceTrailView } from './persistenceSurfaces.js';
 import type { TickSet } from './timeAxis.js';
 
 export interface HoverMeasurement {
@@ -177,6 +178,21 @@ export interface AnalogBandView {
   scope?: AnalogScopeView;
   labels?: { top: string; bottom: string };
   note?: string;
+  trail?: PersistenceTrailView;
+}
+
+function analogYFor(o: AnalogBandView, t: AnalogTraceView): (v: number) => number {
+  const pad = SCOPE_PAD_CSS;
+  const traceScope = t.scope;
+  const traceGeometry = traceScope
+    ? scopeGeometry(o.top, o.band, traceScope.voltsPerDiv, traceScope.zeroPosition) : null;
+  if (traceGeometry && traceScope) {
+    return (v: number): number =>
+      traceGeometry.yVolts(traceScope.offsetV + (v / 255) * traceScope.fullScaleV);
+  }
+  const traceHeight = Math.max(1, o.band - 2 * pad);
+  return (v: number): number =>
+    o.top + pad + ((t.yMax - v) / (t.yMax - t.yMin || 1)) * traceHeight;
 }
 
 export class Overlay {
@@ -209,6 +225,10 @@ export class Overlay {
 
   setPalette(next: CanvasPalette): void {
     this.palette = next;
+  }
+
+  get widthCss(): number {
+    return this.wCss;
   }
 
   /** A context with the bubble font set, for measuring text during layout. */
@@ -385,19 +405,6 @@ export class Overlay {
     // module to place its drag handles, so a canvas tick cannot drift from its handle.
     const geometry = scope
       ? scopeGeometry(o.top, o.band, scope.voltsPerDiv, scope.zeroPosition) : null;
-    const pad = SCOPE_PAD_CSS;
-    const yFor = (t: AnalogTraceView): ((v: number) => number) => {
-      const traceScope = t.scope;
-      const traceGeometry = traceScope
-        ? scopeGeometry(o.top, o.band, traceScope.voltsPerDiv, traceScope.zeroPosition) : null;
-      if (traceGeometry && traceScope) {
-        return (v: number): number =>
-          traceGeometry.yVolts(traceScope.offsetV + (v / 255) * traceScope.fullScaleV);
-      }
-      const traceHeight = Math.max(1, o.band - 2 * pad);
-      return (v: number): number =>
-        o.top + pad + ((t.yMax - v) / (t.yMax - t.yMin || 1)) * traceHeight;
-    };
     // Tick labels use the target scale while their Y positions use the animated one.
     // Thus a real voltage mark (1 V, 2 V, ...) travels away from or toward 0 V as the
     // ruler extends/contracts; recomputing labels from the animated V/Div would instead
@@ -438,7 +445,7 @@ export class Overlay {
       }
       c.globalAlpha = 1;
     } else if (o.traces.length === 1 && o.traces[0]!.yMin < 0 && o.traces[0]!.yMax > 0) {
-      const y = yFor(o.traces[0]!);
+      const y = analogYFor(o, o.traces[0]!);
       c.strokeStyle = this.palette.gridMajor;
       c.setLineDash([3, 3]);
       c.lineWidth = 1;
@@ -448,6 +455,9 @@ export class Overlay {
       c.stroke();
       c.setLineDash([]);
     }
+
+    if (o.trail?.commit) this.commitAnalogTrail(o, o.trail);
+    if (o.trail) c.drawImage(o.trail.canvas, 0, o.top, this.wCss, o.band);
 
     for (const reference of o.references ?? []) {
       const geometryForReference = scopeGeometry(
@@ -478,9 +488,142 @@ export class Overlay {
       c.globalAlpha = 1;
     }
 
+    this.paintAnalogTraces(c, o);
+
+    if (o.note) {
+      c.fillStyle = this.palette.text50;
+      c.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText(o.note, this.wCss / 2, o.top + o.band / 2);
+    }
+
+    c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    c.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
+    c.fillStyle = this.palette.text50;
+    if (geometry && scope) {
+      // The armed trigger level, on the same geometry as the trace. App owns the pointer
+      // handle; the line is painted now and its readout goes above the ruler labels below.
+      if (scope.triggerVolts !== undefined && scope.triggerVolts >= geometry.bottomV &&
+          scope.triggerVolts <= geometry.topV) {
+        c.globalAlpha = 0.9;
+        c.strokeStyle = this.palette.warning;
+        c.lineWidth = 1;
+        c.setLineDash([4, 3]);
+        const ty = Math.round(geometry.yVolts(scope.triggerVolts)) + 0.5;
+        c.beginPath();
+        c.moveTo(0, ty);
+        c.lineTo(this.wCss, ty);
+        c.stroke();
+        c.setLineDash([]);
+        c.globalAlpha = 1;
+      }
+      // The voltage ruler is on the right, inside the analog row. The plot has no
+      // reserved right gutter, so the rule sits just inside the canvas edge and the
+      // labels are right-aligned against it; the top and bottom edge labels are gone
+      // because every division, including the visible extremes, now has one label.
+      const rulerX = Math.round(this.wCss - 6) + 0.5;
+      c.strokeStyle = this.palette.text50;
+      c.lineWidth = 1;
+      c.globalAlpha = 0.75;
+      c.beginPath();
+      c.moveTo(rulerX, geometry.yVolts(geometry.topV));
+      c.lineTo(rulerX, geometry.yVolts(geometry.bottomV));
+      c.stroke();
+      c.textAlign = 'right';
+      c.textBaseline = 'middle';
+      c.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+
+      // Compact readouts share the ruler rather than consuming the left channel control.
+      // Their opaque chips sit on top of the tick labels, so a label that would be cut in
+      // half by a chip is left out below. Placement is decided first for the same reason.
+      const scaleLabel =
+        `${scope.tickVoltsPerDiv ?? scope.voltsPerDiv} ${scope.voltsPerDivUnit ?? 'V/div'}`;
+      const scaleX = rulerX - 6;
+      const scaleY = o.top + o.band - 10;
+      const scaleWidth = c.measureText(scaleLabel).width + 8;
+      const vdiv = { x0: scaleX - scaleWidth, x1: scaleX, y0: scaleY - 8, y1: scaleY + 8 };
+      const triggerVisible = scope.triggerVolts !== undefined && scope.triggerKind !== undefined &&
+        scope.triggerVolts >= geometry.bottomV && scope.triggerVolts <= geometry.topV;
+      const triggerLabel = triggerVisible
+        ? `${scope.triggerKind === 'rising' ? 'R' : 'F'} ${formatScopeVolts(scope.triggerVolts!)}`
+        : '';
+      const triggerY = triggerVisible ? geometry.yVolts(scope.triggerVolts!) : 0;
+      const triggerWidth = triggerVisible ? c.measureText(triggerLabel).width + 8 : 0;
+      // Right edge of the trigger chip. A level in the lowest division would otherwise
+      // paint over the V/div readout: slide the chip left instead, keeping its Y on the
+      // trigger line.
+      let triggerX = rulerX - 12;
+      if (triggerVisible && triggerY + 8 > vdiv.y0 && triggerY - 8 < vdiv.y1) {
+        triggerX = vdiv.x0 - 2;
+      }
+      const hidesLabel = (yy: number): boolean =>
+        (yy > vdiv.y0 && yy < vdiv.y1) ||
+        (triggerVisible && yy > triggerY - 8 && yy < triggerY + 8);
+
+      let lastLabelY: number | null = null;
+      for (const k of ticks) {
+        const volts = k * tickStep;
+        const yy = Math.round(geometry.yVolts(volts)) + 0.5;
+        c.beginPath();
+        c.moveTo(rulerX - 4, yy);
+        c.lineTo(rulerX, yy);
+        c.stroke();
+        if (hidesLabel(yy)) continue;
+        // During the animated zoom a changing scale can place marks closer than the 10 px
+        // label; keep the outermost of a crowded pair rather than overprinting both.
+        if (lastLabelY !== null && lastLabelY - yy < 11) continue;
+        lastLabelY = yy;
+        c.fillStyle = this.palette.text50;
+        c.fillText(formatScopeVolts(volts), rulerX - 6, yy);
+      }
+      c.globalAlpha = 1;
+
+      c.fillStyle = this.palette.bg;
+      roundRect(c, vdiv.x0, vdiv.y0, scaleWidth, 16, 3);
+      c.fill();
+      c.fillStyle = this.palette.text50;
+      c.fillText(scaleLabel, scaleX - 4, scaleY);
+
+      if (triggerVisible) {
+        c.fillStyle = this.palette.bg;
+        roundRect(c, triggerX - triggerWidth, triggerY - 8, triggerWidth, 16, 3);
+        c.fill();
+        c.fillStyle = this.palette.warning;
+        c.fillText(triggerLabel, triggerX - 4, triggerY);
+      }
+    } else if (o.labels) {
+      c.textAlign = 'left';
+      c.textBaseline = 'top';
+      c.fillText(o.labels.top, 4, o.top + 2);
+      c.textBaseline = 'bottom';
+      c.fillText(o.labels.bottom, 4, o.top + o.band - 2);
+    }
+    c.restore();
+  }
+
+  private commitAnalogTrail(o: AnalogBandView, trail: PersistenceTrailView): void {
+    const g = trail.ctx;
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalCompositeOperation = 'destination-in';
+    g.globalAlpha = trail.decay;
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, trail.canvas.width, trail.canvas.height);
+    g.restore();
+    g.save();
+    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    g.beginPath();
+    g.rect(0, 0, this.wCss, o.band);
+    g.clip();
+    this.paintAnalogTraces(g, { ...o, top: 0 });
+    g.restore();
+  }
+
+  private paintAnalogTraces(c: CanvasRenderingContext2D, o: AnalogBandView): void {
     for (const t of o.traces) {
       const f = t.frame;
-      const y = yFor(t);
+      const y = analogYFor(o, t);
       c.fillStyle = t.color;
       c.strokeStyle = t.color;
       c.lineWidth = 1.25;
@@ -628,117 +771,6 @@ export class Overlay {
       }
       c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     }
-
-    if (o.note) {
-      c.fillStyle = this.palette.text50;
-      c.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
-      c.textAlign = 'center';
-      c.textBaseline = 'middle';
-      c.fillText(o.note, this.wCss / 2, o.top + o.band / 2);
-    }
-
-    c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    c.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
-    c.fillStyle = this.palette.text50;
-    if (geometry && scope) {
-      // The armed trigger level, on the same geometry as the trace. App owns the pointer
-      // handle; the line is painted now and its readout goes above the ruler labels below.
-      if (scope.triggerVolts !== undefined && scope.triggerVolts >= geometry.bottomV &&
-          scope.triggerVolts <= geometry.topV) {
-        c.globalAlpha = 0.9;
-        c.strokeStyle = this.palette.warning;
-        c.lineWidth = 1;
-        c.setLineDash([4, 3]);
-        const ty = Math.round(geometry.yVolts(scope.triggerVolts)) + 0.5;
-        c.beginPath();
-        c.moveTo(0, ty);
-        c.lineTo(this.wCss, ty);
-        c.stroke();
-        c.setLineDash([]);
-        c.globalAlpha = 1;
-      }
-      // The voltage ruler is on the right, inside the analog row. The plot has no
-      // reserved right gutter, so the rule sits just inside the canvas edge and the
-      // labels are right-aligned against it; the top and bottom edge labels are gone
-      // because every division, including the visible extremes, now has one label.
-      const rulerX = Math.round(this.wCss - 6) + 0.5;
-      c.strokeStyle = this.palette.text50;
-      c.lineWidth = 1;
-      c.globalAlpha = 0.75;
-      c.beginPath();
-      c.moveTo(rulerX, geometry.yVolts(geometry.topV));
-      c.lineTo(rulerX, geometry.yVolts(geometry.bottomV));
-      c.stroke();
-      c.textAlign = 'right';
-      c.textBaseline = 'middle';
-      c.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-
-      // Compact readouts share the ruler rather than consuming the left channel control.
-      // Their opaque chips sit on top of the tick labels, so a label that would be cut in
-      // half by a chip is left out below. Placement is decided first for the same reason.
-      const scaleLabel =
-        `${scope.tickVoltsPerDiv ?? scope.voltsPerDiv} ${scope.voltsPerDivUnit ?? 'V/div'}`;
-      const scaleX = rulerX - 6;
-      const scaleY = o.top + o.band - 10;
-      const scaleWidth = c.measureText(scaleLabel).width + 8;
-      const vdiv = { x0: scaleX - scaleWidth, x1: scaleX, y0: scaleY - 8, y1: scaleY + 8 };
-      const triggerVisible = scope.triggerVolts !== undefined && scope.triggerKind !== undefined &&
-        scope.triggerVolts >= geometry.bottomV && scope.triggerVolts <= geometry.topV;
-      const triggerLabel = triggerVisible
-        ? `${scope.triggerKind === 'rising' ? 'R' : 'F'} ${formatScopeVolts(scope.triggerVolts!)}`
-        : '';
-      const triggerY = triggerVisible ? geometry.yVolts(scope.triggerVolts!) : 0;
-      const triggerWidth = triggerVisible ? c.measureText(triggerLabel).width + 8 : 0;
-      // Right edge of the trigger chip. A level in the lowest division would otherwise
-      // paint over the V/div readout: slide the chip left instead, keeping its Y on the
-      // trigger line.
-      let triggerX = rulerX - 12;
-      if (triggerVisible && triggerY + 8 > vdiv.y0 && triggerY - 8 < vdiv.y1) {
-        triggerX = vdiv.x0 - 2;
-      }
-      const hidesLabel = (yy: number): boolean =>
-        (yy > vdiv.y0 && yy < vdiv.y1) ||
-        (triggerVisible && yy > triggerY - 8 && yy < triggerY + 8);
-
-      let lastLabelY: number | null = null;
-      for (const k of ticks) {
-        const volts = k * tickStep;
-        const yy = Math.round(geometry.yVolts(volts)) + 0.5;
-        c.beginPath();
-        c.moveTo(rulerX - 4, yy);
-        c.lineTo(rulerX, yy);
-        c.stroke();
-        if (hidesLabel(yy)) continue;
-        // During the animated zoom a changing scale can place marks closer than the 10 px
-        // label; keep the outermost of a crowded pair rather than overprinting both.
-        if (lastLabelY !== null && lastLabelY - yy < 11) continue;
-        lastLabelY = yy;
-        c.fillStyle = this.palette.text50;
-        c.fillText(formatScopeVolts(volts), rulerX - 6, yy);
-      }
-      c.globalAlpha = 1;
-
-      c.fillStyle = this.palette.bg;
-      roundRect(c, vdiv.x0, vdiv.y0, scaleWidth, 16, 3);
-      c.fill();
-      c.fillStyle = this.palette.text50;
-      c.fillText(scaleLabel, scaleX - 4, scaleY);
-
-      if (triggerVisible) {
-        c.fillStyle = this.palette.bg;
-        roundRect(c, triggerX - triggerWidth, triggerY - 8, triggerWidth, 16, 3);
-        c.fill();
-        c.fillStyle = this.palette.warning;
-        c.fillText(triggerLabel, triggerX - 4, triggerY);
-      }
-    } else if (o.labels) {
-      c.textAlign = 'left';
-      c.textBaseline = 'top';
-      c.fillText(o.labels.top, 4, o.top + 2);
-      c.textBaseline = 'bottom';
-      c.fillText(o.labels.bottom, 4, o.top + o.band - 2);
-    }
-    c.restore();
   }
 
   /**

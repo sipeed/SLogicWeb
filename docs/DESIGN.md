@@ -326,6 +326,25 @@ Analog channels are not bus rows. Each analog signal has a row with:
   hiding its Overlay source hides it without deleting it. References are session-only:
   they survive a capture replacement while their group exists, vanish on reload, and are
   never an input to measurement, statistics, Persistence, FFT or XY.
+- **The persistence trail is display, never data.** A band can retain the traces of the
+  waves that just completed: on every unique eligible completed Single/Repeat wave (the
+  shared acquisition predicate) the band's offscreen surface is attenuated by `1 - 1/N` —
+  an exponential trail whose weight decays by that factor per wave — and the current
+  visible band traces are drawn into it once, then it is blitted under the live trace and
+  above the graticule. N is a trail time constant, not a ring of
+  exactly N kept frames: the N+1th wave does not delete the oldest one, it decays it.
+  Never a ring, never an animation frame, never a missed or empty wave, and never a
+  reference - references, chrome, rulers and the trigger keep out of the surface, so live
+  traces and saved references stay visually distinct. The trail is a picture of what was
+  drawn; nothing reads its pixels back.
+- **The trail length is global.** One Off/8/16/32 control sets it for every analog band
+  and lives in the **Automatic measurements** section (§6.3), not in a ruler menu and not
+  per source. It changes no acquisition setting, and Loop disables it, because a
+  continuous rolling window has no finite wave boundary to count. Stop freezes whatever
+  is on the surface; a new capture session or replacement, Clear, a removed band and any
+  display/calibration change clear it and say why. A pan or zoom gesture is an explicit
+  viewport change and clears too, while a following live window only advances the
+  position: it never clears, so a Repeat session accumulates its trail in FollowLive.
 
 ### 5.3 Buses, math and decoder lanes
 
@@ -407,6 +426,11 @@ Analog channels are not bus rows. Each analog signal has a row with:
   (the channel width does). Each chip's tooltip and accessible name say so
   ("D3: click to show/hide (does not affect capture)"); a hidden chip has a dashed
   outline in its channel colour and a muted, struck-through label.
+- **A band's trail surface is the band's box.** It is allocated per current analog band at
+  the plot's CSS width and the band's height, at the device ratio, so resizing a row,
+  switching Stacked/Overlay, or changing the device ratio reallocates and clears it like
+  any other display change; removing the band releases its surface. Surfaces never
+  outnumber the bands and never grow with time.
 - **The ruler, overview and corner stay pinned while rows scroll.** The label and plot
   columns grow to the row stack's height (`#scroll-area` `align-items: flex-start`, both
   columns `min-height: 100%`): a sticky box only pins inside its containing block, and a
@@ -563,6 +587,26 @@ Analog channels are not bus rows. Each analog signal has a row with:
   source to the automatic-measurement list, contribute no sample to statistics,
   Persistence, FFT or XY, and saving or removing one leaves every measurement row and
   statistic byte-identical.
+- **Persistence is a display-only trail of completed waves.** One Off/8/16/32 control in
+  this section sets the trail length for every analog band and changes no acquisition
+  setting. Each unique eligible completed Single or Repeat wave — the shared predicate
+  above: completed, non-Loop, non-empty, not a missed trigger — attenuates every band
+  surface by `1 - 1/N` and repaints the current visible band traces once, so the shortest
+  setting is the fast trail and the longest is the slow one. Stop freezes the surface:
+  the last wave stays visible and nothing more is submitted until another wave completes.
+  Loop has no finite wave boundary, so the control is disabled with that reason and no
+  history accumulates behind it. A new capture session or capture replacement, Clear, a
+  removed band, and every viewport-span, size, DPR, `analogLayout`, sample-rate, V/div,
+  zero, gain, calibration or source-visibility change clear the surface and state the
+  reason; a pan or zoom gesture is an explicit viewport change and clears at once, while a
+  following live window only advances the position and never clears, so a FollowLive
+  Repeat session keeps accumulating; an ordinary Repeat wave inside the session never
+  clears, and Stop clears nothing.
+  `viewMode` is deliberately absent from that key: an analysis view hides the retained
+  surface and pauses new commits, and returning to Time resumes them without clearing.
+  Persistence is session-only (never in the workspace snapshot) and never an input to
+  automatic measurements, statistics, References, FFT, XY or a saved capture; toggling it
+  or its length leaves every measurement row and statistic byte-identical.
 
 ### 6.4 Plot painting
 

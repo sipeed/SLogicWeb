@@ -40,8 +40,7 @@ export interface PersistenceSourceKey {
 }
 
 export interface PersistenceClearKeyInput {
-  viewportStart: number;
-  viewportEnd: number;
+  viewportSpan: number;
   widthCss: number;
   heightCss: number;
   dpr: number;
@@ -88,8 +87,7 @@ export function trailClearKey(input: PersistenceClearKeyInput): string {
     throw new RangeError(`unknown analog layout: ${String(input.analogLayout)}`);
   }
   return [
-    numberText('viewportStart', input.viewportStart),
-    numberText('viewportEnd', input.viewportEnd),
+    numberText('viewportSpan', input.viewportSpan),
     numberText('widthCss', input.widthCss),
     numberText('heightCss', input.heightCss),
     numberText('dpr', input.dpr),
@@ -131,6 +129,7 @@ export type PersistenceClearEvent =
   | 'capture-replacement'
   | 'clear'
   | 'band-removed'
+  | 'display-change'
   | 'none';
 
 export type PersistenceClearReason =

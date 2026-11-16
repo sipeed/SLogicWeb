@@ -320,38 +320,66 @@ function drawAnalogBody(text: string): string {
   return '';
 }
 
-function traceStateIsolation(body: string): boolean {
-  const loopStart = body.indexOf('for (const t of o.traces) {');
-  const loopEnd = body.indexOf('if (o.note)', loopStart);
-  const loop = loopStart >= 0 && loopEnd > loopStart ? body.slice(loopStart, loopEnd) : '';
-  const reset = loop.indexOf('c.setTransform(1, 0, 0, 1, 0, 0);');
-  const restore = loop.indexOf('c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);');
-  const graticule = body.indexOf('if (geometry && scope) {');
-  return (body.match(/c\.save\(\);/g) ?? []).length === 1 &&
-    (body.match(/c\.restore\(\);/g) ?? []).length === 1 &&
-    (body.match(/c\.clip\(\);/g) ?? []).length === 1 &&
-    body.includes('c.rect(0, o.top, this.wCss, o.band);') &&
-    graticule >= 0 && graticule < loopStart &&
-    loop.length > 0 && loop.includes('c.fillStyle = t.color;') &&
-    loop.includes('c.strokeStyle = t.color;') &&
+function traceStateIsolation(text: string): boolean {
+  const band = drawAnalogBody(text);
+  const traces = methodBody(text, '  private paintAnalogTraces(');
+  const reset = traces.indexOf('c.setTransform(1, 0, 0, 1, 0, 0);');
+  const restore = traces.indexOf('c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);');
+  const graticule = band.indexOf('if (geometry && scope) {');
+  const trailBlit = band.indexOf('c.drawImage(o.trail.canvas, 0, o.top, this.wCss, o.band);');
+  const painted = band.indexOf('this.paintAnalogTraces(c, o);');
+  return (band.match(/c\.save\(\);/g) ?? []).length === 1 &&
+    (band.match(/c\.restore\(\);/g) ?? []).length === 1 &&
+    (band.match(/c\.clip\(\);/g) ?? []).length === 1 &&
+    band.includes('c.rect(0, o.top, this.wCss, o.band);') &&
+    graticule >= 0 && trailBlit > graticule && trailBlit < painted &&
+    painted > 0 &&
+    traces.includes('for (const t of o.traces) {') &&
+    traces.includes('c.fillStyle = t.color;') &&
+    traces.includes('c.strokeStyle = t.color;') &&
     reset >= 0 && restore > reset &&
-    (loop.match(/c\.setTransform\(this\.dpr, 0, 0, this\.dpr, 0, 0\);/g) ?? []).length === 1;
+    (traces.match(/c\.setTransform\(this\.dpr, 0, 0, this\.dpr, 0, 0\);/g) ?? []).length === 1;
+}
+
+function methodBody(text: string, signature: string): string {
+  const start = text.indexOf(signature);
+  if (start < 0) return '';
+  const open = text.indexOf('{', start + signature.length - 1);
+  if (open < 0) return '';
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(open, i + 1);
+    }
+  }
+  return '';
 }
 
 {
-  const body = drawAnalogBody(overlay);
   check('one band clip, one save/restore and a per-trace transform reset keep every trace on its own calibration',
-    body.length > 0 && traceStateIsolation(body), `isolation=${traceStateIsolation(body)}`);
-  const noRestore = body.replace('      c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);\n', '');
-  const twoClips = body.replace('    c.clip();', '    c.clip();\n    c.clip();');
-  const bandColour = body.replace(
+    traceStateIsolation(overlay), `isolation=${traceStateIsolation(overlay)}`);
+  const noRestore = overlay.replace('      c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);\n', '');
+  const twoClips = overlay.replace('    c.clip();', '    c.clip();\n    c.clip();');
+  const bandColour = overlay.replace(
     '      c.fillStyle = t.color;\n      c.strokeStyle = t.color;\n', '');
-  check('control: a missing per-trace transform restore, a second clip or a missing trace colour fails the same predicate',
-    noRestore !== body && !traceStateIsolation(noRestore) &&
-    twoClips !== body && !traceStateIsolation(twoClips) &&
-    bandColour !== body && !traceStateIsolation(bandColour),
+  const blitAboveTraces = overlay.replace(
+    '    if (o.trail) c.drawImage(o.trail.canvas, 0, o.top, this.wCss, o.band);\n', '');
+  const trailAfter = overlay.replace(
+    '    if (o.trail) c.drawImage(o.trail.canvas, 0, o.top, this.wCss, o.band);\n', '')
+    .replace('    this.paintAnalogTraces(c, o);',
+      '    this.paintAnalogTraces(c, o);\n' +
+      '    if (o.trail) c.drawImage(o.trail.canvas, 0, o.top, this.wCss, o.band);');
+  check('control: a missing per-trace transform restore, a second clip, a missing trace colour or a trail blitted over the live trace fails the same predicate',
+    noRestore !== overlay && !traceStateIsolation(noRestore) &&
+    twoClips !== overlay && !traceStateIsolation(twoClips) &&
+    bandColour !== overlay && !traceStateIsolation(bandColour) &&
+    blitAboveTraces !== overlay && !traceStateIsolation(blitAboveTraces) &&
+    trailAfter !== overlay && !traceStateIsolation(trailAfter),
     `restore=${traceStateIsolation(noRestore)}, clip=${traceStateIsolation(twoClips)}, ` +
-    `colour=${traceStateIsolation(bandColour)}`);
+    `colour=${traceStateIsolation(bandColour)}, blit=${traceStateIsolation(blitAboveTraces)}, ` +
+    `above=${traceStateIsolation(trailAfter)}`);
 }
 
 {

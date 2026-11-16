@@ -125,8 +125,7 @@ const SOURCE_B: PersistenceSourceKey = {
 };
 
 const KEY_INPUT: PersistenceClearKeyInput = {
-  viewportStart: 1024,
-  viewportEnd: 3072,
+  viewportSpan: 2048,
   widthCss: 800,
   heightCss: 480,
   dpr: 1.25,
@@ -150,8 +149,7 @@ const KEY_INPUT: PersistenceClearKeyInput = {
 {
   const base = trailClearKey(KEY_INPUT);
   const inputChanges: Array<[string, PersistenceClearKeyInput]> = [
-    ['viewportStart', { ...KEY_INPUT, viewportStart: 1025 }],
-    ['viewportEnd', { ...KEY_INPUT, viewportEnd: 3073 }],
+    ['viewportSpan', { ...KEY_INPUT, viewportSpan: 2049 }],
     ['widthCss', { ...KEY_INPUT, widthCss: 801 }],
     ['heightCss', { ...KEY_INPUT, heightCss: 481 }],
     ['dpr', { ...KEY_INPUT, dpr: 2 }],
@@ -177,7 +175,33 @@ const KEY_INPUT: PersistenceClearKeyInput = {
   check('every clear-key input changes the key',
     unchanged.length === 0, `unchanged=${JSON.stringify(unchanged)}`);
   check('the clear-key mutation table is not vacuous',
-    inputChanges.length === 21, `rows=${inputChanges.length}`);
+    inputChanges.length === 20, `rows=${inputChanges.length}`);
+}
+
+{
+  const base = trailClearKey(KEY_INPUT);
+  const panned = trailClearKey({
+    ...KEY_INPUT, viewportStart: 2048, viewportEnd: 4096,
+  } as unknown as PersistenceClearKeyInput);
+  const advanced = trailClearKey({
+    ...KEY_INPUT, viewportStart: 8192, viewportEnd: 10240,
+  } as unknown as PersistenceClearKeyInput);
+  const zoomed = trailClearKey({ ...KEY_INPUT, viewportSpan: 4096 });
+  const legacyPositionKey = (input: {
+    viewportStart: number; viewportEnd: number;
+  }): string => `${input.viewportStart}|${input.viewportEnd}|${trailClearKey(KEY_INPUT)}`;
+  const panA = { viewportStart: 1024, viewportEnd: 3072 };
+  const panB = { viewportStart: 2048, viewportEnd: 4096 };
+  check('a following viewport advance keeps the clear key: only the span enters it',
+    panned === base && advanced === base &&
+    trailClearKey({ ...KEY_INPUT, viewportSpan: 2048 }) === base,
+    `panned=${panned === base}, advanced=${advanced === base}`);
+  check('a zoom changes the span and therefore the clear key',
+    zoomed !== base, `zoomed=${zoomed !== base}`);
+  check('control: a key that still carried the absolute window would clear on a pan',
+    legacyPositionKey(panA) !== legacyPositionKey(panB) && panned === base,
+    `legacyChanged=${legacyPositionKey(panA) !== legacyPositionKey(panB)}, ` +
+    `spanStable=${panned === base}`);
 }
 
 {
