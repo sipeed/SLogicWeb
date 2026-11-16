@@ -29,6 +29,19 @@ import {
 } from '../decode/index.js';
 import type { ChannelEdges, DecodeRequest, DecodeResult } from '../decode/index.js';
 import type { AnalogCodeScan } from '../dsp/analogScan.js';
+import type { WindowKind } from '../dsp/fft.js';
+import {
+  aggregateColumns, logAxisX, logFrequencyAxis, type Spectrum,
+} from '../dsp/fftSpectrum.js';
+import {
+  FFT_DEFAULT_CONFIG, analyzeFft, fftAccessibleText, fftDbRange, fftSummaryLines,
+  fftWindowKind, fftWithBounds, panFftBounds, reconcileFftConfig, resetFftBounds,
+  selectFftMinHz, selectFftSource, selectFftWindow, zoomFftBounds,
+  type AnalysisViewMode, type FftAnalysis, type FftBounds, type FftConfig, type FftSectionView,
+} from './fftView.js';
+import {
+  FftCanvas, fftNearestBin, fftTickLayout, fftViewportBox, type FftViewportBox,
+} from './fftCanvas.js';
 
 import type { AssistantHost, CaptureOutcome } from '../assistant/tools.js';
 
@@ -457,6 +470,13 @@ export class App {
   private captureSessionId = 0;
   private captureWaveGeneration = 0;
   private measurementStats: MeasurementStatsState = emptyMeasurementStats();
+  private viewMode: AnalysisViewMode = 'time';
+  private fftConfig: FftConfig = FFT_DEFAULT_CONFIG;
+  private fftCache: { store: SampleStore; key: string; analysis: FftAnalysis } | null = null;
+  private fftPending = false;
+  private fftCanvas!: FftCanvas;
+  private fftHoverX: number | null = null;
+  private fftDrag: { x: number; bounds: FftBounds } | null = null;
   private runningPanelAt = 0;
   private analysisPanelAt = 0;
   /** New samples are waiting for the next data-driven redraw (HSync's status cadence). */
@@ -735,7 +755,8 @@ export class App {
 
   // DOM
   private readonly el: {
-    plot: HTMLDivElement; waveStack: HTMLDivElement; axis: HTMLCanvasElement;
+    plot: HTMLDivElement; plotCol: HTMLDivElement; waveStack: HTMLDivElement;
+    axis: HTMLCanvasElement;
     overview: HTMLCanvasElement;
     scroll: HTMLDivElement; main: HTMLDivElement; resizer: HTMLDivElement;
     channelList: HTMLDivElement; side: HTMLDivElement;
@@ -761,6 +782,7 @@ export class App {
   constructor() {
     this.el = {
       plot: must<HTMLDivElement>('plot'),
+      plotCol: must<HTMLDivElement>('plot-col'),
       scroll: must<HTMLDivElement>('scroll-area'),
       main: must<HTMLDivElement>('main'),
       resizer: must<HTMLDivElement>('panel-resizer'),
@@ -897,6 +919,9 @@ export class App {
     this.storeRef = new StoreRef(createSampleStore(channelWidthForProbes(this.channels.length), this.settings.samplerate));
     this.stack = new WaveformStack(this.el.waveStack, this.storeRef);
     this.overlay = new Overlay(this.el.plot);
+    this.fftCanvas = new FftCanvas(this.el.plot);
+    this.wireFft();
+    this.syncViewMode();
     this.scopeHost = document.createElement('div');
     this.scopeHost.className = 'scope-scale-host';
     this.el.plot.appendChild(this.scopeHost);
@@ -1341,7 +1366,7 @@ export class App {
 
   private recordMeasurementWave(reason: CaptureStopReason): void {
     const store = this.captureStore;
-    const visible = this.cursorsPageShown();
+    const visible = this.cursorsPageShown() && this.viewMode === 'time';
     const rows: MeasurementWaveRow[] = [];
     if (visible) {
       const view = this.measurementView();
@@ -1388,6 +1413,7 @@ export class App {
       if (sample === null || !Number.isFinite(sample)) return [];
       return [{ id: cursor.id, sample, label: cursor.marker.label, color: cursor.marker.color }];
     });
+    const fft = this.fftSectionView();
     const base = {
       sources,
       filter: state.filter,
@@ -1399,9 +1425,23 @@ export class App {
       ...measurementSectionCounts(state),
       addStart,
       capture: null,
+      fft,
       statsSkipped: this.measurementStats.skipped,
       statsLoopUnavailable: this.captureIsLoop,
     };
+    if (this.viewMode !== 'time') {
+      if (this.measurementCapture !== null) this.dropMeasurementCapture();
+      const paused = new Map<number, MeasurementSourceResult>();
+      for (const source of this.measurementRowsFor(sources, rows)) {
+        paused.set(source.start, { source, scan: null, read: null, unavailable: 'paused' });
+      }
+      return {
+        ...base,
+        rows: measurementRowViews(rows, paused, null, stats),
+        window: null,
+        unavailable: null,
+      };
+    }
     if (sources.length === 0) {
       const none = new Map<number, MeasurementSourceResult>();
       return {
@@ -1631,6 +1671,7 @@ export class App {
   private pumpMeasurementCapture(): void {
     const entry = this.measurementCapture;
     if (entry === null || entry.job.status !== 'running') return;
+    if (this.viewMode !== 'time') return;
     if (!this.cursorsPageShown()) return;
     const store = entry.store;
     if (store !== this.captureStore) {
@@ -1658,6 +1699,336 @@ export class App {
     config: MeasurementConfig, rows: MeasurementRowState,
   ): MeasurementConfig {
     return rows === config.rows ? config : { ...config, rows };
+  }
+
+  private measurementCursors(): { id: number; sample: number }[] {
+    return this.cursors.flatMap((cursor) => {
+      const sample = cursor.marker.sample;
+      if (sample === null || !Number.isFinite(sample)) return [];
+      return [{ id: cursor.id, sample }];
+    });
+  }
+
+  private syncViewMode(): void {
+    const fft = this.viewMode === 'fft';
+    this.el.plotCol.classList.toggle('fft-active', fft);
+    this.el.plot.classList.toggle('fft-active', fft);
+    this.fftCanvas.el.hidden = !fft;
+    if (!fft) {
+      this.fftHoverX = null;
+      this.fftDrag = null;
+    }
+  }
+
+  private setViewMode(mode: AnalysisViewMode): void {
+    if (mode !== 'time' && mode !== 'fft') return;
+    if (mode === this.viewMode) return;
+    this.viewMode = mode;
+    this.syncViewMode();
+    if (mode === 'fft') this.fftPending = true;
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private setFftSource(start: number | null): void {
+    const next = selectFftSource(this.fftConfig, start);
+    if (next === this.fftConfig) return;
+    this.fftConfig = next;
+    this.fftCache = null;
+    this.fftPending = true;
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private setFftWindow(raw: WindowKind): void {
+    const next = selectFftWindow(this.fftConfig, fftWindowKind(raw));
+    if (next === this.fftConfig) return;
+    this.fftConfig = next;
+    this.fftCache = null;
+    this.fftPending = true;
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private setFftMinHz(hz: number | null): void {
+    const next = selectFftMinHz(
+      this.fftConfig, hz !== null && Number.isFinite(hz) && hz > 0 ? hz : null);
+    if (next === this.fftConfig) return;
+    this.fftConfig = next;
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private resetFftView(): void {
+    const next = resetFftBounds(this.fftConfig);
+    if (next === this.fftConfig) return;
+    this.fftConfig = next;
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private applyFftBounds(bounds: FftBounds): void {
+    if (this.fftConfig.minHz === bounds.minHz && this.fftConfig.maxHz === bounds.maxHz) return;
+    this.fftConfig = { ...this.fftConfig, minHz: bounds.minHz, maxHz: bounds.maxHz };
+    if (this.capturePanel !== undefined) {
+      this.capturePanel.updateMeasurements(this.measurementView());
+    }
+    this.dirty = true;
+  }
+
+  private fftSectionView(tick = this.fftPending): FftSectionView {
+    if (tick) this.fftPending = false;
+    const store = this.captureStore;
+    const sources = measurementSources(this.busViews, store.channelCount);
+    const preferred = this.measurementConfig?.rows.filter ?? null;
+    const config = reconcileFftConfig(this.fftConfig, sources, preferred);
+    if (config !== this.fftConfig) this.fftConfig = config;
+    const view: FftSectionView = {
+      mode: this.viewMode === 'fft' ? 'fft' : 'time',
+      sources,
+      source: config.source,
+      window: config.window,
+      minHz: config.minHz,
+      maxHz: config.maxHz,
+      analysis: null,
+    };
+    if (view.mode === 'fft') view.analysis = this.fftAnalysis(config, sources, store, tick);
+    return view;
+  }
+
+  private fftConfigKey(
+    config: FftConfig, source: MeasurementSource, store: SampleStore,
+    start: number, end: number,
+  ): string {
+    return [
+      store.length, store.droppedSamples, store.samplerate, source.start, source.gain,
+      start, end, config.window,
+    ].join('|');
+  }
+
+  private fftAnalysis(
+    config: FftConfig, sources: readonly MeasurementSource[], store: SampleStore, tick: boolean,
+  ): FftAnalysis {
+    const source = config.source === null
+      ? null : sources.find((candidate) => candidate.start === config.source) ?? null;
+    const base: FftAnalysis = {
+      status: 'no-source', source, spectrum: null, samplerateHz: store.samplerate,
+      voltsPerCode: 0, windowStart: 0, requestedSamples: 0, analyzedSamples: 0,
+      truncated: false, clipped: false, gapAt: null, minHz: null, maxHz: null,
+    };
+    if (source === null) return base;
+    if (this.repeatShowingFront) return { ...base, status: 'previous-wave-displayed' };
+    const bus = this.measurementBusView(source.group, store.channelCount);
+    if (bus === null) return base;
+    const window = resolveMeasurementWindow(
+      this.measurementBase(sources), this.measurementCursors(),
+      { start: this.stack.view.start, end: this.stack.view.end }, store.length);
+    if (window === null) return { ...base, status: 'no-window' };
+    const start = Math.max(0, Math.min(window.start, store.length));
+    const end = Math.max(start, Math.min(window.end, store.length));
+    const clipped = start !== window.start || end !== window.end;
+    const key = this.fftConfigKey(config, source, store, start, end);
+    const cache = this.fftCache;
+    const settled = cache !== null && cache.store === store && cache.key === key;
+    if (settled && !tick) return fftWithBounds(cache.analysis, config.minHz, config.maxHz);
+    if (!settled && this.running && !tick && cache !== null) {
+      return fftWithBounds(cache.analysis, config.minHz, config.maxHz);
+    }
+    const read = readMeasureSamples(store, {
+      bits: bus.spec.bits, group: source.group, gain: source.gain,
+    }, { start, end });
+    const analysis = analyzeFft({
+      source,
+      codes: read.codes,
+      unknown: read.unknown,
+      samplerate: store.samplerate,
+      zeroCode: ADC_ZERO_CODE,
+      voltsPerCode: analogVoltsPerCode(source.gain),
+      window: config.window,
+      windowStart: start,
+      requestedSamples: window.end - window.start,
+      clipped: clipped || read.rangeClipped,
+      minHz: config.minHz,
+      maxHz: config.maxHz,
+    });
+    this.fftCache = { store, key, analysis };
+    return fftWithBounds(analysis, config.minHz, config.maxHz);
+  }
+
+  private fftCanvasBox(): FftViewportBox {
+    return fftViewportBox({
+      scrollTop: this.el.scroll.scrollTop,
+      viewportHeight: this.el.scroll.clientHeight,
+      stripsHeight: this.el.overview.offsetHeight + this.el.axis.offsetHeight,
+      plotHeight: this.el.plot.clientHeight,
+      width: this.el.plot.clientWidth,
+    });
+  }
+
+  private drawFftView(): void {
+    const box = this.fftCanvasBox();
+    const widthCss = box.width;
+    const heightCss = box.height;
+    this.fftCanvas.syncSize(box);
+    const view = this.fftSectionView();
+    this.fftCanvas.el.setAttribute('aria-label', fftAccessibleText(view));
+    const analysis = view.analysis;
+    const spectrum = analysis?.spectrum ?? null;
+    if (analysis === null || spectrum === null ||
+      analysis.minHz === null || analysis.maxHz === null) {
+      this.fftCanvas.draw({
+        palette: this.palette, axis: this.emptyFftAxis(), ticks: [],
+        columns: new Float64Array(0), values: new Float64Array(0), dbTop: 0, dbBottom: -100,
+        peak: null, hover: null, message: fftSummaryLines(view).join('\n'),
+      });
+      return;
+    }
+    const width = Math.max(1, Math.round(widthCss));
+    const height = Math.max(1, Math.round(heightCss));
+    const axis = logFrequencyAxis({
+      nyquistHz: analysis.maxHz, minHz: analysis.minHz,
+      binHz: spectrum.binHz, width, height,
+    });
+    const columns = aggregateColumns(axis.columns, spectrum.dbfs);
+    const range = fftDbRange(spectrum.quantizationFloorDbfs);
+    const peakHz = spectrum.peak?.interpolatedHz ?? null;
+    const peak = peakHz !== null && peakHz >= analysis.minHz && peakHz <= analysis.maxHz
+      ? {
+        x: logAxisX(peakHz, analysis.minHz, analysis.maxHz, width),
+        dbfs: spectrum.peak!.dbfs,
+        label: t('capturePanel.fftPeakLabel', {
+          frequency: formatFreq(spectrum.peak!.interpolatedHz),
+          dbfs: spectrum.peak!.dbfs.toFixed(1),
+        }),
+      }
+      : null;
+    const hover = this.fftHoverX === null
+      ? null : this.fftHoverView(spectrum, analysis, this.fftHoverX, width);
+    this.fftCanvas.draw({
+      palette: this.palette, axis, ticks: fftTickLayout(axis), columns,
+      values: spectrum.dbfs, dbTop: range.top, dbBottom: range.bottom,
+      peak, hover, message: null,
+    });
+  }
+
+  private emptyFftAxis(): ReturnType<typeof logFrequencyAxis> {
+    return logFrequencyAxis({ nyquistHz: 2, minHz: 1, binHz: 1, width: 1, height: 1 });
+  }
+
+  private fftHoverView(
+    spectrum: Spectrum, analysis: FftAnalysis, x: number, width: number,
+  ): { x: number; label: string } | null {
+    if (analysis.minHz === null || analysis.maxHz === null) return null;
+    const hz = analysis.minHz *
+      (analysis.maxHz / analysis.minHz) ** (Math.min(width, Math.max(0, x)) / width);
+    const bin = fftNearestBin(hz, spectrum.binHz, spectrum.dbfs.length);
+    if (bin < 0) return null;
+    const value = spectrum.dbfs[bin]!;
+    return {
+      x,
+      label: t('capturePanel.fftHover', {
+        frequency: formatFreq(bin * spectrum.binHz),
+        dbfs: Number.isFinite(value) ? value.toFixed(1) : '-',
+      }),
+    };
+  }
+
+  private wireFft(): void {
+    const canvas = this.fftCanvas.el;
+    this.el.scroll.addEventListener('scroll', () => {
+      if (this.viewMode !== 'fft') return;
+      this.dirty = true;
+    }, { passive: true });
+    const boundsOf = (): FftBounds | null => {
+      const analysis = this.fftCache?.analysis ?? null;
+      if (analysis === null) return null;
+      const live = fftWithBounds(analysis, this.fftConfig.minHz, this.fftConfig.maxHz);
+      if (live.minHz === null || live.maxHz === null) return null;
+      return { minHz: live.minHz, maxHz: live.maxHz };
+    };
+    const widthCss = (): number => Math.max(1, this.el.plot.clientWidth);
+    const stop = (event: Event): void => {
+      if (this.viewMode === 'fft') event.stopPropagation();
+    };
+    const steal = (event: Event): void => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    canvas.addEventListener('pointermove', (event) => {
+      stop(event);
+      if (this.viewMode !== 'fft') return;
+      if (this.fftDrag !== null) {
+        const bounds = boundsOf();
+        if (bounds !== null) {
+          this.applyFftBounds(panFftBounds(
+            this.fftDrag.bounds, event.clientX - this.fftDrag.x, widthCss(), bounds.maxHz));
+        }
+        this.dirty = true;
+        return;
+      }
+      const rect = canvas.getBoundingClientRect();
+      this.fftHoverX = event.clientX - rect.left;
+      this.dirty = true;
+    });
+    canvas.addEventListener('pointerleave', (event) => {
+      stop(event);
+      if (this.fftHoverX === null && this.fftDrag === null) return;
+      this.fftHoverX = null;
+      this.dirty = true;
+    });
+    canvas.addEventListener('pointerdown', (event) => {
+      stop(event);
+      if (this.viewMode !== 'fft' || event.button !== 0) return;
+      const bounds = boundsOf();
+      if (bounds === null) return;
+      canvas.setPointerCapture(event.pointerId);
+      this.fftDrag = { x: event.clientX, bounds };
+    });
+    const release = (event: PointerEvent): void => {
+      stop(event);
+      if (this.fftDrag === null) return;
+      this.fftDrag = null;
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      this.renderPanels();
+    };
+    canvas.addEventListener('pointerup', release);
+    canvas.addEventListener('pointercancel', release);
+    canvas.addEventListener('dblclick', (event) => { stop(event); });
+    canvas.addEventListener('wheel', (event) => {
+      stop(event);
+      if (this.viewMode !== 'fft') return;
+      const bounds = boundsOf();
+      if (bounds === null) return;
+      event.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(1, rect.width);
+      const x = Math.min(width, Math.max(0, event.clientX - rect.left));
+      const anchor = bounds.minHz * (bounds.maxHz / bounds.minHz) ** (x / width);
+      const factor = wheelSpanFactor(event.deltaY, {
+        isPhysicalWheel: Math.abs(event.deltaY) >= 100, shift: false,
+      });
+      this.applyFftBounds(zoomFftBounds(bounds, anchor, factor, bounds.maxHz));
+    }, { passive: false });
+    canvas.addEventListener('keydown', (event) => {
+      if (this.viewMode !== 'fft') return;
+      const bounds = boundsOf();
+      if (bounds === null) return;
+      const width = widthCss();
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        steal(event);
+        const step = width * (event.shiftKey ? 0.5 : 0.1) *
+          (event.key === 'ArrowLeft' ? 1 : -1);
+        this.applyFftBounds(panFftBounds(bounds, step, width, bounds.maxHz));
+      } else if (event.key === '+' || event.key === '=' || event.key === '-' || event.key === '_') {
+        steal(event);
+        const anchor = Math.sqrt(bounds.minHz * bounds.maxHz);
+        const factor = event.key === '+' || event.key === '=' ? Math.SQRT1_2 : Math.SQRT2;
+        this.applyFftBounds(zoomFftBounds(bounds, anchor, factor, bounds.maxHz));
+      } else if (event.key === '0') {
+        steal(event);
+        this.resetFftView();
+      }
+    });
   }
 
   private setMeasurement(patch: {
@@ -2919,7 +3290,7 @@ export class App {
       reason: this.captureAbort === null ? reason : 'error',
       samples: this.captureStore.length,
       missed: this.triggerState === 'not-found',
-      viewMode: 'time',
+      viewMode: this.viewMode,
       visible: true,
       waveKey,
       lastWaveKey: this.persistenceLastWaveKey,
@@ -3616,6 +3987,10 @@ export class App {
     let persistencePanelDue = false;
     if (now - this.analysisPanelAt > 500) {
       this.analysisPanelAt = now;
+      if (this.running && this.viewMode === 'fft') {
+        this.fftPending = true;
+        this.dirty = true;
+      }
       if (this.running && this.cursorsPageShown()) {
         this.capturePanel.updateMeasurements(this.measurementView());
         persistencePanelDue = true;
@@ -3794,6 +4169,12 @@ export class App {
   }
 
   private draw(force = true): void {
+    if (this.viewMode === 'fft') {
+      this.el.hint.style.display = 'none';
+      this.drawFftView();
+      this.renderInteractionBar();
+      return;
+    }
     // A quiet Repeat wave keeps the previous frame until its first samples arrive; a
     // blank store would otherwise flash the plot and axis at every wave boundary.
     if (this.repeatWaveHolding && this.store.length === 0) return;
@@ -6007,6 +6388,11 @@ export class App {
         onPickCursorEdgeChannel: (rowId, channel) => this.pickEdgeChannel(rowId, channel),
         onPickMeasurementFilter: (start) => this.pickMeasurementFilter(start),
         onPickMeasurementRange: (kind) => this.pickMeasurementRange(kind),
+        onPickViewMode: (mode) => this.setViewMode(mode),
+        onPickFftSource: (start) => this.setFftSource(start),
+        onPickFftWindow: (kind) => this.setFftWindow(kind),
+        onPickFftMinHz: (hz) => this.setFftMinHz(hz),
+        onResetFftBounds: () => this.resetFftView(),
         onPickMeasurementCursor: (side, cursorId) => this.pickMeasurementCursor(side, cursorId),
         onToggleMeasurementRow: (start, parameter) =>
           this.toggleMeasurementParameter(start, parameter),
@@ -8901,6 +9287,34 @@ export class App {
     }),
     setPersistence: (raw: unknown) => this.setPersistence(raw),
     clearPersistence: () => this.clearPersistence('clear'),
+    setViewMode: (mode: AnalysisViewMode): void => this.setViewMode(mode),
+    fft: () => {
+      const view = this.fftSectionView();
+      const analysis = view.analysis;
+      const spectrum = analysis?.spectrum ?? null;
+      return {
+        mode: view.mode,
+        source: view.source,
+        window: view.window,
+        status: analysis?.status ?? 'idle',
+        minHz: analysis?.minHz ?? null,
+        maxHz: analysis?.maxHz ?? null,
+        n: spectrum?.n ?? 0,
+        binHz: spectrum?.binHz ?? 0,
+        enbwBins: spectrum?.enbwBins ?? 0,
+        rbwHz: spectrum?.rbwHz ?? 0,
+        nyquistHz: spectrum?.nyquistHz ?? 0,
+        analyzed: analysis?.analyzedSamples ?? 0,
+        requested: analysis?.requestedSamples ?? 0,
+        truncated: analysis?.truncated ?? false,
+        clipped: analysis?.clipped ?? false,
+        gapAt: analysis?.gapAt ?? null,
+        dcDbfs: spectrum?.dcDbfs ?? null,
+        quantizationFloorDbfs: spectrum?.quantizationFloorDbfs ?? null,
+        peak: spectrum?.peak ?? null,
+        summary: fftSummaryLines(view),
+      };
+    },
     setPanel: (p: 'device' | 'analyzers' | null) => {
       this.selectPanel(p);
     },

@@ -147,6 +147,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   'cancelled': 'capture analysis cancelled; analyze again to resume',
   'stable-capture-required': 'analysis needs a completed Single or Repeat capture',
   'loop': 'Loop captures cannot be analysed; stop a Single or Repeat capture first',
+  'paused': 'paused while the FFT view is shown',
 };
 
 {
@@ -431,9 +432,10 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       `updater=${measureUpdater.includes('this.catalogDialog.update(')}`);
 
   const quiet = (source: string): boolean =>
-    (source.match(/setAttribute\('role'/g) ?? []).length === 2 &&
+    (source.match(/setAttribute\('role'/g) ?? []).length === 3 &&
     source.split("undoNotice.setAttribute('role', 'status');").length - 1 === 1 &&
     source.split("progress.setAttribute('role', 'progressbar');").length - 1 === 1 &&
+    source.split("viewSwitch.setAttribute('role', 'group');").length - 1 === 1 &&
     !source.includes('aria-live') && (source.match(/role="/g) ?? []).length === 0;
   const rowLive = measureSection.replace(
     'item.append(source, toggle, status, remove, details);',
@@ -802,7 +804,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     .map((status) => [status, measurementStatusText(rowView({ status }))] as const);
   const wrong = statuses.filter(([status, text]) => text !== STATUS_TEXT[status]);
   check('every non-ok state prints its own explicit status, never a number',
-    wrong.length === 0 && statuses.length === 11 &&
+    wrong.length === 0 && statuses.length === 12 &&
     statuses.every(([, text]) => text !== '' && !text.includes('NaN')),
     `wrong=${JSON.stringify(wrong)}, statuses=${statuses.length}`);
 }
@@ -879,7 +881,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       unavailable: status, rows: [rowView({ status }), rowView({ status })] }))] as const);
   const repeated = unavailableStates.filter(([, note]) => note !== '');
   check('an unavailable section adds no note line that repeats the row status verbatim',
-    repeated.length === 0 && unavailableStates.length === 11,
+    repeated.length === 0 && unavailableStates.length === 12,
     `repeated=${JSON.stringify(repeated)}`);
 
   const clipped = measurementNoteText(sectionView({ rows: [full, { ...full, parameter: 'vpp' }] }));

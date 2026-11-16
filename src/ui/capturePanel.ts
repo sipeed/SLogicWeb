@@ -47,6 +47,11 @@ import {
   type MeasurementRangeKind, type MeasurementRowView, type MeasurementSectionView,
   type MeasurementStatus,
 } from './measurementState.js';
+import {
+  FFT_MIN_HZ_PRESETS, fftSummaryLines, fftWindowKind, fftWindowLabel,
+  type AnalysisViewMode, type FftSectionView,
+} from './fftView.js';
+import { WINDOW_KINDS, type WindowKind } from '../dsp/fft.js';
 import { chipForeground } from './metrics.js';
 import type { MeasurementStatsView } from './measurementStats.js';
 import {
@@ -100,6 +105,11 @@ export interface CapturePanelCallbacks {
   onPickCursorEdgeChannel(rowId: number, channel: number | null): void;
   onPickMeasurementFilter(start: number | null): void;
   onPickMeasurementRange(kind: MeasurementRangeKind): void;
+  onPickViewMode(mode: AnalysisViewMode): void;
+  onPickFftSource(start: number | null): void;
+  onPickFftWindow(kind: WindowKind): void;
+  onPickFftMinHz(hz: number | null): void;
+  onResetFftBounds(): void;
   onPickMeasurementCursor(side: 'a' | 'b', cursorId: number | null): void;
   onToggleMeasurementRow(start: number, parameter: MeasurementParameter): void;
   onRemoveMeasurementRow(id: number): void;
@@ -542,6 +552,11 @@ export class CapturePanel {
       for (const item of root.querySelectorAll<HTMLElement>('[data-measure-window]')) {
         item.textContent = windowText;
         item.hidden = view.window === null;
+      }
+      for (const item of root.querySelectorAll<HTMLElement>('[data-fft-summary]')) {
+        const fft = view.fft;
+        if (fft === undefined) continue;
+        item.textContent = fftSummaryLines(fft).join('\n');
       }
       const capture = measurementCaptureState(view);
       for (const item of root.querySelectorAll<HTMLElement>('[data-measure-capture]')) {
@@ -1609,6 +1624,26 @@ export class CapturePanel {
     measureLegend.className = 'cursor-legend';
     measureLegend.textContent = t('capturePanel.measureFormat');
     measureSec.header.appendChild(measureLegend);
+    const measureFft = v.measurement.fft;
+    const measureMode: AnalysisViewMode = measureFft?.mode ?? 'time';
+    const viewSwitch = div('segmented measure-view-mode');
+    viewSwitch.setAttribute('role', 'group');
+    viewSwitch.setAttribute('aria-label', t('capturePanel.viewMode'));
+    const viewModes: readonly [AnalysisViewMode, MessageKey][] = [
+      ['time', 'capturePanel.viewTime'],
+      ['fft', 'capturePanel.viewFft'],
+    ];
+    for (const [mode, label] of viewModes) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `seg measure-view-mode-btn${measureMode === mode ? ' on' : ''}`;
+      button.dataset.viewMode = mode;
+      button.textContent = t(label);
+      button.setAttribute('aria-pressed', String(measureMode === mode));
+      button.addEventListener('click', () => this.cb.onPickViewMode(mode));
+      viewSwitch.appendChild(button);
+    }
+    measureSec.body.appendChild(viewSwitch);
     const measureControls = div('measure-controls');
     const measureFilter = selectControl(
       'measure.filter',
@@ -1637,6 +1672,14 @@ export class CapturePanel {
       measurementRangeKind(measureRange.value)));
     measureControls.append(measureFilter.el, measureRange.el);
     measureSec.body.appendChild(measureControls);
+    if (measureFft !== undefined && measureMode === 'fft') {
+      measureSec.body.appendChild(fftControls(measureFft, this.cb));
+      const summary = document.createElement('p');
+      summary.className = 'measure-note fft-summary';
+      summary.dataset.fftSummary = '';
+      summary.textContent = fftSummaryLines(measureFft).join('\n');
+      measureSec.body.appendChild(summary);
+    }
     if (v.measurement.range.kind === 'cursors') {
       const measureCursors = div('measure-cursors');
       const cursorOptions: SelectOptionTuple[] = [
@@ -2472,10 +2515,63 @@ const MEASUREMENT_STATUS_KEYS: Record<Exclude<MeasurementStatus, 'ok'>, MessageK
   'cancelled': 'capturePanel.measureStatusCancelled',
   'stable-capture-required': 'capturePanel.measureStatusStableCapture',
   'loop': 'capturePanel.measureStatusLoop',
+  'paused': 'capturePanel.measureStatusPaused',
 };
 
 function measurementParameterText(parameter: MeasurementParameter): string {
   return t(catalogEntry(parameter).labelKey as MessageKey);
+}
+
+function fftControls(
+  view: FftSectionView,
+  cb: Pick<CapturePanelCallbacks,
+    'onPickFftSource' | 'onPickFftWindow' | 'onPickFftMinHz' | 'onResetFftBounds'>,
+): HTMLDivElement {
+  const controls = div('fft-controls');
+  const source = selectControl(
+    'fft.source',
+    t('capturePanel.fftSource'),
+    view.sources.map((entry): SelectOptionTuple => [String(entry.start), entry.name]),
+    view.source === null ? '' : String(view.source),
+  );
+  source.disabled = view.sources.length === 0;
+  source.addEventListener('change', () => cb.onPickFftSource(
+    source.value === '' ? null : Number(source.value)));
+  const windowControl = selectControl(
+    'fft.window',
+    t('capturePanel.fftWindow'),
+    WINDOW_KINDS.map((kind): SelectOptionTuple => [kind, fftWindowLabel(kind)]),
+    view.window,
+  );
+  windowControl.addEventListener('change', () => cb.onPickFftWindow(
+    fftWindowKind(windowControl.value)));
+  const preset = view.minHz !== null &&
+    FFT_MIN_HZ_PRESETS.some((hz) => Math.abs(hz - view.minHz!) < 1e-6);
+  const minOptions: SelectOptionTuple[] = [
+    ['', t('capturePanel.fftMinAuto')],
+    ...FFT_MIN_HZ_PRESETS.map((hz): SelectOptionTuple => [String(hz), formatFreq(hz)]),
+  ];
+  if (view.minHz !== null && !preset) {
+    minOptions.push(['custom', t('capturePanel.fftMinCustom')]);
+  }
+  const minHz = selectControl(
+    'fft.minHz',
+    t('capturePanel.fftMinHz'),
+    minOptions,
+    view.minHz === null ? '' : preset ? String(view.minHz) : 'custom',
+  );
+  minHz.addEventListener('change', () => {
+    if (minHz.value === 'custom') return;
+    cb.onPickFftMinHz(minHz.value === '' ? null : Number(minHz.value));
+  });
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'analyzer-act fft-reset';
+  reset.dataset.fftReset = '';
+  reset.textContent = t('capturePanel.fftReset');
+  reset.addEventListener('click', () => cb.onResetFftBounds());
+  controls.append(source.el, windowControl.el, minHz.el, reset);
+  return controls;
 }
 
 function measurementMethodText(row: MeasurementRowView): string {
