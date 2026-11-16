@@ -39,6 +39,7 @@ const entries = [
   'src/dsp/triggerPlanSelftest.ts',
   'src/dsp/captureTriggerPlanSelftest.ts',
   'src/dsp/measurementsSelftest.ts',
+  'src/dsp/analogScanSelftest.ts',
   'src/dsp/fftSelftest.ts',
   'src/dsp/hostTriggerSelftest.ts',
   'src/dsp/hostTriggerStoreIntegrationSelftest.ts',
