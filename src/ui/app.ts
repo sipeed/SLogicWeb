@@ -28,6 +28,7 @@ import {
   annotationTexts, displayRows, getDecoder, hydrateDecoders, rowForClass, sharedDecodeClient,
 } from '../decode/index.js';
 import type { ChannelEdges, DecodeRequest, DecodeResult } from '../decode/index.js';
+import type { AnalogCodeScan } from '../dsp/analogScan.js';
 
 import type { AssistantHost, CaptureOutcome } from '../assistant/tools.js';
 
@@ -48,9 +49,10 @@ import { CapturePanel, cursorDistanceSideId, cursorEdgeSideId,
   type CursorDistanceSideView, type CursorEdgeChannelView, type CursorEdgeRowView,
   type CursorRowView, type LoopDisplayMetrics, type TriggerStatusView } from './capturePanel.js';
 import {
-  ANALOG_GAIN_DEFAULT, ANALOG_GROUP_COUNT, CHANNEL_BANK_SIZE, analogBankActive,
+  ADC_ZERO_CODE, ANALOG_GAIN_DEFAULT, ANALOG_GROUP_COUNT, CHANNEL_BANK_SIZE, analogBankActive,
   analogBusConfig, analogCodeFromVolts, analogDefaultVoltsPerDiv, analogGainOf, analogGroupCount,
-  analogHalfRangeV, analogSamplerates, analogSpan, analogTriggerQualification, analogTriggerVolts,
+  analogHalfRangeV, analogSamplerates, analogSpan, analogTriggerCode, analogTriggerQualification,
+  analogTriggerVolts,
   analogVoltsPerCode,
   analogVoltsPerDivValues, clampAnalogVolts, isAnalogGain,
   busChannelBank,
@@ -86,6 +88,14 @@ import {
 } from './analogRateMemory.js';
 import { formatCursorTimes } from './cursorTime.js';
 import { sameUsbDevice } from './deviceIdentity.js';
+import {
+  MEASUREMENT_PARAMETERS, addMeasurementRow, defaultMeasurementConfig, isMeasurementBank,
+  measurementCacheKey, measurementRowViews, measurementSources, reconcileMeasurementConfig,
+  resolveMeasurementWindow, runMeasurement, selectMeasurementRange, selectMeasurementSource,
+  type MeasurementConfig, type MeasurementParameter, type MeasurementRange,
+  type MeasurementReadSummary, type MeasurementSectionView,
+} from './measurementState.js';
+import type { MeasureRead } from './measureSamples.js';
 import {
   captureAbortCause, isAllocationFailure, lowerSamplerate, saveFailureNotice,
   type CaptureAbort,
@@ -339,6 +349,9 @@ export class App {
   private nextBus = 0;
   /** When the analyzers panel last re-rendered for a bus build's progress. */
   private busPanelAt = 0;
+  private measurementConfig: MeasurementConfig | null = null;
+  private measurementCache:
+    { store: SampleStore; key: string; read: MeasureRead; scan: AnalogCodeScan | null } | null = null;
   private runningPanelAt = 0;
   /** New samples are waiting for the next data-driven redraw (HSync's status cadence). */
   private livePending = false;
@@ -1137,6 +1150,139 @@ export class App {
 
   private channelAvailable(index: number): boolean {
     return index < Math.min(this.renderChannelCount(), this.store.channelCount);
+  }
+
+  private measurementBusView(group: number, channelCount: number): BusViewState | null {
+    return this.busViews.find((bus) => bus.analogGroup === group &&
+      isMeasurementBank(bus, channelCount)) ?? null;
+  }
+
+  private measurementView(): MeasurementSectionView {
+    const store = this.captureStore;
+    const sources = measurementSources(this.busViews, store.channelCount);
+    const current = this.measurementConfig;
+    const config = reconcileMeasurementConfig(
+      current === null ? defaultMeasurementConfig(sources) : current, sources);
+    if (sources.length > 0 && config !== current) this.measurementConfig = config;
+    const cursors = this.cursors.flatMap((cursor) => {
+      const sample = cursor.marker.sample;
+      if (sample === null || !Number.isFinite(sample)) return [];
+      return [{ id: cursor.id, sample, label: cursor.marker.label, color: cursor.marker.color }];
+    });
+    const base = {
+      sources,
+      source: config.source,
+      range: config.range,
+      cursors: cursors.map((cursor) => ({
+        id: cursor.id, label: cursor.label, color: cursor.color,
+      })),
+      availableParameters: MEASUREMENT_PARAMETERS.filter(
+        (parameter) => !config.rows.includes(parameter)),
+    };
+    const selected = config.source === null
+      ? undefined : sources.find((source) => source.group === config.source);
+    const bus = selected === undefined ? null : this.measurementBusView(selected.group, store.channelCount);
+    if (selected === undefined || bus === null) {
+      return {
+        ...base, rows: measurementRowViews(config.rows, null, null, 'no-source'),
+        window: null, unavailable: 'no-source',
+      };
+    }
+    if (this.repeatShowingFront) {
+      return {
+        ...base, rows: measurementRowViews(config.rows, null, null, 'previous-wave-displayed'),
+        window: null, unavailable: 'previous-wave-displayed',
+      };
+    }
+    const window = resolveMeasurementWindow(config, cursors, {
+      start: this.stack.view.start, end: this.stack.view.end,
+    });
+    if (window === null) {
+      return {
+        ...base, rows: measurementRowViews(config.rows, null, null, 'no-window'),
+        window: null, unavailable: 'no-window',
+      };
+    }
+    const start = Math.max(0, Math.min(window.start, store.length));
+    const end = Math.max(start, Math.min(window.end, store.length));
+    const clipped = start !== window.start || end !== window.end;
+    const trigger = this.settings.analogTriggers[selected.start] ??
+      { kind: 'rising' as const, volts: 0 };
+    const qualification = analogTriggerQualification(store.samplerate);
+    const scan = {
+      samplerate: store.samplerate,
+      zeroCode: ADC_ZERO_CODE,
+      voltsPerCode: analogVoltsPerCode(selected.gain),
+      rising: trigger.kind === 'rising',
+      level: analogTriggerCode(trigger.kind, trigger.volts, selected.gain),
+      hysteresis: qualification.analogHysteresis,
+      window: qualification.analogArtifactSamples,
+    };
+    const key = measurementCacheKey({
+      store,
+      storeLength: store.length,
+      droppedSamples: store.droppedSamples,
+      samplerate: store.samplerate,
+      windowStart: start,
+      windowEnd: end,
+      group: selected.group,
+      gain: selected.gain,
+      rising: scan.rising,
+      level: scan.level,
+      hysteresis: scan.hysteresis,
+      window: scan.window,
+    });
+    let cache = this.measurementCache;
+    if (cache === null || cache.store !== store || cache.key !== key) {
+      const run = runMeasurement({
+        store,
+        bus: { bits: bus.spec.bits, group: selected.group, gain: selected.gain },
+        window: { start, end },
+        scan,
+      });
+      cache = { store, key, read: run.read, scan: run.scan };
+      this.measurementCache = cache;
+    }
+    const read: MeasurementReadSummary = {
+      analyzed: cache.read.analyzed,
+      requestedSamples: cache.read.requestedSamples,
+      truncated: cache.read.truncated,
+      rangeClipped: cache.read.rangeClipped || clipped,
+      unknownSamples: cache.read.unknownSamples,
+    };
+    const unavailable = cache.read.analyzed === 0 ? 'no-data' : null;
+    return {
+      ...base,
+      rows: measurementRowViews(config.rows, cache.scan, read, unavailable),
+      window: { start, end },
+      unavailable,
+    };
+  }
+
+  private setMeasurement(patch: {
+    source?: number | null;
+    range?: MeasurementRange;
+    rows?: readonly MeasurementParameter[];
+  }): MeasurementConfig {
+    const sources = measurementSources(this.busViews, this.captureStore.channelCount);
+    let next = this.measurementConfig ?? defaultMeasurementConfig(sources);
+    if (patch.source !== undefined) next = selectMeasurementSource(next, sources, patch.source);
+    if (patch.range !== undefined) next = selectMeasurementRange(next, patch.range);
+    if (patch.rows !== undefined) {
+      next = { ...next, rows: [] };
+      for (const parameter of patch.rows) next = addMeasurementRow(next, parameter);
+    }
+    this.measurementConfig = reconcileMeasurementConfig(next, sources);
+    this.renderPanels();
+    this.dirty = true;
+    return this.measurementConfig;
+  }
+
+  private resetMeasurement(): void {
+    this.measurementConfig = null;
+    this.measurementCache = null;
+    this.renderPanels();
+    this.dirty = true;
   }
 
   // ------------------------------------------------------------------ bus views
@@ -2355,6 +2501,7 @@ export class App {
     // instead of leaving the panel and the active matcher disagreeing.
     if (triggerChanged) this.syncActiveTrigger();
     this.reconcileEdgeChannels();
+    this.measurementCache = null;
     this.persistWorkspace();
     this.relayout();
     this.renderPanels();
@@ -7610,6 +7757,13 @@ export class App {
       return Array.from(store.edges(channel, start, end));
     },
     hoverAt: (cssX: number, cssY: number) => this.updateHover(cssX, cssY),
+    measurement: () => this.measurementView(),
+    setMeasurement: (patch: {
+      source?: number | null;
+      range?: MeasurementRange;
+      rows?: readonly MeasurementParameter[];
+    }) => this.setMeasurement(patch),
+    resetMeasurement: () => this.resetMeasurement(),
     toggleChannel: (i: number, on: boolean) => this.setChannelEnabled(i, on),
     rename: (i: number, name: string) => {
       const current = this.channels[i];
