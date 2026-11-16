@@ -4,7 +4,8 @@ import {
   ADC_LSB_V, ADC_MAX_CODE, ADC_ZERO_CODE, analogVoltsFromCode, analogVoltsPerCode,
 } from '../channelBanks.js';
 import {
-  XY_DENSITY_MAX_COUNT, XY_DENSITY_MAX_PER_PIXEL, XY_DENSITY_MAX_PIXELS, XY_MAX_POINTS,
+  XY_DENSITY_MAX_COUNT, XY_DENSITY_MAX_PER_PIXEL, XY_DENSITY_MAX_PIXELS, XY_MAX_ANALYZED,
+  XY_MAX_POINTS,
   XY_MIN_PAIRS, XY_REASON_KEYS, fitXyAxes, planXy, xyAxes, xyDensity, xyDensitySize,
   xyFractionY, xyPixelX, xyPixelY, xySummary, xyZeroFraction, xyZeroFractionY, xyZeroLineX,
   xyZeroLineY,
@@ -16,6 +17,7 @@ import {
   type XyAnalysis, type XySectionView,
 } from '../xyPanel.js';
 import { XY_LABEL_MIN_PX, xyTickLayout } from '../xyCanvas.js';
+import { MEASURE_SCAN_SAMPLES } from '../measureSamples.js';
 import { en } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
 import { ru } from '../locales/ru.js';
@@ -79,6 +81,8 @@ interface PlanOverrides {
   voltsPerCodeX?: number;
   voltsPerCodeY?: number;
   maxPoints?: number;
+  maxAnalyzed?: number;
+  requestedSamples?: number;
 }
 
 function planInput(
@@ -97,6 +101,8 @@ function planInput(
   if (over.unknownX !== undefined) input.unknownX = over.unknownX;
   if (over.unknownY !== undefined) input.unknownY = over.unknownY;
   if (over.maxPoints !== undefined) input.maxPoints = over.maxPoints;
+  if (over.maxAnalyzed !== undefined) input.maxAnalyzed = over.maxAnalyzed;
+  if (over.requestedSamples !== undefined) input.requestedSamples = over.requestedSamples;
   return input;
 }
 
@@ -358,22 +364,89 @@ function nonzeroPixels(counts: Uint16Array): number {
 }
 
 {
-  const n = XY_MAX_POINTS + 1;
+  const n = XY_MAX_ANALYZED;
   const codesX = ramp(n);
   const codesY = ramp(n, 60);
-  const plan = okPlan(codesX, codesY);
-  const lastIndex = 2 * (plan.plotted - 1);
-  check('the real point cap is 2^18 and an oversized window is strided, not truncated',
-    XY_MAX_POINTS === 262144 && plan.paired === n && plan.stride === 2 &&
+  const ceiling = XY_MAX_ANALYZED / 2;
+  const plan = okPlan(codesX, codesY, { maxPoints: ceiling });
+  const whole = okPlan(codesX, codesY);
+  const lastIndex = (plan.plotted - 1) * plan.stride;
+  check('the 2^18 plot ceiling stays above the analysis bound and a lower ceiling strides',
+    XY_MAX_POINTS === 262144 && XY_MAX_POINTS > XY_MAX_ANALYZED &&
+      whole.paired === n && whole.stride === 1 && whole.plotted === n && !whole.saturated &&
+      plan.paired === n && plan.stride === 2 &&
       plan.plotted === Math.ceil(n / 2) && plan.saturated &&
       plan.points.length === plan.plotted * 2 &&
       plan.points[plan.points.length - 2] ===
-        (codesX[n - 1] - ADC_ZERO_CODE) * ADC_LSB_V &&
+        (codesX[lastIndex] - ADC_ZERO_CODE) * ADC_LSB_V &&
       plan.points[2] === (codesX[2] - ADC_ZERO_CODE) * ADC_LSB_V &&
       plan.points[2] !== (codesX[1] - ADC_ZERO_CODE) * ADC_LSB_V &&
-      plan.points[lastIndex] === plan.points[plan.points.length - 2],
-    `cap=${XY_MAX_POINTS}, paired=${plan.paired}, stride=${plan.stride}, ` +
-      `plotted=${plan.plotted}, floats=${plan.points.length}`);
+      lastIndex === n - 2,
+    `cap=${XY_MAX_POINTS}, analyzed=${XY_MAX_ANALYZED}, paired=${plan.paired}, ` +
+      `stride=${plan.stride}, plotted=${plan.plotted}, floats=${plan.points.length}, ` +
+      `last=${lastIndex}`);
+}
+
+{
+  const n = XY_MAX_ANALYZED + 4096;
+  const codesX = ramp(n);
+  const codesY = ramp(n, 30);
+  const plan = okPlan(codesX, codesY, { requestedSamples: n });
+  const capped = plan.status === 'ok' ? plan : null;
+  const lastIndex = capped === null ? -1 : (capped.plotted - 1) * capped.stride;
+  check('a window above the analysis bound analyses exactly the bound as an exact prefix',
+    XY_MAX_ANALYZED === MEASURE_SCAN_SAMPLES && MEASURE_SCAN_SAMPLES === 65536 &&
+      viewSource.includes('export const XY_MAX_ANALYZED = MEASURE_SCAN_SAMPLES;') &&
+      capped !== null &&
+      capped.requested === n && capped.analyzed === XY_MAX_ANALYZED &&
+      capped.paired === XY_MAX_ANALYZED && capped.gapExcluded === 0 &&
+      capped.stride === 1 && capped.plotted === XY_MAX_ANALYZED &&
+      lastIndex === XY_MAX_ANALYZED - 1 &&
+      capped.points[capped.points.length - 2] ===
+        (codesX[XY_MAX_ANALYZED - 1] - ADC_ZERO_CODE) * ADC_LSB_V &&
+      capped.points[capped.points.length - 2] !==
+        (codesX[XY_MAX_ANALYZED] - ADC_ZERO_CODE) * ADC_LSB_V,
+    `requested=${capped?.requested}, analyzed=${capped?.analyzed}, ` +
+      `paired=${capped?.paired}, plotted=${capped?.plotted}, last=${lastIndex}`);
+
+  const explicit = okPlan(ramp(2600), ramp(2600, 20), { maxAnalyzed: 1000 });
+  const requestedPlan = okPlan(ramp(600), ramp(600, 20), { requestedSamples: 900 });
+  check('the bound is the callers\' choice up to the constant and the requested total is kept',
+    explicit.analyzed === 1000 && explicit.requested === 2600 &&
+      explicit.paired === 1000 && explicit.plotted === 1000 &&
+      requestedPlan.analyzed === 600 && requestedPlan.requested === 900 &&
+      okPlan(ramp(600), ramp(600), { maxAnalyzed: 0 }).analyzed === 600 &&
+      okPlan(ramp(600), ramp(600), { maxAnalyzed: Number.NaN }).analyzed === 600,
+    `explicit=${explicit.analyzed}/${explicit.requested}, ` +
+      `requested=${requestedPlan.analyzed}/${requestedPlan.requested}`);
+
+  const broadX = ramp(2600);
+  const broadY = ramp(2600, 20);
+  const unknownX = new Uint8Array(2600);
+  unknownX[5] = 1;
+  unknownX[999] = 1;
+  unknownX[1500] = 1;
+  unknownX[2599] = 1;
+  const unknownY = new Uint8Array(2600);
+  unknownY[998] = 1;
+  unknownY[1200] = 1;
+  const counted = okPlan(broadX, broadY, { maxAnalyzed: 1000, unknownX, unknownY });
+  check('the gap and pair counts stay exact inside the analysed prefix',
+    counted.analyzed === 1000 && counted.paired === 997 && counted.gapExcluded === 3 &&
+      counted.paired + counted.gapExcluded === counted.analyzed &&
+      counted.plotted === 997,
+    `analyzed=${counted.analyzed}, paired=${counted.paired}, ` +
+      `gap=${counted.gapExcluded}`);
+
+  const refused = refusedPlan(ramp(2600), ramp(2600, 20), {
+    maxAnalyzed: 1000,
+    unknownX: new Uint8Array(2600).fill(1),
+  });
+  check('a refusal keeps its reason and counts the analysed prefix only',
+    refused.reason === 'gap' && refused.requested === 2600 && refused.analyzed === 1000 &&
+      refused.paired === 0 && refused.gapExcluded === 1000 && refused.reasonKey === XY_REASON_KEYS.gap,
+    `reason=${refused.reason}/${refused.requested}/${refused.analyzed}/` +
+      `${refused.gapExcluded}`);
 }
 
 {
@@ -587,11 +660,14 @@ function nonzeroPixels(counts: Uint16Array): number {
   check('the planner carries only its license header, no explanatory comment',
     commentLines.length === 1 && commentLines[0].includes('SPDX'),
     `comments=${JSON.stringify(commentLines)}`);
+  const plannerBody = slice(viewSource, 'export function planXy(', 'export function xyVoltsStep(');
   check('the planner never sorts, interpolates or resamples a source',
-    !viewSource.includes('.sort(') && !/interpolat|resampl|nearest/i.test(viewSource) &&
-      viewSource.includes('input.codesX[i] - input.zeroX') &&
-      viewSource.includes('input.codesY[i] - input.zeroY'),
-    `sort=${viewSource.includes('.sort(')}, interp=${/interpolat|resampl/.test(viewSource)}`);
+    plannerBody.length > 0 && !plannerBody.includes('.sort(') &&
+      !/interpolat|resampl|nearest/i.test(plannerBody) &&
+      plannerBody.includes('input.codesX[i] - input.zeroX') &&
+      plannerBody.includes('input.codesY[i] - input.zeroY'),
+    `body=${plannerBody.length}, sort=${plannerBody.includes('.sort(')}, ` +
+      `interp=${/interpolat|resampl|nearest/i.test(plannerBody)}`);
 }
 
 {
@@ -653,9 +729,9 @@ function analysisOf(
     windowStart: 1_000,
     windowEnd: 1_000 + plan.requested,
     requestedSamples: plan.requested,
-    analyzedSamples: plan.requested,
+    analyzedSamples: plan.analyzed,
     clipped: false,
-    truncated: false,
+    truncated: plan.analyzed < plan.requested,
     fit: false,
     plan,
     axes,
@@ -719,6 +795,21 @@ function sectionOf(analysis: XyAnalysis | null, over: Partial<XySectionView> = {
     croppedLines.some((line) => line.includes('cropped to the current wave')) &&
       croppedLines.some((line) => line.includes('analyzed 12 of 16 samples')),
     `lines=${JSON.stringify(croppedLines)}`);
+
+  const wide = analysisOf(ramp(4000), ramp(4000, 20), {
+    maxAnalyzed: 1000, requestedSamples: 4000, maxPoints: 4000,
+  });
+  const wideLines = xySummaryLines(sectionOf(wide));
+  check('a window above the analysis bound states the prefix beside the requested total',
+    wide.plan?.status === 'ok' && wide.plan.requested === 4000 && wide.plan.analyzed === 1000 &&
+      wide.summary!.requested === 4000 && wide.summary!.analyzed === 1000 &&
+      wide.summary!.paired === 1000 && wide.summary!.plotted === 1000 &&
+      wide.requestedSamples === 4000 && wide.analyzedSamples === 1000 && wide.truncated &&
+      wideLines.some((line) => line.includes('(4,000 samples)')) &&
+      wideLines.some((line) => line.includes('Requested 4,000') &&
+        line.includes('plotted 1,000')) &&
+      wideLines.some((line) => line.includes('analyzed 1,000 of 4,000 samples')),
+    `lines=${JSON.stringify(wideLines)}`);
 
   const fitted = analysisOf(new Float64Array([118, 128, 138, 123]),
     new Float64Array([118, 128, 138, 123]), { voltsPerCodeX: 0.125, voltsPerCodeY: 0.125 });
@@ -786,6 +877,24 @@ function sectionOf(analysis: XyAnalysis | null, over: Partial<XySectionView> = {
         'no sample is known on both sources in the window' &&
       xyStatusReason(unavailable) === 'a selected analog group is unavailable',
     `same=${JSON.stringify(sameLines)}, gap=${JSON.stringify(xySummaryLines(sectionOf(gap)))}`);
+
+  const cappedGap = analysisOf(ramp(4), ramp(4));
+  cappedGap.status = 'gap';
+  cappedGap.plan = refusedPlan(ramp(4000), ramp(4000, 20), {
+    maxAnalyzed: 1000, requestedSamples: 4000,
+    unknownX: new Uint8Array(4000).fill(1),
+  });
+  cappedGap.axes = null;
+  cappedGap.density = null;
+  cappedGap.requestedSamples = 4000;
+  cappedGap.analyzedSamples = 1000;
+  cappedGap.truncated = true;
+  cappedGap.summary = xySummary(cappedGap.plan);
+  const cappedGapLines = xySummaryLines(sectionOf(cappedGap));
+  check('a refusal over a window above the bound still states the analysed prefix',
+    cappedGapLines[cappedGapLines.length - 1] === 'analyzed 1,000 of 4,000 samples' &&
+      cappedGapLines.some((line) => line.includes('Requested 4,000')),
+    `lines=${JSON.stringify(cappedGapLines)}`);
 
   const noSource = analysisOf(ramp(4), ramp(4));
   noSource.status = 'no-source';
@@ -965,11 +1074,17 @@ function count(source: string, needle: string): number {
       analysis.includes('Math.min(window.start, store.length)') &&
       analysis.includes('Math.min(window.end, store.length)') &&
       analysis.includes('const requested = end - start;') &&
-      analysis.includes('maxSamples: Math.max(1, requested)') &&
+      count(analysis, 'maxSamples: XY_MAX_ANALYZED') === 2 &&
+      !analysis.includes('maxSamples: Math.max(1, requested)') &&
+      analysis.includes('maxAnalyzed: XY_MAX_ANALYZED') &&
+      analysis.includes('requestedSamples: requested,') &&
+      analysis.includes('analyzedSamples: plan.analyzed') &&
+      analysis.includes('truncated: plan.analyzed < requested') &&
       analysis.includes('windowStart: start + store.droppedSamples') &&
       analysis.includes('clipped,'),
     `window=${analysis.includes('resolveMeasurementWindow(')}, ` +
-      `requested=${analysis.includes('const requested = end - start;')}`);
+      `bound=${count(analysis, 'maxSamples: XY_MAX_ANALYZED')}, ` +
+      `whole=${analysis.includes('maxSamples: Math.max(1, requested)')}`);
 
   const key = slice(app, '    const key = [', '].join');
   const fitOnly = slice(app, '  private setXyFit(', '\n  }');
@@ -1099,9 +1214,16 @@ function count(source: string, needle: string): number {
       design.includes('resampling or carried value across a gap') &&
       design.includes('uniform display stride') &&
       design.includes('returning to Time restores every field unchanged') &&
+      design.includes('at most 65,536 pairs (`XY_MAX_ANALYZED`') &&
+      design.includes('the analysed and requested counts together') &&
+      design.includes('every analysed pair is plotted') &&
       architecture.includes('`xyConfig`') &&
       architecture.includes('XY reads two sources through the same exact reader') &&
-      architecture.includes('with no interpolation'),
+      architecture.includes('with no interpolation') &&
+      architecture.includes('at most 65,536 exact pairs (`XY_MAX_ANALYZED`') &&
+      architecture.includes('analysed as an exact') &&
+      architecture.includes('analysed and requested counts are both printed') &&
+      !architecture.includes('XY reads its whole requested window'),
     `design=${design.includes('same-index only')}, ` +
       `architecture=${architecture.includes('`xyConfig`')}`);
 }

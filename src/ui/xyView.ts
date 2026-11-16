@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { ADC_MAX_CODE } from './channelBanks.js';
+import { MEASURE_SCAN_SAMPLES } from './measureSamples.js';
 
 export const XY_MAX_POINTS = 2 ** 18;
+
+export const XY_MAX_ANALYZED = MEASURE_SCAN_SAMPLES;
 
 export const XY_MIN_PAIRS = 2;
 
@@ -44,6 +47,8 @@ export interface XyPlanInput {
   unknownX?: ArrayLike<number>;
   unknownY?: ArrayLike<number>;
   maxPoints?: number;
+  maxAnalyzed?: number;
+  requestedSamples?: number;
 }
 
 export interface XyPlotPlan {
@@ -53,6 +58,7 @@ export interface XyPlotPlan {
   stride: number;
   points: Float64Array;
   requested: number;
+  analyzed: number;
   paired: number;
   plotted: number;
   gapExcluded: number;
@@ -72,6 +78,7 @@ export interface XyRefusalPlan {
   reason: XyRefusal;
   reasonKey: string;
   requested: number;
+  analyzed: number;
   paired: number;
   gapExcluded: number;
 }
@@ -109,6 +116,7 @@ export interface XySummary {
   reason: XyRefusal | null;
   reasonKey: string | null;
   requested: number;
+  analyzed: number;
   paired: number;
   plotted: number;
   gapExcluded: number;
@@ -138,15 +146,27 @@ function xyMaxPoints(raw: number | undefined): number {
   return Math.min(Math.floor(raw), XY_MAX_POINTS);
 }
 
+function xyMaxAnalyzed(raw: number | undefined): number {
+  if (raw === undefined || !Number.isFinite(raw) || raw < 1) return XY_MAX_ANALYZED;
+  return Math.min(Math.floor(raw), XY_MAX_ANALYZED);
+}
+
+function xyRequested(raw: number | undefined, available: number): number {
+  if (raw === undefined || !Number.isFinite(raw) || raw < available) return available;
+  return Math.floor(raw);
+}
+
 export function planXy(input: XyPlanInput): XyPlan {
   const lengthX = input.codesX.length;
   const lengthY = input.codesY.length;
-  const requested = Math.min(lengthX, lengthY);
+  const available = Math.min(lengthX, lengthY);
+  const requested = xyRequested(input.requestedSamples, available);
+  const analyzed = Math.min(available, xyMaxAnalyzed(input.maxAnalyzed));
   const refusal = (
     reason: XyRefusal, paired = 0, gapExcluded = 0,
   ): XyRefusalPlan => ({
     status: 'refuse', reason, reasonKey: XY_REASON_KEYS[reason],
-    requested, paired, gapExcluded,
+    requested, analyzed, paired, gapExcluded,
   });
 
   if (input.sourceX === null || input.sourceY === null) return refusal('unavailable');
@@ -168,7 +188,7 @@ export function planXy(input: XyPlanInput): XyPlan {
   let observedMinY = Number.POSITIVE_INFINITY;
   let observedMaxY = Number.NEGATIVE_INFINITY;
 
-  for (let i = 0; i < requested; i += 1) {
+  for (let i = 0; i < analyzed; i += 1) {
     if (pairUnknown(input.unknownX, i) || pairUnknown(input.unknownY, i)) {
       gapExcluded += 1;
       continue;
@@ -195,7 +215,7 @@ export function planXy(input: XyPlanInput): XyPlan {
   const points = new Float64Array(plotted * 2);
   let seen = 0;
   let at = 0;
-  for (let i = 0; i < requested && at < points.length; i += 1) {
+  for (let i = 0; i < analyzed && at < points.length; i += 1) {
     if (pairUnknown(input.unknownX, i) || pairUnknown(input.unknownY, i)) continue;
     const x = (input.codesX[i] - input.zeroX) * input.voltsPerCodeX;
     const y = (input.codesY[i] - input.zeroY) * input.voltsPerCodeY;
@@ -215,6 +235,7 @@ export function planXy(input: XyPlanInput): XyPlan {
     stride,
     points,
     requested,
+    analyzed,
     paired,
     plotted: points.length / 2,
     gapExcluded,
@@ -412,6 +433,7 @@ export function xySummary(
     reason: plan.status === 'refuse' ? plan.reason : null,
     reasonKey: plan.status === 'refuse' ? plan.reasonKey : null,
     requested: plan.requested,
+    analyzed: plan.analyzed,
     paired: plan.paired,
     plotted: plan.status === 'ok' ? plan.plotted : 0,
     gapExcluded: plan.gapExcluded,

@@ -9,7 +9,7 @@ import {
 } from './measurementState.js';
 import type { MeasureBus } from './measureSamples.js';
 
-export const MEASURE_CAPTURE_CHUNK = 65536;
+export const MEASURE_CAPTURE_CHUNK = 16384;
 export const MEASURE_CAPTURE_BUDGET_MS = 8;
 
 export type CaptureJobStatus = 'running' | 'cancelled' | 'done';

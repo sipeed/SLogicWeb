@@ -140,11 +140,20 @@ export function xyStatusReason(analysis: XyAnalysis): string {
   }
 }
 
+function xyPrefixLine(analysis: XyAnalysis): string | null {
+  if (!analysis.truncated) return null;
+  return t('capturePanel.xyTruncated', {
+    analyzed: formatCount(analysis.analyzedSamples),
+    requested: formatCount(analysis.requestedSamples),
+  });
+}
+
 export function xySummaryLines(view: XySectionView): string[] {
   if (view.mode !== 'xy') return [t('capturePanel.xyIdle')];
   const analysis = view.analysis;
   if (analysis === null) return [t('capturePanel.xyNoSource')];
   const summary = analysis.summary;
+  const prefix = xyPrefixLine(analysis);
   if (analysis.status !== 'ok' || summary === null) {
     const lines = [xyStatusReason(analysis)];
     if (analysis.requestedSamples > 0) {
@@ -154,6 +163,7 @@ export function xySummaryLines(view: XySectionView): string[] {
         gap: formatCount(summary?.gapExcluded ?? 0),
       }));
     }
+    if (prefix !== null) lines.push(prefix);
     if (analysis.clipped) lines.push(t('capturePanel.xyCropped'));
     return lines;
   }
@@ -208,12 +218,7 @@ export function xySummaryLines(view: XySectionView): string[] {
     y: formatVolts(analysis.plan?.status === 'ok' ? analysis.plan.voltsPerCodeY : 0),
   }));
   if (analysis.clipped) lines.push(t('capturePanel.xyCropped'));
-  if (analysis.truncated) {
-    lines.push(t('capturePanel.xyTruncated', {
-      analyzed: formatCount(analysis.analyzedSamples),
-      requested: formatCount(analysis.requestedSamples),
-    }));
-  }
+  if (prefix !== null) lines.push(prefix);
   return lines;
 }
 

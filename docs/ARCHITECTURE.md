@@ -774,11 +774,31 @@ Key transitions (the full table is generated in one pure module):
   range-clipped flags, the unknown-sample count and every gap span in absolute positions
   (`droppedSamples` added). Non-integer bounds, invalid limits, and out-of-group or
   duplicate bits are typed `RangeError`s.
-- Analysis is bounded: one scan reads at most 65,536 exact samples
-  (`MEASURE_SCAN_SAMPLES`). A wider window returns an exact prefix with the analyzed and
-  requested counts, and every row plus the section note labels it partial, so a prefix
-  amplitude or RMS answer is never presented as a full-window result. No UI path scans an
-  unbounded capture.
+- A window-bounded scan reads at most 65,536 exact samples (`MEASURE_SCAN_SAMPLES`). A
+  wider window returns an exact prefix with the analyzed and requested counts, and every
+  row plus the section note labels it partial, so a prefix amplitude or RMS answer is
+  never presented as a full-window result. FFT holds the same bound (`FFT_MAX_SAMPLES`).
+- The Capture range is the one deliberate exception, and it is chunked rather than
+  unbounded work in one frame: `CaptureRangeJob` (`src/ui/measureCaptureJob.ts`) walks
+  the whole retained wave in `MEASURE_CAPTURE_CHUNK`-sample steps (16,384) under a
+  `MEASURE_CAPTURE_BUDGET_MS` budget (8 ms) inside the existing frame callback, only while
+  its surface is visible, and publishes nothing unless every requested sample was read.
+- XY analyses at most 65,536 exact pairs (`XY_MAX_ANALYZED`, the same bound as the
+  amplitude rows and FFT): a wider requested window is analysed as an exact prefix, the
+  analysed and requested counts are both printed, and the pair counts stay exact inside
+  that prefix. Nothing is decimated to reach the bound and the refusal matrix is
+  unchanged; the gap-excluded count and density ceiling are disclosed as before. The
+  plan-level plot ceiling (`XY_MAX_POINTS`, 2^18) is above that analysis bound, so every
+  analysed pair is plotted; a caller that requests a lower ceiling gets a uniform display
+  stride instead of a truncated plot.
+- Statistics and Persistence share one completion predicate,
+  `acquisitionWaveCompleted` (`src/ui/acquisitionWave.ts`): a submitted wave must be
+  `completed`, non-Loop, non-empty and not a missed trigger, and
+  `acquisitionWaveKey(sessionId, generation)` makes a duplicated completion notification
+  idempotent. A wave that finishes while the measurement surface is hidden is counted as
+  a skipped visibility interval and scanned by nothing; a new capture session or a
+  capture replacement starts a new statistical population, while an ordinary Repeat wave
+  inside the session keeps it.
 - `scanAnalogCodes` (`src/dsp/analogScan.ts`) is pure over reconstructed codes, the
   unknown mask, calibration (`ADC_ZERO_CODE`, `analogVoltsPerCode`) and the analog-trigger
   qualification: threshold from `analogTriggerCode`, hysteresis and artifact window from
