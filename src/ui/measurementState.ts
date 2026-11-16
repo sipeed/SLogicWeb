@@ -13,7 +13,7 @@ import {
 } from './measurementRows.js';
 import { readMeasureSamples, type MeasureBus, type MeasureRead } from './measureSamples.js';
 
-export type MeasurementRangeKind = 'viewport' | 'cursors';
+export type MeasurementRangeKind = 'viewport' | 'cursors' | 'capture';
 
 export type MeasurementStatus =
   | 'ok'
@@ -23,7 +23,11 @@ export type MeasurementStatus =
   | 'no-crossing'
   | 'one-crossing'
   | 'no-period'
-  | 'previous-wave-displayed';
+  | 'previous-wave-displayed'
+  | 'analyzing'
+  | 'cancelled'
+  | 'stable-capture-required'
+  | 'loop';
 
 export interface MeasurementSource {
   group: number;
@@ -99,6 +103,13 @@ export interface MeasurementRowView {
   dutyExcludedPeriods: number;
 }
 
+export interface MeasurementCaptureView {
+  status: 'running' | 'cancelled' | 'done';
+  scanned: number;
+  total: number;
+  droppedSamples: number;
+}
+
 export interface MeasurementSectionView {
   sources: MeasurementSource[];
   filter: number | null;
@@ -111,6 +122,7 @@ export interface MeasurementSectionView {
   addStart: number | null;
   window: MeasurementWindow | null;
   unavailable: MeasurementStatus | null;
+  capture: MeasurementCaptureView | null;
 }
 
 export interface MeasurementCacheInput {
@@ -165,8 +177,12 @@ function finiteOrNull(value: number | null): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
+export function measurementRangeKind(value: string): MeasurementRangeKind {
+  return value === 'cursors' ? 'cursors' : value === 'capture' ? 'capture' : 'viewport';
+}
+
 function normalizeRange(range: MeasurementRange): MeasurementRange {
-  const kind: MeasurementRangeKind = range.kind === 'cursors' ? 'cursors' : 'viewport';
+  const kind = measurementRangeKind(range.kind);
   const a = finiteOrNull(range.a);
   const b = finiteOrNull(range.b);
   if (kind === range.kind && a === range.a && b === range.b) return range;
@@ -283,7 +299,12 @@ export function measurementAddStart(
 
 export function resolveMeasurementWindow(
   config: MeasurementConfig, cursors: readonly MeasurementCursor[], viewport: MeasurementWindow,
+  retainedSamples = 0,
 ): MeasurementWindow | null {
+  if (config.range.kind === 'capture') {
+    return Number.isSafeInteger(retainedSamples) && retainedSamples > 0
+      ? { start: 0, end: retainedSamples } : null;
+  }
   if (config.range.kind !== 'cursors') {
     if (!Number.isFinite(viewport.start) || !Number.isFinite(viewport.end)) return null;
     const start = Math.floor(viewport.start);

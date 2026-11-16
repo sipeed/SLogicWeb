@@ -391,7 +391,7 @@ check(
 const actRules = [...css.matchAll(/[^{}]*\.analyzer-act[^{}]*\{[^}]*\}/g)].map((m) => m[0]);
 check(
   'no raw hex inside the analyzer-act rules (tokens only)',
-  actRules.length === 10 && actRules.every((rule) => !/#[0-9a-fA-F]{3,8}/.test(rule)),
+  actRules.length === 12 && actRules.every((rule) => !/#[0-9a-fA-F]{3,8}/.test(rule)),
   `rules=${actRules.length}, hex=${actRules.filter((rule) => /#[0-9a-fA-F]{3,8}/.test(rule)).length}`,
 );
 

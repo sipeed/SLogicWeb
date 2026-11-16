@@ -13,8 +13,8 @@ import {
 } from '../measurementRows.js';
 import {
   defaultMeasurementConfig, isMeasurementBank, measurementAddStart, measurementCacheKey,
-  measurementRowViews, measurementSectionCounts, measurementSources, reconcileMeasurementConfig,
-  resolveMeasurementWindow,
+  measurementRangeKind, measurementRowViews, measurementSectionCounts, measurementSources,
+  reconcileMeasurementConfig, resolveMeasurementWindow,
   runMeasurement, selectMeasurementFilter, selectMeasurementRange,
   type MeasurementBusView, type MeasurementCacheInput, type MeasurementConfig,
   type MeasurementCursor, type MeasurementReadSummary, type MeasurementSource,
@@ -826,6 +826,72 @@ function rowsOf(scan: AnalogCodeScan | null, read: MeasurementReadSummary | null
       appSource.includes('setMeasurement: (patch: {') &&
       appSource.includes('resetMeasurement: () => this.resetMeasurement(),'),
     `debugAt=${appSource.indexOf('readonly debug = {')}`);
+}
+
+{
+  const capture = selectMeasurementRange(config, { kind: 'capture', a: null, b: null });
+  const reconciled = reconcileMeasurementConfig(capture, [source0]);
+  const window = resolveMeasurementWindow(capture, [], VIEWPORT, 300000);
+  check('the capture range resolves the whole retained current wave, never a cursor or viewport span',
+    measurementRangeKind('viewport') === 'viewport' &&
+      measurementRangeKind('cursors') === 'cursors' &&
+      measurementRangeKind('capture') === 'capture' &&
+      measurementRangeKind('whole') === 'viewport' &&
+      capture.range.kind === 'capture' && reconciled.range.kind === 'capture' &&
+      window !== null && window.start === 0 && window.end === 300000 &&
+      resolveMeasurementWindow(capture, [], VIEWPORT, 0) === null &&
+      resolveMeasurementWindow(capture, [], VIEWPORT, 1.5) === null &&
+      resolveMeasurementWindow(capture, [], VIEWPORT) === null,
+    `kind=${capture.range.kind}, window=${JSON.stringify(window)}`);
+
+  const viewport = resolveMeasurementWindow(config, [], VIEWPORT, 300000);
+  const cursorConfig = selectMeasurementRange(config, { kind: 'cursors', a: 1, b: 2 });
+  const cursors: MeasurementCursor[] = [{ id: 1, sample: 10 }, { id: 2, sample: 40 }];
+  const cursorWindow = resolveMeasurementWindow(cursorConfig, cursors, VIEWPORT, 300000);
+  check('the retained length only answers the capture range',
+    viewport !== null && viewport.start === 0 && viewport.end === 100 &&
+      cursorWindow !== null && cursorWindow.start === 10 && cursorWindow.end === 40,
+    `viewport=${JSON.stringify(viewport)}, cursors=${JSON.stringify(cursorWindow)}`);
+}
+
+{
+  const view = between(appSource,
+    '  private measurementView(): MeasurementSectionView {', '  private measurementBase(');
+  const section = between(appSource,
+    '  private captureMeasurementSection(', '  private pumpMeasurementCapture(): void {');
+  const scanAt = view.indexOf('runMeasurement(');
+  const branchAt = view.indexOf("if (config.range.kind === 'capture') {");
+  check('the capture range leaves the bounded scan path before it starts',
+    branchAt >= 0 && scanAt > branchAt &&
+      view.includes('return this.captureMeasurementSection(base, rows, sources, store, start, end, clipped);') &&
+      view.includes('captureRangeUnavailable({') &&
+      view.indexOf('captureRangeUnavailable({') < scanAt &&
+      view.includes('resolveMeasurementWindow(config, cursors, {') &&
+      view.includes('}, store.length);') &&
+      view.includes("if (config.range.kind !== 'capture' && this.measurementCapture !== null) {") &&
+      view.includes('this.dropMeasurementCapture();') &&
+      view.indexOf('this.dropMeasurementCapture();') < scanAt,
+    `branch=${branchAt}, scan=${scanAt}`);
+  check('a blocked capture range carries its own status on every row',
+    view.includes("unavailable: captureBlocked,") &&
+      view.includes('rows: measurementRowViews(rows, blocked, null),') &&
+      view.includes('window: null, unavailable: captureBlocked,'),
+    `blocked=${view.includes('unavailable: captureBlocked,')}`);
+  check('a finished job feeds the rows instead of a second bounded scan',
+    section !== '' && section.includes('const done = entry.job.results();') &&
+      section.includes('if (result === undefined) {') &&
+      section.includes('unavailable: done === null ? status : \'no-source\',') &&
+      !section.includes('runMeasurement(') &&
+      section.includes('window: { start, end },') &&
+      section.includes('droppedSamples: store.droppedSamples,'),
+    `section=${section.length}, scans=${section.includes('runMeasurement(')}`);
+  const fromJob = (source: string): boolean =>
+    source.includes('const done = entry.job.results();') && !source.includes('runMeasurement(');
+  const replayed = section.replace('entry.job.results()',
+    'runMeasurement({} as never).scan as never');
+  check('reading the job result is load-bearing: a second scan fails the contract',
+    fromJob(section) && !fromJob(replayed) && !fromJob(''),
+    `section=${fromJob(section)}, replayed=${fromJob(replayed)}, empty=${fromJob('')}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
