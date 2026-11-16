@@ -2,8 +2,9 @@
 
 import {
   MERGED_ANALOG_BAND_ID, analogBandSignature, analogBands, analogLayoutOf, focusedAnalogSource,
-  pruneAnalogState, resolveAnalogFocus, toggleAnalogVisibility, visibleAnalogSources,
-  type AnalogBand, type AnalogBandSource, type AnalogLayout,
+  pruneAnalogState, resolveAnalogFocus, toggleAnalogVisibility, toggleSourceVisibility,
+  visibleAnalogSources,
+  type AnalogBand, type AnalogBandSource, type AnalogLayout, type PrunedAnalogState,
 } from '../analogBands.js';
 
 interface FsLike {
@@ -44,8 +45,41 @@ function source(group: number, overrides: Partial<AnalogBandSource> = {}): Analo
     color: COLORS[group % COLORS.length]!,
     heightCss: 120 + group * 10,
     gain: 1,
+    signature: `sig-${group}`,
     ...overrides,
   };
+}
+
+function methodBody(text: string, signature: string): string {
+  const start = text.indexOf(signature);
+  if (start < 0) return '';
+  const open = text.indexOf('{', start + signature.length - 1);
+  if (open < 0) return '';
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(open, i + 1);
+    }
+  }
+  return '';
+}
+
+function stackedProjectionIsAuthoritative(text: string): boolean {
+  const relayout = methodBody(text, 'private relayout(): void');
+  const specs = methodBody(text, 'private analogRowSpecs(): RowSpec[]');
+  const entries = methodBody(text, 'private analogRowEntries(): AnalogRowEntry[]');
+  return relayout.length > 0 && specs.length > 0 && entries.length > 0 &&
+    relayout.includes('this.analogRowSpecs()') &&
+    !relayout.includes('rowHeightOf(') &&
+    !relayout.includes('analogRows.push(') &&
+    specs.includes("analogBands('stacked'") &&
+    specs.includes('byBusId.get(band.id)') &&
+    specs.includes('channel: entry.channel') &&
+    specs.includes('bus: entry.bus') &&
+    specs.includes('heightCss: band.heightCss') &&
+    (entries.match(/heightCss: this\.rowHeightOf\(bus\)/g) ?? []).length === 1;
 }
 
 const A = source(0);
@@ -149,6 +183,28 @@ const EMPTY_HIDDEN: ReadonlySet<string> = new Set<string>();
   check('a non-finite participant height cannot poison the merged maximum',
     partial.heightCss === 130 && partial.sources.length === 2,
     `height=${partial.heightCss}, sources=${busIds(partial.sources)}`);
+
+  const allNonFinite = analogBands('merged', [
+    source(0, { heightCss: Number.NaN }),
+    source(1, { heightCss: Number.POSITIVE_INFINITY }),
+    source(2, { heightCss: Number.NEGATIVE_INFINITY }),
+  ], null)[0]!;
+  check('a merged band with no finite height falls back to a usable number',
+    Number.isFinite(allNonFinite.heightCss) && allNonFinite.heightCss >= 0,
+    `height=${allNonFinite.heightCss}`);
+
+  const negative = analogBands('merged', [source(0, { heightCss: -40 }), B], null)[0]!;
+  check('a finite merged height is never reported as negative',
+    negative.heightCss === 130 && analogBands('merged', [source(0, { heightCss: -40 })], null)[0]!
+      .heightCss === 0,
+    `mixed=${negative.heightCss}`);
+
+  const finiteFirst = analogBands('merged', [
+    source(0, { heightCss: 96 }), source(1, { heightCss: Number.NaN }),
+  ], null)[0]!;
+  check('one finite participant supplies the merged height whatever its position',
+    finiteFirst.heightCss === 96,
+    `height=${finiteFirst.heightCss}`);
 }
 
 {
@@ -237,6 +293,46 @@ const EMPTY_HIDDEN: ReadonlySet<string> = new Set<string>();
 }
 
 {
+  const focusedFirst = toggleSourceVisibility(THREE, { focusedId: 'bus-0', hidden: EMPTY_HIDDEN }, 'bus-0');
+  check('hiding the focused source retargets focus to the next visible row',
+    focusedFirst.focusedId === 'bus-1' && [...focusedFirst.hidden].join(',') === 'bus-0',
+    `focus=${focusedFirst.focusedId}, hidden=${[...focusedFirst.hidden].join(',')}`);
+
+  const focusedMiddle = toggleSourceVisibility(
+    THREE, { focusedId: 'bus-1', hidden: EMPTY_HIDDEN }, 'bus-1');
+  check('retargeted focus is the first remaining visible source in row order',
+    focusedMiddle.focusedId === 'bus-0',
+    `focus=${focusedMiddle.focusedId}`);
+
+  const lastVisible = toggleSourceVisibility(
+    THREE, { focusedId: 'bus-2', hidden: hiddenOf('bus-0', 'bus-1') }, 'bus-2');
+  const band = analogBands('merged', THREE, lastVisible.focusedId)[0]!;
+  check('hiding the last visible source keeps focus and leaves zero visible sources',
+    lastVisible.focusedId === 'bus-2' &&
+    visibleAnalogSources(THREE, lastVisible.hidden).length === 0 &&
+    band.heightCss === 140 && band.sources.length === 3,
+    `focus=${lastVisible.focusedId}, visible=${visibleAnalogSources(THREE, lastVisible.hidden).length}, height=${band.heightCss}`);
+
+  const unfocused = toggleSourceVisibility(
+    THREE, { focusedId: 'bus-0', hidden: EMPTY_HIDDEN }, 'bus-2');
+  check('hiding an unfocused source leaves focus alone',
+    unfocused.focusedId === 'bus-0', `focus=${unfocused.focusedId}`);
+
+  const shown = toggleSourceVisibility(
+    THREE, { focusedId: 'bus-2', hidden: hiddenOf('bus-0') }, 'bus-0');
+  const shownOwn = toggleSourceVisibility(
+    THREE, { focusedId: 'bus-2', hidden: hiddenOf('bus-0', 'bus-1') }, 'bus-1');
+  check('showing a source never steals focus',
+    shown.focusedId === 'bus-2' && shownOwn.focusedId === 'bus-2' &&
+    shownOwn.hidden.size === 1,
+    `shown=${shown.focusedId}, shownFocused=${shownOwn.focusedId}`);
+
+  const nullFocus = toggleSourceVisibility(THREE, { focusedId: null, hidden: EMPTY_HIDDEN }, 'bus-0');
+  check('hiding with no focus keeps the empty focus', nullFocus.focusedId === null,
+    `focus=${nullFocus.focusedId}`);
+}
+
+{
   const valid = hiddenOf('bus-0', 'bus-2');
   const kept = pruneAnalogState({ focusedId: 'bus-2', hidden: hiddenOf('bus-2', 'bus-9') }, valid);
   check('pruning keeps a valid focus and drops hidden buses that no longer exist',
@@ -264,6 +360,20 @@ const EMPTY_HIDDEN: ReadonlySet<string> = new Set<string>();
     [...pruneAnalogState({ focusedId: null, hidden: hiddenOf('bus-2', 'bus-0') }, valid).hidden]
       .join(',') === 'bus-2,bus-0' && unrelated.focusedId === null,
     `order=${[...pruneAnalogState({ focusedId: null, hidden: hiddenOf('bus-2', 'bus-0') }, valid).hidden].join(',')}`);
+}
+
+function writableHidden(state: PrunedAnalogState): Set<string> {
+  // @ts-expect-error - an exposed analog hidden set is read-only.
+  return state.hidden;
+}
+
+{
+  const kept = pruneAnalogState({ focusedId: 'bus-1', hidden: hiddenOf('bus-1') }, hiddenOf('bus-1'));
+  const widened = writableHidden(kept);
+  const readonlyToggle: ReadonlySet<string> = toggleAnalogVisibility(EMPTY_HIDDEN, 'bus-1');
+  check('exposed hidden sets are read-only to consumers',
+    widened === kept.hidden && readonlyToggle.size === 1,
+    `same=${widened === kept.hidden}, toggle=${[...readonlyToggle].join(',')}`);
 }
 
 {
@@ -345,6 +455,11 @@ const EMPTY_HIDDEN: ReadonlySet<string> = new Set<string>();
     sig(stacked, 'stacked', EMPTY_HIDDEN) !== sig(moved, 'stacked', EMPTY_HIDDEN),
     `${sig(moved, 'stacked', EMPTY_HIDDEN)}`);
 
+  const resigned = analogBands('stacked', [A, source(1, { signature: 'sig-1-rotated' }), C], null);
+  check('a source display signature change changes the band signature',
+    sig(stacked, 'stacked', EMPTY_HIDDEN) !== sig(resigned, 'stacked', EMPTY_HIDDEN),
+    `${sig(resigned, 'stacked', EMPTY_HIDDEN)}`);
+
   const swapped = analogBands('stacked', [B, A, C], null);
   check('row order changes the signature',
     sig(stacked, 'stacked', EMPTY_HIDDEN) !== sig(swapped, 'stacked', EMPTY_HIDDEN),
@@ -385,6 +500,23 @@ const EMPTY_HIDDEN: ReadonlySet<string> = new Set<string>();
 }
 
 {
+  const rows = [A, B, C];
+  const projected = analogBands('stacked', rows, null).map((band) => `${band.id}:${band.heightCss}`);
+  const expected = rows.map((entry) => `${entry.busId}:${entry.heightCss}`);
+  check('stacked rows project to the caller order and heights unchanged',
+    projected.join(',') === expected.join(','),
+    `projected=${projected.join(',')}`);
+
+  const reordered = analogBands('stacked', [B, A, C], null)
+    .map((band) => `${band.id}:${band.heightCss}`);
+  const resized = analogBands('stacked', [A, source(1, { heightCss: 999 }), C], null)
+    .map((band) => `${band.id}:${band.heightCss}`);
+  check('the stacked projection control detects a reordered or resized row',
+    reordered.join(',') !== expected.join(',') && resized.join(',') !== expected.join(','),
+    `reordered=${reordered.join(',')}, resized=${resized.join(',')}`);
+}
+
+{
   const sourceText = fs.readFileSync('src/ui/analogBands.ts', 'utf8');
   const lines = sourceText.split('\n');
   const commentLines = lines.filter((line) => line.trim().startsWith('//') ||
@@ -403,6 +535,44 @@ const EMPTY_HIDDEN: ReadonlySet<string> = new Set<string>();
     MERGED_ANALOG_BAND_ID === 'analog-merged' &&
     sourceText.split("'analog-merged'").length - 1 === 1,
     `id=${MERGED_ANALOG_BAND_ID}, literals=${sourceText.split("'analog-merged'").length - 1}`);
+}
+
+{
+  const appSource = fs.readFileSync('src/ui/app.ts', 'utf8');
+  check('relayout takes its analog rows from the stacked band model',
+    stackedProjectionIsAuthoritative(appSource),
+    `projection=${stackedProjectionIsAuthoritative(appSource)}`);
+
+  const heightControl = appSource.replace('heightCss: band.heightCss',
+    'heightCss: entry.source.heightCss');
+  const relayoutControl = appSource.replace(
+    'const analogRows: RowSpec[] = this.analogRowSpecs();',
+    'const analogRows: RowSpec[] = [];');
+  const layoutControl = appSource.replace("analogBands('stacked'", "analogBands('merged'");
+  const mappingControl = appSource.replace('bus: entry.bus', 'bus: entry.channel');
+  const pairingControl = appSource.replace('byBusId.get(band.id)!', 'entries[0]!');
+  check('the stacked projection contract rejects a resized, skipped or merged projection',
+    !stackedProjectionIsAuthoritative(heightControl) &&
+    !stackedProjectionIsAuthoritative(relayoutControl) &&
+    !stackedProjectionIsAuthoritative(layoutControl) &&
+    !stackedProjectionIsAuthoritative(mappingControl) &&
+    !stackedProjectionIsAuthoritative(pairingControl),
+    `height=${stackedProjectionIsAuthoritative(heightControl)}, relayout=${stackedProjectionIsAuthoritative(relayoutControl)}, layout=${stackedProjectionIsAuthoritative(layoutControl)}, mapping=${stackedProjectionIsAuthoritative(mappingControl)}, pairing=${stackedProjectionIsAuthoritative(pairingControl)}`);
+
+  const entryBody = methodBody(appSource, 'private analogRowEntries(): AnalogRowEntry[]');
+  check('one source collection feeds the row projection',
+    (appSource.match(/this\.analogRowEntries\(\)/g) ?? []).length === 1 &&
+    (appSource.match(/this\.analogRowSpecs\(\)/g) ?? []).length === 1 &&
+    entryBody.includes('signature: JSON.stringify(busFrameSignatureParts(bus))'),
+    `entries=${(appSource.match(/this\.analogRowEntries\(\)/g) ?? []).length}, relayouts=${(appSource.match(/this\.analogRowSpecs\(\)/g) ?? []).length}`);
+
+  const frameBody = methodBody(
+    appSource, 'private busSignature(viewStart: number, viewEnd: number): number');
+  check('the bus frame field list has one owner shared by the row and frame signatures',
+    (appSource.match(/busFrameSignatureParts\(bus\)/g) ?? []).length === 2 &&
+    (appSource.match(/bus\.builder\?\.pyramid\.doneUpTo/g) ?? []).length === 1 &&
+    frameBody.includes('busFrameSignatureParts(bus)'),
+    `uses=${(appSource.match(/busFrameSignatureParts\(bus\)/g) ?? []).length}, frame=${frameBody.includes('busFrameSignatureParts(bus)')}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

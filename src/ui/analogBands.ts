@@ -10,6 +10,7 @@ export interface AnalogBandSource {
   color: string;
   heightCss: number;
   gain: number;
+  signature: string;
 }
 
 export interface AnalogBand {
@@ -27,7 +28,7 @@ export interface AnalogSessionState {
 
 export interface PrunedAnalogState {
   focusedId: string | null;
-  hidden: Set<string>;
+  hidden: ReadonlySet<string>;
 }
 
 export const MERGED_ANALOG_BAND_ID = 'analog-merged';
@@ -59,11 +60,20 @@ export function visibleAnalogSources(
 
 export function toggleAnalogVisibility(
   hidden: ReadonlySet<string>, busId: string,
-): Set<string> {
+): ReadonlySet<string> {
   const next = new Set(hidden);
   if (next.has(busId)) next.delete(busId);
   else next.add(busId);
   return next;
+}
+
+export function toggleSourceVisibility(
+  sources: readonly AnalogBandSource[], state: AnalogSessionState, busId: string,
+): PrunedAnalogState {
+  const hidden = toggleAnalogVisibility(state.hidden, busId);
+  if (!hidden.has(busId) || state.focusedId !== busId) return { focusedId: state.focusedId, hidden };
+  const next = visibleAnalogSources(sources, hidden)[0];
+  return { focusedId: next ? next.busId : state.focusedId, hidden };
 }
 
 export function pruneAnalogState(
@@ -90,16 +100,20 @@ export function analogBands(
     }));
   }
   if (sources.length === 0) return [];
-  let heightCss = 0;
-  for (const source of sources) {
-    if (Number.isFinite(source.heightCss)) heightCss = Math.max(heightCss, source.heightCss);
-  }
   return [{
     id: MERGED_ANALOG_BAND_ID,
     sources: [...sources],
     focusedId: resolveAnalogFocus(sources, focusedId)!,
-    heightCss,
+    heightCss: mergedHeight(sources),
   }];
+}
+
+function mergedHeight(sources: readonly AnalogBandSource[]): number {
+  let height = 0;
+  for (const source of sources) {
+    if (Number.isFinite(source.heightCss)) height = Math.max(height, source.heightCss);
+  }
+  return height;
 }
 
 export function analogBandSignature(
@@ -122,6 +136,7 @@ export function analogBandSignature(
         source.color,
         source.heightCss,
         source.gain,
+        source.signature,
       ]),
     ]),
   ]);

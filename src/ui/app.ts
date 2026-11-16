@@ -236,6 +236,7 @@ import {
 } from './cursorEdges.js';
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
+import { analogBands, type AnalogBandSource } from './analogBands.js';
 import {
   nextScopeVoltsPerDiv, scopeAutoset, scopeGeometry, scopeRowDivisions, scopeScaleAt, scopeVoltsAtY,
 } from './scopeScale.js';
@@ -316,6 +317,21 @@ interface Lane {
   /** Index into displayRows(decoder). */
   displayRow: number;
   laneChannel: number;
+}
+
+interface AnalogRowEntry {
+  channel: number;
+  bus: number;
+  source: AnalogBandSource;
+}
+
+function busFrameSignatureParts(bus: BusViewState): (string | number | boolean)[] {
+  return [
+    bus.id, bus.color, bus.heightCss, bus.style, bus.hideSources,
+    bus.fullScaleV ?? -1, bus.offsetV, bus.voltsPerDiv ?? -1, bus.zeroPosition ?? -1,
+    bus.analogGroup ?? -1, bus.spec.bits.join(','), String(bus.spec.clock ?? -1),
+    bus.spec.encoding, bus.builder?.pyramid.doneUpTo ?? -1, bus.builder?.done ?? false,
+  ];
 }
 
 interface CursorLine {
@@ -2748,6 +2764,38 @@ export class App {
     this.dirty = true;
   }
 
+  private analogRowSpecs(): RowSpec[] {
+    const entries = this.analogRowEntries();
+    const byBusId = new Map(entries.map((entry) => [entry.source.busId, entry]));
+    return analogBands('stacked', entries.map((entry) => entry.source), null).map((band) => {
+      const entry = byBusId.get(band.id)!;
+      return { kind: 'analog', channel: entry.channel, heightCss: band.heightCss, bus: entry.bus };
+    });
+  }
+
+  private analogRowEntries(): AnalogRowEntry[] {
+    const entries: AnalogRowEntry[] = [];
+    const lastChannel = Math.max(0, this.store.channelCount - 1);
+    this.busViews.forEach((bus, index) => {
+      if (busOutOfWidth(bus.spec, this.renderChannelCount())) return;
+      entries.push({
+        channel: Math.min(bus.spec.bits[0] ?? 0, lastChannel),
+        bus: index,
+        source: {
+          busId: bus.id,
+          group: bus.analogGroup ?? -1,
+          start: channelBankStart(bus.spec.bits[0] ?? 0),
+          name: bus.name,
+          color: bus.color,
+          heightCss: this.rowHeightOf(bus),
+          gain: analogGainOf(bus),
+          signature: JSON.stringify(busFrameSignatureParts(bus)),
+        },
+      });
+    });
+    return entries;
+  }
+
   /**
    * Rebuild the row model.
    *
@@ -2759,14 +2807,7 @@ export class App {
     // axis). When even minimum-height rows do not fit, the stack overflows and the
     // scroll area scrolls - phones get every channel instead of the first six.
     // Analog (parallel-bus) rows sit above the channels and take their height first.
-    const analogRows: RowSpec[] = [];
-    this.busViews.forEach((b, i) => {
-      if (busOutOfWidth(b.spec, this.renderChannelCount())) return;
-      analogRows.push({
-        kind: 'analog', channel: Math.min(b.spec.bits[0] ?? 0, Math.max(0, this.store.channelCount - 1)),
-        heightCss: this.rowHeightOf(b), bus: i,
-      });
-    });
+    const analogRows: RowSpec[] = this.analogRowSpecs();
     const analogH = analogRows.reduce((sum, r) => sum + r.heightCss, 0);
     this.overview.syncSize();
     const axisH = this.el.axis.offsetHeight || 30;
@@ -3333,10 +3374,7 @@ export class App {
       JSON.stringify(this.settings.analogTriggers ?? {}),
     ];
     for (const bus of this.busViews) {
-      parts.push(bus.id, bus.color, bus.heightCss, bus.style, bus.hideSources,
-        bus.fullScaleV ?? -1, bus.offsetV, bus.voltsPerDiv ?? -1, bus.zeroPosition ?? -1,
-        bus.analogGroup ?? -1, bus.spec.bits.join(','), String(bus.spec.clock ?? -1),
-        bus.spec.encoding, bus.builder?.pyramid.doneUpTo ?? -1, bus.builder?.done ?? false);
+      parts.push(...busFrameSignatureParts(bus));
     }
     return fingerprintOf(parts);
   }
