@@ -306,6 +306,27 @@ Analog channels are not bus rows. Each analog signal has a row with:
   The readout refreshes in place on the cursor refresh path, never from a drawing frame,
   and it changes neither the cursor positions nor `1/Δt`.
 
+- **Reference traces compare live data with a saved snapshot.** Each analog source saves
+  at most one reference through its own ruler context menu (`Save reference`, reachable by
+  pointer and by the keyboard context-menu key / `Shift+F10` on the focused ruler); the
+  same menu removes it, and it lists references whose group is no longer available with
+  an unavailable state so they remain removable. A save copies the exact codes and unknown
+  masks of the visible window out of the current acquisition wave — never the Repeat
+  composite's old layer, which is cropped away and disclosed (a held previous wave refuses
+  the save outright, because its viewport is that wave's coordinates), and never a render
+  frame or the display copy — together with the capture rate's sample period, the start relative to
+  the displayed trigger origin, the source's gain, zero code and volts-per-code, its
+  colour, its group and its name. The window is bounded to 1,048,576 samples per trace and
+  four traces per session (about 8 MiB outside the capture budget); an oversized, empty or
+  previous-wave window is refused with a stated reason and nothing is saved — never
+  silently decimated. A reference draws in its own source band, time-aligned through its
+  saved sample period, dashed and dimmed beneath the live trace, converted by the
+  calibration saved with it (a later live gain or V/div never rewrites its volts), clipped
+  by the band and broken at unknown samples. It owns no graticule, ruler or trigger, and
+  hiding its Overlay source hides it without deleting it. References are session-only:
+  they survive a capture replacement while their group exists, vanish on reload, and are
+  never an input to measurement, statistics, Persistence, FFT or XY.
+
 ### 5.3 Buses, math and decoder lanes
 
 - A bus row is a display construct built from signal bits; its editor owns wiring, clock,
@@ -537,6 +558,11 @@ Analog channels are not bus rows. Each analog signal has a row with:
   advances a chunk only on a frame drawn while the surface is visible.
 - Math/FFT rows are measurements too: they state their sources, window function, bins and
   units; they never silently change the acquisition.
+
+- Reference traces are a display-only comparison, never an analysis input: they add no
+  source to the automatic-measurement list, contribute no sample to statistics,
+  Persistence, FFT or XY, and saving or removing one leaves every measurement row and
+  statistic byte-identical.
 
 ### 6.4 Plot painting
 

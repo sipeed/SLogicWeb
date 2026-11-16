@@ -49,6 +49,9 @@ const MIN_BRACKET_PX = 6;
 /** [SOURCE] the readout box is offset 30 px to the side away from the pointer. */
 const READOUT_OFFSET = 30;
 
+const REFERENCE_DASH: readonly number[] = [4, 3];
+const REFERENCE_ALPHA = 0.55;
+
 /**
  * Catmull-Rom reconstruction through the analog points. The ADC is a sampled signal, so a
  * straight polyline makes every sample a corner; this is the practical band-limited
@@ -159,10 +162,18 @@ export interface AnalogTraceView {
   scope?: AnalogScopeView;
 }
 
+export interface AnalogReferenceView {
+  xs: Float64Array;
+  volts: Float64Array;
+  color: string;
+  scope: AnalogScopeView;
+}
+
 export interface AnalogBandView {
   top: number;
   band: number;
   traces: readonly AnalogTraceView[];
+  references?: readonly AnalogReferenceView[];
   scope?: AnalogScopeView;
   labels?: { top: string; bottom: string };
   note?: string;
@@ -436,6 +447,35 @@ export class Overlay {
       c.lineTo(this.wCss, Math.round(y(0)) + 0.5);
       c.stroke();
       c.setLineDash([]);
+    }
+
+    for (const reference of o.references ?? []) {
+      const geometryForReference = scopeGeometry(
+        o.top, o.band, reference.scope.voltsPerDiv, reference.scope.zeroPosition);
+      c.strokeStyle = reference.color;
+      c.lineWidth = 1;
+      c.globalAlpha = REFERENCE_ALPHA;
+      c.setLineDash([...REFERENCE_DASH]);
+      c.beginPath();
+      let open = false;
+      for (let i = 0; i < reference.xs.length; i++) {
+        const x = reference.xs[i]!;
+        const value = reference.volts[i]!;
+        if (Number.isNaN(x) || Number.isNaN(value)) {
+          open = false;
+          continue;
+        }
+        const y = geometryForReference.yVolts(value);
+        if (!open) {
+          c.moveTo(x, y);
+          open = true;
+          continue;
+        }
+        c.lineTo(x, y);
+      }
+      c.stroke();
+      c.setLineDash([]);
+      c.globalAlpha = 1;
     }
 
     for (const t of o.traces) {

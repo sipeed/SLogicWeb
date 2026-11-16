@@ -823,6 +823,18 @@ export const zhCN: Messages = {
   'bus.voltsPreviousWaveNote': '当前显示上一波：光标电压等待当前波。',
   'bus.voltsNoSource': '本次采集没有该信号源',
   'bus.voltsNoCursor': '还没有放置光标',
+  'references.save': '保存参考波形',
+  'references.remove': '移除参考波形',
+  'references.removeNamed': '移除 {label} 的参考波形',
+  'references.unavailable': '不可用',
+  'references.hidden': '随信号源隐藏',
+  'references.refusedEmpty': '无法保存：可见窗口内没有当前波形的采样',
+  'references.refusedOutside': '窗口内只有上一波数据，请先采集新数据',
+  'references.refusedTooWide': '可见窗口超出单个参考波形上限（1,048,576 个采样），请先放大',
+  'references.refusedLimit': '已保存四个参考波形，请先移除一个',
+  'references.refusedId': '该参考编号已被占用',
+  'references.partial': '已保存窗口内当前波形的 {count} 个采样，其余不属于本波',
+  'references.refusedPreviousWave': '当前显示的是上一波，请等当前波绘制后再保存',
 
   // ------------------------------------------------------- AI assistant
   'assistant.title': 'AI 助手',

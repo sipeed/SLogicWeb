@@ -869,6 +869,18 @@ export const ru: Messages = {
   'bus.voltsPreviousWaveNote': 'Показана предыдущая волна: напряжения курсоров ждут текущей волны.',
   'bus.voltsNoSource': 'источника нет в этом захвате',
   'bus.voltsNoCursor': 'курсор не установлен',
+  'references.save': 'Сохранить опорный сигнал',
+  'references.remove': 'Удалить опорный сигнал',
+  'references.removeNamed': 'Удалить опорный сигнал {label}',
+  'references.unavailable': 'недоступен',
+  'references.hidden': 'скрыт вместе с источником',
+  'references.refusedEmpty': 'Нечего сохранять: в видимом окне нет отсчётов текущей волны',
+  'references.refusedOutside': 'В окне только предыдущая волна; сначала выполните новый захват',
+  'references.refusedTooWide': 'Видимое окно шире одного опорного сигнала (1 048 576 отсчётов); сначала увеличьте масштаб',
+  'references.refusedLimit': 'Уже сохранены четыре опорных сигнала; сначала удалите один',
+  'references.refusedId': 'Этот идентификатор опорного сигнала уже занят',
+  'references.partial': 'Сохранено {count} отсчётов текущей волны из окна; остальное к этой волне не относится',
+  'references.refusedPreviousWave': 'На экране предыдущая волна; дождитесь отрисовки текущей',
 
   // ------------------------------------------------------- AI assistant
   'assistant.title': 'ИИ-ассистент',

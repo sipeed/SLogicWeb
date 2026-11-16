@@ -879,6 +879,18 @@ export const en = {
   'bus.voltsPreviousWaveNote': 'Previous wave shown: cursor voltages wait for the current wave.',
   'bus.voltsNoSource': 'source not in this capture',
   'bus.voltsNoCursor': 'no cursor placed',
+  'references.save': 'Save reference',
+  'references.remove': 'Remove reference',
+  'references.removeNamed': 'Remove the {label} reference',
+  'references.unavailable': 'unavailable',
+  'references.hidden': 'hidden with its source',
+  'references.refusedEmpty': 'Nothing to save: the visible window holds no sample of the current wave',
+  'references.refusedOutside': 'The window shows only the previous wave; capture new data first',
+  'references.refusedTooWide': 'The visible window is wider than one reference can hold (1,048,576 samples); zoom in first',
+  'references.refusedLimit': 'Four references are already saved; remove one first',
+  'references.refusedId': 'That reference id is already in use',
+  'references.partial': 'Saved the {count} current-wave samples in the window; the rest is not in this wave',
+  'references.refusedPreviousWave': 'The previous wave is on screen; wait until the current wave is drawn',
 
   // ------------------------------------------------------- AI assistant
   'assistant.title': 'AI assistant',

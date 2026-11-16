@@ -529,13 +529,14 @@ function mergedTracePasses(source: string): boolean {
 }
 
 {
-  const menu = methodBody(app, 'private scopeBarMenu(event: MouseEvent, bar: HTMLDivElement): void {');
-  const body = menu.length > 0 ? menu : app.slice(app.indexOf('private scopeBarMenu('));
+  const menu = methodBody(app, 'private scopeMenuItems(');
+  const body = menu.length > 0 ? menu : app.slice(app.indexOf('private scopeMenuItems('));
   const layoutItem = body.includes(
     "label: t(this.analogLayout === 'merged' ? 'bus.layoutStacked' : 'bus.layoutMerged'),") &&
     body.includes("onPick: () => this.setAnalogLayout(this.analogLayout === 'merged' ? 'stacked' : 'merged'),");
   check('the ruler menu picks the same layout setter as Appearance',
-    layoutItem, `menu=${layoutItem}`);
+    layoutItem && app.includes('this.scopeMenuItems(bus)'),
+    `menu=${layoutItem}, items=${app.split('this.scopeMenuItems(bus)').length - 1}`);
 }
 
 {
