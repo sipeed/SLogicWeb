@@ -157,6 +157,28 @@ export function measurementStatsSummary(acc: MeasurementAccumulator): Measuremen
   };
 }
 
+export type MeasurementStatsView = MeasurementStatsSummary;
+
+export function noMeasurementStatsView(): MeasurementStatsView {
+  return {
+    count: 0,
+    mean: Number.NaN,
+    min: Number.NaN,
+    max: Number.NaN,
+    stdDev: null,
+    excluded: 0,
+    capped: false,
+  };
+}
+
+export function measurementStatsView(
+  state: MeasurementStatsState, rowId: number, key: string,
+): MeasurementStatsView {
+  const acc = state.accumulators.get(rowId);
+  if (acc === undefined || acc.key !== key) return noMeasurementStatsView();
+  return measurementStatsSummary(acc);
+}
+
 export function resetMeasurementStatsFor(
   state: MeasurementStatsState, rowId: number,
 ): MeasurementStatsState {
@@ -169,6 +191,18 @@ export function resetMeasurementStatsFor(
 export function resetAllMeasurementStats(state: MeasurementStatsState): MeasurementStatsState {
   if (state.accumulators.size === 0 && state.skipped === 0) return state;
   return { accumulators: new Map(), skipped: 0, lastWaveKey: state.lastWaveKey };
+}
+
+export function retainMeasurementStats(
+  state: MeasurementStatsState, rowIds: readonly number[],
+): MeasurementStatsState {
+  if (state.accumulators.size === 0) return state;
+  const live = new Set(rowIds);
+  const dropped = [...state.accumulators.keys()].filter((rowId) => !live.has(rowId));
+  if (dropped.length === 0) return state;
+  const accumulators = new Map(state.accumulators);
+  for (const rowId of dropped) accumulators.delete(rowId);
+  return { accumulators, skipped: state.skipped, lastWaveKey: state.lastWaveKey };
 }
 
 export interface MeasurementWaveRow {

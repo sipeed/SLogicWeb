@@ -13,13 +13,20 @@ import {
 } from '../measurementRows.js';
 import {
   defaultMeasurementConfig, isMeasurementBank, measurementAddStart, measurementCacheKey,
-  measurementRangeKind, measurementRowViews, measurementSectionCounts, measurementSources,
+  measurementRangeKind, measurementRowEligible, measurementRowSettled, measurementRowViews,
+  measurementSectionCounts, measurementSources, measurementWaveValue,
   reconcileMeasurementConfig, resolveMeasurementWindow,
   runMeasurement, selectMeasurementFilter, selectMeasurementRange,
   type MeasurementBusView, type MeasurementCacheInput, type MeasurementConfig,
-  type MeasurementCursor, type MeasurementReadSummary, type MeasurementSource,
-  type MeasurementSourceResult, type MeasurementStatus, type MeasurementWindow,
+  type MeasurementCursor, type MeasurementReadSummary, type MeasurementRowView,
+  type MeasurementSource, type MeasurementSourceResult, type MeasurementStatus,
+  type MeasurementWindow,
 } from '../measurementState.js';
+import {
+  accumulateSample, emptyAccumulator, excludeSample, measurementStatsView,
+  retainMeasurementStats, type MeasurementAccumulator, type MeasurementStatsState,
+  type MeasurementStatsView,
+} from '../measurementStats.js';
 
 const nodeProcess = (() => {
   const p = (globalThis as {
@@ -781,7 +788,7 @@ function rowsOf(scan: AnalogCodeScan | null, read: MeasurementReadSummary | null
       view.includes('if (entry.store !== store) this.measurementCache.delete(start);') &&
       view.indexOf('this.measurementCache.delete(start)') < scanAt &&
       (view.split('runMeasurement({').length - 1) === 1 &&
-      view.includes('rows: measurementRowViews(rows, results, null),'),
+      view.includes('rows: measurementRowViews(rows, results, null, stats),'),
     `scans=${view.split('runMeasurement({').length - 1}, ` +
       `evictAt=${view.indexOf('this.measurementCache.delete(start)')}`);
   check('the cache key carries the wave identity, the source scan inputs and the window',
@@ -874,9 +881,28 @@ function rowsOf(scan: AnalogCodeScan | null, read: MeasurementReadSummary | null
     `branch=${branchAt}, scan=${scanAt}`);
   check('a blocked capture range carries its own status on every row',
     view.includes("unavailable: captureBlocked,") &&
-      view.includes('rows: measurementRowViews(rows, blocked, null),') &&
+      view.includes('rows: measurementRowViews(rows, blocked, null, stats),') &&
       view.includes('window: null, unavailable: captureBlocked,'),
     `blocked=${view.includes('unavailable: captureBlocked,')}`);
+  const projected = (source: string): boolean =>
+    source.includes('const stats = this.measurementStatsViews(rows, sources, store.samplerate, config.range);') &&
+    source.indexOf('this.measurementStatsViews(') < source.indexOf('const results = new Map<number, MeasurementSourceResult>();') &&
+    (source.match(/measurementRowViews\(rows, /g) ?? []).length === 5 &&
+    (source.match(/measurementRowViews\(rows, [^)]*, stats\)/g) ?? []).length === 5;
+  check('one statistics projection runs before the branches and every row view carries it',
+    projected(view) &&
+      view.includes('statsSkipped: this.measurementStats.skipped,') &&
+      view.includes('statsLoopUnavailable: this.captureIsLoop,') &&
+      !projected(view.replace('const stats = this.measurementStatsViews(rows, sources, store.samplerate, config.range);', '')) &&
+      !projected(view.replace(', stats)', ')')),
+    `projected=${projected(view)}, ` +
+    `all=${(view.match(/measurementRowViews\(rows, [^)]*, stats\)/g) ?? []).length}, ` +
+    `skipped=${view.includes('statsSkipped: this.measurementStats.skipped,')}, ` +
+    `loop=${view.includes('statsLoopUnavailable: this.captureIsLoop,')}`);
+  check('the capture-range section projects the same statistics map for its own rows',
+    section.includes('const stats = this.measurementStatsViews(rows, sources, store.samplerate, base.range);') &&
+      section.includes('rows: measurementRowViews(rows, results, null, stats),'),
+    `projection=${section.includes('this.measurementStatsViews(')}`);
   check('a finished job feeds the rows instead of a second bounded scan',
     section !== '' && section.includes('const done = entry.job.results();') &&
       section.includes('if (result === undefined) {') &&
@@ -892,6 +918,163 @@ function rowsOf(scan: AnalogCodeScan | null, read: MeasurementReadSummary | null
   check('reading the job result is load-bearing: a second scan fails the contract',
     fromJob(section) && !fromJob(replayed) && !fromJob(''),
     `section=${fromJob(section)}, replayed=${fromJob(replayed)}, empty=${fromJob('')}`);
+}
+
+{
+  const accumulate = (values: readonly number[], key: string): MeasurementAccumulator => {
+    let acc = emptyAccumulator(key);
+    for (const value of values) acc = accumulateSample(acc, value);
+    return acc;
+  };
+  const rows: MeasurementRow[] = [
+    { id: 1, start: 0, parameter: 'vpp' },
+    { id: 2, start: 0, parameter: 'rms' },
+    { id: 3, start: 0, parameter: 'frequency' },
+  ];
+  const resultsMap = new Map<number, MeasurementSourceResult>([
+    [0, resultFor(A0, scanFixture(), readFixture())],
+  ]);
+  const state: MeasurementStatsState = {
+    accumulators: new Map([
+      [1, accumulate([1, 3, 5], 'match')],
+      [2, accumulate([2, 4], 'superseded')],
+    ]),
+    skipped: 3,
+    lastWaveKey: '0:7',
+  };
+  const stats = new Map<number, MeasurementStatsView>([
+    [1, measurementStatsView(state, 1, 'match')],
+    [2, measurementStatsView(state, 2, 'current')],
+    [3, measurementStatsView(state, 3, 'current')],
+  ]);
+  const views: MeasurementRowView[] = measurementRowViews(rows, resultsMap, null, stats);
+  check('a matching accumulator key projects its count, mean, extrema and sample standard deviation',
+    views[0]!.stats.count === 3 && views[0]!.stats.mean === 3 &&
+      views[0]!.stats.min === 1 && views[0]!.stats.max === 5 &&
+      views[0]!.stats.stdDev !== null && Math.abs(views[0]!.stats.stdDev - 2) < 1e-12 &&
+      !views[0]!.stats.capped && views[0]!.stats.excluded === 0,
+    `count=${views[0]!.stats.count}, mean=${views[0]!.stats.mean}, ` +
+    `min/max=${views[0]!.stats.min}/${views[0]!.stats.max}, ` +
+    `stdDev=${views[0]!.stats.stdDev}`);
+  const emptyStats = views.slice(1).map((view) => view.stats);
+  check('a mismatched or missing accumulator key reports an empty history, never stale numbers',
+    emptyStats.every((entry) => entry.count === 0 && Number.isNaN(entry.mean) &&
+      Number.isNaN(entry.min) && Number.isNaN(entry.max) &&
+      entry.stdDev === null && entry.excluded === 0 && !entry.capped) &&
+      views[1]!.stats !== views[0]!.stats,
+    `mismatched=${JSON.stringify(emptyStats[0])}, missing=${JSON.stringify(emptyStats[1])}`);
+  const noStats = measurementRowViews(rows, resultsMap, null);
+  check('a row view built without a statistics map carries the empty history, not undefined',
+    noStats.every((view) => view.stats.count === 0 && Number.isNaN(view.stats.mean) &&
+      view.stats.stdDev === null),
+    `stats=${JSON.stringify(noStats[0]!.stats)}`);
+
+  const capped = accumulate(Array.from({ length: 600 }, (_, k) => k), 'match');
+  const cappedView = measurementStatsView({ ...state, accumulators: new Map([[1, capped]]) }, 1,
+    'match');
+  check('an accumulator that reached the cap keeps its count and reports the cap',
+    cappedView.count === 512 && cappedView.capped && capped.count === 512,
+    `count=${cappedView.count}, capped=${cappedView.capped}, held=${capped.count}`);
+
+  const excluded = excludeSample(accumulate([1, 2], 'match'));
+  const excludedView = measurementStatsView({ ...state, accumulators: new Map([[1, excluded]]) },
+    1, 'match');
+  check('an excluded result keeps the population and discloses its own count',
+    excludedView.count === 2 && excludedView.excluded === 1 &&
+      excludedView.mean === 1.5,
+    `count=${excludedView.count}, excluded=${excludedView.excluded}, ` +
+    `mean=${excludedView.mean}`);
+}
+
+{
+  const row: MeasurementRow = { id: 1, start: 0, parameter: 'vpp' };
+  const view = (
+    scan: Partial<AnalogCodeScan> = {}, read: Partial<MeasurementReadSummary> = {},
+  ): MeasurementRowView => measurementRowViews(
+    [row],
+    new Map([[0, resultFor(A0, scanFixture(scan), readFixture(read))]]), null,
+  )[0]!;
+  const eligible = view();
+  const rejected: [string, MeasurementRowView][] = [
+    ['status', view({ status: 'no-data' })],
+    ['truncated', view({}, { truncated: true })],
+    ['rangeClipped', view({}, { rangeClipped: true })],
+    ['gaps', view({}, { unknownSamples: 3 })],
+    ['clippedLow', view({ clippedLow: true })],
+    ['clippedHigh', view({ clippedHigh: true })],
+  ];
+  const admitted = rejected.filter(([, entry]) => measurementRowEligible(entry) ||
+    measurementWaveValue(entry) !== null);
+  check('only an ok, complete, unclipped, gapless result is eligible for the statistics',
+    measurementRowEligible(eligible) && measurementWaveValue(eligible) === eligible.value &&
+      rejected.length === 6 && admitted.length === 0,
+    `admitted=${JSON.stringify(admitted.map(([name]) => name))}, ` +
+    `value=${measurementWaveValue(eligible)}`);
+  const skipped = rejected.map(([, entry]) => measurementWaveValue(entry));
+  check('an ineligible settled result offers no value, so the wave can only count it as excluded',
+    skipped.every((value) => value === null),
+    `values=${JSON.stringify(skipped)}`);
+}
+
+{
+  const row: MeasurementRow = { id: 1, start: 0, parameter: 'vpp' };
+  const pending: MeasurementStatus[] = [
+    'no-source', 'no-window', 'previous-wave-displayed', 'analyzing', 'cancelled',
+    'stable-capture-required', 'loop',
+  ];
+  const settled: MeasurementStatus[] = [
+    'ok', 'no-data', 'no-crossing', 'one-crossing', 'no-period',
+  ];
+  const blank = (status: MeasurementStatus): MeasurementRowView => measurementRowViews(
+    [row], new Map([[0, resultFor(A0, null, null, status)]]), null)[0]!;
+  const unmeasured = pending.map(blank);
+  const attempted = settled.map(blank);
+  const wronglySettled = unmeasured.filter((view) => measurementRowSettled(view))
+    .map((view) => view.status);
+  const wronglyPending = attempted.filter((view) => !measurementRowSettled(view))
+    .map((view) => view.status);
+  check('only a completed measurement attempt may count as an excluded result',
+    wronglySettled.length === 0 && wronglyPending.length === 0 &&
+      unmeasured.map((view) => view.status).join(',') === pending.join(',') &&
+      measurementRowViews([row], new Map([[0, resultFor(A0, null, null, 'analyzing')]]),
+        null)[0]!.status === 'analyzing',
+    `wronglySettled=${JSON.stringify(wronglySettled)}, ` +
+    `wronglyPending=${JSON.stringify(wronglyPending)}`);
+  check('a pending or unavailable result is neither a sample nor an exclusion',
+    unmeasured.every((view) => measurementWaveValue(view) === null) &&
+      attempted.every((view) => measurementWaveValue(view) === null),
+    `pendingValues=${JSON.stringify(unmeasured.map((view) => measurementWaveValue(view)))}`);
+  const wave = between(appSource, 'private measurementWaveRows(',
+    'private recordMeasurementWave(');
+  const needle = 'if (!measurementRowSettled(row)) continue;';
+  const guarded = (source: string): boolean =>
+    source.includes(needle) && source.indexOf(needle) < source.indexOf('wave.push({ rowId');
+  check('the wave composer drops an unsettled row instead of offering it as an exclusion',
+    wave.length > 0 && guarded(wave) && !guarded(wave.replace(needle, '')) &&
+      !guarded(wave.replace(needle, 'if (false) continue;')),
+    `guarded=${guarded(wave)}, dropped=${!guarded(wave.replace(needle, ''))}, ` +
+    `disabled=${!guarded(wave.replace(needle, 'if (false) continue;'))}`);
+
+  const accumulate = (values: readonly number[]): MeasurementAccumulator => {
+    let acc = emptyAccumulator('k');
+    for (const value of values) acc = accumulateSample(acc, value);
+    return acc;
+  };
+  const population: MeasurementStatsState = {
+    accumulators: new Map([[1, accumulate([1, 2])], [2, accumulate([3])], [9, accumulate([4])]]),
+    skipped: 2,
+    lastWaveKey: '0:4',
+  };
+  const kept = retainMeasurementStats(population, [1, 2]);
+  const none: MeasurementStatsState = { accumulators: new Map(), skipped: 0, lastWaveKey: null };
+  check('a pruned row hands its accumulator back, so the histories stay bounded',
+    kept.accumulators.size === 2 && !kept.accumulators.has(9) &&
+      kept.accumulators.get(1) === population.accumulators.get(1) &&
+      kept.skipped === 2 && kept.lastWaveKey === '0:4' &&
+      retainMeasurementStats(population, [1, 2, 9]) === population &&
+      retainMeasurementStats(none, []) === none,
+    `kept=${[...kept.accumulators.keys()].join(',')}, ` +
+    `shared=${retainMeasurementStats(population, [1, 2, 9]) === population}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

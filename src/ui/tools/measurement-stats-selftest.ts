@@ -40,6 +40,14 @@ function check(name: string, pass: boolean, detail: string): void {
   results.push({ name, pass, detail });
 }
 
+const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+
+function between(text: string, from: string, to: string): string {
+  const start = text.indexOf(from);
+  const end = text.indexOf(to, start + from.length);
+  return start < 0 || end <= start ? '' : text.slice(start, end);
+}
+
 function close(a: number, b: number, tolerance = 1e-9): boolean {
   return Math.abs(a - b) <= tolerance * Math.max(1, Math.abs(a), Math.abs(b));
 }
@@ -770,6 +778,216 @@ const stopReasonVocabulary:
   check('one wave cannot offer the same row twice and every row id must be a real index',
     thrown.every(Boolean) && state.accumulators.size === 0 && state.lastWaveKey === null,
     `thrown=${thrown.join(',')}`);
+}
+
+{
+  const finish = between(app, "private finishCapture(reason: CaptureStopReason = 'manual'): void {",
+    '// ------------------------------------------------------------------ analyzers');
+  const record = between(app, 'private recordMeasurementWave(reason: CaptureStopReason): void {',
+    'private measurementView(): MeasurementSectionView {');
+  const settled = finish.indexOf('this.recordMeasurementWave(reason);');
+  check('one submission sits at the end of finishCapture, after the store and rows settle',
+    finish.length > 0 && record.length > 0 && settled > finish.indexOf('this.renderPanels();') &&
+      settled > finish.indexOf('this.syncUnloadGuard();') &&
+      settled < finish.indexOf('const waiters = this.captureWaiters;') &&
+      finish.split('this.recordMeasurementWave(reason);').length - 1 === 1,
+    `record=${record.length}, at=${settled}, waiters=${finish.indexOf('const waiters')}`);
+  const late = finish.replace('    this.recordMeasurementWave(reason);\n', '')
+    + '\n    this.recordMeasurementWave(reason);';
+  const twice = finish.replace('this.syncUnloadGuard();',
+    'this.syncUnloadGuard(); this.recordMeasurementWave(reason);');
+  const wires = (body: string): boolean =>
+    body.indexOf('this.recordMeasurementWave(reason);') > body.indexOf('this.renderPanels();') &&
+    body.indexOf('this.recordMeasurementWave(reason);') <
+      body.indexOf('const waiters = this.captureWaiters;') &&
+    body.split('this.recordMeasurementWave(reason);').length - 1 === 1;
+  check('a submission after the waiters or a second one per stop fails that placement control',
+    !wires(late) && !wires(twice) && wires(finish),
+    `late=${wires(late)}, twice=${wires(twice)}, finish=${wires(finish)}`);
+
+  const submitted = (body: string): boolean =>
+    body.includes('submitMeasurementWave(this.measurementStats, {') &&
+    body.includes('sessionId: this.captureSessionId,') &&
+    body.includes('generation: this.captureWaveGeneration,') &&
+    body.includes('loop: this.captureIsLoop,') &&
+    body.includes("reason: this.captureAbort === null ? reason : 'error',") &&
+    body.includes('samples: store.length,') &&
+    body.includes("missed: this.triggerState === 'not-found',") &&
+    body.includes('const visible = this.cursorsPageShown();') &&
+    body.includes('visible,') &&
+    body.includes('rows.push(...this.measurementWaveRows(\n        view.rows, view.sources, store.samplerate, view.range));') &&
+    !body.includes('visible: true');
+  const aborted = record.replace("reason: this.captureAbort === null ? reason : 'error',",
+    'reason,');
+  const alwaysVisible = record.replace('const visible = this.cursorsPageShown();',
+    'const visible = true;');
+  const ungated = record.replace("missed: this.triggerState === 'not-found',", 'missed: false,');
+  check('the wave submission is memory-abort aware, visibility gated and carries the shared facts',
+    submitted(record) && !submitted(aborted) && !submitted(alwaysVisible) && !submitted(ungated),
+    `submitted=${submitted(record)}, aborted=${submitted(aborted)}, ` +
+    `visible=${submitted(alwaysVisible)}, missed=${submitted(ungated)}`);
+  const hiddenScan = (body: string): boolean =>
+    body.includes('if (visible) {') &&
+    body.indexOf('if (visible) {') < body.indexOf('this.measurementView()') &&
+    body.indexOf('const rows: MeasurementWaveRow[] = [];') <
+      body.indexOf('this.measurementView()');
+  check('a hidden wave builds no measurement rows, so its submission cannot scan the capture',
+    hiddenScan(record) &&
+      !hiddenScan(record.replace('if (visible) {', 'if (true) {')),
+    `guarded=${hiddenScan(record)}, always=${hiddenScan(record.replace('if (visible) {', 'if (true) {'))}`);
+  const stored = ['localStorage', 'sessionStorage', 'persistWorkspace', 'localForage', 'opfs'];
+  const leaks = stored.filter((needle) => record.includes(needle));
+  check('a submitted wave writes no persisted state: the history is session-only',
+    record.length > 0 && leaks.length === 0,
+    `leaks=${JSON.stringify(leaks)}`);
+
+  const start = between(app, 'const generation = ++this.captureGeneration;',
+    'this.startMutatedCapture = false;');
+  check('the App pins one wave generation for the whole sweep, so a duplicate end cannot count twice',
+    start.includes('this.captureWaveGeneration = generation;') &&
+      app.split('this.captureWaveGeneration =').length - 1 === 1 &&
+      record.includes('generation: this.captureWaveGeneration,') &&
+      record.split('submitMeasurementWave(').length - 1 === 1,
+    `start=${start.includes('this.captureWaveGeneration = generation;')}, ` +
+    `assignments=${app.split('this.captureWaveGeneration =').length - 1}`);
+
+  const newSession = between(app, 'if (newSession) {', 'this.lastCaptureChannels = cfg.channels;');
+  const repeatWave = newSession.replace(
+    'this.captureSessionId += 1;\n        this.measurementStats = emptyMeasurementStats();\n', '');
+  check('a new session increments the capture-session key and empties the population',
+    newSession.includes('this.captureSessionId += 1;') &&
+      newSession.includes('this.measurementStats = emptyMeasurementStats();') &&
+      newSession.includes('this.repeatMissed = false;') &&
+      app.split('this.captureSessionId += 1;').length - 1 === 3,
+    `block=${newSession.length}, increments=${app.split('this.captureSessionId += 1;').length - 1}`);
+  const outsideSession = newSession.replace('if (newSession) {', 'if (origin === \'repeat\') {');
+  check('an ordinary Repeat wave cannot reach the session reset, because only the new-session branch owns it',
+    !repeatWave.includes('this.captureSessionId += 1;') &&
+      outsideSession.includes('this.captureSessionId += 1;') &&
+      !newSession.includes("origin === 'repeat'"),
+    `repeat=${repeatWave.includes('this.captureSessionId += 1;')}, ` +
+    `moved=${outsideSession.includes('this.captureSessionId += 1;')}`);
+
+  const adopt = between(app, 'private adoptCapture(', 'private async openExample(): Promise<void> {');
+  check('a replaced capture opens a new statistical population',
+    adopt.includes('this.captureSessionId += 1;') &&
+      adopt.includes('this.measurementStats = emptyMeasurementStats();') &&
+      adopt.indexOf('this.captureSessionId += 1;') < adopt.indexOf('this.relayout();'),
+    `adopt=${adopt.length}, reset=${adopt.includes('this.captureSessionId += 1;')}`);
+}
+
+{
+  const builder = between(app, 'private measurementStatsRowKey(',
+    'private measurementStatsViews(');
+  const fields = [
+    'sessionId: this.captureSessionId,',
+    'source: source.start,',
+    'parameter: row.parameter,',
+    'rangeKind: range.kind,',
+    'cursorA: range.a,',
+    'cursorB: range.b,',
+    'gain: source.gain,',
+    'level: analogTriggerCode(trigger.kind, trigger.volts, source.gain),',
+    "rising: trigger.kind === 'rising',",
+    'hysteresis: qualification.analogHysteresis,',
+    'artifactWindow: qualification.analogArtifactSamples,',
+    'samplerate,',
+  ];
+  const missing = fields.filter((needle) => !builder.includes(needle));
+  const keepsEveryField = (source: string): boolean =>
+    fields.every((needle) => source.includes(needle));
+  const dropped = fields.filter((needle) => keepsEveryField(builder.replace(needle, '')));
+  check('one key builder carries every reset-key field for the projection and the submission',
+    builder.length > 0 && missing.length === 0 && dropped.length === 0 &&
+      app.split('this.measurementStatsRowKey(').length - 1 === 2 &&
+      app.split('measurementStatsKey({').length - 1 === 1,
+    `missing=${JSON.stringify(missing)}, dropped=${JSON.stringify(dropped)}, ` +
+    `calls=${app.split('this.measurementStatsRowKey(').length - 1}, ` +
+    `keys=${app.split('measurementStatsKey({').length - 1}`);
+  const callers = (source: string): boolean =>
+    source.split('this.measurementStatsRowKey(').length - 1 === 2 &&
+    source.split('measurementStatsKey({').length - 1 === 1;
+  check('a second key-construction site or a dropped caller fails that contract',
+    callers(app) &&
+      !callers(app.replace('const key = this.measurementStatsRowKey(',
+        'const key = this.measurementStatsRowKeyUnused(')) &&
+      !callers(app.replace('return measurementStatsKey({',
+        'const extra = measurementStatsKey({ params: [] as never });\n    return measurementStatsKey({')),
+    `callers=${callers(app)}, ` +
+    `dropped=${!callers(app.replace('const key = this.measurementStatsRowKey(', 'const key = x('))}`);
+
+  const view = between(app, 'private measurementView(): MeasurementSectionView {',
+    'private measurementBase(');
+  const prunes = (source: string): boolean =>
+    source.includes('retainMeasurementStats(') &&
+    source.includes('state.rows.map((row) => row.id)') &&
+    source.indexOf('retainMeasurementStats(') <
+      source.indexOf('this.measurementStatsViews(');
+  check('the projection hands back the accumulators of rows the configuration no longer holds',
+    prunes(view) && !prunes(view.replace('retainMeasurementStats(', 'noRetain(')) &&
+      !prunes(view.replace('state.rows.map((row) => row.id)', '[]')),
+    `prunes=${prunes(view)}, ` +
+    `dropped=${!prunes(view.replace('retainMeasurementStats(', 'noRetain('))}`);
+}
+
+{
+  const removeRow = between(app, 'private removeMeasurementRowById(id: number): void {',
+    'private cancelMeasurementCapture(): void {');
+  const clear = between(app, 'private async clearMeasurementRows(invoker: HTMLElement | null): Promise<void> {',
+    'private undoMeasurementRows(): void {');
+  const undo = between(app, 'private undoMeasurementRows(): void {',
+    'private removeMeasurementRowById(id: number): void {');
+  const toggle = between(app, 'private toggleMeasurementParameter(start: number, parameter: MeasurementParameter): void {',
+    'private async clearMeasurementRows(');
+  const reset = between(app, 'private resetMeasurement(): void {',
+    'private resetMeasurementStatsRow(rowId: number): void {');
+  check('removal, Clear all, Undo and reset each drop the population they invalidate',
+    removeRow.includes('resetMeasurementStatsFor(this.measurementStats, id)') &&
+      clear.includes('resetAllMeasurementStats(this.measurementStats)') &&
+      undo.includes('resetAllMeasurementStats(this.measurementStats)') &&
+      toggle.includes('resetMeasurementStatsFor(this.measurementStats, removed.id)') &&
+      reset.includes('resetAllMeasurementStats(this.measurementStats)') &&
+      reset.includes('this.captureSessionId += 1;'),
+    `remove=${removeRow.includes('resetMeasurementStatsFor(')}, ` +
+    `clear=${clear.includes('resetAllMeasurementStats(')}, ` +
+    `undo=${undo.includes('resetAllMeasurementStats(')}, ` +
+    `toggle=${toggle.includes('resetMeasurementStatsFor(')}, ` +
+    `reset=${reset.includes('resetAllMeasurementStats(')}`);
+  const pruned = clear.replace('this.measurementStats = resetAllMeasurementStats(this.measurementStats);', '');
+  const undoKept = undo.replace('this.measurementStats = resetAllMeasurementStats(this.measurementStats);', '');
+  check('a Clear all or Undo that kept the old population fails that control',
+    !pruned.includes('resetAllMeasurementStats(') &&
+      !undoKept.includes('resetAllMeasurementStats('),
+    `cleared=${pruned.includes('resetAllMeasurementStats(')}, ` +
+    `undo=${undoKept.includes('resetAllMeasurementStats(')}`);
+
+  const resetRow = between(app, 'private resetMeasurementStatsRow(rowId: number): void {',
+    'private resetAllMeasurementStatsRows(): void {');
+  const resetAll = between(app, 'private resetAllMeasurementStatsRows(): void {',
+    'private refreshMeasurementStats(): void {');
+  const untouched = ['measurementConfig', 'measurementCache', 'this.cursors', 'captureStore',
+    'startCapture', 'repeatTimer', 'persistWorkspace', 'renderPanels', 'captureSessionId'];
+  const leaked = [resetRow, resetAll].flatMap((body) => untouched.filter((needle) => body.includes(needle)));
+  check('a statistics reset touches the population only, never rows, range, cursors or acquisition',
+    resetRow.includes('resetMeasurementStatsFor(this.measurementStats, rowId)') &&
+      resetAll.includes('resetAllMeasurementStats(this.measurementStats)') &&
+      resetRow.includes('this.refreshMeasurementStats();') &&
+      resetAll.includes('this.refreshMeasurementStats();') &&
+      leaked.length === 0,
+    `leaked=${JSON.stringify(leaked)}`);
+
+  const refresh = between(app, 'private refreshMeasurementStats(): void {',
+    'private applyMeasurementConfig(');
+  check('the reset publishes the new history as text, without rebuilding the panel',
+    refresh.includes('this.capturePanel.updateMeasurements(this.measurementView());') &&
+      !refresh.includes('renderPanels()') && refresh.includes('this.dirty = true;'),
+    `refresh=${refresh.length}`);
+
+  check('App registers both statistics reset callbacks on the capture panel',
+    app.includes('onResetMeasurementStats: (rowId) => this.resetMeasurementStatsRow(rowId),') &&
+      app.includes('onResetAllMeasurementStats: () => this.resetAllMeasurementStatsRows(),'),
+    `row=${app.includes('onResetMeasurementStats:')}, ` +
+    `all=${app.includes('onResetAllMeasurementStats:')}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

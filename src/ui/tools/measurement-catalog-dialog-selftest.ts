@@ -48,6 +48,8 @@ function sectionView(over: Partial<MeasurementSectionView> = {}): MeasurementSec
     window: null,
     unavailable: null,
     capture: null,
+    statsSkipped: 0,
+    statsLoopUnavailable: false,
     ...over,
   };
 }

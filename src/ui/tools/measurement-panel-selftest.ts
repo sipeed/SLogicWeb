@@ -13,6 +13,10 @@ import { fr } from '../locales/fr.js';
 import type {
   MeasurementRowView, MeasurementSectionView, MeasurementStatus,
 } from '../measurementState.js';
+import {
+  accumulateSample, emptyAccumulator, measurementStatsView, noMeasurementStatsView,
+  type MeasurementStatsState, type MeasurementStatsView,
+} from '../measurementStats.js';
 import { installFakeDom, type FakeElement } from './fakeDom.js';
 
 interface FsLike {
@@ -105,6 +109,7 @@ function rowView(over: Partial<MeasurementRowView> = {}): MeasurementRowView {
     crossingCount: 0,
     dutyPeriods: 0,
     dutyExcludedPeriods: 0,
+    stats: noMeasurementStatsView(),
     ...over,
   };
 }
@@ -123,6 +128,8 @@ function sectionView(over: Partial<MeasurementSectionView> = {}): MeasurementSec
     window: null,
     unavailable: null,
     capture: null,
+    statsSkipped: 0,
+    statsLoopUnavailable: false,
     ...over,
   };
 }
@@ -250,10 +257,10 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     measureSection.includes("parameter.className = 'measure-param';") &&
     measureSection.includes("value.className = 'measure-value';") &&
     measureSection.includes("status.className = 'measure-status';") &&
-    measureSection.includes('item.append(source, parameter, value, status, remove);'),
+    measureSection.includes('item.append(source, toggle, status, remove, details);'),
     `rows=${measureSection.includes('v.measurement.rows')}, ` +
     `dataset=${measureSection.includes('item.dataset.measureId = String(row.id);')}, ` +
-    `order=${measureSection.includes('item.append(source, parameter, value, status, remove);')}`);
+    `order=${measureSection.includes('item.append(source, toggle, status, remove, details);')}`);
 
   check('the row text comes from the shared parameter, value and status composition',
     measureSection.includes('parameter.textContent = measurementParameterText(row.parameter);') &&
@@ -270,8 +277,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   check('each row removes exactly its own row id through the shared remove button',
     measureSection.includes('const remove = cursorRemoveButton(') &&
     measureSection.includes("t('capturePanel.measureRemove', { parameter: label })") &&
-    measureSection.includes('const label = `${row.sourceName} ' +
-      '${measurementParameterText(row.parameter)}`;') &&
+    measureSection.includes('const label = measurementRowLabel(row);') &&
     measureSection.includes(removeFocus) &&
     measureSection.indexOf('cursorRemoveButton(') <
       measureSection.indexOf('this.cb.onRemoveMeasurementRow(row.id)') &&
@@ -426,9 +432,9 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     source.split("progress.setAttribute('role', 'progressbar');").length - 1 === 1 &&
     !source.includes('aria-live') && (source.match(/role="/g) ?? []).length === 0;
   const rowLive = measureSection.replace(
-    'item.append(source, parameter, value, status, remove);',
+    'item.append(source, toggle, status, remove, details);',
     "item.setAttribute('role', 'status');\n        " +
-      'item.append(source, parameter, value, status, remove);');
+      'item.append(source, toggle, status, remove, details);');
   const valueLive = measureSection.replace(
     'value.textContent = measurementValueText(row);',
     "value.setAttribute('role', 'status');\n        " +
@@ -960,6 +966,21 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureNearLimit': 'period near the sample limit',
     'capturePanel.measureCrossingCap': 'crossing scan stopped at {count}',
     'capturePanel.measureDutyExcluded': '{periods} complete periods excluded (gaps or clipping)',
+    'capturePanel.measureDetailsShow': 'Show statistics details: {parameter}',
+    'capturePanel.measureDetailsHide': 'Hide statistics details: {parameter}',
+    'capturePanel.measureDetailsCurrent': 'Current',
+    'capturePanel.measureDetailsMean': 'Mean',
+    'capturePanel.measureDetailsMin': 'Min',
+    'capturePanel.measureDetailsMax': 'Max',
+    'capturePanel.measureDetailsStdDev': 'StdDev',
+    'capturePanel.measureDetailsCount': 'Count',
+    'capturePanel.measureDetailsExcluded': 'Excluded',
+    'capturePanel.measureDetailsSkipped': 'Skipped visibility intervals: {count}',
+    'capturePanel.measureStatsCapped': 'capped at {count}',
+    'capturePanel.measureStatsReset': 'Reset statistics',
+    'capturePanel.measureStatsResetAll': 'Reset all statistics',
+    'capturePanel.measureStatsLoop': 'cross-acquisition statistics are unavailable in Loop captures',
+    'capturePanel.measureStatsNote': 'Statistics are cross-acquisition and kept for this session only.',
     'capturePanel.measureValueNone': '–',
   };
   const keys = Object.keys(english);
@@ -969,8 +990,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const value = (dict: Readonly<Record<string, string>>, key: string): string => dict[key] ?? '';
   const missing = catalogs.flatMap(([locale, dict]) =>
     keys.filter((key) => value(dict, key).trim() === '').map((key) => `${locale}:${key}`));
-  check('all four catalogs define the seventy-three measurement keys',
-    missing.length === 0 && keys.length === 73, `missing=${JSON.stringify(missing)}`);
+  check('all four catalogs define the eighty-eight measurement keys',
+    missing.length === 0 && keys.length === 88, `missing=${JSON.stringify(missing)}`);
 
   const mismatched = keys.filter((key) => value(en, key) !== english[key]);
   check('the English measurement copy matches the approved vocabulary',
@@ -978,6 +999,10 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `mismatched=${JSON.stringify(mismatched.map((key) => [key, value(en, key)]))}`);
 
   const variables: Record<string, readonly string[]> = {
+    'capturePanel.measureDetailsShow': ['{parameter}'],
+    'capturePanel.measureDetailsHide': ['{parameter}'],
+    'capturePanel.measureDetailsSkipped': ['{count}'],
+    'capturePanel.measureStatsCapped': ['{count}'],
     'capturePanel.measureRemove': ['{parameter}'],
     'capturePanel.measureCleared': ['{count}'],
     'capturePanel.measureMethodFrequency': ['{count}'],
@@ -1239,7 +1264,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   check('only the visible rows are scanned, and the catalog receives row identity alone',
     measureView.includes('const results = new Map<number, MeasurementSourceResult>();') &&
       measureView.includes('for (const source of this.measurementRowsFor(sources, rows)) {') &&
-      measureView.includes('rows: measurementRowViews(rows, results, null),') &&
+      measureView.includes('rows: measurementRowViews(rows, results, null, stats),') &&
       measureView.split('runMeasurement({').length - 1 === 1 &&
       !measureView.includes('measurementRowViews(state.rows') &&
       app.includes('const wanted = new Set(rows.map((row) => row.start));'),
@@ -1285,9 +1310,9 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 
   check('the status line is ordered after the remove control without moving it in the DOM',
     status.includes('order: 1;') &&
-    measureSection.indexOf('item.append(source, parameter, value, status, remove);') > 0 &&
+    measureSection.indexOf('item.append(source, toggle, status, remove, details);') > 0 &&
     measureSection.indexOf('status.className') <
-      measureSection.indexOf('item.append(source, parameter, value, status, remove);'),
+      measureSection.indexOf('item.append(source, toggle, status, remove, details);'),
     `order=${status.includes('order: 1;')}`);
 
   check('the source column wraps and the footer actions wrap at the narrow rail',
@@ -1854,6 +1879,286 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     restartFocused && scans === 2 && afterRestartState === 'running' &&
       afterRestart !== null && afterRestart !== doc.body && afterRestart === cancelOf(),
     `focused=${restartFocused}, scans=${scans}, cancel=${afterRestart === cancelOf()}`);
+}
+
+{
+  const doc = installFakeDom();
+  const capture = doc.createElement('div');
+  const cursors = doc.createElement('div');
+  doc.body.append(capture, cursors);
+  const statsOf = (over: Partial<MeasurementStatsView> = {}): MeasurementStatsView => ({
+    count: 2, mean: 3.5, min: 1, max: 5, stdDev: 1.5, excluded: 0, capped: false, ...over,
+  });
+  const section = (over: Partial<MeasurementSectionView> = {}): MeasurementSectionView =>
+    sectionView({
+      sources: [{ group: 0, start: 0, gain: 1, name: 'A0' }],
+      rows: [rowView({
+        id: 1, parameter: 'vpp', unit: 'v', value: 21.4588, analyzedSamples: 1000,
+        requestedSamples: 1000, crossingCount: 0, stats: statsOf(),
+      })],
+      allRows: [{ id: 1, start: 0, parameter: 'vpp' }],
+      rowCount: 1,
+      window: { start: 0, end: 1000 },
+      ...over,
+    });
+  const view = (over: Partial<MeasurementSectionView> = {}): CapturePanelView => ({
+    settings: defaultCaptureSettings(),
+    channels: [],
+    widthOptions: [16],
+    buses: [],
+    analogGroups: 0,
+    deviceName: 'fixture',
+    running: false,
+    stopping: false,
+    repeatPending: false,
+    captureState: 'ready',
+    result: null,
+    progress: null,
+    maxSamplerateHz: { 16: 200e6 },
+    triggerState: 'off',
+    cursors: [],
+    cursorDistances: [],
+    cursorEdges: [],
+    cursorEdgeChannels: [],
+    triggerViewLost: false,
+    triggerViewPending: false,
+    triggerLocked: false,
+    triggerRetuneRejected: false,
+    triggerAnalogRolling: false,
+    triggerArmed: false,
+    triggerAutoDisarmed: false,
+    settingsArmed: false,
+    activeTriggerPreSamples: undefined,
+    measurement: section(over),
+  });
+  const resets: string[] = [];
+  const target = new CapturePanel({
+    capture: capture as unknown as HTMLElement,
+    cursors: cursors as unknown as HTMLElement,
+  }, {
+    onResetMeasurementStats: (rowId: number) => resets.push(`row:${rowId}`),
+    onResetAllMeasurementStats: () => resets.push('all'),
+  } as unknown as CapturePanelCallbacks);
+  const toggleOf = (): FakeElement | null => cursors.querySelector('.measure-row .measure-open');
+  const detailsOf = (): FakeElement | null => cursors.querySelector('[data-measure-details]');
+  const cellOf = (key: string): string =>
+    cursors.querySelector(`[data-measure-detail="${key}"]`)?.textContent ?? '';
+  const active = (): FakeElement | null =>
+    doc.activeElement === doc.body ? null : doc.activeElement;
+
+  target.render(view());
+  const closed = {
+    tag: toggleOf()?.tagName ?? '',
+    expanded: toggleOf()?.getAttribute('aria-expanded') ?? '',
+    controls: toggleOf()?.getAttribute('aria-controls') ?? '',
+    label: toggleOf()?.getAttribute('aria-label') ?? '',
+    id: detailsOf()?.id ?? '',
+    hidden: detailsOf()?.hidden,
+    param: cursors.querySelector('.measure-open .measure-param')?.textContent ?? '',
+    value: cursors.querySelector('.measure-open .measure-value')?.textContent ?? '',
+  };
+  check('the parameter and value region is a disclosure button wired to one details block',
+    closed.tag === 'BUTTON' && closed.expanded === 'false' &&
+      closed.controls === 'measure-details-1' && closed.id === 'measure-details-1' &&
+      closed.hidden === true && closed.param === 'Vpp' && closed.value === '21.5 V' &&
+      closed.label === 'Show statistics details: A0 Vpp',
+    `closed=${JSON.stringify(closed)}`);
+
+  toggleOf()?.focus();
+  const focused = active() === toggleOf();
+  toggleOf()?.click();
+  const opened = {
+    expanded: toggleOf()?.getAttribute('aria-expanded') ?? '',
+    label: toggleOf()?.getAttribute('aria-label') ?? '',
+    hidden: detailsOf()?.hidden,
+    focus: active() === toggleOf(),
+    method: cellOf('method'),
+    window: cellOf('window'),
+    current: cellOf('current'),
+    mean: cellOf('mean'),
+    min: cellOf('min'),
+    max: cellOf('max'),
+    stdDev: cellOf('stdDev'),
+    count: cellOf('count'),
+    excluded: cellOf('excluded'),
+    loop: cellOf('loop'),
+  };
+  check('opening the details carries the method, the window, the current value and the population',
+    focused && opened.expanded === 'true' &&
+      opened.label === 'Hide statistics details: A0 Vpp' && opened.hidden === false &&
+      opened.focus && opened.method === 'exact code extrema' &&
+      opened.window === 'Window: 1,000 samples' && opened.current === '21.5 V' &&
+      opened.mean === '3.5 V' && opened.min === '1 V' && opened.max === '5 V' &&
+      opened.stdDev === '1.5 V' && opened.count === '2' && opened.excluded === '0' &&
+      opened.loop === '',
+    `opened=${JSON.stringify(opened)}`);
+  check('the session-only statistics note is part of the details in every theme',
+    cellOf('note') === 'Statistics are cross-acquisition and kept for this session only.' &&
+      cellOf('note').length > 0,
+    `note=${cellOf('note')}`);
+  toggleOf()?.click();
+  check('a second activation collapses the details without rebuilding the row',
+    toggleOf()?.getAttribute('aria-expanded') === 'false' && detailsOf()?.hidden === true &&
+      active() === toggleOf() && cursors.querySelectorAll('.measure-row').length === 1,
+    `expanded=${toggleOf()?.getAttribute('aria-expanded')}, hidden=${detailsOf()?.hidden}`);
+  toggleOf()?.click();
+
+  target.updateMeasurements(section({ rows: [rowView({
+    id: 1, parameter: 'vpp', unit: 'v', value: 22, analyzedSamples: 1000,
+    requestedSamples: 1000, crossingCount: 0, stats: statsOf({
+      count: 3, mean: 4, min: 2, max: 6, stdDev: 2, excluded: 1,
+    }),
+  })] }));
+  const updated = {
+    value: cursors.querySelector('.measure-open .measure-value')?.textContent ?? '',
+    count: cellOf('count'),
+    mean: cellOf('mean'),
+    excluded: cellOf('excluded'),
+  };
+  check('a live refresh rewrites the open details in place and still hides the closed ones',
+    updated.value === '22 V' && updated.count === '3' && updated.mean === '4 V' &&
+      updated.excluded === '1' && detailsOf()?.hidden === false,
+    `updated=${JSON.stringify(updated)}`);
+
+  const nodes = (): FakeElement[] => [
+    cursors.querySelector('[data-measure-detail="count"]')!,
+    cursors.querySelector('[data-measure-details]')!,
+  ];
+  const before = nodes();
+  target.updateMeasurements(section());
+  check('the in-place refresh keeps the same details elements, so nothing is rebuilt per update',
+    nodes()[0] === before[0] && nodes()[1] === before[1] && cellOf('count') === '2',
+    `same=${nodes()[0] === before[0]}, count=${cellOf('count')}`);
+
+  const rebuilt = (source: string): boolean => source.includes('details.replaceChildren()') ||
+    source.includes('item.replaceChildren()');
+  check('an updater that rebuilt the details instead of rewriting text fails that control',
+    !rebuilt(slice(panel, 'updateMeasurements(view: MeasurementSectionView): void {',
+      'updateCursors(rows: readonly CursorRowView[]): void {')),
+    `rebuilt=${rebuilt(slice(panel, 'updateMeasurements(view: MeasurementSectionView): void {',
+      'updateCursors(rows: readonly CursorRowView[]): void {'))}`);
+
+  target.render(view({
+    rows: [rowView({
+      id: 1, parameter: 'vpp', unit: 'v', value: 21.4588, crossingCount: 0,
+      stats: statsOf({ count: 1, mean: 21.4588, min: 21.4588, max: 21.4588, stdDev: null }),
+    })],
+  }));
+  toggleOf()?.click();
+  check('a single sample renders StdDev as the locale-neutral dash, never a zero spread',
+    cellOf('stdDev') === '--' && cellOf('count') === '1',
+    `stdDev=${JSON.stringify(cellOf('stdDev'))}, count=${cellOf('count')}`);
+
+  target.render(view({
+    rows: [rowView({
+      id: 1, parameter: 'vpp', unit: 'v', value: 21.4588, crossingCount: 0,
+      stats: statsOf({ count: 512, capped: true, excluded: 4 }),
+    })],
+    statsSkipped: 3,
+  }));
+  toggleOf()?.click();
+  const capped = {
+    count: cellOf('count'),
+    excluded: cellOf('excluded'),
+    skipped: cellOf('skipped'),
+    skippedHidden: cursors.querySelector('[data-measure-detail="skipped"]')?.hidden,
+  };
+  check('the cap is stated on the count and the excluded and skipped intervals are disclosed',
+    capped.count === '512 (capped at 512)' && capped.excluded === '4' &&
+      capped.skipped === 'Skipped visibility intervals: 3' && capped.skippedHidden === false,
+    `capped=${JSON.stringify(capped)}`);
+
+  target.render(view({
+    rows: [rowView({
+      id: 1, parameter: 'vpp', unit: 'v', value: 21.4588, crossingCount: 0,
+      stats: noMeasurementStatsView(),
+    })],
+    statsSkipped: 0,
+    statsLoopUnavailable: true,
+  }));
+  toggleOf()?.click();
+  const loop = {
+    statsHidden: cursors.querySelector('[data-measure-stats]')?.hidden,
+    loop: cellOf('loop'),
+    skippedHidden: cursors.querySelector('[data-measure-detail="skipped"]')?.hidden,
+    count: cellOf('count'),
+    current: cellOf('current'),
+  };
+  check('Loop discloses the unavailable statistics with the reason instead of a zero count',
+    loop.statsHidden === true && loop.count === '--' &&
+      loop.loop === 'cross-acquisition statistics are unavailable in Loop captures' &&
+      loop.skippedHidden === true && loop.current === '21.5 V',
+    `loop=${JSON.stringify(loop)}`);
+
+  const reset = cursors.querySelector('[data-measure-stats-reset]');
+  const resetAll = cursors.querySelector('[data-measure-stats-reset-all]');
+  check('the details own the per-row and all-rows reset actions',
+    reset !== null && resetAll !== null &&
+      reset.textContent === 'Reset statistics' &&
+      resetAll.textContent === 'Reset all statistics' &&
+      reset.getAttribute('data-measure-stats-reset') === '1',
+    `row=${reset?.textContent}, all=${resetAll?.textContent}`);
+  reset?.click();
+  resetAll?.click();
+  check('each reset button emits its own callback once, without touching the section',
+    JSON.stringify(resets) === JSON.stringify(['row:1', 'all']) &&
+      cursors.querySelectorAll('.measure-row').length === 1,
+    `resets=${JSON.stringify(resets)}`);
+
+  const accumulate = (values: readonly number[]): MeasurementStatsState => {
+    let acc = emptyAccumulator('current');
+    for (const value of values) acc = accumulateSample(acc, value);
+    return { accumulators: new Map([[1, acc]]), skipped: 0, lastWaveKey: null };
+  };
+  const state = accumulate([2, 4]);
+  const stale = measurementStatsView(state, 1, 'superseded');
+  target.render(view({
+    rows: [rowView({
+      id: 1, parameter: 'vpp', unit: 'v', value: 21.4588, crossingCount: 0,
+      stats: measurementStatsView(state, 1, 'current'),
+    })],
+  }));
+  toggleOf()?.click();
+  const matchedCount = cellOf('count');
+  target.updateMeasurements(section({
+    rows: [rowView({
+      id: 1, parameter: 'vpp', unit: 'v', value: 21.4588, crossingCount: 0, stats: stale,
+    })],
+  }));
+  const staleCount = cellOf('count');
+  check('a superseded configuration key renders Count 0 instead of the previous population',
+    matchedCount === '2' && staleCount === '0' && stale.mean !== stale.mean,
+    `matched=${matchedCount}, stale=${staleCount}, staleMean=${String(stale.mean)}`);
+}
+
+{
+  const rules = ['.measure-open {', '.measure-details {', '.measure-detail-method,',
+    '.measure-detail-stats {', '.measure-detail-row {', '.measure-detail-label {',
+    '.measure-detail-value {', '.measure-detail-actions {',
+    '.analyzer-act.measure-stats-reset {', '.analyzer-act.measure-stats-reset-all {'];
+  const absent = rules.filter((rule) => !css.includes(rule));
+  const hiddenRules = ['\n.measure-details[hidden] { display: none; }',
+    '\n.measure-detail-stats[hidden] { display: none; }'];
+  const missingHidden = hiddenRules.filter((rule) => !css.includes(rule));
+  check('the details block has its own sheet rules and every author display collapses when hidden',
+    absent.length === 0 && missingHidden.length === 0 &&
+      slice(css, '.measure-details {', '}').includes('display: flex;') &&
+      slice(css, '.measure-detail-stats {', '}').includes('display: flex;'),
+    `absent=${JSON.stringify(absent)}, hidden=${JSON.stringify(missingHidden)}`);
+
+  const details = slice(css, '.measure-details {', '.measure-detail-stats {');
+  const colour = details.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(|oklch\(/g) ?? [];
+  check('the details rules reuse the sheet tokens and add no colour literal',
+    details.length > 0 && colour.length === 0 && !details.includes('!important'),
+    `colours=${JSON.stringify(colour)}, block=${details.length} chars`);
+
+  check('the details markup stays div/span/button, never a table, a list or string HTML',
+    ['<table', '<dl', 'innerHTML', "createElement('table')", "createElement('dl')"]
+      .every((needle) => !slice(panel, 'private measurementDetailsBlock(',
+        'dispose(): void {').includes(needle)),
+    `markup=${JSON.stringify(['<table', '<dl', 'innerHTML'].filter((needle) => slice(panel,
+      'private measurementDetailsBlock(', 'dispose(): void {').includes(needle)))}`);
+
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

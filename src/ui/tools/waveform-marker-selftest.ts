@@ -833,9 +833,18 @@ function between(source: string, start: string, end: string): string {
     !drawBlock.includes('markerA'),
     `draws=${draws.length}`);
 
+  const statsKeyRange = /cursorA: range\.a,\s*\n\s*cursorB: range\.b,/;
+  const withoutStatsKey = appSource.replace(statsKeyRange, '');
+  const restoredA = withoutStatsKey.replace(
+    'private measurementStats: MeasurementStatsState = emptyMeasurementStats();',
+    'private cursorA = 0;\n' +
+    '  private measurementStats: MeasurementStatsState = emptyMeasurementStats();');
   check('the retired single A marker field leaves no state, draw, or status path behind',
-    !appSource.includes('markerA') && !appSource.includes('cursorA'),
-    `markerA=${appSource.includes('markerA')}, cursorA=${appSource.includes('cursorA')}`);
+    statsKeyRange.test(appSource) && !withoutStatsKey.includes('cursorA') &&
+    !appSource.includes('markerA') && restoredA.includes('cursorA'),
+    `markerA=${appSource.includes('markerA')}, ` +
+    `cursorA=${withoutStatsKey.includes('cursorA')}, ` +
+    `restored=${restoredA.includes('cursorA')}`);
 
   check('the marker class stays single-instance while the application owns the list',
     !/markers\s*[:=]|WaveformMarkers|MarkerManager/.test(markerSource) &&
@@ -854,7 +863,7 @@ function between(source: string, start: string, end: string): string {
   const bTokens = ['setCursors', "'B'", '|B-A|', '1/|B-A|'];
   const bTraces = [
     ...bTokens.filter((token) => appSource.includes(token)),
-    ...(/\bcursorB\b/.test(appSource) ? ['cursorB'] : []),
+    ...(/\bcursorB\b/.test(withoutStatsKey) ? ['cursorB'] : []),
   ];
   check('marker B leaves no state, draw, readout, or debug parameter behind',
     bTraces.length === 0, `traces=${JSON.stringify(bTraces)}`);

@@ -37,7 +37,7 @@ import {
 import { t, type MessageKey } from './i18n.js';
 import { helpTip } from './helpTip.js';
 import {
-  catalogEntry, type MeasurementParameter,
+  catalogEntry, type MeasurementParameter, type MeasurementUnit,
 } from './measurementCatalog.js';
 import {
   MeasurementCatalogDialog, measurementCatalogView,
@@ -48,6 +48,7 @@ import {
   type MeasurementStatus,
 } from './measurementState.js';
 import { chipForeground } from './metrics.js';
+import type { MeasurementStatsView } from './measurementStats.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
 import type { CaptureSettings, ChannelState } from './state.js';
@@ -101,6 +102,8 @@ export interface CapturePanelCallbacks {
   onUndoMeasurementRows(): void;
   onCancelMeasurementCapture(): void;
   onRestartMeasurementCapture(): void;
+  onResetMeasurementStats(rowId: number): void;
+  onResetAllMeasurementStats(): void;
 }
 
 /** `aborted`: the last capture was ended by a device/link failure (`CapturePanelView.abort`). */
@@ -298,6 +301,8 @@ export class CapturePanel {
   private chipObserver: ResizeObserver | null = null;
   private chipFallback = false;
   private measureFocus: MeasureFocusIntent | null = null;
+  private readonly measureOpen = new Set<number>();
+  private measureSectionView: MeasurementSectionView | null = null;
   private readonly catalogDialog: MeasurementCatalogDialog;
 
   constructor(
@@ -364,6 +369,44 @@ export class CapturePanel {
     const target = row?.querySelector<HTMLElement>('.analyzer-act--remove') ??
       this.host.cursors.querySelector<HTMLElement>('[data-measure-open]');
     target?.focus();
+  }
+
+  private measurementDetailsBlock(rowId: number): HTMLDivElement {
+    const details = div('measure-details');
+    details.id = measurementDetailsId(rowId);
+    details.dataset.measureDetails = String(rowId);
+    details.hidden = true;
+    const method = div('measure-detail-method');
+    method.dataset.measureDetail = 'method';
+    const windowLine = div('measure-detail-window');
+    windowLine.dataset.measureDetail = 'window';
+    const stats = div('measure-detail-stats');
+    stats.dataset.measureStats = '';
+    for (const [key, labelKey] of MEASUREMENT_DETAIL_ROWS) {
+      stats.appendChild(measurementDetailRow(key, t(labelKey)));
+    }
+    const skipped = div('measure-detail-skipped');
+    skipped.dataset.measureDetail = 'skipped';
+    const loop = div('measure-detail-loop');
+    loop.dataset.measureDetail = 'loop';
+    const note = div('measure-detail-note');
+    note.dataset.measureDetail = 'note';
+    const actions = div('measure-detail-actions');
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.className = 'analyzer-act measure-stats-reset';
+    reset.dataset.measureStatsReset = String(rowId);
+    reset.textContent = t('capturePanel.measureStatsReset');
+    reset.addEventListener('click', () => this.cb.onResetMeasurementStats(rowId));
+    const resetAll = document.createElement('button');
+    resetAll.type = 'button';
+    resetAll.className = 'analyzer-act measure-stats-reset-all';
+    resetAll.dataset.measureStatsResetAll = '';
+    resetAll.textContent = t('capturePanel.measureStatsResetAll');
+    resetAll.addEventListener('click', () => this.cb.onResetAllMeasurementStats());
+    actions.append(reset, resetAll);
+    details.append(method, windowLine, stats, skipped, loop, note, actions);
+    return details;
   }
 
   dispose(): void {
@@ -456,6 +499,7 @@ export class CapturePanel {
   }
 
   updateMeasurements(view: MeasurementSectionView): void {
+    this.measureSectionView = view;
     const byId = new Map<number, MeasurementRowView>();
     for (const row of view.rows) byId.set(row.id, row);
     const note = measurementNoteText(view);
@@ -471,6 +515,10 @@ export class CapturePanel {
         if (value !== null) value.textContent = measurementValueText(row);
         const status = item.querySelector<HTMLElement>('.measure-status');
         if (status !== null) status.textContent = measurementStatusText(row);
+        const details = item.querySelector<HTMLElement>('[data-measure-details]');
+        if (this.measureOpen.has(row.id) && details !== null && !details.hidden) {
+          applyMeasurementDetails(item, row, true, view);
+        }
       }
       for (const item of root.querySelectorAll<HTMLElement>('[data-measure-note]')) {
         item.textContent = note;
@@ -1528,6 +1576,10 @@ export class CapturePanel {
     cursorPage.appendChild(cursorSec.el);
 
     const measureSec = section(t('capturePanel.measure'));
+    this.measureSectionView = v.measurement;
+    for (const id of this.measureOpen) {
+      if (!v.measurement.allRows.some((row) => row.id === id)) this.measureOpen.delete(id);
+    }
     const measureLegend = document.createElement('span');
     measureLegend.className = 'cursor-legend';
     measureLegend.textContent = t('capturePanel.measureFormat');
@@ -1633,6 +1685,11 @@ export class CapturePanel {
         const source = document.createElement('span');
         source.className = 'measure-source';
         source.textContent = row.sourceName;
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'measure-open';
+        toggle.dataset.measureToggle = String(row.id);
+        toggle.setAttribute('aria-controls', measurementDetailsId(row.id));
         const parameter = document.createElement('span');
         parameter.className = 'measure-param';
         parameter.textContent = measurementParameterText(row.parameter);
@@ -1640,16 +1697,27 @@ export class CapturePanel {
         value.className = 'measure-value';
         value.translate = false;
         value.textContent = measurementValueText(row);
+        toggle.append(parameter, value);
         const status = document.createElement('span');
         status.className = 'measure-status';
         status.textContent = measurementStatusText(row);
-        const label = `${row.sourceName} ${measurementParameterText(row.parameter)}`;
+        const label = measurementRowLabel(row);
         const remove = cursorRemoveButton(
           t('capturePanel.measureRemove', { parameter: label }),
           () => this.runMeasureAction('row', remove,
             () => this.cb.onRemoveMeasurementRow(row.id), row.id, index),
         );
-        item.append(source, parameter, value, status, remove);
+        const details = this.measurementDetailsBlock(row.id);
+        toggle.addEventListener('click', () => {
+          const expanded = !this.measureOpen.has(row.id);
+          if (expanded) this.measureOpen.add(row.id);
+          else this.measureOpen.delete(row.id);
+          const view = this.measureSectionView;
+          const live = view?.rows.find((entry) => entry.id === row.id) ?? row;
+          applyMeasurementDetails(item, live, expanded, view);
+        });
+        item.append(source, toggle, status, remove, details);
+        applyMeasurementDetails(item, row, this.measureOpen.has(row.id), v.measurement);
         list.appendChild(item);
       });
       measureSec.body.appendChild(list);
@@ -2396,12 +2464,113 @@ function measurementFlagText(row: MeasurementRowView): string[] {
 }
 
 export function measurementValueText(row: MeasurementRowView): string {
-  if (Number.isNaN(row.value)) return t('capturePanel.measureValueNone');
-  switch (row.unit) {
-    case 'hz': return formatFreq(row.value);
-    case 'v': return `${formatVoltsNumber(row.value)} V`;
-    case 's': return formatDuration(row.value);
-    case '%': return `${row.value.toFixed(1)} %`;
+  return formatMeasureValue(row.unit, row.value);
+}
+
+function formatMeasureValue(unit: MeasurementUnit, value: number): string {
+  if (!Number.isFinite(value)) return t('capturePanel.measureValueNone');
+  switch (unit) {
+    case 'hz': return formatFreq(value);
+    case 'v': return `${formatVoltsNumber(value)} V`;
+    case 's': return formatDuration(value);
+    case '%': return `${value.toFixed(1)} %`;
+  }
+}
+
+export type MeasurementDetailKey =
+  | 'method' | 'window' | 'current' | 'mean' | 'min' | 'max'
+  | 'stdDev' | 'count' | 'excluded' | 'skipped' | 'loop' | 'note';
+
+export type MeasurementDetailText = Record<MeasurementDetailKey, string>;
+
+const MEASUREMENT_DETAIL_ROWS: readonly [MeasurementDetailKey, MessageKey][] = [
+  ['current', 'capturePanel.measureDetailsCurrent'],
+  ['mean', 'capturePanel.measureDetailsMean'],
+  ['min', 'capturePanel.measureDetailsMin'],
+  ['max', 'capturePanel.measureDetailsMax'],
+  ['stdDev', 'capturePanel.measureDetailsStdDev'],
+  ['count', 'capturePanel.measureDetailsCount'],
+  ['excluded', 'capturePanel.measureDetailsExcluded'],
+];
+
+function measurementRowLabel(row: MeasurementRowView): string {
+  const parameter = measurementParameterText(row.parameter);
+  const source = row.sourceName.trim();
+  return source === '' ? parameter : `${source} ${parameter}`;
+}
+
+function measurementDetailsId(rowId: number): string {
+  return `measure-details-${rowId}`;
+}
+
+function measurementCountText(stats: MeasurementStatsView): string {
+  const count = formatCount(stats.count);
+  return stats.capped
+    ? `${count} (${t('capturePanel.measureStatsCapped', { count })})`
+    : count;
+}
+
+export function measurementDetailText(
+  view: MeasurementSectionView | null, row: MeasurementRowView,
+): MeasurementDetailText {
+  const stats = row.stats;
+  const loop = view !== null && view.statsLoopUnavailable;
+  const skipped = view === null ? 0 : view.statsSkipped;
+  return {
+    method: measurementMethodText(row),
+    window: view === null ? '' : measurementWindowText(view),
+    current: measurementValueText(row),
+    mean: loop ? '--' : formatMeasureValue(row.unit, stats.mean),
+    min: loop ? '--' : formatMeasureValue(row.unit, stats.min),
+    max: loop ? '--' : formatMeasureValue(row.unit, stats.max),
+    stdDev: loop || stats.stdDev === null
+      ? '--' : formatMeasureValue(row.unit, stats.stdDev),
+    count: loop ? '--' : measurementCountText(stats),
+    excluded: loop ? '--' : formatCount(stats.excluded),
+    skipped: loop || skipped <= 0 ? '' : t('capturePanel.measureDetailsSkipped', {
+      count: formatCount(skipped),
+    }),
+    loop: loop ? t('capturePanel.measureStatsLoop') : '',
+    note: t('capturePanel.measureStatsNote'),
+  };
+}
+
+function measurementDetailRow(key: MeasurementDetailKey, label: string): HTMLDivElement {
+  const row = div('measure-detail-row');
+  const name = document.createElement('span');
+  name.className = 'measure-detail-label';
+  name.textContent = label;
+  const value = document.createElement('span');
+  value.className = 'measure-detail-value';
+  value.dataset.measureDetail = key;
+  value.translate = false;
+  row.append(name, value);
+  return row;
+}
+
+function applyMeasurementDetails(
+  item: HTMLElement, row: MeasurementRowView, expanded: boolean,
+  view: MeasurementSectionView | null,
+): void {
+  const toggle = item.querySelector<HTMLElement>('.measure-open');
+  if (toggle !== null) {
+    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    toggle.setAttribute('aria-label', t(expanded
+      ? 'capturePanel.measureDetailsHide' : 'capturePanel.measureDetailsShow',
+    { parameter: measurementRowLabel(row) }));
+  }
+  const details = item.querySelector<HTMLElement>('[data-measure-details]');
+  if (details === null) return;
+  details.hidden = !expanded;
+  if (!expanded) return;
+  const text = measurementDetailText(view, row);
+  const stats = details.querySelector<HTMLElement>('[data-measure-stats]');
+  if (stats !== null) stats.hidden = text.loop !== '';
+  for (const cell of details.querySelectorAll<HTMLElement>('[data-measure-detail]')) {
+    const key = cell.dataset.measureDetail as MeasurementDetailKey | undefined;
+    if (key === undefined) continue;
+    cell.textContent = text[key];
+    if (key === 'skipped' || key === 'loop') cell.hidden = text[key] === '';
   }
 }
 
