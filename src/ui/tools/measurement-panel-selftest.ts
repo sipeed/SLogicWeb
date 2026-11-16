@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  measurementNoteText, measurementStatusText, measurementValueText, CapturePanel,
-  type CapturePanelCallbacks,
+  measurementNoteText, measurementStatusText, measurementValueText, measurementWindowText,
+  CapturePanel, type CapturePanelCallbacks,
 } from '../capturePanel.js';
 import { en } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
@@ -281,6 +281,19 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `note=${measureSection.includes("div('measure-note')")}, ` +
     `hook=${measureSection.includes("measureNote.dataset.measureNote = '';")}`);
 
+  const windowLine = measureSection.indexOf("const measureWindow = div('measure-window');");
+  check('the section states the window sample count between the controls and the rows',
+    windowLine > measureSection.indexOf('measureSec.body.appendChild(measureCursors);') &&
+    windowLine < measureSection.indexOf("const list = div('measure-list');") &&
+    windowLine < measureSection.indexOf('if (v.measurement.rows.length === 0) {') &&
+    measureSection.includes("measureWindow.dataset.measureWindow = '';") &&
+    measureSection.includes('measureWindow.textContent = measurementWindowText(v.measurement);') &&
+    measureSection.includes('measureWindow.hidden = v.measurement.window === null;') &&
+    measureSection.includes('measureSec.body.appendChild(measureWindow);') &&
+    panel.includes('export function measurementWindowText(view: MeasurementSectionView): string {'),
+    `line=${windowLine}, ` +
+    `hidden=${measureSection.includes('measureWindow.hidden = v.measurement.window === null;')}`);
+
   const markup = ['<table', '<thead', '<tbody', '<tr', '<th', '<td', 'innerHTML',
     "createElement('table')", "createElement('th')", "createElement('td')"]
     .filter((needle) => measureSection.includes(needle));
@@ -319,6 +332,20 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   check('the in-place update is load-bearing: a dropped id guard or a rebuild fails',
     !liveRow(droppedGuard) && !liveRow(rebuild) && liveRow(measureUpdater),
     `dropped=${liveRow(droppedGuard)}, rebuilt=${liveRow(rebuild)}`);
+
+  const liveWindow = (source: string): boolean =>
+    source.includes('const windowText = measurementWindowText(view);') &&
+    source.includes("root.querySelectorAll<HTMLElement>('[data-measure-window]')") &&
+    source.includes('item.textContent = windowText;') &&
+    source.includes('item.hidden = view.window === null;');
+  const hardCoded = measureUpdater.replace('item.textContent = windowText;',
+    "item.textContent = 'Window: 0 samples';");
+  const neverHidden = measureUpdater.replace('item.hidden = view.window === null;',
+    'item.hidden = false;');
+  check('the window line is refreshed text-only inside the same root loop',
+    liveWindow(measureUpdater) && !liveWindow(hardCoded) && !liveWindow(neverHidden),
+    `live=${liveWindow(measureUpdater)}, hardCoded=${liveWindow(hardCoded)}, ` +
+    `neverHidden=${liveWindow(neverHidden)}`);
 }
 
 {
@@ -350,11 +377,20 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     note.hidden = false;
     root.appendChild(note);
   };
+  const makeWindowLine = (root: FakeElement): void => {
+    const line = doc.createElement('div');
+    line.className = 'measure-window';
+    line.dataset.measureWindow = '';
+    line.textContent = 'stale';
+    line.hidden = false;
+    root.appendChild(line);
+  };
   for (const root of [capture, cursors]) {
     makeRow(root, 'vpp', 'old vpp');
     makeRow(root, 'rms', 'old rms');
     makeRow(root, 'frequency', 'old hz');
     makeNote(root);
+    makeWindowLine(root);
   }
   const cb = {} as CapturePanelCallbacks;
   const target = new CapturePanel({
@@ -375,6 +411,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       ?.textContent ?? '';
   const noteOf = (root: FakeElement): FakeElement | null =>
     root.querySelector('[data-measure-note]');
+  const windowOf = (root: FakeElement): FakeElement | null =>
+    root.querySelector('[data-measure-window]');
   const written = [capture, cursors].map((root) => [
     cells(root, 'vpp', 'measure-value'),
     cells(root, 'vpp', 'measure-status'),
@@ -388,7 +426,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   ]);
   const rowsKept = [capture, cursors].every((root) =>
     root.querySelectorAll('.measure-row').length === 3);
-  check('a live update writes value, status and note text in both roots and touches nothing else',
+  check('a live update writes value, status and note text in both roots and leaves unlisted rows alone',
     written.every((entry) => entry[0] === '21.5 V' && entry[2] === '4.1 V' &&
       entry[4] === 'old hz' && entry[5] === 'stale' && entry[6] === 'label') &&
     written.every((entry) => entry[1] === 'exact code extrema · ' +
@@ -397,6 +435,50 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       'partial: 32,768 of 65,536 samples' && entry[8] === false) &&
     rowsKept,
     `written=${JSON.stringify(written)}, rows=${rowsKept}`);
+
+  const wide = rowView({
+    parameter: 'vpp', unit: 'v', value: 21.4588,
+    analyzedSamples: 65536, requestedSamples: 300000, truncated: true,
+  });
+  target.updateMeasurements(sectionView({
+    rows: [wide, rms],
+    window: { start: 0, end: 300000 },
+  }));
+  const windowLines = [capture, cursors].map((root) =>
+    `${windowOf(root)?.textContent}/${windowOf(root)?.hidden}`);
+  check('the window line names the requested window, and the truncated row its own prefix',
+    windowLines.every((entry) => entry === 'Window: 300,000 samples/false') &&
+    [capture, cursors].every((root) =>
+      cells(root, 'vpp', 'measure-status').includes('partial: 65,536 of 300,000 samples') &&
+      !(windowOf(root)?.textContent ?? '').includes('65,536')),
+    `lines=${JSON.stringify(windowLines)}, ` +
+    `row=${cells(capture, 'vpp', 'measure-status')}`);
+
+  target.updateMeasurements(sectionView({ rows: [vpp, rms] }));
+  const clearedWindow = [capture, cursors].map((root) =>
+    `${windowOf(root)?.textContent}/${windowOf(root)?.hidden}`);
+  check('a null window collapses the count line instead of leaving the last span up',
+    clearedWindow.every((entry) => entry === '/true'),
+    `lines=${JSON.stringify(clearedWindow)}`);
+
+  const composer = slice(panel, 'export function measurementWindowText(',
+    'export function measurementNoteText(');
+  const honestComposer = (source: string): boolean =>
+    source.includes("if (window === null) return '';") &&
+    source.includes("t('capturePanel.measureWindowSamples', {") &&
+    source.includes('samples: formatCount(window.end - window.start),');
+  const zeroed = composer.replace('samples: formatCount(window.end - window.start),',
+    "samples: '0',");
+  const untranslated = composer.replace("t('capturePanel.measureWindowSamples', {",
+    "'Window: ' + ({");
+  check('the count is the resolved span and a translated key: a zeroed or literal composer fails',
+    honestComposer(composer) && !honestComposer(zeroed) &&
+    !honestComposer(untranslated) &&
+    measurementWindowText(sectionView({ window: { start: 1024, end: 66560 } })) ===
+      'Window: 65,536 samples' &&
+    measurementWindowText(sectionView({ window: null })) === '',
+    `zeroed=${honestComposer(zeroed)}, untranslated=${honestComposer(untranslated)}, ` +
+    `text=${measurementWindowText(sectionView({ window: { start: 1024, end: 66560 } }))}`);
 
   target.updateMeasurements(sectionView({
     rows: [
@@ -550,6 +632,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureStatusPreviousWave': 'an older capture is on screen; ' +
       'waiting for the current one',
     'capturePanel.measurePartial': 'partial: {analyzed} of {requested} samples',
+    'capturePanel.measureWindowSamples': 'Window: {samples} samples',
     'capturePanel.measureRangeClipped': 'window clipped to captured samples',
     'capturePanel.measureGaps': 'missing samples in the window are ignored',
     'capturePanel.measureClippedLow': 'signal reaches code 0',
@@ -565,8 +648,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const value = (dict: Readonly<Record<string, string>>, key: string): string => dict[key] ?? '';
   const missing = catalogs.flatMap(([locale, dict]) =>
     keys.filter((key) => value(dict, key).trim() === '').map((key) => `${locale}:${key}`));
-  check('all four catalogs define the thirty-three measurement keys',
-    missing.length === 0 && keys.length === 33, `missing=${JSON.stringify(missing)}`);
+  check('all four catalogs define the thirty-four measurement keys',
+    missing.length === 0 && keys.length === 34, `missing=${JSON.stringify(missing)}`);
 
   const mismatched = keys.filter((key) => value(en, key) !== english[key]);
   check('the English measurement copy matches the approved vocabulary',
@@ -579,6 +662,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureMethodFrequency': ['{count}'],
     'capturePanel.measureCrossingCap': ['{count}'],
     'capturePanel.measurePartial': ['{analyzed}', '{requested}'],
+    'capturePanel.measureWindowSamples': ['{samples}'],
   };
   const placeholderProblems = catalogs.flatMap(([locale, dict]) => {
     const problems: string[] = [];
@@ -617,6 +701,16 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   }).map(([locale]) => locale);
   check('the section title is written in each locale script',
     scriptMissing.length === 0, `missing=${JSON.stringify(scriptMissing)}`);
+
+  const windowKey = 'capturePanel.measureWindowSamples';
+  const windowValues = catalogs.map(([locale, dict]) => [locale, value(dict, windowKey)] as const);
+  const windowMissing = windowValues.filter(([, text]) =>
+    text.trim() === '' || !text.includes('{samples}'));
+  const windowCopied = windowValues.filter(([locale, text]) =>
+    locale !== 'en' && text === value(en, windowKey));
+  check('every locale names the window sample count in its own prose',
+    windowValues.length === 4 && windowMissing.length === 0 && windowCopied.length === 0,
+    `values=${JSON.stringify(windowValues)}, copied=${JSON.stringify(windowCopied)}`);
 }
 
 {
@@ -742,10 +836,19 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 {
   const rules = ['.measure-controls {', '.measure-cursors {', '.measure-row {',
     '.measure-param {', '.measure-value {', '.measure-status {', '.measure-add-row {',
-    '.analyzer-act.measure-add {', '.measure-note {'];
+    '.analyzer-act.measure-add {', '.measure-note {', '.measure-window {'];
   const absent = rules.filter((rule) => !css.includes(rule));
   check('the sheet carries every measurement rule', absent.length === 0,
     `absent=${JSON.stringify(absent)}`);
+
+  const windowRule = slice(css, '.measure-window {', '}');
+  const noteRule = slice(css, '.measure-note {', '}');
+  check('the window count line is secondary body text that wraps at the narrow rail',
+    windowRule.includes('font-size: 10px;') && windowRule.includes('color: var(--text50);') &&
+    windowRule.includes('line-height: 1.5;') &&
+    windowRule.includes('overflow-wrap: anywhere;') && windowRule.includes('margin: 0;') &&
+    windowRule === noteRule.replace('.measure-note', '.measure-window'),
+    `rule=${windowRule}`);
 
   const row = slice(css, '.measure-row {', '}');
   const status = slice(css, '.measure-status {', '}');

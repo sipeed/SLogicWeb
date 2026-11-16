@@ -377,6 +377,7 @@ export class CapturePanel {
     const byParameter = new Map<MeasurementParameter, MeasurementRowView>();
     for (const row of view.rows) byParameter.set(row.parameter, row);
     const note = measurementNoteText(view);
+    const windowText = measurementWindowText(view);
     for (const root of this.roots()) {
       for (const item of root.querySelectorAll<HTMLElement>('.measure-row')) {
         const parameter = item.dataset.measure as MeasurementParameter | undefined;
@@ -390,6 +391,10 @@ export class CapturePanel {
       for (const item of root.querySelectorAll<HTMLElement>('[data-measure-note]')) {
         item.textContent = note;
         item.hidden = note === '';
+      }
+      for (const item of root.querySelectorAll<HTMLElement>('[data-measure-window]')) {
+        item.textContent = windowText;
+        item.hidden = view.window === null;
       }
     }
   }
@@ -1481,6 +1486,11 @@ export class CapturePanel {
       }
       measureSec.body.appendChild(measureCursors);
     }
+    const measureWindow = div('measure-window');
+    measureWindow.dataset.measureWindow = '';
+    measureWindow.textContent = measurementWindowText(v.measurement);
+    measureWindow.hidden = v.measurement.window === null;
+    measureSec.body.appendChild(measureWindow);
     if (v.measurement.rows.length === 0) {
       const hint = div('panel-note');
       hint.textContent = t('capturePanel.measureEmpty');
@@ -2233,6 +2243,14 @@ export function measurementStatusText(row: MeasurementRowView): string {
     parts.unshift(t(MEASUREMENT_STATUS_KEYS[status]));
   }
   return parts.join(' · ');
+}
+
+export function measurementWindowText(view: MeasurementSectionView): string {
+  const window = view.window;
+  if (window === null) return '';
+  return t('capturePanel.measureWindowSamples', {
+    samples: formatCount(window.end - window.start),
+  });
 }
 
 export function measurementNoteText(view: MeasurementSectionView): string {

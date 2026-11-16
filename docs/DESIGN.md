@@ -404,9 +404,12 @@ Analog channels are not bus rows. Each analog signal has a row with:
   only where its eight-bit bank bus view does, which at 32 channels is A0–A3 and at 16
   A0–A1; with no such bus view the source list is empty, the source select is disabled and
   the rows read "no analog group selected" — a window of Viewport or a chosen pair of
-  existing cursors, and the three core rows Frequency, Vpp and RMS. The rows default on
-  for the first group and can be removed and re-added; the section says so when no row is
-  left.
+  existing cursors, and the three core rows Frequency, Vpp and RMS. The section names the
+  resolved window's length in samples on its own line ("Window: 300,000 samples") under the
+  range controls whenever a window resolves, and omits the line when none does; a truncated
+  scan still states the whole window there and discloses its analyzed prefix on each row.
+  The rows default on for the first group and can be removed and re-added; the section says
+  so when no row is left.
 - Every row states its parameter, its value with unit (or "–") and one textual status:
   the method when there is a value, the reason when there is not. Method text names what is
   measured — the mean period of qualified crossings for Frequency, exact code extrema for

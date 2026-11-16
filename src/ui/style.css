@@ -2210,6 +2210,10 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
   margin: 0; font-size: 10px; color: var(--text50); line-height: 1.5;
   overflow-wrap: anywhere;
 }
+.measure-window {
+  margin: 0; font-size: 10px; color: var(--text50); line-height: 1.5;
+  overflow-wrap: anywhere;
+}
 .cursor-edge-channel { flex: 0 0 58px; width: 58px; gap: 0; }
 .cursor-edge-channel > label {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;

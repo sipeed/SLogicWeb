@@ -658,6 +658,7 @@ export const en = {
   'capturePanel.measureStatusOneCrossing': 'one qualified crossing; a period needs two',
   'capturePanel.measureStatusPreviousWave': 'an older capture is on screen; waiting for the current one',
   'capturePanel.measurePartial': 'partial: {analyzed} of {requested} samples',
+  'capturePanel.measureWindowSamples': 'Window: {samples} samples',
   'capturePanel.measureRangeClipped': 'window clipped to captured samples',
   'capturePanel.measureGaps': 'missing samples in the window are ignored',
   'capturePanel.measureClippedLow': 'signal reaches code 0',
