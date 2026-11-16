@@ -20,6 +20,8 @@ export interface AnalogCodeScanInput {
   maxCrossings?: number;
 }
 
+export type AnalogCodeScanConfig = Omit<AnalogCodeScanInput, 'codes' | 'unknown'>;
+
 export interface AnalogCodeScan {
   analyzed: number;
   known: number;
@@ -52,17 +54,7 @@ export interface AnalogCodeScan {
   nearSampleLimit: boolean;
 }
 
-function validate(input: AnalogCodeScanInput): void {
-  const codes = input.codes;
-  const unknown = input.unknown;
-  if (!Number.isSafeInteger(codes.length) || codes.length < 0) {
-    throw new RangeError(`codes length must be a non-negative safe integer, got ${String(codes.length)}`);
-  }
-  if (unknown !== undefined && unknown.length !== codes.length) {
-    throw new RangeError(
-      `unknown length must equal codes length, got ${String(unknown.length)} and ${String(codes.length)}`,
-    );
-  }
+function validate(input: AnalogCodeScanConfig): void {
   if (!Number.isFinite(input.samplerate) || input.samplerate <= 0) {
     throw new RangeError(`samplerate must be finite and positive, got ${String(input.samplerate)}`);
   }
@@ -87,205 +79,265 @@ function validate(input: AnalogCodeScanInput): void {
   }
 }
 
-export function scanAnalogCodes(input: AnalogCodeScanInput): AnalogCodeScan {
-  validate(input);
-  const codes = input.codes;
-  const unknown = input.unknown;
-  const zeroCode = input.zeroCode;
-  const voltsPerCode = input.voltsPerCode;
-  const maxCrossings = input.maxCrossings ?? ANALOG_SCAN_MAX_CROSSINGS;
-  const clipThreshold = Math.max(1, input.window);
-  const level = input.level;
-  const slotCount = Math.max(1, input.window);
-  const slotHigh = new Uint8Array(slotCount);
-  const slotUnknown = new Uint8Array(slotCount);
-  const slotClip = new Float64Array(slotCount);
-  const qualifier = new AnalogRunQualifier({
-    rising: input.rising,
-    level: input.level,
-    hysteresis: input.hysteresis,
-    window: input.window,
-  });
+export class AnalogCodeScanAccumulator {
+  private readonly samplerate: number;
+  private readonly zeroCode: number;
+  private readonly voltsPerCode: number;
+  private readonly maxCrossings: number;
+  private readonly clipThreshold: number;
+  private readonly level: number;
+  private readonly qualifier: AnalogRunQualifier;
+  private readonly slotHigh: Uint8Array;
+  private readonly slotUnknown: Uint8Array;
+  private readonly slotClip: Float64Array;
 
-  const analyzed = codes.length;
-  let known = 0;
-  let minCode = Number.POSITIVE_INFINITY;
-  let maxCode = Number.NEGATIVE_INFINITY;
-  let sum = 0;
-  let sumCompensation = 0;
-  let squareSum = 0;
-  let squareCompensation = 0;
+  private index = 0;
+  private known = 0;
+  private minCode = Number.POSITIVE_INFINITY;
+  private maxCode = Number.NEGATIVE_INFINITY;
+  private sum = 0;
+  private sumCompensation = 0;
+  private squareSum = 0;
+  private squareCompensation = 0;
 
-  let crossingCount = 0;
-  let crossingCap = false;
-  let firstCrossing = -1;
-  let lastCrossing = -1;
+  private crossingCount = 0;
+  private crossingCap = false;
+  private firstCrossing = -1;
+  private lastCrossing = -1;
 
-  let lowRun = 0;
-  let highRun = 0;
-  let clippedLow = false;
-  let clippedHigh = false;
+  private lowRun = 0;
+  private highRun = 0;
+  private clippedLow = false;
+  private clippedHigh = false;
 
-  let openHigh = 0;
-  let openUnknown = 0;
-  let openClip = 0;
-  let periodStart = -1;
-  let dutyFrozen = false;
-  let dutyPeriods = 0;
-  let dutyExcludedPeriods = 0;
-  let dutyKnownSamples = 0;
-  let dutyHighSamples = 0;
+  private openHigh = 0;
+  private openUnknown = 0;
+  private openClip = 0;
+  private periodStart = -1;
+  private dutyFrozen = false;
+  private dutyPeriods = 0;
+  private dutyExcludedPeriods = 0;
+  private dutyKnownSamples = 0;
+  private dutyHighSamples = 0;
 
-  for (let i = 0; i < analyzed; i += 1) {
-    const slot = i % slotCount;
-    if (unknown !== undefined && unknown[i] !== 0) {
-      qualifier.reset();
-      lowRun = 0;
-      highRun = 0;
-      if (!dutyFrozen) {
-        slotHigh[slot] = 0;
-        slotUnknown[slot] = 1;
-        slotClip[slot] = 0;
-        openUnknown += 1;
+  private result: AnalogCodeScan | null = null;
+  private rejected = false;
+
+  constructor(input: AnalogCodeScanConfig) {
+    validate(input);
+    this.samplerate = input.samplerate;
+    this.zeroCode = input.zeroCode;
+    this.voltsPerCode = input.voltsPerCode;
+    this.maxCrossings = input.maxCrossings ?? ANALOG_SCAN_MAX_CROSSINGS;
+    this.clipThreshold = Math.max(1, input.window);
+    this.level = input.level;
+    const slotCount = Math.max(1, input.window);
+    this.slotHigh = new Uint8Array(slotCount);
+    this.slotUnknown = new Uint8Array(slotCount);
+    this.slotClip = new Float64Array(slotCount);
+    this.qualifier = new AnalogRunQualifier({
+      rising: input.rising,
+      level: input.level,
+      hysteresis: input.hysteresis,
+      window: input.window,
+    });
+  }
+
+  push(codes: ArrayLike<number>, unknown?: ArrayLike<number>): void {
+    if (this.result !== null) {
+      throw new RangeError(`push after finish is not allowed (${String(this.index)} samples analyzed)`);
+    }
+    if (this.rejected) {
+      throw new RangeError(`push after a rejected sample is not allowed (${String(this.index)} samples analyzed)`);
+    }
+    const length = codes.length;
+    if (!Number.isSafeInteger(length) || length < 0) {
+      throw new RangeError(`codes length must be a non-negative safe integer, got ${String(length)}`);
+    }
+    if (unknown !== undefined && unknown.length !== length) {
+      throw new RangeError(
+        `unknown length must equal codes length, got ${String(unknown.length)} and ${String(length)}`,
+      );
+    }
+
+    const { qualifier, level, zeroCode, clipThreshold, maxCrossings } = this;
+    const slotCount = this.slotHigh.length;
+
+    for (let offset = 0; offset < length; offset += 1) {
+      const i = this.index;
+      this.index = i + 1;
+      const slot = i % slotCount;
+
+      if (unknown !== undefined && unknown[offset] !== 0) {
+        qualifier.reset();
+        this.lowRun = 0;
+        this.highRun = 0;
+        if (!this.dutyFrozen) {
+          this.slotHigh[slot] = 0;
+          this.slotUnknown[slot] = 1;
+          this.slotClip[slot] = 0;
+          this.openUnknown += 1;
+        }
+        continue;
       }
-      continue;
-    }
 
-    const code = codes[i]!;
-    if (!Number.isInteger(code) || code < 0 || code > 255) {
-      throw new RangeError(`codes[${i}] must be an integer in 0..255, got ${String(code)}`);
-    }
-    known += 1;
-    if (code < minCode) minCode = code;
-    if (code > maxCode) maxCode = code;
-
-    const centered = code - zeroCode;
-    let next = sum + centered;
-    sumCompensation += Math.abs(sum) >= Math.abs(centered)
-      ? (sum - next) + centered
-      : (centered - next) + sum;
-    sum = next;
-
-    const square = centered * centered;
-    next = squareSum + square;
-    squareCompensation += Math.abs(squareSum) >= Math.abs(square)
-      ? (squareSum - next) + square
-      : (square - next) + squareSum;
-    squareSum = next;
-
-    let clipHit = 0;
-    if (code === 0) {
-      lowRun += 1;
-      highRun = 0;
-      if (lowRun >= clipThreshold) {
-        clippedLow = true;
-        clipHit = lowRun === clipThreshold ? clipThreshold : 1;
+      const code = codes[offset]!;
+      if (!Number.isInteger(code) || code < 0 || code > 255) {
+        this.rejected = true;
+        throw new RangeError(`codes[${i}] must be an integer in 0..255, got ${String(code)}`);
       }
-    } else if (code === 255) {
-      highRun += 1;
-      lowRun = 0;
-      if (highRun >= clipThreshold) {
-        clippedHigh = true;
-        clipHit = highRun === clipThreshold ? clipThreshold : 1;
-      }
-    } else {
-      lowRun = 0;
-      highRun = 0;
-    }
+      this.known += 1;
+      if (code < this.minCode) this.minCode = code;
+      if (code > this.maxCode) this.maxCode = code;
 
-    if (!dutyFrozen) {
-      const high = code >= level ? 1 : 0;
-      slotHigh[slot] = high;
-      slotUnknown[slot] = 0;
-      slotClip[slot] = clipHit;
-      openHigh += high;
-      openClip += clipHit;
-    }
+      const centered = code - zeroCode;
+      let next = this.sum + centered;
+      this.sumCompensation += Math.abs(this.sum) >= Math.abs(centered)
+        ? (this.sum - next) + centered
+        : (centered - next) + this.sum;
+      this.sum = next;
 
-    const crossing = qualifier.step(code, i);
-    if (crossing >= 0) {
-      if (crossingCount < maxCrossings) {
-        if (crossingCount === 0) firstCrossing = crossing;
-        crossingCount += 1;
-        lastCrossing = crossing;
-        if (!dutyFrozen) {
-          let tailHigh = 0;
-          let tailUnknown = 0;
-          let tailClip = 0;
-          for (let j = crossing; j <= i; j += 1) {
-            const tailSlot = j % slotCount;
-            tailHigh += slotHigh[tailSlot]!;
-            tailUnknown += slotUnknown[tailSlot]!;
-            tailClip += slotClip[tailSlot]!;
-          }
-          if (periodStart >= 0) {
-            if (openUnknown > tailUnknown || openClip > tailClip) {
-              dutyExcludedPeriods += 1;
-            } else {
-              dutyPeriods += 1;
-              dutyKnownSamples += crossing - periodStart;
-              dutyHighSamples += openHigh - tailHigh;
-            }
-          }
-          openHigh = tailHigh;
-          openUnknown = tailUnknown;
-          openClip = tailClip;
-          periodStart = crossing;
+      const square = centered * centered;
+      next = this.squareSum + square;
+      this.squareCompensation += Math.abs(this.squareSum) >= Math.abs(square)
+        ? (this.squareSum - next) + square
+        : (square - next) + this.squareSum;
+      this.squareSum = next;
+
+      let clipHit = 0;
+      if (code === 0) {
+        this.lowRun += 1;
+        this.highRun = 0;
+        if (this.lowRun >= clipThreshold) {
+          this.clippedLow = true;
+          clipHit = this.lowRun === clipThreshold ? clipThreshold : 1;
+        }
+      } else if (code === 255) {
+        this.highRun += 1;
+        this.lowRun = 0;
+        if (this.highRun >= clipThreshold) {
+          this.clippedHigh = true;
+          clipHit = this.highRun === clipThreshold ? clipThreshold : 1;
         }
       } else {
-        crossingCap = true;
-        dutyFrozen = true;
+        this.lowRun = 0;
+        this.highRun = 0;
+      }
+
+      if (!this.dutyFrozen) {
+        const high = code >= level ? 1 : 0;
+        this.slotHigh[slot] = high;
+        this.slotUnknown[slot] = 0;
+        this.slotClip[slot] = clipHit;
+        this.openHigh += high;
+        this.openClip += clipHit;
+      }
+
+      const crossing = qualifier.step(code, i);
+      if (crossing >= 0) {
+        if (this.crossingCount < maxCrossings) {
+          if (this.crossingCount === 0) this.firstCrossing = crossing;
+          this.crossingCount += 1;
+          this.lastCrossing = crossing;
+          if (!this.dutyFrozen) {
+            let tailHigh = 0;
+            let tailUnknown = 0;
+            let tailClip = 0;
+            for (let j = crossing; j <= i; j += 1) {
+              const tailSlot = j % slotCount;
+              tailHigh += this.slotHigh[tailSlot]!;
+              tailUnknown += this.slotUnknown[tailSlot]!;
+              tailClip += this.slotClip[tailSlot]!;
+            }
+            if (this.periodStart >= 0) {
+              if (this.openUnknown > tailUnknown || this.openClip > tailClip) {
+                this.dutyExcludedPeriods += 1;
+              } else {
+                this.dutyPeriods += 1;
+                this.dutyKnownSamples += crossing - this.periodStart;
+                this.dutyHighSamples += this.openHigh - tailHigh;
+              }
+            }
+            this.openHigh = tailHigh;
+            this.openUnknown = tailUnknown;
+            this.openClip = tailClip;
+            this.periodStart = crossing;
+          }
+        } else {
+          this.crossingCap = true;
+          this.dutyFrozen = true;
+        }
       }
     }
   }
 
-  const unknownCount = analyzed - known;
-  let status: AnalogScanStatus;
-  if (known === 0) status = 'no-data';
-  else if (crossingCount === 0) status = 'no-crossing';
-  else if (crossingCount === 1) status = 'one-crossing';
-  else status = 'ok';
+  finish(): AnalogCodeScan {
+    if (this.result !== null) return this.result;
+    if (this.rejected) {
+      throw new RangeError(`finish after a rejected sample is not allowed (${String(this.index)} samples analyzed)`);
+    }
 
-  const meanOffsetCodes = known === 0 ? Number.NaN : (sum + sumCompensation) / known;
-  const rmsOffsetCodes = known === 0 ? Number.NaN : Math.sqrt((squareSum + squareCompensation) / known);
-  const vppCodes = known === 0 ? Number.NaN : maxCode - minCode;
-  const periodSamples = status === 'ok'
-    ? (lastCrossing - firstCrossing) / (crossingCount - 1)
-    : Number.NaN;
-  const periodSeconds = status === 'ok' ? periodSamples / input.samplerate : Number.NaN;
-  const frequencyHz = status === 'ok' ? input.samplerate / periodSamples : Number.NaN;
-  const dutyPercent = dutyPeriods > 0 ? (100 * dutyHighSamples) / dutyKnownSamples : Number.NaN;
-  const nearSampleLimit = status === 'ok' && periodSamples < ANALOG_NEAR_LIMIT_PERIOD_SAMPLES;
+    const analyzed = this.index;
+    const known = this.known;
+    const unknownCount = analyzed - known;
+    let status: AnalogScanStatus;
+    if (known === 0) status = 'no-data';
+    else if (this.crossingCount === 0) status = 'no-crossing';
+    else if (this.crossingCount === 1) status = 'one-crossing';
+    else status = 'ok';
 
-  return {
-    analyzed,
-    known,
-    unknown: unknownCount,
-    minCode: known === 0 ? Number.NaN : minCode,
-    maxCode: known === 0 ? Number.NaN : maxCode,
-    vppCodes,
-    vppVolts: known === 0 ? Number.NaN : vppCodes * voltsPerCode,
-    minVolts: known === 0 ? Number.NaN : (minCode - zeroCode) * voltsPerCode,
-    maxVolts: known === 0 ? Number.NaN : (maxCode - zeroCode) * voltsPerCode,
-    meanOffsetCodes,
-    meanVolts: known === 0 ? Number.NaN : meanOffsetCodes * voltsPerCode,
-    rmsOffsetCodes,
-    rmsVolts: known === 0 ? Number.NaN : rmsOffsetCodes * voltsPerCode,
-    crossingCount,
-    crossingCap,
-    firstCrossing,
-    lastCrossing,
-    periodSamples,
-    periodSeconds,
-    frequencyHz,
-    dutyPercent,
-    dutyPeriods,
-    dutyExcludedPeriods,
-    dutyKnownSamples,
-    dutyHighSamples,
-    status,
-    clippedLow,
-    clippedHigh,
-    nearSampleLimit,
-  };
+    const meanOffsetCodes = known === 0 ? Number.NaN : (this.sum + this.sumCompensation) / known;
+    const rmsOffsetCodes = known === 0
+      ? Number.NaN
+      : Math.sqrt((this.squareSum + this.squareCompensation) / known);
+    const vppCodes = known === 0 ? Number.NaN : this.maxCode - this.minCode;
+    const periodSamples = status === 'ok'
+      ? (this.lastCrossing - this.firstCrossing) / (this.crossingCount - 1)
+      : Number.NaN;
+    const periodSeconds = status === 'ok' ? periodSamples / this.samplerate : Number.NaN;
+    const frequencyHz = status === 'ok' ? this.samplerate / periodSamples : Number.NaN;
+    const dutyPercent = this.dutyPeriods > 0
+      ? (100 * this.dutyHighSamples) / this.dutyKnownSamples
+      : Number.NaN;
+    const nearSampleLimit = status === 'ok' && periodSamples < ANALOG_NEAR_LIMIT_PERIOD_SAMPLES;
+
+    this.result = {
+      analyzed,
+      known,
+      unknown: unknownCount,
+      minCode: known === 0 ? Number.NaN : this.minCode,
+      maxCode: known === 0 ? Number.NaN : this.maxCode,
+      vppCodes,
+      vppVolts: known === 0 ? Number.NaN : vppCodes * this.voltsPerCode,
+      minVolts: known === 0 ? Number.NaN : (this.minCode - this.zeroCode) * this.voltsPerCode,
+      maxVolts: known === 0 ? Number.NaN : (this.maxCode - this.zeroCode) * this.voltsPerCode,
+      meanOffsetCodes,
+      meanVolts: known === 0 ? Number.NaN : meanOffsetCodes * this.voltsPerCode,
+      rmsOffsetCodes,
+      rmsVolts: known === 0 ? Number.NaN : rmsOffsetCodes * this.voltsPerCode,
+      crossingCount: this.crossingCount,
+      crossingCap: this.crossingCap,
+      firstCrossing: this.firstCrossing,
+      lastCrossing: this.lastCrossing,
+      periodSamples,
+      periodSeconds,
+      frequencyHz,
+      dutyPercent,
+      dutyPeriods: this.dutyPeriods,
+      dutyExcludedPeriods: this.dutyExcludedPeriods,
+      dutyKnownSamples: this.dutyKnownSamples,
+      dutyHighSamples: this.dutyHighSamples,
+      status,
+      clippedLow: this.clippedLow,
+      clippedHigh: this.clippedHigh,
+      nearSampleLimit,
+    };
+    return this.result;
+  }
+}
+
+export function scanAnalogCodes(input: AnalogCodeScanInput): AnalogCodeScan {
+  const scan = new AnalogCodeScanAccumulator(input);
+  scan.push(input.codes, input.unknown);
+  return scan.finish();
 }
