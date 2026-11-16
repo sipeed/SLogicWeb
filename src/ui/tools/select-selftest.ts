@@ -689,6 +689,9 @@ check(
     'fft.source',
     'fft.window',
     'fft.minHz',
+    'xy.source.x',
+    'xy.source.y',
+    'xy.range',
   ];
   const controlCalls = capture.match(/selectControl\(/g)?.length ?? 0;
   const missingKeys = controlKeys.filter((key) => !capture.includes(`'${key}'`));
@@ -710,8 +713,9 @@ check(
     (catalog.match(/selectControl\(/g)?.length ?? 0) === 1;
   check(
     'all four capture selects, the five measurement selects, the three FFT selects, ' +
-      'the catalog source, edge channels and analog gain use selectControl with stable keys',
-    missingKeys.length === 0 && controlCalls === 14 && gainKey && catalogKey &&
+      'the three XY selects, the catalog source, edge channels and analog gain use ' +
+      'selectControl with stable keys',
+    missingKeys.length === 0 && controlCalls === 17 && gainKey && catalogKey &&
       oldNativeSites.length === 0 && oldLabelled.length === 0,
     `missingKeys=${JSON.stringify(missingKeys)}, controlCalls=${controlCalls}, ` +
       `catalogKey=${catalogKey}, ` +

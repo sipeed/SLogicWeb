@@ -42,6 +42,16 @@ import {
 import {
   FftCanvas, fftNearestBin, fftTickLayout, fftViewportBox, type FftViewportBox,
 } from './fftCanvas.js';
+import {
+  XY_DEFAULT_CONFIG, reconcileXyConfig, selectXySource, setXyFit, xyAccessibleText,
+  xySourceLabel, xySummaryLines,
+  type XyAnalysis, type XyAxis, type XyConfig, type XySectionView,
+} from './xyPanel.js';
+import { XyCanvas, xyTickLayout } from './xyCanvas.js';
+import {
+  planXy, xyAxes, xyDensity, xyDensitySize, xySummary,
+  type XyAxes, type XyDensity, type XyPlan,
+} from './xyView.js';
 
 import type { AssistantHost, CaptureOutcome } from '../assistant/tools.js';
 
@@ -477,6 +487,11 @@ export class App {
   private fftCanvas!: FftCanvas;
   private fftHoverX: number | null = null;
   private fftDrag: { x: number; bounds: FftBounds } | null = null;
+  private xyConfig: XyConfig = XY_DEFAULT_CONFIG;
+  private xyCache: { store: SampleStore; key: string; plan: XyPlan } | null = null;
+  private xyDensityCache: { plan: XyPlan; key: string; density: XyDensity } | null = null;
+  private xyPending = false;
+  private xyCanvas!: XyCanvas;
   private runningPanelAt = 0;
   private analysisPanelAt = 0;
   /** New samples are waiting for the next data-driven redraw (HSync's status cadence). */
@@ -921,6 +936,8 @@ export class App {
     this.overlay = new Overlay(this.el.plot);
     this.fftCanvas = new FftCanvas(this.el.plot);
     this.wireFft();
+    this.xyCanvas = new XyCanvas(this.el.plot);
+    this.wireXy();
     this.syncViewMode();
     this.scopeHost = document.createElement('div');
     this.scopeHost.className = 'scope-scale-host';
@@ -1414,6 +1431,7 @@ export class App {
       return [{ id: cursor.id, sample, label: cursor.marker.label, color: cursor.marker.color }];
     });
     const fft = this.fftSectionView();
+    const xy = this.xySectionView();
     const base = {
       sources,
       filter: state.filter,
@@ -1426,6 +1444,7 @@ export class App {
       addStart,
       capture: null,
       fft,
+      xy,
       statsSkipped: this.measurementStats.skipped,
       statsLoopUnavailable: this.captureIsLoop,
     };
@@ -1711,9 +1730,13 @@ export class App {
 
   private syncViewMode(): void {
     const fft = this.viewMode === 'fft';
+    const xy = this.viewMode === 'xy';
     this.el.plotCol.classList.toggle('fft-active', fft);
     this.el.plot.classList.toggle('fft-active', fft);
     this.fftCanvas.el.hidden = !fft;
+    this.el.plotCol.classList.toggle('xy-active', xy);
+    this.el.plot.classList.toggle('xy-active', xy);
+    this.xyCanvas.el.hidden = !xy;
     if (!fft) {
       this.fftHoverX = null;
       this.fftDrag = null;
@@ -1721,11 +1744,12 @@ export class App {
   }
 
   private setViewMode(mode: AnalysisViewMode): void {
-    if (mode !== 'time' && mode !== 'fft') return;
+    if (mode !== 'time' && mode !== 'fft' && mode !== 'xy') return;
     if (mode === this.viewMode) return;
     this.viewMode = mode;
     this.syncViewMode();
     if (mode === 'fft') this.fftPending = true;
+    if (mode === 'xy') this.xyPending = true;
     this.renderPanels();
     this.dirty = true;
   }
@@ -1763,6 +1787,27 @@ export class App {
     const next = resetFftBounds(this.fftConfig);
     if (next === this.fftConfig) return;
     this.fftConfig = next;
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private setXySource(axis: XyAxis, start: number | null): void {
+    const next = selectXySource(this.xyConfig, axis, start);
+    if (next === this.xyConfig) return;
+    this.xyConfig = next;
+    this.xyCache = null;
+    this.xyDensityCache = null;
+    this.xyPending = true;
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private setXyFit(fit: boolean): void {
+    const next = setXyFit(this.xyConfig, fit);
+    if (next === this.xyConfig) return;
+    this.xyConfig = next;
+    this.xyDensityCache = null;
+    this.xyPending = true;
     this.renderPanels();
     this.dirty = true;
   }
@@ -1853,6 +1898,171 @@ export class App {
     });
     this.fftCache = { store, key, analysis };
     return fftWithBounds(analysis, config.minHz, config.maxHz);
+  }
+
+  private xySectionView(tick = this.xyPending): XySectionView {
+    if (tick) this.xyPending = false;
+    const store = this.captureStore;
+    const sources = measurementSources(this.busViews, store.channelCount);
+    const preferred = this.measurementConfig?.rows.filter ?? null;
+    const config = reconcileXyConfig(this.xyConfig, sources, preferred);
+    if (config !== this.xyConfig) this.xyConfig = config;
+    const view: XySectionView = {
+      mode: this.viewMode === 'xy' ? 'xy' : 'time',
+      sources,
+      sourceX: config.sourceX,
+      sourceY: config.sourceY,
+      fit: config.fit,
+      analysis: null,
+    };
+    if (view.mode === 'xy') view.analysis = this.xyAnalysis(config, sources, store, tick);
+    return view;
+  }
+
+  private xyAnalysis(
+    config: XyConfig, sources: readonly MeasurementSource[], store: SampleStore, tick: boolean,
+  ): XyAnalysis {
+    const sourceX = config.sourceX === null
+      ? null : sources.find((candidate) => candidate.start === config.sourceX) ?? null;
+    const sourceY = config.sourceY === null
+      ? null : sources.find((candidate) => candidate.start === config.sourceY) ?? null;
+    const base: XyAnalysis = {
+      status: 'no-source', sourceX, sourceY, windowStart: 0, windowEnd: 0,
+      requestedSamples: 0, analyzedSamples: 0, clipped: false, truncated: false,
+      fit: config.fit, plan: null, axes: null, density: null, summary: null,
+    };
+    if (sourceX === null || sourceY === null) return base;
+    if (this.repeatShowingFront) return { ...base, status: 'previous-wave-displayed' };
+    const busX = this.measurementBusView(sourceX.group, store.channelCount);
+    const busY = this.measurementBusView(sourceY.group, store.channelCount);
+    if (busX === null || busY === null) return base;
+    const window = resolveMeasurementWindow(
+      this.measurementBase(sources), this.measurementCursors(),
+      { start: this.stack.view.start, end: this.stack.view.end }, store.length);
+    if (window === null) return { ...base, status: 'no-window' };
+    const start = Math.max(0, Math.min(window.start, store.length));
+    const end = Math.max(start, Math.min(window.end, store.length));
+    const clipped = start !== window.start || end !== window.end;
+    const requested = end - start;
+    const key = [
+      store.length, store.droppedSamples, store.samplerate,
+      sourceX.start, sourceX.gain, sourceY.start, sourceY.gain, start, end,
+    ].join('|');
+    const cache = this.xyCache;
+    const settled = cache !== null && cache.store === store && cache.key === key;
+    let plan: XyPlan;
+    if (settled && !tick) {
+      plan = cache.plan;
+    } else if (!settled && this.running && !tick && cache !== null) {
+      plan = cache.plan;
+    } else {
+      const readX = readMeasureSamples(store, {
+        bits: busX.spec.bits, group: sourceX.group, gain: sourceX.gain,
+      }, { start, end, maxSamples: Math.max(1, requested) });
+      const readY = readMeasureSamples(store, {
+        bits: busY.spec.bits, group: sourceY.group, gain: sourceY.gain,
+      }, { start, end, maxSamples: Math.max(1, requested) });
+      plan = planXy({
+        sourceX: sourceX.start,
+        sourceY: sourceY.start,
+        codesX: readX.codes,
+        codesY: readY.codes,
+        unknownX: readX.unknown,
+        unknownY: readY.unknown,
+        zeroX: ADC_ZERO_CODE,
+        zeroY: ADC_ZERO_CODE,
+        voltsPerCodeX: analogVoltsPerCode(sourceX.gain),
+        voltsPerCodeY: analogVoltsPerCode(sourceY.gain),
+      });
+      this.xyCache = { store, key, plan };
+    }
+    const axes = plan.status === 'ok' ? xyAxes(plan, { fit: config.fit }) : null;
+    const density = plan.status === 'ok' && axes !== null
+      ? this.xyDensityFor(plan, axes) : null;
+    const summary = xySummary(plan, { axes, density });
+    return {
+      status: plan.status === 'ok' ? 'ok' : plan.reason,
+      sourceX,
+      sourceY,
+      windowStart: start + store.droppedSamples,
+      windowEnd: end + store.droppedSamples,
+      requestedSamples: requested,
+      analyzedSamples: plan.requested,
+      clipped,
+      truncated: plan.requested < requested,
+      fit: config.fit,
+      plan,
+      axes,
+      density,
+      summary,
+    };
+  }
+
+  private xyDensityFor(plan: XyPlan, axes: XyAxes): XyDensity | null {
+    const box = this.fftCanvasBox();
+    const size = xyDensitySize(box.width, box.height);
+    const width = size.width;
+    const height = size.height;
+    const key = [
+      axes.fit ? 1 : 0, axes.x.min, axes.x.max, axes.y.min, axes.y.max, width, height,
+    ].join('|');
+    const cache = this.xyDensityCache;
+    if (cache !== null && cache.plan === plan && cache.key === key) return cache.density;
+    const density = xyDensity(plan, { width, height, axes });
+    if (density !== null) this.xyDensityCache = { plan, key, density };
+    return density;
+  }
+
+  private drawXyView(): void {
+    const box = this.fftCanvasBox();
+    this.xyCanvas.syncSize(box);
+    const view = this.xySectionView();
+    this.xyCanvas.el.setAttribute('aria-label', xyAccessibleText(view));
+    const analysis = view.analysis;
+    const axes = analysis?.axes ?? null;
+    const density = analysis?.density ?? null;
+    if (analysis === null || analysis.status !== 'ok' || axes === null || density === null) {
+      this.xyCanvas.draw({
+        palette: this.palette,
+        axes: axes ?? { fit: false, x: { min: 0, max: 1 }, y: { min: 0, max: 1 } },
+        ticks: { x: [], y: [], stepX: 0, stepY: 0 },
+        density: null,
+        message: xySummaryLines(view).join('\n'),
+        sourceX: '-',
+        sourceY: '-',
+      });
+      return;
+    }
+    const width = Math.max(1, Math.round(box.width));
+    const height = Math.max(1, Math.round(box.height));
+    this.xyCanvas.draw({
+      palette: this.palette,
+      axes,
+      ticks: xyTickLayout(axes, width, height),
+      density,
+      message: null,
+      sourceX: xySourceLabel(analysis.sourceX),
+      sourceY: xySourceLabel(analysis.sourceY),
+    });
+  }
+
+  private wireXy(): void {
+    const xyCanvas = this.xyCanvas.el;
+    const stop = (event: Event): void => {
+      if (this.viewMode === 'xy') event.stopPropagation();
+    };
+    const steal = (event: Event): void => {
+      if (this.viewMode !== 'xy') return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    xyCanvas.addEventListener('pointermove', stop);
+    xyCanvas.addEventListener('pointerdown', steal);
+    xyCanvas.addEventListener('pointerup', stop);
+    xyCanvas.addEventListener('pointercancel', stop);
+    xyCanvas.addEventListener('dblclick', steal);
+    xyCanvas.addEventListener('wheel', steal, { passive: false });
+    xyCanvas.addEventListener('keydown', stop);
   }
 
   private fftCanvasBox(): FftViewportBox {
@@ -3991,6 +4201,10 @@ export class App {
         this.fftPending = true;
         this.dirty = true;
       }
+      if (this.running && this.viewMode === 'xy') {
+        this.xyPending = true;
+        this.dirty = true;
+      }
       if (this.running && this.cursorsPageShown()) {
         this.capturePanel.updateMeasurements(this.measurementView());
         persistencePanelDue = true;
@@ -4172,6 +4386,12 @@ export class App {
     if (this.viewMode === 'fft') {
       this.el.hint.style.display = 'none';
       this.drawFftView();
+      this.renderInteractionBar();
+      return;
+    }
+    if (this.viewMode === 'xy') {
+      this.el.hint.style.display = 'none';
+      this.drawXyView();
       this.renderInteractionBar();
       return;
     }
@@ -6393,6 +6613,8 @@ export class App {
         onPickFftWindow: (kind) => this.setFftWindow(kind),
         onPickFftMinHz: (hz) => this.setFftMinHz(hz),
         onResetFftBounds: () => this.resetFftView(),
+        onPickXySource: (axis, start) => this.setXySource(axis, start),
+        onPickXyFit: (fit) => this.setXyFit(fit),
         onPickMeasurementCursor: (side, cursorId) => this.pickMeasurementCursor(side, cursorId),
         onToggleMeasurementRow: (start, parameter) =>
           this.toggleMeasurementParameter(start, parameter),
@@ -9288,6 +9510,30 @@ export class App {
     setPersistence: (raw: unknown) => this.setPersistence(raw),
     clearPersistence: () => this.clearPersistence('clear'),
     setViewMode: (mode: AnalysisViewMode): void => this.setViewMode(mode),
+    setXySource: (axis: XyAxis, start: number | null) => this.setXySource(axis, start),
+    setXyFit: (fit: boolean) => this.setXyFit(fit),
+    xy: () => {
+      const view = this.xySectionView();
+      const analysis = view.analysis;
+      return {
+        mode: view.mode,
+        sourceX: view.sourceX,
+        sourceY: view.sourceY,
+        fit: view.fit,
+        status: analysis?.status ?? 'idle',
+        requested: analysis?.requestedSamples ?? 0,
+        plotted: analysis?.summary?.plotted ?? 0,
+        paired: analysis?.summary?.paired ?? 0,
+        gapExcluded: analysis?.summary?.gapExcluded ?? 0,
+        stride: analysis?.summary?.stride ?? 1,
+        clipped: analysis?.clipped ?? false,
+        windowStart: analysis?.windowStart ?? 0,
+        windowEnd: analysis?.windowEnd ?? 0,
+        rangeX: analysis?.summary?.rangeX ?? null,
+        rangeY: analysis?.summary?.rangeY ?? null,
+        summary: xySummaryLines(view),
+      };
+    },
     fft: () => {
       const view = this.fftSectionView();
       const analysis = view.analysis;

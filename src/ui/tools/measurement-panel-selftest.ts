@@ -147,7 +147,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   'cancelled': 'capture analysis cancelled; analyze again to resume',
   'stable-capture-required': 'analysis needs a completed Single or Repeat capture',
   'loop': 'Loop captures cannot be analysed; stop a Single or Repeat capture first',
-  'paused': 'paused while the FFT view is shown',
+  'paused': 'paused while an analysis view (FFT or XY) is shown',
 };
 
 {

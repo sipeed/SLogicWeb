@@ -14,6 +14,7 @@ import {
 import { readMeasureSamples, type MeasureBus, type MeasureRead } from './measureSamples.js';
 import { noMeasurementStatsView, type MeasurementStatsView } from './measurementStats.js';
 import type { FftSectionView } from './fftView.js';
+import type { XySectionView } from './xyPanel.js';
 
 export type MeasurementRangeKind = 'viewport' | 'cursors' | 'capture';
 
@@ -128,6 +129,7 @@ export interface MeasurementSectionView {
   unavailable: MeasurementStatus | null;
   capture: MeasurementCaptureView | null;
   fft?: FftSectionView;
+  xy?: XySectionView;
   statsSkipped: number;
   statsLoopUnavailable: boolean;
 }
