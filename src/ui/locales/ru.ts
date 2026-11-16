@@ -853,6 +853,17 @@ export const ru: Messages = {
   'bus.layoutMerged': 'Наложение',
   'bus.sourceStrip': 'Аналоговые источники',
   'bus.focusSource': 'Фокус на {name}',
+  'bus.hideSource': 'Скрыть {name}',
+  'bus.showSource': 'Показать {name}',
+  'bus.allHiddenNote': 'Все источники скрыты',
+  'bus.allHiddenHint': 'Все источники скрыты. Покажите нужный кнопкой на его маркере.',
+  'bus.voltsAtCursor': '{volts} в курсоре {cursor}',
+  'bus.voltsUnknown': 'отсчёт неизвестен',
+  'bus.voltsOutside': 'вне текущей волны',
+  'bus.voltsPreviousWave': 'показана предыдущая волна',
+  'bus.voltsPreviousWaveNote': 'Показана предыдущая волна: напряжения курсоров ждут текущей волны.',
+  'bus.voltsNoSource': 'источника нет в этом захвате',
+  'bus.voltsNoCursor': 'курсор не установлен',
 
   // ------------------------------------------------------- AI assistant
   'assistant.title': 'ИИ-ассистент',

@@ -52,19 +52,27 @@ function countLimit(name: string, value: number | undefined, fallback: number): 
   return value;
 }
 
-function checkedBits(bits: readonly number[], channelCount: number): number[] {
+export function measureBitsProblem(
+  bits: readonly number[], channelCount: number,
+): string | null {
   if (bits.length < 1 || bits.length > MEASURE_MAX_BITS) {
-    throw new RangeError(`an analog group reads 1 to ${MEASURE_MAX_BITS} channels, got ${bits.length}`);
+    return `an analog group reads 1 to ${MEASURE_MAX_BITS} channels, got ${bits.length}`;
   }
-  const out: number[] = [];
+  const seen = new Set<number>();
   for (const bit of bits) {
     if (!Number.isInteger(bit) || bit < 0 || bit >= channelCount) {
-      throw new RangeError(`channel ${bit} is not in D0-D${channelCount - 1}`);
+      return `channel ${bit} is not in D0-D${channelCount - 1}`;
     }
-    if (out.includes(bit)) throw new RangeError(`channel ${bit} is used twice`);
-    out.push(bit);
+    if (seen.has(bit)) return `channel ${bit} is used twice`;
+    seen.add(bit);
   }
-  return out;
+  return null;
+}
+
+function checkedBits(bits: readonly number[], channelCount: number): number[] {
+  const problem = measureBitsProblem(bits, channelCount);
+  if (problem !== null) throw new RangeError(problem);
+  return [...bits];
 }
 
 export function readMeasureSamples(

@@ -863,6 +863,17 @@ export const en = {
   'bus.layoutMerged': 'Overlay',
   'bus.sourceStrip': 'Analog sources',
   'bus.focusSource': 'Focus {name}',
+  'bus.hideSource': 'Hide {name}',
+  'bus.showSource': 'Show {name}',
+  'bus.allHiddenNote': 'All sources hidden',
+  'bus.allHiddenHint': 'All sources are hidden. Use the source chips to show one.',
+  'bus.voltsAtCursor': '{volts} at cursor {cursor}',
+  'bus.voltsUnknown': 'sample unknown',
+  'bus.voltsOutside': 'outside the current wave',
+  'bus.voltsPreviousWave': 'previous wave shown',
+  'bus.voltsPreviousWaveNote': 'Previous wave shown: cursor voltages wait for the current wave.',
+  'bus.voltsNoSource': 'source not in this capture',
+  'bus.voltsNoCursor': 'no cursor placed',
 
   // ------------------------------------------------------- AI assistant
   'assistant.title': 'AI assistant',

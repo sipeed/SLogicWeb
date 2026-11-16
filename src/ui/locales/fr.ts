@@ -862,6 +862,17 @@ export const fr: Messages = {
   'bus.layoutMerged': 'Superposition',
   'bus.sourceStrip': 'Sources analogiques',
   'bus.focusSource': 'Cibler {name}',
+  'bus.hideSource': 'Masquer {name}',
+  'bus.showSource': 'Afficher {name}',
+  'bus.allHiddenNote': 'Toutes les sources sont masquées',
+  'bus.allHiddenHint': 'Toutes les sources sont masquées. Utilisez les puces de source pour en afficher une.',
+  'bus.voltsAtCursor': '{volts} au curseur {cursor}',
+  'bus.voltsUnknown': 'échantillon inconnu',
+  'bus.voltsOutside': 'hors de l\'onde actuelle',
+  'bus.voltsPreviousWave': 'onde précédente affichée',
+  'bus.voltsPreviousWaveNote': 'Onde précédente affichée : les tensions de curseur attendent l\'onde actuelle.',
+  'bus.voltsNoSource': 'source absente de cette capture',
+  'bus.voltsNoCursor': 'aucun curseur placé',
 
   // ------------------------------------------------------- AI assistant
   'assistant.title': 'Assistant IA',

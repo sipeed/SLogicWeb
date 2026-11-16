@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import { installFakeDom, fakeEvent, type FakeElement } from './fakeDom.js';
-import { AnalogSourceStrip, type AnalogSourceStripItem } from '../analogSourceStrip.js';
+import {
+  AnalogSourceStrip, type AnalogSourceStripItem, type AnalogSourceStripView,
+} from '../analogSourceStrip.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
@@ -49,15 +51,28 @@ const doc = installFakeDom();
 const host = doc.createElement('div') as unknown as FakeElement;
 doc.body.appendChild(host as never);
 const focused: string[] = [];
+const toggled: string[] = [];
 const strip = new AnalogSourceStrip(host as unknown as HTMLElement, {
   onFocus: (busId) => focused.push(busId),
+  onToggleVisibility: (busId) => toggled.push(busId),
 });
 
-const items: AnalogSourceStripItem[] = [
-  { busId: 'bus-0', name: 'A0', color: '#CD427E', focused: false },
-  { busId: 'bus-1', name: 'A1', color: '#00994D', focused: true },
+function sourceItem(overrides: Partial<AnalogSourceStripItem> = {}): AnalogSourceStripItem {
+  return {
+    busId: 'bus-0', name: 'A0', color: '#CD427E',
+    focused: false, visible: true, volts: '', voltsDetail: '',
+    ...overrides,
+  };
+}
+
+const TWO: AnalogSourceStripItem[] = [
+  sourceItem({ volts: '1.23 V', voltsDetail: '1.23 V at cursor 1' }),
+  sourceItem({
+    busId: 'bus-1', name: 'A1', color: '#00994D', focused: true,
+    volts: '--', voltsDetail: 'sample unknown',
+  }),
 ];
-strip.render(items);
+strip.render({ items: TWO, note: '' });
 
 const root = host.querySelector('.analog-source-strip');
 const chips = host.querySelectorAll('.analog-source-chip');
@@ -66,22 +81,25 @@ const chips = host.querySelectorAll('.analog-source-chip');
   const pressed = chips.map((chip) => chip.getAttribute('aria-pressed'));
   const names = chips.map((chip) => chip.querySelector('.analog-source-name')?.textContent);
   const busses = chips.map((chip) => chip.dataset.busId);
-  check('the strip is one labelled group of source chips in row order with pressed state on the focus',
+  const volts = host.querySelectorAll('.analog-source-volts').map((span) => span.textContent);
+  check('the strip is one labelled group of source chips in row order with pressed state, voltage text and the focus',
     root !== null && root.getAttribute('role') === 'group' &&
     root.getAttribute('aria-label') === 'Analog sources' && root.hidden === false &&
     chips.length === 2 && busses.join(',') === 'bus-0,bus-1' &&
     names.join(',') === 'A0,A1' && pressed.join(',') === 'false,true' &&
+    volts.join('|') === '1.23 V|--' &&
     chips[1]!.className.includes('focused') && !chips[0]!.className.includes('focused'),
     `role=${root?.getAttribute('role')}, label=${root?.getAttribute('aria-label')}, ` +
-    `buses=${busses.join(',')}, names=${names.join(',')}, pressed=${pressed.join(',')}`);
+    `buses=${busses.join(',')}, names=${names.join(',')}, pressed=${pressed.join(',')}, ` +
+    `volts=${volts.join('|')}`);
 }
 
 {
   const labels = chips.map((chip) => chip.getAttribute('aria-label'));
   const swatches = chips.map((chip) => chip.querySelector('.analog-source-swatch')?.style.background);
-  check('each chip is a keyboard-reachable button whose accessible name is the focus action and whose swatch carries the source colour',
+  check('each chip is a keyboard-reachable button named by the focus action plus its readable voltage, with the source colour on its swatch',
     chips.every((chip) => chip.localName === 'button' && chip.type === 'button') &&
-    labels.join('|') === 'Focus A0|Focus A1' &&
+    labels.join('|') === 'Focus A0. 1.23 V at cursor 1|Focus A1. sample unknown' &&
     swatches.join('|') === '#CD427E|#00994D',
     `labels=${labels.join('|')}, swatches=${swatches.join('|')}`);
 }
@@ -100,59 +118,208 @@ const chips = host.querySelectorAll('.analog-source-chip');
 }
 
 {
-  strip.render([
-    { busId: 'bus-1', name: 'A1', color: '#00994D', focused: true },
-    { busId: 'bus-0', name: 'A0', color: '#CD427E', focused: false },
-  ]);
-  const second = host.querySelectorAll('.analog-source-chip');
-  const swapped = second.map((chip) => `${chip.dataset.busId}:${chip.getAttribute('aria-pressed')}`);
-  strip.render([]);
+  const visibility = host.querySelectorAll('.analog-source-visibility');
+  const pressed = visibility.map((button) => button.getAttribute('aria-pressed'));
+  const labels = visibility.map((button) => button.getAttribute('aria-label'));
+  const eyes = visibility.map((button) => button.querySelector('.analog-source-eye') !== null);
+  check('every source carries its own keyboard-reachable visibility button whose pressed state is its display state',
+    visibility.length === 2 &&
+    visibility.every((button) => button.localName === 'button' && button.type === 'button') &&
+    pressed.join(',') === 'true,true' && labels.join('|') === 'Hide A0|Hide A1' &&
+    eyes.join(',') === 'true,true',
+    `buttons=${visibility.length}, pressed=${pressed.join(',')}, labels=${labels.join('|')}, eyes=${eyes.join(',')}`);
+
+  const stuck = visibility[1]!;
+  const pointer = fakeEvent('pointerdown');
+  stuck.dispatchEvent(pointer);
+  visibility[0]!.click();
+  check('the visibility action is a separate button that never pans the plot and never focuses a source',
+    pointer.propagationStopped && toggled.join(',') === 'bus-0' &&
+    focused.join(',') === 'bus-1',
+    `press=${pointer.propagationStopped}, toggled=${toggled.join(',')}, ` +
+    `focused=${focused.join(',')}`);
+
+  const hiddenView: AnalogSourceStripView = {
+    items: [
+      sourceItem({ visible: false }),
+      sourceItem({
+        busId: 'bus-1', name: 'A1', color: '#00994D', focused: true,
+        volts: '2.00 V', voltsDetail: '2.00 V at cursor 1',
+      }),
+    ],
+    note: 'All sources are hidden. Use the source chips to show one.',
+  };
+  strip.render(hiddenView);
+  const after = host.querySelectorAll('.analog-source-visibility');
+  const shown = host.querySelectorAll('.analog-source-chip');
+  const note = host.querySelector('.analog-source-note');
+  check('a hidden source stays listed with its name, its icon slashed, its chip dimmed and a localized show action',
+    shown.length === 2 && shown[0]!.className.includes('is-hidden') &&
+    !shown[1]!.className.includes('is-hidden') &&
+    after[0]!.getAttribute('aria-pressed') === 'false' &&
+    after[0]!.getAttribute('aria-label') === 'Show A0' &&
+    after[1]!.getAttribute('aria-pressed') === 'true' &&
+    note !== null && note.textContent === 'All sources are hidden. Use the source chips to show one.',
+    `hidden=${shown[0]?.className}, pressed=${after.map((b) => b.getAttribute('aria-pressed')).join(',')}, ` +
+    `labels=${after.map((b) => b.getAttribute('aria-label')).join('|')}, note=${note?.textContent}`);
+}
+
+{
+  strip.render({
+    items: [sourceItem({ volts: '1.00 V', voltsDetail: '1.00 V at cursor 1' })],
+    note: '',
+  });
+  const before = host.querySelector('.analog-source-chip');
+  const beforeVolts = host.querySelector('.analog-source-volts');
+  strip.updateVoltages({
+    items: [sourceItem({ volts: '2.50 V', voltsDetail: '2.50 V at cursor 1' })],
+    note: '',
+  });
+  const after = host.querySelector('.analog-source-chip');
+  const afterVolts = host.querySelector('.analog-source-volts');
+  check('a voltage refresh rewrites only the existing chip text and label, never rebuilding the strip',
+    before !== null && before === after && beforeVolts === afterVolts &&
+    afterVolts?.textContent === '2.50 V' &&
+    after?.getAttribute('aria-label') === 'Focus A0. 2.50 V at cursor 1',
+    `sameChip=${before === after}, sameSpan=${beforeVolts === afterVolts}, ` +
+    `volts=${afterVolts?.textContent}, label=${after?.getAttribute('aria-label')}`);
+
+  const noteView: AnalogSourceStripView = {
+    items: [sourceItem({ volts: '--', voltsDetail: 'previous wave shown' })],
+    note: 'Previous wave shown: cursor voltages wait for the current wave.',
+  };
+  strip.updateVoltages(noteView);
+  const note = host.querySelector('.analog-source-note');
+  check('a refresh that has to add or drop the strip note re-renders the same chip set instead of leaving it stale',
+    note?.textContent === noteView.note &&
+    host.querySelectorAll('.analog-source-chip').length === 1 &&
+    host.querySelectorAll('.analog-source-volts')[0]?.textContent === '--',
+    `note=${note?.textContent}`);
+
+  strip.updateVoltages({ items: [], note: '' });
+  const empty = host.querySelector('.analog-source-strip');
+  check('a refresh with no source rebuilds an empty, hidden host with no note left behind',
+    empty?.hidden === true && empty.childNodes.length === 0,
+    `hidden=${empty?.hidden}, children=${empty?.childNodes.length}`);
+}
+
+{
+  strip.render({
+    items: [
+      sourceItem({ volts: '1.00 V', voltsDetail: '1.00 V at cursor 1' }),
+      sourceItem({
+        busId: 'bus-1', name: 'A1', color: '#00994D', focused: true,
+        volts: '2.00 V', voltsDetail: '2.00 V at cursor 1',
+      }),
+    ],
+    note: '',
+  });
+  const second = host.querySelectorAll('.analog-source-chip')[1]!;
+  second.focus();
+  strip.render({
+    items: [
+      sourceItem({ volts: '1.00 V', voltsDetail: '1.00 V at cursor 1' }),
+      sourceItem({
+        busId: 'bus-1', name: 'A1', color: '#00994D', focused: true,
+        volts: '2.00 V', voltsDetail: '2.00 V at cursor 1',
+      }),
+    ],
+    note: '',
+  });
+  const swapped = host.querySelectorAll('.analog-source-chip');
+  const swappedState = swapped.map((chip) =>
+    `${chip.dataset.busId}:${chip.getAttribute('aria-pressed')}`);
+  strip.render({
+    items: [
+      sourceItem({
+        busId: 'bus-1', name: 'A1', color: '#00994D', focused: true,
+        volts: '2.00 V', voltsDetail: '2.00 V at cursor 1',
+      }),
+      sourceItem({ volts: '1.00 V', voltsDetail: '1.00 V at cursor 1' }),
+    ],
+    note: '',
+  });
+  const reordered = host.querySelectorAll('.analog-source-chip');
+  check('a rebuilt strip follows the band order and keeps the pressed state with its own source',
+    swappedState.join(',') === 'bus-0:false,bus-1:true' &&
+    reordered.map((chip) => chip.dataset.busId).join(',') === 'bus-1,bus-0' &&
+    reordered[0]!.getAttribute('aria-pressed') === 'true',
+    `swapped=${swappedState.join(',')}, order=${reordered.map((chip) => chip.dataset.busId).join(',')}`);
+}
+
+{
+  strip.render({ items: [], note: '' });
   const hidden = host.querySelector('.analog-source-strip');
-  check('a rebuilt strip follows the band order and an empty source list hides the host',
-    swapped.join(',') === 'bus-1:true,bus-0:false' &&
+  check('an empty source list hides the host and leaves no children behind',
     hidden !== null && hidden.hidden === true && hidden.childNodes.length === 0,
-    `swapped=${swapped.join(',')}, hidden=${hidden?.hidden}, children=${hidden?.childNodes.length}`);
+    `hidden=${hidden?.hidden}, children=${hidden?.childNodes.length}`);
 }
 
 {
-  const replayed = host.querySelector('.analog-source-strip');
-  const before = replayed?.getAttribute('aria-label');
-  strip.render([
-    { busId: 'bus-0', name: 'A0', color: '#CD427E', focused: true },
-  ]);
+  strip.render({
+    items: [sourceItem({ name: 'Shunt', volts: '0.50 V', voltsDetail: '0.50 V at cursor 1' })],
+    note: '',
+  });
   const single = host.querySelectorAll('.analog-source-chip');
-  check('a single visible source still renders its chip with the same group label',
-    single.length === 1 && single[0]!.getAttribute('aria-pressed') === 'true' &&
-    host.querySelector('.analog-source-strip')?.getAttribute('aria-label') === before &&
+  check('a single source still renders its chip, its voltage and its visibility button under the same group label',
+    single.length === 1 && single[0]!.getAttribute('aria-pressed') === 'false' &&
+    host.querySelectorAll('.analog-source-volts')[0]?.textContent === '0.50 V' &&
+    host.querySelectorAll('.analog-source-visibility').length === 1 &&
+    host.querySelector('.analog-source-strip')?.getAttribute('aria-label') === 'Analog sources' &&
     host.querySelector('.analog-source-strip')?.hidden === false,
-    `chips=${single.length}, label=${before}`);
+    `chips=${single.length}, volts=${host.querySelectorAll('.analog-source-volts')[0]?.textContent}`);
 }
 
 {
-  strip.render([
-    { busId: 'bus-0', name: 'A0', color: '#CD427E', focused: false },
-    { busId: 'bus-1', name: 'A1', color: '#00994D', focused: true },
-  ]);
+  strip.render({
+    items: [
+      sourceItem({ volts: '1.00 V', voltsDetail: '1.00 V at cursor 1' }),
+      sourceItem({
+        busId: 'bus-1', name: 'A1', color: '#00994D', focused: true,
+        volts: '2.00 V', voltsDetail: '2.00 V at cursor 1',
+      }),
+    ],
+    note: '',
+  });
   const chip = host.querySelectorAll('.analog-source-chip')[1]!;
   chip.focus();
   const focusedBefore = doc.activeElement === chip;
-  strip.render([
-    { busId: 'bus-0', name: 'A0', color: '#CD427E', focused: false },
-    { busId: 'bus-1', name: 'A1', color: '#00994D', focused: true },
-  ]);
+  strip.render({
+    items: [
+      sourceItem({ volts: '1.00 V', voltsDetail: '1.00 V at cursor 1' }),
+      sourceItem({
+        busId: 'bus-1', name: 'A1', color: '#00994D', focused: true,
+        volts: '2.00 V', voltsDetail: '2.00 V at cursor 1',
+      }),
+    ],
+    note: '',
+  });
   const after = doc.activeElement as unknown as FakeElement;
   const outside = doc.createElement('button') as unknown as FakeElement;
   doc.body.appendChild(outside as never);
   outside.focus();
-  strip.render([
-    { busId: 'bus-0', name: 'A0', color: '#CD427E', focused: true },
-    { busId: 'bus-1', name: 'A1', color: '#00994D', focused: false },
-  ]);
+  strip.render({
+    items: [sourceItem({ focused: true, volts: '1.00 V', voltsDetail: '1.00 V at cursor 1' })],
+    note: '',
+  });
   check('a re-rendered strip keeps keyboard focus on the same source chip and never steals it from outside',
-    focusedBefore && after.dataset.busId === 'bus-1' &&
+    focusedBefore && after.dataset.busId === 'bus-1' && after.dataset.action === 'focus' &&
     (doc.activeElement as unknown as FakeElement) === outside,
     `before=${focusedBefore}, after=${after?.dataset.busId}, ` +
     `outside=${(doc.activeElement as unknown as FakeElement) === outside}`);
+
+  const visibility = host.querySelectorAll('.analog-source-visibility')[0]!;
+  visibility.focus();
+  const actionBefore = doc.activeElement === visibility;
+  strip.render({
+    items: [sourceItem({ focused: true, volts: '1.00 V', voltsDetail: '1.00 V at cursor 1' })],
+    note: '',
+  });
+  const restored = doc.activeElement as unknown as FakeElement;
+  check('the visibility button keeps its own focus across a rebuild instead of handing it to the chip',
+    actionBefore && restored.dataset.action === 'visibility' &&
+    restored.dataset.busId === 'bus-0',
+    `before=${actionBefore}, action=${restored?.dataset.action}, bus=${restored?.dataset.busId}`);
 }
 
 const app = fs.readFileSync('src/ui/app.ts', 'utf8');
@@ -222,24 +389,24 @@ const layoutBody = methodBody(app, 'private setAnalogLayout(layout: AnalogLayout
     (relayout.match(/this\.renderAnalogSources\(\);/g) ?? []).length === 2 &&
     relayout.includes('this.pruneAnalogFocus();'),
     `renders=${(relayout.match(/this\.renderAnalogSources\(\);/g) ?? []).length}`);
-  const sourcesBody = methodBody(app, 'private renderAnalogSources(): void {');
-  const stripGate = "this.analogLayout === 'merged'";
-  const mergedOnly = sourcesBody.includes(stripGate) &&
-    sourcesBody.includes("band.id === MERGED_ANALOG_BAND_ID") &&
-    sourcesBody.includes('const sources = merged.sources;');
-  const ungated = app.replace(
-    stripGate + '\n      ? this.analogRowBands.find((band) => band.id === MERGED_ANALOG_BAND_ID) : undefined;',
-    'true ? { sources: this.analogRowBands.flatMap((band) => band.sources) } : undefined;');
   const gatedOf = (source: string): boolean => {
     const body = methodBody(source, 'private renderAnalogSources(): void {');
-    return body.includes(stripGate) && body.includes('band.id === MERGED_ANALOG_BAND_ID') &&
-      body.includes('const sources = merged.sources;');
+    const merged = methodBody(source, 'private mergedAnalogSources(): readonly AnalogBandSource[] {');
+    return body.includes('const sources = this.mergedAnalogSources();') &&
+      body.includes("sources.length === 0 ? { items: [], note: '' } : this.analogStripView(sources)") &&
+      merged.includes("if (this.analogLayout !== 'merged') return [];") &&
+      merged.includes('band.id === MERGED_ANALOG_BAND_ID');
   };
+  const ungated = app.replace(
+    "    if (this.analogLayout !== 'merged') return [];\n", '');
+  const allBands = app.replace(
+    'band.id === MERGED_ANALOG_BAND_ID)?.sources ?? []',
+    'true)?.sources ?? []');
   check('the strip lists only the Overlay band\'s participants, so Stacked shows no chips',
-    mergedOnly, `mergedOnly=${mergedOnly}`);
-  check('control: dropping the Overlay gate lists every band source and its dead focus chips',
-    ungated !== app && !gatedOf(ungated) && gatedOf(app),
-    `ungated=${gatedOf(ungated)}`);
+    gatedOf(app), `mergedOnly=${gatedOf(app)}`);
+  check('control: dropping the Overlay gate either way lists Stacked sources and their dead focus chips',
+    ungated !== app && !gatedOf(ungated) && allBands !== app && !gatedOf(allBands) && gatedOf(app),
+    `ungated=${gatedOf(ungated)}, allBands=${gatedOf(allBands)}`);
   const bandsBody = methodBody(
     app, 'private analogBandsFor(entries: readonly AnalogRowEntry[]): AnalogBand[]');
   const partition = bandsBody.includes('entry.source.group >= 0') &&
@@ -257,11 +424,11 @@ const layoutBody = methodBody(app, 'private setAnalogLayout(layout: AnalogLayout
     `mergeAll=${mergeAll.includes('entries.filter((entry) => entry.source.group >= 0)')}`);
   const focusBody = methodBody(app, 'private setAnalogFocus(busId: string): void {');
   check('a focus is accepted only for an ADC group, so the band always keeps a ruler owner',
-    focusBody.includes('if (!entry || entry.source.group < 0 || busId === this.analogFocusId) return;'),
+    focusBody.includes('if (!entry || entry.source.group < 0) return;'),
     `group=${focusBody.includes('entry.source.group < 0')}`);
   const anySourceFocus = app.replace(
-    'if (!entry || entry.source.group < 0 || busId === this.analogFocusId) return;',
-    'if (!entry || busId === this.analogFocusId) return;');
+    'if (!entry || entry.source.group < 0) return;',
+    'if (!entry) return;');
   check('control: accepting any bus as the focus fails the same predicate',
     anySourceFocus !== app &&
     !methodBody(anySourceFocus, 'private setAnalogFocus(busId: string): void {')
@@ -295,7 +462,9 @@ const drawBody = methodBody(app, 'private drawBusRows(');
 function mergedTracePasses(source: string): boolean {
   const body = methodBody(source, 'private drawBusRows(');
   return body.includes('const band = this.analogRowBands[analogIndex];') &&
-    body.includes('for (const source of band.sources) {') &&
+    body.includes('const hidden = this.hiddenAnalogSources();') &&
+    body.includes('? band.sources : band.sources.filter((source) => !hidden.has(source.busId));') &&
+    body.includes('for (const source of visible) {') &&
     body.includes('traces.push(this.analogTrace(bus, scopeOf(bus)));') &&
     body.includes('const focused = focusedAnalogSource(band);') &&
     body.includes('const scope = focusedBus ? scopeOf(focusedBus) : undefined;') &&
@@ -308,7 +477,7 @@ function mergedTracePasses(source: string): boolean {
     drawBody.length > 0 && mergedTracePasses(app),
     `draw=${mergedTracePasses(app)}`);
   const firstSourceOnly = app.replace(
-    'for (const source of band.sources) {', 'for (const source of band.sources.slice(0, 1)) {');
+    'for (const source of visible) {', 'for (const source of band.sources.slice(0, 1)) {');
   const perSourceChrome = app.replace(
     'const scope = focusedBus ? scopeOf(focusedBus) : undefined;',
     'const scope = traces[0] ? scopeOf(busesById.get(band.sources[0]!.busId)!) : undefined;');
@@ -392,7 +561,147 @@ function mergedTracePasses(source: string): boolean {
 }
 
 {
-  const layoutNames = ['bus.layoutStacked', 'bus.layoutMerged', 'bus.sourceStrip', 'bus.focusSource'];
+  const body = methodBody(app, 'private toggleAnalogVisibility(busId: string): void {');
+  const toggled = body.includes('toggleSourceVisibility(') &&
+    body.includes('{ focusedId: resolveAnalogFocus(sources, this.analogFocusId), hidden: this.analogHidden },') &&
+    body.includes('this.analogHidden = next.hidden;') &&
+    body.includes('this.analogFocusId = next.focusedId;') &&
+    !body.includes('persistWorkspace') &&
+    !body.split('\n').some((line) => line.includes('this.analogHidden.add(') ||
+      line.includes('this.analogHidden.delete('));
+  const order = ['this.analogHidden = next.hidden;', 'this.relayout();', 'this.renderPanels();', 'this.dirty = true;']
+    .map((needle) => body.indexOf(needle));
+  const sequential = order.every((index, i) => index >= 0 && (i === 0 || index > order[i - 1]!));
+  check('one visibility setter keeps the App-owned hidden set, retargets focus through the pure reducer and re-renders without persisting',
+    toggled && sequential,
+    `reducer=${body.includes('toggleSourceVisibility(')}, order=${JSON.stringify(order)}, ` +
+    `persists=${body.includes('persistWorkspace')}`);
+  const direct = app.replace(
+    '    this.analogHidden = next.hidden;\n    this.analogFocusId = next.focusedId;',
+    '    const hidden = new Set(this.analogHidden);\n    hidden.add(busId);\n    this.analogHidden = hidden;');
+  const persisted = app.replace(
+    'private toggleAnalogVisibility(busId: string): void {',
+    'private toggleAnalogVisibility(busId: string): void {\n    this.persistWorkspace();');
+  const toggles = (source: string): boolean => {
+    const inner = methodBody(source, 'private toggleAnalogVisibility(busId: string): void {');
+    return inner.includes('this.analogHidden = next.hidden;') &&
+      inner.includes('this.analogFocusId = next.focusedId;') && !inner.includes('persistWorkspace');
+  };
+  check('control: a hand-rolled hidden set or a persisted visibility fails the same predicate',
+    direct !== app && !toggles(direct) && persisted !== app && !toggles(persisted) && toggles(app),
+    `direct=${toggles(direct)}, persisted=${toggles(persisted)}`);
+
+  const focusBody = methodBody(app, 'private setAnalogFocus(busId: string): void {');
+  const focusGuard = 'if (busId === this.analogFocusId && !hiddenBus) return;';
+  const focusShowsHidden = (source: string): boolean => {
+    const body = methodBody(source, 'private setAnalogFocus(busId: string): void {');
+    const guardAt = body.indexOf(focusGuard);
+    const deleteAt = body.indexOf('hidden.delete(busId);');
+    return body.includes('const hiddenBus = this.analogHidden.has(busId);') &&
+      guardAt > 0 && deleteAt > guardAt &&
+      deleteAt < body.indexOf('this.relayout();') &&
+      body.includes('this.analogHidden = hidden;');
+  };
+  check('focusing a hidden Overlay source shows it, even when that source already owns the focus',
+    focusShowsHidden(app) && focusBody.includes(focusGuard),
+    `guard=${focusBody.indexOf(focusGuard)}, unhide=${focusBody.indexOf('hidden.delete(busId);')}`);
+  const focusedShortCircuit = app.replace(focusGuard, 'if (busId === this.analogFocusId) return;');
+  const keepsHidden = app.replace(
+    '    if (hiddenBus) {\n      const hidden = new Set(this.analogHidden);\n      hidden.delete(busId);\n      this.analogHidden = hidden;\n    }\n', '');
+  check('control: a plain focus short-circuit or a dropped unhide fails the same predicate',
+    focusedShortCircuit !== app && !focusShowsHidden(focusedShortCircuit) &&
+    keepsHidden !== app && !focusShowsHidden(keepsHidden),
+    `short-circuit=${focusShowsHidden(focusedShortCircuit)}, dropped=${focusShowsHidden(keepsHidden)}`);
+
+  const pruneBody = methodBody(app, 'private pruneAnalogFocus(): void {');
+  check('capture replacement prunes focus and visibility together without touching source configuration',
+    pruneBody.includes('{ focusedId: this.analogFocusId, hidden: this.analogHidden }, valid') &&
+    pruneBody.includes('this.analogHidden = pruned.hidden;') &&
+    !pruneBody.includes('busViews =') && !pruneBody.includes('heightCss'),
+    `hidden=${pruneBody.includes('hidden: this.analogHidden')}`);
+  const pruneFocusOnly = app.replace(
+    '{ focusedId: this.analogFocusId, hidden: this.analogHidden }, valid',
+    '{ focusedId: this.analogFocusId, hidden: new Set<string>() }, valid');
+  check('control: pruning with an empty hidden set drops a valid visibility state',
+    pruneFocusOnly !== app && !pruneFocusOnly.includes('hidden: this.analogHidden }, valid'),
+    `keeps=${pruneFocusOnly.includes('hidden: this.analogHidden }, valid')}`);
+}
+
+{
+  const signed = methodBody(app, 'private busSignature(viewStart: number, viewEnd: number): number {');
+  const hiddenLine = "this.analogLayout === 'merged' ? [...this.analogHidden].sort().join(',') : '',";
+  check('the bus frame signature carries the Overlay visibility of the band it draws',
+    signed.includes(hiddenLine) && signed.includes('this.analogLayout, this.analogFocusId'),
+    `hidden=${signed.includes(hiddenLine)}`);
+  const unsigned = app.replace(`      ${hiddenLine}\n`, '');
+  const ungated = app.replace(hiddenLine, "[...this.analogHidden].sort().join(','),");
+  const signedOf = (source: string): boolean => methodBody(
+    source, 'private busSignature(viewStart: number, viewEnd: number): number {')
+    .includes('this.analogHidden');
+  check('control: dropping the visibility input from the bus signature fails the same predicate',
+    unsigned !== app && signedOf(unsigned) === false && signedOf(app) === true &&
+    ungated !== app,
+    `unsigned=${signedOf(unsigned)}, ungated=${signedOf(ungated)}`);
+
+  const drawBody = methodBody(app, 'private drawBusRows(');
+  check('the merged band draws only visible sources and states the all-hidden case in the band itself',
+    drawBody.includes('const hidden = this.hiddenAnalogSources();') &&
+    drawBody.includes('const allHidden = band.sources.length > 0 && visible.length === 0;') &&
+    drawBody.includes("const note = allHidden ? t('bus.allHiddenNote')") &&
+    drawBody.includes('for (const source of visible) {'),
+    `allHidden=${drawBody.includes('allHidden')}`);
+  const drawnAll = app.replace(
+    '? band.sources : band.sources.filter((source) => !hidden.has(source.busId));',
+    '? band.sources : band.sources;');
+  const noteDropped = app.replace("const note = allHidden ? t('bus.allHiddenNote')", 'const note = allHidden ? \'\'');
+  check('control: drawing hidden sources or dropping the in-band note fails the same predicate',
+    drawnAll !== app && !drawnAll.includes('band.sources.filter((source) => !hidden.has(source.busId));') &&
+    noteDropped !== app && !noteDropped.includes("t('bus.allHiddenNote')"),
+    `drawn=${drawnAll.includes('!hidden.has(source.busId)')}, note=${noteDropped.includes('allHiddenNote')}`);
+}
+
+{
+  const panels = methodBody(app, 'private renderPanels(): void {');
+  const refresh = methodBody(app, 'private refreshAnalogVoltages(): void {');
+  const transitions = [
+    'private releaseRepeatHold(): void {',
+    'private clearRepeatLayers(): void {',
+    'private settleHeldRepeatWave(): void {',
+  ].filter((signature) => methodBody(app, signature).includes('this.refreshAnalogVoltages();'));
+  const dragSites = app.split('this.refreshAnalogVoltages();').length - 1;
+  check('the voltage readout refreshes on the existing cursor drag path, on every panel render and on each wave hand-over, never from a frame',
+    panels.includes('this.refreshAnalogVoltages();') &&
+    dragSites >= 7 && transitions.length === 3 &&
+    refresh.includes('this.mergedAnalogSources()') &&
+    refresh.includes('this.sourceStrip.updateVoltages(this.analogStripView(sources));') &&
+    !refresh.includes('projectCursorVoltages(') &&
+    !methodBody(app, 'private frame = (): void => {').includes('refreshAnalogVoltages'),
+    `panels=${panels.includes('this.refreshAnalogVoltages();')}, sites=${dragSites}, ` +
+    `transitions=${transitions.length}, ` +
+    `frames=${methodBody(app, 'private frame = (): void => {').includes('refreshAnalogVoltages')}`);
+  const unrefreshed = app.replace(
+    "    this.renderSidebarContent();\n    this.refreshAnalogVoltages();",
+    '    this.renderSidebarContent();');
+  check('control: dropping the panel-render refresh leaves the strip text stale',
+    unrefreshed !== app &&
+    !methodBody(unrefreshed, 'private renderPanels(): void {').includes('this.refreshAnalogVoltages();'),
+    `sites=${unrefreshed.split('this.refreshAnalogVoltages();').length - 1}`);
+  const framed = app.replace(
+    'private frame = (): void => {',
+    'private frame = (): void => {\n    this.refreshAnalogVoltages();');
+  check('control: moving the refresh into the frame loop fails the same predicate',
+    framed !== app &&
+    methodBody(framed, 'private frame = (): void => {').includes('this.refreshAnalogVoltages();'),
+    `frames=${methodBody(framed, 'private frame = (): void => {').includes('refreshAnalogVoltages')}`);
+}
+
+{
+  const layoutNames = [
+    'bus.layoutStacked', 'bus.layoutMerged', 'bus.sourceStrip', 'bus.focusSource',
+    'bus.hideSource', 'bus.showSource', 'bus.allHiddenNote', 'bus.allHiddenHint',
+    'bus.voltsAtCursor', 'bus.voltsUnknown', 'bus.voltsOutside', 'bus.voltsPreviousWave',
+    'bus.voltsPreviousWaveNote', 'bus.voltsNoSource', 'bus.voltsNoCursor',
+  ];
   const settingsRows = ['settings.analogLayout'];
   const files = ['en', 'zh-CN', 'fr', 'ru'].map((locale) =>
     fs.readFileSync(`src/ui/locales/${locale}.ts`, 'utf8'));
@@ -408,7 +717,11 @@ function mergedTracePasses(source: string): boolean {
     sheet.includes('.analog-source-chip[aria-pressed="true"]') &&
     sheet.includes('display: flex; align-items: center; gap: 4px; flex-wrap: wrap;') &&
     sheet.includes('max-width: calc(100% - 60px);') &&
-    sheet.includes('.settings-row-select { grid-template-columns: minmax(0, 1fr); }'),
+    sheet.includes('.settings-row-select { grid-template-columns: minmax(0, 1fr); }') &&
+    ['.analog-source-item {', '.analog-source-volts {', '.analog-source-volts:empty {',
+      '.analog-source-chip.is-hidden {', '.analog-source-visibility {', '.analog-source-note {']
+      .every((rule) => sheet.includes(rule)) &&
+    !/analog-source[^{]*\{[^}]*(position:\s*fixed|width:\s*\d+px;\s*width:)/.test(sheet),
     `sheet=${sheet.includes('.analog-source-strip {')}`);
 }
 

@@ -282,7 +282,29 @@ Analog channels are not bus rows. Each analog signal has a row with:
   the merged band's groups in row order: colour swatch plus name, the focused chip
   pressed, and a localized focus action as its accessible name. Chips are keyboard
   reachable; clicking, Enter or Space focuses that source only. Stacked draws no strip:
-  there every row is its own source.
+  there every row is its own source, so neither focus nor visibility needs a chip.
+- **Display visibility is a session-only Overlay state.** Each Overlay chip carries its
+  own visibility button next to the focus chip, with a localized show/hide action as its
+  accessible name and its pressed state as the source's display state; the eye glyph is
+  slashed when hidden, so the state is never colour alone. A hidden group keeps its chip,
+  its name and its row slot but is not drawn. Hiding the focused group retargets focus to
+  the first remaining visible group; hiding the last visible group keeps the band, its
+  height and its focused ruler and paints an all-hidden note in the band and a disclosure
+  line in the strip instead of an empty chart; focusing a hidden group shows it; showing
+  a group never steals focus. The set is session state: it is not written to the
+  workspace, is pruned when its bus disappears, and never reuses a bus view's
+  `hideSources`. Stacked ignores it entirely.
+- **Each chip reads its source's cursor voltage.** While Overlay is shown and a cursor is
+  placed, the focused cursor's sample — the active cursor, or the first placed one — is
+  read from the current acquisition wave through the exact single-point reader, one code
+  per visible group, and each chip shows that number in the group's own calibration
+  beside its name. The value is text on the chip,
+  so it never depends on colour, and its accessible name carries the cursor it belongs
+  to. A gap, a sample outside the current wave, a group missing from the loaded capture,
+  or a held previous wave shows `--` with the reason disclosed (the strip states the
+  previous-wave case once); no old Repeat composite sample is ever read as current data.
+  The readout refreshes in place on the cursor refresh path, never from a drawing frame,
+  and it changes neither the cursor positions nor `1/Δt`.
 
 ### 5.3 Buses, math and decoder lanes
 
@@ -458,6 +480,17 @@ Analog channels are not bus rows. Each analog signal has a row with:
 - The analog row layout never changes what is measured: automatic measurements still
   read each ADC bank's own current-wave codes, and every vertical view edit (Autoset,
   V/div, zero) follows the focused source in Overlay.
+- **Per-source cursor voltages are a third, separate readout.** The Overlay chip strip
+  prints, on each visible group's chip, that group's own code at the focused cursor,
+  converted with its own gain, and it covers every visible group rather than the focused
+  one alone. The sample comes from the current acquisition wave through the exact
+  single-point reader: a gap, a position outside the current wave, a group absent from
+  the loaded capture and a held previous wave all read `--`, with the reason disclosed on
+  the chip or, for the previous-wave case, once in the strip. Hiding a group removes its
+  value with the trace, Stacked shows none, and the readout is text so it never relies on
+  colour. It moves no cursor, restyles neither the position text nor `1/Δt`, and starts no
+  clock of its own: the values are recomputed only when a cursor, the wave or the
+  visibility changes.
 - **Capture** is the third range and the one deliberate exception to window-bounded
   scanning: it analyses the whole retained current wave (`[0, length)`) instead of what the
   viewport shows, and says so — its window line reads "Window: 300,000 samples (captured
