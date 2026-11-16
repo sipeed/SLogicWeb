@@ -813,19 +813,23 @@ const stopReasonVocabulary:
     body.includes("reason: this.captureAbort === null ? reason : 'error',") &&
     body.includes('samples: store.length,') &&
     body.includes("missed: this.triggerState === 'not-found',") &&
-    body.includes('const visible = this.cursorsPageShown();') &&
+    body.includes("const visible = this.cursorsPageShown() && this.viewMode === 'time';") &&
     body.includes('visible,') &&
     body.includes('rows.push(...this.measurementWaveRows(\n        view.rows, view.sources, store.samplerate, view.range));') &&
     !body.includes('visible: true');
   const aborted = record.replace("reason: this.captureAbort === null ? reason : 'error',",
     'reason,');
-  const alwaysVisible = record.replace('const visible = this.cursorsPageShown();',
+  const alwaysVisible = record.replace(
+    "const visible = this.cursorsPageShown() && this.viewMode === 'time';",
     'const visible = true;');
+  const analysisVisible = record.replace("this.viewMode === 'time'", "this.viewMode !== 'time'");
   const ungated = record.replace("missed: this.triggerState === 'not-found',", 'missed: false,');
   check('the wave submission is memory-abort aware, visibility gated and carries the shared facts',
-    submitted(record) && !submitted(aborted) && !submitted(alwaysVisible) && !submitted(ungated),
+    submitted(record) && !submitted(aborted) && !submitted(alwaysVisible) &&
+      !submitted(analysisVisible) && !submitted(ungated),
     `submitted=${submitted(record)}, aborted=${submitted(aborted)}, ` +
-    `visible=${submitted(alwaysVisible)}, missed=${submitted(ungated)}`);
+    `visible=${submitted(alwaysVisible)}, analysis=${submitted(analysisVisible)}, ` +
+    `missed=${submitted(ungated)}`);
   const hiddenScan = (body: string): boolean =>
     body.includes('if (visible) {') &&
     body.indexOf('if (visible) {') < body.indexOf('this.measurementView()') &&

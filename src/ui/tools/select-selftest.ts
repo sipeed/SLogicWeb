@@ -687,6 +687,9 @@ check(
     'measure.cursor.a',
     'measure.cursor.b',
     'measure.persistence',
+    'fft.source',
+    'fft.window',
+    'fft.minHz',
   ];
   const controlCalls = capture.match(/selectControl\(/g)?.length ?? 0;
   const missingKeys = controlKeys.filter((key) => !capture.includes(`'${key}'`));
@@ -707,9 +710,10 @@ check(
   const catalogKey = catalog.includes("'measure.catalogSource'") &&
     (catalog.match(/selectControl\(/g)?.length ?? 0) === 1;
   check(
-    'all four capture selects, the temperature select, the five measurement selects, the catalog source, ' +
-      'edge channels and analog gain use selectControl with stable keys',
-    missingKeys.length === 0 && controlCalls === 12 && gainKey && catalogKey &&
+    'all four capture selects, the temperature select, the five measurement selects, ' +
+      'the three FFT selects, the catalog source, edge channels and analog gain ' +
+      'use selectControl with stable keys',
+    missingKeys.length === 0 && controlCalls === 15 && gainKey && catalogKey &&
       oldNativeSites.length === 0 && oldLabelled.length === 0,
     `missingKeys=${JSON.stringify(missingKeys)}, controlCalls=${controlCalls}, ` +
       `catalogKey=${catalogKey}, ` +

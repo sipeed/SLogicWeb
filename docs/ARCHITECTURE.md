@@ -827,6 +827,16 @@ Key transitions (the full table is generated in one pure module):
   carries the wave identity and length, the dropped offset, window, group, gain, slope,
   level, hysteresis and artifact window, so a replacement capture, gain change or
   threshold change cannot leave an old value presented as current.
+- The analysis view mode is `App`-owned session state (`viewMode`, `fftConfig`, display
+  bounds) mirrored into `MeasurementSectionView.fft`; the section's single Time/FFT switch
+  and its FFT source, window, minimum-frequency and reset controls emit `onPickViewMode`,
+  `onPickFftSource`, `onPickFftWindow`, `onPickFftMinHz` and `onResetFftBounds`. Switching
+  toggles plot-layer visibility only, so the Time DOM and canvases keep their own state.
+  FFT reads `captureStore` through `readMeasureSamples` and `src/dsp/fftSpectrum.ts`, and
+  never writes acquisition, trigger, cursor, viewport or persisted state; its display
+  bounds are re-derived from a settled transform, so pan and zoom never recompute it.
+  While the analysis view is shown the automatic time measurements report `paused`,
+  statistics skip the wave, and Persistence commits nothing.
 - One `OverlayController` owns the stack of menus, popovers, sheets and dialogs. Opening
   one closes its transient siblings; Escape/back closes the topmost; focus returns to the
   invoker by token.

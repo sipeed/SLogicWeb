@@ -607,6 +607,44 @@ Analog channels are not bus rows. Each analog signal has a row with:
   Persistence is session-only (never in the workspace snapshot) and never an input to
   automatic measurements, statistics, References, FFT, XY or a saved capture; toggling it
   or its length leaves every measurement row and statistic byte-identical.
+- **The analysis view is a display mode of the same measurement section.** One
+  Time/FFT switch in the measurement section chooses it; FFT replaces the visible plot
+  with one analysis canvas while the Time DOM and canvases keep their state hidden. The
+  switch changes visibility only: it never starts, stops or reconfigures an acquisition,
+  moves a cursor, rewrites the viewport, T, trigger, source vertical settings, References
+  or Persistence, and returning to Time redraws the retained surface. The analysis canvas
+  occupies the visible plot column — the scroll viewport below the sticky overview and
+  axis strips — not the channel-row content height, so its frequency labels and dB floor
+  stay on screen while rows overflow; a window/sidebar resize, a row-count change and a
+  scroll of the stack reposition it on the ordinary frame path. FFT reads one real
+  ADC group at a time and reuses the same Viewport, cursor-pair and whole-capture range as
+  the rows above it.
+- **FFT input is exact and bounded.** It reads contiguous calibrated codes from the
+  current acquisition wave (`captureStore`) only; a Repeat composite's older-layer
+  coverage is cropped and disclosed, never treated as current data. An internal gap
+  refuses the transform instead of filling it, and N is the largest power of two no
+  greater than the bounded span anchored at the window start — no zero padding and no
+  decimation — with 65,536 samples as the initial main-thread cap. Hann is the default
+  window; Rectangular, Hamming and Blackman remain selectable.
+- **FFT normalization and disclosure.** One-sided amplitudes use the coherent window gain
+  with no factor two at DC or Nyquist, and dBFS references a nominal 127.5-code
+  full-scale sine (the quantized endpoints cannot represent an ideal unclipped sine at
+  exactly that amplitude); linear voltage peak is printed beside it. The section states
+  source, sample rate, N, analyzed and requested spans, delta-f, ENBW and RBW, Nyquist,
+  window, the dBFS reference, the 8-bit quantization floor and the transform bound. DC is
+  reported separately in text and is never a point on the logarithmic axis, whose minimum
+  defaults to the first usable bin so the whole spectrum is on axis until the operator
+  pans, zooms or picks a preset.
+- **FFT axis and inspection are analysis-only.** The frequency axis is logarithmic with
+  1-2-5 ticks; each device column shows the maximum covered bin, and a column with no
+  exact bin shows only a nearest-bin point, never a connecting segment. Wheel, drag and
+  keyboard pan/zoom change display bounds only. Peak frequency is labeled with parabolic
+  log-magnitude interpolation between bins, with the raw bin stated beside it; hover names
+  the nearest bin. Running updates use the section's own 500 ms
+  `analysisPanelAt` branch inside the frame callback, stopped updates are event-driven,
+  and no second rAF or timer is added. While FFT is shown the automatic time measurements
+  report paused and scan nothing; statistics and Persistence commit only in Time mode.
+  FFT is never an input to or output from References, Persistence or an acquisition.
 
 ### 6.4 Plot painting
 

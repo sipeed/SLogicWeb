@@ -13,6 +13,7 @@ import {
 } from './measurementRows.js';
 import { readMeasureSamples, type MeasureBus, type MeasureRead } from './measureSamples.js';
 import { noMeasurementStatsView, type MeasurementStatsView } from './measurementStats.js';
+import type { FftSectionView } from './fftView.js';
 
 export type MeasurementRangeKind = 'viewport' | 'cursors' | 'capture';
 
@@ -28,7 +29,8 @@ export type MeasurementStatus =
   | 'analyzing'
   | 'cancelled'
   | 'stable-capture-required'
-  | 'loop';
+  | 'loop'
+  | 'paused';
 
 export interface MeasurementSource {
   group: number;
@@ -125,6 +127,7 @@ export interface MeasurementSectionView {
   window: MeasurementWindow | null;
   unavailable: MeasurementStatus | null;
   capture: MeasurementCaptureView | null;
+  fft?: FftSectionView;
   statsSkipped: number;
   statsLoopUnavailable: boolean;
 }

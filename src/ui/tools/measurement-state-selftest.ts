@@ -887,8 +887,8 @@ function rowsOf(scan: AnalogCodeScan | null, read: MeasurementReadSummary | null
   const projected = (source: string): boolean =>
     source.includes('const stats = this.measurementStatsViews(rows, sources, store.samplerate, config.range);') &&
     source.indexOf('this.measurementStatsViews(') < source.indexOf('const results = new Map<number, MeasurementSourceResult>();') &&
-    (source.match(/measurementRowViews\(rows, /g) ?? []).length === 5 &&
-    (source.match(/measurementRowViews\(rows, [^)]*, stats\)/g) ?? []).length === 5;
+    (source.match(/measurementRowViews\(rows, /g) ?? []).length === 6 &&
+    (source.match(/measurementRowViews\(rows, [^)]*, stats\)/g) ?? []).length === 6;
   check('one statistics projection runs before the branches and every row view carries it',
     projected(view) &&
       view.includes('statsSkipped: this.measurementStats.skipped,') &&

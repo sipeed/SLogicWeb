@@ -1525,6 +1525,21 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
 #plot.marker-grab { cursor: grab; }
 #plot.marker-grabbing { cursor: grabbing; }
 
+.fft-canvas {
+  position: absolute; left: 0; top: 0; z-index: 4;
+  display: block;
+  touch-action: none; cursor: crosshair; outline: none;
+}
+.fft-canvas:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+#plot:not(.fft-active) > .fft-canvas { display: none; }
+#plot.fft-active #wave-stack,
+#plot.fft-active .scope-scale-host,
+#plot.fft-active .analog-source-strip,
+#plot.fft-active #empty-hint { visibility: hidden; }
+#plot.fft-active #wave-stack { pointer-events: none; }
+#plot-col.fft-active #axis,
+#plot-col.fft-active #overview { visibility: hidden; }
+
 #wave-stack { position: relative; }
 .scope-scale-host { position: absolute; inset: 0; pointer-events: none; z-index: 2; }
 .scope-scale-bar {
@@ -2248,6 +2263,15 @@ html[data-theme="light"] .select-trigger:hover { border-color: var(--border-high
 .cursor-edge-hint { margin: 0; font-size: 10px; color: var(--text50); line-height: 1.5; }
 .measure-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .measure-controls > .field { flex: 1 1 90px; min-width: 0; }
+.measure-view-mode { margin-bottom: 8px; }
+.measure-view-mode-btn { padding: 3px 12px; font-size: 11px; cursor: pointer; }
+.measure-view-mode-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.fft-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
+.fft-controls > .field { flex: 1 1 90px; min-width: 0; }
+.analyzer-act.fft-reset {
+  width: auto; min-width: 22px; padding: 0 6px; white-space: nowrap;
+}
+.fft-summary { white-space: pre-line; }
 .measure-cursors { display: flex; flex-wrap: wrap; gap: 8px; }
 .measure-cursors > .field { flex: 1 1 90px; min-width: 0; }
 .measure-list { display: flex; flex-direction: column; gap: 6px; }
