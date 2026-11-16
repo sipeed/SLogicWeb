@@ -447,6 +447,28 @@ Analog channels are not bus rows. Each analog signal has a row with:
   Repeat wave inside a stopped session is a stable capture. Cancelling or replacing the
   job (source, parameter, range, gain, trigger, rate, store, row set) discards its partial
   aggregates; only a completed job feeds the rows.
+- Selecting a row's parameter-and-value region expands one details block in place (a
+  down chevron marks it closed, an up chevron open) without making every numeric update a
+  live-region announcement. The block names the row's method and window and lists Current,
+  Mean, Min, Max, sample StdDev (N−1 denominator, "–" while fewer than two samples exist),
+  Count, and the number of results excluded from the aggregates, plus Reset for this row and
+  Reset all. Statistics are explicitly cross-acquisition: one valid result per eligible
+  completed Single or Repeat wave measured while the Cursors surface is visible. A Loop
+  reports them unavailable, a wave that finishes while the surface is hidden is counted as a
+  skipped visibility interval instead of being scanned in the background, and an animation
+  frame, a cursor move, or a duplicate completion notification never increments Count.
+  Invalid, clipped, gapped, truncated or range-clipped results are excluded and counted,
+  and a row whose analysis is still pending offers neither a sample nor an exclusion.
+  Eligibility is the shared acquisition predicate — completed, non-Loop, non-empty, not a
+  missed trigger — so a memory-aborted wave never counts. The population is identified by
+  source, parameter, range selection (kind plus the two cursor identities, never the live
+  viewport window), calibration, threshold and slope, hysteresis and artifact window, and
+  sample rate inside one capture session; a Repeat wave or a store replacement keeps the
+  population, while a new session, a file or device replacement, or a row removal and
+  re-add starts a new one. Welford accumulation keeps Count, Mean, M2, Min and Max in
+  constant memory, stops at 512 samples, and then reads "512 (capped at 512)" instead of
+  sliding. Reset clears history without touching the current value, the rows, the range,
+  the cursors or the acquisition, and the whole model stays session-only.
 - Rise/fall, overshoot, top/base and amplitude remain future parameters under the same row
   contract. Period and Duty are catalog rows: Period is the same mean same-slope qualified
   interval divided by the sample rate (never a transform of a rounded Frequency), and Duty
