@@ -65,18 +65,21 @@ const frame = (() => {
   return end < 0 ? '' : app.slice(start, end);
 })();
 const applyConfig = slice(app, 'private applyMeasurementConfig(',
-  'private pickMeasurementSource(');
+  'private pickMeasurementFilter(');
 const pickRange = slice(app, 'private pickMeasurementRange(',
   'private pickMeasurementCursor(');
 const pickCursor = slice(app, 'private pickMeasurementCursor(',
   'private addMeasurementParameter(');
 const addParameter = slice(app, 'private addMeasurementParameter(',
-  'private removeMeasurementParameter(');
-const removeParameter = slice(app, 'private removeMeasurementParameter(',
+  'private removeMeasurementRowById(');
+const removeParameter = slice(app, 'private removeMeasurementRowById(',
   '// ------------------------------------------------------------------ bus views');
 
 function rowView(over: Partial<MeasurementRowView> = {}): MeasurementRowView {
   return {
+    id: 1,
+    start: 0,
+    sourceName: 'A0',
     parameter: 'frequency',
     value: Number.NaN,
     unit: 'hz',
@@ -91,6 +94,8 @@ function rowView(over: Partial<MeasurementRowView> = {}): MeasurementRowView {
     nearSampleLimit: false,
     crossingCap: false,
     crossingCount: 0,
+    dutyPeriods: 0,
+    dutyExcludedPeriods: 0,
     ...over,
   };
 }
@@ -98,10 +103,11 @@ function rowView(over: Partial<MeasurementRowView> = {}): MeasurementRowView {
 function sectionView(over: Partial<MeasurementSectionView> = {}): MeasurementSectionView {
   return {
     sources: [],
-    source: null,
+    filter: null,
     range: { kind: 'viewport', a: null, b: null },
     cursors: [],
     rows: [],
+    addStart: null,
     availableParameters: [],
     window: null,
     unavailable: null,
@@ -116,6 +122,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   'no-data': 'no samples in the window',
   'no-crossing': 'no qualified crossing',
   'one-crossing': 'one qualified crossing; a period needs two',
+  'no-period': 'no complete qualified period',
   'previous-wave-displayed': 'an older capture is on screen; waiting for the current one',
 };
 
@@ -141,28 +148,30 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 }
 
 {
-  const sourceAt = measureSection.indexOf("selectControl(\n      'measure.source',");
+  const filterAt = measureSection.indexOf("selectControl(\n      'measure.filter',");
   const rangeAt = measureSection.indexOf("selectControl(\n      'measure.range',");
-  check('the source and range selects are the first two controls of the section',
-    sourceAt >= 0 && rangeAt > sourceAt &&
+  check('the filter and range selects are the first two controls of the section',
+    filterAt >= 0 && rangeAt > filterAt &&
     measureSection.includes("t('capturePanel.measureSource')") &&
     measureSection.includes("t('capturePanel.measureRange')") &&
-    measureSection.includes('v.measurement.sources.map((source): SelectOptionTuple => ' +
-      '[String(source.group), source.name])') &&
-    measureSection.includes("v.measurement.source === null ? '' : String(v.measurement.source)"),
-    `source=${sourceAt}, range=${rangeAt}`);
+    measureSection.includes("['', t('capturePanel.measureSourceAll')],") &&
+    measureSection.includes('(source): SelectOptionTuple => ' +
+      '[String(source.start), source.name])') &&
+    measureSection.includes("v.measurement.filter === null ? '' : String(v.measurement.filter)"),
+    `filter=${filterAt}, range=${rangeAt}, ` +
+    `all=${measureSection.includes("t('capturePanel.measureSourceAll')")}`);
 
-  check('the source select reports the picked group and the null choice',
-    measureSection.includes("measureSource.addEventListener('change', " +
-      '() => this.cb.onPickMeasurementSource(') &&
-    measureSection.includes("measureSource.value === '' ? null : Number(measureSource.value)") &&
-    panel.includes('onPickMeasurementSource(group: number | null): void;'),
-    `wired=${measureSection.includes('this.cb.onPickMeasurementSource(')}`);
+  check('the filter select reports the picked source start and the All choice',
+    measureSection.includes("measureFilter.addEventListener('change', " +
+      '() => this.cb.onPickMeasurementFilter(') &&
+    measureSection.includes("measureFilter.value === '' ? null : Number(measureFilter.value)") &&
+    panel.includes('onPickMeasurementFilter(start: number | null): void;'),
+    `wired=${measureSection.includes('this.cb.onPickMeasurementFilter(')}`);
 
-  const disabled = 'measureSource.disabled = v.measurement.sources.length === 0;';
-  check('a session with no analog group disables the source combobox instead of offering none',
+  const disabled = 'measureFilter.disabled = v.measurement.sources.length === 0;';
+  check('a session with no analog group disables the filter combobox instead of offering none',
     measureSection.includes(disabled) &&
-    !measureSection.replace(disabled, '').includes('measureSource.disabled'),
+    !measureSection.replace(disabled, '').includes('measureFilter.disabled'),
     `disabled=${measureSection.includes(disabled)}`);
 
   check('the range select offers the Viewport and between-cursors kinds',
@@ -212,16 +221,20 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 }
 
 {
-  check('one rendered row per parameter, keyed by dataset for the live update',
+  check('one rendered row per visible row, keyed by row id for the live update',
     measureSection.includes("const list = div('measure-list');") &&
     measureSection.includes('for (const row of v.measurement.rows) {') &&
     measureSection.includes("const item = div('measure-row');") &&
-    measureSection.includes('item.dataset.measure = row.parameter;') &&
+    measureSection.includes('item.dataset.measureId = String(row.id);') &&
+    measureSection.includes("source.className = 'measure-source';") &&
+    measureSection.includes('source.textContent = row.sourceName;') &&
     measureSection.includes("parameter.className = 'measure-param';") &&
     measureSection.includes("value.className = 'measure-value';") &&
-    measureSection.includes("status.className = 'measure-status';"),
+    measureSection.includes("status.className = 'measure-status';") &&
+    measureSection.includes('item.append(source, parameter, value, status, remove);'),
     `rows=${measureSection.includes('v.measurement.rows')}, ` +
-    `dataset=${measureSection.includes('item.dataset.measure = row.parameter;')}`);
+    `dataset=${measureSection.includes('item.dataset.measureId = String(row.id);')}, ` +
+    `order=${measureSection.includes('item.append(source, parameter, value, status, remove);')}`);
 
   check('the row text comes from the shared parameter, value and status composition',
     measureSection.includes('parameter.textContent = measurementParameterText(row.parameter);') &&
@@ -233,15 +246,16 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `value=${measureSection.includes('measurementValueText(row)')}, ` +
     `status=${measureSection.includes('measurementStatusText(row)')}`);
 
-  check('each row removes exactly its own parameter through the shared remove button',
+  check('each row removes exactly its own row id through the shared remove button',
     measureSection.includes('const remove = cursorRemoveButton(') &&
-    measureSection.includes("t('capturePanel.measureRemove', " +
-      '{ parameter: measurementParameterText(row.parameter) })') &&
-    measureSection.includes('() => this.cb.onRemoveMeasurementRow(row.parameter),') &&
+    measureSection.includes("t('capturePanel.measureRemove', { parameter: label })") &&
+    measureSection.includes('const label = `${row.sourceName} ' +
+      '${measurementParameterText(row.parameter)}`;') &&
+    measureSection.includes('() => this.cb.onRemoveMeasurementRow(row.id),') &&
     measureSection.indexOf('cursorRemoveButton(') <
-      measureSection.indexOf('this.cb.onRemoveMeasurementRow(row.parameter)') &&
-    panel.includes('onRemoveMeasurementRow(parameter: MeasurementParameter): void;'),
-    `wired=${measureSection.includes('this.cb.onRemoveMeasurementRow(row.parameter)')}`);
+      measureSection.indexOf('this.cb.onRemoveMeasurementRow(row.id)') &&
+    panel.includes('onRemoveMeasurementRow(id: number): void;'),
+    `wired=${measureSection.includes('this.cb.onRemoveMeasurementRow(row.id)')}`);
 
   check('the row actions are real buttons, so every control is keyboard reachable',
     panel.includes("b.type = 'button';") &&
@@ -260,18 +274,22 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 }
 
 {
-  check('every available parameter gets one add control bound to its callback',
-    measureSection.includes('if (v.measurement.availableParameters.length > 0) {') &&
-    measureSection.includes('for (const parameter of v.measurement.availableParameters) {') &&
+  check('the temporary add control is one parameter select plus one Add button on the target source',
+    measureSection.includes('const addStart = v.measurement.addStart;') &&
+    measureSection.includes('if (addStart !== null && ' +
+      'v.measurement.availableParameters.length > 0) {') &&
     measureSection.includes("const addRow = div('measure-add-row');") &&
-    measureSection.includes("add.className = 'analyzer-act measure-add';") &&
-    measureSection.includes("measureAdd', {") &&
-    measureSection.includes('add.title = label;') &&
-    measureSection.includes("add.setAttribute('aria-label', label);") &&
-    measureSection.includes('this.cb.onAddMeasurementRow(parameter)') &&
-    panel.includes('onAddMeasurementRow(parameter: MeasurementParameter): void;'),
-    `guard=${measureSection.includes('availableParameters.length > 0')}, ` +
-    `wired=${measureSection.includes('this.cb.onAddMeasurementRow(parameter)')}`);
+    measureSection.includes("'measure.add',") &&
+    measureSection.includes("t('capturePanel.measureAdd'),") &&
+    measureSection.includes('v.measurement.availableParameters.map(') &&
+    measureSection.includes("add.textContent = t('capturePanel.measureAddRow');") &&
+    measureSection.includes('const parameter = picker.value;') &&
+    measureSection.includes('if (isMeasurementParameter(parameter)) ' +
+      'this.cb.onAddMeasurementRow(addStart, parameter);') &&
+    measureSection.includes('addRow.append(picker.el, add);') &&
+    panel.includes('onAddMeasurementRow(start: number, parameter: MeasurementParameter): void;'),
+    `guard=${measureSection.includes('addStart !== null')}, ` +
+    `wired=${measureSection.includes('this.cb.onAddMeasurementRow(addStart, parameter)')}`);
 
   check('the section note is textual and carries its own data hook',
     measureSection.includes("const measureNote = div('measure-note');") &&
@@ -306,7 +324,9 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     const guard = 'if (row === undefined) continue;';
     return source.includes('for (const root of this.roots()) {') &&
       source.includes("root.querySelectorAll<HTMLElement>('.measure-row')") &&
-      source.includes('item.dataset.measure as MeasurementParameter | undefined') &&
+      source.includes('const id = Number(item.dataset.measureId);') &&
+      source.includes('const row = Number.isInteger(id) ? byId.get(id) : undefined;') &&
+      source.includes('const byId = new Map<number, MeasurementRowView>();') &&
       source.includes(guard) &&
       source.includes("item.querySelector<HTMLElement>('.measure-value')") &&
       source.includes('value.textContent = measurementValueText(row);') &&
@@ -353,10 +373,10 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const capture = doc.createElement('div');
   const cursors = doc.createElement('div');
   doc.body.append(capture, cursors);
-  const makeRow = (root: FakeElement, parameter: string, value: string): void => {
+  const makeRow = (root: FakeElement, id: number, value: string): void => {
     const item = doc.createElement('div');
     item.className = 'measure-row';
-    item.dataset.measure = parameter;
+    item.dataset.measureId = String(id);
     const name = doc.createElement('span');
     name.className = 'measure-param';
     name.textContent = 'label';
@@ -386,9 +406,9 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     root.appendChild(line);
   };
   for (const root of [capture, cursors]) {
-    makeRow(root, 'vpp', 'old vpp');
-    makeRow(root, 'rms', 'old rms');
-    makeRow(root, 'frequency', 'old hz');
+    makeRow(root, 1, 'old vpp');
+    makeRow(root, 2, 'old rms');
+    makeRow(root, 3, 'old hz');
     makeNote(root);
     makeWindowLine(root);
   }
@@ -398,29 +418,29 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     cursors: cursors as unknown as HTMLElement,
   }, cb);
   const vpp = rowView({
-    parameter: 'vpp', unit: 'v', value: 21.4588, crossingCount: 0,
+    id: 1, parameter: 'vpp', unit: 'v', value: 21.4588, crossingCount: 0,
     analyzedSamples: 32768, requestedSamples: 65536, truncated: true,
   });
-  const rms = rowView({ parameter: 'rms', unit: 'v', value: 4.09936 });
+  const rms = rowView({ id: 2, parameter: 'rms', unit: 'v', value: 4.09936 });
   target.updateMeasurements(sectionView({ rows: [vpp, rms] }));
 
-  const cells = (root: FakeElement, parameter: string, cls: string): string =>
-    root.querySelector(`.measure-row[data-measure="${parameter}"] .${cls}`)?.textContent ?? '';
-  const labelOf = (root: FakeElement, parameter: string): string =>
-    root.querySelector(`.measure-row[data-measure="${parameter}"] .measure-param`)
+  const cells = (root: FakeElement, id: number, cls: string): string =>
+    root.querySelector(`.measure-row[data-measure-id="${id}"] .${cls}`)?.textContent ?? '';
+  const labelOf = (root: FakeElement, id: number): string =>
+    root.querySelector(`.measure-row[data-measure-id="${id}"] .measure-param`)
       ?.textContent ?? '';
   const noteOf = (root: FakeElement): FakeElement | null =>
     root.querySelector('[data-measure-note]');
   const windowOf = (root: FakeElement): FakeElement | null =>
     root.querySelector('[data-measure-window]');
   const written = [capture, cursors].map((root) => [
-    cells(root, 'vpp', 'measure-value'),
-    cells(root, 'vpp', 'measure-status'),
-    cells(root, 'rms', 'measure-value'),
-    cells(root, 'rms', 'measure-status'),
-    cells(root, 'frequency', 'measure-value'),
-    cells(root, 'frequency', 'measure-status'),
-    labelOf(root, 'vpp'),
+    cells(root, 1, 'measure-value'),
+    cells(root, 1, 'measure-status'),
+    cells(root, 2, 'measure-value'),
+    cells(root, 2, 'measure-status'),
+    cells(root, 3, 'measure-value'),
+    cells(root, 3, 'measure-status'),
+    labelOf(root, 1),
     noteOf(root)?.textContent ?? '',
     noteOf(root)?.hidden,
   ]);
@@ -437,7 +457,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `written=${JSON.stringify(written)}, rows=${rowsKept}`);
 
   const wide = rowView({
-    parameter: 'vpp', unit: 'v', value: 21.4588,
+    id: 1, parameter: 'vpp', unit: 'v', value: 21.4588,
     analyzedSamples: 65536, requestedSamples: 300000, truncated: true,
   });
   target.updateMeasurements(sectionView({
@@ -449,10 +469,10 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   check('the window line names the requested window, and the truncated row its own prefix',
     windowLines.every((entry) => entry === 'Window: 300,000 samples/false') &&
     [capture, cursors].every((root) =>
-      cells(root, 'vpp', 'measure-status').includes('partial: 65,536 of 300,000 samples') &&
+      cells(root, 1, 'measure-status').includes('partial: 65,536 of 300,000 samples') &&
       !(windowOf(root)?.textContent ?? '').includes('65,536')),
     `lines=${JSON.stringify(windowLines)}, ` +
-    `row=${cells(capture, 'vpp', 'measure-status')}`);
+    `row=${cells(capture, 1, 'measure-status')}`);
 
   target.updateMeasurements(sectionView({ rows: [vpp, rms] }));
   const clearedWindow = [capture, cursors].map((root) =>
@@ -482,8 +502,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 
   target.updateMeasurements(sectionView({
     rows: [
-      rowView({ parameter: 'vpp', unit: 'v', status: 'no-data' }),
-      rowView({ parameter: 'rms', unit: 'v', status: 'no-data' }),
+      rowView({ id: 1, parameter: 'vpp', unit: 'v', status: 'no-data' }),
+      rowView({ id: 2, parameter: 'rms', unit: 'v', status: 'no-data' }),
     ],
     unavailable: 'no-data',
   }));
@@ -493,13 +513,13 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   });
   check('an unavailable section labels every row and leaves the section note collapsed',
     [capture, cursors].every((root) =>
-      cells(root, 'vpp', 'measure-value') === '–' &&
-      cells(root, 'vpp', 'measure-status') === 'no samples in the window' &&
-      cells(root, 'rms', 'measure-status') === 'no samples in the window') &&
+      cells(root, 1, 'measure-value') === '–' &&
+      cells(root, 1, 'measure-status') === 'no samples in the window' &&
+      cells(root, 2, 'measure-status') === 'no samples in the window') &&
     hidden.every((entry) => entry === '/true'),
     `note=${JSON.stringify(hidden)}`);
 
-  target.updateMeasurements(sectionView({ rows: [rms] }));
+  target.updateMeasurements(sectionView({ rows: [{ ...rms, id: 2 }] }));
   const cleared = [capture, cursors].map((root) => {
     const note = noteOf(root);
     return `${note?.textContent}/${note?.hidden}`;
@@ -507,6 +527,48 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   check('a clean section collapses the note instead of leaving the last status up',
     cleared.every((entry) => entry === '/true'),
     `note=${JSON.stringify(cleared)}`);
+}
+
+{
+  const doc = installFakeDom();
+  const root = doc.createElement('div');
+  doc.body.appendChild(root);
+  const makeRow = (id: number): void => {
+    const item = doc.createElement('div');
+    item.className = 'measure-row';
+    item.dataset.measureId = String(id);
+    const name = doc.createElement('span');
+    name.className = 'measure-param';
+    name.textContent = 'Vpp';
+    const cell = doc.createElement('span');
+    cell.className = 'measure-value';
+    cell.textContent = 'stale';
+    const status = doc.createElement('span');
+    status.className = 'measure-status';
+    status.textContent = 'stale';
+    item.append(name, cell, status);
+    root.appendChild(item);
+  };
+  makeRow(4);
+  makeRow(5);
+  makeRow(6);
+  const target = new CapturePanel({
+    capture: root as unknown as HTMLElement,
+    cursors: doc.createElement('div') as unknown as HTMLElement,
+  }, {} as CapturePanelCallbacks);
+  target.updateMeasurements(sectionView({
+    rows: [
+      rowView({ id: 4, start: 0, sourceName: 'A0', parameter: 'vpp', unit: 'v', value: 1 }),
+      rowView({ id: 5, start: 16, sourceName: 'A2', parameter: 'vpp', unit: 'v', value: 2 }),
+    ],
+  }));
+  const cellOf = (id: number, cls: string): string =>
+    root.querySelector(`.measure-row[data-measure-id="${id}"] .${cls}`)?.textContent ?? '';
+  check('two rows of one parameter on different sources update by row id, not by parameter',
+    cellOf(4, 'measure-value') === '1 V' && cellOf(5, 'measure-value') === '2 V' &&
+      cellOf(6, 'measure-value') === 'stale',
+    `a0=${cellOf(4, 'measure-value')}, a2=${cellOf(5, 'measure-value')}, ` +
+      `unlisted=${cellOf(6, 'measure-value')}`);
 }
 
 {
@@ -542,7 +604,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     .map((status) => [status, measurementStatusText(rowView({ status }))] as const);
   const wrong = statuses.filter(([status, text]) => text !== STATUS_TEXT[status]);
   check('every non-ok state prints its own explicit status, never a number',
-    wrong.length === 0 && statuses.length === 6 &&
+    wrong.length === 0 && statuses.length === 7 &&
     statuses.every(([, text]) => text !== '' && !text.includes('NaN')),
     `wrong=${JSON.stringify(wrong)}, statuses=${statuses.length}`);
 }
@@ -571,12 +633,40 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     rmsFull === `DC-coupled RMS of exact samples · ${shared}` && leaked.length === 0,
     `vpp=${vppFull}, rms=${rmsFull}, leaked=${JSON.stringify(leaked)}`);
 
-  const gate = 'if (row.parameter !== \'frequency\') return parts;';
+  const gate = "if (row.parameter === 'frequency' || row.parameter === 'period') {";
   const gated = (source: string): boolean => source.includes(gate) &&
     source.includes('const parts = measurementSharedFlagText(row);');
-  check('the amplitude rows keep shared-only flags because of the frequency gate, not luck',
-    gated(panel) && !gated(panel.replace(gate, '')),
-    `gate=${panel.includes(gate)}, dropped=${gated(panel.replace(gate, ''))}`);
+  check('the vertical rows keep shared-only flags because of the horizontal gate, not luck',
+    gated(panel) && !gated(panel.replaceAll(gate, 'if (false) {')),
+    `gate=${panel.includes(gate)}, dropped=${gated(panel.replaceAll(gate, 'if (false) {'))}`);
+
+  const periodFull = measurementStatusText({ ...full, parameter: 'period', unit: 's', value: 1 });
+  const dutyFull = measurementStatusText({
+    ...full, parameter: 'duty', unit: '%', value: 42.5, dutyPeriods: 9, dutyExcludedPeriods: 2,
+  });
+  check('period discloses the same validity flags as frequency and duty its excluded periods',
+    periodFull === `mean period of 4,096 qualified crossings · ${shared}` +
+      ' · period near the sample limit · crossing scan stopped at 4,096' &&
+      dutyFull === 'known samples above the level over 9 complete periods · ' + shared +
+      ' · 2 complete periods excluded (gaps or clipping)',
+    `period=${periodFull}, duty=${dutyFull}`);
+
+  const dutyClean = measurementStatusText({
+    ...rowView({ parameter: 'duty', unit: '%', value: 12.5, dutyPeriods: 3 }),
+  });
+  check('a duty row with no excluded period adds no disclosure',
+    dutyClean === 'known samples above the level over 3 complete periods' &&
+      !dutyClean.includes('excluded'),
+    `duty=${dutyClean}`);
+
+  const dutyNoPeriod = measurementStatusText({
+    ...rowView({ parameter: 'duty', unit: '%', status: 'no-period', dutyExcludedPeriods: 2 }),
+  });
+  check('a duty row lacking a complete period names that, never "no samples in the window"',
+    dutyNoPeriod === 'no complete qualified period · ' +
+      '2 complete periods excluded (gaps or clipping)' &&
+      dutyNoPeriod !== STATUS_TEXT['no-data'],
+    `duty=${dutyNoPeriod}`);
 
   const onlyCap = measurementStatusText(rowView({ crossingCap: true, crossingCount: 4096 }));
   const noFlags = measurementStatusText(rowView({ crossingCount: 3 }));
@@ -591,7 +681,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       unavailable: status, rows: [rowView({ status }), rowView({ status })] }))] as const);
   const repeated = unavailableStates.filter(([, note]) => note !== '');
   check('an unavailable section adds no note line that repeats the row status verbatim',
-    repeated.length === 0 && unavailableStates.length === 6,
+    repeated.length === 0 && unavailableStates.length === 7,
     `repeated=${JSON.stringify(repeated)}`);
 
   const clipped = measurementNoteText(sectionView({ rows: [full, { ...full, parameter: 'vpp' }] }));
@@ -608,6 +698,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measure': 'Automatic measurements',
     'capturePanel.measureFormat': 'source · window · method',
     'capturePanel.measureSource': 'Source',
+    'capturePanel.measureSourceAll': 'All sources',
     'capturePanel.measureRange': 'Range',
     'capturePanel.measureRangeViewport': 'Viewport',
     'capturePanel.measureRangeCursors': 'Between cursors',
@@ -616,19 +707,31 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureCursorUnset': 'not set',
     'capturePanel.measureCursorHint': 'Place two cursors on the waveform to measure between them.',
     'capturePanel.measureEmpty': 'Add a measurement row.',
-    'capturePanel.measureAdd': 'Add row: {parameter}',
+    'capturePanel.measureAdd': 'Add measurement',
+    'capturePanel.measureAddRow': 'Add',
     'capturePanel.measureRemove': 'Remove row: {parameter}',
     'capturePanel.measureFrequency': 'Frequency',
     'capturePanel.measureVpp': 'Vpp',
+    'capturePanel.measureMax': 'Max',
+    'capturePanel.measureMin': 'Min',
+    'capturePanel.measureMean': 'Mean',
     'capturePanel.measureRms': 'RMS',
+    'capturePanel.measurePeriod': 'Period',
+    'capturePanel.measureDuty': 'Duty',
     'capturePanel.measureMethodFrequency': 'mean period of {count} qualified crossings',
     'capturePanel.measureMethodVpp': 'exact code extrema',
+    'capturePanel.measureMethodMax': 'exact known-sample maximum',
+    'capturePanel.measureMethodMin': 'exact known-sample minimum',
+    'capturePanel.measureMethodMean': 'compensated mean of known samples',
     'capturePanel.measureMethodRms': 'DC-coupled RMS of exact samples',
+    'capturePanel.measureMethodPeriod': 'mean period of {count} qualified crossings',
+    'capturePanel.measureMethodDuty': 'known samples above the level over {periods} complete periods',
     'capturePanel.measureStatusNoSource': 'no analog group selected',
     'capturePanel.measureStatusNoWindow': 'no measurement window',
     'capturePanel.measureStatusNoData': 'no samples in the window',
     'capturePanel.measureStatusNoCrossing': 'no qualified crossing',
     'capturePanel.measureStatusOneCrossing': 'one qualified crossing; a period needs two',
+    'capturePanel.measureStatusNoPeriod': 'no complete qualified period',
     'capturePanel.measureStatusPreviousWave': 'an older capture is on screen; ' +
       'waiting for the current one',
     'capturePanel.measurePartial': 'partial: {analyzed} of {requested} samples',
@@ -639,6 +742,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureClippedHigh': 'signal reaches code 255',
     'capturePanel.measureNearLimit': 'period near the sample limit',
     'capturePanel.measureCrossingCap': 'crossing scan stopped at {count}',
+    'capturePanel.measureDutyExcluded': '{periods} complete periods excluded (gaps or clipping)',
     'capturePanel.measureValueNone': '–',
   };
   const keys = Object.keys(english);
@@ -648,8 +752,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const value = (dict: Readonly<Record<string, string>>, key: string): string => dict[key] ?? '';
   const missing = catalogs.flatMap(([locale, dict]) =>
     keys.filter((key) => value(dict, key).trim() === '').map((key) => `${locale}:${key}`));
-  check('all four catalogs define the thirty-four measurement keys',
-    missing.length === 0 && keys.length === 34, `missing=${JSON.stringify(missing)}`);
+  check('all four catalogs define the forty-eight measurement keys',
+    missing.length === 0 && keys.length === 48, `missing=${JSON.stringify(missing)}`);
 
   const mismatched = keys.filter((key) => value(en, key) !== english[key]);
   check('the English measurement copy matches the approved vocabulary',
@@ -657,9 +761,11 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `mismatched=${JSON.stringify(mismatched.map((key) => [key, value(en, key)]))}`);
 
   const variables: Record<string, readonly string[]> = {
-    'capturePanel.measureAdd': ['{parameter}'],
     'capturePanel.measureRemove': ['{parameter}'],
     'capturePanel.measureMethodFrequency': ['{count}'],
+    'capturePanel.measureMethodPeriod': ['{count}'],
+    'capturePanel.measureMethodDuty': ['{periods}'],
+    'capturePanel.measureDutyExcluded': ['{periods}'],
     'capturePanel.measureCrossingCap': ['{count}'],
     'capturePanel.measurePartial': ['{analyzed}', '{requested}'],
     'capturePanel.measureWindowSamples': ['{samples}'],
@@ -722,24 +828,24 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `field=${panel.includes('measurement: MeasurementSectionView;')}`);
 
   const registrations = [
-    'onPickMeasurementSource: (group) => this.pickMeasurementSource(group),',
+    'onPickMeasurementFilter: (start) => this.pickMeasurementFilter(start),',
     'onPickMeasurementRange: (kind) => this.pickMeasurementRange(kind),',
     'onPickMeasurementCursor: (side, cursorId) => ' +
       'this.pickMeasurementCursor(side, cursorId),',
-    'onAddMeasurementRow: (parameter) => this.addMeasurementParameter(parameter),',
-    'onRemoveMeasurementRow: (parameter) => this.removeMeasurementParameter(parameter),',
+    'onAddMeasurementRow: (start, parameter) => this.addMeasurementParameter(start, parameter),',
+    'onRemoveMeasurementRow: (id) => this.removeMeasurementRowById(id),',
   ];
   const absent = registrations.filter((line) => !app.includes(line));
   const declared = [
-    'onPickMeasurementSource(group: number | null): void;',
+    'onPickMeasurementFilter(start: number | null): void;',
     'onPickMeasurementRange(kind: MeasurementRangeKind): void;',
     "onPickMeasurementCursor(side: 'a' | 'b', cursorId: number | null): void;",
-    'onAddMeasurementRow(parameter: MeasurementParameter): void;',
-    'onRemoveMeasurementRow(parameter: MeasurementParameter): void;',
+    'onAddMeasurementRow(start: number, parameter: MeasurementParameter): void;',
+    'onRemoveMeasurementRow(id: number): void;',
   ].filter((line) => !panel.includes(line));
   check('the panel emits all five measurement callbacks and App registers each one',
     absent.length === 0 && declared.length === 0 &&
-    panel.split('onPickMeasurementSource').length - 1 >= 2,
+    panel.split('onPickMeasurementFilter').length - 1 >= 2,
     `absent=${JSON.stringify(absent)}, declared=${JSON.stringify(declared)}`);
 
   const restart = app.split('this.runningPanelAt = 0;').length - 1;
@@ -825,11 +931,14 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     pickCursor.includes('selectMeasurementRange(base, range)'),
     `cursor=${pickCursor.length} chars`);
 
-  check('the row reducers add and remove exactly one core parameter',
-    addParameter.includes('addMeasurementRow(base, parameter)') &&
-    removeParameter.includes('removeMeasurementRow(base, parameter)') &&
+  check('the row actions add and remove exactly one row of the targeted source id',
+    addParameter.includes('addMeasurementRow(base.rows, start, parameter)') &&
+    removeParameter.includes('removeMeasurementRow(base.rows, id)') &&
+    addParameter.includes('this.withMeasurementRows(') &&
+    removeParameter.includes('this.withMeasurementRows(') &&
     addParameter.includes('this.applyMeasurementConfig(') &&
-    removeParameter.includes('this.applyMeasurementConfig('),
+    removeParameter.includes('this.applyMeasurementConfig(') &&
+    applyConfig.includes('this.applyMeasurementConfig(') === false,
     `add=${addParameter.length}, remove=${removeParameter.length}`);
 }
 
@@ -864,10 +973,16 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 
   check('the status line is ordered after the remove control without moving it in the DOM',
     status.includes('order: 1;') &&
-    measureSection.indexOf('item.append(parameter, value, status, remove);') > 0 &&
+    measureSection.indexOf('item.append(source, parameter, value, status, remove);') > 0 &&
     measureSection.indexOf('status.className') <
-      measureSection.indexOf('item.append(parameter, value, status, remove);'),
+      measureSection.indexOf('item.append(source, parameter, value, status, remove);'),
     `order=${status.includes('order: 1;')}`);
+
+  check('the source column and the add-row select share the section layout tokens',
+    slice(css, '.measure-source {', '}').includes('overflow-wrap: anywhere;') &&
+    slice(css, '.measure-add-row > .field {', '}').includes('flex: 1 1 90px;'),
+    `source=${css.includes('.measure-source {')}, ` +
+    `field=${css.includes('.measure-add-row > .field {')}`);
 
   const block = slice(css, '.measure-controls {', '.cursor-edge-channel {');
   const colour = block.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(|oklch\(/g) ?? [];

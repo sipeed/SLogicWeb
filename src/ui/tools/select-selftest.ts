@@ -681,10 +681,11 @@ check(
     'capture.preTrigger',
     'capture.testMode',
     'capture.tempRate',
-    'measure.source',
+    'measure.filter',
     'measure.range',
     'measure.cursor.a',
     'measure.cursor.b',
+    'measure.add',
   ];
   const controlCalls = capture.match(/selectControl\(/g)?.length ?? 0;
   const missingKeys = controlKeys.filter((key) => !capture.includes(`'${key}'`));
@@ -703,8 +704,8 @@ check(
     "labelled(t('capturePanel.testMode')",
   ].filter((needle) => capture.includes(needle));
   check(
-    'all four capture selects, the temperature select, the four measurement selects, edge channels and analog gain use selectControl with stable keys',
-    missingKeys.length === 0 && controlCalls === 11 && gainKey && oldNativeSites.length === 0 &&
+    'all four capture selects, the temperature select, the five measurement selects, edge channels and analog gain use selectControl with stable keys',
+    missingKeys.length === 0 && controlCalls === 12 && gainKey && oldNativeSites.length === 0 &&
       oldLabelled.length === 0,
     `missingKeys=${JSON.stringify(missingKeys)}, controlCalls=${controlCalls}, ` +
     `oldNativeSites=${JSON.stringify(oldNativeSites)}, oldLabelled=${JSON.stringify(oldLabelled)}`,
