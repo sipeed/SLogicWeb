@@ -91,11 +91,13 @@ import { formatCursorTimes } from './cursorTime.js';
 import { sameUsbDevice } from './deviceIdentity.js';
 import {
   defaultMeasurementConfig, isMeasurementBank, measurementAddStart, measurementCacheKey,
-  measurementRowViews, measurementSectionCounts, measurementSources, reconcileMeasurementConfig,
-  resolveMeasurementWindow, runMeasurement, selectMeasurementFilter, selectMeasurementRange,
+  measurementRowViews, measurementRowSettled, measurementSectionCounts, measurementSources,
+  measurementWaveValue, reconcileMeasurementConfig, resolveMeasurementWindow, runMeasurement,
+  selectMeasurementFilter, selectMeasurementRange,
   type MeasurementConfig, type MeasurementCaptureView, type MeasurementRange,
-  type MeasurementRangeKind, type MeasurementReadSummary, type MeasurementSectionView,
-  type MeasurementSource, type MeasurementSourceResult, type MeasurementStatus,
+  type MeasurementRangeKind, type MeasurementReadSummary, type MeasurementRowView,
+  type MeasurementSectionView, type MeasurementSource, type MeasurementSourceResult,
+  type MeasurementStatus,
 } from './measurementState.js';
 import {
   CaptureRangeJob, MEASURE_CAPTURE_BUDGET_MS, captureJobKey, captureRangeUnavailable,
@@ -108,6 +110,12 @@ import {
   type MeasurementRow, type MeasurementRowState,
 } from './measurementRows.js';
 import { readMeasureSamples, type MeasureRead } from './measureSamples.js';
+import {
+  emptyMeasurementStats, measurementStatsKey, measurementStatsView, noMeasurementStatsView,
+  resetAllMeasurementStats, resetMeasurementStatsFor, retainMeasurementStats,
+  submitMeasurementWave,
+  type MeasurementStatsState, type MeasurementStatsView, type MeasurementWaveRow,
+} from './measurementStats.js';
 import {
   captureAbortCause, isAllocationFailure, lowerSamplerate, saveFailureNotice,
   type CaptureAbort,
@@ -374,6 +382,9 @@ export class App {
   private measurementCapture: {
     key: string; store: SampleStore; job: CaptureRangeJob; sources: CaptureJobSource[];
   } | null = null;
+  private captureSessionId = 0;
+  private captureWaveGeneration = 0;
+  private measurementStats: MeasurementStatsState = emptyMeasurementStats();
   private runningPanelAt = 0;
   private analysisPanelAt = 0;
   /** New samples are waiting for the next data-driven redraw (HSync's status cadence). */
@@ -1187,6 +1198,84 @@ export class App {
     return sources.filter((source) => wanted.has(source.start));
   }
 
+  private measurementStatsRowKey(
+    row: MeasurementRow, sources: readonly MeasurementSource[], samplerate: number,
+    range: MeasurementRange,
+  ): string | null {
+    const source = sources.find((entry) => entry.start === row.start);
+    if (source === undefined) return null;
+    const trigger = this.settings.analogTriggers[source.start] ??
+      { kind: 'rising' as const, volts: 0 };
+    const qualification = analogTriggerQualification(samplerate);
+    return measurementStatsKey({
+      sessionId: this.captureSessionId,
+      source: source.start,
+      parameter: row.parameter,
+      rangeKind: range.kind,
+      cursorA: range.a,
+      cursorB: range.b,
+      gain: source.gain,
+      level: analogTriggerCode(trigger.kind, trigger.volts, source.gain),
+      rising: trigger.kind === 'rising',
+      hysteresis: qualification.analogHysteresis,
+      artifactWindow: qualification.analogArtifactSamples,
+      samplerate,
+    });
+  }
+
+  private measurementStatsViews(
+    rows: readonly MeasurementRow[], sources: readonly MeasurementSource[],
+    samplerate: number, range: MeasurementRange,
+  ): ReadonlyMap<number, MeasurementStatsView> {
+    const views = new Map<number, MeasurementStatsView>();
+    for (const row of rows) {
+      const key = this.measurementStatsRowKey(row, sources, samplerate, range);
+      views.set(row.id, key === null
+        ? noMeasurementStatsView()
+        : measurementStatsView(this.measurementStats, row.id, key));
+    }
+    return views;
+  }
+
+  private measurementWaveRows(
+    rows: readonly MeasurementRowView[], sources: readonly MeasurementSource[],
+    samplerate: number, range: MeasurementRange,
+  ): MeasurementWaveRow[] {
+    const wave: MeasurementWaveRow[] = [];
+    for (const row of rows) {
+      if (!measurementRowSettled(row)) continue;
+      const key = this.measurementStatsRowKey(
+        { id: row.id, start: row.start, parameter: row.parameter }, sources, samplerate, range);
+      if (key === null) continue;
+      wave.push({ rowId: row.id, key, value: measurementWaveValue(row) });
+    }
+    return wave;
+  }
+
+  private recordMeasurementWave(reason: CaptureStopReason): void {
+    const store = this.captureStore;
+    const visible = this.cursorsPageShown();
+    const rows: MeasurementWaveRow[] = [];
+    if (visible) {
+      const view = this.measurementView();
+      rows.push(...this.measurementWaveRows(
+        view.rows, view.sources, store.samplerate, view.range));
+    }
+    const result = submitMeasurementWave(this.measurementStats, {
+      sessionId: this.captureSessionId,
+      generation: this.captureWaveGeneration,
+      loop: this.captureIsLoop,
+      reason: this.captureAbort === null ? reason : 'error',
+      samples: store.length,
+      missed: this.triggerState === 'not-found',
+      visible,
+      rows,
+    });
+    if (result.state === this.measurementStats) return;
+    this.measurementStats = result.state;
+    this.dirty = true;
+  }
+
   private measurementView(): MeasurementSectionView {
     const store = this.captureStore;
     for (const [start, entry] of this.measurementCache) {
@@ -1202,6 +1291,10 @@ export class App {
     }
     const state = config.rows;
     const rows = visibleMeasurementRows(state);
+    const retained = retainMeasurementStats(
+      this.measurementStats, state.rows.map((row) => row.id));
+    if (retained !== this.measurementStats) this.measurementStats = retained;
+    const stats = this.measurementStatsViews(rows, sources, store.samplerate, config.range);
     const addStart = sources.length === 0 ? null : measurementAddStart(sources, state);
     const cursors = this.cursors.flatMap((cursor) => {
       const sample = cursor.marker.sample;
@@ -1219,12 +1312,14 @@ export class App {
       ...measurementSectionCounts(state),
       addStart,
       capture: null,
+      statsSkipped: this.measurementStats.skipped,
+      statsLoopUnavailable: this.captureIsLoop,
     };
     if (sources.length === 0) {
       const none = new Map<number, MeasurementSourceResult>();
       return {
         ...base,
-        rows: measurementRowViews(rows, none, 'no-source'),
+        rows: measurementRowViews(rows, none, 'no-source', stats),
         window: null, unavailable: 'no-source',
       };
     }
@@ -1232,7 +1327,7 @@ export class App {
       const none = new Map<number, MeasurementSourceResult>();
       return {
         ...base,
-        rows: measurementRowViews(rows, none, 'previous-wave-displayed'),
+        rows: measurementRowViews(rows, none, 'previous-wave-displayed', stats),
         window: null, unavailable: 'previous-wave-displayed',
       };
     }
@@ -1250,7 +1345,7 @@ export class App {
       }
       return {
         ...base,
-        rows: measurementRowViews(rows, blocked, null),
+        rows: measurementRowViews(rows, blocked, null, stats),
         window: null, unavailable: captureBlocked,
       };
     }
@@ -1264,7 +1359,7 @@ export class App {
       }
       return {
         ...base,
-        rows: measurementRowViews(rows, absent, null),
+        rows: measurementRowViews(rows, absent, null, stats),
         window: null, unavailable: null,
       };
     }
@@ -1334,7 +1429,7 @@ export class App {
     }
     return {
       ...base,
-      rows: measurementRowViews(rows, results, null),
+      rows: measurementRowViews(rows, results, null, stats),
       window: { start, end },
       unavailable: null,
     };
@@ -1354,6 +1449,7 @@ export class App {
     end: number,
     clipped: boolean,
   ): MeasurementSectionView {
+    const stats = this.measurementStatsViews(rows, sources, store.samplerate, base.range);
     const qualification = analogTriggerQualification(store.samplerate);
     const jobSources: CaptureJobSource[] = [];
     for (const source of this.measurementRowsFor(sources, rows)) {
@@ -1438,7 +1534,7 @@ export class App {
     }
     return {
       ...base,
-      rows: measurementRowViews(rows, results, null),
+      rows: measurementRowViews(rows, results, null, stats),
       window: { start, end },
       unavailable: null,
       capture,
@@ -1503,7 +1599,24 @@ export class App {
     this.measurementConfig = null;
     this.measurementCache.clear();
     this.dropMeasurementCapture();
+    this.captureSessionId += 1;
+    this.measurementStats = resetAllMeasurementStats(this.measurementStats);
     this.renderPanels();
+    this.dirty = true;
+  }
+
+  private resetMeasurementStatsRow(rowId: number): void {
+    this.measurementStats = resetMeasurementStatsFor(this.measurementStats, rowId);
+    this.refreshMeasurementStats();
+  }
+
+  private resetAllMeasurementStatsRows(): void {
+    this.measurementStats = resetAllMeasurementStats(this.measurementStats);
+    this.refreshMeasurementStats();
+  }
+
+  private refreshMeasurementStats(): void {
+    this.capturePanel.updateMeasurements(this.measurementView());
     this.dirty = true;
   }
 
@@ -1550,6 +1663,11 @@ export class App {
   private toggleMeasurementParameter(start: number, parameter: MeasurementParameter): void {
     const sources = measurementSources(this.busViews, this.captureStore.channelCount);
     const base = this.measurementBase(sources);
+    const removed = base.rows.rows.find(
+      (row) => row.start === start && row.parameter === parameter);
+    if (removed !== undefined) {
+      this.measurementStats = resetMeasurementStatsFor(this.measurementStats, removed.id);
+    }
     this.applyMeasurementConfig(
       this.withMeasurementRows(base, toggleMeasurementRow(base.rows, start, parameter)));
   }
@@ -1564,6 +1682,7 @@ export class App {
     if (!confirmed) return;
     const sources = measurementSources(this.busViews, this.captureStore.channelCount);
     const base = this.measurementBase(sources);
+    this.measurementStats = resetAllMeasurementStats(this.measurementStats);
     this.applyMeasurementConfig(this.withMeasurementRows(base, clearMeasurementRows(base.rows)));
   }
 
@@ -1572,12 +1691,14 @@ export class App {
     const base = this.measurementBase(sources);
     const rows = undoClearMeasurementRows(base.rows);
     if (rows === base.rows) return;
+    this.measurementStats = resetAllMeasurementStats(this.measurementStats);
     this.applyMeasurementConfig(this.withMeasurementRows(base, rows));
   }
 
   private removeMeasurementRowById(id: number): void {
     const sources = measurementSources(this.busViews, this.captureStore.channelCount);
     const base = this.measurementBase(sources);
+    this.measurementStats = resetMeasurementStatsFor(this.measurementStats, id);
     this.applyMeasurementConfig(this.withMeasurementRows(base, removeMeasurementRow(base.rows, id)));
   }
 
@@ -5214,6 +5335,8 @@ export class App {
         onUndoMeasurementRows: () => this.undoMeasurementRows(),
         onCancelMeasurementCapture: () => this.cancelMeasurementCapture(),
         onRestartMeasurementCapture: () => this.restartMeasurementCapture(),
+        onResetMeasurementStats: (rowId) => this.resetMeasurementStatsRow(rowId),
+        onResetAllMeasurementStats: () => this.resetAllMeasurementStatsRows(),
       });
       return;
     }
@@ -6060,6 +6183,8 @@ export class App {
     this.storeRef.set(store);
     this.waveStore = store;
     this.repeatMissed = false;
+    this.captureSessionId += 1;
+    this.measurementStats = emptyMeasurementStats();
     this.settledHeldCapture = false;
     this.clearRepeatLayers();
     // The first file over device data sets the device layout aside; a second file keeps
@@ -6580,6 +6705,7 @@ export class App {
     if (this.resetting) return;
     const device = this.device;
     const generation = ++this.captureGeneration;
+    this.captureWaveGeneration = generation;
     try {
       this.statusError = null;
       this.renderErrorBanner();
@@ -6611,7 +6737,11 @@ export class App {
       // Every device RUN is one sweep; a Repeat session keeps its policy across them.
       this.session = beginSweep(session);
       this.viewIntent = false;
-      if (newSession) this.repeatMissed = false;
+      if (newSession) {
+        this.repeatMissed = false;
+        this.captureSessionId += 1;
+        this.measurementStats = emptyMeasurementStats();
+      }
       this.lastCaptureChannels = cfg.channels;
       this.lastCaptureRate = cfg.samplerate;
       this.lastCaptureTestMode = cfg.testMode ?? 0;
@@ -7753,6 +7883,7 @@ export class App {
       this.scheduleAutoDecode();
     }
     this.syncUnloadGuard();
+    this.recordMeasurementWave(reason);
     const waiters = this.captureWaiters;
     this.captureWaiters = [];
     for (const w of waiters) w();

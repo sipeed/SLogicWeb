@@ -12,6 +12,7 @@ import {
   setMeasurementFilter, type MeasurementRow, type MeasurementRowState,
 } from './measurementRows.js';
 import { readMeasureSamples, type MeasureBus, type MeasureRead } from './measureSamples.js';
+import { noMeasurementStatsView, type MeasurementStatsView } from './measurementStats.js';
 
 export type MeasurementRangeKind = 'viewport' | 'cursors' | 'capture';
 
@@ -101,6 +102,7 @@ export interface MeasurementRowView {
   crossingCount: number;
   dutyPeriods: number;
   dutyExcludedPeriods: number;
+  stats: MeasurementStatsView;
 }
 
 export interface MeasurementCaptureView {
@@ -123,6 +125,8 @@ export interface MeasurementSectionView {
   window: MeasurementWindow | null;
   unavailable: MeasurementStatus | null;
   capture: MeasurementCaptureView | null;
+  statsSkipped: number;
+  statsLoopUnavailable: boolean;
 }
 
 export interface MeasurementCacheInput {
@@ -332,7 +336,9 @@ export function measurementCacheKey(input: MeasurementCacheInput): string {
   ].join('|');
 }
 
-function blankRow(row: MeasurementRow, status: MeasurementStatus): MeasurementRowView {
+function blankRow(
+  row: MeasurementRow, status: MeasurementStatus, stats: MeasurementStatsView,
+): MeasurementRowView {
   return {
     id: row.id,
     start: row.start,
@@ -353,6 +359,7 @@ function blankRow(row: MeasurementRow, status: MeasurementStatus): MeasurementRo
     crossingCount: 0,
     dutyPeriods: 0,
     dutyExcludedPeriods: 0,
+    stats,
   };
 }
 
@@ -360,17 +367,22 @@ export function measurementRowViews(
   rows: readonly MeasurementRow[],
   results: MeasurementResultMap,
   sectionUnavailable: MeasurementStatus | null,
+  stats: ReadonlyMap<number, MeasurementStatsView> = new Map(),
 ): MeasurementRowView[] {
+  const statsOf = (id: number): MeasurementStatsView =>
+    stats.get(id) ?? noMeasurementStatsView();
   return rows.map((row): MeasurementRowView => {
-    if (sectionUnavailable !== null) return blankRow(row, sectionUnavailable);
+    if (sectionUnavailable !== null) {
+      return blankRow(row, sectionUnavailable, statsOf(row.id));
+    }
     const result = results.get(row.start);
-    if (result === undefined) return blankRow(row, 'no-source');
+    if (result === undefined) return blankRow(row, 'no-source', statsOf(row.id));
     const source = result.source;
     const scan = result.scan;
     const read = result.read;
     if (scan === null || read === null) {
       return {
-        ...blankRow(row, result.unavailable ?? 'no-data'),
+        ...blankRow(row, result.unavailable ?? 'no-data', statsOf(row.id)),
         sourceName: source.name,
       };
     }
@@ -394,8 +406,26 @@ export function measurementRowViews(
       crossingCount: scan.crossingCount,
       dutyPeriods: scan.dutyPeriods,
       dutyExcludedPeriods: scan.dutyExcludedPeriods,
+      stats: statsOf(row.id),
     };
   });
+}
+
+export function measurementRowEligible(row: MeasurementRowView): boolean {
+  return row.status === 'ok' && Number.isFinite(row.value) &&
+    !row.truncated && !row.rangeClipped && !row.gaps && !row.clippedLow && !row.clippedHigh;
+}
+
+export function measurementWaveValue(row: MeasurementRowView): number | null {
+  return measurementRowEligible(row) ? row.value : null;
+}
+
+const SETTLED_ROW_STATUSES: readonly MeasurementStatus[] = [
+  'ok', 'no-data', 'no-crossing', 'one-crossing', 'no-period',
+];
+
+export function measurementRowSettled(row: MeasurementRowView): boolean {
+  return SETTLED_ROW_STATUSES.includes(row.status);
 }
 
 export function runMeasurement(input: MeasurementRunInput): {

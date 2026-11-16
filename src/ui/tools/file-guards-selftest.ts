@@ -200,8 +200,15 @@ async function confirmDialogChecks(): Promise<void> {
   const guard = app.includes("window.addEventListener('beforeunload', this.unloadGuard);") &&
     app.includes("window.removeEventListener('beforeunload', this.unloadGuard);") &&
     app.includes('event.preventDefault();\n        // Older Chromium/Safari still need returnValue set to show the prompt.\n        event.returnValue = \'\';');
+  const finishStart = app.indexOf(
+    "private finishCapture(reason: CaptureStopReason = 'manual'): void {");
+  const finishEnd = app.indexOf(
+    '// ------------------------------------------------------------------ analyzers', finishStart);
+  const finishBody = finishStart < 0 || finishEnd < 0 ? '' : app.slice(finishStart, finishEnd);
   const synced = app.includes('    this.syncUnloadGuard();\n    const repeatPending = this.repeatTimer.pending;') &&
-    app.includes('    this.syncUnloadGuard();\n    const waiters = this.captureWaiters;');
+    finishBody.includes('this.syncUnloadGuard();') &&
+    finishBody.indexOf('this.syncUnloadGuard();') <
+      finishBody.indexOf('const waiters = this.captureWaiters;');
   check('both save paths mark the capture saved; beforeunload is registered only while needed',
     savedMarks === 2 && guard && synced, `marks=${savedMarks}, guard=${guard}, synced=${synced}`);
 }
