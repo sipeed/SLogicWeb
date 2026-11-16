@@ -42,22 +42,32 @@ function seeded(): MeasurementRowState {
 
 {
   const expected = [
-    ['vpp', 'vertical', 'v', 'capturePanel.measureVpp', 'capturePanel.measureMethodVpp'],
-    ['max', 'vertical', 'v', 'capturePanel.measureMax', 'capturePanel.measureMethodMax'],
-    ['min', 'vertical', 'v', 'capturePanel.measureMin', 'capturePanel.measureMethodMin'],
-    ['mean', 'vertical', 'v', 'capturePanel.measureMean', 'capturePanel.measureMethodMean'],
-    ['rms', 'vertical', 'v', 'capturePanel.measureRms', 'capturePanel.measureMethodRms'],
+    ['vpp', 'vertical', 'v', 'capturePanel.measureVpp', 'capturePanel.measureMethodVpp',
+      'capturePanel.measureMethodVpp'],
+    ['max', 'vertical', 'v', 'capturePanel.measureMax', 'capturePanel.measureMethodMax',
+      'capturePanel.measureMethodMax'],
+    ['min', 'vertical', 'v', 'capturePanel.measureMin', 'capturePanel.measureMethodMin',
+      'capturePanel.measureMethodMin'],
+    ['mean', 'vertical', 'v', 'capturePanel.measureMean', 'capturePanel.measureMethodMean',
+      'capturePanel.measureMethodMean'],
+    ['rms', 'vertical', 'v', 'capturePanel.measureRms', 'capturePanel.measureMethodRms',
+      'capturePanel.measureMethodRms'],
     ['frequency', 'horizontal', 'hz',
-      'capturePanel.measureFrequency', 'capturePanel.measureMethodFrequency'],
-    ['period', 'horizontal', 's', 'capturePanel.measurePeriod', 'capturePanel.measureMethodPeriod'],
-    ['duty', 'horizontal', '%', 'capturePanel.measureDuty', 'capturePanel.measureMethodDuty'],
+      'capturePanel.measureFrequency', 'capturePanel.measureMethodFrequency',
+      'capturePanel.measureCatalogMethodFrequency'],
+    ['period', 'horizontal', 's', 'capturePanel.measurePeriod',
+      'capturePanel.measureMethodPeriod', 'capturePanel.measureCatalogMethodPeriod'],
+    ['duty', 'horizontal', '%', 'capturePanel.measureDuty',
+      'capturePanel.measureMethodDuty', 'capturePanel.measureCatalogMethodDuty'],
   ];
   const actual = MEASUREMENT_CATALOG.map((entry) => [
     entry.parameter, entry.group, entry.unit, entry.labelKey, entry.methodKey,
+    entry.descriptionKey,
   ]);
-  check('the catalog lists eight parameters in display order with group, unit and key pair',
+  check('the catalog lists eight parameters in display order with group, unit and key triples',
     JSON.stringify(actual) === JSON.stringify(expected) &&
-      MEASUREMENT_CATALOG.length === 8,
+      MEASUREMENT_CATALOG.length === 8 &&
+      MEASUREMENT_CATALOG.every((entry) => entry.descriptionKey.startsWith('capturePanel.')),
     JSON.stringify(actual));
 }
 
@@ -205,9 +215,11 @@ function seeded(): MeasurementRowState {
     keys(restored.rows) === '16:mean,0:vpp,16:duty' && ids(restored.rows) === '1,2,3' &&
       restored.nextId === 4 && restored.undo === null && restoredAgain === restored &&
       undoClearMeasurementRows(state) === state &&
-      undoClearMeasurementRows(emptyState) === emptyState,
+      undoClearMeasurementRows(emptyState) === emptyState &&
+      restored.rows === cleared.undo?.rows && restored.filter === null,
     `rows=${keys(restored.rows)}, ids=${ids(restored.rows)}, next=${restored.nextId}, ` +
-      `undo=${String(restored.undo)}, secondUndoSame=${restoredAgain === restored}`);
+      `undo=${String(restored.undo)}, secondUndoSame=${restoredAgain === restored}, ` +
+      `filter=${String(restored.filter)}, snapshot=${restored.rows === cleared.undo?.rows}`);
 
   const afterAdd = addMeasurementRow(cleared, 0, 'min');
   const afterUndo = undoClearMeasurementRows(afterAdd);

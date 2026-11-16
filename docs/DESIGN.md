@@ -404,16 +404,26 @@ Analog channels are not bus rows. Each analog signal has a row with:
   only where its eight-bit bank bus view does, which at 32 channels is A0–A3 and at 16
   A0–A1; with no such bus view the source list is empty, the source select is disabled and
   the rows read "no analog group selected" — a window of Viewport or a chosen pair of
-  existing cursors, and the three core rows Frequency, Vpp and RMS. The section names the
+  existing cursors, and eight catalog parameters of which Frequency, Vpp and RMS are the
+  default rows of the first group and the other five are added on demand. A Source select
+  narrows the list to one group or to All and changes no row. The section names the
   resolved window's length in samples on its own line ("Window: 300,000 samples") under the
   range controls whenever a window resolves, and omits the line when none does; a truncated
   scan still states the whole window there and discloses its analyzed prefix on each row.
-  The rows default on for the first group and can be removed and re-added; the section says
-  so when no row is left.
+  Rows are managed from the section's own footer: each row removes itself, "Add
+  measurement…" opens one modal catalog of the eight parameters grouped Vertical and
+  Horizontal — each row naming its method in a sentence that carries no live count — and
+  toggles one parameter on the catalog's source, which is the section's Source select,
+  without closing the dialog; Done, Escape and a backdrop press close it and return focus to
+  the section's rebuilt Add button. "Clear all" asks through the shared confirmation first,
+  clears every row whatever the filter shows, and returns the Source select to All; one
+  Undo then restores the rows in their exact order and ids without re-applying the old
+  filter, and its notice is a status line rather than a live region on the value rows. The
+  section says so when no row is left.
 - Every row states its parameter, its value with unit (or "–") and one textual status:
   the method when there is a value, the reason when there is not. Method text names what is
-  measured — the mean period of qualified crossings for Frequency, exact code extrema for
-  Vpp, DC-coupled RMS of exact samples for RMS — and a row whose window was not analyzed
+  measured — the mean period of its qualified crossings for Frequency, exact code extrema
+  for Vpp, DC-coupled RMS of exact samples for RMS — and a row whose window was not analyzed
   whole adds "partial: x of y samples" to it.
 - No value is shown for no source, no window, a window with no usable sample (empty or
   wholly unknown), an older capture on screen, or a Frequency row with no qualified
@@ -423,10 +433,13 @@ Analog channels are not bus rows. Each analog signal has a row with:
   an earlier qualification up.
 - Cursor `1/Δt` stays the manual reciprocal it always was: automatic measurements are a
   separate readout with their own source, window and status, and never restyle it.
-- Period, duty cycle, rise/fall and overshoot are not implemented; they remain future
-  parameters under the same row contract. Nothing scans on a clock while the Cursors
-  surface is hidden: values recompute on settled input changes and on that surface's own
-  live refresh.
+- Rise/fall, overshoot, top/base and amplitude remain future parameters under the same row
+  contract. Period and Duty are catalog rows: Period is the same mean same-slope qualified
+  interval divided by the sample rate (never a transform of a rounded Frequency), and Duty
+  counts known samples at or above the trigger level over complete qualified periods only,
+  excluding and counting the periods that contain gaps or clipping. Nothing scans on a
+  clock while the Cursors surface is hidden: values recompute on settled input changes and
+  on that surface's own live refresh.
 - Math/FFT rows are measurements too: they state their sources, window function, bins and
   units; they never silently change the acquisition.
 

@@ -7,12 +7,14 @@ import { scanAnalogCodes, type AnalogCodeScan } from '../../dsp/analogScan.js';
 import { ADC_ZERO_CODE, analogBusConfig, analogVoltsPerCode } from '../channelBanks.js';
 import { MEASUREMENT_DEFAULT_PARAMETERS, measurementUnit } from '../measurementCatalog.js';
 import {
-  addMeasurementRow, emptyMeasurementRows, removeMeasurementRow, visibleMeasurementRows,
+  addMeasurementRow, clearMeasurementRows, emptyMeasurementRows, removeMeasurementRow,
+  setMeasurementFilter, undoClearMeasurementRows, visibleMeasurementRows,
   type MeasurementRow,
 } from '../measurementRows.js';
 import {
   defaultMeasurementConfig, isMeasurementBank, measurementAddStart, measurementCacheKey,
-  measurementRowViews, measurementSources, reconcileMeasurementConfig, resolveMeasurementWindow,
+  measurementRowViews, measurementSectionCounts, measurementSources, reconcileMeasurementConfig,
+  resolveMeasurementWindow,
   runMeasurement, selectMeasurementFilter, selectMeasurementRange,
   type MeasurementBusView, type MeasurementCacheInput, type MeasurementConfig,
   type MeasurementCursor, type MeasurementReadSummary, type MeasurementSource,
@@ -285,6 +287,34 @@ function resultFor(
     measurementAddStart([A0, A2], { ...full, filter: 0 }) === 0 &&
       second.filter === null && second.rows.length === 4,
     `filteredFull=${String(measurementAddStart([A0, A2], { ...full, filter: 0 }))}`);
+}
+
+{
+  let state = emptyMeasurementRows();
+  state = addMeasurementRow(state, 0, 'vpp');
+  state = addMeasurementRow(state, 16, 'rms');
+  state = addMeasurementRow(state, 0, 'duty');
+  const filtered = setMeasurementFilter(state, 0);
+  const cleared = clearMeasurementRows(filtered);
+  const undone = undoClearMeasurementRows(cleared);
+  const mutated = addMeasurementRow(cleared, 0, 'vpp');
+  const counts = measurementSectionCounts(state);
+  check('rowCount is every row while the visible list is filtered, and undoCount is the snapshot size',
+    counts.rowCount === 3 && counts.undoCount === null &&
+      visibleMeasurementRows(filtered).length === 2 &&
+      measurementSectionCounts(filtered).rowCount === 3 &&
+      cleared.rows.length === 0 && measurementSectionCounts(cleared).undoCount === 3 &&
+      measurementSectionCounts(undone).undoCount === null &&
+      undone.rows.length === 3 && measurementSectionCounts(mutated).undoCount === null,
+    `counts=${JSON.stringify(counts)}, visible=${visibleMeasurementRows(filtered).length}, ` +
+      `cleared=${JSON.stringify(measurementSectionCounts(cleared))}, ` +
+      `mutated=${JSON.stringify(measurementSectionCounts(mutated))}`);
+  const shallow = { rowCount: (s: typeof state): number => visibleMeasurementRows(s).length };
+  check('a visible-row count or a stale snapshot cannot pass that predicate',
+    shallow.rowCount(filtered) !== counts.rowCount &&
+      (cleared.undo === null) === false && mutated.undo === null &&
+      measurementSectionCounts(filtered).undoCount === null,
+    `visible=${shallow.rowCount(filtered)}, rowCount=${counts.rowCount}`);
 }
 
 {
@@ -764,13 +794,23 @@ function rowsOf(scan: AnalogCodeScan | null, read: MeasurementReadSummary | null
       view.includes('hysteresis: scan.hysteresis,') && view.includes('window: scan.window,') &&
       view.includes('if (cache === undefined || cache.store !== store || cache.key !== key) {'),
     `keyAt=${view.indexOf('measurementCacheKey(')}`);
-  check('the filter and add target are derived, not stored twice',
-    view.includes('filter: state.filter,') &&
-      view.includes('const addStart = sources.length === 0 ? null : measurementAddStart(sources, state);') &&
-      view.includes('availableParameters: addStart === null') &&
-      view.includes('? [] : [...availableMeasurementParameters(state, addStart)],') &&
-      !view.includes('source: config.source'),
-    `addStartAt=${view.indexOf('measurementAddStart(')}`);
+  const feed = (body: string): boolean =>
+    body.includes('filter: state.filter,') &&
+    body.includes('const addStart = sources.length === 0 ? null : measurementAddStart(sources, state);') &&
+    body.includes('allRows: state.rows,') &&
+    !body.includes('availableParameters') &&
+    !body.includes('measurementRowViews(state.rows') &&
+    !body.includes('source: config.source');
+  const scannedFeed = view.replace('allRows: state.rows,',
+    'allRows: measurementRowViews(state.rows, results, null),');
+  const deadField = view.replace('allRows: state.rows,',
+    'allRows: state.rows, availableParameters: [],');
+  check('the filter and add target are derived, and the catalog feed is row identity alone',
+    feed(view) && !feed(scannedFeed) && !feed(deadField) &&
+      view.split('allRows: state.rows,').length - 1 === 1 &&
+      !appSource.includes('availableParameters'),
+    `addStartAt=${view.indexOf('measurementAddStart(')}, feed=${feed(view)}, ` +
+      `scanned=${feed(scannedFeed)}, dead=${feed(deadField)}`);
   check('the measurement path runs on demand, without a clock or a workspace write',
     setter !== '' && !view.includes('requestAnimationFrame') &&
       !view.includes('setTimeout') && !view.includes('setInterval') &&
