@@ -36,9 +36,11 @@ import {
 } from './thresholdOptions.js';
 import { t, type MessageKey } from './i18n.js';
 import { helpTip } from './helpTip.js';
+import {
+  catalogEntry, isMeasurementParameter, type MeasurementParameter,
+} from './measurementCatalog.js';
 import type {
-  MeasurementParameter, MeasurementRangeKind, MeasurementRowView, MeasurementSectionView,
-  MeasurementStatus,
+  MeasurementRangeKind, MeasurementRowView, MeasurementSectionView, MeasurementStatus,
 } from './measurementState.js';
 import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
@@ -85,11 +87,11 @@ export interface CapturePanelCallbacks {
   onRemoveCursorEdge(rowId: number): void;
   onPickCursorEdge(rowId: number, side: DistanceSide, cursorId: number): void;
   onPickCursorEdgeChannel(rowId: number, channel: number | null): void;
-  onPickMeasurementSource(group: number | null): void;
+  onPickMeasurementFilter(start: number | null): void;
   onPickMeasurementRange(kind: MeasurementRangeKind): void;
   onPickMeasurementCursor(side: 'a' | 'b', cursorId: number | null): void;
-  onAddMeasurementRow(parameter: MeasurementParameter): void;
-  onRemoveMeasurementRow(parameter: MeasurementParameter): void;
+  onAddMeasurementRow(start: number, parameter: MeasurementParameter): void;
+  onRemoveMeasurementRow(id: number): void;
 }
 
 /** `aborted`: the last capture was ended by a device/link failure (`CapturePanelView.abort`). */
@@ -374,14 +376,14 @@ export class CapturePanel {
   }
 
   updateMeasurements(view: MeasurementSectionView): void {
-    const byParameter = new Map<MeasurementParameter, MeasurementRowView>();
-    for (const row of view.rows) byParameter.set(row.parameter, row);
+    const byId = new Map<number, MeasurementRowView>();
+    for (const row of view.rows) byId.set(row.id, row);
     const note = measurementNoteText(view);
     const windowText = measurementWindowText(view);
     for (const root of this.roots()) {
       for (const item of root.querySelectorAll<HTMLElement>('.measure-row')) {
-        const parameter = item.dataset.measure as MeasurementParameter | undefined;
-        const row = parameter === undefined ? undefined : byParameter.get(parameter);
+        const id = Number(item.dataset.measureId);
+        const row = Number.isInteger(id) ? byId.get(id) : undefined;
         if (row === undefined) continue;
         const value = item.querySelector<HTMLElement>('.measure-value');
         if (value !== null) value.textContent = measurementValueText(row);
@@ -1440,15 +1442,19 @@ export class CapturePanel {
     measureLegend.textContent = t('capturePanel.measureFormat');
     measureSec.header.appendChild(measureLegend);
     const measureControls = div('measure-controls');
-    const measureSource = selectControl(
-      'measure.source',
+    const measureFilter = selectControl(
+      'measure.filter',
       t('capturePanel.measureSource'),
-      v.measurement.sources.map((source): SelectOptionTuple => [String(source.group), source.name]),
-      v.measurement.source === null ? '' : String(v.measurement.source),
+      [
+        ['', t('capturePanel.measureSourceAll')],
+        ...v.measurement.sources.map(
+          (source): SelectOptionTuple => [String(source.start), source.name]),
+      ],
+      v.measurement.filter === null ? '' : String(v.measurement.filter),
     );
-    measureSource.addEventListener('change', () => this.cb.onPickMeasurementSource(
-      measureSource.value === '' ? null : Number(measureSource.value)));
-    measureSource.disabled = v.measurement.sources.length === 0;
+    measureFilter.addEventListener('change', () => this.cb.onPickMeasurementFilter(
+      measureFilter.value === '' ? null : Number(measureFilter.value)));
+    measureFilter.disabled = v.measurement.sources.length === 0;
     const measureRange = selectControl(
       'measure.range',
       t('capturePanel.measureRange'),
@@ -1460,7 +1466,7 @@ export class CapturePanel {
     );
     measureRange.addEventListener('change', () => this.cb.onPickMeasurementRange(
       measureRange.value === 'cursors' ? 'cursors' : 'viewport'));
-    measureControls.append(measureSource.el, measureRange.el);
+    measureControls.append(measureFilter.el, measureRange.el);
     measureSec.body.appendChild(measureControls);
     if (v.measurement.range.kind === 'cursors') {
       const measureCursors = div('measure-cursors');
@@ -1499,7 +1505,10 @@ export class CapturePanel {
       const list = div('measure-list');
       for (const row of v.measurement.rows) {
         const item = div('measure-row');
-        item.dataset.measure = row.parameter;
+        item.dataset.measureId = String(row.id);
+        const source = document.createElement('span');
+        source.className = 'measure-source';
+        source.textContent = row.sourceName;
         const parameter = document.createElement('span');
         parameter.className = 'measure-param';
         parameter.textContent = measurementParameterText(row.parameter);
@@ -1510,31 +1519,36 @@ export class CapturePanel {
         const status = document.createElement('span');
         status.className = 'measure-status';
         status.textContent = measurementStatusText(row);
+        const label = `${row.sourceName} ${measurementParameterText(row.parameter)}`;
         const remove = cursorRemoveButton(
-          t('capturePanel.measureRemove', { parameter: measurementParameterText(row.parameter) }),
-          () => this.cb.onRemoveMeasurementRow(row.parameter),
+          t('capturePanel.measureRemove', { parameter: label }),
+          () => this.cb.onRemoveMeasurementRow(row.id),
         );
-        item.append(parameter, value, status, remove);
+        item.append(source, parameter, value, status, remove);
         list.appendChild(item);
       }
       measureSec.body.appendChild(list);
     }
-    if (v.measurement.availableParameters.length > 0) {
+    const addStart = v.measurement.addStart;
+    if (addStart !== null && v.measurement.availableParameters.length > 0) {
       const addRow = div('measure-add-row');
-      for (const parameter of v.measurement.availableParameters) {
-        const add = document.createElement('button');
-        add.type = 'button';
-        add.className = 'analyzer-act measure-add';
-        add.dataset.measureAdd = parameter;
-        add.textContent = measurementParameterText(parameter);
-        const label = t('capturePanel.measureAdd', {
-          parameter: measurementParameterText(parameter),
-        });
-        add.title = label;
-        add.setAttribute('aria-label', label);
-        add.addEventListener('click', () => this.cb.onAddMeasurementRow(parameter));
-        addRow.appendChild(add);
-      }
+      const picker = selectControl(
+        'measure.add',
+        t('capturePanel.measureAdd'),
+        v.measurement.availableParameters.map(
+          (parameter): SelectOptionTuple => [parameter, measurementParameterText(parameter)]),
+        v.measurement.availableParameters[0] ?? '',
+      );
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'analyzer-act measure-add';
+      add.dataset.measureAdd = String(addStart);
+      add.textContent = t('capturePanel.measureAddRow');
+      add.addEventListener('click', () => {
+        const parameter = picker.value;
+        if (isMeasurementParameter(parameter)) this.cb.onAddMeasurementRow(addStart, parameter);
+      });
+      addRow.append(picker.el, add);
       measureSec.body.appendChild(addRow);
     }
     const measureNote = div('measure-note');
@@ -2177,31 +2191,27 @@ function cursorRemoveIcon(): SVGSVGElement {
   return icon;
 }
 
-const MEASUREMENT_LABEL_KEYS: Record<MeasurementParameter, MessageKey> = {
-  frequency: 'capturePanel.measureFrequency',
-  vpp: 'capturePanel.measureVpp',
-  rms: 'capturePanel.measureRms',
-};
-
 const MEASUREMENT_STATUS_KEYS: Record<Exclude<MeasurementStatus, 'ok'>, MessageKey> = {
   'no-source': 'capturePanel.measureStatusNoSource',
   'no-window': 'capturePanel.measureStatusNoWindow',
   'no-data': 'capturePanel.measureStatusNoData',
   'no-crossing': 'capturePanel.measureStatusNoCrossing',
   'one-crossing': 'capturePanel.measureStatusOneCrossing',
+  'no-period': 'capturePanel.measureStatusNoPeriod',
   'previous-wave-displayed': 'capturePanel.measureStatusPreviousWave',
 };
 
 function measurementParameterText(parameter: MeasurementParameter): string {
-  return t(MEASUREMENT_LABEL_KEYS[parameter]);
+  return t(catalogEntry(parameter).labelKey as MessageKey);
 }
 
 function measurementMethodText(row: MeasurementRowView): string {
-  if (row.parameter === 'frequency') {
-    return t('capturePanel.measureMethodFrequency', { count: formatCount(row.crossingCount) });
+  const key = catalogEntry(row.parameter).methodKey as MessageKey;
+  if (row.parameter === 'frequency' || row.parameter === 'period') {
+    return t(key, { count: formatCount(row.crossingCount) });
   }
-  return t(row.parameter === 'vpp'
-    ? 'capturePanel.measureMethodVpp' : 'capturePanel.measureMethodRms');
+  if (row.parameter === 'duty') return t(key, { periods: formatCount(row.dutyPeriods) });
+  return t(key);
 }
 
 function measurementSharedFlagText(row: MeasurementRowView): string[] {
@@ -2221,17 +2231,28 @@ function measurementSharedFlagText(row: MeasurementRowView): string[] {
 
 function measurementFlagText(row: MeasurementRowView): string[] {
   const parts = measurementSharedFlagText(row);
-  if (row.parameter !== 'frequency') return parts;
-  if (row.nearSampleLimit) parts.push(t('capturePanel.measureNearLimit'));
-  if (row.crossingCap) {
-    parts.push(t('capturePanel.measureCrossingCap', { count: formatCount(row.crossingCount) }));
+  if (row.parameter === 'frequency' || row.parameter === 'period') {
+    if (row.nearSampleLimit) parts.push(t('capturePanel.measureNearLimit'));
+    if (row.crossingCap) {
+      parts.push(t('capturePanel.measureCrossingCap', { count: formatCount(row.crossingCount) }));
+    }
+  }
+  if (row.parameter === 'duty' && row.dutyExcludedPeriods > 0) {
+    parts.push(t('capturePanel.measureDutyExcluded', {
+      periods: formatCount(row.dutyExcludedPeriods),
+    }));
   }
   return parts;
 }
 
 export function measurementValueText(row: MeasurementRowView): string {
   if (Number.isNaN(row.value)) return t('capturePanel.measureValueNone');
-  return row.unit === 'hz' ? formatFreq(row.value) : `${formatVoltsNumber(row.value)} V`;
+  switch (row.unit) {
+    case 'hz': return formatFreq(row.value);
+    case 'v': return `${formatVoltsNumber(row.value)} V`;
+    case 's': return formatDuration(row.value);
+    case '%': return `${row.value.toFixed(1)} %`;
+  }
 }
 
 export function measurementStatusText(row: MeasurementRowView): string {

@@ -3,11 +3,15 @@
 import { scanAnalogCodes, type AnalogCodeScan, type AnalogCodeScanInput } from '../dsp/analogScan.js';
 import type { SampleStore } from '../data/types.js';
 import { CHANNEL_BANK_SIZE, analogGainOf, analogGroupCount } from './channelBanks.js';
+import {
+  MEASUREMENT_DEFAULT_PARAMETERS, measurementUnit,
+  type MeasurementParameter, type MeasurementUnit,
+} from './measurementCatalog.js';
+import {
+  addMeasurementRow, availableMeasurementParameters, emptyMeasurementRows, pruneMeasurementRows,
+  setMeasurementFilter, type MeasurementRow, type MeasurementRowState,
+} from './measurementRows.js';
 import { readMeasureSamples, type MeasureBus, type MeasureRead } from './measureSamples.js';
-
-export const MEASUREMENT_PARAMETERS = ['frequency', 'vpp', 'rms'] as const;
-export type MeasurementParameter = (typeof MEASUREMENT_PARAMETERS)[number];
-export const MEASUREMENT_MAX_ROWS: number = MEASUREMENT_PARAMETERS.length;
 
 export type MeasurementRangeKind = 'viewport' | 'cursors';
 
@@ -18,6 +22,7 @@ export type MeasurementStatus =
   | 'no-data'
   | 'no-crossing'
   | 'one-crossing'
+  | 'no-period'
   | 'previous-wave-displayed';
 
 export interface MeasurementSource {
@@ -41,9 +46,8 @@ export interface MeasurementRange {
 }
 
 export interface MeasurementConfig {
-  source: number | null;
   range: MeasurementRange;
-  rows: MeasurementParameter[];
+  rows: MeasurementRowState;
 }
 
 export interface MeasurementWindow {
@@ -64,10 +68,22 @@ export interface MeasurementReadSummary {
   unknownSamples: number;
 }
 
+export interface MeasurementSourceResult {
+  source: MeasurementSource;
+  scan: AnalogCodeScan | null;
+  read: MeasurementReadSummary | null;
+  unavailable?: MeasurementStatus | null;
+}
+
+export type MeasurementResultMap = ReadonlyMap<number, MeasurementSourceResult>;
+
 export interface MeasurementRowView {
+  id: number;
+  start: number;
+  sourceName: string;
   parameter: MeasurementParameter;
+  unit: MeasurementUnit;
   value: number;
-  unit: 'hz' | 'v';
   status: MeasurementStatus;
   analyzedSamples: number;
   requestedSamples: number;
@@ -79,14 +95,17 @@ export interface MeasurementRowView {
   nearSampleLimit: boolean;
   crossingCap: boolean;
   crossingCount: number;
+  dutyPeriods: number;
+  dutyExcludedPeriods: number;
 }
 
 export interface MeasurementSectionView {
   sources: MeasurementSource[];
-  source: number | null;
+  filter: number | null;
   range: MeasurementRange;
   cursors: { id: number; label: string; color: string }[];
   rows: MeasurementRowView[];
+  addStart: number | null;
   availableParameters: MeasurementParameter[];
   window: MeasurementWindow | null;
   unavailable: MeasurementStatus | null;
@@ -115,20 +134,33 @@ export interface MeasurementRunInput {
   maxSamples?: number;
 }
 
+const ROW_VALUES: Record<MeasurementParameter, (scan: AnalogCodeScan) => number> = {
+  vpp: (scan) => scan.vppVolts,
+  max: (scan) => scan.maxVolts,
+  min: (scan) => scan.minVolts,
+  mean: (scan) => scan.meanVolts,
+  rms: (scan) => scan.rmsVolts,
+  frequency: (scan) => scan.frequencyHz,
+  period: (scan) => scan.periodSeconds,
+  duty: (scan) => scan.dutyPercent,
+};
+
+const ROW_STATUS: Record<MeasurementParameter, (scan: AnalogCodeScan) => MeasurementStatus> = {
+  vpp: (scan) => (scan.status === 'no-data' ? 'no-data' : 'ok'),
+  max: (scan) => (scan.status === 'no-data' ? 'no-data' : 'ok'),
+  min: (scan) => (scan.status === 'no-data' ? 'no-data' : 'ok'),
+  mean: (scan) => (scan.status === 'no-data' ? 'no-data' : 'ok'),
+  rms: (scan) => (scan.status === 'no-data' ? 'no-data' : 'ok'),
+  frequency: (scan) => scan.status,
+  period: (scan) => scan.status,
+  duty: (scan) => {
+    if (scan.status !== 'ok') return scan.status;
+    return scan.dutyPeriods > 0 ? 'ok' : 'no-period';
+  },
+};
+
 function finiteOrNull(value: number | null): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function catalogRows(parameters: readonly MeasurementParameter[]): MeasurementParameter[] {
-  const rows: MeasurementParameter[] = [];
-  for (const parameter of MEASUREMENT_PARAMETERS) {
-    if (parameters.includes(parameter)) rows.push(parameter);
-  }
-  return rows;
-}
-
-function sameRows(a: readonly MeasurementParameter[], b: readonly MeasurementParameter[]): boolean {
-  return a.length === b.length && a.every((parameter, index) => parameter === b[index]);
 }
 
 function normalizeRange(range: MeasurementRange): MeasurementRange {
@@ -189,33 +221,35 @@ export function measurementSources(
 }
 
 export function defaultMeasurementConfig(sources: readonly MeasurementSource[]): MeasurementConfig {
-  const first = sources[0];
-  return {
-    source: first === undefined ? null : first.group,
-    range: { kind: 'viewport', a: null, b: null },
-    rows: [...MEASUREMENT_PARAMETERS],
-  };
+  let first: MeasurementSource | null = null;
+  for (const source of sources) {
+    if (first === null || source.start < first.start) first = source;
+  }
+  let rows = emptyMeasurementRows();
+  if (first !== null) {
+    for (const parameter of MEASUREMENT_DEFAULT_PARAMETERS) {
+      rows = addMeasurementRow(rows, first.start, parameter);
+    }
+  }
+  return { range: { kind: 'viewport', a: null, b: null }, rows };
 }
 
 export function reconcileMeasurementConfig(
   config: MeasurementConfig, sources: readonly MeasurementSource[],
 ): MeasurementConfig {
-  const source = config.source === null ||
-    sources.some((candidate) => candidate.group === config.source)
-    ? config.source : null;
-  const rows = catalogRows(config.rows);
-  const rowsSame = sameRows(rows, config.rows);
+  const rows = pruneMeasurementRows(config.rows, sources.map((source) => source.start));
   const range = normalizeRange(config.range);
-  if (source === config.source && rowsSame && range === config.range) return config;
-  return { source, range, rows: rowsSame ? config.rows : rows };
+  if (rows === config.rows && range === config.range) return config;
+  return { range, rows };
 }
 
-export function selectMeasurementSource(
-  config: MeasurementConfig, sources: readonly MeasurementSource[], group: number | null,
+export function selectMeasurementFilter(
+  config: MeasurementConfig, sources: readonly MeasurementSource[], start: number | null,
 ): MeasurementConfig {
-  if (group === null) return config.source === null ? config : { ...config, source: null };
-  if (!sources.some((candidate) => candidate.group === group)) return config;
-  return config.source === group ? config : { ...config, source: group };
+  const target = start !== null && !sources.some((source) => source.start === start)
+    ? null : start;
+  const rows = setMeasurementFilter(config.rows, target);
+  return rows === config.rows ? config : { ...config, rows };
 }
 
 export function selectMeasurementRange(
@@ -225,19 +259,15 @@ export function selectMeasurementRange(
   return sameRange(next, config.range) ? config : { ...config, range: next };
 }
 
-export function addMeasurementRow(
-  config: MeasurementConfig, parameter: MeasurementParameter,
-): MeasurementConfig {
-  if (config.rows.includes(parameter) || config.rows.length >= MEASUREMENT_MAX_ROWS) return config;
-  const rows = catalogRows([...config.rows, parameter]);
-  return sameRows(rows, config.rows) ? config : { ...config, rows };
-}
-
-export function removeMeasurementRow(
-  config: MeasurementConfig, parameter: MeasurementParameter,
-): MeasurementConfig {
-  if (!config.rows.includes(parameter)) return config;
-  return { ...config, rows: config.rows.filter((candidate) => candidate !== parameter) };
+export function measurementAddStart(
+  sources: readonly MeasurementSource[], state: MeasurementRowState,
+): number | null {
+  if (state.filter !== null) return state.filter;
+  const starts = sources.map((source) => source.start).sort((a, b) => a - b);
+  for (const start of starts) {
+    if (availableMeasurementParameters(state, start).length > 0) return start;
+  }
+  return starts[0] ?? null;
 }
 
 export function resolveMeasurementWindow(
@@ -270,39 +300,56 @@ export function measurementCacheKey(input: MeasurementCacheInput): string {
   ].join('|');
 }
 
+function blankRow(row: MeasurementRow, status: MeasurementStatus): MeasurementRowView {
+  return {
+    id: row.id,
+    start: row.start,
+    sourceName: '',
+    parameter: row.parameter,
+    unit: measurementUnit(row.parameter),
+    value: Number.NaN,
+    status,
+    analyzedSamples: 0,
+    requestedSamples: 0,
+    truncated: false,
+    rangeClipped: false,
+    gaps: false,
+    clippedLow: false,
+    clippedHigh: false,
+    nearSampleLimit: false,
+    crossingCap: false,
+    crossingCount: 0,
+    dutyPeriods: 0,
+    dutyExcludedPeriods: 0,
+  };
+}
+
 export function measurementRowViews(
-  parameters: readonly MeasurementParameter[],
-  scan: AnalogCodeScan | null,
-  read: MeasurementReadSummary | null,
-  unavailable: MeasurementStatus | null,
+  rows: readonly MeasurementRow[],
+  results: MeasurementResultMap,
+  sectionUnavailable: MeasurementStatus | null,
 ): MeasurementRowView[] {
-  return parameters.map((parameter): MeasurementRowView => {
-    const unit = parameter === 'frequency' ? 'hz' : 'v';
-    if (unavailable !== null || scan === null || read === null) {
+  return rows.map((row): MeasurementRowView => {
+    if (sectionUnavailable !== null) return blankRow(row, sectionUnavailable);
+    const result = results.get(row.start);
+    if (result === undefined) return blankRow(row, 'no-source');
+    const source = result.source;
+    const scan = result.scan;
+    const read = result.read;
+    if (scan === null || read === null) {
       return {
-        parameter,
-        value: Number.NaN,
-        unit,
-        status: unavailable ?? 'no-data',
-        analyzedSamples: 0,
-        requestedSamples: 0,
-        truncated: false,
-        rangeClipped: false,
-        gaps: false,
-        clippedLow: false,
-        clippedHigh: false,
-        nearSampleLimit: false,
-        crossingCap: false,
-        crossingCount: 0,
+        ...blankRow(row, result.unavailable ?? 'no-data'),
+        sourceName: source.name,
       };
     }
-    const amplitude: MeasurementStatus = scan.status === 'no-data' ? 'no-data' : 'ok';
     return {
-      parameter,
-      value: parameter === 'frequency'
-        ? scan.frequencyHz : parameter === 'vpp' ? scan.vppVolts : scan.rmsVolts,
-      unit,
-      status: parameter === 'frequency' ? scan.status : amplitude,
+      id: row.id,
+      start: row.start,
+      sourceName: source.name,
+      parameter: row.parameter,
+      unit: measurementUnit(row.parameter),
+      value: ROW_VALUES[row.parameter](scan),
+      status: ROW_STATUS[row.parameter](scan),
       analyzedSamples: read.analyzed,
       requestedSamples: read.requestedSamples,
       truncated: read.truncated,
@@ -313,6 +360,8 @@ export function measurementRowViews(
       nearSampleLimit: scan.nearSampleLimit,
       crossingCap: scan.crossingCap,
       crossingCount: scan.crossingCount,
+      dutyPeriods: scan.dutyPeriods,
+      dutyExcludedPeriods: scan.dutyExcludedPeriods,
     };
   });
 }

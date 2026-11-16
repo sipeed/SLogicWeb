@@ -98,8 +98,8 @@ export function pruneMeasurementRows(
   const rows = state.rows.filter((row) => valid.has(row.start));
   const staleUndo = state.undo !== null &&
     state.undo.rows.some((row) => !valid.has(row.start));
-  if (rows.length === state.rows.length && !staleUndo) return state;
-  const filterGone = state.filter !== null && !rows.some((row) => row.start === state.filter);
+  const filterGone = state.filter !== null && !valid.has(state.filter);
+  if (rows.length === state.rows.length && !staleUndo && !filterGone) return state;
   return {
     rows,
     nextId: state.nextId,

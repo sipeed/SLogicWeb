@@ -89,13 +89,18 @@ import {
 import { formatCursorTimes } from './cursorTime.js';
 import { sameUsbDevice } from './deviceIdentity.js';
 import {
-  MEASUREMENT_PARAMETERS, addMeasurementRow, defaultMeasurementConfig, isMeasurementBank,
-  measurementCacheKey, measurementRowViews, measurementSources, reconcileMeasurementConfig,
-  removeMeasurementRow, resolveMeasurementWindow, runMeasurement, selectMeasurementRange,
-  selectMeasurementSource,
-  type MeasurementConfig, type MeasurementParameter, type MeasurementRange,
+  defaultMeasurementConfig, isMeasurementBank, measurementAddStart, measurementCacheKey,
+  measurementRowViews, measurementSources, reconcileMeasurementConfig, resolveMeasurementWindow,
+  runMeasurement, selectMeasurementFilter, selectMeasurementRange,
+  type MeasurementConfig, type MeasurementRange,
   type MeasurementRangeKind, type MeasurementReadSummary, type MeasurementSectionView,
+  type MeasurementSource, type MeasurementSourceResult,
 } from './measurementState.js';
+import type { MeasurementParameter } from './measurementCatalog.js';
+import {
+  addMeasurementRow, availableMeasurementParameters, removeMeasurementRow,
+  visibleMeasurementRows, type MeasurementRow, type MeasurementRowState,
+} from './measurementRows.js';
 import type { MeasureRead } from './measureSamples.js';
 import {
   captureAbortCause, isAllocationFailure, lowerSamplerate, saveFailureNotice,
@@ -351,8 +356,9 @@ export class App {
   /** When the analyzers panel last re-rendered for a bus build's progress. */
   private busPanelAt = 0;
   private measurementConfig: MeasurementConfig | null = null;
-  private measurementCache:
-    { store: SampleStore; key: string; read: MeasureRead; scan: AnalogCodeScan | null } | null = null;
+  private measurementCache = new Map<number, {
+    store: SampleStore; key: string; read: MeasureRead; scan: AnalogCodeScan | null;
+  }>();
   private runningPanelAt = 0;
   private analysisPanelAt = 0;
   /** New samples are waiting for the next data-driven redraw (HSync's status cadence). */
@@ -1159,13 +1165,26 @@ export class App {
       isMeasurementBank(bus, channelCount)) ?? null;
   }
 
+  private measurementRowsFor(
+    sources: readonly MeasurementSource[], rows: readonly MeasurementRow[],
+  ): MeasurementSource[] {
+    const wanted = new Set(rows.map((row) => row.start));
+    return sources.filter((source) => wanted.has(source.start));
+  }
+
   private measurementView(): MeasurementSectionView {
     const store = this.captureStore;
+    for (const [start, entry] of this.measurementCache) {
+      if (entry.store !== store) this.measurementCache.delete(start);
+    }
     const sources = measurementSources(this.busViews, store.channelCount);
     const current = this.measurementConfig;
     const config = reconcileMeasurementConfig(
       current === null ? defaultMeasurementConfig(sources) : current, sources);
     if (sources.length > 0 && config !== current) this.measurementConfig = config;
+    const state = config.rows;
+    const rows = visibleMeasurementRows(state);
+    const addStart = sources.length === 0 ? null : measurementAddStart(sources, state);
     const cursors = this.cursors.flatMap((cursor) => {
       const sample = cursor.marker.sample;
       if (sample === null || !Number.isFinite(sample)) return [];
@@ -1173,26 +1192,24 @@ export class App {
     });
     const base = {
       sources,
-      source: config.source,
+      filter: state.filter,
       range: config.range,
       cursors: cursors.map((cursor) => ({
         id: cursor.id, label: cursor.label, color: cursor.color,
       })),
-      availableParameters: MEASUREMENT_PARAMETERS.filter(
-        (parameter) => !config.rows.includes(parameter)),
+      addStart,
+      availableParameters: addStart === null
+        ? [] : [...availableMeasurementParameters(state, addStart)],
     };
-    const selected = config.source === null
-      ? undefined : sources.find((source) => source.group === config.source);
-    const bus = selected === undefined ? null : this.measurementBusView(selected.group, store.channelCount);
-    if (selected === undefined || bus === null) {
+    if (sources.length === 0) {
       return {
-        ...base, rows: measurementRowViews(config.rows, null, null, 'no-source'),
+        ...base, rows: measurementRowViews(rows, new Map(), 'no-source'),
         window: null, unavailable: 'no-source',
       };
     }
     if (this.repeatShowingFront) {
       return {
-        ...base, rows: measurementRowViews(config.rows, null, null, 'previous-wave-displayed'),
+        ...base, rows: measurementRowViews(rows, new Map(), 'previous-wave-displayed'),
         window: null, unavailable: 'previous-wave-displayed',
       };
     }
@@ -1200,79 +1217,107 @@ export class App {
       start: this.stack.view.start, end: this.stack.view.end,
     });
     if (window === null) {
-      return {
-        ...base, rows: measurementRowViews(config.rows, null, null, 'no-window'),
-        window: null, unavailable: 'no-window',
-      };
+      const absent = new Map<number, MeasurementSourceResult>();
+      for (const source of sources) {
+        absent.set(source.start, { source, scan: null, read: null, unavailable: 'no-window' });
+      }
+      return { ...base, rows: measurementRowViews(rows, absent, null), window: null, unavailable: null };
     }
     const start = Math.max(0, Math.min(window.start, store.length));
     const end = Math.max(start, Math.min(window.end, store.length));
     const clipped = start !== window.start || end !== window.end;
-    const trigger = this.settings.analogTriggers[selected.start] ??
-      { kind: 'rising' as const, volts: 0 };
     const qualification = analogTriggerQualification(store.samplerate);
-    const scan = {
-      samplerate: store.samplerate,
-      zeroCode: ADC_ZERO_CODE,
-      voltsPerCode: analogVoltsPerCode(selected.gain),
-      rising: trigger.kind === 'rising',
-      level: analogTriggerCode(trigger.kind, trigger.volts, selected.gain),
-      hysteresis: qualification.analogHysteresis,
-      window: qualification.analogArtifactSamples,
-    };
-    const key = measurementCacheKey({
-      store,
-      storeLength: store.length,
-      droppedSamples: store.droppedSamples,
-      samplerate: store.samplerate,
-      windowStart: start,
-      windowEnd: end,
-      group: selected.group,
-      gain: selected.gain,
-      rising: scan.rising,
-      level: scan.level,
-      hysteresis: scan.hysteresis,
-      window: scan.window,
-    });
-    let cache = this.measurementCache;
-    if (cache === null || cache.store !== store || cache.key !== key) {
-      const run = runMeasurement({
+    const results = new Map<number, MeasurementSourceResult>();
+    for (const source of this.measurementRowsFor(sources, rows)) {
+      const bus = this.measurementBusView(source.group, store.channelCount);
+      if (bus === null) {
+        results.set(source.start, { source, scan: null, read: null, unavailable: 'no-source' });
+        continue;
+      }
+      const trigger = this.settings.analogTriggers[source.start] ??
+        { kind: 'rising' as const, volts: 0 };
+      const scan = {
+        samplerate: store.samplerate,
+        zeroCode: ADC_ZERO_CODE,
+        voltsPerCode: analogVoltsPerCode(source.gain),
+        rising: trigger.kind === 'rising',
+        level: analogTriggerCode(trigger.kind, trigger.volts, source.gain),
+        hysteresis: qualification.analogHysteresis,
+        window: qualification.analogArtifactSamples,
+      };
+      const key = measurementCacheKey({
         store,
-        bus: { bits: bus.spec.bits, group: selected.group, gain: selected.gain },
-        window: { start, end },
-        scan,
+        storeLength: store.length,
+        droppedSamples: store.droppedSamples,
+        samplerate: store.samplerate,
+        windowStart: start,
+        windowEnd: end,
+        group: source.group,
+        gain: source.gain,
+        rising: scan.rising,
+        level: scan.level,
+        hysteresis: scan.hysteresis,
+        window: scan.window,
       });
-      cache = { store, key, read: run.read, scan: run.scan };
-      this.measurementCache = cache;
+      let cache = this.measurementCache.get(source.start);
+      if (cache === undefined || cache.store !== store || cache.key !== key) {
+        const run = runMeasurement({
+          store,
+          bus: { bits: bus.spec.bits, group: source.group, gain: source.gain },
+          window: { start, end },
+          scan,
+        });
+        cache = { store, key, read: run.read, scan: run.scan };
+        this.measurementCache.set(source.start, cache);
+      }
+      const read: MeasurementReadSummary = {
+        analyzed: cache.read.analyzed,
+        requestedSamples: cache.read.requestedSamples,
+        truncated: cache.read.truncated,
+        rangeClipped: cache.read.rangeClipped || clipped,
+        unknownSamples: cache.read.unknownSamples,
+      };
+      results.set(source.start, {
+        source,
+        scan: cache.scan,
+        read,
+        unavailable: cache.read.analyzed === 0 ? 'no-data' : null,
+      });
     }
-    const read: MeasurementReadSummary = {
-      analyzed: cache.read.analyzed,
-      requestedSamples: cache.read.requestedSamples,
-      truncated: cache.read.truncated,
-      rangeClipped: cache.read.rangeClipped || clipped,
-      unknownSamples: cache.read.unknownSamples,
-    };
-    const unavailable = cache.read.analyzed === 0 ? 'no-data' : null;
     return {
       ...base,
-      rows: measurementRowViews(config.rows, cache.scan, read, unavailable),
+      rows: measurementRowViews(rows, results, null),
       window: { start, end },
-      unavailable,
+      unavailable: null,
     };
   }
 
+  private measurementBase(sources: readonly MeasurementSource[]): MeasurementConfig {
+    return reconcileMeasurementConfig(
+      this.measurementConfig ?? defaultMeasurementConfig(sources), sources);
+  }
+
+  private withMeasurementRows(
+    config: MeasurementConfig, rows: MeasurementRowState,
+  ): MeasurementConfig {
+    return rows === config.rows ? config : { ...config, rows };
+  }
+
   private setMeasurement(patch: {
-    source?: number | null;
     range?: MeasurementRange;
-    rows?: readonly MeasurementParameter[];
+    filter?: number | null;
+    add?: readonly { start: number; parameter: MeasurementParameter }[];
+    remove?: readonly number[];
   }): MeasurementConfig {
     const sources = measurementSources(this.busViews, this.captureStore.channelCount);
-    let next = this.measurementConfig ?? defaultMeasurementConfig(sources);
-    if (patch.source !== undefined) next = selectMeasurementSource(next, sources, patch.source);
+    let next = this.measurementBase(sources);
+    if (patch.filter !== undefined) next = selectMeasurementFilter(next, sources, patch.filter);
     if (patch.range !== undefined) next = selectMeasurementRange(next, patch.range);
-    if (patch.rows !== undefined) {
-      next = { ...next, rows: [] };
-      for (const parameter of patch.rows) next = addMeasurementRow(next, parameter);
+    for (const item of patch.add ?? []) {
+      next = this.withMeasurementRows(next, addMeasurementRow(next.rows, item.start, item.parameter));
+    }
+    for (const id of patch.remove ?? []) {
+      next = this.withMeasurementRows(next, removeMeasurementRow(next.rows, id));
     }
     this.measurementConfig = reconcileMeasurementConfig(next, sources);
     this.renderPanels();
@@ -1282,7 +1327,7 @@ export class App {
 
   private resetMeasurement(): void {
     this.measurementConfig = null;
-    this.measurementCache = null;
+    this.measurementCache.clear();
     this.renderPanels();
     this.dirty = true;
   }
@@ -1294,15 +1339,14 @@ export class App {
     this.dirty = true;
   }
 
-  private pickMeasurementSource(group: number | null): void {
+  private pickMeasurementFilter(start: number | null): void {
     const sources = measurementSources(this.busViews, this.captureStore.channelCount);
-    const base = this.measurementConfig ?? defaultMeasurementConfig(sources);
-    this.applyMeasurementConfig(selectMeasurementSource(base, sources, group));
+    this.applyMeasurementConfig(selectMeasurementFilter(this.measurementBase(sources), sources, start));
   }
 
   private pickMeasurementRange(kind: MeasurementRangeKind): void {
     const sources = measurementSources(this.busViews, this.captureStore.channelCount);
-    const base = this.measurementConfig ?? defaultMeasurementConfig(sources);
+    const base = this.measurementBase(sources);
     const seeded = this.cursors.flatMap((cursor) => {
       const sample = cursor.marker.sample;
       return sample === null || !Number.isFinite(sample) ? [] : [cursor.id];
@@ -1319,23 +1363,24 @@ export class App {
 
   private pickMeasurementCursor(side: 'a' | 'b', cursorId: number | null): void {
     const sources = measurementSources(this.busViews, this.captureStore.channelCount);
-    const base = this.measurementConfig ?? defaultMeasurementConfig(sources);
+    const base = this.measurementBase(sources);
     if (base.range.kind !== 'cursors') return;
     const range: MeasurementRange = side === 'a'
       ? { ...base.range, a: cursorId } : { ...base.range, b: cursorId };
     this.applyMeasurementConfig(selectMeasurementRange(base, range));
   }
 
-  private addMeasurementParameter(parameter: MeasurementParameter): void {
+  private addMeasurementParameter(start: number, parameter: MeasurementParameter): void {
     const sources = measurementSources(this.busViews, this.captureStore.channelCount);
-    const base = this.measurementConfig ?? defaultMeasurementConfig(sources);
-    this.applyMeasurementConfig(addMeasurementRow(base, parameter));
+    const base = this.measurementBase(sources);
+    this.applyMeasurementConfig(
+      this.withMeasurementRows(base, addMeasurementRow(base.rows, start, parameter)));
   }
 
-  private removeMeasurementParameter(parameter: MeasurementParameter): void {
+  private removeMeasurementRowById(id: number): void {
     const sources = measurementSources(this.busViews, this.captureStore.channelCount);
-    const base = this.measurementConfig ?? defaultMeasurementConfig(sources);
-    this.applyMeasurementConfig(removeMeasurementRow(base, parameter));
+    const base = this.measurementBase(sources);
+    this.applyMeasurementConfig(this.withMeasurementRows(base, removeMeasurementRow(base.rows, id)));
   }
 
   // ------------------------------------------------------------------ bus views
@@ -2554,7 +2599,7 @@ export class App {
     // instead of leaving the panel and the active matcher disagreeing.
     if (triggerChanged) this.syncActiveTrigger();
     this.reconcileEdgeChannels();
-    this.measurementCache = null;
+    this.measurementCache.clear();
     this.persistWorkspace();
     this.relayout();
     this.renderPanels();
@@ -4935,11 +4980,11 @@ export class App {
         onRemoveCursorEdge: (rowId) => this.removeEdgeRow(rowId),
         onPickCursorEdge: (rowId, side, cursorId) => this.pickEdgeCursor(rowId, side, cursorId),
         onPickCursorEdgeChannel: (rowId, channel) => this.pickEdgeChannel(rowId, channel),
-        onPickMeasurementSource: (group) => this.pickMeasurementSource(group),
+        onPickMeasurementFilter: (start) => this.pickMeasurementFilter(start),
         onPickMeasurementRange: (kind) => this.pickMeasurementRange(kind),
         onPickMeasurementCursor: (side, cursorId) => this.pickMeasurementCursor(side, cursorId),
-        onAddMeasurementRow: (parameter) => this.addMeasurementParameter(parameter),
-        onRemoveMeasurementRow: (parameter) => this.removeMeasurementParameter(parameter),
+        onAddMeasurementRow: (start, parameter) => this.addMeasurementParameter(start, parameter),
+        onRemoveMeasurementRow: (id) => this.removeMeasurementRowById(id),
       });
       return;
     }
@@ -7828,9 +7873,10 @@ export class App {
     hoverAt: (cssX: number, cssY: number) => this.updateHover(cssX, cssY),
     measurement: () => this.measurementView(),
     setMeasurement: (patch: {
-      source?: number | null;
       range?: MeasurementRange;
-      rows?: readonly MeasurementParameter[];
+      filter?: number | null;
+      add?: readonly { start: number; parameter: MeasurementParameter }[];
+      remove?: readonly number[];
     }) => this.setMeasurement(patch),
     resetMeasurement: () => this.resetMeasurement(),
     toggleChannel: (i: number, on: boolean) => this.setChannelEnabled(i, on),

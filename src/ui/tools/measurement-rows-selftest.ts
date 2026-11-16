@@ -241,6 +241,16 @@ function seeded(): MeasurementRowState {
     `untouchedSame=${untouched === state}, pruned=${keys(pruned.rows)}, ` +
       `filter=${String(pruned.filter)}, keptFilter=${String(keptFilter.filter)}`);
 
+  const liveRowless = pruneMeasurementRows(setMeasurementFilter(state, 24), [0, 16, 24]);
+  const deadRowless = pruneMeasurementRows(setMeasurementFilter(state, 24), [0, 16]);
+  check('prune keeps a filter on a live source without rows and clears one whose source is gone',
+    liveRowless.filter === 24 && liveRowless.rows === state.rows &&
+      keys(liveRowless.rows) === keys(state.rows) &&
+      deadRowless.filter === null && keys(deadRowless.rows) === keys(state.rows) &&
+      ids(deadRowless.rows) === ids(state.rows) && deadRowless.nextId === state.nextId,
+    `live=${String(liveRowless.filter)}, dead=${String(deadRowless.filter)}, ` +
+      `rows=${keys(deadRowless.rows)}`);
+
   check('prune keeps an undo snapshot whose every source survives',
     undoKept !== withUndo && undoKept.undo === withUndo.undo &&
       keys(undoKept.rows) === '0:vpp' && undoKept.filter === null &&

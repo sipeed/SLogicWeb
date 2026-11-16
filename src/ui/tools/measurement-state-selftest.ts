@@ -5,14 +5,18 @@ import { createSampleStore } from '../../data/index.js';
 import type { SampleStore } from '../../data/types.js';
 import { scanAnalogCodes, type AnalogCodeScan } from '../../dsp/analogScan.js';
 import { ADC_ZERO_CODE, analogBusConfig, analogVoltsPerCode } from '../channelBanks.js';
+import { MEASUREMENT_DEFAULT_PARAMETERS, measurementUnit } from '../measurementCatalog.js';
 import {
-  MEASUREMENT_MAX_ROWS, MEASUREMENT_PARAMETERS, addMeasurementRow, defaultMeasurementConfig,
-  isMeasurementBank, measurementCacheKey, measurementRowViews, measurementSources,
-  reconcileMeasurementConfig, removeMeasurementRow, resolveMeasurementWindow, runMeasurement,
-  selectMeasurementRange, selectMeasurementSource,
+  addMeasurementRow, emptyMeasurementRows, removeMeasurementRow, visibleMeasurementRows,
+  type MeasurementRow,
+} from '../measurementRows.js';
+import {
+  defaultMeasurementConfig, isMeasurementBank, measurementAddStart, measurementCacheKey,
+  measurementRowViews, measurementSources, reconcileMeasurementConfig, resolveMeasurementWindow,
+  runMeasurement, selectMeasurementFilter, selectMeasurementRange,
   type MeasurementBusView, type MeasurementCacheInput, type MeasurementConfig,
   type MeasurementCursor, type MeasurementReadSummary, type MeasurementSource,
-  type MeasurementStatus, type MeasurementWindow,
+  type MeasurementSourceResult, type MeasurementStatus, type MeasurementWindow,
 } from '../measurementState.js';
 
 const nodeProcess = (() => {
@@ -56,6 +60,64 @@ function bank(group: number, gain?: number): MeasurementBusView {
   };
 }
 
+function rowList(config: MeasurementConfig): MeasurementRow[] {
+  return [...visibleMeasurementRows(config.rows)];
+}
+
+function rowRefs(config: MeasurementConfig): string {
+  return visibleMeasurementRows(config.rows)
+    .map((row) => `${row.id}:${row.start}:${row.parameter}`).join(',');
+}
+
+function scanFixture(over: Partial<AnalogCodeScan> = {}): AnalogCodeScan {
+  return {
+    analyzed: 1000,
+    known: 1000,
+    unknown: 0,
+    minCode: 84,
+    maxCode: 255,
+    vppCodes: 171,
+    vppVolts: 21.4588,
+    minVolts: -5.4,
+    maxVolts: 16.0,
+    meanOffsetCodes: 1.5,
+    meanVolts: 0.18825,
+    rmsOffsetCodes: 32.6668,
+    rmsVolts: 4.09936,
+    crossingCount: 30,
+    crossingCap: false,
+    firstCrossing: 10,
+    lastCrossing: 290010,
+    periodSamples: 10000.4,
+    periodSeconds: 1.00004e-4,
+    frequencyHz: 9999.5877,
+    dutyPercent: 42.5,
+    dutyPeriods: 12,
+    dutyExcludedPeriods: 3,
+    dutyKnownSamples: 900,
+    dutyHighSamples: 400,
+    status: 'ok',
+    clippedLow: false,
+    clippedHigh: false,
+    nearSampleLimit: false,
+    ...over,
+  };
+}
+
+function readFixture(over: Partial<MeasurementReadSummary> = {}): MeasurementReadSummary {
+  return {
+    analyzed: 1000, requestedSamples: 1000, truncated: false, rangeClipped: false,
+    unknownSamples: 0, ...over,
+  };
+}
+
+function resultFor(
+  source: MeasurementSource, scan: AnalogCodeScan | null, read: MeasurementReadSummary | null,
+  unavailable: MeasurementStatus | null = null,
+): MeasurementSourceResult {
+  return { source, scan, read, unavailable };
+}
+
 {
   const a0 = bank(0);
   const a2 = bank(2, 3);
@@ -95,57 +157,72 @@ function bank(group: number, gain?: number): MeasurementBusView {
     sources.map((s) => `${s.group}:${s.start}:${s.gain}:${s.name}`).join(', '));
 }
 
-function rowNames(config: MeasurementConfig): string {
-  return config.rows.join(',');
-}
-
 {
   const all = defaultMeasurementConfig([A2, A0]);
   const none = defaultMeasurementConfig([]);
-  check('the default config selects the first source, the viewport range and all three rows',
-    all.source === A2.group && rowNames(all) === 'frequency,vpp,rms' &&
-      all.range.kind === 'viewport' && all.range.a === null && all.range.b === null &&
-      none.source === null && rowNames(none) === 'frequency,vpp,rms' &&
-      MEASUREMENT_PARAMETERS.join(',') === 'frequency,vpp,rms' && MEASUREMENT_MAX_ROWS === 3,
-    `source=${all.source}, rows=${rowNames(all)}, empty=${none.source}, max=${MEASUREMENT_MAX_ROWS}`);
+  check('the default config seeds the lowest source with the three default rows and All filter',
+    all.rows.filter === null && all.range.kind === 'viewport' &&
+      all.range.a === null && all.range.b === null &&
+      rowRefs(all) === '1:0:frequency,2:0:vpp,3:0:rms' &&
+      all.rows.nextId === 4 && all.rows.undo === null &&
+      none.rows.rows.length === 0 && none.rows.nextId === 1 && none.rows.filter === null &&
+      MEASUREMENT_DEFAULT_PARAMETERS.join(',') === 'frequency,vpp,rms',
+    `rows=${rowRefs(all)}, empty=${none.rows.rows.length}, ` +
+      `default=${MEASUREMENT_DEFAULT_PARAMETERS.join(',')}`);
 }
 
 {
   const clean = defaultMeasurementConfig([A2, A0]);
   const same = reconcileMeasurementConfig(clean, [A0, A2]);
-  const dropped = reconcileMeasurementConfig({ ...clean, source: 2 }, [A0]);
-  const dupes = reconcileMeasurementConfig(
-    { ...clean, rows: ['rms', 'frequency', 'rms'] }, [A2, A0]);
-  const overCap = reconcileMeasurementConfig(
-    { ...clean, rows: ['rms', 'vpp', 'frequency', 'vpp'] }, [A2, A0]);
-  const unselected = reconcileMeasurementConfig({ ...clean, source: null }, [A0, A2]);
-  const once = reconcileMeasurementConfig(dupes, [A2, A0]);
-  check('reconcile keeps a live selection and never invents one',
-    same === clean && dropped.source === null && dropped !== clean &&
-      unselected.source === null && reconcileMeasurementConfig(unselected, [A0, A2]) === unselected,
-    `same=${same === clean}, dropped=${String(dropped.source)}, unselected=${String(unselected.source)}`);
-  check('reconcile orders and de-duplicates rows inside the cap',
-    rowNames(dupes) === 'frequency,rms' && rowNames(overCap) === 'frequency,vpp,rms' &&
-      dupes.rows !== clean.rows && overCap.rows !== clean.rows,
-    `dupes=${rowNames(dupes)}, overCap=${rowNames(overCap)}`);
-  check('reconcile is idempotent and returns the same object on the second pass',
-    once === dupes && reconcileMeasurementConfig(clean, [A2, A0]) === clean,
-    `once=${once === dupes}`);
+  const copy = { range: clean.range, rows: clean.rows };
+  const missing = reconcileMeasurementConfig(clean, [A2]);
+  check('reconcile keeps a config whose rows and range are all live, by reference',
+    same === clean && reconcileMeasurementConfig(copy, [A0, A2]) === copy &&
+      copy !== clean && copy.rows === clean.rows,
+    `same=${same === clean}, copy=${reconcileMeasurementConfig(copy, [A0, A2]) === copy}`);
+  check('reconcile prunes rows of a vanished source and neutralises its filter',
+    missing.rows.rows.length === 0 && missing.rows.filter === null &&
+      missing.rows.nextId === 4 && missing !== clean,
+    `rows=${missing.rows.rows.length}, filter=${String(missing.rows.filter)}, ` +
+      `nextId=${missing.rows.nextId}`);
+  const filtered = selectMeasurementFilter(clean, [A0, A2], 16);
+  const kept = reconcileMeasurementConfig(filtered, [A0, A2]);
+  const gone = reconcileMeasurementConfig(filtered, [A0]);
+  check('a filter on a live source survives reconcile and follows the source when it leaves',
+    kept === filtered && filtered.rows.filter === 16 &&
+      gone.rows.filter === null && gone.rows.rows.length === 3,
+    `kept=${kept === filtered}, filter=${String(filtered.rows.filter)}, ` +
+      `gone=${String(gone.rows.filter)}`);
+  const normalized = reconcileMeasurementConfig({
+    ...clean, range: { kind: 'cursors' as const, a: Number.NaN, b: 4 },
+  }, [A0, A2]);
+  const stable = reconcileMeasurementConfig(normalized, [A0, A2]);
+  check('reconcile normalizes the range once and is idempotent afterwards',
+    normalized.range.a === null && normalized.range.b === 4 &&
+      normalized.range.kind === 'cursors' && stable === normalized,
+    `range=${JSON.stringify(normalized.range)}, stable=${stable === normalized}`);
 }
 
 {
   const base = defaultMeasurementConfig([A0, A2]);
-  const picked = selectMeasurementSource(base, [A0, A2], 2);
-  const again = selectMeasurementSource(picked, [A0, A2], 2);
-  const unknown = selectMeasurementSource(base, [A0, A2], 7);
-  const missing = selectMeasurementSource(base, [], 0);
-  const cleared = selectMeasurementSource(picked, [A0, A2], null);
-  check('selecting a source validates it against the enumerated groups',
-    picked.source === 2 && picked !== base && base.source === 0 &&
-      again === picked && unknown === base && missing === base &&
-      cleared.source === null && selectMeasurementSource(cleared, [A0, A2], null) === cleared,
-    `picked=${String(picked.source)}, unknown=${String(unknown.source)}, ` +
-      `missing=${String(missing.source)}, cleared=${String(cleared.source)}`);
+  const picked = selectMeasurementFilter(base, [A0, A2], 16);
+  const again = selectMeasurementFilter(picked, [A0, A2], 16);
+  const unknown = selectMeasurementFilter(picked, [A0, A2], 7);
+  const missing = selectMeasurementFilter(base, [], 0);
+  const cleared = selectMeasurementFilter(picked, [A0, A2], null);
+  check('the filter validates against the enumerated source starts and All is null',
+    base.rows.filter === null && picked.rows.filter === 16 && picked !== base &&
+      again === picked && unknown.rows.filter === null && missing.rows.filter === null &&
+      cleared !== base && cleared.rows.filter === null &&
+      selectMeasurementFilter(cleared, [A0, A2], null) === cleared,
+    `picked=${String(picked.rows.filter)}, unknown=${String(unknown.rows.filter)}, ` +
+      `missing=${String(missing.rows.filter)}, cleared=${String(cleared.rows.filter)}`);
+  const two = selectMeasurementFilter(base, [A0, A2], 16);
+  check('All exposes every row in row order while a source filter exposes only its rows',
+    rowRefs(base) === '1:0:frequency,2:0:vpp,3:0:rms' &&
+      rowRefs(two) === '' && rowList(base).length === 3 &&
+      visibleMeasurementRows({ ...base.rows, filter: 0 }).length === 3,
+    `all=${rowRefs(base)}, filtered=${rowRefs(two)}`);
 }
 
 {
@@ -160,30 +237,151 @@ function rowNames(config: MeasurementConfig): string {
     cursors !== base && cursors.range.kind === 'cursors' && cursors.range.a === 2 &&
       cursors.range.b === null && base.range.kind === 'viewport' && repeat === cursors &&
       cleaned.range.a === null && cleaned.range.b === null &&
-      viewport.range.kind === 'viewport' && viewport.range.a === 2 && viewport.range.b === 6,
+      viewport.range.kind === 'viewport' && viewport.range.a === 2 && viewport.range.b === 6 &&
+      cursors.rows === base.rows,
     `cursors=${JSON.stringify(cursors.range)}, cleaned=${JSON.stringify(cleaned.range)}, ` +
       `viewport=${JSON.stringify(viewport.range)}`);
 }
 
 {
-  const all = defaultMeasurementConfig([A0]);
-  const two = removeMeasurementRow(all, 'vpp');
-  const readded = addMeasurementRow(two, 'vpp');
-  const fromOne = addMeasurementRow({ ...all, rows: ['rms'] }, 'frequency');
-  const removedMissing = removeMeasurementRow(two, 'vpp');
-  const removedAgain = removeMeasurementRow(two, 'frequency');
-  const cleared = MEASUREMENT_PARAMETERS.reduce(
-    (config, parameter) => removeMeasurementRow(config, parameter), all);
-  check('row reducers enforce catalog order, uniqueness and the row cap',
-    rowNames(two) === 'frequency,rms' && rowNames(readded) === 'frequency,vpp,rms' &&
-      rowNames(fromOne) === 'frequency,rms' && rowNames(cleared) === '',
-    `two=${rowNames(two)}, readded=${rowNames(readded)}, fromOne=${rowNames(fromOne)}, ` +
-      `cleared=${rowNames(cleared)}`);
-  check('adding an existing or over-cap row and removing a missing row are no-ops',
-    addMeasurementRow(all, 'rms') === all && addMeasurementRow(all, 'vpp') === all &&
-      removedMissing === two && removedAgain.rows.join(',') === 'rms',
-    `existing=${addMeasurementRow(all, 'rms') === all}, ` +
-      `overCap=${addMeasurementRow(all, 'vpp') === all}, missing=${removedMissing === two}`);
+  let state = emptyMeasurementRows();
+  state = addMeasurementRow(state, 0, 'vpp');
+  state = addMeasurementRow(state, 16, 'vpp');
+  state = addMeasurementRow(state, 0, 'duty');
+  const refs = state.rows.map((row) => `${row.id}:${row.start}:${row.parameter}`).join(',');
+  const duplicate = addMeasurementRow(state, 0, 'vpp');
+  const removed = removeMeasurementRow(state, 1);
+  check('the same parameter on two sources is two rows with distinct monotonic ids',
+    refs === '1:0:vpp,2:16:vpp,3:0:duty' && state.nextId === 4 &&
+      duplicate === state && removed.rows.length === 2 &&
+      removed.rows[0]!.id === 2 && removed.rows[0]!.start === 16,
+    `refs=${refs}, duplicate=${duplicate === state}, ` +
+      `removed=${removed.rows.map((row) => `${row.id}:${row.start}`).join(',')}`);
+}
+
+{
+  const base = defaultMeasurementConfig([A0, A2]);
+  const filtered = selectMeasurementFilter(base, [A0, A2], 16);
+  const second = addMeasurementRow(base.rows, 16, 'vpp');
+  check('the add target is the filtered source, else the first source with room in the catalog',
+    measurementAddStart([A0, A2], base.rows) === 0 &&
+      measurementAddStart([A0, A2], filtered.rows) === 16 &&
+      measurementAddStart([A2, A0], base.rows) === 0 &&
+      measurementAddStart([], base.rows) === null &&
+      measurementAddStart([A0, A2], { ...base.rows, rows: [] }) === 0,
+    `all=${String(measurementAddStart([A0, A2], base.rows))}, ` +
+      `filtered=${String(measurementAddStart([A0, A2], filtered.rows))}, ` +
+      `empty=${String(measurementAddStart([], base.rows))}`);
+  let full = base.rows;
+  for (const parameter of ['max', 'min', 'mean', 'duty', 'period'] as const) {
+    full = addMeasurementRow(full, 0, parameter);
+  }
+  check('a source with all eight rows is skipped for the next source with room',
+    measurementAddStart([A0, A2], full) === 16 &&
+      visibleMeasurementRows(full).length === 8,
+    `target=${String(measurementAddStart([A0, A2], full))}, ` +
+      `rows=${visibleMeasurementRows(full).length}`);
+  check('a source that is already full leaves the filtered add target empty',
+    measurementAddStart([A0, A2], { ...full, filter: 0 }) === 0 &&
+      second.filter === null && second.rows.length === 4,
+    `filteredFull=${String(measurementAddStart([A0, A2], { ...full, filter: 0 }))}`);
+}
+
+{
+  const row = (id: number, parameter: MeasurementRow['parameter']): MeasurementRow =>
+    ({ id, start: 0, parameter });
+  const scan = scanFixture();
+  const read = readFixture();
+  const resultsMap = new Map<number, MeasurementSourceResult>([[0, resultFor(A0, scan, read)]]);
+  const rows = measurementRowViews(
+    [row(1, 'vpp'), row(2, 'max'), row(3, 'min'), row(4, 'mean'),
+      row(5, 'rms'), row(6, 'frequency'), row(7, 'period'), row(8, 'duty')],
+    resultsMap, null);
+  const values = rows.map((view) => `${view.parameter}=${view.value}/${view.unit}`).join(', ');
+  check('every catalog parameter reads its own field with the catalog unit',
+    rows.length === 8 &&
+      rows[0]!.value === scan.vppVolts && rows[0]!.unit === 'v' &&
+      rows[1]!.value === scan.maxVolts && rows[1]!.unit === 'v' &&
+      rows[2]!.value === scan.minVolts && rows[2]!.unit === 'v' &&
+      rows[3]!.value === scan.meanVolts && rows[3]!.unit === 'v' &&
+      rows[4]!.value === scan.rmsVolts && rows[4]!.unit === 'v' &&
+      rows[5]!.value === scan.frequencyHz && rows[5]!.unit === 'hz' &&
+      rows[6]!.value === scan.periodSeconds && rows[6]!.unit === 's' &&
+      rows[7]!.value === scan.dutyPercent && rows[7]!.unit === '%' &&
+      rows.every((view) => view.unit === measurementUnit(view.parameter)),
+    values);
+  check('every mapped row carries its source name, id and the shared read counts',
+    rows.every((view) => view.sourceName === 'A0' && view.start === 0 &&
+      view.analyzedSamples === 1000 && view.requestedSamples === 1000 &&
+      !view.truncated && !view.rangeClipped && view.status === 'ok') &&
+      rows[7]!.dutyPeriods === 12 && rows[7]!.dutyExcludedPeriods === 3,
+    rows.map((view) => `${view.id}:${view.sourceName}:${view.analyzedSamples}`).join(', '));
+
+  const noPeriods = measurementRowViews([row(1, 'duty')], new Map([[
+    0, resultFor(A0, scanFixture({
+      status: 'ok', dutyPeriods: 0, dutyExcludedPeriods: 2, dutyPercent: Number.NaN,
+    }), read),
+  ]]), null);
+  const dutyNoPeriodStatus: MeasurementStatus = noPeriods[0]!.status;
+  const notNoData = dutyNoPeriodStatus !== 'no-data';
+  check('a duty row with samples but no complete period reads no-period, never no-data',
+    dutyNoPeriodStatus === 'no-period' && notNoData &&
+      Number.isNaN(noPeriods[0]!.value) && noPeriods[0]!.analyzedSamples === 1000 &&
+      noPeriods[0]!.dutyPeriods === 0 && noPeriods[0]!.dutyExcludedPeriods === 2,
+    `status=${noPeriods[0]!.status}, value=${noPeriods[0]!.value}, ` +
+      `analyzed=${noPeriods[0]!.analyzedSamples}, periods=${noPeriods[0]!.dutyPeriods}`);
+  const onePeriod = measurementRowViews([row(1, 'duty')], new Map([[
+    0, resultFor(A0, scanFixture({ status: 'ok', dutyPeriods: 1, dutyPercent: 25 }), read),
+  ]]), null);
+  check('one complete qualified period is enough to report a duty value',
+    onePeriod[0]!.status === 'ok' && onePeriod[0]!.value === 25,
+    `status=${onePeriod[0]!.status}, value=${onePeriod[0]!.value}`);
+
+  const periodless = measurementRowViews([row(1, 'frequency'), row(2, 'period')], new Map([[
+    0, resultFor(A0, scanFixture({ status: 'one-crossing', crossingCount: 1 }), read),
+  ]]), null);
+  check('frequency and period share the scan status while vertical rows stay numeric',
+    periodless[0]!.status === 'one-crossing' && periodless[1]!.status === 'one-crossing',
+    `frequency=${periodless[0]!.status}, period=${periodless[1]!.status}`);
+}
+
+{
+  const row = (id: number, start: number, parameter: MeasurementRow['parameter']): MeasurementRow =>
+    ({ id, start, parameter });
+  const resultsMap = new Map<number, MeasurementSourceResult>([
+    [0, resultFor(A0, scanFixture({ vppVolts: 21.4588, maxVolts: 16, dutyPeriods: 9 }), readFixture())],
+    [16, resultFor({ ...A2, gain: 3 },
+      scanFixture({ vppVolts: 64.3764, maxVolts: 48, dutyPeriods: 4 }),
+      readFixture({ analyzed: 500, requestedSamples: 600, unknownSamples: 7 }))],
+  ]);
+  const rows = measurementRowViews([
+    row(1, 0, 'vpp'), row(2, 16, 'vpp'), row(3, 16, 'duty'), row(4, 0, 'max'),
+  ], resultsMap, null);
+  check('each row reads the scan of its own source, with that source gain and read summary',
+    rows[0]!.value === 21.4588 && rows[0]!.sourceName === 'A0' && rows[0]!.start === 0 &&
+      rows[1]!.value === 64.3764 && rows[1]!.sourceName === 'A2' && rows[1]!.start === 16 &&
+      rows[1]!.analyzedSamples === 500 && rows[1]!.requestedSamples === 600 &&
+      rows[1]!.gaps && rows[0]!.analyzedSamples === 1000 && !rows[0]!.gaps &&
+      rows[2]!.dutyPeriods === 4 && rows[3]!.value === 16,
+    rows.map((view) => `${view.id}:${view.start}:${view.sourceName}:${view.value}`).join(', '));
+  check('two rows of the same parameter on different sources keep distinct ids and values',
+    rows[0]!.id !== rows[1]!.id && rows[0]!.parameter === rows[1]!.parameter &&
+      rows[0]!.value !== rows[1]!.value,
+    `ids=${rows[0]!.id},${rows[1]!.id}, values=${rows[0]!.value},${rows[1]!.value}`);
+  const dead = measurementRowViews([row(9, 24, 'vpp')], resultsMap, null);
+  check('a row whose source has no result reports no-source without a number or flag',
+    dead[0]!.status === 'no-source' && Number.isNaN(dead[0]!.value) &&
+      dead[0]!.sourceName === '' && dead[0]!.analyzedSamples === 0 &&
+      !dead[0]!.truncated && !dead[0]!.gaps,
+    `status=${dead[0]!.status}, source=${JSON.stringify(dead[0]!.sourceName)}`);
+  const windowless = measurementRowViews([row(1, 0, 'vpp'), row(2, 16, 'rms')], new Map([
+    [0, resultFor(A0, null, null, 'no-window')],
+    [16, resultFor(A2, null, null, 'no-window')],
+  ]), null);
+  check('an unresolved window reports no-window on every source row',
+    windowless.every((view) => view.status === 'no-window' && Number.isNaN(view.value) &&
+      view.analyzedSamples === 0),
+    windowless.map((view) => `${view.start}:${view.status}`).join(', '));
 }
 
 {
@@ -268,6 +466,25 @@ function rowNames(config: MeasurementConfig): string {
     `growing=${growing}, shrunk=${shrunk}`);
 }
 
+{
+  const store = {};
+  const keyOf = (
+    source: MeasurementSource, rising: boolean, level: number, hysteresis: number, window: number,
+  ): string => measurementCacheKey({
+    store, storeLength: 1000, droppedSamples: 0, samplerate: 100e6,
+    windowStart: 0, windowEnd: 1000, group: source.group, gain: source.gain,
+    rising, level, hysteresis, window,
+  });
+  const a0 = keyOf(A0, true, 130, 4, 50);
+  const a2 = keyOf(A2, false, 120, 6, 80);
+  const sameSettingsOtherGroup = keyOf({ ...A0, group: A2.group, start: A2.start }, true, 130, 4, 50);
+  const sameSettingsOtherGain = keyOf({ ...A0, gain: 3 }, true, 130, 4, 50);
+  check('two sources never share a scan cache key even with identical trigger settings',
+    keyOf(A0, true, 130, 4, 50) === a0 && a0 !== a2 && a0 !== sameSettingsOtherGroup &&
+      a0 !== sameSettingsOtherGain && sameSettingsOtherGroup !== a2,
+    `a0=${a0}, a2=${a2}, group=${sameSettingsOtherGroup}, gain=${sameSettingsOtherGain}`);
+}
+
 const TRACE = loadAdcTrace('sine');
 const CHANNELS = 32;
 const analog = analogBusConfig(0, CHANNELS, '#123456');
@@ -298,25 +515,46 @@ const SCAN = {
 };
 
 const store = fixtureStore(TRACE);
-const config = defaultMeasurementConfig([
-  { group: 0, start: 0, gain: BUS.gain, name: analog.name },
-]);
+const source0: MeasurementSource = { group: 0, start: 0, gain: BUS.gain, name: analog.name };
+const config = defaultMeasurementConfig([source0]);
 const requested: MeasurementWindow = { start: 0, end: TRACE.length };
+
+function summary(read: {
+  analyzed: number;
+  requestedSamples: number;
+  truncated: boolean;
+  rangeClipped: boolean;
+  unknownSamples: number;
+}): MeasurementReadSummary {
+  return {
+    analyzed: read.analyzed,
+    requestedSamples: read.requestedSamples,
+    truncated: read.truncated,
+    rangeClipped: read.rangeClipped,
+    unknownSamples: read.unknownSamples,
+  };
+}
+
+function rowsOf(scan: AnalogCodeScan | null, read: MeasurementReadSummary | null): {
+  rows: ReturnType<typeof measurementRowViews>;
+  vpp: ReturnType<typeof measurementRowViews>[number];
+  rms: ReturnType<typeof measurementRowViews>[number];
+  frequency: ReturnType<typeof measurementRowViews>[number];
+} {
+  const map = new Map<number, MeasurementSourceResult>([[0, resultFor(source0, scan, read)]]);
+  const rows = measurementRowViews(rowList(config), map, null);
+  return {
+    rows,
+    vpp: rows.find((row) => row.parameter === 'vpp')!,
+    rms: rows.find((row) => row.parameter === 'rms')!,
+    frequency: rows.find((row) => row.parameter === 'frequency')!,
+  };
+}
 
 {
   const run = runMeasurement({ store, bus: BUS, window: requested, scan: SCAN });
   const scan = run.scan;
-  const read: MeasurementReadSummary = {
-    analyzed: run.read.analyzed,
-    requestedSamples: run.read.requestedSamples,
-    truncated: run.read.truncated,
-    rangeClipped: run.read.rangeClipped,
-    unknownSamples: run.read.unknownSamples,
-  };
-  const rows = measurementRowViews(config.rows, scan, read, null);
-  const vpp = rows.find((row) => row.parameter === 'vpp')!;
-  const rms = rows.find((row) => row.parameter === 'rms')!;
-  const frequency = rows.find((row) => row.parameter === 'frequency')!;
+  const { rows, vpp, rms, frequency } = rowsOf(scan, summary(run.read));
   check('the default UI window scans the exact 65,536-sample prefix and discloses truncation',
     run.read.analyzed === 65536 && run.read.end === 65536 && run.read.truncated &&
       !run.read.rangeClipped && run.read.requestedSamples === TRACE.length &&
@@ -337,7 +575,7 @@ const requested: MeasurementWindow = { start: 0, end: TRACE.length };
     rows.length === 3 && rows.every((row) => row.analyzedSamples === 65536 &&
       row.requestedSamples === TRACE.length && row.truncated && !row.rangeClipped &&
       !row.gaps && !row.clippedLow && !row.clippedHigh && !row.nearSampleLimit &&
-      !row.crossingCap && row.crossingCount === 6),
+      !row.crossingCap && row.crossingCount === 6 && row.sourceName === analog.name),
     rows.map((row) => `${row.parameter}:${row.analyzedSamples}/${row.requestedSamples}` +
       `/${row.crossingCount}`).join(', '));
 }
@@ -352,13 +590,10 @@ const requested: MeasurementWindow = { start: 0, end: TRACE.length };
     store, bus: BUS, window: window ?? requested, scan: SCAN, maxSamples: TRACE.length,
   });
   const scan = run.scan!;
-  const rows = measurementRowViews(cursorConfig.rows, scan, {
-    analyzed: run.read.analyzed,
-    requestedSamples: run.read.requestedSamples,
-    truncated: run.read.truncated,
-    rangeClipped: run.read.rangeClipped,
-    unknownSamples: run.read.unknownSamples,
-  }, null);
+  const map = new Map<number, MeasurementSourceResult>([
+    [0, resultFor(source0, scan, summary(run.read))],
+  ]);
+  const rows = measurementRowViews(rowList(cursorConfig), map, null);
   const vpp = rows.find((row) => row.parameter === 'vpp')!;
   const rms = rows.find((row) => row.parameter === 'rms')!;
   const frequency = rows.find((row) => row.parameter === 'frequency')!;
@@ -386,7 +621,10 @@ const requested: MeasurementWindow = { start: 0, end: TRACE.length };
   const past = runMeasurement({
     store, bus: BUS, window: { start: TRACE.length, end: TRACE.length }, scan: SCAN,
   });
-  const emptyRows = measurementRowViews(config.rows, run.scan, null, 'no-data');
+  const map = new Map<number, MeasurementSourceResult>([
+    [0, resultFor(source0, null, null, 'no-data')],
+  ]);
+  const emptyRows = measurementRowViews(rowList(config), map, null);
   check('a window with no samples yields no scan and no-data rows without a number',
     run.read.analyzed === 0 && run.scan === null && past.scan === null &&
       past.read.analyzed === 0 && emptyRows.length === 3 &&
@@ -405,8 +643,8 @@ const requested: MeasurementWindow = { start: 0, end: TRACE.length };
   const read: MeasurementReadSummary = {
     analyzed: 200, requestedSamples: 200, truncated: false, rangeClipped: false, unknownSamples: 0,
   };
-  const blockedRows = measurementRowViews(config.rows, blocked, read, null);
-  const onceRows = measurementRowViews(config.rows, once, read, null);
+  const blockedRows = rowsOf(blocked, read).rows;
+  const onceRows = rowsOf(once, read).rows;
   const frequency = (rows: typeof blockedRows) => rows.find((row) => row.parameter === 'frequency')!;
   const vpp = (rows: typeof blockedRows) => rows.find((row) => row.parameter === 'vpp')!;
   check('no crossing is a frequency status; amplitude rows stay numeric',
@@ -435,10 +673,10 @@ const requested: MeasurementWindow = { start: 0, end: TRACE.length };
     'no-source', 'no-window', 'previous-wave-displayed', 'no-data',
   ];
   const blockedOk = unavailable.every((status) => measurementRowViews(
-    config.rows, scan, gapped, status).every((row) => Number.isNaN(row.value) &&
+    rowList(config), new Map(), status).every((row) => Number.isNaN(row.value) &&
       row.status === status && row.analyzedSamples === 0 && row.requestedSamples === 0 &&
       !row.truncated && !row.rangeClipped && !row.gaps));
-  const flagged = measurementRowViews(config.rows, scan, gapped, null);
+  const flagged = rowsOf(scan, gapped).rows;
   check('an unavailable section never leaks a number or a stale flag',
     blockedOk, `statuses=${unavailable.join(',')}`);
   check('gaps and truncation reach every row from the read summary',
@@ -455,9 +693,9 @@ const requested: MeasurementWindow = { start: 0, end: TRACE.length };
     codes: new Uint8Array(80).map((_, index) => index % 2 === 0 ? 100 : 200),
     window: 1,
   });
-  const rows = measurementRowViews(config.rows, fast, {
+  const rows = rowsOf(fast, {
     analyzed: 80, requestedSamples: 80, truncated: false, rangeClipped: false, unknownSamples: 0,
-  }, null);
+  }).rows;
   check('a period near the sample limit is disclosed on every row',
     fast.nearSampleLimit && rows.every((row) => row.nearSampleLimit) &&
       rows.find((row) => row.parameter === 'frequency')!.status === 'ok',
@@ -467,14 +705,14 @@ const requested: MeasurementWindow = { start: 0, end: TRACE.length };
 
 {
   const view = between(appSource,
-    '  private measurementView(): MeasurementSectionView {', '  private setMeasurement(patch: {');
+    '  private measurementView(): MeasurementSectionView {', '  private measurementBase(');
   const setter = between(appSource,
-    '  private setMeasurement(patch: {',
-    '  // ------------------------------------------------------------------ bus views');
+    '  private measurementBase(', '  // ------------------------------------------------------------------ bus views');
   const scanAt = view.indexOf('runMeasurement(');
   check('the view analyses the current wave and every bus view, never display state',
     view !== '' && view.includes('const store = this.captureStore;') &&
       view.includes('measurementSources(this.busViews, store.channelCount)') &&
+      view.includes('this.measurementRowsFor(sources, rows)') &&
       !view.includes('this.store.') && !view.includes('repeatComposite') &&
       !view.includes('visibleChannels(') && !view.includes('enabledChannels(') &&
       !view.includes('hideSources'),
@@ -486,7 +724,7 @@ const requested: MeasurementWindow = { start: 0, end: TRACE.length };
       view.indexOf("'no-source'") < scanAt && view.indexOf("'previous-wave-displayed'") < scanAt &&
       view.indexOf("'no-window'") < scanAt,
     `repeatAt=${view.indexOf('if (this.repeatShowingFront) {')}, scanAt=${scanAt}`);
-  check('the requested window is clipped to the current wave before the scan',
+  check('the requested window is clipped to the current wave before the scans',
     view.includes('const start = Math.max(0, Math.min(window.start, store.length));') &&
       view.includes('const end = Math.max(start, Math.min(window.end, store.length));') &&
       view.includes('const clipped = start !== window.start || end !== window.end;') &&
@@ -494,28 +732,45 @@ const requested: MeasurementWindow = { start: 0, end: TRACE.length };
       view.includes('window: { start, end },') &&
       view.includes('rangeClipped: cache.read.rangeClipped || clipped,'),
     `clippedAt=${view.indexOf('const clipped =')}, scanAt=${scanAt}`);
-  check('the scan inputs come from the group trigger and the ADC scale',
-    view.includes('this.settings.analogTriggers[selected.start]') &&
+  check('the scan inputs come from each source trigger and the ADC scale',
+    view.includes('this.settings.analogTriggers[source.start]') &&
       view.includes('trigger.kind === \'rising\'') &&
-      view.includes('analogTriggerCode(trigger.kind, trigger.volts, selected.gain)') &&
+      view.includes('analogTriggerCode(trigger.kind, trigger.volts, source.gain)') &&
       view.includes('analogTriggerQualification(store.samplerate)') &&
       view.includes('hysteresis: qualification.analogHysteresis,') &&
       view.includes('window: qualification.analogArtifactSamples,') &&
       view.includes('zeroCode: ADC_ZERO_CODE,') &&
-      view.includes('voltsPerCode: analogVoltsPerCode(selected.gain),') &&
-      view.includes('bus: { bits: bus.spec.bits, group: selected.group, gain: selected.gain },'),
+      view.includes('voltsPerCode: analogVoltsPerCode(source.gain),') &&
+      view.includes('bus: { bits: bus.spec.bits, group: source.group, gain: source.gain },'),
     `scanAt=${scanAt}`);
-  check('the cache key carries the wave identity, the scan inputs and the window',
+  check('one bounded scan runs per distinct row source and is cached by that start',
+    view.includes('const results = new Map<number, MeasurementSourceResult>();') &&
+      view.includes('for (const source of this.measurementRowsFor(sources, rows)) {') &&
+      view.includes('let cache = this.measurementCache.get(source.start);') &&
+      view.includes('this.measurementCache.set(source.start, cache);') &&
+      view.includes('if (entry.store !== store) this.measurementCache.delete(start);') &&
+      view.indexOf('this.measurementCache.delete(start)') < scanAt &&
+      (view.split('runMeasurement({').length - 1) === 1 &&
+      view.includes('rows: measurementRowViews(rows, results, null),'),
+    `scans=${view.split('runMeasurement({').length - 1}, ` +
+      `evictAt=${view.indexOf('this.measurementCache.delete(start)')}`);
+  check('the cache key carries the wave identity, the source scan inputs and the window',
     view.includes('storeLength: store.length,') &&
       view.includes('droppedSamples: store.droppedSamples,') &&
       view.includes('samplerate: store.samplerate,') &&
       view.includes('windowStart: start,') && view.includes('windowEnd: end,') &&
-      view.includes('group: selected.group,') && view.includes('gain: selected.gain,') &&
+      view.includes('group: source.group,') && view.includes('gain: source.gain,') &&
       view.includes('rising: scan.rising,') && view.includes('level: scan.level,') &&
       view.includes('hysteresis: scan.hysteresis,') && view.includes('window: scan.window,') &&
-      view.includes('if (cache === null || cache.store !== store || cache.key !== key) {') &&
-      view.includes('this.measurementCache = cache;'),
+      view.includes('if (cache === undefined || cache.store !== store || cache.key !== key) {'),
     `keyAt=${view.indexOf('measurementCacheKey(')}`);
+  check('the filter and add target are derived, not stored twice',
+    view.includes('filter: state.filter,') &&
+      view.includes('const addStart = sources.length === 0 ? null : measurementAddStart(sources, state);') &&
+      view.includes('availableParameters: addStart === null') &&
+      view.includes('? [] : [...availableMeasurementParameters(state, addStart)],') &&
+      !view.includes('source: config.source'),
+    `addStartAt=${view.indexOf('measurementAddStart(')}`);
   check('the measurement path runs on demand, without a clock or a workspace write',
     setter !== '' && !view.includes('requestAnimationFrame') &&
       !view.includes('setTimeout') && !view.includes('setInterval') &&
