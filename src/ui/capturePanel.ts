@@ -42,8 +42,10 @@ import {
 import {
   MeasurementCatalogDialog, measurementCatalogView,
 } from './measurementCatalogDialog.js';
-import type {
-  MeasurementRangeKind, MeasurementRowView, MeasurementSectionView, MeasurementStatus,
+import {
+  measurementRangeKind,
+  type MeasurementRangeKind, type MeasurementRowView, type MeasurementSectionView,
+  type MeasurementStatus,
 } from './measurementState.js';
 import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
@@ -97,6 +99,8 @@ export interface CapturePanelCallbacks {
   onRemoveMeasurementRow(id: number): void;
   onClearMeasurementRows(invoker: HTMLElement | null): Promise<void>;
   onUndoMeasurementRows(): void;
+  onCancelMeasurementCapture(): void;
+  onRestartMeasurementCapture(): void;
 }
 
 /** `aborted`: the last capture was ended by a device/link failure (`CapturePanelView.abort`). */
@@ -104,7 +108,7 @@ export type CapturePanelState =
   'ready' | 'capturing' | 'stopping' | 'waiting' | 'completed' | 'aborted';
 
 interface MeasureFocusIntent {
-  readonly kind: 'row' | 'clear' | 'undo';
+  readonly kind: 'row' | 'clear' | 'undo' | 'capture-cancel' | 'capture-restart';
   readonly from: HTMLElement | null;
   readonly id: number;
   readonly row: number;
@@ -336,6 +340,8 @@ export class CapturePanel {
   private measureFocusApplied(pending: MeasureFocusIntent, view: MeasurementSectionView): boolean {
     if (pending.kind === 'row') return !view.allRows.some((row) => row.id === pending.id);
     if (pending.kind === 'clear') return view.rowCount === 0 && view.undoCount !== null;
+    if (pending.kind === 'capture-cancel') return view.capture?.status === 'cancelled';
+    if (pending.kind === 'capture-restart') return view.capture?.status === 'running';
     return view.rowCount > 0 && view.undoCount === null;
   }
 
@@ -345,6 +351,12 @@ export class CapturePanel {
     this.measureFocus = null;
     const active = document.activeElement as HTMLElement | null;
     if (active !== null && active !== document.body && active !== pending.from) return;
+    if (pending.kind === 'capture-cancel' || pending.kind === 'capture-restart') {
+      const selector = pending.kind === 'capture-cancel'
+        ? '[data-measure-capture-restart]' : '[data-measure-capture-cancel]';
+      this.host.cursors.querySelector<HTMLElement>(selector)?.focus();
+      return;
+    }
     const rows = this.host.cursors.querySelectorAll<HTMLElement>('.measure-row');
     const row = pending.row >= 0 && rows.length > 0
       ? rows[Math.min(pending.row, rows.length - 1)]
@@ -467,6 +479,10 @@ export class CapturePanel {
       for (const item of root.querySelectorAll<HTMLElement>('[data-measure-window]')) {
         item.textContent = windowText;
         item.hidden = view.window === null;
+      }
+      const capture = measurementCaptureState(view);
+      for (const item of root.querySelectorAll<HTMLElement>('[data-measure-capture]')) {
+        applyMeasurementCapture(item, capture);
       }
       for (const item of root.querySelectorAll<HTMLElement>('[data-measure-undo-notice]')) {
         const text = item.querySelector<HTMLElement>('.measure-undo-text');
@@ -1536,11 +1552,12 @@ export class CapturePanel {
       [
         ['viewport', t('capturePanel.measureRangeViewport')],
         ['cursors', t('capturePanel.measureRangeCursors')],
+        ['capture', t('capturePanel.measureRangeCapture')],
       ],
       v.measurement.range.kind,
     );
     measureRange.addEventListener('change', () => this.cb.onPickMeasurementRange(
-      measureRange.value === 'cursors' ? 'cursors' : 'viewport'));
+      measurementRangeKind(measureRange.value)));
     measureControls.append(measureFilter.el, measureRange.el);
     measureSec.body.appendChild(measureControls);
     if (v.measurement.range.kind === 'cursors') {
@@ -1572,6 +1589,38 @@ export class CapturePanel {
     measureWindow.textContent = measurementWindowText(v.measurement);
     measureWindow.hidden = v.measurement.window === null;
     measureSec.body.appendChild(measureWindow);
+    if (v.measurement.capture !== null) {
+      const capture = div('measure-capture');
+      capture.dataset.measureCapture = '';
+      const progress = div('measure-capture-progress');
+      progress.dataset.measureCaptureProgress = '';
+      progress.setAttribute('role', 'progressbar');
+      progress.setAttribute('aria-valuemin', '0');
+      progress.setAttribute('aria-label', t('capturePanel.measureCaptureLabel'));
+      const captureActions = div('measure-capture-actions');
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'analyzer-act measure-capture-cancel';
+      cancel.dataset.measureCaptureCancel = '';
+      cancel.textContent = t('capturePanel.measureCaptureCancel');
+      cancel.addEventListener('click', () => {
+        this.runMeasureAction('capture-cancel', cancel,
+          () => this.cb.onCancelMeasurementCapture());
+      });
+      const restart = document.createElement('button');
+      restart.type = 'button';
+      restart.className = 'analyzer-act measure-capture-restart';
+      restart.dataset.measureCaptureRestart = '';
+      restart.textContent = t('capturePanel.measureCaptureRestart');
+      restart.addEventListener('click', () => {
+        this.runMeasureAction('capture-restart', restart,
+          () => this.cb.onRestartMeasurementCapture());
+      });
+      captureActions.append(cancel, restart);
+      capture.append(progress, captureActions);
+      measureSec.body.appendChild(capture);
+      applyMeasurementCapture(capture, measurementCaptureState(v.measurement));
+    }
     if (v.measurement.rows.length === 0) {
       const hint = div('panel-note');
       hint.textContent = t('capturePanel.measureEmpty');
@@ -2296,6 +2345,10 @@ const MEASUREMENT_STATUS_KEYS: Record<Exclude<MeasurementStatus, 'ok'>, MessageK
   'one-crossing': 'capturePanel.measureStatusOneCrossing',
   'no-period': 'capturePanel.measureStatusNoPeriod',
   'previous-wave-displayed': 'capturePanel.measureStatusPreviousWave',
+  'analyzing': 'capturePanel.measureStatusAnalyzing',
+  'cancelled': 'capturePanel.measureStatusCancelled',
+  'stable-capture-required': 'capturePanel.measureStatusStableCapture',
+  'loop': 'capturePanel.measureStatusLoop',
 };
 
 function measurementParameterText(parameter: MeasurementParameter): string {
@@ -2366,9 +2419,70 @@ export function measurementStatusText(row: MeasurementRowView): string {
 export function measurementWindowText(view: MeasurementSectionView): string {
   const window = view.window;
   if (window === null) return '';
-  return t('capturePanel.measureWindowSamples', {
-    samples: formatCount(window.end - window.start),
-  });
+  const samples = formatCount(window.end - window.start);
+  const capture = view.capture;
+  if (capture !== null) {
+    return t('capturePanel.measureWindowRetained', {
+      samples,
+      from: formatCount(capture.droppedSamples + window.start),
+      to: formatCount(capture.droppedSamples + window.end),
+    });
+  }
+  return t('capturePanel.measureWindowSamples', { samples });
+}
+
+export interface MeasurementCaptureState {
+  text: string;
+  valueMax: number;
+  valueNow: number;
+  running: boolean;
+  cancelled: boolean;
+}
+
+export function measurementCaptureState(
+  view: MeasurementSectionView,
+): MeasurementCaptureState | null {
+  const capture = view.capture;
+  if (capture === null || capture.status === 'done') return null;
+  if (capture.status === 'cancelled') {
+    return {
+      text: t('capturePanel.measureCaptureCancelled'),
+      valueMax: capture.total,
+      valueNow: capture.scanned,
+      running: false,
+      cancelled: true,
+    };
+  }
+  const percent = capture.total > 0
+    ? Math.min(100, Math.floor((100 * capture.scanned) / capture.total)) : 0;
+  return {
+    text: t('capturePanel.measureCaptureProgress', {
+      done: formatCount(capture.scanned),
+      total: formatCount(capture.total),
+      percent: String(percent),
+    }),
+    valueMax: capture.total,
+    valueNow: capture.scanned,
+    running: true,
+    cancelled: false,
+  };
+}
+
+function applyMeasurementCapture(
+  root: HTMLElement, state: MeasurementCaptureState | null,
+): void {
+  root.hidden = state === null;
+  if (state === null) return;
+  const progress = root.querySelector<HTMLElement>('[data-measure-capture-progress]');
+  if (progress !== null) {
+    progress.textContent = state.text;
+    progress.setAttribute('aria-valuemax', String(state.valueMax));
+    progress.setAttribute('aria-valuenow', String(state.valueNow));
+  }
+  const cancel = root.querySelector<HTMLElement>('[data-measure-capture-cancel]');
+  if (cancel !== null) cancel.hidden = !state.running;
+  const restart = root.querySelector<HTMLElement>('[data-measure-capture-restart]');
+  if (restart !== null) restart.hidden = !state.cancelled;
 }
 
 export function measurementClearedText(view: MeasurementSectionView): string {

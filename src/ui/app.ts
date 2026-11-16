@@ -92,17 +92,21 @@ import {
   defaultMeasurementConfig, isMeasurementBank, measurementAddStart, measurementCacheKey,
   measurementRowViews, measurementSectionCounts, measurementSources, reconcileMeasurementConfig,
   resolveMeasurementWindow, runMeasurement, selectMeasurementFilter, selectMeasurementRange,
-  type MeasurementConfig, type MeasurementRange,
+  type MeasurementConfig, type MeasurementCaptureView, type MeasurementRange,
   type MeasurementRangeKind, type MeasurementReadSummary, type MeasurementSectionView,
-  type MeasurementSource, type MeasurementSourceResult,
+  type MeasurementSource, type MeasurementSourceResult, type MeasurementStatus,
 } from './measurementState.js';
+import {
+  CaptureRangeJob, MEASURE_CAPTURE_BUDGET_MS, captureJobKey, captureRangeUnavailable,
+  type CaptureJobSource,
+} from './measureCaptureJob.js';
 import type { MeasurementParameter } from './measurementCatalog.js';
 import {
   addMeasurementRow, clearMeasurementRows, removeMeasurementRow,
   toggleMeasurementRow, undoClearMeasurementRows, visibleMeasurementRows,
   type MeasurementRow, type MeasurementRowState,
 } from './measurementRows.js';
-import type { MeasureRead } from './measureSamples.js';
+import { readMeasureSamples, type MeasureRead } from './measureSamples.js';
 import {
   captureAbortCause, isAllocationFailure, lowerSamplerate, saveFailureNotice,
   type CaptureAbort,
@@ -360,6 +364,9 @@ export class App {
   private measurementCache = new Map<number, {
     store: SampleStore; key: string; read: MeasureRead; scan: AnalogCodeScan | null;
   }>();
+  private measurementCapture: {
+    key: string; store: SampleStore; job: CaptureRangeJob; sources: CaptureJobSource[];
+  } | null = null;
   private runningPanelAt = 0;
   private analysisPanelAt = 0;
   /** New samples are waiting for the next data-driven redraw (HSync's status cadence). */
@@ -1183,6 +1190,9 @@ export class App {
     const config = reconcileMeasurementConfig(
       current === null ? defaultMeasurementConfig(sources) : current, sources);
     if (sources.length > 0 && config !== current) this.measurementConfig = config;
+    if (config.range.kind !== 'capture' && this.measurementCapture !== null) {
+      this.dropMeasurementCapture();
+    }
     const state = config.rows;
     const rows = visibleMeasurementRows(state);
     const addStart = sources.length === 0 ? null : measurementAddStart(sources, state);
@@ -1201,6 +1211,7 @@ export class App {
       allRows: state.rows,
       ...measurementSectionCounts(state),
       addStart,
+      capture: null,
     };
     if (sources.length === 0) {
       const none = new Map<number, MeasurementSourceResult>();
@@ -1218,9 +1229,27 @@ export class App {
         window: null, unavailable: 'previous-wave-displayed',
       };
     }
+    const captureBlocked = config.range.kind === 'capture'
+      ? captureRangeUnavailable({
+        running: this.running, loop: this.captureIsLoop, storeLength: store.length,
+      })
+      : null;
+    if (captureBlocked !== null) {
+      const blocked = new Map<number, MeasurementSourceResult>();
+      for (const source of this.measurementRowsFor(sources, rows)) {
+        blocked.set(source.start, {
+          source, scan: null, read: null, unavailable: captureBlocked,
+        });
+      }
+      return {
+        ...base,
+        rows: measurementRowViews(rows, blocked, null),
+        window: null, unavailable: captureBlocked,
+      };
+    }
     const window = resolveMeasurementWindow(config, cursors, {
       start: this.stack.view.start, end: this.stack.view.end,
-    });
+    }, store.length);
     if (window === null) {
       const absent = new Map<number, MeasurementSourceResult>();
       for (const source of sources) {
@@ -1235,6 +1264,9 @@ export class App {
     const start = Math.max(0, Math.min(window.start, store.length));
     const end = Math.max(start, Math.min(window.end, store.length));
     const clipped = start !== window.start || end !== window.end;
+    if (config.range.kind === 'capture') {
+      return this.captureMeasurementSection(base, rows, sources, store, start, end, clipped);
+    }
     const qualification = analogTriggerQualification(store.samplerate);
     const results = new Map<number, MeasurementSourceResult>();
     for (const source of this.measurementRowsFor(sources, rows)) {
@@ -1306,6 +1338,132 @@ export class App {
       this.measurementConfig ?? defaultMeasurementConfig(sources), sources);
   }
 
+  private captureMeasurementSection(
+    base: Omit<MeasurementSectionView, 'rows' | 'window' | 'unavailable' | 'capture'>,
+    rows: readonly MeasurementRow[],
+    sources: readonly MeasurementSource[],
+    store: SampleStore,
+    start: number,
+    end: number,
+    clipped: boolean,
+  ): MeasurementSectionView {
+    const qualification = analogTriggerQualification(store.samplerate);
+    const jobSources: CaptureJobSource[] = [];
+    for (const source of this.measurementRowsFor(sources, rows)) {
+      const bus = this.measurementBusView(source.group, store.channelCount);
+      if (bus === null) continue;
+      const trigger = this.settings.analogTriggers[source.start] ??
+        { kind: 'rising' as const, volts: 0 };
+      jobSources.push({
+        source,
+        bus: { bits: bus.spec.bits, group: source.group, gain: source.gain },
+        scan: {
+          samplerate: store.samplerate,
+          zeroCode: ADC_ZERO_CODE,
+          voltsPerCode: analogVoltsPerCode(source.gain),
+          rising: trigger.kind === 'rising',
+          level: analogTriggerCode(trigger.kind, trigger.volts, source.gain),
+          hysteresis: qualification.analogHysteresis,
+          window: qualification.analogArtifactSamples,
+        },
+      });
+    }
+    const key = jobSources.length === 0 ? '' : captureJobKey({
+      store,
+      storeLength: store.length,
+      droppedSamples: store.droppedSamples,
+      samplerate: store.samplerate,
+      windowStart: start,
+      windowEnd: end,
+      sources: jobSources.map((entry) => ({
+        start: entry.source.start,
+        group: entry.source.group,
+        gain: entry.source.gain,
+        rising: entry.scan.rising,
+        level: entry.scan.level,
+        hysteresis: entry.scan.hysteresis,
+        window: entry.scan.window,
+      })),
+    });
+    let entry = this.measurementCapture;
+    if (jobSources.length === 0) {
+      if (entry !== null) entry.job.cancel();
+      entry = null;
+      this.measurementCapture = null;
+    } else if (entry === null || entry.key !== key || entry.store !== store) {
+      if (entry !== null) entry.job.cancel();
+      entry = {
+        key,
+        store,
+        sources: jobSources,
+        job: new CaptureRangeJob(key, start, end, jobSources, store.length),
+      };
+      this.measurementCapture = entry;
+    }
+    const capture: MeasurementCaptureView | null = entry === null ? null : {
+      status: entry.job.status,
+      scanned: entry.job.scanned,
+      total: entry.job.total,
+      droppedSamples: store.droppedSamples,
+    };
+    const results = new Map<number, MeasurementSourceResult>();
+    if (entry !== null) {
+      const done = entry.job.results();
+      const status: MeasurementStatus = entry.job.status === 'cancelled'
+        ? 'cancelled'
+        : 'analyzing';
+      for (const source of this.measurementRowsFor(sources, rows)) {
+        const result = done === null ? undefined : done.get(source.start);
+        if (result === undefined) {
+          results.set(source.start, {
+            source, scan: null, read: null,
+            unavailable: done === null ? status : 'no-source',
+          });
+          continue;
+        }
+        results.set(source.start, {
+          source,
+          scan: result.scan,
+          read: { ...result.read, rangeClipped: result.read.rangeClipped || clipped },
+          unavailable: null,
+        });
+      }
+    }
+    return {
+      ...base,
+      rows: measurementRowViews(rows, results, null),
+      window: { start, end },
+      unavailable: null,
+      capture,
+    };
+  }
+
+  private pumpMeasurementCapture(): void {
+    const entry = this.measurementCapture;
+    if (entry === null || entry.job.status !== 'running') return;
+    if (!this.cursorsPageShown()) return;
+    const store = entry.store;
+    if (store !== this.captureStore) {
+      entry.job.cancel();
+      this.measurementCapture = null;
+      this.dirty = true;
+      return;
+    }
+    try {
+      entry.job.step((source, from, to) => {
+        const read = readMeasureSamples(store, source.bus, {
+          start: from, end: to, maxSamples: to - from,
+        });
+        return { codes: read.codes, unknown: read.unknown };
+      }, MEASURE_CAPTURE_BUDGET_MS);
+    } catch (e) {
+      this.fail('error.render', e);
+      return;
+    }
+    if (entry.job.done) this.dirty = true;
+    this.capturePanel.updateMeasurements(this.measurementView());
+  }
+
   private withMeasurementRows(
     config: MeasurementConfig, rows: MeasurementRowState,
   ): MeasurementConfig {
@@ -1337,6 +1495,7 @@ export class App {
   private resetMeasurement(): void {
     this.measurementConfig = null;
     this.measurementCache.clear();
+    this.dropMeasurementCapture();
     this.renderPanels();
     this.dirty = true;
   }
@@ -1362,11 +1521,13 @@ export class App {
     });
     const range: MeasurementRange = kind === 'viewport'
       ? { kind: 'viewport', a: null, b: null }
-      : {
-        kind: 'cursors',
-        a: base.range.a ?? seeded[0] ?? null,
-        b: base.range.b ?? seeded[1] ?? null,
-      };
+      : kind === 'capture'
+        ? { kind: 'capture', a: null, b: null }
+        : {
+          kind: 'cursors',
+          a: base.range.a ?? seeded[0] ?? null,
+          b: base.range.b ?? seeded[1] ?? null,
+        };
     this.applyMeasurementConfig(selectMeasurementRange(base, range));
   }
 
@@ -1411,6 +1572,28 @@ export class App {
     const sources = measurementSources(this.busViews, this.captureStore.channelCount);
     const base = this.measurementBase(sources);
     this.applyMeasurementConfig(this.withMeasurementRows(base, removeMeasurementRow(base.rows, id)));
+  }
+
+  private cancelMeasurementCapture(): void {
+    const entry = this.measurementCapture;
+    if (entry === null) return;
+    entry.job.cancel();
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private restartMeasurementCapture(): void {
+    const entry = this.measurementCapture;
+    if (entry !== null) entry.job.cancel();
+    this.measurementCapture = null;
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private dropMeasurementCapture(): void {
+    const entry = this.measurementCapture;
+    if (entry !== null) entry.job.cancel();
+    this.measurementCapture = null;
   }
 
   // ------------------------------------------------------------------ bus views
@@ -2630,6 +2813,7 @@ export class App {
     if (triggerChanged) this.syncActiveTrigger();
     this.reconcileEdgeChannels();
     this.measurementCache.clear();
+    this.dropMeasurementCapture();
     this.persistWorkspace();
     this.relayout();
     this.renderPanels();
@@ -2714,6 +2898,7 @@ export class App {
         }
       }
     }
+    this.pumpMeasurementCapture();
     if (!this.dirty && !liveDue) return;
     const forced = this.dirty;
     this.dirty = false;
@@ -5018,6 +5203,8 @@ export class App {
         onRemoveMeasurementRow: (id) => this.removeMeasurementRowById(id),
         onClearMeasurementRows: (invoker) => this.clearMeasurementRows(invoker),
         onUndoMeasurementRows: () => this.undoMeasurementRows(),
+        onCancelMeasurementCapture: () => this.cancelMeasurementCapture(),
+        onRestartMeasurementCapture: () => this.restartMeasurementCapture(),
       });
       return;
     }

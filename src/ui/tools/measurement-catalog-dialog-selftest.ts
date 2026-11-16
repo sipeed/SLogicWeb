@@ -47,6 +47,7 @@ function sectionView(over: Partial<MeasurementSectionView> = {}): MeasurementSec
     addStart: null,
     window: null,
     unavailable: null,
+    capture: null,
     ...over,
   };
 }

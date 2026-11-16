@@ -433,13 +433,28 @@ Analog channels are not bus rows. Each analog signal has a row with:
   an earlier qualification up.
 - Cursor `1/Δt` stays the manual reciprocal it always was: automatic measurements are a
   separate readout with their own source, window and status, and never restyle it.
+- **Capture** is the third range and the one deliberate exception to window-bounded
+  scanning: it analyses the whole retained current wave (`[0, length)`) instead of what the
+  viewport shows, and says so — its window line reads "Window: 300,000 samples (captured
+  1,200,000 – 1,500,000)", naming the absolute captured range beside the sample count. It
+  runs as one user-requested, cancellable job in fixed 65,536-sample chunks inside the
+  existing frame callback: no new clock, no progress while the Cursors surface is hidden,
+  and nothing published unless every requested sample was read. The section states
+  "Analyzing capture: 98,304 / 300,000 samples (32%)" as a progress bar with its own
+  Cancel, and a cancelled job says so and offers Analyze again; rows carry no value until
+  the job completes. Loop captures and a still-running Single/Repeat capture report that a
+  completed capture is required instead of restarting an unbounded job, and an ordinary
+  Repeat wave inside a stopped session is a stable capture. Cancelling or replacing the
+  job (source, parameter, range, gain, trigger, rate, store, row set) discards its partial
+  aggregates; only a completed job feeds the rows.
 - Rise/fall, overshoot, top/base and amplitude remain future parameters under the same row
   contract. Period and Duty are catalog rows: Period is the same mean same-slope qualified
   interval divided by the sample rate (never a transform of a rounded Frequency), and Duty
   counts known samples at or above the trigger level over complete qualified periods only,
   excluding and counting the periods that contain gaps or clipping. Nothing scans on a
-  clock while the Cursors surface is hidden: values recompute on settled input changes and
-  on that surface's own live refresh.
+  clock while the Cursors surface is hidden: Viewport and cursor-pair windows recompute on
+  settled input changes and on that surface's own live refresh, and the Capture job
+  advances a chunk only on a frame drawn while the surface is visible.
 - Math/FFT rows are measurements too: they state their sources, window function, bins and
   units; they never silently change the acquisition.
 
@@ -631,7 +646,7 @@ Target panels (each with at most four sections):
 | Device | Link, Profile, Notes |
 | Acquire | Acquisition, Retention, Notes |
 | Trigger | Enable/source, Conditions preview, Pre-trigger, State |
-| Measure | Cursors, Automatic measurements, Cursor distance, Edges |
+| Measure | Cursors, Automatic measurements (range, row management, whole-capture analysis), Cursor distance, Edges |
 | Analyze | Analyzers, Buses, Results, Status |
 | Record | State, Capacity, Export, Recovery |
 | Settings | Appearance, Behaviour, Shortcuts, About |

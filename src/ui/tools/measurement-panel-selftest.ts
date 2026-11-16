@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  measurementNoteText, measurementStatusText, measurementValueText, measurementWindowText,
+  measurementCaptureState, measurementNoteText, measurementStatusText, measurementValueText,
+  measurementWindowText,
   CapturePanel, type CapturePanelCallbacks, type CapturePanelView,
 } from '../capturePanel.js';
 import { defaultCaptureSettings } from '../state.js';
@@ -121,6 +122,7 @@ function sectionView(over: Partial<MeasurementSectionView> = {}): MeasurementSec
     addStart: null,
     window: null,
     unavailable: null,
+    capture: null,
     ...over,
   };
 }
@@ -134,6 +136,10 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   'one-crossing': 'one qualified crossing; a period needs two',
   'no-period': 'no complete qualified period',
   'previous-wave-displayed': 'an older capture is on screen; waiting for the current one',
+  'analyzing': 'analysing the current capture',
+  'cancelled': 'capture analysis cancelled; analyze again to resume',
+  'stable-capture-required': 'analysis needs a completed Single or Repeat capture',
+  'loop': 'Loop captures cannot be analysed; stop a Single or Repeat capture first',
 };
 
 {
@@ -184,15 +190,18 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     !measureSection.replace(disabled, '').includes('measureFilter.disabled'),
     `disabled=${measureSection.includes(disabled)}`);
 
-  check('the range select offers the Viewport and between-cursors kinds',
+  check('the range select offers the Viewport, between-cursors and whole-capture kinds',
     measureSection.includes("['viewport', t('capturePanel.measureRangeViewport')],") &&
     measureSection.includes("['cursors', t('capturePanel.measureRangeCursors')],") &&
+    measureSection.includes("['capture', t('capturePanel.measureRangeCapture')],") &&
     measureSection.includes('v.measurement.range.kind,') &&
     measureSection.includes("measureRange.addEventListener('change', " +
       '() => this.cb.onPickMeasurementRange(') &&
-    measureSection.includes("measureRange.value === 'cursors' ? 'cursors' : 'viewport'") &&
+    measureSection.includes('measurementRangeKind(measureRange.value)') &&
+    !measureSection.includes("measureRange.value === 'cursors' ? 'cursors' : 'viewport'") &&
     panel.includes('onPickMeasurementRange(kind: MeasurementRangeKind): void;'),
-    `wired=${measureSection.includes('this.cb.onPickMeasurementRange(')}`);
+    `wired=${measureSection.includes('this.cb.onPickMeasurementRange(')}, ` +
+    `capture=${measureSection.includes("t('capturePanel.measureRangeCapture')")}`);
 }
 
 {
@@ -412,8 +421,9 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       `updater=${measureUpdater.includes('this.catalogDialog.update(')}`);
 
   const quiet = (source: string): boolean =>
-    (source.match(/setAttribute\('role'/g) ?? []).length === 1 &&
+    (source.match(/setAttribute\('role'/g) ?? []).length === 2 &&
     source.split("undoNotice.setAttribute('role', 'status');").length - 1 === 1 &&
+    source.split("progress.setAttribute('role', 'progressbar');").length - 1 === 1 &&
     !source.includes('aria-live') && (source.match(/role="/g) ?? []).length === 0;
   const rowLive = measureSection.replace(
     'item.append(source, parameter, value, status, remove);',
@@ -423,10 +433,13 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'value.textContent = measurementValueText(row);',
     "value.setAttribute('role', 'status');\n        " +
       'value.textContent = measurementValueText(row);');
-  check('the undo notice is the section\'s only status role and no measurement row is live',
-    quiet(measureSection) && !quiet(rowLive) && !quiet(valueLive),
+  const progressLive = measureSection.replace(
+    "progress.setAttribute('role', 'progressbar');",
+    "progress.setAttribute('role', 'status');");
+  check('the undo notice is the only status role, the progress bar is a progressbar, and no row is live',
+    quiet(measureSection) && !quiet(rowLive) && !quiet(valueLive) && !quiet(progressLive),
     `quiet=${quiet(measureSection)}, rowLive=${quiet(rowLive)}, ` +
-      `valueLive=${quiet(valueLive)}, ` +
+      `valueLive=${quiet(valueLive)}, progressLive=${quiet(progressLive)}, ` +
       `roles=${(measureSection.match(/setAttribute\('role'/g) ?? []).length}`);
 
   check('the section note is textual and carries its own data hook',
@@ -659,12 +672,13 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'export function measurementNoteText(');
   const honestComposer = (source: string): boolean =>
     source.includes("if (window === null) return '';") &&
-    source.includes("t('capturePanel.measureWindowSamples', {") &&
-    source.includes('samples: formatCount(window.end - window.start),');
-  const zeroed = composer.replace('samples: formatCount(window.end - window.start),',
-    "samples: '0',");
-  const untranslated = composer.replace("t('capturePanel.measureWindowSamples', {",
-    "'Window: ' + ({");
+    source.includes('const samples = formatCount(window.end - window.start);') &&
+    source.includes("t('capturePanel.measureWindowSamples', { samples })") &&
+    (source.match(/formatCount\(window\.end - window\.start\)/g) ?? []).length === 1;
+  const zeroed = composer.replace('const samples = formatCount(window.end - window.start);',
+    "const samples = '0';");
+  const untranslated = composer.replace("t('capturePanel.measureWindowSamples', { samples })",
+    "'Window: ' + samples");
   check('the count is the resolved span and a translated key: a zeroed or literal composer fails',
     honestComposer(composer) && !honestComposer(zeroed) &&
     !honestComposer(untranslated) &&
@@ -778,7 +792,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     .map((status) => [status, measurementStatusText(rowView({ status }))] as const);
   const wrong = statuses.filter(([status, text]) => text !== STATUS_TEXT[status]);
   check('every non-ok state prints its own explicit status, never a number',
-    wrong.length === 0 && statuses.length === 7 &&
+    wrong.length === 0 && statuses.length === 11 &&
     statuses.every(([, text]) => text !== '' && !text.includes('NaN')),
     `wrong=${JSON.stringify(wrong)}, statuses=${statuses.length}`);
 }
@@ -855,7 +869,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       unavailable: status, rows: [rowView({ status }), rowView({ status })] }))] as const);
   const repeated = unavailableStates.filter(([, note]) => note !== '');
   check('an unavailable section adds no note line that repeats the row status verbatim',
-    repeated.length === 0 && unavailableStates.length === 7,
+    repeated.length === 0 && unavailableStates.length === 11,
     `repeated=${JSON.stringify(repeated)}`);
 
   const clipped = measurementNoteText(sectionView({ rows: [full, { ...full, parameter: 'vpp' }] }));
@@ -876,6 +890,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureRange': 'Range',
     'capturePanel.measureRangeViewport': 'Viewport',
     'capturePanel.measureRangeCursors': 'Between cursors',
+    'capturePanel.measureRangeCapture': 'Whole capture',
     'capturePanel.measureCursorA': 'First cursor',
     'capturePanel.measureCursorB': 'Second cursor',
     'capturePanel.measureCursorUnset': 'not set',
@@ -924,8 +939,20 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureStatusNoPeriod': 'no complete qualified period',
     'capturePanel.measureStatusPreviousWave': 'an older capture is on screen; ' +
       'waiting for the current one',
+    'capturePanel.measureStatusAnalyzing': 'analysing the current capture',
+    'capturePanel.measureStatusCancelled': 'capture analysis cancelled; ' +
+      'analyze again to resume',
+    'capturePanel.measureStatusStableCapture': 'analysis needs a completed Single or Repeat capture',
+    'capturePanel.measureStatusLoop': 'Loop captures cannot be analysed; ' +
+      'stop a Single or Repeat capture first',
     'capturePanel.measurePartial': 'partial: {analyzed} of {requested} samples',
     'capturePanel.measureWindowSamples': 'Window: {samples} samples',
+    'capturePanel.measureWindowRetained': 'Window: {samples} samples (captured {from} – {to})',
+    'capturePanel.measureCaptureLabel': 'Capture range analysis',
+    'capturePanel.measureCaptureProgress': 'Analyzing capture: {done} / {total} samples ({percent}%)',
+    'capturePanel.measureCaptureCancel': 'Cancel',
+    'capturePanel.measureCaptureRestart': 'Analyze again',
+    'capturePanel.measureCaptureCancelled': 'Analysis cancelled',
     'capturePanel.measureRangeClipped': 'window clipped to captured samples',
     'capturePanel.measureGaps': 'missing samples in the window are ignored',
     'capturePanel.measureClippedLow': 'signal reaches code 0',
@@ -942,8 +969,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const value = (dict: Readonly<Record<string, string>>, key: string): string => dict[key] ?? '';
   const missing = catalogs.flatMap(([locale, dict]) =>
     keys.filter((key) => value(dict, key).trim() === '').map((key) => `${locale}:${key}`));
-  check('all four catalogs define the sixty-two measurement keys',
-    missing.length === 0 && keys.length === 62, `missing=${JSON.stringify(missing)}`);
+  check('all four catalogs define the seventy-three measurement keys',
+    missing.length === 0 && keys.length === 73, `missing=${JSON.stringify(missing)}`);
 
   const mismatched = keys.filter((key) => value(en, key) !== english[key]);
   check('the English measurement copy matches the approved vocabulary',
@@ -960,6 +987,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureCrossingCap': ['{count}'],
     'capturePanel.measurePartial': ['{analyzed}', '{requested}'],
     'capturePanel.measureWindowSamples': ['{samples}'],
+    'capturePanel.measureWindowRetained': ['{samples}', '{from}', '{to}'],
+    'capturePanel.measureCaptureProgress': ['{done}', '{total}', '{percent}'],
   };
   const placeholderProblems = catalogs.flatMap(([locale, dict]) => {
     const problems: string[] = [];
@@ -1226,7 +1255,9 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     '.measure-catalog-dialog {', '.measure-catalog-body {', '.measure-catalog-source > .field {',
     '.measure-catalog-list {', '.measure-catalog-group {', '.measure-catalog-row {',
     '.measure-catalog-check {', '.measure-catalog-text {', '.measure-catalog-param {',
-    '.measure-catalog-method {'];
+    '.measure-catalog-method {', '.measure-capture {', '.measure-capture-progress {',
+    '.measure-capture-actions {', '.analyzer-act.measure-capture-cancel {',
+    '.analyzer-act.measure-capture-restart {'];
   const absent = rules.filter((rule) => !css.includes(rule));
   check('the sheet carries every measurement rule', absent.length === 0,
     `absent=${JSON.stringify(absent)}`);
@@ -1277,6 +1308,21 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       slice(css, '.measure-catalog-dialog {', '}')
         .includes('width: min(420px, calc(100vw - 32px));'),
     `row=${catalogRow.length}, method=${catalogMethod.length}`);
+
+  const hiddenRules = ['\n.measure-undo[hidden] { display: none; }',
+    '\n.measure-capture[hidden] { display: none; }',
+    '\n.measure-capture-cancel[hidden], .measure-capture-restart[hidden] { display: none; }'];
+  const missingHidden = hiddenRules.filter((rule) => !css.includes(rule));
+  const unguarded = hiddenRules.filter((rule) => {
+    const cls = rule.slice(1, rule.indexOf('['));
+    return !css.includes(`${cls} {`) && !css.includes(`${cls},`);
+  });
+  check('every measurement block with an author display still collapses when hidden',
+    missingHidden.length === 0 && unguarded.length === 0 &&
+      slice(css, '.measure-capture {', '}').includes('display: flex;') &&
+      slice(css, '.measure-undo {', '}').includes('display: flex;'),
+    `missing=${JSON.stringify(missingHidden)}, authorRule=${JSON.stringify(
+      hiddenRules.map((rule) => css.includes(rule.slice(1, rule.indexOf('[')) + ' {')))}`);
 
   const block = slice(css, '.measure-controls {', '.cursor-edge-channel {');
   const colour = block.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(|oklch\(/g) ?? [];
@@ -1576,6 +1622,238 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   check('a control that already holds the focus before the rebuild keeps it',
     JSON.stringify(shownIds()) === JSON.stringify(['1', '3']) && active() === focusDialog,
     `dialog=${active() === focusDialog}, ids=${JSON.stringify(shownIds())}`);
+}
+
+{
+  const running = sectionView({
+    capture: { status: 'running', scanned: 98304, total: 300000, droppedSamples: 1200000 },
+  });
+  const analyzing = measurementCaptureState(running);
+  check('the analyzing line states done, total and percent with numeric progress values',
+    analyzing !== null &&
+      analyzing.text === 'Analyzing capture: 98,304 / 300,000 samples (32%)' &&
+      analyzing.valueNow === 98304 && analyzing.valueMax === 300000 &&
+      analyzing.running && !analyzing.cancelled,
+    `text=${analyzing?.text}, now=${analyzing?.valueNow}/${analyzing?.valueMax}`);
+
+  const cancelled = measurementCaptureState(sectionView({
+    capture: { status: 'cancelled', scanned: 98304, total: 300000, droppedSamples: 0 },
+  }));
+  check('a cancelled job states that it stopped and offers the restart, never a percentage',
+    cancelled !== null && cancelled.text === 'Analysis cancelled' &&
+      !cancelled.running && cancelled.cancelled &&
+      !cancelled.text.includes('%'),
+    `text=${cancelled?.text}`);
+
+  const done = measurementCaptureState(sectionView({
+    capture: { status: 'done', scanned: 300000, total: 300000, droppedSamples: 0 },
+  }));
+  check('a finished job hides the progress line because the rows carry the values',
+    done === null && measurementCaptureState(sectionView()) === null,
+    `done=${String(done)}, none=${String(measurementCaptureState(sectionView()))}`);
+
+  const retained = measurementWindowText(sectionView({
+    window: { start: 0, end: 300000 },
+    capture: { status: 'running', scanned: 0, total: 300000, droppedSamples: 1200000 },
+  }));
+  const plain = measurementWindowText(sectionView({ window: { start: 0, end: 300000 } }));
+  check('the capture window discloses the absolute retained range and the plain window does not',
+    retained === 'Window: 300,000 samples (captured 1,200,000 – 1,500,000)' &&
+      plain === 'Window: 300,000 samples',
+    `retained=${retained}, plain=${plain}`);
+}
+
+{
+  const progressBlock = slice(measureSection, 'if (v.measurement.capture !== null) {',
+    'if (v.measurement.rows.length === 0) {');
+  const built = (source: string): boolean =>
+    source.includes("const capture = div('measure-capture');") &&
+    source.includes("capture.dataset.measureCapture = '';") &&
+    source.includes("const progress = div('measure-capture-progress');") &&
+    source.includes("progress.dataset.measureCaptureProgress = '';") &&
+    source.includes("progress.setAttribute('role', 'progressbar');") &&
+    source.includes("progress.setAttribute('aria-valuemin', '0');") &&
+    source.includes("progress.setAttribute('aria-label', t('capturePanel.measureCaptureLabel'));") &&
+    source.includes("cancel.dataset.measureCaptureCancel = '';") &&
+    source.includes("cancel.textContent = t('capturePanel.measureCaptureCancel');") &&
+    source.includes("restart.dataset.measureCaptureRestart = '';") &&
+    source.includes("restart.textContent = t('capturePanel.measureCaptureRestart');") &&
+    source.includes('this.runMeasureAction(\'capture-cancel\', cancel,') &&
+    source.includes('() => this.cb.onCancelMeasurementCapture()') &&
+    source.includes('this.runMeasureAction(\'capture-restart\', restart,') &&
+    source.includes('() => this.cb.onRestartMeasurementCapture()') &&
+    source.includes('captureActions.append(cancel, restart);') &&
+    source.includes('capture.append(progress, captureActions);') &&
+    source.includes('measureSec.body.appendChild(capture);') &&
+    source.includes('applyMeasurementCapture(capture, measurementCaptureState(v.measurement));');
+  const noRole = built(progressBlock.replace(
+    "progress.setAttribute('role', 'progressbar');", ''));
+  const noCancel = built(progressBlock.replace(
+    '() => this.cb.onCancelMeasurementCapture()', '() => {}'));
+  const windowAt = measureSection.indexOf("const measureWindow = div('measure-window');");
+  const rowAt = measureSection.indexOf("const list = div('measure-list');");
+  const blockAt = measureSection.indexOf('if (v.measurement.capture !== null) {');
+  check('the progress line sits between the window line and the rows with role, label and actions',
+    built(progressBlock) && !noRole && !noCancel &&
+      blockAt > windowAt && blockAt < rowAt &&
+      progressBlock.includes("if (v.measurement.capture !== null) {") &&
+      panel.includes('onCancelMeasurementCapture(): void;') &&
+      panel.includes('onRestartMeasurementCapture(): void;'),
+    `built=${built(progressBlock)}, blockAt=${blockAt}, rows=${rowAt}`);
+
+  const updaterQuiet = (source: string): boolean =>
+    source.includes('const capture = measurementCaptureState(view);') &&
+    source.includes("root.querySelectorAll<HTMLElement>('[data-measure-capture]')") &&
+    source.includes('applyMeasurementCapture(item, capture);') &&
+    !source.includes('createElement') && !source.includes('this.cb.');
+  const noFill = updaterQuiet(measureUpdater.replace(
+    'applyMeasurementCapture(item, capture);', ''));
+  check('the live refresh rewrites the progress text and action visibility in place',
+    updaterQuiet(measureUpdater) && !noFill &&
+      panel.includes('function applyMeasurementCapture(') &&
+      panel.includes("progress.setAttribute('aria-valuemax', String(state.valueMax));") &&
+      panel.includes("progress.setAttribute('aria-valuenow', String(state.valueNow));") &&
+      panel.includes('if (cancel !== null) cancel.hidden = !state.running;') &&
+      panel.includes('if (restart !== null) restart.hidden = !state.cancelled;') &&
+      panel.includes('root.hidden = state === null;'),
+    `update=${updaterQuiet(measureUpdater)}, fill=${panel.includes('function applyMeasurementCapture(')}`);
+}
+
+{
+  const doc = installFakeDom();
+  const capture = doc.createElement('div');
+  const cursors = doc.createElement('div');
+  doc.body.append(capture, cursors);
+  let state: 'running' | 'cancelled' | 'done' = 'running';
+  let scans = 0;
+  const total = 300000;
+  const section = (): MeasurementSectionView => sectionView({
+    sources: [{ group: 0, start: 0, gain: 1, name: 'A0' }],
+    rows: [rowView({ id: 1, parameter: 'vpp', unit: 'v', value: state === 'done' ? 21.4588 : Number.NaN, status: state === 'done' ? 'ok' : state === 'cancelled' ? 'cancelled' : 'analyzing' })],
+    window: { start: 0, end: total },
+    capture: {
+      status: state,
+      scanned: state === 'running' ? 98304 : total,
+      total,
+      droppedSamples: 1200000,
+    },
+  });
+  const view = (): CapturePanelView => ({
+    settings: defaultCaptureSettings(),
+    channels: [],
+    widthOptions: [16],
+    buses: [],
+    analogGroups: 0,
+    deviceName: 'fixture',
+    running: false,
+    stopping: false,
+    repeatPending: false,
+    captureState: 'ready',
+    result: null,
+    progress: null,
+    maxSamplerateHz: { 16: 200e6 },
+    triggerState: 'off',
+    cursors: [],
+    cursorDistances: [],
+    cursorEdges: [],
+    cursorEdgeChannels: [],
+    triggerViewLost: false,
+    triggerViewPending: false,
+    triggerLocked: false,
+    triggerRetuneRejected: false,
+    triggerAnalogRolling: false,
+    triggerArmed: false,
+    triggerAutoDisarmed: false,
+    settingsArmed: false,
+    activeTriggerPreSamples: undefined,
+    measurement: section(),
+  });
+  const panel = new CapturePanel({
+    capture: capture as unknown as HTMLElement,
+    cursors: cursors as unknown as HTMLElement,
+  }, {
+    onCancelMeasurementCapture: () => { scans += 1; state = 'cancelled'; render(); },
+    onRestartMeasurementCapture: () => { scans += 1; state = 'running'; render(); },
+  } as unknown as CapturePanelCallbacks);
+  const render = (): void => panel.render(view());
+  const progressOf = (): FakeElement | null =>
+    cursors.querySelector('[data-measure-capture-progress]');
+  const wrapperOf = (): FakeElement | null => cursors.querySelector('[data-measure-capture]');
+  const cancelOf = (): FakeElement | null => cursors.querySelector('[data-measure-capture-cancel]');
+  const restartOf = (): FakeElement | null => cursors.querySelector('[data-measure-capture-restart]');
+  const active = (): FakeElement | null =>
+    doc.activeElement === doc.body ? null : doc.activeElement;
+
+  render();
+  const first = {
+    text: progressOf()?.textContent ?? '',
+    max: progressOf()?.getAttribute('aria-valuemax') ?? '',
+    now: progressOf()?.getAttribute('aria-valuenow') ?? '',
+    role: progressOf()?.getAttribute('role') ?? '',
+    min: progressOf()?.getAttribute('aria-valuemin') ?? '',
+    label: progressOf()?.getAttribute('aria-label') ?? '',
+    cancel: cancelOf()?.hidden,
+    restart: restartOf()?.hidden,
+    hidden: wrapperOf()?.hidden,
+  };
+  check('the running job renders one progress bar with numeric aria values and only Cancel',
+    first.text === 'Analyzing capture: 98,304 / 300,000 samples (32%)' &&
+      first.max === '300000' && first.now === '98304' && first.min === '0' &&
+      first.role === 'progressbar' && first.label === 'Capture range analysis' &&
+      first.cancel === false && first.restart === true && first.hidden === false,
+    `first=${JSON.stringify(first)}`);
+
+  panel.updateMeasurements(sectionView({
+    ...section(),
+    rows: [rowView({ id: 1, parameter: 'vpp', unit: 'v', status: 'cancelled' })],
+    capture: { ...section().capture!, status: 'cancelled' },
+  }));
+  const cancelledState = {
+    text: progressOf()?.textContent ?? '',
+    cancel: cancelOf()?.hidden,
+    restart: restartOf()?.hidden,
+    row: cursors.querySelector('.measure-row .measure-status')?.textContent ?? '',
+  };
+  check('a cancelled job is disclosed in place with the restart and no live row update',
+    cancelledState.text === 'Analysis cancelled' &&
+      cancelledState.cancel === true && cancelledState.restart === false &&
+      cancelledState.row.includes('cancelled'),
+    `state=${JSON.stringify(cancelledState)}`);
+
+  panel.updateMeasurements(sectionView({
+    ...section(), capture: { ...section().capture!, status: 'done' },
+  }));
+  check('a finished job collapses the progress line in place and leaves the wrapper reusable',
+    wrapperOf() !== null && wrapperOf()?.hidden === true,
+    `hidden=${wrapperOf()?.hidden}`);
+
+  panel.updateMeasurements(section());
+  check('a refreshed running job restores its own progress state without a rebuild',
+    progressOf()?.getAttribute('aria-valuenow') === '98304' &&
+      cancelOf()?.hidden === false && restartOf()?.hidden === true,
+    `now=${progressOf()?.getAttribute('aria-valuenow')}`);
+
+  state = 'running';
+  render();
+  cancelOf()?.focus();
+  const cancelFocused = active() === cancelOf();
+  cancelOf()?.click();
+  const afterCancel = active();
+  const afterCancelState: string = state;
+  check('Cancel stops the job, keeps the hand-off and lands on Analyze again',
+    cancelFocused && scans === 1 && afterCancelState === 'cancelled' &&
+      afterCancel !== null && afterCancel !== doc.body && afterCancel === restartOf(),
+    `focused=${cancelFocused}, scans=${scans}, restart=${afterCancel === restartOf()}`);
+
+  restartOf()?.focus();
+  const restartFocused = active() === restartOf();
+  restartOf()?.click();
+  const afterRestart = active();
+  const afterRestartState: string = state;
+  check('Analyze again starts a new job and hands the focus back to Cancel',
+    restartFocused && scans === 2 && afterRestartState === 'running' &&
+      afterRestart !== null && afterRestart !== doc.body && afterRestart === cancelOf(),
+    `focused=${restartFocused}, scans=${scans}, cancel=${afterRestart === cancelOf()}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
