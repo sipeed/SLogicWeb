@@ -4,6 +4,11 @@ import {
   type CursorDistanceRow,
 } from '../cursorDistance.js';
 import { formatCursorSpan } from '../cursorTime.js';
+import type { MessageKey } from '../i18n.js';
+import { en } from '../locales/en.js';
+import { zhCN } from '../locales/zh-CN.js';
+import { ru } from '../locales/ru.js';
+import { fr } from '../locales/fr.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
@@ -501,6 +506,158 @@ check('the row cap is the DSView Max_Measure_Limits literal',
     `private=${signatures.filter(([signature, texts]) =>
       guardFirst(privateCondition(app, signature), signature, texts)).length}, ` +
     `derivations=${(app.match(/private cursorReadOnly\(\): boolean \{/g) ?? []).length}`);
+}
+
+function span(text: string, from: string, to: string): string {
+  const start = text.indexOf(from);
+  if (start < 0) return '';
+  const end = text.indexOf(to, start + from.length);
+  return text.slice(start, end < 0 ? text.length : end);
+}
+
+function methodSlice(source: string, signature: string): string {
+  return span(source, signature, '\n  }');
+}
+
+{
+  const panel = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
+  const builder = span(panel, 'function distanceZoomButton(', 'function distanceZoomIcon(');
+  const row = span(panel, "        const zoom = distanceZoomButton(", "        item.append(a.el");
+  const sidesRule = 'row.a === null || row.b === null,';
+  const rowDisablesUnsetSides = (text: string): boolean => text.includes(
+    "          t('capturePanel.cursorDistanceZoom', { row: row.row }),\n" +
+    `          ${sidesRule}\n` +
+    '          () => this.cb.onZoomCursorDistance(row.id),\n');
+  const constantEnabled = panel.replace(sidesRule, 'false,');
+  check('a distance row offers one zoom action that is disabled while a side is unset',
+    rowDisablesUnsetSides(row) && constantEnabled !== panel &&
+    !rowDisablesUnsetSides(span(constantEnabled, '        const zoom = distanceZoomButton(',
+      '        item.append(a.el')) &&
+    row.indexOf('tail.append(delta, zoom, remove);') > row.indexOf('const tail ='),
+    `rule=${rowDisablesUnsetSides(row)}, control=${constantEnabled !== panel}, ` +
+    `sides=${row.includes(sidesRule)}`);
+
+  const shape = [
+    "b.className = 'analyzer-act cursor-dist-zoom';",
+    'b.disabled = disabled;',
+    'b.title = label;',
+    "b.setAttribute('aria-label', label);",
+    'b.appendChild(distanceZoomIcon());',
+    'b.addEventListener(\'click\', onZoom);',
+  ];
+  const labelKey = "t('capturePanel.cursorDistanceZoom', { row: row.row })";
+  const ownTitle = (text: string): boolean => (text.match(/\.title = /g) ?? []).length === 1;
+  const clicks = (text: string): number => (text.match(/addEventListener\('click'/g) ?? []).length;
+  const plainButton = (text: string): boolean => !text.includes('popover') &&
+    !text.includes('popovertarget') && clicks(text) === 1;
+  check('the zoom action reuses the shared compact action shape and names its own row',
+    shape.every((needle) => builder.includes(needle)) && ownTitle(builder) && plainButton(builder) &&
+    !builder.includes('style.') && panel.includes(labelKey) &&
+    panel.includes('onZoomCursorDistance(rowId: number): void;') &&
+    !ownTitle(`${builder}\n  b.title = label;`) &&
+    !plainButton(`${builder}\n  b.addEventListener('click', onZoom);`) &&
+    !plainButton(`${builder}\n  b.popoverTargetElement = el;`),
+    `shape=${shape.filter((needle) => builder.includes(needle)).length}/${shape.length}, ` +
+    `titles=${(builder.match(/\.title = /g) ?? []).length}, ` +
+    `secondTitle=${ownTitle(`${builder}\n  b.title = label;`)}, key=${panel.includes(labelKey)}, ` +
+    `clicks=${clicks(builder)}, doubled=${clicks(`${builder}\nb.addEventListener('click', onZoom);`)}, ` +
+    `popover=${builder.includes('popover')}`);
+}
+
+{
+  const app = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const body = methodSlice(app, 'private zoomToCursorInterval(');
+  const requests = 'this.cursors.map((cursor) => ({ cursorId: cursor.id, sample: cursor.marker.sample })), pair);';
+  const refusal = "this.setFileNotice({ key: CURSOR_ZOOM_REFUSALS[plan.reason] });";
+  const viewportAt = body.indexOf('this.stack.setViewport(plan.start, plan.end);');
+  const noteAt = body.indexOf('this.noteExplicitViewport();');
+  const dirtyAt = body.indexOf('this.dirty = true;');
+  const refusalBeforeViewport = (text: string): boolean => {
+    const guard = text.indexOf(refusal);
+    const viewport = text.indexOf('this.stack.setViewport(plan.start, plan.end);');
+    const back = text.indexOf('\n      return;', guard);
+    return guard >= 0 && back > guard && viewport > back;
+  };
+  check('the command plans from the placed cursors, refuses before any viewport write, then takes the standard path',
+    body.length > 0 && body.includes('const plan = planCursorZoom(') &&
+    body.includes(requests) && refusalBeforeViewport(body) &&
+    viewportAt >= 0 && noteAt > viewportAt && dirtyAt > noteAt &&
+    !body.includes('.filter(') &&
+    !refusalBeforeViewport(body.replace(`\n      return;`, '')),
+    `plan=${body.includes('const plan = planCursorZoom(')}, requests=${body.includes(requests)}, ` +
+    `refusal=${refusalBeforeViewport(body)}, viewport=${viewportAt}, note=${noteAt}, dirty=${dirtyAt}`);
+
+  const forbidden = ['this.settings', 'applySettings', 'persistWorkspace', 'renderPanels',
+    'addCursor(', 'clearCursors(', 'this.cursors =', 'triggerSampleIndex =', 'runDecode',
+    'measurement', 'this.busViews =', 'startCapture'];
+  const hits = forbidden.filter((token) => body.includes(token));
+  const injected = body.replace('this.dirty = true;', 'this.settings = { ...this.settings };');
+  check('the command writes no acquisition, cursor, trigger, persistence or analysis state',
+    hits.length === 0 && injected !== body &&
+    forbidden.some((token) => injected.includes(token)) &&
+    body.includes('this.stack.setViewport(') &&
+    !body.includes('this.stack.restoreViewport('),
+    `hits=${json(hits)}, injected=${forbidden.filter((token) => injected.includes(token)).join(',')}`);
+
+  const clamp = "{ key: 'notice.cursorZoomLoopLimited' }";
+  const write = `if (noticeFree) this.setFileNotice(exact ? null : ${clamp});`;
+  const exactNeedle = 'const exact = view.start === plan.start && view.end === plan.end;';
+  const ownedNeedle =
+    'const noticeFree = this.fileNotice === null || CURSOR_ZOOM_NOTICES.has(this.fileNotice.key);';
+  const limited = (text: string): boolean => text.includes(write) && text.includes(exactNeedle) &&
+    text.includes(ownedNeedle) &&
+    text.indexOf(write) > text.indexOf('this.noteExplicitViewport();');
+  const alwaysLimited = body.replace(write, `this.setFileNotice(${clamp});`);
+  const alwaysExact = body.replace(write, 'this.setFileNotice(null);');
+  const stealsForeign = body.replace('if (noticeFree) this.setFileNotice(', 'this.setFileNotice(');
+  check('a Loop-limited view reports the limitation, an exact fit clears it, and a foreign notice survives',
+    limited(body) && alwaysLimited !== body && alwaysExact !== body &&
+    stealsForeign !== body && !limited(alwaysLimited) && !limited(alwaysExact) &&
+    !limited(stealsForeign),
+    `limited=${limited(body)}, alwaysLimited=${limited(alwaysLimited)}, ` +
+    `alwaysExact=${limited(alwaysExact)}, stealsForeign=${limited(stealsForeign)}`);
+
+  const map = span(app, 'const CURSOR_ZOOM_REFUSALS = {', '} as const satisfies');
+  const notices = span(app, 'const CURSOR_ZOOM_NOTICES', ']);');
+  check('the three refusal reasons and the Loop-limited notice own one key each',
+    map.includes("'needs-pair': 'notice.cursorZoomNeedsPair',") &&
+    map.includes("degenerate: 'notice.cursorZoomDegenerate',") &&
+    map.includes("missing: 'notice.cursorZoomMissing',") &&
+    notices.includes("...Object.values(CURSOR_ZOOM_REFUSALS), 'notice.cursorZoomLoopLimited',") &&
+    !map.includes('notice.cursorZoomLoopLimited'),
+    `map=${map.replace(/\s+/g, ' ').trim()}, notices=${notices.replace(/\s+/g, ' ').trim()}`);
+
+  const rowBody = methodSlice(app, 'private zoomDistanceRow(rowId: number): void {');
+  const deleted = rowBody.replace('row === undefined || row.a === null || row.b === null',
+    'row === undefined');
+  check('a distance row delegates its own two cursor ids to the shared command',
+    rowBody.includes('const row = this.distanceRows.find((candidate) => candidate.id === rowId);') &&
+    rowBody.includes('this.zoomToCursorInterval([row.a, row.b]);') &&
+    deleted !== rowBody && !deleted.includes('row.a === null') &&
+    app.includes('onZoomCursorDistance: (rowId) => this.zoomDistanceRow(rowId),'),
+    `find=${rowBody.includes('this.distanceRows.find(')}, ` +
+    `delegate=${rowBody.includes('this.zoomToCursorInterval([row.a, row.b]);')}, ` +
+    `guarded=${rowBody.includes('row.a === null || row.b === null')}`);
+}
+
+{
+  type Catalog = Readonly<Record<string, string>>;
+  const catalogs: readonly (readonly [string, Catalog])[] = [
+    ['en', en], ['zh-CN', zhCN], ['ru', ru], ['fr', fr],
+  ];
+  const keys: readonly MessageKey[] = ['notice.cursorZoomNeedsPair', 'notice.cursorZoomDegenerate',
+    'notice.cursorZoomMissing', 'notice.cursorZoomLoopLimited',
+    'capturePanel.cursorDistanceZoom', 'shortcuts.zoomToCursors'];
+  const missing = catalogs.flatMap(([locale, dict]) => keys
+    .filter((key) => (dict[key] ?? '').trim() === '').map((key) => `${locale}:${key}`));
+  const englishCopy = catalogs.slice(1).flatMap(([locale, dict]) => keys
+    .filter((key) => dict[key] === en[key]).map((key) => `${locale}:${key}`));
+  check('all four catalogs carry the zoom action, its refusals and the Loop-limited notice in their own words',
+    missing.length === 0 && englishCopy.length === 0 &&
+    en['capturePanel.cursorDistanceZoom'] === 'Zoom to the cursors of row {row}' &&
+    en['shortcuts.zoomToCursors'] === 'Zoom to the cursor interval' &&
+    keys.every((key) => (en[key] ?? '').includes(key === 'capturePanel.cursorDistanceZoom' ? '{row}' : '')),
+    `missing=${json(missing)}, reused=${json(englishCopy)}`);
 }
 
 const failed = results.filter((r) => !r.pass).length;

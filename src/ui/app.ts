@@ -236,6 +236,7 @@ import {
   pruneDistancePairs, removeDistanceRow as dropDistanceRow, seedDistanceRow,
   type CursorDistanceRow, type DistanceSide,
 } from './cursorDistance.js';
+import { planCursorZoom, type CursorZoomRefusal } from './cursorZoom.js';
 import {
   addEdgeRow as appendEdgeRow, assignEdgeChannel, assignEdgeCursor, clearEdgeCursors, countCursorEdges,
   CURSOR_EDGE_DEFERRED_RESULT, CURSOR_EDGE_EMPTY_RESULT, pruneEdgeChannels, pruneEdgeCursors,
@@ -308,6 +309,16 @@ async function partsBlob(
 
 /** sessionStorage flag: this tab's user dismissed the browser-support notice. */
 const PLATFORM_NOTICE_DISMISSED_KEY = 'slogicweb.platformNoticeDismissed';
+
+const CURSOR_ZOOM_REFUSALS = {
+  'needs-pair': 'notice.cursorZoomNeedsPair',
+  degenerate: 'notice.cursorZoomDegenerate',
+  missing: 'notice.cursorZoomMissing',
+} as const satisfies Record<CursorZoomRefusal, MessageKey>;
+
+const CURSOR_ZOOM_NOTICES: ReadonlySet<MessageKey> = new Set<MessageKey>([
+  ...Object.values(CURSOR_ZOOM_REFUSALS), 'notice.cursorZoomLoopLimited',
+]);
 
 /** Create one SVG node with constant attributes; the hint glyph has no other DOM needs. */
 function svgNode(tag: string, attrs: Readonly<Record<string, string>>): SVGElement {
@@ -4130,6 +4141,9 @@ export class App {
         this.renderPanels();
         this.dirty = true;
         return false;
+      case 'view.cursorsZoom':
+        this.zoomToCursorInterval();
+        return true;
       case 'view.zoomIn':
         this.keyZoom(1);
         return true;
@@ -4397,6 +4411,12 @@ export class App {
     if (this.cursorReadOnly()) return;
     this.distanceRows = dropDistanceRow(this.distanceRows, rowId);
     this.renderPanels();
+  }
+
+  private zoomDistanceRow(rowId: number): void {
+    const row = this.distanceRows.find((candidate) => candidate.id === rowId);
+    if (row === undefined || row.a === null || row.b === null) return;
+    this.zoomToCursorInterval([row.a, row.b]);
   }
 
   private pickDistanceCursor(rowId: number, side: DistanceSide, cursorId: number): void {
@@ -4769,6 +4789,22 @@ export class App {
       return true;
     }
     return false;
+  }
+
+  private zoomToCursorInterval(pair?: readonly [number, number]): void {
+    const plan = planCursorZoom(
+      this.cursors.map((cursor) => ({ cursorId: cursor.id, sample: cursor.marker.sample })), pair);
+    if (plan.kind === 'refuse') {
+      this.setFileNotice({ key: CURSOR_ZOOM_REFUSALS[plan.reason] });
+      return;
+    }
+    this.stack.setViewport(plan.start, plan.end);
+    this.noteExplicitViewport();
+    const view = this.stack.view;
+    const exact = view.start === plan.start && view.end === plan.end;
+    const noticeFree = this.fileNotice === null || CURSOR_ZOOM_NOTICES.has(this.fileNotice.key);
+    if (noticeFree) this.setFileNotice(exact ? null : { key: 'notice.cursorZoomLoopLimited' });
+    this.dirty = true;
   }
 
   /**
@@ -5617,6 +5653,7 @@ export class App {
         onRemoveCursorDistance: (rowId) => this.removeDistanceRow(rowId),
         onPickCursorDistance: (rowId, side, cursorId) =>
           this.pickDistanceCursor(rowId, side, cursorId),
+        onZoomCursorDistance: (rowId) => this.zoomDistanceRow(rowId),
         onAddCursorEdge: () => this.addEdgeRow(),
         onRemoveCursorEdge: (rowId) => this.removeEdgeRow(rowId),
         onPickCursorEdge: (rowId, side, cursorId) => this.pickEdgeCursor(rowId, side, cursorId),
@@ -8554,6 +8591,7 @@ export class App {
       this.noteExplicitViewport();
       this.dirty = true;
     },
+    zoomToCursors: (pair?: readonly [number, number]) => this.zoomToCursorInterval(pair),
     setMarker: (sample: number | null) => {
       this.releaseMarkerPointer();
       this.clearCursors();

@@ -93,6 +93,7 @@ export interface CapturePanelCallbacks {
   onAddCursorDistance(): void;
   onRemoveCursorDistance(rowId: number): void;
   onPickCursorDistance(rowId: number, side: DistanceSide, cursorId: number): void;
+  onZoomCursorDistance(rowId: number): void;
   onAddCursorEdge(): void;
   onRemoveCursorEdge(rowId: number): void;
   onPickCursorEdge(rowId: number, side: DistanceSide, cursorId: number): void;
@@ -1818,8 +1819,13 @@ export class CapturePanel {
           () => this.cb.onRemoveCursorDistance(row.id),
         );
         remove.disabled = locked;
+        const zoom = distanceZoomButton(
+          t('capturePanel.cursorDistanceZoom', { row: row.row }),
+          row.a === null || row.b === null,
+          () => this.cb.onZoomCursorDistance(row.id),
+        );
         const tail = div('cursor-dist-tail');
-        tail.append(delta, remove);
+        tail.append(delta, zoom, remove);
         item.append(a.el, mark, b.el, tail, a.popover, b.popover);
         list.appendChild(item);
       }
@@ -2806,6 +2812,27 @@ function distanceAddIcon(): SVGSVGElement {
   icon.setAttribute('viewBox', '0 0 24 24');
   icon.setAttribute('aria-hidden', 'true');
   for (const d of ['M12 5v14', 'M5 12h14']) appendIconPath(icon, d);
+  return icon;
+}
+
+function distanceZoomButton(label: string, disabled: boolean, onZoom: () => void): HTMLButtonElement {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'analyzer-act cursor-dist-zoom';
+  b.disabled = disabled;
+  b.title = label;
+  b.setAttribute('aria-label', label);
+  b.appendChild(distanceZoomIcon());
+  b.addEventListener('click', onZoom);
+  return b;
+}
+
+function distanceZoomIcon(): SVGSVGElement {
+  const namespace = 'http://www.w3.org/2000/svg';
+  const icon = document.createElementNS(namespace, 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true');
+  for (const d of ['M4 9V4h5', 'M20 15v5h-5']) appendIconPath(icon, d);
   return icon;
 }
 

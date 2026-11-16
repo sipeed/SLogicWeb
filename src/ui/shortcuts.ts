@@ -4,7 +4,7 @@ import { CHORD_ALIASES } from './chords.js';
 
 export type ShortcutId =
   | 'file.open' | 'file.save' | 'settings.open'
-  | 'capture.toggle' | 'view.fit' | 'cursors.clear'
+  | 'capture.toggle' | 'view.fit' | 'cursors.clear' | 'view.cursorsZoom'
   | 'view.zoomIn' | 'view.zoomOut' | 'view.panLeft' | 'view.panRight'
   | 'view.panLeftPage' | 'view.panRightPage' | 'theme.next'
   | 'sidebar.capture' | 'sidebar.cursors' | 'sidebar.decoders' | 'sidebar.toggle'
@@ -45,6 +45,9 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
   },
   { id: 'view.fit', group: 'view', chords: ['F', 'Home'], labels: ['toolbar.fit'] },
   { id: 'cursors.clear', group: 'view', chords: ['Escape'], labels: ['shortcuts.clearCursors'] },
+  {
+    id: 'view.cursorsZoom', group: 'view', chords: ['Z'], labels: ['shortcuts.zoomToCursors'],
+  },
   { id: 'view.zoomIn', group: 'view', chords: ['+', '='], labels: ['shortcuts.zoomIn'] },
   { id: 'view.zoomOut', group: 'view', chords: ['-', '_'], labels: ['shortcuts.zoomOut'] },
   { id: 'view.panLeft', group: 'view', chords: ['ArrowLeft'], labels: ['shortcuts.panLeft'] },
