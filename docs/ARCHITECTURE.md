@@ -763,6 +763,39 @@ Key transitions (the full table is generated in one pure module):
   `SharedArrayBuffer`; without it, use transferable buffers and cancellation by worker
   restart. The capability is exposed by `src/platform`, never sniffed.
 
+### 5.6 Measurement analysis
+
+- Exact analysis reads the **current acquisition wave** (`captureStore`, never the Repeat
+  composite) through one chunked exact reader, `readMeasureSamples`
+  (`src/ui/measureSamples.ts`): `bins` equals the requested sample count, each source
+  channel is folded into the code and unknown arrays before the next query so no borrowed
+  `ColumnView` outlives it, and a gap bit on any source channel marks that sample unknown.
+  The result discloses the requested and analyzed ranges, the truncation and
+  range-clipped flags, the unknown-sample count and every gap span in absolute positions
+  (`droppedSamples` added). Non-integer bounds, invalid limits, and out-of-group or
+  duplicate bits are typed `RangeError`s.
+- Analysis is bounded: one scan reads at most 65,536 exact samples
+  (`MEASURE_SCAN_SAMPLES`). A wider window returns an exact prefix with the analyzed and
+  requested counts, and every row plus the section note labels it partial, so a prefix
+  amplitude or RMS answer is never presented as a full-window result. No UI path scans an
+  unbounded capture.
+- `scanAnalogCodes` (`src/dsp/analogScan.ts`) is pure over reconstructed codes, the
+  unknown mask, calibration (`ADC_ZERO_CODE`, `analogVoltsPerCode`) and the analog-trigger
+  qualification: threshold from `analogTriggerCode`, hysteresis and artifact window from
+  `analogTriggerQualification` — the authority the trigger compiles from. Crossings come
+  from `AnalogRunQualifier`; Frequency is the mean period between accepted same-slope
+  crossings (512-crossing cap disclosed), Vpp is the exact code extrema, and mean and RMS
+  are centered on the zero code, so they include DC. Unknown samples reset the qualifier
+  and stay out of the aggregates. An endpoint-code run counts as clipping once it reaches
+  the artifact window (at least one sample); a shorter run, such as a transition
+  artifact, does not.
+- Measurement sources are the in-width ADC groups whose bank bus view exists
+  (`analogGroupCount` gives one group per eight channels, up to four: A0–A3 at 32
+  channels, A0–A1 at 16), never channel enable/visible/`hideSources` display state and
+  never a fixed group table; codes are rebuilt from that group's own `spec.bits`. No
+  analog-first-class store or acquisition change is involved: the source stays the
+  eight-bit bank group the device already captures.
+
 ## 6. Panels and view models
 
 - `PanelId` is declared once: `device`, `acquire`, `trigger`, `measure`, `analyze`,
@@ -777,6 +810,23 @@ Key transitions (the full table is generated in one pure module):
   change without a rebuild. Missing nodes throw; cached element references are not a
   second source of truth. View models are presentation-ready; panels do not re-derive
   armed/capability/formatting values.
+- Measurement selection (`source`, `range`, `rows`) is session state owned by `App`
+  (`src/ui/measurementState.ts`); the Cursors page renders a `MeasurementSectionView` and
+  emits five callbacks (`onPickMeasurementSource`, `onPickMeasurementRange`,
+  `onPickMeasurementCursor`, `onAddMeasurementRow`, `onRemoveMeasurementRow`). It is never
+  written to the workspace: a reload starts from the derived default.
+- Repeat's composite is display-only for analysis. The requested composite-coordinate
+  window is cropped to current-wave coverage and flagged `rangeClipped`, and a held
+  previous wave (`repeatShowingFront`) is an explicit `previous-wave-displayed`
+  unavailability with no number until current-wave display coordinates are valid.
+- Live measurement text follows its own `analysisPanelAt` 500 ms timestamp inside
+  `App.frame`, gated by `cursorsPageShown()` while running: it never consumes Capture's
+  `runningPanelAt`, adds no rAF/timer and calls `updateMeasurements()`, which rewrites only
+  value, status and section-note text. A stopped session refreshes the same text on the
+  forced drawing gesture that already redraws the plot. The per-source/window cache key
+  carries the wave identity and length, the dropped offset, window, group, gain, slope,
+  level, hysteresis and artifact window, so a replacement capture, gain change or
+  threshold change cannot leave an old value presented as current.
 - One `OverlayController` owns the stack of menus, popovers, sheets and dialogs. Opening
   one closes its transient siblings; Escape/back closes the topmost; focus returns to the
   invoker by token.
