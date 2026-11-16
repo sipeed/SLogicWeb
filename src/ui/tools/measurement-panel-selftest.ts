@@ -179,7 +179,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 {
   check('the cursor pair selects render only in cursor range mode',
     measureSection.includes("if (v.measurement.range.kind === 'cursors') {") &&
-    measureSection.indexOf("if (v.measurement.range.kind === 'cursors') {") > 
+    measureSection.indexOf("if (v.measurement.range.kind === 'cursors') {") >
       measureSection.indexOf("'measure.range',") &&
     measureSection.includes("const measureCursors = div('measure-cursors');") &&
     measureSection.includes("selectControl('measure.cursor.a', t('capturePanel.measureCursorA'),") &&
