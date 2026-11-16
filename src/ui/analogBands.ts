@@ -116,6 +116,27 @@ function mergedHeight(sources: readonly AnalogBandSource[]): number {
   return height;
 }
 
+export interface AnalogRowSlot {
+  channel: number;
+  bus: number;
+}
+
+export interface AnalogRowRef extends AnalogRowSlot {
+  heightCss: number;
+}
+
+export function analogRowProjection(
+  bands: readonly AnalogBand[], rowOf: (busId: string) => AnalogRowSlot | null,
+): AnalogRowRef[] {
+  const rows: AnalogRowRef[] = [];
+  for (const band of bands) {
+    const source = focusedAnalogSource(band);
+    const row = source ? rowOf(source.busId) : null;
+    if (row) rows.push({ channel: row.channel, bus: row.bus, heightCss: band.heightCss });
+  }
+  return rows;
+}
+
 export function analogBandSignature(
   bands: readonly AnalogBand[], layout: AnalogLayout, hidden: ReadonlySet<string>,
 ): string {

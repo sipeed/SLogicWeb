@@ -121,6 +121,25 @@ check('literal false and true survive parsing without coercion',
 {
   const base = { version: WORKSPACE_SCHEMA_VERSION, detailedLabels: true } as const;
   const defaultRaw = serializeWorkspaceSnapshot(base);
+  const mergedRaw = serializeWorkspaceSnapshot({ ...base, analogLayout: 'merged' });
+  const restored = parseWorkspaceSnapshot(mergedRaw);
+  const rejected = ['stacked', 'Merged', ' merged', 'overlay', 1, true, null, {}, ['merged']].map(
+    (analogLayout) => parseWorkspaceSnapshot(JSON.stringify({ ...base, analogLayout }))?.analogLayout);
+  const legacy = parseWorkspaceSnapshot(JSON.stringify(base));
+  check('the analog layout writes only literal merged and every other value falls back to stacked',
+    defaultRaw === '{"version":1,"detailedLabels":true,"analyzers":[]}' &&
+      !defaultRaw.includes('analogLayout') &&
+      mergedRaw === '{"version":1,"detailedLabels":true,"analogLayout":"merged","analyzers":[]}' &&
+      restored?.analogLayout === 'merged' &&
+      parseWorkspaceSnapshot(serializeWorkspaceSnapshot({ ...base, analogLayout: restored.analogLayout }))?.analogLayout === 'merged' &&
+      rejected.every((value) => value === undefined) &&
+      legacy?.analogLayout === undefined,
+    `default=${defaultRaw}, merged=${mergedRaw}, rejected=${rejected.join('/')}, legacy=${legacy?.analogLayout}`);
+}
+
+{
+  const base = { version: WORKSPACE_SCHEMA_VERSION, detailedLabels: true } as const;
+  const defaultRaw = serializeWorkspaceSnapshot(base);
   const offRaw = serializeWorkspaceSnapshot({ ...base, fitRows: false });
   const off = parseWorkspaceSnapshot(offRaw);
   const onRaw = serializeWorkspaceSnapshot({ ...base, fitRows: true });
@@ -1605,7 +1624,7 @@ const expectedWriters = [
   'adoptCapture', 'adoptDeviceChannels', 'afterChannelChange', 'applySettings', 'applySidebar',
   'attachAnalyzer', 'configureAnalogGain', 'configureBusScope', 'configureChannel', 'dragScopeTrigger',
   'finishCapture',
-  'removeAnalyzer', 'reorder', 'setCompactRows', 'setDetailedLabels', 'setDeveloperTools',
+  'removeAnalyzer', 'reorder', 'setAnalogLayout', 'setCompactRows', 'setDetailedLabels', 'setDeveloperTools',
   'setFitRows', 'setHideIdle', 'setQuickScroll', 'setWheelZooms', 'showIdleChannels', 'startCapture', 'updateAnalyzer',
 ].sort();
 const quietMethods = ['runDecode', 'discardDecodeState', 'renderPanels', 'relayout', 'retranslate'];

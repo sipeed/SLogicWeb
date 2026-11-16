@@ -803,6 +803,10 @@ export const zhCN: Messages = {
   'bus.unknown': '未知',
   'plot.notCaptured': '本次采集不含此通道，下次采集起包含',
   'bus.code': '数值',
+  'bus.layoutStacked': '堆叠行',
+  'bus.layoutMerged': '叠加',
+  'bus.sourceStrip': '模拟信号源',
+  'bus.focusSource': '聚焦 {name}',
 
   // ------------------------------------------------------- AI assistant
   'assistant.title': 'AI 助手',
@@ -873,6 +877,7 @@ export const zhCN: Messages = {
   'settings.compactRowsHelp': '数字通道行最低 24 px，并且只显示通道标题。模拟通道行和解码标注行保持原有尺寸。',
   'settings.hideIdle': '隐藏无跳变通道',
   'settings.hideIdleHelp': '采集停止时隐藏没有边沿的通道。带解码标注的通道行保持可见；提示行会显示隐藏数量并提供“显示”操作。',
+  'settings.analogLayout': '模拟行布局',
   'settings.developerTools': 'USB 寄存器控制台',
   'settings.developerToolsWhere': '右侧栏 › 采集 › 高级',
   'settings.savedData': '已保存的数据',

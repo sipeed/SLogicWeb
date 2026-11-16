@@ -19,6 +19,7 @@ import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannelName, defaultChannels,
   type AnalyzerState, type CaptureSettings, type TriggerMode,
 } from './state.js';
+import { analogLayoutOf, type AnalogLayout } from './analogBands.js';
 import { parseSidebarPage, type SidebarPage } from './sidebar.js';
 import { isRestorableThreshold } from './thresholdOptions.js';
 
@@ -84,6 +85,7 @@ export interface WorkspaceSnapshotV1 {
   hideIdleChannels?: boolean;
   fitRows?: boolean;
   quickScroll?: boolean;
+  analogLayout?: AnalogLayout;
   channels?: PersistedChannel[];
   order?: number[];
   capture?: PersistedCaptureSettings;
@@ -455,6 +457,7 @@ export function parseWorkspaceSnapshot(
     ...(parsed.hideIdleChannels === true ? { hideIdleChannels: true } : {}),
     ...(parsed.fitRows === false ? { fitRows: false } : {}),
     ...(parsed.quickScroll === false ? { quickScroll: false } : {}),
+    ...(analogLayoutOf(parsed.analogLayout) === 'merged' ? { analogLayout: 'merged' as const } : {}),
     channels,
     order: restoreOrder(parsed.order, channels.length),
     capture: restoreCapture(parsed.capture, channels.length),
@@ -495,6 +498,7 @@ export function serializeWorkspaceSnapshot(snapshot: WorkspaceSnapshotV1): strin
   if (snapshot.hideIdleChannels === true) serialized.hideIdleChannels = true;
   if (snapshot.fitRows === false) serialized.fitRows = false;
   if (snapshot.quickScroll === false) serialized.quickScroll = false;
+  if (snapshot.analogLayout === 'merged') serialized.analogLayout = 'merged';
   if (snapshot.channels) {
     serialized.channels = snapshot.channels.map(({ name, color, enabled }) => ({ name, color, enabled }));
   }
