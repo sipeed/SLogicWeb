@@ -396,9 +396,34 @@ Analog channels are not bus rows. Each analog signal has a row with:
   new acquisition clears them with a visible notice; a Repeat wave inside the same
   session remaps them by the display-origin delta and keeps them.
 - Measurement rows reference named cursors; missing references are empty selects.
-- Automatic measurements (Vpp, mean, RMS, frequency, period, duty, rise/fall, overshoot)
-  update when the visible window or signal set changes; they show their window and never
-  run in the background.
+- The Cursors surface keeps four sections in one order: Cursors, **Automatic
+  measurements**, Cursor distance, Edges. Automatic measurements is the second section of
+  that page and the surface stays inside the four-section panel budget of §10: no sidebar
+  page, tab or fifth section is added.
+- Automatic measurements read one real active ADC group as the source — a group exists
+  only where its eight-bit bank bus view does, which at 32 channels is A0–A3 and at 16
+  A0–A1; with no such bus view the source list is empty, the source select is disabled and
+  the rows read "no analog group selected" — a window of Viewport or a chosen pair of
+  existing cursors, and the three core rows Frequency, Vpp and RMS. The rows default on
+  for the first group and can be removed and re-added; the section says so when no row is
+  left.
+- Every row states its parameter, its value with unit (or "–") and one textual status:
+  the method when there is a value, the reason when there is not. Method text names what is
+  measured — the mean period of qualified crossings for Frequency, exact code extrema for
+  Vpp, DC-coupled RMS of exact samples for RMS — and a row whose window was not analyzed
+  whole adds "partial: x of y samples" to it.
+- No value is shown for no source, no window, a window with no usable sample (empty or
+  wholly unknown), an older capture on screen, or a Frequency row with no qualified
+  crossing or only one. A value that exists carries its qualifications instead: a window
+  clipped to captured samples, missing samples, a sustained endpoint run at code 0 or 255,
+  a period near the sample limit, or a crossing cap. No state leaves an earlier value or
+  an earlier qualification up.
+- Cursor `1/Δt` stays the manual reciprocal it always was: automatic measurements are a
+  separate readout with their own source, window and status, and never restyle it.
+- Period, duty cycle, rise/fall and overshoot are not implemented; they remain future
+  parameters under the same row contract. Nothing scans on a clock while the Cursors
+  surface is hidden: values recompute on settled input changes and on that surface's own
+  live refresh.
 - Math/FFT rows are measurements too: they state their sources, window function, bins and
   units; they never silently change the acquisition.
 
@@ -590,7 +615,7 @@ Target panels (each with at most four sections):
 | Device | Link, Profile, Notes |
 | Acquire | Acquisition, Retention, Notes |
 | Trigger | Enable/source, Conditions preview, Pre-trigger, State |
-| Measure | Cursors, Automatic measurements, Math/FFT |
+| Measure | Cursors, Automatic measurements, Cursor distance, Edges |
 | Analyze | Analyzers, Buses, Results, Status |
 | Record | State, Capacity, Export, Recovery |
 | Settings | Appearance, Behaviour, Shortcuts, About |
