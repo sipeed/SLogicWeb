@@ -49,6 +49,10 @@ import {
 } from './measurementState.js';
 import { chipForeground } from './metrics.js';
 import type { MeasurementStatsView } from './measurementStats.js';
+import {
+  PERSISTENCE_FRAMES, persistenceOf,
+  type PersistenceClearReason, type PersistenceFrames,
+} from './persistenceTrail.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
 import type { CaptureSettings, ChannelState } from './state.js';
@@ -105,6 +109,8 @@ export interface CapturePanelCallbacks {
   onRestartMeasurementCapture(): void;
   onResetMeasurementStats(rowId: number): void;
   onResetAllMeasurementStats(): void;
+  onPickPersistence(raw: unknown): void;
+  onClearPersistence(): void;
 }
 
 /** `aborted`: the last capture was ended by a device/link failure (`CapturePanelView.abort`). */
@@ -243,6 +249,14 @@ export interface CapturePanelView {
   /** A previous Repeat Interval missed its trigger; the session is retrying. */
   repeatMissed?: boolean;
   measurement: MeasurementSectionView;
+  persistence: PersistencePanelView;
+}
+
+export interface PersistencePanelView {
+  frames: PersistenceFrames;
+  effective: PersistenceFrames;
+  loop: boolean;
+  clear: PersistenceClearReason;
 }
 
 /**
@@ -537,6 +551,16 @@ export class CapturePanel {
         const text = item.querySelector<HTMLElement>('.measure-undo-text');
         if (text !== null) text.textContent = undoText;
         item.hidden = undoText === '';
+      }
+    }
+  }
+
+  updatePersistence(view: PersistencePanelView): void {
+    const note = persistenceNoteText(view);
+    for (const root of this.roots()) {
+      for (const item of root.querySelectorAll<HTMLElement>('[data-persistence-note]')) {
+        if (item.textContent !== note) item.textContent = note;
+        item.hidden = note === '';
       }
     }
   }
@@ -1746,6 +1770,31 @@ export class CapturePanel {
     });
     measureActions.append(addOpen, clearAll);
     measureSec.body.appendChild(measureActions);
+    const persistence = div('measure-persistence');
+    const persistenceLength = selectControl(
+      'measure.persistence',
+      t('capturePanel.persistence'),
+      PERSISTENCE_FRAMES.map((frames): SelectOptionTuple =>
+        [String(frames), persistenceLengthLabel(frames)]),
+      String(v.persistence.frames),
+    );
+    persistenceLength.disabled = v.persistence.loop;
+    persistenceLength.addEventListener('change', () => this.cb.onPickPersistence(
+      persistenceOf(Number(persistenceLength.value))));
+    const persistenceClear = document.createElement('button');
+    persistenceClear.type = 'button';
+    persistenceClear.className = 'analyzer-act measure-persistence-clear';
+    persistenceClear.dataset.persistenceClear = '';
+    persistenceClear.textContent = t('capturePanel.persistenceClear');
+    persistenceClear.disabled = v.persistence.effective === 0;
+    persistenceClear.addEventListener('click', () => this.cb.onClearPersistence());
+    persistence.append(persistenceLength.el, persistenceClear);
+    measureSec.body.appendChild(persistence);
+    const persistenceNote = div('measure-note');
+    persistenceNote.dataset.persistenceNote = '';
+    persistenceNote.textContent = persistenceNoteText(v.persistence);
+    persistenceNote.hidden = persistenceNote.textContent === '';
+    measureSec.body.appendChild(persistenceNote);
     if (v.measurement.undoCount !== null) {
       const undoNotice = div('measure-undo');
       undoNotice.dataset.measureUndoNotice = '';
@@ -2674,6 +2723,26 @@ export function measurementNoteText(view: MeasurementSectionView): string {
     }
   }
   return parts.join(' · ');
+}
+
+const PERSISTENCE_REASON_KEYS: Record<Exclude<PersistenceClearReason, null>, MessageKey> = {
+  'capture-session': 'capturePanel.persistenceReasonCaptureSession',
+  'capture-replacement': 'capturePanel.persistenceReasonCaptureReplacement',
+  'clear': 'capturePanel.persistenceReasonClear',
+  'band-removed': 'capturePanel.persistenceReasonBandRemoved',
+  'display-change': 'capturePanel.persistenceReasonDisplayChange',
+};
+
+export function persistenceNoteText(view: PersistencePanelView): string {
+  if (view.loop) return t('capturePanel.persistenceLoopOff');
+  if (view.effective === 0 || view.clear === null) return '';
+  return t('capturePanel.persistenceCleared', { reason: t(PERSISTENCE_REASON_KEYS[view.clear]) });
+}
+
+export function persistenceLengthLabel(frames: PersistenceFrames): string {
+  return frames === 0
+    ? t('capturePanel.persistenceOff')
+    : t('capturePanel.persistenceWaves', { count: frames });
 }
 
 export function cursorDistanceSideId(rowId: number, side: DistanceSide): string {

@@ -47,7 +47,8 @@ import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLay
 import { CapturePanel, cursorDistanceSideId, cursorEdgeSideId,
   type CapturePanelState, type CapturePanelView, type CursorDistanceRowView,
   type CursorDistanceSideView, type CursorEdgeChannelView, type CursorEdgeRowView,
-  type CursorRowView, type LoopDisplayMetrics, type TriggerStatusView } from './capturePanel.js';
+  type CursorRowView, type LoopDisplayMetrics, type PersistencePanelView,
+  type TriggerStatusView } from './capturePanel.js';
 import {
   ADC_ZERO_CODE, ANALOG_GAIN_DEFAULT, ANALOG_GROUP_COUNT, CHANNEL_BANK_SIZE, analogBankActive,
   analogBusConfig, analogCodeFromVolts, analogDefaultVoltsPerDiv, analogGainOf, analogGroupCount,
@@ -249,6 +250,13 @@ import {
   resolveAnalogFocus, toggleSourceVisibility, visibleAnalogSources, type AnalogBand,
   type AnalogBandSource, type AnalogLayout,
 } from './analogBands.js';
+import { acquisitionWaveKey } from './acquisitionWave.js';
+import { PersistenceTrail, type PersistenceBandSpec } from './persistenceSurfaces.js';
+import {
+  effectivePersistence, persistenceOf, persistenceSignature, shouldCommitPersistence,
+  type PersistenceClearEvent, type PersistenceClearReason, type PersistenceFrames,
+  type PersistenceSourceKey,
+} from './persistenceTrail.js';
 import {
   nextScopeVoltsPerDiv, scopeAutoset, scopeGeometry, scopeRowDivisions, scopeScaleAt, scopeVoltsAtY,
 } from './scopeScale.js';
@@ -392,6 +400,13 @@ export class App {
   private readonly referenceCache = new Map<number, ReferenceProjection & { key: string }>();
   private readonly analogVoltages = new CursorVoltageProjection();
   private analogRowBands: readonly AnalogBand[] = [];
+  private persistenceFrames: PersistenceFrames = 0;
+  private readonly persistenceTrail = new PersistenceTrail();
+  private persistenceLastWaveKey: string | null = null;
+  private persistencePendingKey: string | null = null;
+  private persistenceClearReason: PersistenceClearReason = null;
+  private persistenceClearEvent: PersistenceClearEvent = 'none';
+  private persistenceLatched = false;
   private readonly scopeBars = new Map<string, HTMLDivElement>();
   private readonly scopeTriggers = new Map<string, HTMLDivElement>();
   private readonly scopeScaleAnimations = new Map<string, { from: number; to: number; startedAt: number }>();
@@ -2763,12 +2778,20 @@ export class App {
     const noteOf = (frame: AnalogFrame): string => frame.kind !== 'empty' ? ''
       : frame.reason === 'live' ? t('bus.liveNote')
         : store.length > 0 ? t('bus.badChannels') : '';
+    const hidden = this.hiddenAnalogSources();
+    const analogRows: { band: AnalogBand; box: RowBox }[] = [];
     let analogIndex = 0;
     for (const box of boxes) {
       if (box.spec.kind !== 'analog') continue;
       const band = this.analogRowBands[analogIndex];
       analogIndex += 1;
       if (!band) continue;
+      analogRows.push({ band, box });
+    }
+    const persistenceFrames = this.effectivePersistenceFrames();
+    const commitsTrail = this.persistencePendingKey !== null && store.length > 0;
+    this.syncPersistenceTrail(analogRows, hidden);
+    for (const { band, box } of analogRows) {
       // The analog row is a renderer row with a trace in it; cover it first, then carry
       // the Repeat two-wave tint across it like every other row.
       this.overlay.fillLane(box.top, box.height);
@@ -2779,7 +2802,6 @@ export class App {
         return scopes.get(bus.id);
       };
       const traces: AnalogTraceView[] = [];
-      const hidden = this.hiddenAnalogSources();
       const visible = hidden.size === 0
         ? band.sources : band.sources.filter((source) => !hidden.has(source.busId));
       for (const source of visible) {
@@ -2800,8 +2822,10 @@ export class App {
       const labels = band.sources.length === 1 && focusedBus && first
         ? { top: busLabel(focusedBus, first.yMax), bottom: busLabel(focusedBus, first.yMin) }
         : undefined;
+      const trail = this.persistenceTrail.trailOf(band.id, persistenceFrames, commitsTrail);
       const view: AnalogBandView = {
         top: box.top, band: box.band, traces,
+        ...(trail === undefined ? {} : { trail }),
         ...(references.length > 0 ? { references } : {}),
         ...(scope ? { scope } : {}),
         ...(labels ? { labels } : {}),
@@ -2809,6 +2833,122 @@ export class App {
       };
       this.overlay.drawAnalog(view);
     }
+    this.settlePersistenceCommit(commitsTrail, analogRows);
+  }
+
+  private persistenceLoop(): boolean {
+    return this.captureIsLoop || this.settings.mode === 'loop';
+  }
+
+  private effectivePersistenceFrames(): PersistenceFrames {
+    return effectivePersistence(this.persistenceFrames, this.persistenceLoop());
+  }
+
+  private persistenceView(): PersistencePanelView {
+    return {
+      frames: this.persistenceFrames,
+      effective: this.effectivePersistenceFrames(),
+      loop: this.persistenceLoop(),
+      clear: this.persistenceClearReason,
+    };
+  }
+
+  private persistenceSources(
+    band: AnalogBand, hidden: ReadonlySet<string>,
+  ): PersistenceSourceKey[] {
+    const sources: PersistenceSourceKey[] = [];
+    for (const source of band.sources) {
+      const bus = this.busViews.find((candidate) => candidate.id === source.busId);
+      if (!bus) continue;
+      sources.push({
+        busId: bus.id,
+        gain: analogGainOf(bus),
+        fullScaleV: bus.fullScaleV ?? null,
+        voltsPerDiv: this.scopeTargetVoltsPerDiv(bus),
+        zeroPosition: Math.min(1, Math.max(0, bus.zeroPosition ?? 0.5)),
+        offsetV: bus.offsetV,
+        color: bus.color,
+        visible: !hidden.has(bus.id),
+      });
+    }
+    return sources;
+  }
+
+  private syncPersistenceTrail(
+    rows: readonly { band: AnalogBand; box: RowBox }[], hidden: ReadonlySet<string>,
+  ): void {
+    const view = this.stack.view;
+    const frames = this.effectivePersistenceFrames();
+    const result = this.persistenceTrail.sync({
+      frames,
+      width: this.overlay.widthCss,
+      dpr: globalThis.devicePixelRatio || 1,
+      viewportStart: view.start,
+      viewportEnd: view.end,
+      analogLayout: this.analogLayout,
+      samplerate: this.store.samplerate,
+      event: this.persistenceClearEvent,
+      bands: frames === 0 ? [] : rows.map(({ band, box }): PersistenceBandSpec => ({
+        id: band.id,
+        top: box.top,
+        height: box.band,
+        sources: this.persistenceSources(band, hidden),
+      })),
+    });
+    this.persistenceClearEvent = 'none';
+    const reason = result.reasons[result.reasons.length - 1];
+    if (reason !== undefined) this.persistenceClearReason = reason;
+    if (result.reallocated || result.removed.length > 0) this.persistenceLatched = true;
+  }
+
+  private settlePersistenceCommit(
+    committed: boolean, rows: readonly { band: AnalogBand }[],
+  ): void {
+    if (this.persistencePendingKey === null) return;
+    this.persistencePendingKey = null;
+    if (!committed) return;
+    for (const { band } of rows) this.persistenceTrail.commit(band.id);
+    this.persistenceClearReason = null;
+  }
+
+  private submitPersistenceWave(reason: CaptureStopReason): void {
+    const waveKey = acquisitionWaveKey(this.captureSessionId, this.captureWaveGeneration);
+    const commit = shouldCommitPersistence({
+      enabled: this.effectivePersistenceFrames() > 0,
+      loop: this.persistenceLoop(),
+      reason: this.captureAbort === null ? reason : 'error',
+      samples: this.captureStore.length,
+      missed: this.triggerState === 'not-found',
+      viewMode: 'time',
+      visible: true,
+      waveKey,
+      lastWaveKey: this.persistenceLastWaveKey,
+    });
+    if (!commit) return;
+    this.persistenceLastWaveKey = waveKey;
+    this.persistencePendingKey = waveKey;
+  }
+
+  private clearPersistence(event: PersistenceClearEvent): void {
+    if (event === 'none') return;
+    this.persistenceClearEvent = event;
+    this.persistenceClearReason = event;
+    this.persistencePendingKey = null;
+    this.dirty = true;
+  }
+
+  private setPersistence(raw: unknown): void {
+    const next = persistenceOf(raw);
+    if (next === this.persistenceFrames) return;
+    this.persistenceFrames = next;
+    this.persistenceClearReason = null;
+    if (next === 0) this.persistenceTrail.releaseAll();
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private persistenceSignatureValue(): string {
+    return persistenceSignature(this.effectivePersistenceFrames(), this.persistenceTrail.views());
   }
 
   private applySettings(s: CaptureSettings): void {
@@ -3473,10 +3613,12 @@ export class App {
     // Bus overviews are background work: skip them on the fastest loop streams so the
     // ingest path keeps the link, and let them finish after the capture stops.
     if (!highRateLoop) this.pumpBusBuilders();
+    let persistencePanelDue = false;
     if (now - this.analysisPanelAt > 500) {
       this.analysisPanelAt = now;
       if (this.running && this.cursorsPageShown()) {
         this.capturePanel.updateMeasurements(this.measurementView());
+        persistencePanelDue = true;
       }
     }
     if (this.running && this.repeatWaveHolding && now - this.runningPanelAt > 500) {
@@ -3543,6 +3685,9 @@ export class App {
       this.fail('error.render', e);
     } finally {
       this.recordFrameCost(performance.now() - drawStartedAt, liveDue);
+    }
+    if (persistencePanelDue || (forced && !this.running && this.cursorsPageShown())) {
+      this.capturePanel.updatePersistence(this.persistenceView());
     }
   };
 
@@ -3676,11 +3821,13 @@ export class App {
     const hCss = this.el.plot.clientHeight;
     this.overlay.syncSize(wCss, hCss);
     const overlayInvalidation = this.overlay.consumeInvalidation();
+    const persistenceLatched = this.persistenceLatched;
+    this.persistenceLatched = false;
     const invalidated: LayerInvalidation = {
       wave: this.stack.consumeInvalidation(),
       axis: false,
       overlay: overlayInvalidation.overlay,
-      bus: overlayInvalidation.bus,
+      bus: overlayInvalidation.bus || persistenceLatched,
     };
     this.el.hint.style.display = emptyHintVisible({
       displayedSamples: this.store.length,
@@ -3835,6 +3982,7 @@ export class App {
       this.analogLayout, this.analogFocusId ?? '',
       this.analogLayout === 'merged' ? [...this.analogHidden].sort().join(',') : '',
       this.referenceSig,
+      this.persistenceSignatureValue(),
     ];
     for (const bus of this.busViews) {
       parts.push(...busFrameSignatureParts(bus));
@@ -4920,6 +5068,7 @@ export class App {
   private beginViewportGesture(): void {
     if (this.session) this.viewIntent = true;
     this.setFollow(false);
+    this.clearPersistence('display-change');
   }
 
   /**
@@ -5868,6 +6017,8 @@ export class App {
         onRestartMeasurementCapture: () => this.restartMeasurementCapture(),
         onResetMeasurementStats: (rowId) => this.resetMeasurementStatsRow(rowId),
         onResetAllMeasurementStats: () => this.resetAllMeasurementStatsRows(),
+        onPickPersistence: (raw) => this.setPersistence(raw),
+        onClearPersistence: () => this.clearPersistence('clear'),
       });
       return;
     }
@@ -6163,6 +6314,7 @@ export class App {
       cursorDistances: this.cursorDistanceRows(),
       cursorEdges: this.cursorEdgeRows(),
       measurement: this.measurementView(),
+      persistence: this.persistenceView(),
       cursorEdgeChannels: this.edgeChannelOptions(),
       triggerViewLost: this.triggerViewLost,
       triggerViewPending: this.triggerViewPending,
@@ -6715,6 +6867,7 @@ export class App {
     this.repeatMissed = false;
     this.captureSessionId += 1;
     this.measurementStats = emptyMeasurementStats();
+    this.clearPersistence('capture-replacement');
     this.settledHeldCapture = false;
     this.clearRepeatLayers();
     // The first file over device data sets the device layout aside; a second file keeps
@@ -7213,6 +7366,7 @@ export class App {
         this.repeatMissed = false;
         this.captureSessionId += 1;
         this.measurementStats = emptyMeasurementStats();
+        this.clearPersistence('capture-session');
       }
       this.lastCaptureChannels = cfg.channels;
       this.lastCaptureRate = cfg.samplerate;
@@ -8357,6 +8511,7 @@ export class App {
     }
     this.syncUnloadGuard();
     this.recordMeasurementWave(reason);
+    this.submitPersistenceWave(reason);
     const waiters = this.captureWaiters;
     this.captureWaiters = [];
     for (const w of waiters) w();
@@ -8734,6 +8889,18 @@ export class App {
       if (bus) this.saveReference(bus);
     },
     removeReference: (id: number) => this.removeReference(id),
+    persistence: () => ({
+      frames: this.persistenceFrames,
+      effective: this.effectivePersistenceFrames(),
+      loop: this.persistenceLoop(),
+      clear: this.persistenceClearReason,
+      lastWaveKey: this.persistenceLastWaveKey,
+      pendingWaveKey: this.persistencePendingKey,
+      signature: this.persistenceSignatureValue(),
+      surfaces: this.persistenceTrail.views(),
+    }),
+    setPersistence: (raw: unknown) => this.setPersistence(raw),
+    clearPersistence: () => this.clearPersistence('clear'),
     setPanel: (p: 'device' | 'analyzers' | null) => {
       this.selectPanel(p);
     },

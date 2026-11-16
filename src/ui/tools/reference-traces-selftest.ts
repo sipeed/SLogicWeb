@@ -716,7 +716,7 @@ const near = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-12 * Math.
   const painted = overlay.includes('c.strokeStyle = reference.color;') &&
     overlay.includes('const y = geometryForReference.yVolts(value);');
   const referenceAt = overlay.indexOf('for (const reference of o.references ?? []) {');
-  const traceAt = overlay.indexOf('for (const t of o.traces) {');
+  const traceAt = overlay.indexOf('this.paintAnalogTraces(c, o);');
   const block = referenceAt >= 0 && traceAt > referenceAt ? overlay.slice(referenceAt, traceAt) : '';
   const chromeFree = block.length > 0 && !block.includes('fillText') &&
     !block.includes('setLineDash([4, 3])') && !block.includes('triggerVolts') &&
@@ -730,7 +730,7 @@ const near = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-12 * Math.
 
   const referencePass = (source: string): boolean => {
     const at = source.indexOf('for (const reference of o.references ?? []) {');
-    const traces = source.indexOf('for (const t of o.traces) {');
+    const traces = source.indexOf('this.paintAnalogTraces(c, o);');
     const body = at >= 0 && traces > at ? source.slice(at, traces) : '';
     return body.length > 0 && !body.includes('fillText') &&
       /c\.globalAlpha = REFERENCE_ALPHA;/.test(body) &&
@@ -743,11 +743,16 @@ const near = (a: number, b: number): boolean => Math.abs(a - b) <= 1e-12 * Math.
   const withChrome = overlay.replace(
     '      c.strokeStyle = reference.color;',
     "      c.fillText('ref', 0, 0);\n      c.strokeStyle = reference.color;");
-  check('control: a solid, opaque or chrome-painting reference pass fails the same predicate',
+  const aboveTraces = overlay.replace(
+    '    for (const reference of o.references ?? []) {',
+    '    this.paintAnalogTraces(c, o);\n' +
+    '    for (const reference of o.references ?? []) {');
+  check('control: a solid, opaque, chrome-painting or trace-covering reference pass fails the same predicate',
     referencePass(overlay) && !referencePass(undashed) && !referencePass(opaque) &&
-      !referencePass(withChrome),
+      !referencePass(withChrome) && !referencePass(aboveTraces),
     `plain=${referencePass(overlay)}, undashed=${referencePass(undashed)}, ` +
-    `opaque=${referencePass(opaque)}, chrome=${referencePass(withChrome)}`);
+    `opaque=${referencePass(opaque)}, chrome=${referencePass(withChrome)}, ` +
+    `above=${referencePass(aboveTraces)}`);
 }
 
 const app = fs.readFileSync('src/ui/app.ts', 'utf8');

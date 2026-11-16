@@ -90,7 +90,7 @@ const edgeMethodsSource = slice(app,
 
   const walks = panel.split('for (const root of this.roots()) {').length - 1;
   check('every in-place row updater walks both stored page containers',
-    walks === 4 && panel.split('private *roots()').length === 2 &&
+    walks === 5 && panel.split('private *roots()').length === 2 &&
     panel.includes('yield this.host.capture;') && panel.includes('yield this.host.cursors;'),
     `walks=${walks}`);
 }

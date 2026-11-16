@@ -1404,6 +1404,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     settingsArmed: false,
     activeTriggerPreSamples: undefined,
     measurement: section,
+    persistence: { frames: 0, effective: 0, loop: false, clear: null },
   });
   const source: MeasurementSectionView['sources'] = [{ group: 0, start: 0, gain: 1, name: 'A0' }];
   const rowViews = (ids: readonly number[]): MeasurementRowView[] =>
@@ -1796,6 +1797,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     settingsArmed: false,
     activeTriggerPreSamples: undefined,
     measurement: section(),
+    persistence: { frames: 0, effective: 0, loop: false, clear: null },
   });
   const panel = new CapturePanel({
     capture: capture as unknown as HTMLElement,
@@ -1934,6 +1936,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     settingsArmed: false,
     activeTriggerPreSamples: undefined,
     measurement: section(over),
+    persistence: { frames: 0, effective: 0, loop: false, clear: null },
   });
   const resets: string[] = [];
   const target = new CapturePanel({
