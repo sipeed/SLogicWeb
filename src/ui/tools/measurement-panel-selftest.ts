@@ -2,8 +2,9 @@
 
 import {
   measurementNoteText, measurementStatusText, measurementValueText, measurementWindowText,
-  CapturePanel, type CapturePanelCallbacks,
+  CapturePanel, type CapturePanelCallbacks, type CapturePanelView,
 } from '../capturePanel.js';
+import { defaultCaptureSettings } from '../state.js';
 import { en } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
 import { ru } from '../locales/ru.js';
@@ -49,6 +50,7 @@ const slice = (source: string, from: string, to: string): string => {
 };
 
 const panel = read('src/ui/capturePanel.ts');
+const catalogSource = read('src/ui/measurementCatalogDialog.ts');
 const app = read('src/ui/app.ts');
 const css = read('src/ui/style.css');
 
@@ -58,6 +60,8 @@ const measureUpdater = slice(panel, 'updateMeasurements(view: MeasurementSection
   'updateCursors(rows: readonly CursorRowView[]): void {');
 const appView = slice(app, 'private capturePanelView(): CapturePanelView {',
   'private primaryAction(): void {');
+const measureView = slice(app, 'private measurementView(): MeasurementSectionView {',
+  'private measurementBase(');
 const frame = (() => {
   const start = app.indexOf('private frame = (): void => {');
   if (start < 0) return '';
@@ -69,8 +73,12 @@ const applyConfig = slice(app, 'private applyMeasurementConfig(',
 const pickRange = slice(app, 'private pickMeasurementRange(',
   'private pickMeasurementCursor(');
 const pickCursor = slice(app, 'private pickMeasurementCursor(',
-  'private addMeasurementParameter(');
-const addParameter = slice(app, 'private addMeasurementParameter(',
+  'private toggleMeasurementParameter(');
+const toggleParameter = slice(app, 'private toggleMeasurementParameter(',
+  'private async clearMeasurementRows(');
+const clearRows = slice(app, 'private async clearMeasurementRows(',
+  'private undoMeasurementRows(');
+const undoRows = slice(app, 'private undoMeasurementRows(',
   'private removeMeasurementRowById(');
 const removeParameter = slice(app, 'private removeMeasurementRowById(',
   '// ------------------------------------------------------------------ bus views');
@@ -107,8 +115,10 @@ function sectionView(over: Partial<MeasurementSectionView> = {}): MeasurementSec
     range: { kind: 'viewport', a: null, b: null },
     cursors: [],
     rows: [],
+    allRows: [],
+    rowCount: 0,
+    undoCount: null,
     addStart: null,
-    availableParameters: [],
     window: null,
     unavailable: null,
     ...over,
@@ -223,7 +233,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 {
   check('one rendered row per visible row, keyed by row id for the live update',
     measureSection.includes("const list = div('measure-list');") &&
-    measureSection.includes('for (const row of v.measurement.rows) {') &&
+    measureSection.includes('v.measurement.rows.forEach((row, index) => {') &&
     measureSection.includes("const item = div('measure-row');") &&
     measureSection.includes('item.dataset.measureId = String(row.id);') &&
     measureSection.includes("source.className = 'measure-source';") &&
@@ -246,24 +256,43 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `value=${measureSection.includes('measurementValueText(row)')}, ` +
     `status=${measureSection.includes('measurementStatusText(row)')}`);
 
+  const removeFocus = "() => this.runMeasureAction('row', remove,\n" +
+    '            () => this.cb.onRemoveMeasurementRow(row.id), row.id, index)';
   check('each row removes exactly its own row id through the shared remove button',
     measureSection.includes('const remove = cursorRemoveButton(') &&
     measureSection.includes("t('capturePanel.measureRemove', { parameter: label })") &&
     measureSection.includes('const label = `${row.sourceName} ' +
       '${measurementParameterText(row.parameter)}`;') &&
-    measureSection.includes('() => this.cb.onRemoveMeasurementRow(row.id),') &&
+    measureSection.includes(removeFocus) &&
     measureSection.indexOf('cursorRemoveButton(') <
       measureSection.indexOf('this.cb.onRemoveMeasurementRow(row.id)') &&
+    measureSection.indexOf("this.runMeasureAction('row', remove") <
+      measureSection.indexOf('this.cb.onRemoveMeasurementRow(row.id)') &&
     panel.includes('onRemoveMeasurementRow(id: number): void;'),
-    `wired=${measureSection.includes('this.cb.onRemoveMeasurementRow(row.id)')}`);
+    `wired=${measureSection.includes(removeFocus)}, ` +
+      `armed=${measureSection.includes("this.runMeasureAction('row', remove")}`);
+
+  const armFirst = 'const intent = this.armMeasureFocus(kind, from, id, row);\n' +
+    '    try {\n      action();';
+  const armAfterEmit = panel.replace(armFirst,
+    'try {\n      action();\n    } finally {\n' +
+    '      this.dropMeasureFocus(intent);\n    }\n' +
+    '    const intent = this.armMeasureFocus(kind, from, id, row);');
+  check('the action runs only after its hand-off is armed, and a no-rebuild action drops it',
+    panel.includes(armFirst) && !armAfterEmit.includes(armFirst) &&
+      panel.includes('    } finally {\n      this.dropMeasureFocus(intent);\n    }') &&
+      panel.includes('if (this.measureFocus === intent) this.measureFocus = null;'),
+    `armFirst=${panel.includes(armFirst)}, lateArm=${armAfterEmit.includes(armFirst)}, ` +
+      `drop=${panel.includes('if (this.measureFocus === intent) this.measureFocus = null;')}`);
 
   check('the row actions are real buttons, so every control is keyboard reachable',
     panel.includes("b.type = 'button';") &&
-    measureSection.includes("add.type = 'button';") &&
+    measureSection.includes("addOpen.type = 'button';") &&
+    measureSection.includes("clearAll.type = 'button';") &&
     panel.includes('function cursorRemoveButton(label: string, onRemove: () => void): ' +
       'HTMLButtonElement {'),
     `remove=${panel.includes("b.type = 'button';")}, ` +
-    `add=${measureSection.includes("add.type = 'button';")}`);
+    `add=${measureSection.includes("addOpen.type = 'button';")}`);
 
   check('an empty row list shows the add hint instead of a list',
     measureSection.includes('if (v.measurement.rows.length === 0) {') &&
@@ -274,22 +303,131 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 }
 
 {
-  check('the temporary add control is one parameter select plus one Add button on the target source',
-    measureSection.includes('const addStart = v.measurement.addStart;') &&
-    measureSection.includes('if (addStart !== null && ' +
-      'v.measurement.availableParameters.length > 0) {') &&
-    measureSection.includes("const addRow = div('measure-add-row');") &&
-    measureSection.includes("'measure.add',") &&
-    measureSection.includes("t('capturePanel.measureAdd'),") &&
-    measureSection.includes('v.measurement.availableParameters.map(') &&
-    measureSection.includes("add.textContent = t('capturePanel.measureAddRow');") &&
-    measureSection.includes('const parameter = picker.value;') &&
-    measureSection.includes('if (isMeasurementParameter(parameter)) ' +
-      'this.cb.onAddMeasurementRow(addStart, parameter);') &&
-    measureSection.includes('addRow.append(picker.el, add);') &&
-    panel.includes('onAddMeasurementRow(start: number, parameter: MeasurementParameter): void;'),
-    `guard=${measureSection.includes('addStart !== null')}, ` +
-    `wired=${measureSection.includes('this.cb.onAddMeasurementRow(addStart, parameter)')}`);
+  const clearClick = "clearAll.addEventListener('click', () => {\n" +
+    "      const intent = this.armMeasureFocus('clear', clearAll);\n" +
+    '      void this.cb.onClearMeasurementRows(clearAll)\n' +
+    '        .finally(() => this.dropMeasureFocus(intent));';
+  const undoClick = "undo.addEventListener('click', () => {\n" +
+    "        this.runMeasureAction('undo', undo, () => this.cb.onUndoMeasurementRows());\n" +
+    '      });';
+  const footer = (source: string): boolean =>
+    source.includes("const measureActions = div('measure-actions');") &&
+    source.includes("addOpen.dataset.measureOpen = '';") &&
+    source.includes("addOpen.setAttribute('aria-haspopup', 'dialog');") &&
+    source.includes("addOpen.textContent = t('capturePanel.measureAddOpen');") &&
+    source.includes('addOpen.disabled = v.measurement.sources.length === 0;') &&
+    source.includes('this.catalogDialog.open(\n' +
+      '      measurementCatalogView(v.measurement), addOpen)') &&
+    source.includes("clearAll.dataset.measureClearAll = '';") &&
+    source.includes("clearAll.textContent = t('capturePanel.measureClearAll');") &&
+    source.includes('clearAll.disabled = v.measurement.rowCount === 0;') &&
+    source.includes(clearClick) &&
+    source.includes('measureActions.append(addOpen, clearAll);');
+  const noEnable = footer(measureSection.replace(
+    'addOpen.disabled = v.measurement.sources.length === 0;', 'addOpen.disabled = false;'));
+  const visibleOnly = footer(measureSection.replace(
+    'clearAll.disabled = v.measurement.rowCount === 0;',
+    'clearAll.disabled = v.measurement.rows.length === 0;'));
+  check('the footer row carries the catalog opener and Clear all, and no temporary add select',
+    footer(measureSection) && !noEnable && !visibleOnly &&
+    !measureSection.includes('measure-add-row') &&
+    !measureSection.includes("'measure.add'") &&
+    !measureSection.includes('onAddMeasurementRow') &&
+    panel.includes('onToggleMeasurementRow(start: number, parameter: MeasurementParameter): void;') &&
+    panel.includes('onClearMeasurementRows(invoker: HTMLElement | null): Promise<void>;') &&
+    panel.includes('onUndoMeasurementRows(): void;'),
+    `footer=${footer(measureSection)}, noEnable=${noEnable}, visibleOnly=${visibleOnly}, ` +
+      `temp=${measureSection.includes('onAddMeasurementRow')}`);
+
+  const noticeAt = measureSection.indexOf("const undoNotice = div('measure-undo');");
+  const notice = (source: string): boolean =>
+    source.includes('if (v.measurement.undoCount !== null) {') &&
+    source.includes("undoNotice.dataset.measureUndoNotice = '';") &&
+    source.includes("undoNotice.setAttribute('role', 'status');") &&
+    source.includes("undoText.className = 'measure-undo-text';") &&
+    source.includes('undoText.textContent = measurementClearedText(v.measurement);') &&
+    source.includes("undo.className = 'analyzer-act measure-undo-action';") &&
+    source.includes("undo.dataset.measureUndo = '';") &&
+    source.includes("undo.textContent = t('capturePanel.measureUndo');") &&
+    source.includes(undoClick) &&
+    source.includes('undoNotice.append(undoText, undo);');
+  const alwaysShown = notice(measureSection.replace(
+    'if (v.measurement.undoCount !== null) {', 'if (true) {'));
+  check('each management callback has exactly one owning control',
+    panel.split('this.cb.onToggleMeasurementRow(').length - 1 === 1 &&
+      panel.split('this.cb.onRemoveMeasurementRow(').length - 1 === 1 &&
+      panel.split('this.cb.onClearMeasurementRows(').length - 1 === 1 &&
+      panel.split('this.cb.onUndoMeasurementRows(').length - 1 === 1 &&
+      panel.includes('onToggle: (start, parameter) => ' +
+        'this.cb.onToggleMeasurementRow(start, parameter),') &&
+      panel.includes('onPickSource: (start) => this.cb.onPickMeasurementFilter(start),') &&
+      measureSection.includes(clearClick) &&
+      measureSection.includes(undoClick),
+    `toggle=${panel.split('this.cb.onToggleMeasurementRow(').length - 1}, ` +
+      `clear=${panel.split('this.cb.onClearMeasurementRows(').length - 1}, ` +
+      `undo=${panel.split('this.cb.onUndoMeasurementRows(').length - 1}`);
+
+  check('the undo notice is a live status line with its own count and one Undo button',
+    notice(measureSection) && !alwaysShown &&
+    noticeAt > measureSection.indexOf('measureActions.append(addOpen, clearAll);') &&
+    noticeAt < measureSection.indexOf("const measureNote = div('measure-note');") &&
+    panel.includes('export function measurementClearedText(view: MeasurementSectionView): string {'),
+    `noticeAt=${noticeAt}, alwaysShown=${alwaysShown}`);
+
+  const guardLine = 'if (this.catalogDialog.isOpen) ' +
+    'this.catalogDialog.update(measurementCatalogView(v.measurement));';
+  const owned = (source: string): boolean =>
+    source.split('new MeasurementCatalogDialog(').length - 1 === 1 &&
+    source.indexOf('new MeasurementCatalogDialog(') <
+      source.indexOf('render(v: CapturePanelView): void {') &&
+    source.split(guardLine).length - 1 === 1 &&
+    source.includes('this.catalogDialog.close();') &&
+    source.includes('private readonly catalogDialog: MeasurementCatalogDialog;');
+  const missingUpdate = panel.replace(guardLine, '');
+  const unguarded = panel.replace('if (this.catalogDialog.isOpen) ' +
+    'this.catalogDialog.update(measurementCatalogView(v.measurement));',
+  'this.catalogDialog.update(measurementCatalogView(v.measurement));');
+  const secondInstance = panel.replace('render(v: CapturePanelView): void {',
+    'render(v: CapturePanelView): void {\n' +
+    '    new MeasurementCatalogDialog({ onToggle: () => {}, onPickSource: () => {} });');
+  const modal = (source: string): boolean =>
+    source.includes("this.dialog = document.createElement('dialog');") &&
+    source.includes('this.dialog.showModal();') &&
+    !source.includes('.show();') && !source.includes('.open = true') &&
+    source.includes('this.dialog.close();') &&
+    source.includes("document.body.appendChild(this.dialog);");
+  check('the catalog is a native modal, so the browser owns the focus trap the plot cannot reach',
+    modal(catalogSource) &&
+      !modal(catalogSource.replace('this.dialog.showModal();', 'this.dialog.open = true;')) &&
+      !modal(catalogSource.replace('this.dialog.showModal();', 'this.dialog.show();')),
+    `modal=${modal(catalogSource)}, ` +
+      `openFlag=${modal(catalogSource.replace('this.dialog.showModal();', 'this.dialog.open = true;'))}`);
+
+  check('one catalog instance owned by the panel survives every rebuild and is re-pointed after it',
+    owned(panel) && !owned(missingUpdate) && !owned(unguarded) && !owned(secondInstance) &&
+      measureUpdater.includes('this.catalogDialog.update(measurementCatalogView(view));') &&
+      panel.includes('dispose(): void {\n    this.catalogDialog.close();'),
+    `owned=${owned(panel)}, missingUpdate=${owned(missingUpdate)}, ` +
+      `unguarded=${owned(unguarded)}, second=${owned(secondInstance)}, ` +
+      `updater=${measureUpdater.includes('this.catalogDialog.update(')}`);
+
+  const quiet = (source: string): boolean =>
+    (source.match(/setAttribute\('role'/g) ?? []).length === 1 &&
+    source.split("undoNotice.setAttribute('role', 'status');").length - 1 === 1 &&
+    !source.includes('aria-live') && (source.match(/role="/g) ?? []).length === 0;
+  const rowLive = measureSection.replace(
+    'item.append(source, parameter, value, status, remove);',
+    "item.setAttribute('role', 'status');\n        " +
+      'item.append(source, parameter, value, status, remove);');
+  const valueLive = measureSection.replace(
+    'value.textContent = measurementValueText(row);',
+    "value.setAttribute('role', 'status');\n        " +
+      'value.textContent = measurementValueText(row);');
+  check('the undo notice is the section\'s only status role and no measurement row is live',
+    quiet(measureSection) && !quiet(rowLive) && !quiet(valueLive),
+    `quiet=${quiet(measureSection)}, rowLive=${quiet(rowLive)}, ` +
+      `valueLive=${quiet(valueLive)}, ` +
+      `roles=${(measureSection.match(/setAttribute\('role'/g) ?? []).length}`);
 
   check('the section note is textual and carries its own data hook',
     measureSection.includes("const measureNote = div('measure-note');") &&
@@ -405,12 +543,29 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     line.hidden = false;
     root.appendChild(line);
   };
+  const makeUndoNotice = (root: FakeElement): void => {
+    const notice = doc.createElement('div');
+    notice.className = 'measure-undo';
+    notice.dataset.measureUndoNotice = '';
+    notice.setAttribute('role', 'status');
+    notice.hidden = true;
+    const text = doc.createElement('span');
+    text.className = 'measure-undo-text';
+    text.textContent = '';
+    const undo = doc.createElement('button');
+    undo.type = 'button';
+    undo.dataset.measureUndo = '';
+    undo.textContent = 'Undo';
+    notice.append(text, undo);
+    root.appendChild(notice);
+  };
   for (const root of [capture, cursors]) {
     makeRow(root, 1, 'old vpp');
     makeRow(root, 2, 'old rms');
     makeRow(root, 3, 'old hz');
     makeNote(root);
     makeWindowLine(root);
+    makeUndoNotice(root);
   }
   const cb = {} as CapturePanelCallbacks;
   const target = new CapturePanel({
@@ -473,6 +628,25 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       !(windowOf(root)?.textContent ?? '').includes('65,536')),
     `lines=${JSON.stringify(windowLines)}, ` +
     `row=${cells(capture, 1, 'measure-status')}`);
+
+  const undoOf = (root: FakeElement): FakeElement | null =>
+    root.querySelector('[data-measure-undo-notice]');
+  const undoTextOf = (root: FakeElement): string =>
+    root.querySelector('.measure-undo-text')?.textContent ?? '';
+  target.updateMeasurements(sectionView({ rows: [vpp, rms], undoCount: 3, rowCount: 3 }));
+  const undoShown = [capture, cursors].map((root) =>
+    `${undoTextOf(root)}/${undoOf(root)?.hidden}/${undoOf(root)?.children.length}`);
+  check('a clear notice is refreshed in place with its count and keeps exactly its text and Undo',
+    undoShown.every((entry) => entry === 'Cleared 3 measurements/false/2') &&
+      [capture, cursors].every((root) =>
+        root.querySelector('[data-measure-undo]')?.textContent === 'Undo' &&
+        undoOf(root)?.getAttribute('role') === 'status'),
+    `notice=${JSON.stringify(undoShown)}`);
+  target.updateMeasurements(sectionView({ rows: [vpp, rms] }));
+  const undoHidden = [capture, cursors].map((root) =>
+    `${undoTextOf(root)}/${undoOf(root)?.hidden}`);
+  check('a cleared snapshot hides the notice instead of leaving the last count up',
+    undoHidden.every((entry) => entry === '/true'), `notice=${JSON.stringify(undoHidden)}`);
 
   target.updateMeasurements(sectionView({ rows: [vpp, rms] }));
   const clearedWindow = [capture, cursors].map((root) =>
@@ -707,9 +881,25 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureCursorUnset': 'not set',
     'capturePanel.measureCursorHint': 'Place two cursors on the waveform to measure between them.',
     'capturePanel.measureEmpty': 'Add a measurement row.',
-    'capturePanel.measureAdd': 'Add measurement',
-    'capturePanel.measureAddRow': 'Add',
+    'capturePanel.measureAddOpen': 'Add measurement…',
+    'capturePanel.measureClearAll': 'Clear all',
     'capturePanel.measureRemove': 'Remove row: {parameter}',
+    'capturePanel.measureClearTitle': 'Clear all measurements?',
+    'capturePanel.measureClearBody': 'This removes every measurement row. ' +
+      'Undo restores them in their original order.',
+    'capturePanel.measureClearConfirm': 'Clear all',
+    'capturePanel.measureClearCancel': 'Cancel',
+    'capturePanel.measureCleared': 'Cleared {count} measurements',
+    'capturePanel.measureUndo': 'Undo',
+    'capturePanel.measureCatalogTitle': 'Add measurements',
+    'capturePanel.measureCatalogSource': 'Source',
+    'capturePanel.measureCatalogVertical': 'Vertical',
+    'capturePanel.measureCatalogHorizontal': 'Horizontal',
+    'capturePanel.measureCatalogDone': 'Done',
+    'capturePanel.measureCatalogMethodFrequency': 'mean period of qualified crossings',
+    'capturePanel.measureCatalogMethodPeriod': 'mean qualified-crossing interval, in seconds',
+    'capturePanel.measureCatalogMethodDuty':
+      'known samples at or above the level over complete qualified periods',
     'capturePanel.measureFrequency': 'Frequency',
     'capturePanel.measureVpp': 'Vpp',
     'capturePanel.measureMax': 'Max',
@@ -752,8 +942,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const value = (dict: Readonly<Record<string, string>>, key: string): string => dict[key] ?? '';
   const missing = catalogs.flatMap(([locale, dict]) =>
     keys.filter((key) => value(dict, key).trim() === '').map((key) => `${locale}:${key}`));
-  check('all four catalogs define the forty-eight measurement keys',
-    missing.length === 0 && keys.length === 48, `missing=${JSON.stringify(missing)}`);
+  check('all four catalogs define the sixty-two measurement keys',
+    missing.length === 0 && keys.length === 62, `missing=${JSON.stringify(missing)}`);
 
   const mismatched = keys.filter((key) => value(en, key) !== english[key]);
   check('the English measurement copy matches the approved vocabulary',
@@ -762,6 +952,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 
   const variables: Record<string, readonly string[]> = {
     'capturePanel.measureRemove': ['{parameter}'],
+    'capturePanel.measureCleared': ['{count}'],
     'capturePanel.measureMethodFrequency': ['{count}'],
     'capturePanel.measureMethodPeriod': ['{count}'],
     'capturePanel.measureMethodDuty': ['{periods}'],
@@ -789,13 +980,29 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `problems=${JSON.stringify(placeholderProblems)}`);
 
   const localeNeutral = new Set(['capturePanel.measureSource', 'capturePanel.measureVpp',
-    'capturePanel.measureValueNone']);
+    'capturePanel.measureValueNone', 'capturePanel.measureCatalogSource']);
   const copied = catalogs.filter(([locale]) => locale !== 'en')
     .filter(([, dict]) => keys.some((key) => !localeNeutral.has(key) &&
       value(dict, key) === value(en, key)))
     .map(([locale]) => locale);
   check('no locale reuses English measurement prose; units and the dash stay neutral',
     copied.length === 0, `copied=${JSON.stringify(copied)}`);
+
+  const counted = ['capturePanel.measureMethodFrequency', 'capturePanel.measureMethodPeriod',
+    'capturePanel.measureMethodDuty'] as const;
+  const describe = ['capturePanel.measureCatalogMethodFrequency',
+    'capturePanel.measureCatalogMethodPeriod',
+    'capturePanel.measureCatalogMethodDuty'] as const;
+  const describeHits = catalogs.flatMap(([locale, dict]) => describe
+    .filter((key) => /\{\w+\}/.test(value(dict, key)) ||
+      /\b0\b/.test(value(dict, key)))
+    .map((key) => `${locale}:${key}`));
+  check('the catalog copy is count-free in every locale while the row status keeps its count',
+    describeHits.length === 0 &&
+      counted.every((key) => /\{\w+\}/.test(value(en, key))) &&
+      describe.every((key) => !value(en, key).includes('0 ')),
+    `hits=${JSON.stringify(describeHits)}, counted=${JSON.stringify(
+      counted.map((key) => value(en, key)))}`);
 
   const scripts: [string, RegExp][] = [
     ['zh-CN', /\p{Script=Han}/u],
@@ -832,20 +1039,26 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'onPickMeasurementRange: (kind) => this.pickMeasurementRange(kind),',
     'onPickMeasurementCursor: (side, cursorId) => ' +
       'this.pickMeasurementCursor(side, cursorId),',
-    'onAddMeasurementRow: (start, parameter) => this.addMeasurementParameter(start, parameter),',
+    'onToggleMeasurementRow: (start, parameter) =>\n' +
+      '          this.toggleMeasurementParameter(start, parameter),',
     'onRemoveMeasurementRow: (id) => this.removeMeasurementRowById(id),',
+    'onClearMeasurementRows: (invoker) => this.clearMeasurementRows(invoker),',
+    'onUndoMeasurementRows: () => this.undoMeasurementRows(),',
   ];
   const absent = registrations.filter((line) => !app.includes(line));
   const declared = [
     'onPickMeasurementFilter(start: number | null): void;',
     'onPickMeasurementRange(kind: MeasurementRangeKind): void;',
     "onPickMeasurementCursor(side: 'a' | 'b', cursorId: number | null): void;",
-    'onAddMeasurementRow(start: number, parameter: MeasurementParameter): void;',
+    'onToggleMeasurementRow(start: number, parameter: MeasurementParameter): void;',
     'onRemoveMeasurementRow(id: number): void;',
+    'onClearMeasurementRows(invoker: HTMLElement | null): Promise<void>;',
+    'onUndoMeasurementRows(): void;',
   ].filter((line) => !panel.includes(line));
-  check('the panel emits all five measurement callbacks and App registers each one',
-    absent.length === 0 && declared.length === 0 &&
-    panel.split('onPickMeasurementFilter').length - 1 >= 2,
+  check('the panel emits all seven measurement callbacks and App registers each one',
+    absent.length === 0 && declared.length === 0 && registrations.length === 7 &&
+    panel.split('onPickMeasurementFilter').length - 1 >= 2 &&
+    !panel.includes('onAddMeasurementRow') && !app.includes('onAddMeasurementRow'),
     `absent=${JSON.stringify(absent)}, declared=${JSON.stringify(declared)}`);
 
   const restart = app.split('this.runningPanelAt = 0;').length - 1;
@@ -931,21 +1144,89 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     pickCursor.includes('selectMeasurementRange(base, range)'),
     `cursor=${pickCursor.length} chars`);
 
-  check('the row actions add and remove exactly one row of the targeted source id',
-    addParameter.includes('addMeasurementRow(base.rows, start, parameter)') &&
+  check('the row actions toggle, remove, clear and undo through the same reducers and setter',
+    toggleParameter.includes('toggleMeasurementRow(base.rows, start, parameter)') &&
     removeParameter.includes('removeMeasurementRow(base.rows, id)') &&
-    addParameter.includes('this.withMeasurementRows(') &&
-    removeParameter.includes('this.withMeasurementRows(') &&
-    addParameter.includes('this.applyMeasurementConfig(') &&
-    removeParameter.includes('this.applyMeasurementConfig(') &&
+    clearRows.includes('clearMeasurementRows(base.rows)') &&
+    undoRows.includes('undoClearMeasurementRows(base.rows)') &&
+    undoRows.includes('if (rows === base.rows) return;') &&
+    [toggleParameter, removeParameter, clearRows, undoRows]
+      .every((body) => body.includes('this.withMeasurementRows(') &&
+        body.includes('this.applyMeasurementConfig(') &&
+        !body.includes('persistWorkspace')) &&
     applyConfig.includes('this.applyMeasurementConfig(') === false,
-    `add=${addParameter.length}, remove=${removeParameter.length}`);
+    `toggle=${toggleParameter.length}, remove=${removeParameter.length}, ` +
+      `clear=${clearRows.length}, undo=${undoRows.length}`);
+
+  const untouched = ['selectMeasurementRange', 'selectMeasurementFilter', 'this.cursors',
+    'range', 'captureStore.replace', 'settings.', 'repeatTimer', 'startCapture'];
+  const leaked = [toggleParameter, removeParameter, clearRows, undoRows]
+    .flatMap((body) => untouched.filter((needle) => body.includes(needle)));
+  const spreads = [toggleParameter, removeParameter, clearRows, undoRows]
+    .filter((body) => body.includes('this.measurementBase(sources)')).length;
+  check('no row action touches the range, the filter, the cursors or the acquisition',
+    leaked.length === 0 && spreads === 4 &&
+      app.includes('return rows === config.rows ? config : { ...config, rows };'),
+    `leaked=${JSON.stringify(leaked)}, spreads=${spreads}`);
+
+  const ask = clearRows.slice(0, clearRows.indexOf('if (!confirmed) return;'));
+  const guarded = (body: string): boolean => {
+    const guardAt = body.indexOf('if (!confirmed) return;');
+    return guardAt >= 0 &&
+      guardAt < body.indexOf('clearMeasurementRows(base.rows)') &&
+      guardAt < body.indexOf('this.applyMeasurementConfig(') &&
+      guardAt < body.indexOf('this.withMeasurementRows(');
+  };
+  const noGuard = clearRows.replace('if (!confirmed) return;', '');
+  const guardAfter = clearRows.replace('if (!confirmed) return;\n', '')
+    + '\n    if (!confirmed) return;';
+  check('Clear all confirms first through the shared dialog and changes nothing on Escape or Cancel',
+    ask.includes('await this.confirmDialog.ask({') &&
+      ask.includes("title: t('capturePanel.measureClearTitle'),") &&
+      ask.includes("body: t('capturePanel.measureClearBody'),") &&
+      ask.includes("confirm: t('capturePanel.measureClearConfirm'),") &&
+      ask.includes("cancel: t('capturePanel.measureClearCancel'),") &&
+      ask.includes('}, invoker);') &&
+      guarded(clearRows) && !guarded(noGuard) && !guarded(guardAfter) &&
+      clearRows.indexOf('await this.confirmDialog.ask({') <
+        clearRows.indexOf('if (!confirmed) return;') &&
+      !clearRows.includes('requestAnimationFrame') && !clearRows.includes('setTimeout') &&
+      app.split('clearMeasurementRows(base.rows)').length - 1 === 1,
+    `askAt=${ask.length}, guard=${clearRows.indexOf('if (!confirmed) return;')}, ` +
+      `noGuard=${guarded(noGuard)}, lateGuard=${guarded(guardAfter)}`);
+
+  const payload = (body: string): boolean =>
+    body.includes('...measurementSectionCounts(state),') &&
+    body.includes('const rows = visibleMeasurementRows(state);') &&
+    !body.includes('rowCount: rows.length');
+  check('the view exposes the whole row count and the undo snapshot size, not the filtered count',
+    payload(measureView) && measureView.includes('allRows: state.rows,') &&
+      !measureView.includes('availableParameters') &&
+      !app.includes('measurementRowViews(state.rows'),
+    `counts=${payload(measureView)}, ` +
+      `allRows=${measureView.split('allRows: state.rows,').length - 1}, ` +
+      `scanIntoCatalog=${app.includes('measurementRowViews(state.rows')}`);
+
+  check('only the visible rows are scanned, and the catalog receives row identity alone',
+    measureView.includes('const results = new Map<number, MeasurementSourceResult>();') &&
+      measureView.includes('for (const source of this.measurementRowsFor(sources, rows)) {') &&
+      measureView.includes('rows: measurementRowViews(rows, results, null),') &&
+      measureView.split('runMeasurement({').length - 1 === 1 &&
+      !measureView.includes('measurementRowViews(state.rows') &&
+      app.includes('const wanted = new Set(rows.map((row) => row.start));'),
+    `scans=${measureView.split('runMeasurement({').length - 1}, ` +
+      `visibleOnly=${measureView.includes('this.measurementRowsFor(sources, rows)')}`);
 }
 
 {
   const rules = ['.measure-controls {', '.measure-cursors {', '.measure-row {',
-    '.measure-param {', '.measure-value {', '.measure-status {', '.measure-add-row {',
-    '.analyzer-act.measure-add {', '.measure-note {', '.measure-window {'];
+    '.measure-param {', '.measure-value {', '.measure-status {', '.measure-actions {',
+    '.analyzer-act.measure-add {', '.measure-note {', '.measure-window {',
+    '.measure-undo {', '.measure-undo-text {', '.analyzer-act.measure-undo-action {',
+    '.measure-catalog-dialog {', '.measure-catalog-body {', '.measure-catalog-source > .field {',
+    '.measure-catalog-list {', '.measure-catalog-group {', '.measure-catalog-row {',
+    '.measure-catalog-check {', '.measure-catalog-text {', '.measure-catalog-param {',
+    '.measure-catalog-method {'];
   const absent = rules.filter((rule) => !css.includes(rule));
   check('the sheet carries every measurement rule', absent.length === 0,
     `absent=${JSON.stringify(absent)}`);
@@ -978,11 +1259,24 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       measureSection.indexOf('item.append(source, parameter, value, status, remove);'),
     `order=${status.includes('order: 1;')}`);
 
-  check('the source column and the add-row select share the section layout tokens',
+  check('the source column wraps and the footer actions wrap at the narrow rail',
     slice(css, '.measure-source {', '}').includes('overflow-wrap: anywhere;') &&
-    slice(css, '.measure-add-row > .field {', '}').includes('flex: 1 1 90px;'),
+    slice(css, '.measure-actions {', '}').includes('flex-wrap: wrap;') &&
+    !css.includes('.measure-add-row'),
     `source=${css.includes('.measure-source {')}, ` +
-    `field=${css.includes('.measure-add-row > .field {')}`);
+      `actions=${css.includes('.measure-actions {')}, ` +
+      `temp=${css.includes('.measure-add-row')}`);
+
+  const catalogRow = slice(css, '.measure-catalog-row {', '}');
+  const catalogMethod = slice(css, '.measure-catalog-method {', '}');
+  check('a catalog row lays out checkbox, name and method without forcing horizontal overflow',
+    catalogRow.includes('align-items: flex-start;') &&
+      catalogRow.includes('cursor: pointer;') &&
+      catalogMethod.includes('overflow-wrap: anywhere;') &&
+      slice(css, '.measure-catalog-text {', '}').includes('min-width: 0;') &&
+      slice(css, '.measure-catalog-dialog {', '}')
+        .includes('width: min(420px, calc(100vw - 32px));'),
+    `row=${catalogRow.length}, method=${catalogMethod.length}`);
 
   const block = slice(css, '.measure-controls {', '.cursor-edge-channel {');
   const colour = block.match(/#[0-9a-fA-F]{3,8}\b|rgba?\(|oklch\(/g) ?? [];
@@ -992,10 +1286,296 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `colours=${JSON.stringify(colour)}, block=${block.length} chars`);
 
   const addRule = slice(css, '.analyzer-act.measure-add {', '}');
-  check('the add control overrides the icon box so its translated label fits',
-    addRule.includes('width: auto;') && addRule.includes('padding: 0 6px;') &&
-    addRule.includes('white-space: nowrap;') && !addRule.includes('!important'),
-    `rule=${addRule.length} chars`);
+  const clearRule = slice(css, '.analyzer-act.measure-clear {', '}');
+  const undoRule = slice(css, '.analyzer-act.measure-undo-action {', '}');
+  check('the three text actions override the icon box so their translated labels fit',
+    [addRule, clearRule, undoRule].every((rule) => rule.includes('width: auto;') &&
+      rule.includes('padding: 0 6px;') && rule.includes('white-space: nowrap;') &&
+      !rule.includes('!important')),
+    `add=${addRule.length}, clear=${clearRule.length}, undo=${undoRule.length}`);
+}
+
+{
+  const doc = installFakeDom();
+  const capture = doc.createElement('div');
+  const cursors = doc.createElement('div');
+  doc.body.append(capture, cursors);
+  const panelView = (section: MeasurementSectionView): CapturePanelView => ({
+    settings: defaultCaptureSettings(),
+    channels: [],
+    widthOptions: [16],
+    buses: [],
+    analogGroups: 0,
+    deviceName: 'fixture',
+    running: false,
+    stopping: false,
+    repeatPending: false,
+    captureState: 'ready',
+    result: null,
+    progress: null,
+    maxSamplerateHz: { 16: 200e6 },
+    triggerState: 'off',
+    cursors: [],
+    cursorDistances: [],
+    cursorEdges: [],
+    cursorEdgeChannels: [],
+    triggerViewLost: false,
+    triggerViewPending: false,
+    triggerLocked: false,
+    triggerRetuneRejected: false,
+    triggerAnalogRolling: false,
+    triggerArmed: false,
+    triggerAutoDisarmed: false,
+    settingsArmed: false,
+    activeTriggerPreSamples: undefined,
+    measurement: section,
+  });
+  const source: MeasurementSectionView['sources'] = [{ group: 0, start: 0, gain: 1, name: 'A0' }];
+  const rowViews = (ids: readonly number[]): MeasurementRowView[] =>
+    ids.map((id) => rowView({ id, parameter: 'vpp', unit: 'v', value: id }));
+  const rowModels = (): MeasurementSectionView['allRows'] =>
+    rows.map((row) => ({ id: row.id, start: row.start, parameter: row.parameter }));
+
+  let rows = rowViews([1, 2, 3]);
+  let undoCount: number | null = null;
+  let cancelClear = false;
+  let holdClear = false;
+  const pendingClear: (() => void)[] = [];
+  let openDialogFirst = false;
+  let dropRemoveRender = false;
+  let throwRemove = false;
+  let dropUndoRender = false;
+  let panel: CapturePanel;
+  const render = (): void => {
+    panel.render(panelView(sectionView({
+      sources: source, rows, allRows: rowModels(), rowCount: rows.length, undoCount,
+    })));
+  };
+  const focusDialog = doc.createElement('input');
+  const dialog = doc.createElement('dialog');
+  dialog.appendChild(focusDialog);
+  doc.body.appendChild(dialog);
+  panel = new CapturePanel({
+    capture: capture as unknown as HTMLElement,
+    cursors: cursors as unknown as HTMLElement,
+  }, {
+    onRemoveMeasurementRow: (id: number) => {
+      if (openDialogFirst) {
+        focusDialog.focus();
+        openDialogFirst = false;
+      }
+      if (throwRemove) throw new Error('measurement remove failed');
+      if (dropRemoveRender) return;
+      rows = rows.filter((row) => row.id !== id);
+      render();
+    },
+    onClearMeasurementRows: () => {
+      if (cancelClear) {
+        cancelClear = false;
+        return Promise.resolve();
+      }
+      const apply = (): void => {
+        undoCount = rows.length;
+        rows = [];
+        render();
+      };
+      if (holdClear) {
+        return new Promise<void>((resolve) => {
+          pendingClear.push(() => { apply(); resolve(); });
+        });
+      }
+      apply();
+      return Promise.resolve();
+    },
+    onUndoMeasurementRows: () => {
+      if (dropUndoRender) return;
+      rows = rowViews([1, 2, 3]);
+      undoCount = null;
+      render();
+    },
+  } as unknown as CapturePanelCallbacks);
+
+  const active = (): FakeElement | null =>
+    doc.activeElement === doc.body ? null : doc.activeElement;
+  const removeOf = (id: number): FakeElement | null =>
+    cursors.querySelector(`.measure-row[data-measure-id="${id}"] .analyzer-act--remove`);
+  const addOf = (): FakeElement | null => cursors.querySelector('[data-measure-open]');
+  const shownIds = (): string[] =>
+    cursors.querySelectorAll('.measure-row').map((item) => item.dataset.measureId ?? '');
+
+  const reset = (ids: readonly number[]): void => {
+    rows = rowViews(ids);
+    undoCount = null;
+    cancelClear = false;
+    holdClear = false;
+    pendingClear.length = 0;
+    openDialogFirst = false;
+    throwRemove = false;
+    render();
+  };
+
+  reset([1, 2, 3]);
+  removeOf(2)?.focus();
+  const middleFocused = active() === removeOf(2);
+  removeOf(2)?.click();
+  const afterMiddle = active();
+  check('removing a middle row hands the focus to the next row in the same list',
+    middleFocused && JSON.stringify(shownIds()) === JSON.stringify(['1', '3']) &&
+      afterMiddle !== null && afterMiddle === removeOf(3) && afterMiddle !== addOf(),
+    `focused=${middleFocused}, ids=${JSON.stringify(shownIds())}, ` +
+      `next=${afterMiddle === removeOf(3)}, add=${afterMiddle === addOf()}`);
+
+  reset([1, 2, 3]);
+  removeOf(3)?.focus();
+  removeOf(3)?.click();
+  const afterLast = active();
+  check('removing the last row hands the focus to the previous row',
+    JSON.stringify(shownIds()) === JSON.stringify(['1', '2']) &&
+      afterLast !== null && afterLast === removeOf(2) && afterLast !== addOf(),
+    `ids=${JSON.stringify(shownIds())}, previous=${afterLast === removeOf(2)}`);
+
+  reset([7]);
+  removeOf(7)?.focus();
+  removeOf(7)?.click();
+  const afterOnly = active();
+  check('removing the only row hands the focus to the Add measurement button',
+    shownIds().length === 0 && afterOnly !== null && afterOnly === addOf(),
+    `ids=${JSON.stringify(shownIds())}, add=${afterOnly === addOf()}`);
+
+  reset([1, 2, 3]);
+  const clear = cursors.querySelector('[data-measure-clear-all]');
+  clear?.focus();
+  const clearFocused = clear !== null && clear.disabled === false && active() === clear;
+  clear?.click();
+  const afterClear = active();
+  check('a confirmed Clear all hands the focus to Add because the Clear button goes away',
+    clearFocused && shownIds().length === 0 && afterClear !== null && afterClear === addOf(),
+    `ids=${JSON.stringify(shownIds())}, focused=${clearFocused}, ` +
+      `add=${afterClear === addOf()}`);
+
+  const undo = cursors.querySelector('[data-measure-undo]');
+  undo?.focus();
+  const undoFocused = undo !== null && active() === undo;
+  undo?.click();
+  const afterUndo = active();
+  check('Undo hands the focus to Add because the Undo button disappears',
+    undoFocused && JSON.stringify(shownIds()) === JSON.stringify(['1', '2', '3']) &&
+      cursors.querySelector('[data-measure-undo]') === null &&
+      afterUndo !== null && afterUndo === addOf(),
+    `focused=${undoFocused}, ids=${JSON.stringify(shownIds())}, ` +
+      `gone=${cursors.querySelector('[data-measure-undo]') === null}, ` +
+      `add=${afterUndo === addOf()}`);
+
+  reset([1, 2, 3]);
+  removeOf(2)?.focus();
+  const liveTarget = active();
+  panel.updateMeasurements(sectionView({
+    sources: source, rows, allRows: rowModels(), rowCount: rows.length,
+  }));
+  check('a live measurement refresh moves no focus',
+    liveTarget === removeOf(2) && active() === liveTarget && liveTarget !== addOf(),
+    `before=${liveTarget === removeOf(2)}, after=${active() === liveTarget}`);
+
+  reset([1, 2, 3]);
+  removeOf(2)?.focus();
+  render();
+  check('an unrelated re-render neither keeps a hand-off nor steals the focus to Add',
+    active() === null && addOf() !== null && removeOf(2) !== null,
+    `active=${active() === null ? 'body' : 'other'}, add=${addOf() !== null}`);
+
+  reset([1, 2, 3]);
+  dropRemoveRender = true;
+  removeOf(2)?.focus();
+  removeOf(2)?.click();
+  dropRemoveRender = false;
+  rows = rowViews([1, 3]);
+  render();
+  const afterDroppedRemove = active();
+  check('a row action that produced no rebuild drops its hand-off instead of taking a later one',
+    JSON.stringify(shownIds()) === JSON.stringify(['1', '3']) && removeOf(3) !== null &&
+      afterDroppedRemove === null,
+    `ids=${JSON.stringify(shownIds())}, target=${removeOf(3) !== null}, ` +
+      `active=${afterDroppedRemove === null ? 'body' : 'other'}`);
+
+  reset([1, 2, 3]);
+  throwRemove = true;
+  removeOf(2)?.focus();
+  let threw = false;
+  try {
+    removeOf(2)?.click();
+  } catch {
+    threw = true;
+  }
+  throwRemove = false;
+  rows = rowViews([1, 3]);
+  render();
+  const afterThrownRemove = active();
+  check('a row action whose callback throws drops its hand-off before the error escapes',
+    threw && JSON.stringify(shownIds()) === JSON.stringify(['1', '3']) &&
+      removeOf(3) !== null && afterThrownRemove === null,
+    `threw=${threw}, ids=${JSON.stringify(shownIds())}, ` +
+      `active=${afterThrownRemove === null ? 'body' : 'other'}`);
+
+  reset([1, 2, 3]);
+  const clearCancelled = cursors.querySelector('[data-measure-clear-all]');
+  clearCancelled?.focus();
+  cancelClear = true;
+  clearCancelled?.click();
+  rows = [];
+  undoCount = null;
+  render();
+  const afterCancelledClear = active();
+  check('a cancelled Clear all drops its hand-off instead of taking a later empty render',
+    shownIds().length === 0 && addOf() !== null && afterCancelledClear === null,
+    `ids=${JSON.stringify(shownIds())}, target=${addOf() !== null}, ` +
+      `active=${afterCancelledClear === null ? 'body' : 'other'}`);
+
+  await Promise.resolve();
+  undoCount = 2;
+  render();
+  const afterSettledClear = active();
+  check('a settled Clear all is one-shot, so a much later render cannot take its hand-off',
+    shownIds().length === 0 && undoCount === 2 && addOf() !== null && afterSettledClear === null,
+    `undo=${undoCount}, target=${addOf() !== null}, ` +
+      `active=${afterSettledClear === null ? 'body' : 'other'}`);
+
+  reset([1, 2, 3]);
+  holdClear = true;
+  const deferredClear = cursors.querySelector('[data-measure-clear-all]');
+  deferredClear?.focus();
+  deferredClear?.click();
+  render();
+  const duringClear = active();
+  pendingClear.shift()?.();
+  const afterDeferredClear = active();
+  check('a pending Clear all keeps its hand-off across an unrelated rebuild and uses it on confirmation',
+    duringClear === null && shownIds().length === 0 && afterDeferredClear === addOf(),
+    `during=${duringClear === null ? 'body' : 'other'}, ids=${JSON.stringify(shownIds())}, ` +
+      `add=${afterDeferredClear === addOf()}`);
+
+  reset([1, 2, 3]);
+  cursors.querySelector('[data-measure-clear-all]')?.click();
+  const undoStale = cursors.querySelector('[data-measure-undo]');
+  undoStale?.focus();
+  dropUndoRender = true;
+  undoStale?.click();
+  dropUndoRender = false;
+  render();
+  const afterStaleUndo = active();
+  check('an Undo that changed nothing drops its hand-off instead of taking a later one',
+    shownIds().length === 0 && cursors.querySelector('[data-measure-undo]') !== null &&
+      afterStaleUndo === null,
+    `ids=${JSON.stringify(shownIds())}, ` +
+      `undo=${cursors.querySelector('[data-measure-undo]') !== null}, ` +
+      `active=${afterStaleUndo === null ? 'body' : 'other'}`);
+
+  reset([1, 2, 3]);
+  openDialogFirst = true;
+  removeOf(2)?.focus();
+  removeOf(2)?.click();
+  check('a control that already holds the focus before the rebuild keeps it',
+    JSON.stringify(shownIds()) === JSON.stringify(['1', '3']) && active() === focusDialog,
+    `dialog=${active() === focusDialog}, ids=${JSON.stringify(shownIds())}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

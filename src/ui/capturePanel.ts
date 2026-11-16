@@ -37,8 +37,11 @@ import {
 import { t, type MessageKey } from './i18n.js';
 import { helpTip } from './helpTip.js';
 import {
-  catalogEntry, isMeasurementParameter, type MeasurementParameter,
+  catalogEntry, type MeasurementParameter,
 } from './measurementCatalog.js';
+import {
+  MeasurementCatalogDialog, measurementCatalogView,
+} from './measurementCatalogDialog.js';
 import type {
   MeasurementRangeKind, MeasurementRowView, MeasurementSectionView, MeasurementStatus,
 } from './measurementState.js';
@@ -94,13 +97,22 @@ export interface CapturePanelCallbacks {
   onPickMeasurementFilter(start: number | null): void;
   onPickMeasurementRange(kind: MeasurementRangeKind): void;
   onPickMeasurementCursor(side: 'a' | 'b', cursorId: number | null): void;
-  onAddMeasurementRow(start: number, parameter: MeasurementParameter): void;
+  onToggleMeasurementRow(start: number, parameter: MeasurementParameter): void;
   onRemoveMeasurementRow(id: number): void;
+  onClearMeasurementRows(invoker: HTMLElement | null): Promise<void>;
+  onUndoMeasurementRows(): void;
 }
 
 /** `aborted`: the last capture was ended by a device/link failure (`CapturePanelView.abort`). */
 export type CapturePanelState =
   'ready' | 'capturing' | 'stopping' | 'waiting' | 'completed' | 'aborted';
+
+interface MeasureFocusIntent {
+  readonly kind: 'row' | 'clear' | 'undo';
+  readonly from: HTMLElement | null;
+  readonly id: number;
+  readonly row: number;
+}
 
 export interface CursorRowView {
   id: number;
@@ -291,13 +303,69 @@ export class CapturePanel {
   private readonly chipRows = new Map<Element, () => void>();
   private chipObserver: ResizeObserver | null = null;
   private chipFallback = false;
+  private measureFocus: MeasureFocusIntent | null = null;
+  private readonly catalogDialog: MeasurementCatalogDialog;
 
   constructor(
     private readonly host: CapturePanelHost,
     private readonly cb: CapturePanelCallbacks,
-  ) {}
+  ) {
+    this.catalogDialog = new MeasurementCatalogDialog({
+      onToggle: (start, parameter) => this.cb.onToggleMeasurementRow(start, parameter),
+      onPickSource: (start) => this.cb.onPickMeasurementFilter(start),
+    });
+  }
+
+  private armMeasureFocus(
+    kind: MeasureFocusIntent['kind'], from: HTMLElement | null, id = -1, row = -1,
+  ): MeasureFocusIntent {
+    const intent: MeasureFocusIntent = { kind, from, id, row };
+    this.measureFocus = intent;
+    return intent;
+  }
+
+  private dropMeasureFocus(intent: MeasureFocusIntent): void {
+    if (this.measureFocus === intent) this.measureFocus = null;
+  }
+
+  private runMeasureAction(
+    kind: MeasureFocusIntent['kind'],
+    from: HTMLElement | null,
+    action: () => void,
+    id = -1,
+    row = -1,
+  ): void {
+    const intent = this.armMeasureFocus(kind, from, id, row);
+    try {
+      action();
+    } finally {
+      this.dropMeasureFocus(intent);
+    }
+  }
+
+  private measureFocusApplied(pending: MeasureFocusIntent, view: MeasurementSectionView): boolean {
+    if (pending.kind === 'row') return !view.allRows.some((row) => row.id === pending.id);
+    if (pending.kind === 'clear') return view.rowCount === 0 && view.undoCount !== null;
+    return view.rowCount > 0 && view.undoCount === null;
+  }
+
+  private restoreMeasureFocus(view: MeasurementSectionView): void {
+    const pending = this.measureFocus;
+    if (pending === null || !this.measureFocusApplied(pending, view)) return;
+    this.measureFocus = null;
+    const active = document.activeElement as HTMLElement | null;
+    if (active !== null && active !== document.body && active !== pending.from) return;
+    const rows = this.host.cursors.querySelectorAll<HTMLElement>('.measure-row');
+    const row = pending.row >= 0 && rows.length > 0
+      ? rows[Math.min(pending.row, rows.length - 1)]
+      : undefined;
+    const target = row?.querySelector<HTMLElement>('.analyzer-act--remove') ??
+      this.host.cursors.querySelector<HTMLElement>('[data-measure-open]');
+    target?.focus();
+  }
 
   dispose(): void {
+    this.catalogDialog.close();
     this.chipObserver?.disconnect();
     this.chipObserver = null;
     this.chipRows.clear();
@@ -390,6 +458,8 @@ export class CapturePanel {
     for (const row of view.rows) byId.set(row.id, row);
     const note = measurementNoteText(view);
     const windowText = measurementWindowText(view);
+    const undoText = measurementClearedText(view);
+    this.catalogDialog.update(measurementCatalogView(view));
     for (const root of this.roots()) {
       for (const item of root.querySelectorAll<HTMLElement>('.measure-row')) {
         const id = Number(item.dataset.measureId);
@@ -407,6 +477,11 @@ export class CapturePanel {
       for (const item of root.querySelectorAll<HTMLElement>('[data-measure-window]')) {
         item.textContent = windowText;
         item.hidden = view.window === null;
+      }
+      for (const item of root.querySelectorAll<HTMLElement>('[data-measure-undo-notice]')) {
+        const text = item.querySelector<HTMLElement>('.measure-undo-text');
+        if (text !== null) text.textContent = undoText;
+        item.hidden = undoText === '';
       }
     }
   }
@@ -1513,7 +1588,7 @@ export class CapturePanel {
       measureSec.body.appendChild(hint);
     } else {
       const list = div('measure-list');
-      for (const row of v.measurement.rows) {
+      v.measurement.rows.forEach((row, index) => {
         const item = div('measure-row');
         item.dataset.measureId = String(row.id);
         const source = document.createElement('span');
@@ -1532,34 +1607,54 @@ export class CapturePanel {
         const label = `${row.sourceName} ${measurementParameterText(row.parameter)}`;
         const remove = cursorRemoveButton(
           t('capturePanel.measureRemove', { parameter: label }),
-          () => this.cb.onRemoveMeasurementRow(row.id),
+          () => this.runMeasureAction('row', remove,
+            () => this.cb.onRemoveMeasurementRow(row.id), row.id, index),
         );
         item.append(source, parameter, value, status, remove);
         list.appendChild(item);
-      }
+      });
       measureSec.body.appendChild(list);
     }
-    const addStart = v.measurement.addStart;
-    if (addStart !== null && v.measurement.availableParameters.length > 0) {
-      const addRow = div('measure-add-row');
-      const picker = selectControl(
-        'measure.add',
-        t('capturePanel.measureAdd'),
-        v.measurement.availableParameters.map(
-          (parameter): SelectOptionTuple => [parameter, measurementParameterText(parameter)]),
-        v.measurement.availableParameters[0] ?? '',
-      );
-      const add = document.createElement('button');
-      add.type = 'button';
-      add.className = 'analyzer-act measure-add';
-      add.dataset.measureAdd = String(addStart);
-      add.textContent = t('capturePanel.measureAddRow');
-      add.addEventListener('click', () => {
-        const parameter = picker.value;
-        if (isMeasurementParameter(parameter)) this.cb.onAddMeasurementRow(addStart, parameter);
+    const measureActions = div('measure-actions');
+    const addOpen = document.createElement('button');
+    addOpen.type = 'button';
+    addOpen.className = 'analyzer-act measure-add';
+    addOpen.dataset.measureOpen = '';
+    addOpen.setAttribute('aria-haspopup', 'dialog');
+    addOpen.textContent = t('capturePanel.measureAddOpen');
+    addOpen.disabled = v.measurement.sources.length === 0;
+    addOpen.addEventListener('click', () => this.catalogDialog.open(
+      measurementCatalogView(v.measurement), addOpen));
+    const clearAll = document.createElement('button');
+    clearAll.type = 'button';
+    clearAll.className = 'analyzer-act measure-clear';
+    clearAll.dataset.measureClearAll = '';
+    clearAll.textContent = t('capturePanel.measureClearAll');
+    clearAll.disabled = v.measurement.rowCount === 0;
+    clearAll.addEventListener('click', () => {
+      const intent = this.armMeasureFocus('clear', clearAll);
+      void this.cb.onClearMeasurementRows(clearAll)
+        .finally(() => this.dropMeasureFocus(intent));
+    });
+    measureActions.append(addOpen, clearAll);
+    measureSec.body.appendChild(measureActions);
+    if (v.measurement.undoCount !== null) {
+      const undoNotice = div('measure-undo');
+      undoNotice.dataset.measureUndoNotice = '';
+      undoNotice.setAttribute('role', 'status');
+      const undoText = document.createElement('span');
+      undoText.className = 'measure-undo-text';
+      undoText.textContent = measurementClearedText(v.measurement);
+      const undo = document.createElement('button');
+      undo.type = 'button';
+      undo.className = 'analyzer-act measure-undo-action';
+      undo.dataset.measureUndo = '';
+      undo.textContent = t('capturePanel.measureUndo');
+      undo.addEventListener('click', () => {
+        this.runMeasureAction('undo', undo, () => this.cb.onUndoMeasurementRows());
       });
-      addRow.append(picker.el, add);
-      measureSec.body.appendChild(addRow);
+      undoNotice.append(undoText, undo);
+      measureSec.body.appendChild(undoNotice);
     }
     const measureNote = div('measure-note');
     measureNote.dataset.measureNote = '';
@@ -1567,6 +1662,7 @@ export class CapturePanel {
     measureNote.hidden = measureNote.textContent === '';
     measureSec.body.appendChild(measureNote);
     cursorPage.appendChild(measureSec.el);
+    if (this.catalogDialog.isOpen) this.catalogDialog.update(measurementCatalogView(v.measurement));
 
     const distanceSec = section(t('capturePanel.cursorDistance'));
     distanceSec.header.classList.add('cursor-dist-head');
@@ -1755,6 +1851,7 @@ export class CapturePanel {
     if (v.developerTools === true) this.renderUsbConsole(body, v);
     advanced.appendChild(body);
     capture.appendChild(advanced);
+    this.restoreMeasureFocus(v.measurement);
   }
 
   /** The App's temperature poll updates the mounted value without a render. */
@@ -2314,6 +2411,11 @@ export function measurementWindowText(view: MeasurementSectionView): string {
   return t('capturePanel.measureWindowSamples', {
     samples: formatCount(window.end - window.start),
   });
+}
+
+export function measurementClearedText(view: MeasurementSectionView): string {
+  if (view.undoCount === null) return '';
+  return t('capturePanel.measureCleared', { count: formatCount(view.undoCount) });
 }
 
 export function measurementNoteText(view: MeasurementSectionView): string {

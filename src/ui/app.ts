@@ -91,16 +91,17 @@ import { formatCursorTimes } from './cursorTime.js';
 import { sameUsbDevice } from './deviceIdentity.js';
 import {
   defaultMeasurementConfig, isMeasurementBank, measurementAddStart, measurementCacheKey,
-  measurementRowViews, measurementSources, reconcileMeasurementConfig, resolveMeasurementWindow,
-  runMeasurement, selectMeasurementFilter, selectMeasurementRange,
+  measurementRowViews, measurementSectionCounts, measurementSources, reconcileMeasurementConfig,
+  resolveMeasurementWindow, runMeasurement, selectMeasurementFilter, selectMeasurementRange,
   type MeasurementConfig, type MeasurementRange,
   type MeasurementRangeKind, type MeasurementReadSummary, type MeasurementSectionView,
   type MeasurementSource, type MeasurementSourceResult,
 } from './measurementState.js';
 import type { MeasurementParameter } from './measurementCatalog.js';
 import {
-  addMeasurementRow, availableMeasurementParameters, removeMeasurementRow,
-  visibleMeasurementRows, type MeasurementRow, type MeasurementRowState,
+  addMeasurementRow, clearMeasurementRows, removeMeasurementRow,
+  toggleMeasurementRow, undoClearMeasurementRows, visibleMeasurementRows,
+  type MeasurementRow, type MeasurementRowState,
 } from './measurementRows.js';
 import type { MeasureRead } from './measureSamples.js';
 import {
@@ -1204,19 +1205,23 @@ export class App {
       cursors: cursors.map((cursor) => ({
         id: cursor.id, label: cursor.label, color: cursor.color,
       })),
+      allRows: state.rows,
+      ...measurementSectionCounts(state),
       addStart,
-      availableParameters: addStart === null
-        ? [] : [...availableMeasurementParameters(state, addStart)],
     };
     if (sources.length === 0) {
+      const none = new Map<number, MeasurementSourceResult>();
       return {
-        ...base, rows: measurementRowViews(rows, new Map(), 'no-source'),
+        ...base,
+        rows: measurementRowViews(rows, none, 'no-source'),
         window: null, unavailable: 'no-source',
       };
     }
     if (this.repeatShowingFront) {
+      const none = new Map<number, MeasurementSourceResult>();
       return {
-        ...base, rows: measurementRowViews(rows, new Map(), 'previous-wave-displayed'),
+        ...base,
+        rows: measurementRowViews(rows, none, 'previous-wave-displayed'),
         window: null, unavailable: 'previous-wave-displayed',
       };
     }
@@ -1228,7 +1233,11 @@ export class App {
       for (const source of sources) {
         absent.set(source.start, { source, scan: null, read: null, unavailable: 'no-window' });
       }
-      return { ...base, rows: measurementRowViews(rows, absent, null), window: null, unavailable: null };
+      return {
+        ...base,
+        rows: measurementRowViews(rows, absent, null),
+        window: null, unavailable: null,
+      };
     }
     const start = Math.max(0, Math.min(window.start, store.length));
     const end = Math.max(start, Math.min(window.end, store.length));
@@ -1377,11 +1386,32 @@ export class App {
     this.applyMeasurementConfig(selectMeasurementRange(base, range));
   }
 
-  private addMeasurementParameter(start: number, parameter: MeasurementParameter): void {
+  private toggleMeasurementParameter(start: number, parameter: MeasurementParameter): void {
     const sources = measurementSources(this.busViews, this.captureStore.channelCount);
     const base = this.measurementBase(sources);
     this.applyMeasurementConfig(
-      this.withMeasurementRows(base, addMeasurementRow(base.rows, start, parameter)));
+      this.withMeasurementRows(base, toggleMeasurementRow(base.rows, start, parameter)));
+  }
+
+  private async clearMeasurementRows(invoker: HTMLElement | null): Promise<void> {
+    const confirmed = await this.confirmDialog.ask({
+      title: t('capturePanel.measureClearTitle'),
+      body: t('capturePanel.measureClearBody'),
+      confirm: t('capturePanel.measureClearConfirm'),
+      cancel: t('capturePanel.measureClearCancel'),
+    }, invoker);
+    if (!confirmed) return;
+    const sources = measurementSources(this.busViews, this.captureStore.channelCount);
+    const base = this.measurementBase(sources);
+    this.applyMeasurementConfig(this.withMeasurementRows(base, clearMeasurementRows(base.rows)));
+  }
+
+  private undoMeasurementRows(): void {
+    const sources = measurementSources(this.busViews, this.captureStore.channelCount);
+    const base = this.measurementBase(sources);
+    const rows = undoClearMeasurementRows(base.rows);
+    if (rows === base.rows) return;
+    this.applyMeasurementConfig(this.withMeasurementRows(base, rows));
   }
 
   private removeMeasurementRowById(id: number): void {
@@ -4992,8 +5022,11 @@ export class App {
         onPickMeasurementFilter: (start) => this.pickMeasurementFilter(start),
         onPickMeasurementRange: (kind) => this.pickMeasurementRange(kind),
         onPickMeasurementCursor: (side, cursorId) => this.pickMeasurementCursor(side, cursorId),
-        onAddMeasurementRow: (start, parameter) => this.addMeasurementParameter(start, parameter),
+        onToggleMeasurementRow: (start, parameter) =>
+          this.toggleMeasurementParameter(start, parameter),
         onRemoveMeasurementRow: (id) => this.removeMeasurementRowById(id),
+        onClearMeasurementRows: (invoker) => this.clearMeasurementRows(invoker),
+        onUndoMeasurementRows: () => this.undoMeasurementRows(),
       });
       return;
     }

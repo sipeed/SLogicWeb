@@ -105,8 +105,10 @@ export interface MeasurementSectionView {
   range: MeasurementRange;
   cursors: { id: number; label: string; color: string }[];
   rows: MeasurementRowView[];
+  allRows: readonly MeasurementRow[];
+  rowCount: number;
+  undoCount: number | null;
   addStart: number | null;
-  availableParameters: MeasurementParameter[];
   window: MeasurementWindow | null;
   unavailable: MeasurementStatus | null;
 }
@@ -257,6 +259,15 @@ export function selectMeasurementRange(
 ): MeasurementConfig {
   const next = normalizeRange(range);
   return sameRange(next, config.range) ? config : { ...config, range: next };
+}
+
+export function measurementSectionCounts(
+  state: MeasurementRowState,
+): { rowCount: number; undoCount: number | null } {
+  return {
+    rowCount: state.rows.length,
+    undoCount: state.undo === null ? null : state.undo.rows.length,
+  };
 }
 
 export function measurementAddStart(
