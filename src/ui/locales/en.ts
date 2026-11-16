@@ -163,6 +163,10 @@ export const en = {
   'notice.noUsbInsecure': 'This page is not a secure context, so it can only view and decode files. To connect a device, open it over HTTPS (or localhost) in Chrome or Edge.',
   'notice.dismiss': 'Dismiss',
   'notice.srProbesDropped': '{file} declares {declared} probes, but its samples carry only {loaded}; the other {dropped} were not loaded.',
+  'notice.cursorZoomNeedsPair': 'Place two cursors on the waveform to zoom to the interval between them.',
+  'notice.cursorZoomDegenerate': 'Both cursors sit on the same sample, so there is no interval to zoom to.',
+  'notice.cursorZoomMissing': 'One of the chosen cursors is no longer on the waveform; pick two placed cursors to zoom.',
+  'notice.cursorZoomLoopLimited': 'The Loop window limits this view, so it does not show exactly the cursor interval.',
 
   // ------------------------------------------------------- device menu
   'deviceMenu.model': 'Model',
@@ -622,6 +626,7 @@ export const en = {
   'capturePanel.cursorDistanceStart': 'Choose the first cursor for row {row}',
   'capturePanel.cursorDistanceEnd': 'Choose the second cursor for row {row}',
   'capturePanel.cursorDistanceUnset': 'not set',
+  'capturePanel.cursorDistanceZoom': 'Zoom to the cursors of row {row}',
   'capturePanel.cursorEdges': 'Edges',
   'capturePanel.cursorEdgesFormat': 'Rising/Falling/Edges',
   'capturePanel.cursorEdgesEmpty': 'Place two cursors on the waveform to count edges between them.',
@@ -971,6 +976,7 @@ export const en = {
   // ----------------------------------------------------------- shortcuts
   'shortcuts.close': 'Close',
   'shortcuts.clearCursors': 'Clear cursors',
+  'shortcuts.zoomToCursors': 'Zoom to the cursor interval',
   'shortcuts.open': 'Open…',
   'shortcuts.save': 'Save…',
   'shortcuts.settings': 'Settings',

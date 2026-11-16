@@ -157,6 +157,10 @@ export const zhCN: Messages = {
   'notice.noUsbInsecure': '当前页面不是安全上下文，只能查看和解码文件。连接设备请在 Chrome 或 Edge 中通过 HTTPS（或 localhost）打开本页。',
   'notice.dismiss': '关闭',
   'notice.srProbesDropped': '{file} 声明了 {declared} 个通道，但其采样数据只包含 {loaded} 个；其余 {dropped} 个通道未加载。',
+  'notice.cursorZoomNeedsPair': '在波形上放置两个光标，才能缩放到它们之间的区间。',
+  'notice.cursorZoomDegenerate': '两个光标位于同一个采样点，没有可缩放的区间。',
+  'notice.cursorZoomMissing': '所选光标已不在波形上；请选择两个已放置的光标再缩放。',
+  'notice.cursorZoomLoopLimited': '视图受循环窗口限制，无法精确显示光标区间。',
 
   // ------------------------------------------------------- device menu
   'deviceMenu.model': '型号',
@@ -567,6 +571,7 @@ export const zhCN: Messages = {
   'capturePanel.cursorDistanceStart': '选择第 {row} 行的起点光标',
   'capturePanel.cursorDistanceEnd': '选择第 {row} 行的终点光标',
   'capturePanel.cursorDistanceUnset': '未选择',
+  'capturePanel.cursorDistanceZoom': '缩放到第 {row} 行的两个光标',
   'capturePanel.cursorEdges': '边沿',
   'capturePanel.cursorEdgesFormat': '上升沿/下降沿/边沿',
   'capturePanel.cursorEdgesEmpty': '在波形上放置两个光标，即可统计它们之间的边沿。',
@@ -915,6 +920,7 @@ export const zhCN: Messages = {
   // ----------------------------------------------------------- shortcuts
   'shortcuts.close': '关闭',
   'shortcuts.clearCursors': '清除光标',
+  'shortcuts.zoomToCursors': '缩放到光标区间',
   'shortcuts.open': '打开…',
   'shortcuts.save': '保存…',
   'shortcuts.settings': '设置',

@@ -127,16 +127,17 @@ const body = keydownBody(appSource);
 {
   const rows = SHORTCUTS.map((entry) =>
     `${entry.id}|${entry.group}|${entry.chords.join(',')}`).join(';');
-  check('the catalogue is exactly eighteen rows in dispatch order with pinned groups and chords',
-    SHORTCUTS.length === 18 &&
+  check('the catalogue is exactly nineteen rows in dispatch order with pinned groups and chords',
+    SHORTCUTS.length === 19 &&
     rows === 'file.open|file|Mod+O;file.save|file|Mod+S;settings.open|file|Mod+,;' +
       'capture.toggle|view|Space;view.fit|view|F,Home;cursors.clear|view|Escape;' +
+      'view.cursorsZoom|view|Z;' +
       'view.zoomIn|view|+,=;view.zoomOut|view|-,_;view.panLeft|view|ArrowLeft;' +
       'view.panRight|view|ArrowRight;view.panLeftPage|view|Shift+ArrowLeft;' +
       'view.panRightPage|view|Shift+ArrowRight;theme.next|view|T;sidebar.capture|navigation|1;' +
       'sidebar.cursors|navigation|2;sidebar.decoders|navigation|3;sidebar.toggle|navigation|\\;' +
       'decoders.add|navigation|D' &&
-    shortcutsIn('view').length === 10 && shortcutsIn('file').length === 3 &&
+    shortcutsIn('view').length === 11 && shortcutsIn('file').length === 3 &&
     shortcutsIn('navigation').length === 5,
     `rows=${rows}`);
 }
@@ -145,7 +146,7 @@ const body = keydownBody(appSource);
   const shown = SHORTCUTS.map((entry) =>
     entry.chords.map((chord) => formatChord(chord, false)).join(' / ')).join('|');
   check('every reference row prints its chords through formatChord, aliases included',
-    shown === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F / Home|Esc|+ / =|- / _|←|→|Shift+←|Shift+→|T|' +
+    shown === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F / Home|Esc|Z|+ / =|- / _|←|→|Shift+←|Shift+→|T|' +
       '1|2|3|\\|D',
     `shown=${shown}`);
 }
@@ -211,8 +212,8 @@ function groupListProblem(
     .map((entry) => entry.chords.map((chord) => formatChord(chord, true)).join(' / ')).join('|');
   check('control: a reordered chord list changes the rendered notation',
     mutated !== single &&
-    single === '⌘O|⌘S|⌘,|Space|F / Home|Esc|+ / =|- / _|←|→|⇧←|⇧→|T|1|2|3|\\|D' &&
-    mutated === '⌘O|⌘S|⌘,|Space|Home / F|Esc|= / +|_ / -|←|→|⇧←|⇧→|T|1|2|3|\\|D',
+    single === '⌘O|⌘S|⌘,|Space|F / Home|Esc|Z|+ / =|- / _|←|→|⇧←|⇧→|T|1|2|3|\\|D' &&
+    mutated === '⌘O|⌘S|⌘,|Space|Home / F|Esc|Z|= / +|_ / -|←|→|⇧←|⇧→|T|1|2|3|\\|D',
     `real=${single}, mutated=${mutated}`);
 }
 
@@ -225,6 +226,7 @@ function groupListProblem(
     ['F', actionOf('F')],
     ['Home', actionOf('Home')],
     ['Escape', actionOf('Escape')],
+    ['Z', actionOf('Z')],
     ['+', actionOf('+')],
     ['=', actionOf('=')],
     ['-', actionOf('-')],
@@ -241,7 +243,8 @@ function groupListProblem(
     ['D', actionOf('D')],
   ];
   const want = ['file.open', 'file.save', 'settings.open', 'capture.toggle', 'view.fit',
-    'view.fit', 'cursors.clear', 'view.zoomIn', 'view.zoomIn', 'view.zoomOut', 'view.zoomOut',
+    'view.fit', 'cursors.clear', 'view.cursorsZoom', 'view.zoomIn', 'view.zoomIn', 'view.zoomOut',
+    'view.zoomOut',
     'view.panLeft', 'view.panRight', 'view.panLeftPage', 'view.panRightPage', 'theme.next',
     'sidebar.capture', 'sidebar.cursors', 'sidebar.decoders', 'sidebar.toggle', 'decoders.add'];
   check('actionOf maps every live chord and alias to its id',
@@ -405,12 +408,42 @@ function groupListProblem(
 }
 
 {
+  const source = runShortcutBody(appSource);
+  const CURSOR_ZOOM_BRANCH = "      case 'view.cursorsZoom':\n" +
+    '        this.zoomToCursorInterval();\n        return true;\n';
+  const zoomBehindGuards = (text: string): boolean => {
+    const listener = keydownBody(text);
+    const dialogGuard = listener.indexOf("closest('dialog[open]')");
+    const dispatch = listener.lastIndexOf('if (this.runShortcut(id)) e.preventDefault();');
+    return runShortcutBody(text).includes(CURSOR_ZOOM_BRANCH) &&
+      !listener.includes('view.cursorsZoom') && !WORK_ANYWHERE.has('view.cursorsZoom') &&
+      dialogGuard >= 0 && dispatch > dialogGuard && anywhereBeforeGuards(text);
+  };
+  const behindTheAnywhereBlock = appSource.replace(ANYWHERE_BLOCK, ANYWHERE_BLOCK.replace(
+    'if (this.runShortcut(id)) e.preventDefault();',
+    "if (id === 'view.cursorsZoom' || this.runShortcut(id)) e.preventDefault();"));
+  const secondPath = source.replace(CURSOR_ZOOM_BRANCH,
+    "      case 'view.cursorsZoom':\n" +
+    '        this.stack.setViewport(0, this.store.length);\n        return true;\n');
+  check('the cursor-interval zoom runs through the field, button and dialog guards and one App method',
+    zoomBehindGuards(appSource) && secondPath !== source &&
+    !runShortcutBody(secondPath).includes(CURSOR_ZOOM_BRANCH) &&
+    behindTheAnywhereBlock !== appSource && !zoomBehindGuards(behindTheAnywhereBlock) &&
+    actionOf('Z') === 'view.cursorsZoom' &&
+    appSource.includes('private zoomToCursorInterval(pair?: readonly [number, number]): void {'),
+    `behindGuards=${zoomBehindGuards(appSource)}, ` +
+    `dispatch=${behindTheAnywhereBlock !== appSource ? zoomBehindGuards(behindTheAnywhereBlock) : 'n/a'}, ` +
+    `secondPath=${runShortcutBody(secondPath).includes(CURSOR_ZOOM_BRANCH)}`);
+}
+
+{
   const rows = SHORTCUTS.map((entry) => `${entry.id}|${entry.labels.join(',')}`).join(';');
   check('every row names its command through catalog keys, in dispatch order',
     rows === 'file.open|shortcuts.open;file.save|shortcuts.save;' +
       'settings.open|shortcuts.settings;' +
       'capture.toggle|toolbar.start,toolbar.stop;view.fit|toolbar.fit;' +
-      'cursors.clear|shortcuts.clearCursors;view.zoomIn|shortcuts.zoomIn;' +
+      'cursors.clear|shortcuts.clearCursors;view.cursorsZoom|shortcuts.zoomToCursors;' +
+      'view.zoomIn|shortcuts.zoomIn;' +
       'view.zoomOut|shortcuts.zoomOut;view.panLeft|shortcuts.panLeft;view.panRight|shortcuts.panRight;' +
       'view.panLeftPage|shortcuts.panPage;view.panRightPage|shortcuts.panPage;' +
       'theme.next|shortcuts.theme;' +
@@ -641,6 +674,8 @@ const SHORTCUT_KEY_VALUES: ReadonlyArray<readonly [MessageKey, readonly [string,
   ['settings.wheelZooms', ['Wheel zooms', '滚轮直接缩放', 'Колесо масштабирует', 'La molette zoome']],
   ['shortcuts.close', ['Close', '关闭', 'Закрыть', 'Fermer']],
   ['shortcuts.clearCursors', ['Clear cursors', '清除光标', 'Сбросить курсоры', 'Effacer les curseurs']],
+  ['shortcuts.zoomToCursors', ['Zoom to the cursor interval', '缩放到光标区间',
+    'Масштабировать интервал курсоров', 'Zoomer sur l’intervalle des curseurs']],
   ['shortcuts.addDecoder', ['Add a protocol decoder', '添加解码器',
     'Добавить декодер протокола', 'Ajouter un décodeur de protocole']],
   ['shortcuts.theme', ['Switch theme', '切换主题', 'Сменить тему', 'Changer de thème']],
@@ -680,7 +715,7 @@ const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = 
   const capture = SHORTCUTS.find((entry) => entry.id === 'capture.toggle')!;
   check('the reference action text joins the labeled catalog keys with the two-label separator',
     texts.join(' | ') === 'Open… | Save… | Settings | Capture / Stop | Fit | Clear cursors | ' +
-      'Zoom in | Zoom out | Pan left (earlier) | Pan right (later) | Pan by half a screen | ' +
+      'Zoom to the cursor interval | Zoom in | Zoom out | Pan left (earlier) | Pan right (later) | Pan by half a screen | ' +
       'Pan by half a screen | Switch theme | Capture panel | Cursors panel | Decoders panel | ' +
       'Show or hide the sidebar | Add a protocol decoder' &&
     capture.labels.length === 2 && t('toolbar.start') === 'Capture',

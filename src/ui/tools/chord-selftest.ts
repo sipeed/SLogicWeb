@@ -193,7 +193,7 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const ids = SHORTCUTS.map((entry) => entry.id);
   check('every id appears once and every chord is claimed once across the catalogue',
     new Set(ids).size === ids.length && new Set(chords).size === chords.length &&
-    SHORTCUTS.length === 18 && chords.length === 21,
+    SHORTCUTS.length === 19 && chords.length === 22,
     `ids=${ids.join(',')}, chords=${chords.join(',')}`);
 }
 
@@ -214,7 +214,7 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const every = SHORTCUTS.map((entry) =>
     entry.chords.map((chord) => actionOf(chord) === entry.id).join(',')).join(';');
   check('actionOf resolves every catalogued chord to its own row',
-    every === 'true;true;true;true;true,true;true;true,true;true,true;' +
+    every === 'true;true;true;true;true,true;true;true;true,true;true,true;' +
       'true;true;true;true;true;true;true;true;true;true',
     `every=${every}`);
 }
@@ -289,7 +289,7 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const counts = groups.map((group) => shortcutsIn(group).length).join(',');
   const ids = groups.flatMap((group) => shortcutsIn(group).map((entry) => entry.id));
   check('the three groups partition the catalogue without losing or repeating a row',
-    counts === '3,10,5' && new Set(ids).size === ids.length &&
+    counts === '3,11,5' && new Set(ids).size === ids.length &&
     ids.length === SHORTCUTS.length,
     `counts=${counts}, ids=${ids.join(',')}`);
 }
@@ -377,9 +377,9 @@ const KEY_ROWS: readonly (readonly [PressInit, string | null])[] = [
   const mac: string = apple;
   check('every catalogued chord prints a non-empty distinct notation on both platforms',
     mac !== text &&
-    text === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F / Home|Esc|+ / =|- / _|←|→|Shift+←|Shift+→|T|' +
+    text === 'Ctrl+O|Ctrl+S|Ctrl+,|Space|F / Home|Esc|Z|+ / =|- / _|←|→|Shift+←|Shift+→|T|' +
       '1|2|3|\\|D' &&
-    mac === '⌘O|⌘S|⌘,|Space|F / Home|Esc|+ / =|- / _|←|→|⇧←|⇧→|T|1|2|3|\\|D',
+    mac === '⌘O|⌘S|⌘,|Space|F / Home|Esc|Z|+ / =|- / _|←|→|⇧←|⇧→|T|1|2|3|\\|D',
     `text=${rendered}, apple=${apple}`);
 }
 

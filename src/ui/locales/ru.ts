@@ -159,6 +159,10 @@ export const ru: Messages = {
   'notice.noUsbInsecure': 'Эта страница открыта не в защищённом контексте, поэтому можно только просматривать и декодировать файлы. Для подключения устройства откройте её по HTTPS (или через localhost) в Chrome или Edge.',
   'notice.dismiss': 'Закрыть',
   'notice.srProbesDropped': '{file} объявляет {declared} каналов, но его отсчёты содержат только {loaded}; остальные {dropped} не загружены.',
+  'notice.cursorZoomNeedsPair': 'Поставьте два курсора на осциллограмме, чтобы масштабировать интервал между ними.',
+  'notice.cursorZoomDegenerate': 'Оба курсора стоят на одном отсчёте — интервала для масштабирования нет.',
+  'notice.cursorZoomMissing': 'Выбранный курсор больше не на осциллограмме; выберите два установленных курсора для масштабирования.',
+  'notice.cursorZoomLoopLimited': 'Вид ограничен окном цикла, поэтому показан не точный интервал курсоров.',
 
   // ------------------------------------------------------- device menu
   'deviceMenu.model': 'Модель',
@@ -612,6 +616,7 @@ export const ru: Messages = {
   'capturePanel.cursorDistanceStart': 'Выбрать первый курсор для строки {row}',
   'capturePanel.cursorDistanceEnd': 'Выбрать второй курсор для строки {row}',
   'capturePanel.cursorDistanceUnset': 'не выбран',
+  'capturePanel.cursorDistanceZoom': 'Масштабировать курсоры строки {row}',
   'capturePanel.cursorEdges': 'Фронты',
   'capturePanel.cursorEdgesFormat': 'Нарастающие/Спадающие/Фронты',
   'capturePanel.cursorEdgesEmpty': 'Поставьте два курсора на осциллограмме, чтобы посчитать фронты между ними.',
@@ -961,6 +966,7 @@ export const ru: Messages = {
   // ----------------------------------------------------------- shortcuts
   'shortcuts.close': 'Закрыть',
   'shortcuts.clearCursors': 'Сбросить курсоры',
+  'shortcuts.zoomToCursors': 'Масштабировать интервал курсоров',
   'shortcuts.open': 'Открыть…',
   'shortcuts.save': 'Сохранить…',
   'shortcuts.settings': 'Настройки',

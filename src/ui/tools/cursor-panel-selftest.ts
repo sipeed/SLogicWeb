@@ -895,18 +895,19 @@ const edgeMethodsSource = slice(app,
   const bAt = distanceSection.indexOf("distanceSideControl(row, 'b', v.cursors,");
   const deltaAt = distanceSection.indexOf("delta.className = 'cursor-dist-delta';");
   const removeAt = distanceSection.indexOf('const remove = cursorRemoveButton(');
+  const zoomAt = distanceSection.indexOf('const zoom = distanceZoomButton(');
   const tailAt = distanceSection.indexOf("const tail = div('cursor-dist-tail');");
-  const tailAppendAt = distanceSection.indexOf('tail.append(delta, remove);');
+  const tailAppendAt = distanceSection.indexOf('tail.append(delta, zoom, remove);');
   const appendAt = distanceSection.indexOf(
     'item.append(a.el, mark, b.el, tail, a.popover, b.popover);');
-  check('the row is side A, minus mark, side B, then one tail holding the delta and remove',
+  check('the row is side A, minus mark, side B, then one tail holding the delta and its two actions',
     aAt >= 0 && markAt > aAt && bAt > markAt && deltaAt > bAt && removeAt > deltaAt &&
-    tailAt > removeAt && tailAppendAt > tailAt && appendAt > tailAppendAt &&
+    zoomAt > removeAt && tailAt > zoomAt && tailAppendAt > tailAt && appendAt > tailAppendAt &&
     !distanceSection.includes('item.append(a.el, mark, b.el, remove, delta, a.popover, b.popover);') &&
     !distanceSection.includes('item.append(a.el, mark, b.el, delta, remove, a.popover, b.popover);') &&
     distanceSection.includes("mark.textContent = '→';") &&
     distanceSection.includes("mark.setAttribute('aria-hidden', 'true');"),
-    `a=${aAt}, mark=${markAt}, b=${bAt}, delta=${deltaAt}, remove=${removeAt}, ` +
+    `a=${aAt}, mark=${markAt}, b=${bAt}, delta=${deltaAt}, remove=${removeAt}, zoom=${zoomAt}, ` +
     `tail=${tailAt}, tailAppend=${tailAppendAt}, append=${appendAt}`);
 }
 
@@ -914,18 +915,26 @@ const edgeMethodsSource = slice(app,
   const tailRule = slice(css, '.cursor-dist-tail {', '.cursor-dist-delta {');
   const rowAppend = slice(distanceSection,
     'item.append(a.el, mark, b.el,', 'list.appendChild(item);');
-  const tailIsOneItem = rowAppend.includes('tail, a.popover, b.popover);') &&
-    !rowAppend.includes('delta,') && !rowAppend.includes('remove,');
-  check('the delta and the remove control share one wrapping flex item',
+  const compositions = (text: string): number => (text.match(/item\.append\(/g) ?? []).length;
+  const oneTailItem = (text: string): boolean => text.includes('tail, a.popover, b.popover);') &&
+    compositions(text) === 1 &&
+    !text.includes('item.append(a.el, mark, b.el, delta') &&
+    !text.includes('item.append(a.el, mark, b.el, zoom');
+  const separateRemove = rowAppend.replace('tail, a.popover', 'tail, remove, a.popover');
+  const separateDelta = rowAppend.replace('tail, a.popover', 'tail, delta, a.popover');
+  const tailIsOneItem = oneTailItem(rowAppend);
+  check('the delta and its actions share one wrapping flex item',
     tailRule.length > 0 &&
     tailRule.includes('display: flex;') &&
     tailRule.includes('flex: 1 0 auto;') &&
     tailRule.includes('align-items: center;') &&
     tailRule.includes('gap: 6px;') &&
     !tailRule.includes('!important') &&
-    distanceSection.includes('tail.append(delta, remove);') &&
-    tailIsOneItem,
+    distanceSection.includes('tail.append(delta, zoom, remove);') &&
+    tailIsOneItem && separateRemove !== rowAppend && separateDelta !== rowAppend &&
+    !oneTailItem(separateRemove) && !oneTailItem(separateDelta),
     `rule=${tailRule.length} chars, oneItem=${tailIsOneItem}, ` +
+    `separateRemove=${oneTailItem(separateRemove)}, separateDelta=${oneTailItem(separateDelta)}, ` +
     `append=${rowAppend.replace(/\s+/g, ' ').trim()}`);
 }
 
@@ -1132,14 +1141,16 @@ const edgeMethodsSource = slice(app,
 }
 
 {
-  check('the three distance callbacks are part of the panel contract',
+  check('the four distance callbacks are part of the panel contract',
     panel.includes('onAddCursorDistance(): void;') &&
     panel.includes('onRemoveCursorDistance(rowId: number): void;') &&
     panel.includes('onPickCursorDistance(rowId: number, side: DistanceSide, cursorId: number): void;') &&
+    panel.includes('onZoomCursorDistance(rowId: number): void;') &&
     panel.includes("from './cursorDistance.js';"),
     `add=${panel.includes('onAddCursorDistance(): void;')}, ` +
     `remove=${panel.includes('onRemoveCursorDistance(rowId: number): void;')}, ` +
-    `pick=${panel.includes('onPickCursorDistance(')}`);
+    `pick=${panel.includes('onPickCursorDistance(')}, ` +
+    `zoom=${panel.includes('onZoomCursorDistance(rowId: number): void;')}`);
 
   check('the row controls raise the row-scoped callbacks',
     distanceSection.includes("(cursorId) => this.cb.onPickCursorDistance(row.id, 'a', cursorId));") &&
@@ -1153,10 +1164,12 @@ const edgeMethodsSource = slice(app,
   check('App routes the three callbacks to its own row list',
     app.includes('onAddCursorDistance: () => this.addDistanceRow(),') &&
     app.includes('onRemoveCursorDistance: (rowId) => this.removeDistanceRow(rowId),') &&
-    app.includes('this.pickDistanceCursor(rowId, side, cursorId),'),
+    app.includes('this.pickDistanceCursor(rowId, side, cursorId),') &&
+    app.includes('onZoomCursorDistance: (rowId) => this.zoomDistanceRow(rowId),'),
     `add=${app.includes('onAddCursorDistance: () => this.addDistanceRow(),')}, ` +
     `remove=${app.includes('onRemoveCursorDistance:')}, ` +
-    `pick=${app.includes('this.pickDistanceCursor(rowId, side, cursorId)')}`);
+    `pick=${app.includes('this.pickDistanceCursor(rowId, side, cursorId)')}, ` +
+    `zoom=${app.includes('onZoomCursorDistance:')}`);
 }
 
 {

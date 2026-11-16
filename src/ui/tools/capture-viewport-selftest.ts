@@ -173,7 +173,7 @@ const model = fs.readFileSync('src/ui/captureSession.ts', 'utf8');
     app.includes('private noteViewportIntent(): void') &&
     // wheel, pinch, drag, axis drag, cursor focus, the +/- and arrow-key steps, each
     // quick-scroll frame.
-    intentCalls === 8 && explicitCalls === 3 && fitCalls === 1 && gestures &&
+    intentCalls === 8 && explicitCalls === 4 && fitCalls === 1 && gestures &&
     between(app, 'private keyZoom(', 'private keyPan(').includes('this.noteViewportIntent();') &&
     between(app, 'private keyPan(', 'private beginViewportGesture(').includes('this.noteViewportIntent();') &&
     overviewIntent &&

@@ -159,6 +159,10 @@ export const fr: Messages = {
   'notice.noUsbInsecure': 'Cette page n’est pas un contexte sécurisé : elle permet seulement d’afficher et de décoder des fichiers. Pour connecter un appareil, ouvrez-la en HTTPS (ou localhost) dans Chrome ou Edge.',
   'notice.dismiss': 'Fermer',
   'notice.srProbesDropped': '{file} déclare {declared} voies, mais ses échantillons n’en contiennent que {loaded} ; les {dropped} autres n’ont pas été chargées.',
+  'notice.cursorZoomNeedsPair': 'Placez deux curseurs sur la trace pour zoomer sur l’intervalle qui les sépare.',
+  'notice.cursorZoomDegenerate': 'Les deux curseurs sont sur le même échantillon : il n’y a aucun intervalle à zoomer.',
+  'notice.cursorZoomMissing': 'L’un des curseurs choisis n’est plus sur la trace ; choisissez deux curseurs placés pour zoomer.',
+  'notice.cursorZoomLoopLimited': 'La fenêtre de Boucle limite cette vue : elle n’affiche pas exactement l’intervalle des curseurs.',
 
   // ------------------------------------------------------- device menu
   'deviceMenu.model': 'Modèle',
@@ -621,6 +625,7 @@ export const fr: Messages = {
   'capturePanel.cursorDistanceStart': 'Choisir le premier curseur de la ligne {row}',
   'capturePanel.cursorDistanceEnd': 'Choisir le second curseur de la ligne {row}',
   'capturePanel.cursorDistanceUnset': 'non défini',
+  'capturePanel.cursorDistanceZoom': 'Zoomer sur les curseurs de la ligne {row}',
   'capturePanel.cursorEdges': 'Fronts',
   'capturePanel.cursorEdgesFormat': 'Montants/Descendants/Fronts',
   'capturePanel.cursorEdgesEmpty': 'Placez deux curseurs sur la forme d’onde pour compter les fronts entre eux.',
@@ -970,6 +975,7 @@ export const fr: Messages = {
   // ----------------------------------------------------------- shortcuts
   'shortcuts.close': 'Fermer',
   'shortcuts.clearCursors': 'Effacer les curseurs',
+  'shortcuts.zoomToCursors': 'Zoomer sur l’intervalle des curseurs',
   'shortcuts.open': 'Ouvrir…',
   'shortcuts.save': 'Enregistrer…',
   'shortcuts.settings': 'Paramètres',
