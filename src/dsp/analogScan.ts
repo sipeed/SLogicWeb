@@ -39,7 +39,13 @@ export interface AnalogCodeScan {
   firstCrossing: number;
   lastCrossing: number;
   periodSamples: number;
+  periodSeconds: number;
   frequencyHz: number;
+  dutyPercent: number;
+  dutyPeriods: number;
+  dutyExcludedPeriods: number;
+  dutyKnownSamples: number;
+  dutyHighSamples: number;
   status: AnalogScanStatus;
   clippedLow: boolean;
   clippedHigh: boolean;
@@ -89,6 +95,11 @@ export function scanAnalogCodes(input: AnalogCodeScanInput): AnalogCodeScan {
   const voltsPerCode = input.voltsPerCode;
   const maxCrossings = input.maxCrossings ?? ANALOG_SCAN_MAX_CROSSINGS;
   const clipThreshold = Math.max(1, input.window);
+  const level = input.level;
+  const slotCount = Math.max(1, input.window);
+  const slotHigh = new Uint8Array(slotCount);
+  const slotUnknown = new Uint8Array(slotCount);
+  const slotClip = new Float64Array(slotCount);
   const qualifier = new AnalogRunQualifier({
     rising: input.rising,
     level: input.level,
@@ -115,11 +126,28 @@ export function scanAnalogCodes(input: AnalogCodeScanInput): AnalogCodeScan {
   let clippedLow = false;
   let clippedHigh = false;
 
+  let openHigh = 0;
+  let openUnknown = 0;
+  let openClip = 0;
+  let periodStart = -1;
+  let dutyFrozen = false;
+  let dutyPeriods = 0;
+  let dutyExcludedPeriods = 0;
+  let dutyKnownSamples = 0;
+  let dutyHighSamples = 0;
+
   for (let i = 0; i < analyzed; i += 1) {
+    const slot = i % slotCount;
     if (unknown !== undefined && unknown[i] !== 0) {
       qualifier.reset();
       lowRun = 0;
       highRun = 0;
+      if (!dutyFrozen) {
+        slotHigh[slot] = 0;
+        slotUnknown[slot] = 1;
+        slotClip[slot] = 0;
+        openUnknown += 1;
+      }
       continue;
     }
 
@@ -145,17 +173,33 @@ export function scanAnalogCodes(input: AnalogCodeScanInput): AnalogCodeScan {
       : (square - next) + squareSum;
     squareSum = next;
 
+    let clipHit = 0;
     if (code === 0) {
       lowRun += 1;
       highRun = 0;
-      if (lowRun >= clipThreshold) clippedLow = true;
+      if (lowRun >= clipThreshold) {
+        clippedLow = true;
+        clipHit = lowRun === clipThreshold ? clipThreshold : 1;
+      }
     } else if (code === 255) {
       highRun += 1;
       lowRun = 0;
-      if (highRun >= clipThreshold) clippedHigh = true;
+      if (highRun >= clipThreshold) {
+        clippedHigh = true;
+        clipHit = highRun === clipThreshold ? clipThreshold : 1;
+      }
     } else {
       lowRun = 0;
       highRun = 0;
+    }
+
+    if (!dutyFrozen) {
+      const high = code >= level ? 1 : 0;
+      slotHigh[slot] = high;
+      slotUnknown[slot] = 0;
+      slotClip[slot] = clipHit;
+      openHigh += high;
+      openClip += clipHit;
     }
 
     const crossing = qualifier.step(code, i);
@@ -164,8 +208,33 @@ export function scanAnalogCodes(input: AnalogCodeScanInput): AnalogCodeScan {
         if (crossingCount === 0) firstCrossing = crossing;
         crossingCount += 1;
         lastCrossing = crossing;
+        if (!dutyFrozen) {
+          let tailHigh = 0;
+          let tailUnknown = 0;
+          let tailClip = 0;
+          for (let j = crossing; j <= i; j += 1) {
+            const tailSlot = j % slotCount;
+            tailHigh += slotHigh[tailSlot]!;
+            tailUnknown += slotUnknown[tailSlot]!;
+            tailClip += slotClip[tailSlot]!;
+          }
+          if (periodStart >= 0) {
+            if (openUnknown > tailUnknown || openClip > tailClip) {
+              dutyExcludedPeriods += 1;
+            } else {
+              dutyPeriods += 1;
+              dutyKnownSamples += crossing - periodStart;
+              dutyHighSamples += openHigh - tailHigh;
+            }
+          }
+          openHigh = tailHigh;
+          openUnknown = tailUnknown;
+          openClip = tailClip;
+          periodStart = crossing;
+        }
       } else {
         crossingCap = true;
+        dutyFrozen = true;
       }
     }
   }
@@ -183,7 +252,9 @@ export function scanAnalogCodes(input: AnalogCodeScanInput): AnalogCodeScan {
   const periodSamples = status === 'ok'
     ? (lastCrossing - firstCrossing) / (crossingCount - 1)
     : Number.NaN;
+  const periodSeconds = status === 'ok' ? periodSamples / input.samplerate : Number.NaN;
   const frequencyHz = status === 'ok' ? input.samplerate / periodSamples : Number.NaN;
+  const dutyPercent = dutyPeriods > 0 ? (100 * dutyHighSamples) / dutyKnownSamples : Number.NaN;
   const nearSampleLimit = status === 'ok' && periodSamples < ANALOG_NEAR_LIMIT_PERIOD_SAMPLES;
 
   return {
@@ -205,7 +276,13 @@ export function scanAnalogCodes(input: AnalogCodeScanInput): AnalogCodeScan {
     firstCrossing,
     lastCrossing,
     periodSamples,
+    periodSeconds,
     frequencyHz,
+    dutyPercent,
+    dutyPeriods,
+    dutyExcludedPeriods,
+    dutyKnownSamples,
+    dutyHighSamples,
     status,
     clippedLow,
     clippedHigh,

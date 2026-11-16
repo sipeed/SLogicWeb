@@ -94,6 +94,12 @@ function periodic(length: number, period: number, low: number, high: number): Ui
   return out;
 }
 
+function squareWave(length: number, period: number, highSamples: number): Uint8Array {
+  const out = new Uint8Array(length);
+  for (let i = 0; i < length; i += 1) out[i] = i % period < highSamples ? 200 : 60;
+  return out;
+}
+
 const sine = loadAdcTrace('sine');
 
 check(
@@ -152,6 +158,33 @@ check(
     'full sine: frequency within 0.5% of the independent 9999.5877 Hz reference',
     Math.abs(full.frequencyHz - 9999.5877) / 9999.5877 < 0.005,
     `got ${full.frequencyHz} Hz, period ${full.periodSamples} samples`,
+  );
+  check(
+    'full sine: period seconds is the measured period over the sample rate',
+    Number.isFinite(full.periodSeconds) && full.periodSeconds === full.periodSamples / RATE &&
+      Math.abs(full.periodSeconds - 1e-4) / 1e-4 < 0.005 &&
+      Math.abs(full.frequencyHz * full.periodSeconds - 1) < 1e-12,
+    `periodSeconds=${full.periodSeconds}, periodSamples=${full.periodSamples}, ` +
+      `frequency=${full.frequencyHz}`,
+  );
+  const dutyOracle: number[] = qualifiedCrossings(sine, true, 128, H, W);
+  let oracleHigh = 0;
+  let oracleKnown = 0;
+  for (let k = 1; k < dutyOracle.length; k += 1) {
+    for (let i = dutyOracle[k - 1]!; i < dutyOracle[k]!; i += 1) {
+      oracleKnown += 1;
+      if (sine[i]! >= 128) oracleHigh += 1;
+    }
+  }
+  check(
+    'full sine: duty is the per-period high fraction of the qualified crossings',
+    dutyOracle.length === full.crossingCount && full.dutyPeriods === dutyOracle.length - 1 &&
+      full.dutyExcludedPeriods === 0 && full.dutyKnownSamples === oracleKnown &&
+      full.dutyHighSamples === oracleHigh &&
+      full.dutyPercent === (100 * oracleHigh) / oracleKnown && full.dutyPercent > 0 &&
+      full.dutyPercent < 100,
+    `duty=${full.dutyPercent}, periods=${full.dutyPeriods}, excluded=${full.dutyExcludedPeriods}, ` +
+      `known=${full.dutyKnownSamples}/${oracleKnown}, high=${full.dutyHighSamples}/${oracleHigh}`,
   );
 
   const oracle144 = qualifiedCrossings(sine, true, 144, H, W);
@@ -363,7 +396,16 @@ check(
   isNaNField('all unknown: Vpp volts is NaN', allUnknown.vppVolts);
   isNaNField('all unknown: RMS volts is NaN', allUnknown.rmsVolts);
   isNaNField('all unknown: period is NaN', allUnknown.periodSamples);
+  isNaNField('all unknown: period seconds is NaN', allUnknown.periodSeconds);
   isNaNField('all unknown: frequency is NaN', allUnknown.frequencyHz);
+  isNaNField('all unknown: duty is NaN', allUnknown.dutyPercent);
+  check(
+    'all unknown: no duty period is claimed',
+    allUnknown.dutyPeriods === 0 && allUnknown.dutyExcludedPeriods === 0 &&
+      allUnknown.dutyKnownSamples === 0 && allUnknown.dutyHighSamples === 0,
+    `periods=${allUnknown.dutyPeriods}, excluded=${allUnknown.dutyExcludedPeriods}, ` +
+      `known=${allUnknown.dutyKnownSamples}, high=${allUnknown.dutyHighSamples}`,
+  );
 }
 
 {
@@ -374,7 +416,9 @@ check(
     `status=${flat.status}, count=${flat.crossingCount}`,
   );
   isNaNField('flat DC input: period is NaN', flat.periodSamples);
+  isNaNField('flat DC input: period seconds is NaN', flat.periodSeconds);
   isNaNField('flat DC input: frequency is NaN', flat.frequencyHz);
+  isNaNField('flat DC input: duty is NaN', flat.dutyPercent);
 
   const high = scan(filled(100, 200));
   const low = scan(filled(100, 100));
@@ -399,6 +443,8 @@ check(
   isNaNField('empty input: RMS is NaN', empty.rmsOffsetCodes);
   isNaNField('empty input: Vpp is NaN', empty.vppCodes);
   isNaNField('empty input: frequency is NaN', empty.frequencyHz);
+  isNaNField('empty input: period seconds is NaN', empty.periodSeconds);
+  isNaNField('empty input: duty is NaN', empty.dutyPercent);
   check(
     'empty input: no sustained endpoint clipping',
     !empty.clippedLow && !empty.clippedHigh && !empty.nearSampleLimit,
@@ -417,7 +463,16 @@ check(
       `near=${oneGot.nearSampleLimit}`,
   );
   isNaNField('one crossing: period is NaN', oneGot.periodSamples);
+  isNaNField('one crossing: period seconds is NaN', oneGot.periodSeconds);
   isNaNField('one crossing: frequency is NaN', oneGot.frequencyHz);
+  isNaNField('one crossing: duty is NaN', oneGot.dutyPercent);
+  check(
+    'one crossing: no complete period exists for the duty',
+    oneGot.dutyPeriods === 0 && oneGot.dutyExcludedPeriods === 0 &&
+      oneGot.dutyKnownSamples === 0 && oneGot.dutyHighSamples === 0,
+    `periods=${oneGot.dutyPeriods}, excluded=${oneGot.dutyExcludedPeriods}, ` +
+      `known=${oneGot.dutyKnownSamples}, high=${oneGot.dutyHighSamples}`,
+  );
 
   const shortWave = scan(periodic(4, 3, 0, 255), { window: 0 });
   const wave = scan(periodic(5, 3, 0, 255), { window: 0 });
@@ -437,6 +492,152 @@ check(
     'a period-4 square wave is not near the sample limit',
     period4.status === 'ok' && period4.periodSamples === 4 && !period4.nearSampleLimit,
     `period=${period4.periodSamples}, near=${period4.nearSampleLimit}`,
+  );
+}
+
+{
+  const quarter = scan(squareWave(96, 8, 2));
+  check(
+    '25% duty: ten complete 8-sample periods of 2 high samples read exactly 25%',
+    quarter.status === 'ok' && quarter.crossingCount === 11 &&
+      quarter.firstCrossing === 8 && quarter.lastCrossing === 88 &&
+      quarter.dutyPeriods === 10 && quarter.dutyExcludedPeriods === 0 &&
+      quarter.dutyKnownSamples === 80 && quarter.dutyHighSamples === 20 &&
+      quarter.dutyPercent === 25 && quarter.periodSeconds === 8 / RATE,
+    `crossings=${quarter.crossingCount}/${quarter.firstCrossing}/${quarter.lastCrossing}, ` +
+      `periods=${quarter.dutyPeriods}/${quarter.dutyExcludedPeriods}, ` +
+      `known=${quarter.dutyKnownSamples}, high=${quarter.dutyHighSamples}, ` +
+      `duty=${quarter.dutyPercent}, periodSeconds=${quarter.periodSeconds}`,
+  );
+
+  const threeQuarters = scan(squareWave(96, 8, 6));
+  check(
+    '75% duty: the same ten periods of 6 high samples read exactly 75%',
+    threeQuarters.status === 'ok' && threeQuarters.dutyPeriods === 10 &&
+      threeQuarters.dutyExcludedPeriods === 0 && threeQuarters.dutyKnownSamples === 80 &&
+      threeQuarters.dutyHighSamples === 60 && threeQuarters.dutyPercent === 75,
+    `periods=${threeQuarters.dutyPeriods}, known=${threeQuarters.dutyKnownSamples}, ` +
+      `high=${threeQuarters.dutyHighSamples}, duty=${threeQuarters.dutyPercent}`,
+  );
+
+  const lowHalf = scan(squareWave(96, 8, 4));
+  check(
+    '50% duty: four high samples per 8-sample period read exactly 50%',
+    lowHalf.dutyPeriods === 10 && lowHalf.dutyKnownSamples === 80 &&
+      lowHalf.dutyHighSamples === 40 && lowHalf.dutyPercent === 50,
+    `periods=${lowHalf.dutyPeriods}, known=${lowHalf.dutyKnownSamples}, ` +
+      `high=${lowHalf.dutyHighSamples}, duty=${lowHalf.dutyPercent}`,
+  );
+}
+
+{
+  const codes = squareWave(96, 8, 2);
+  const mask = new Uint8Array(96);
+  mask[28] = 1;
+  const gapped = scan(codes, { unknown: mask });
+  check(
+    'a gap inside one middle period excludes exactly that period and keeps the 25% duty',
+    gapped.crossingCount === 11 && gapped.dutyPeriods === 9 &&
+      gapped.dutyExcludedPeriods === 1 && gapped.dutyKnownSamples === 72 &&
+      gapped.dutyHighSamples === 18 && gapped.dutyPercent === 25,
+    `crossings=${gapped.crossingCount}, periods=${gapped.dutyPeriods}, ` +
+      `excluded=${gapped.dutyExcludedPeriods}, known=${gapped.dutyKnownSamples}, ` +
+      `high=${gapped.dutyHighSamples}, duty=${gapped.dutyPercent}`,
+  );
+  check(
+    'the gap exclusion is the only difference from the ungapped scan',
+    scan(codes).dutyExcludedPeriods === 0 && gapped.unknown === 1 &&
+      gapped.dutyKnownSamples === scan(codes).dutyKnownSamples - 8,
+    `excluded=${gapped.dutyExcludedPeriods}, unknown=${gapped.unknown}, ` +
+      `known=${gapped.dutyKnownSamples} vs ${scan(codes).dutyKnownSamples}`,
+  );
+
+  const clippedCodes = squareWave(96, 8, 2);
+  clippedCodes.fill(255, 40, 42);
+  const clipped = scan(clippedCodes, { window: 2 });
+  check(
+    'a sustained clip run inside one middle period excludes exactly that period',
+    clipped.clippedHigh && !clipped.clippedLow && clipped.crossingCount === 11 &&
+      clipped.dutyPeriods === 9 && clipped.dutyExcludedPeriods === 1 &&
+      clipped.dutyKnownSamples === 72 && clipped.dutyPercent === 25,
+    `clipped=${clipped.clippedHigh}/${clipped.clippedLow}, crossings=${clipped.crossingCount}, ` +
+      `periods=${clipped.dutyPeriods}, excluded=${clipped.dutyExcludedPeriods}, ` +
+      `known=${clipped.dutyKnownSamples}, duty=${clipped.dutyPercent}`,
+  );
+  const unclipped = scan(squareWave(96, 8, 2), { window: 2 });
+  check(
+    'the same corner is a normal period without the clip run',
+    unclipped.dutyPeriods === 10 && unclipped.dutyExcludedPeriods === 0 &&
+      unclipped.dutyPercent === 25,
+    `periods=${unclipped.dutyPeriods}, excluded=${unclipped.dutyExcludedPeriods}, ` +
+      `duty=${unclipped.dutyPercent}`,
+  );
+}
+
+{
+  const core = squareWave(64, 8, 2);
+  const codes = new Uint8Array(20 + core.length + 20);
+  codes.fill(200, 0, 20);
+  codes.set(core, 20);
+  codes.fill(200, 20 + core.length, codes.length);
+  const duty = scan(codes);
+  let wholeHigh = 0;
+  for (let i = 0; i < codes.length; i += 1) if (codes[i]! >= 128) wholeHigh += 1;
+  const wholePercent = (100 * wholeHigh) / codes.length;
+  check(
+    'leading and trailing highs outside the recorded crossings never enter the duty',
+    duty.dutyPeriods === 6 && duty.dutyKnownSamples === 48 && duty.dutyHighSamples === 12 &&
+      duty.dutyPercent === 25 && wholePercent > 50,
+    `periods=${duty.dutyPeriods}, known=${duty.dutyKnownSamples}, ` +
+      `high=${duty.dutyHighSamples}, duty=${duty.dutyPercent}, whole=${wholePercent}`,
+  );
+}
+
+{
+  const capped = scan(squareWave(96, 8, 2), { maxCrossings: 4 });
+  check(
+    'a crossing cap pairs only the recorded crossings and never claims full coverage',
+    capped.crossingCap && capped.crossingCount === 4 && capped.firstCrossing === 8 &&
+      capped.lastCrossing === 32 && capped.dutyPeriods === 3 &&
+      capped.dutyExcludedPeriods === 0 && capped.dutyKnownSamples === 24 &&
+      capped.dutyHighSamples === 6 && capped.dutyPercent === 25,
+    `cap=${capped.crossingCap}, crossings=${capped.crossingCount}, ` +
+      `first=${capped.firstCrossing}, last=${capped.lastCrossing}, ` +
+      `periods=${capped.dutyPeriods}, known=${capped.dutyKnownSamples}, ` +
+      `duty=${capped.dutyPercent}`,
+  );
+}
+
+{
+  const build = (first: readonly number[], second: readonly number[]): Uint8Array => {
+    const out = new Uint8Array(40);
+    out.fill(200, 0, 10);
+    out.set(first, 10);
+    out.fill(60, 10 + first.length, 20);
+    out.fill(200, 20, 30);
+    out.set(second, 30);
+    out.fill(60, 30 + second.length, 40);
+    return out;
+  };
+  const atLevel = scan(build([128, 60], [120, 60]), { rising: false, window: 2 });
+  check(
+    'a falling crossing decided one sample late keeps the level sample at the period boundary',
+    atLevel.crossingCount === 2 && atLevel.firstCrossing === 10 && atLevel.lastCrossing === 30 &&
+      atLevel.dutyPeriods === 1 && atLevel.dutyExcludedPeriods === 0 &&
+      atLevel.dutyKnownSamples === 20 && atLevel.dutyHighSamples === 11 &&
+      atLevel.dutyPercent === 55,
+    `crossings=${atLevel.crossingCount}/${atLevel.firstCrossing}/${atLevel.lastCrossing}, ` +
+      `known=${atLevel.dutyKnownSamples}, high=${atLevel.dutyHighSamples}, ` +
+      `duty=${atLevel.dutyPercent}`,
+  );
+  const levelRun = scan(build([128, 128, 128], [120, 120]), { rising: false, window: 2 });
+  check(
+    'the delayed decision samples stay in the closing period and are counted once',
+    levelRun.crossingCount === 2 && levelRun.dutyPeriods === 1 &&
+      levelRun.dutyKnownSamples === 20 && levelRun.dutyHighSamples === 13 &&
+      levelRun.dutyPercent === 65,
+    `crossings=${levelRun.crossingCount}, known=${levelRun.dutyKnownSamples}, ` +
+      `high=${levelRun.dutyHighSamples}, duty=${levelRun.dutyPercent}`,
   );
 }
 
