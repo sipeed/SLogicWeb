@@ -171,8 +171,8 @@ import { cornerView, cornerViewEqual, type CornerView } from './cornerCell.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
 import { TOUCH_TARGET_PX } from './presenters.js';
 import {
-  Overlay, paintMarkerChip, type AnalogBandView, type AnalogScopeView, type AnalogTraceView,
-  type HoverMeasurement, type RegionTint,
+  Overlay, paintMarkerChip, type AnalogBandView, type AnalogReferenceView,
+  type AnalogScopeView, type AnalogTraceView, type HoverMeasurement, type RegionTint,
 } from './overlay.js';
 import {
   AnalogSourceStrip, type AnalogSourceStripItem, type AnalogSourceStripView,
@@ -253,7 +253,13 @@ import {
 import {
   nextScopeVoltsPerDiv, scopeAutoset, scopeGeometry, scopeRowDivisions, scopeScaleAt, scopeVoltsAtY,
 } from './scopeScale.js';
-import { openScopeMenu } from './scopeMenu.js';
+import { openScopeMenu, type ScopeMenuItem } from './scopeMenu.js';
+import {
+  MAX_REFERENCE_SAMPLES, addReference, planReferenceSave, projectReference, pruneReferences,
+  referenceSignature, referenceTrace, removeReference, visibleReferences,
+  type ReferenceEntry, type ReferenceProjection, type ReferenceSavePlan, type ReferenceSaveRefusal,
+  type ReferenceTrace,
+} from './referenceTraces.js';
 import {
   captureLocksTriggerView, clampLoopViewOffsets, loopOverviewWindow, loopPendingLimit,
   loopStoreLimit, mayReanchor, medianOfRecent, planLocalTriggerStep, reconcileTrigger,
@@ -320,6 +326,12 @@ const CURSOR_ZOOM_NOTICES: ReadonlySet<MessageKey> = new Set<MessageKey>([
   ...Object.values(CURSOR_ZOOM_REFUSALS), 'notice.cursorZoomLoopLimited',
 ]);
 
+const REFERENCE_SAVE_REFUSALS = {
+  empty: 'references.refusedEmpty',
+  outside: 'references.refusedOutside',
+  'too-wide': 'references.refusedTooWide',
+} as const satisfies Record<ReferenceSaveRefusal, MessageKey>;
+
 /** Create one SVG node with constant attributes; the hint glyph has no other DOM needs. */
 function svgNode(tag: string, attrs: Readonly<Record<string, string>>): SVGElement {
   const node = document.createElementNS(SVG_NS, tag);
@@ -373,6 +385,12 @@ export class App {
   private analogLayout: AnalogLayout = 'stacked';
   private analogFocusId: string | null = null;
   private analogHidden: ReadonlySet<string> = new Set<string>();
+  private references: readonly ReferenceTrace[] = [];
+  private referenceEntries: readonly ReferenceEntry[] = [];
+  private referenceSig = '';
+  private referenceSigKey = '';
+  private referenceNextId = 1;
+  private readonly referenceCache = new Map<number, ReferenceProjection & { key: string }>();
   private readonly analogVoltages = new CursorVoltageProjection();
   private analogRowBands: readonly AnalogBand[] = [];
   private readonly scopeBars = new Map<string, HTMLDivElement>();
@@ -2501,9 +2519,20 @@ export class App {
     if (!bus || bus.analogGroup === undefined) return;
     event.preventDefault();
     event.stopPropagation();
+    openScopeMenu(event.clientX, event.clientY, bar, this.scopeMenuItems(bus));
+  }
+
+  private openScopeMenuAt(bar: HTMLDivElement): void {
+    const bus = this.busViews.find((candidate) => candidate.id === bar.dataset.busId);
+    if (!bus || bus.analogGroup === undefined) return;
+    const rect = bar.getBoundingClientRect();
+    openScopeMenu(rect.right, rect.top + rect.height / 2, bar, this.scopeMenuItems(bus));
+  }
+
+  private scopeMenuItems(bus: BusViewState): ScopeMenuItem[] {
     const id = bus.id;
     const current = (): BusViewState | undefined => this.busViews.find((candidate) => candidate.id === id);
-    openScopeMenu(event.clientX, event.clientY, bar, [
+    const items: ScopeMenuItem[] = [
       {
         label: t('bus.autoset'), hint: 'A',
         onPick: () => { const b = current(); if (b) this.autosetScope(b); },
@@ -2520,7 +2549,29 @@ export class App {
         hint: '',
         onPick: () => this.setAnalogLayout(this.analogLayout === 'merged' ? 'stacked' : 'merged'),
       },
-    ]);
+      {
+        label: t('references.save'), hint: '',
+        onPick: () => { const b = current(); if (b) this.saveReference(b); },
+      },
+    ];
+    const hiddenBuses = this.hiddenAnalogSources();
+    for (const trace of this.references) {
+      if (trace.busId !== id) continue;
+      items.push({
+        label: t('references.remove'),
+        hint: hiddenBuses.has(trace.busId) ? t('references.hidden') : trace.label,
+        onPick: () => this.removeReference(trace.id),
+      });
+    }
+    for (const entry of this.referenceEntries) {
+      if (entry.available || entry.trace.busId === id) continue;
+      items.push({
+        label: t('references.removeNamed', { label: entry.trace.label }),
+        hint: t('references.unavailable'),
+        onPick: () => this.removeReference(entry.trace.id),
+      });
+    }
+    return items;
   }
 
   private wheelScopeBar(event: WheelEvent, bar: HTMLDivElement): void {
@@ -2547,6 +2598,12 @@ export class App {
   private keyScopeBar(event: KeyboardEvent, bar: HTMLDivElement): void {
     const bus = this.busViews.find((candidate) => candidate.id === bar.dataset.busId);
     if (!bus || bus.analogGroup === undefined) return;
+    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openScopeMenuAt(bar);
+      return;
+    }
     if (event.key === 'Home') {
       this.resetScopeBar(event, bar);
       return;
@@ -2737,6 +2794,7 @@ export class App {
         if (!bus) continue;
         traces.push(this.analogTrace(bus, scopeOf(bus)));
       }
+      const references = this.referenceViews(visible);
       const focused = focusedAnalogSource(band);
       const focusedBus = focused ? busesById.get(focused.busId) : undefined;
       const scope = focusedBus ? scopeOf(focusedBus) : undefined;
@@ -2751,6 +2809,7 @@ export class App {
         : undefined;
       const view: AnalogBandView = {
         top: box.top, band: box.band, traces,
+        ...(references.length > 0 ? { references } : {}),
         ...(scope ? { scope } : {}),
         ...(labels ? { labels } : {}),
         ...(note ? { note } : {}),
@@ -3054,6 +3113,152 @@ export class App {
     return entries;
   }
 
+  private referenceHiddenIds(): ReadonlySet<number> {
+    const hiddenBuses = this.hiddenAnalogSources();
+    const ids = new Set<number>();
+    for (const trace of this.references) {
+      if (hiddenBuses.has(trace.busId)) ids.add(trace.id);
+    }
+    return ids;
+  }
+
+  private referenceValidity(): ReadonlySet<string> {
+    const groups = new Map<string, number>();
+    for (const band of this.analogRowBands) {
+      for (const source of band.sources) {
+        if (source.group >= 0) groups.set(source.busId, source.group);
+      }
+    }
+    const valid = new Set<string>();
+    for (const trace of this.references) {
+      if (groups.get(trace.busId) === trace.group) valid.add(trace.busId);
+    }
+    return valid;
+  }
+
+  private syncReferences(): void {
+    this.referenceEntries = pruneReferences(this.references, this.referenceValidity());
+    const hidden = this.referenceHiddenIds();
+    const key = [
+      this.references.map((trace) => trace.id).join(','),
+      this.referenceEntries.map((entry) => (entry.available ? 1 : 0)).join(''),
+      [...hidden].sort().join(','),
+    ].join('|');
+    if (key === this.referenceSigKey) return;
+    this.referenceSigKey = key;
+    this.referenceSig = referenceSignature(this.referenceEntries, hidden);
+    this.referenceCache.clear();
+  }
+
+  private saveReference(bus: BusViewState): void {
+    if (this.repeatShowingFront) {
+      this.setFileNotice({ key: 'references.refusedPreviousWave' });
+      return;
+    }
+    const store = this.captureStore;
+    const view = this.stack.view;
+    const plan = planReferenceSave({
+      start: Math.floor(view.start), end: Math.ceil(view.end),
+      storeLength: store.length, droppedSamples: store.droppedSamples,
+    });
+    if (plan.kind === 'refuse') {
+      this.setFileNotice({ key: REFERENCE_SAVE_REFUSALS[plan.reason] });
+      return;
+    }
+    if (!(store.samplerate > 0)) {
+      this.setFileNotice({ key: REFERENCE_SAVE_REFUSALS.empty });
+      return;
+    }
+    const group = bus.analogGroup ?? 0;
+    const gain = analogGainOf(bus);
+    const read = readMeasureSamples(
+      store, { bits: bus.spec.bits, group, gain },
+      { start: plan.start, end: plan.end, maxSamples: MAX_REFERENCE_SAMPLES });
+    if (read.analyzed === 0) {
+      this.setFileNotice({ key: REFERENCE_SAVE_REFUSALS.empty });
+      return;
+    }
+    const added = addReference(this.references, referenceTrace({
+      id: this.referenceNextId,
+      busId: bus.id,
+      group,
+      start: plan.absoluteStart,
+      samplePeriod: 1 / store.samplerate,
+      originSample: plan.start - (this.triggerSampleIndex ?? 0),
+      gain,
+      zeroCode: ADC_ZERO_CODE,
+      voltsPerCode: analogVoltsPerCode(gain),
+      codes: read.codes,
+      unknown: read.unknown,
+      color: bus.color,
+      label: bus.name,
+    }));
+    if (added.kind === 'refuse') {
+      this.setFileNotice({
+        key: added.reason === 'limit' ? 'references.refusedLimit' : 'references.refusedId',
+      });
+      return;
+    }
+    this.referenceNextId += 1;
+    this.references = added.list;
+    this.syncReferences();
+    this.setFileNotice(this.referenceSaveNotice(plan, read.analyzed, view, this.store.length));
+    this.dirty = true;
+  }
+
+  private referenceSaveNotice(
+    plan: ReferenceSavePlan, analyzed: number, view: { start: number; end: number },
+    displayLength: number,
+  ): { key: MessageKey; vars?: MessageVars } | null {
+    if (plan.kind !== 'save') return null;
+    const cropped = plan.start > Math.floor(view.start) ||
+      plan.end < Math.ceil(Math.min(view.end, displayLength)) ||
+      analyzed < plan.end - plan.start;
+    if (!cropped) return null;
+    return { key: 'references.partial', vars: { count: analyzed } };
+  }
+
+  private removeReference(id: number): void {
+    const next = removeReference(this.references, id);
+    if (next.length === this.references.length) return;
+    this.references = next;
+    this.syncReferences();
+    this.dirty = true;
+  }
+
+  private referenceProjection(trace: ReferenceTrace): ReferenceProjection {
+    const view = this.stack.view;
+    const dpr = globalThis.devicePixelRatio || 1;
+    const origin = this.displayOriginSample();
+    const period = this.store.samplerate > 0 ? 1 / this.store.samplerate : 1;
+    const key = `${view.start}:${view.end}:${this.stack.widthDevicePx}:${dpr}:${origin}:${period}`;
+    const cached = this.referenceCache.get(trace.id);
+    if (cached !== undefined && cached.key === key) return cached;
+    const projection = projectReference(trace, {
+      viewStart: view.start - origin, viewEnd: view.end - origin, samplePeriod: period,
+    }, (sample) => this.toPx(origin + sample), view.widthPx / dpr);
+    this.referenceCache.set(trace.id, { key, ...projection });
+    return projection;
+  }
+
+  private referenceViews(visible: readonly AnalogBandSource[]): AnalogReferenceView[] {
+    const drawable = visibleReferences(this.referenceEntries, this.referenceHiddenIds());
+    if (drawable.length === 0) return [];
+    const views: AnalogReferenceView[] = [];
+    for (const entry of drawable) {
+      const source = visible.find((candidate) => candidate.busId === entry.trace.busId);
+      const bus = source ? this.busViews.find((candidate) => candidate.id === source.busId) : undefined;
+      const scope = bus ? this.analogScopeView(bus) : undefined;
+      if (!scope) continue;
+      const projection = this.referenceProjection(entry.trace);
+      if (projection.xs.length === 0) continue;
+      views.push({
+        xs: projection.xs, volts: projection.volts, color: entry.trace.color, scope,
+      });
+    }
+    return views;
+  }
+
   /**
    * Rebuild the row model.
    *
@@ -3067,6 +3272,7 @@ export class App {
     // Analog (parallel-bus) rows sit above the channels and take their height first.
     this.pruneAnalogFocus();
     const analogRows: RowSpec[] = this.analogRowSpecs();
+    this.syncReferences();
     const analogH = analogRows.reduce((sum, r) => sum + r.heightCss, 0);
     this.overview.syncSize();
     const axisH = this.el.axis.offsetHeight || 30;
@@ -3635,6 +3841,7 @@ export class App {
       JSON.stringify(this.settings.analogTriggers ?? {}),
       this.analogLayout, this.analogFocusId ?? '',
       this.analogLayout === 'merged' ? [...this.analogHidden].sort().join(',') : '',
+      this.referenceSig,
     ];
     for (const bus of this.busViews) {
       parts.push(...busFrameSignatureParts(bus));
@@ -8582,6 +8789,24 @@ export class App {
       id: b.id, name: b.name, color: b.color, summary: busSummary(b.spec), hideSources: b.hideSources,
       built: b.builder?.done ?? false, progress: b.builder?.progress ?? 0,
     })),
+    references: () => this.referenceEntries.map((entry) => ({
+      id: entry.trace.id,
+      busId: entry.trace.busId,
+      group: entry.trace.group,
+      label: entry.trace.label,
+      start: entry.trace.start,
+      samples: entry.trace.codes.length,
+      originSample: entry.trace.originSample,
+      samplePeriod: entry.trace.samplePeriod,
+      available: entry.available,
+      hidden: this.referenceHiddenIds().has(entry.trace.id),
+      signature: this.referenceSig,
+    })),
+    saveReference: (busId: string) => {
+      const bus = this.busViews.find((candidate) => candidate.id === busId);
+      if (bus) this.saveReference(bus);
+    },
+    removeReference: (id: number) => this.removeReference(id),
     setPanel: (p: 'device' | 'analyzers' | null) => {
       this.selectPanel(p);
     },

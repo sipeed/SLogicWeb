@@ -886,6 +886,18 @@ export const fr: Messages = {
   'bus.voltsPreviousWaveNote': 'Onde précédente affichée : les tensions de curseur attendent l\'onde actuelle.',
   'bus.voltsNoSource': 'source absente de cette capture',
   'bus.voltsNoCursor': 'aucun curseur placé',
+  'references.save': 'Enregistrer la trace de référence',
+  'references.remove': 'Supprimer la trace de référence',
+  'references.removeNamed': 'Supprimer la trace de référence de {label}',
+  'references.unavailable': 'indisponible',
+  'references.hidden': 'masquée avec sa source',
+  'references.refusedEmpty': 'Rien à enregistrer : la fenêtre visible ne contient aucun échantillon de l\'onde courante',
+  'references.refusedOutside': 'La fenêtre n\'affiche que l\'onde précédente ; lancez d\'abord une nouvelle acquisition',
+  'references.refusedTooWide': 'La fenêtre visible dépasse ce qu\'une référence peut contenir (1 048 576 échantillons) ; zoomez d\'abord',
+  'references.refusedLimit': 'Quatre références sont déjà enregistrées ; supprimez-en une d\'abord',
+  'references.refusedId': 'Cet identifiant de référence est déjà utilisé',
+  'references.partial': '{count} échantillons de l\'onde courante enregistrés depuis la fenêtre ; le reste n\'appartient pas à cette onde',
+  'references.refusedPreviousWave': 'L\'onde précédente est affichée ; attendez que l\'onde courante s\'affiche',
 
   // ------------------------------------------------------- AI assistant
   'assistant.title': 'Assistant IA',
