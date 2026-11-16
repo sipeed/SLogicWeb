@@ -90,7 +90,7 @@ const edgeMethodsSource = slice(app,
 
   const walks = panel.split('for (const root of this.roots()) {').length - 1;
   check('every in-place row updater walks both stored page containers',
-    walks === 3 && panel.split('private *roots()').length === 2 &&
+    walks === 4 && panel.split('private *roots()').length === 2 &&
     panel.includes('yield this.host.capture;') && panel.includes('yield this.host.cursors;'),
     `walks=${walks}`);
 }
@@ -114,13 +114,14 @@ const edgeMethodsSource = slice(app,
 {
   const cursors = [
     'cursorPage.appendChild(cursorSec.el)',
+    'cursorPage.appendChild(measureSec.el)',
     'cursorPage.appendChild(distanceSec.el)',
     'cursorPage.appendChild(edgeSec.el)',
   ].map((needle) => panel.indexOf(needle));
   const ascending = cursors.every((index, i) =>
     index >= 0 && (i === 0 || index > cursors[i - 1]!));
-  check('the cursors page order is cursors, distance, edges',
-    ascending && cursors.length === 3 &&
+  check('the cursors page order is cursors, measurement, distance, edges',
+    ascending && cursors.length === 4 &&
     panel.includes("const cursorPage = this.host.cursors;") &&
     panel.includes('cursorPage.replaceChildren();'),
     `indices=${cursors.join(',')}`);
@@ -136,9 +137,9 @@ const edgeMethodsSource = slice(app,
     return 'none';
   };
   const owners = ['chSec.el', 'modeSec.el', 'triggerSec.el', 'advanced',
-    'cursorSec.el', 'distanceSec.el', 'edgeSec.el'].map(owner);
+    'cursorSec.el', 'measureSec.el', 'distanceSec.el', 'edgeSec.el'].map(owner);
   check('every section is appended to exactly one page, so neither page carries the other page\u2019s sections',
-    owners.join(',') === 'capture,capture,capture,capture,cursors,cursors,cursors' &&
+    owners.join(',') === 'capture,capture,capture,capture,cursors,cursors,cursors,cursors' &&
     count('capture.replaceChildren();') === 1 && count('cursorPage.replaceChildren();') === 1,
     `owners=${owners.join(',')}, clears=${count('capture.replaceChildren();')}/` +
     `${count('cursorPage.replaceChildren();')}`);
