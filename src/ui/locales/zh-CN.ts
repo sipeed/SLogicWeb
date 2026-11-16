@@ -604,6 +604,7 @@ export const zhCN: Messages = {
   'capturePanel.measureStatusOneCrossing': '只有一个合格跳变，计算周期需要两个',
   'capturePanel.measureStatusPreviousWave': '当前显示的是旧波形，正在等待本次波形',
   'capturePanel.measurePartial': '部分结果：{analyzed}/{requested} 个采样点',
+  'capturePanel.measureWindowSamples': '区间：{samples} 个采样点',
   'capturePanel.measureRangeClipped': '区间已裁剪到已采集的采样点',
   'capturePanel.measureGaps': '区间内缺失的采样点已忽略',
   'capturePanel.measureClippedLow': '信号到达码值 0',

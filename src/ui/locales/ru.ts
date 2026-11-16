@@ -649,6 +649,7 @@ export const ru: Messages = {
   'capturePanel.measureStatusOneCrossing': 'один отобранный фронт; для периода нужны два',
   'capturePanel.measureStatusPreviousWave': 'показана предыдущая волна; ожидание текущей волны',
   'capturePanel.measurePartial': 'частично: {analyzed} из {requested} отсчётов',
+  'capturePanel.measureWindowSamples': 'Окно: {samples} отсчётов',
   'capturePanel.measureRangeClipped': 'окно обрезано по захваченным отсчётам',
   'capturePanel.measureGaps': 'пропущенные в окне отсчёты игнорируются',
   'capturePanel.measureClippedLow': 'сигнал достигает кода 0',

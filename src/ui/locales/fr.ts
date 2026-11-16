@@ -658,6 +658,7 @@ export const fr: Messages = {
   'capturePanel.measureStatusOneCrossing': 'un seul franchissement qualifié ; une période en demande deux',
   'capturePanel.measureStatusPreviousWave': 'une forme d’onde précédente est affichée ; attente de la courante',
   'capturePanel.measurePartial': 'partiel : {analyzed} échantillons sur {requested}',
+  'capturePanel.measureWindowSamples': 'Fenêtre : {samples} échantillons',
   'capturePanel.measureRangeClipped': 'fenêtre limitée aux échantillons capturés',
   'capturePanel.measureGaps': 'les échantillons manquants dans la fenêtre sont ignorés',
   'capturePanel.measureClippedLow': 'le signal atteint le code 0',
