@@ -50,7 +50,7 @@ import {
 } from './xyPanel.js';
 import { XyCanvas, xyTickLayout } from './xyCanvas.js';
 import {
-  planXy, xyAxes, xyDensity, xyDensitySize, xySummary,
+  planXy, xyAxes, xyDensity, xyDensitySize, xySummary, XY_MAX_ANALYZED,
   type XyAxes, type XyDensity, type XyPlan,
 } from './xyView.js';
 
@@ -1965,10 +1965,10 @@ export class App {
     } else {
       const readX = readMeasureSamples(store, {
         bits: busX.spec.bits, group: sourceX.group, gain: sourceX.gain,
-      }, { start, end, maxSamples: Math.max(1, requested) });
+      }, { start, end, maxSamples: XY_MAX_ANALYZED });
       const readY = readMeasureSamples(store, {
         bits: busY.spec.bits, group: sourceY.group, gain: sourceY.gain,
-      }, { start, end, maxSamples: Math.max(1, requested) });
+      }, { start, end, maxSamples: XY_MAX_ANALYZED });
       plan = planXy({
         sourceX: sourceX.start,
         sourceY: sourceY.start,
@@ -1980,6 +1980,8 @@ export class App {
         zeroY: ADC_ZERO_CODE,
         voltsPerCodeX: analogVoltsPerCode(sourceX.gain),
         voltsPerCodeY: analogVoltsPerCode(sourceY.gain),
+        maxAnalyzed: XY_MAX_ANALYZED,
+        requestedSamples: requested,
       });
       this.xyCache = { store, key, plan };
     }
@@ -1994,9 +1996,9 @@ export class App {
       windowStart: start + store.droppedSamples,
       windowEnd: end + store.droppedSamples,
       requestedSamples: requested,
-      analyzedSamples: plan.requested,
+      analyzedSamples: plan.analyzed,
       clipped,
-      truncated: plan.requested < requested,
+      truncated: plan.analyzed < requested,
       fit: config.fit,
       plan,
       axes,
@@ -9595,6 +9597,8 @@ export class App {
         fit: view.fit,
         status: analysis?.status ?? 'idle',
         requested: analysis?.requestedSamples ?? 0,
+        analyzed: analysis?.analyzedSamples ?? 0,
+        truncated: analysis?.truncated ?? false,
         plotted: analysis?.summary?.plotted ?? 0,
         paired: analysis?.summary?.paired ?? 0,
         gapExcluded: analysis?.summary?.gapExcluded ?? 0,

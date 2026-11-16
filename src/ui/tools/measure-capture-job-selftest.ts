@@ -9,6 +9,7 @@ import {
   type CaptureJobChunk, type CaptureJobKeyInput, type CaptureJobKeySource,
   type CaptureJobReader, type CaptureJobSource,
 } from '../measureCaptureJob.js';
+import { MEASURE_READ_CHUNK, MEASURE_SCAN_SAMPLES } from '../measureSamples.js';
 import type { MeasurementSource } from '../measurementState.js';
 
 const nodeProcess = (() => {
@@ -100,8 +101,11 @@ function scanKey(scan: AnalogCodeScan): string {
 
 {
   check('the chunk and budget are the documented code-selected constants',
-    MEASURE_CAPTURE_CHUNK === 65536 && MEASURE_CAPTURE_BUDGET_MS === 8,
-    `chunk=${MEASURE_CAPTURE_CHUNK}, budget=${MEASURE_CAPTURE_BUDGET_MS}`);
+    MEASURE_CAPTURE_CHUNK === 16384 && MEASURE_CAPTURE_BUDGET_MS === 8 &&
+      MEASURE_CAPTURE_CHUNK % MEASURE_READ_CHUNK === 0 &&
+      MEASURE_CAPTURE_CHUNK <= MEASURE_SCAN_SAMPLES,
+    `chunk=${MEASURE_CAPTURE_CHUNK}, budget=${MEASURE_CAPTURE_BUDGET_MS}, ` +
+      `readChunk=${MEASURE_READ_CHUNK}, scanBound=${MEASURE_SCAN_SAMPLES}`);
 }
 
 {
@@ -119,8 +123,9 @@ function scanKey(scan: AnalogCodeScan): string {
   const a0 = finished === null ? undefined : finished.get(0);
   const sameScan = a0 !== undefined && scanKey(a0.scan) === scanKey(whole);
   check('a budgeted step covers exactly one chunk and the whole job equals the full-array scan',
-    firstChunk && sameScan && calls.length === 5 && last.to === TRACE.length &&
-      last.from === 4 * MEASURE_CAPTURE_CHUNK &&
+    firstChunk && sameScan && calls.length === Math.ceil(TRACE.length / MEASURE_CAPTURE_CHUNK) &&
+      last.to === TRACE.length && last.from === Math.floor(TRACE.length / MEASURE_CAPTURE_CHUNK) *
+        MEASURE_CAPTURE_CHUNK &&
       job.scanned === job.total && job.total === TRACE.length,
     `calls=${calls.length}, last=${JSON.stringify(last)}, scanned=${job.scanned}, ` +
     `same=${sameScan}, a0=${a0 === undefined ? 'missing' : scanKey(a0.scan)}`);
@@ -133,6 +138,44 @@ function scanKey(scan: AnalogCodeScan): string {
   check('a finished job returns the same result map twice without rescanning',
     finished !== null && job.results() === finished,
     `identity=${job.results() === finished}`);
+}
+
+{
+  const chunk = MEASURE_CAPTURE_CHUNK;
+  const full = Math.floor(TRACE.length / chunk);
+  const partial = TRACE.length - full * chunk;
+  const calls: Call[] = [];
+  const steps: number[] = [];
+  const job = new CaptureRangeJob('p', 0, TRACE.length, [jobSource()], TRACE.length);
+  const read = readerFor(TRACE, noUnknown(TRACE.length), calls);
+  while (!job.done) {
+    job.step(read, 0);
+    steps.push(job.scanned);
+  }
+  const whole = scanAnalogCodes({ ...SCAN, codes: TRACE });
+  const a0 = job.results()?.get(0);
+  check('the production chunk walks to a partial final chunk that matches the whole scan',
+    chunk === 16384 && full === 18 && partial === 5088 &&
+      steps.length === 19 && steps[0] === chunk && steps[steps.length - 1] === TRACE.length &&
+      steps.every((value, index) => value === Math.min(TRACE.length, (index + 1) * chunk)) &&
+      calls.every((call, index) => call.from === index * chunk &&
+        call.to === Math.min(TRACE.length, (index + 1) * chunk)) &&
+      a0 !== undefined && scanKey(a0.scan) === scanKey(whole) &&
+      a0.read.analyzed === TRACE.length && a0.scan.analyzed === TRACE.length,
+    `steps=${steps.length}, full=${full}, partial=${partial}, ` +
+      `first=${steps[0]}, last=${steps[steps.length - 1]}, ` +
+      `same=${a0 !== undefined && scanKey(a0.scan) === scanKey(whole)}`);
+
+  const square = new Uint8Array(TRACE.length);
+  for (let i = 0; i < square.length; i += 1) square[i] = i % 200 < 100 ? 40 : 216;
+  const capped = scanAnalogCodes({ ...SCAN, codes: square });
+  const capRun = runChunked(square, noUnknown(square.length), chunk);
+  check('a crossing cap reached inside the first chunks still equals the whole-array scan',
+    capped.crossingCap && capped.crossingCount === 512 &&
+      scanKey(capRun.scan) === scanKey(capped) &&
+      capRun.calls.length === 19 && capRun.total === square.length,
+    `cap=${capped.crossingCount}/${capped.crossingCap}, ` +
+      `same=${scanKey(capRun.scan) === scanKey(capped)}, calls=${capRun.calls.length}`);
 }
 
 {

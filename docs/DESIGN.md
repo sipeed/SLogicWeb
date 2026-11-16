@@ -540,7 +540,7 @@ Analog channels are not bus rows. Each analog signal has a row with:
   scanning: it analyses the whole retained current wave (`[0, length)`) instead of what the
   viewport shows, and says so — its window line reads "Window: 300,000 samples (captured
   1,200,000 – 1,500,000)", naming the absolute captured range beside the sample count. It
-  runs as one user-requested, cancellable job in fixed 65,536-sample chunks inside the
+  runs as one user-requested, cancellable job in fixed 16,384-sample chunks inside the
   existing frame callback: no new clock, no progress while the Cursors surface is hidden,
   and nothing published unless every requested sample was read. The section states
   "Analyzing capture: 98,304 / 300,000 samples (32%)" as a progress bar with its own
@@ -653,14 +653,20 @@ Analog channels are not bus rows. Each analog signal has a row with:
   interpolation, resampling or carried value across a gap. Requested, plotted and
   gap-excluded pair counts are printed, and fewer than two known pairs, one unavailable
   source or the same source on both axes is a stated refusal instead of an empty plot.
+  The analysis reads at most 65,536 pairs (`XY_MAX_ANALYZED`, the same bound as the
+  automatic rows and FFT) of the requested window as an exact prefix; a wider window states
+  the analysed and requested counts together, and the pair and gap counts stay exact inside
+  that prefix.
 - **XY axes and density are display-only.** X and Y are independent calibrated voltage
   axes with source and gain labels, linear 1-2-5 ticks, the exact 0 V lines emphasized and
   Y pointing up. Ranges default to each source's full calibrated code span; Fit samples is
   an explicit display command that pads the observed pair extrema onto a 1-2-5 range. V/div
   and zero changes stay Time-only settings and are not edited from XY. Points render into
-  a bounded density buffer with no connecting lines and no time order; a window above
-  2^18 pairs uses a stated uniform display stride, and the per-pixel density ceiling,
-  saturated pixel count and 8-bit quantization step are disclosed in text.
+  a bounded density buffer with no connecting lines and no time order; the plot ceiling is
+  2^18 points, above that analysis bound, so every analysed pair is plotted and a lower
+  requested ceiling would use a stated uniform display stride rather than truncation. The
+  per-pixel density ceiling, saturated pixel count and 8-bit quantization step are disclosed
+  in text.
 - **XY is orthogonal to the acquisition.** It never creates or moves a time cursor or T,
   never edits trigger, acquisition or viewport state, and never writes References or
   Persistence; returning to Time restores every field unchanged and redraws the retained
