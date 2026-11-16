@@ -107,6 +107,7 @@ const MOTION_CONSUMERS: readonly string[] = [
   '.settings-dialog',
   '.settings-dialog::backdrop',
   '.settings-dialog-close',
+  '.measure-chevron',
 ];
 
 const ENTRY_RULES: readonly string[] = [

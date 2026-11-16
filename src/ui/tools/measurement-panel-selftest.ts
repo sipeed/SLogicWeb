@@ -266,11 +266,15 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     measureSection.includes('parameter.textContent = measurementParameterText(row.parameter);') &&
     measureSection.includes('value.textContent = measurementValueText(row);') &&
     measureSection.includes('status.textContent = measurementStatusText(row);') &&
+    measureSection.includes('toggle.append(parameter, measureChevron(), value);') &&
+    panel.includes('function measureChevron(): SVGSVGElement {') &&
+    panel.includes("appendIconPath(icon, 'm6 9 6 6 6-6');") &&
     panel.includes('export function measurementValueText(row: MeasurementRowView): string {') &&
     panel.includes('export function measurementStatusText(row: MeasurementRowView): string {'),
     `parameter=${measureSection.includes('measurementParameterText(row.parameter)')}, ` +
     `value=${measureSection.includes('measurementValueText(row)')}, ` +
-    `status=${measureSection.includes('measurementStatusText(row)')}`);
+    `status=${measureSection.includes('measurementStatusText(row)')}, ` +
+    `chevron=${measureSection.includes('measureChevron()')}`);
 
   const removeFocus = "() => this.runMeasureAction('row', remove,\n" +
     '            () => this.cb.onRemoveMeasurementRow(row.id), row.id, index)';
@@ -1941,6 +1945,13 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   } as unknown as CapturePanelCallbacks);
   const toggleOf = (): FakeElement | null => cursors.querySelector('.measure-row .measure-open');
   const detailsOf = (): FakeElement | null => cursors.querySelector('[data-measure-details]');
+  const chevronOf = (): FakeElement | null =>
+    cursors.querySelector('.measure-open .measure-chevron');
+  const toggleClasses = (): string[] => (toggleOf()?.children ?? [])
+    .map((child) => child.className);
+  const disclosureOrder = (classes: readonly string[]): boolean =>
+    classes.length === 3 && classes[0] === 'measure-param' &&
+      classes[1] === 'measure-chevron' && classes[2] === 'measure-value';
   const cellOf = (key: string): string =>
     cursors.querySelector(`[data-measure-detail="${key}"]`)?.textContent ?? '';
   const active = (): FakeElement | null =>
@@ -1963,6 +1974,27 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       closed.hidden === true && closed.param === 'Vpp' && closed.value === '21.5 V' &&
       closed.label === 'Show statistics details: A0 Vpp',
     `closed=${JSON.stringify(closed)}`);
+
+  const chevron = chevronOf();
+  const chevronPath = chevron?.children[0] ?? null;
+  const chevronAttr = (name: string): string => chevron?.getAttribute(name) ?? '';
+  const pathAttr = (name: string): string => chevronPath?.getAttribute(name) ?? '';
+  const swapped = ['measure-param', 'measure-value', 'measure-chevron'];
+  const missingChevron = ['measure-param', 'measure-value'];
+  check('the disclosure affordance sits between the parameter and the value',
+    disclosureOrder(toggleClasses()) &&
+      cursors.querySelectorAll('.measure-open .measure-chevron').length === 1 &&
+      !disclosureOrder(swapped) && !disclosureOrder(missingChevron),
+    `classes=${JSON.stringify(toggleClasses())}, swapped=${disclosureOrder(swapped)}, ` +
+      `missing=${disclosureOrder(missingChevron)}`);
+  check('the affordance is a decorative down chevron drawn by the shared icon path helper',
+    chevronAttr('viewBox') === '0 0 24 24' && chevronAttr('aria-hidden') === 'true' &&
+      chevronAttr('focusable') === 'false' && chevronAttr('data-icon') === 'inline-end' &&
+      chevron?.children.length === 1 && pathAttr('d') === 'm6 9 6 6 6-6' &&
+      pathAttr('fill') === 'none' && pathAttr('stroke') === 'currentColor' &&
+      pathAttr('stroke-width') === '2',
+    `attrs=${JSON.stringify([chevronAttr('aria-hidden'), chevronAttr('focusable'),
+      chevronAttr('data-icon'), pathAttr('d')])}`);
 
   toggleOf()?.focus();
   const focused = active() === toggleOf();
@@ -1996,6 +2028,12 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     cellOf('note') === 'Statistics are cross-acquisition and kept for this session only.' &&
       cellOf('note').length > 0,
     `note=${cellOf('note')}`);
+  check('expanding rotates the same chevron through aria-expanded instead of swapping its path',
+    opened.expanded === 'true' && chevronOf() === chevron &&
+      (chevronOf()?.children[0]?.getAttribute('d') ?? '') === 'm6 9 6 6 6-6',
+    `same=${chevronOf() === chevron}, d=${chevronOf()?.children[0]?.getAttribute('d') ?? ''}, ` +
+      `expanded=${opened.expanded}`);
+
   toggleOf()?.click();
   check('a second activation collapses the details without rebuilding the row',
     toggleOf()?.getAttribute('aria-expanded') === 'false' && detailsOf()?.hidden === true &&
@@ -2132,7 +2170,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 }
 
 {
-  const rules = ['.measure-open {', '.measure-details {', '.measure-detail-method,',
+  const rules = ['.measure-open {', '.measure-chevron {', '.measure-details {', '.measure-detail-method,',
     '.measure-detail-stats {', '.measure-detail-row {', '.measure-detail-label {',
     '.measure-detail-value {', '.measure-detail-actions {',
     '.analyzer-act.measure-stats-reset {', '.analyzer-act.measure-stats-reset-all {'];
@@ -2159,6 +2197,30 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `markup=${JSON.stringify(['<table', '<dl', 'innerHTML'].filter((needle) => slice(panel,
       'private measurementDetailsBlock(', 'dispose(): void {').includes(needle)))}`);
 
+  const chevronRule = slice(css, '.measure-chevron {', '}');
+  const chevronOpenRule = slice(css, '.measure-open[aria-expanded="true"] .measure-chevron {', '}');
+  const ruleBody = (rule: string): string =>
+    rule.slice(rule.indexOf('{') + 1).trim();
+  const rotationOnly = (body: string): boolean => body === 'transform: rotate(180deg);';
+  const chevronOpen = ruleBody(chevronOpenRule);
+  const resizedOpen = ruleBody(chevronOpenRule.replace(
+    'transform: rotate(180deg);', 'transform: rotate(180deg); width: 18px;'));
+  const chevronRotate = (source: string): boolean =>
+    rotationOnly(ruleBody(slice(source, '.measure-open[aria-expanded="true"] .measure-chevron {',
+      '}')));
+  const collapsedOnly = css.replace('.measure-open[aria-expanded="true"] .measure-chevron',
+    '.measure-open[aria-expanded="false"] .measure-chevron');
+  check('the chevron keeps one fixed box in both states and rotates through the expanded attribute',
+    chevronRule.includes('width: 10px;') && chevronRule.includes('height: 10px;') &&
+      chevronRule.includes('flex: none;') &&
+      chevronRule.includes('color: var(--muted-foreground);') &&
+      chevronRule.includes('transition: transform var(--motion-fast) var(--motion-ease);') &&
+      !chevronRule.includes('display: none') && !chevronRule.includes('rotate(') &&
+      rotationOnly(chevronOpen) && !rotationOnly(resizedOpen) &&
+      chevronRotate(css) && !chevronRotate(collapsedOnly) &&
+      !chevronOpenRule.includes('#') && !chevronOpenRule.includes('rgb'),
+    `rule=${chevronRule}, open=${chevronOpen}, resized=${rotationOnly(resizedOpen)}, ` +
+      `collapsedOnly=${chevronRotate(collapsedOnly)}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
