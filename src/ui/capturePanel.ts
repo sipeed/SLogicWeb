@@ -1707,7 +1707,7 @@ export class CapturePanel {
         value.className = 'measure-value';
         value.translate = false;
         value.textContent = measurementValueText(row);
-        toggle.append(parameter, value);
+        toggle.append(parameter, measureChevron(), value);
         const status = document.createElement('span');
         status.className = 'measure-status';
         status.textContent = measurementStatusText(row);
@@ -2895,6 +2895,17 @@ function edgeAddButton(disabled: boolean, onAdd: () => void): HTMLButtonElement 
   b.appendChild(distanceAddIcon());
   b.addEventListener('click', onAdd);
   return b;
+}
+
+function measureChevron(): SVGSVGElement {
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('class', 'measure-chevron');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true');
+  icon.setAttribute('focusable', 'false');
+  icon.setAttribute('data-icon', 'inline-end');
+  appendIconPath(icon, 'm6 9 6 6 6-6');
+  return icon;
 }
 
 function appendIconPath(icon: SVGSVGElement, d: string): void {
