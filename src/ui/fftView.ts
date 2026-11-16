@@ -10,7 +10,7 @@ import { formatCount, formatFreq, formatRate } from './format.js';
 import { t } from './i18n.js';
 import type { MeasurementSource } from './measurementState.js';
 
-export type AnalysisViewMode = 'time' | 'fft';
+export type AnalysisViewMode = 'time' | 'fft' | 'xy';
 
 export type FftStatus =
   | 'idle'

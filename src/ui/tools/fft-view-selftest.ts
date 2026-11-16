@@ -466,9 +466,10 @@ function sectionOf(analysis: FftAnalysis | null, over: Partial<FftSectionView> =
 
 {
   const oneSwitch = panel.split('measure-view-mode').length - 1;
-  check('one Time/FFT switch lives in the measurement section and adds no fifth section',
+  check('one Time/FFT/XY switch lives in the measurement section and adds no fifth section',
     oneSwitch === 2 && panel.includes("['time', 'capturePanel.viewTime']") &&
       panel.includes("['fft', 'capturePanel.viewFft']") &&
+      panel.includes("['xy', 'capturePanel.viewXy']") &&
       panel.includes('onPickViewMode(mode: AnalysisViewMode): void;') &&
       app.includes('onPickViewMode: (mode) => this.setViewMode(mode)') &&
       !panel.includes("section(t('capturePanel.fft") &&

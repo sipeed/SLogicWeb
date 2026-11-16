@@ -608,17 +608,17 @@ Analog channels are not bus rows. Each analog signal has a row with:
   automatic measurements, statistics, References, FFT, XY or a saved capture; toggling it
   or its length leaves every measurement row and statistic byte-identical.
 - **The analysis view is a display mode of the same measurement section.** One
-  Time/FFT switch in the measurement section chooses it; FFT replaces the visible plot
-  with one analysis canvas while the Time DOM and canvases keep their state hidden. The
-  switch changes visibility only: it never starts, stops or reconfigures an acquisition,
-  moves a cursor, rewrites the viewport, T, trigger, source vertical settings, References
-  or Persistence, and returning to Time redraws the retained surface. The analysis canvas
-  occupies the visible plot column — the scroll viewport below the sticky overview and
-  axis strips — not the channel-row content height, so its frequency labels and dB floor
-  stay on screen while rows overflow; a window/sidebar resize, a row-count change and a
-  scroll of the stack reposition it on the ordinary frame path. FFT reads one real
-  ADC group at a time and reuses the same Viewport, cursor-pair and whole-capture range as
-  the rows above it.
+  Time/FFT/XY switch in the measurement section chooses it; FFT or XY replaces the visible
+  plot with one analysis canvas while the Time DOM and canvases keep their state hidden.
+  The switch changes visibility only: it never starts, stops or reconfigures an
+  acquisition, moves a cursor, rewrites the viewport, T, trigger, source vertical settings,
+  References or Persistence, and returning to Time redraws the retained surface. The
+  analysis canvas occupies the visible plot column — the scroll viewport below the sticky
+  overview and axis strips — not the channel-row content height, so its labels stay on
+  screen while rows overflow; a window/sidebar resize, a row-count change and a scroll of
+  the stack reposition it on the ordinary frame path. FFT reads one real ADC group at a
+  time and reuses the same Viewport, cursor-pair and whole-capture range as the rows
+  above it; XY reads two.
 - **FFT input is exact and bounded.** It reads contiguous calibrated codes from the
   current acquisition wave (`captureStore`) only; a Repeat composite's older-layer
   coverage is cropped and disclosed, never treated as current data. An internal gap
@@ -645,6 +645,29 @@ Analog channels are not bus rows. Each analog signal has a row with:
   and no second rAF or timer is added. While FFT is shown the automatic time measurements
   report paused and scan nothing; statistics and Persistence commit only in Time mode.
   FFT is never an input to or output from References, Persistence or an acquisition.
+- **XY view is a relationship of two real analog groups.** X and Y selects name two
+  different active ADC groups; both read the same current-wave window as the rows above
+  (Viewport, cursor pair or whole capture), and Repeat composite coverage from an older
+  layer is cropped and disclosed rather than paired with current data. Pairing is
+  same-index only: pair i is drawn only when sample i is known on both sources, with no
+  interpolation, resampling or carried value across a gap. Requested, plotted and
+  gap-excluded pair counts are printed, and fewer than two known pairs, one unavailable
+  source or the same source on both axes is a stated refusal instead of an empty plot.
+- **XY axes and density are display-only.** X and Y are independent calibrated voltage
+  axes with source and gain labels, linear 1-2-5 ticks, the exact 0 V lines emphasized and
+  Y pointing up. Ranges default to each source's full calibrated code span; Fit samples is
+  an explicit display command that pads the observed pair extrema onto a 1-2-5 range. V/div
+  and zero changes stay Time-only settings and are not edited from XY. Points render into
+  a bounded density buffer with no connecting lines and no time order; a window above
+  2^18 pairs uses a stated uniform display stride, and the per-pixel density ceiling,
+  saturated pixel count and 8-bit quantization step are disclosed in text.
+- **XY is orthogonal to the acquisition.** It never creates or moves a time cursor or T,
+  never edits trigger, acquisition or viewport state, and never writes References or
+  Persistence; returning to Time restores every field unchanged and redraws the retained
+  surface. Its source, range and fit choices are session-only. Running updates use the
+  same separate 500 ms `analysisPanelAt` branch as FFT, stopped updates are event-driven,
+  and no second rAF or timer is added; automatic time measurements report paused and
+  statistics and Persistence commit only in Time mode.
 
 ### 6.4 Plot painting
 

@@ -51,6 +51,7 @@ import {
   FFT_MIN_HZ_PRESETS, fftSummaryLines, fftWindowKind, fftWindowLabel,
   type AnalysisViewMode, type FftSectionView,
 } from './fftView.js';
+import { xySummaryLines, type XyAxis, type XySectionView } from './xyPanel.js';
 import { WINDOW_KINDS, type WindowKind } from '../dsp/fft.js';
 import { chipForeground } from './metrics.js';
 import type { MeasurementStatsView } from './measurementStats.js';
@@ -114,6 +115,8 @@ export interface CapturePanelCallbacks {
   onPickFftWindow(kind: WindowKind): void;
   onPickFftMinHz(hz: number | null): void;
   onResetFftBounds(): void;
+  onPickXySource(axis: XyAxis, start: number | null): void;
+  onPickXyFit(fit: boolean): void;
   onPickMeasurementCursor(side: 'a' | 'b', cursorId: number | null): void;
   onToggleMeasurementRow(start: number, parameter: MeasurementParameter): void;
   onRemoveMeasurementRow(id: number): void;
@@ -567,6 +570,11 @@ export class CapturePanel {
         const fft = view.fft;
         if (fft === undefined) continue;
         item.textContent = fftSummaryLines(fft).join('\n');
+      }
+      for (const item of root.querySelectorAll<HTMLElement>('[data-xy-summary]')) {
+        const xy = view.xy;
+        if (xy === undefined) continue;
+        item.textContent = xySummaryLines(xy).join('\n');
       }
       const capture = measurementCaptureState(view);
       for (const item of root.querySelectorAll<HTMLElement>('[data-measure-capture]')) {
@@ -1635,13 +1643,16 @@ export class CapturePanel {
     measureLegend.textContent = t('capturePanel.measureFormat');
     measureSec.header.appendChild(measureLegend);
     const measureFft = v.measurement.fft;
-    const measureMode: AnalysisViewMode = measureFft?.mode ?? 'time';
+    const measureXy = v.measurement.xy;
+    const measureMode: AnalysisViewMode =
+      measureXy?.mode === 'xy' ? 'xy' : measureFft?.mode === 'fft' ? 'fft' : 'time';
     const viewSwitch = div('segmented measure-view-mode');
     viewSwitch.setAttribute('role', 'group');
     viewSwitch.setAttribute('aria-label', t('capturePanel.viewMode'));
     const viewModes: readonly [AnalysisViewMode, MessageKey][] = [
       ['time', 'capturePanel.viewTime'],
       ['fft', 'capturePanel.viewFft'],
+      ['xy', 'capturePanel.viewXy'],
     ];
     for (const [mode, label] of viewModes) {
       const button = document.createElement('button');
@@ -1688,6 +1699,14 @@ export class CapturePanel {
       summary.className = 'measure-note fft-summary';
       summary.dataset.fftSummary = '';
       summary.textContent = fftSummaryLines(measureFft).join('\n');
+      measureSec.body.appendChild(summary);
+    }
+    if (measureXy !== undefined && measureMode === 'xy') {
+      measureSec.body.appendChild(xyControls(measureXy, this.cb));
+      const summary = document.createElement('p');
+      summary.className = 'measure-note xy-summary';
+      summary.dataset.xySummary = '';
+      summary.textContent = xySummaryLines(measureXy).join('\n');
       measureSec.body.appendChild(summary);
     }
     if (v.measurement.range.kind === 'cursors') {
@@ -2613,6 +2632,48 @@ function fftControls(
   reset.textContent = t('capturePanel.fftReset');
   reset.addEventListener('click', () => cb.onResetFftBounds());
   controls.append(source.el, windowControl.el, minHz.el, reset);
+  return controls;
+}
+
+function xyControls(
+  view: XySectionView,
+  cb: Pick<CapturePanelCallbacks, 'onPickXySource' | 'onPickXyFit'>,
+): HTMLDivElement {
+  const controls = div('xy-controls');
+  const options = view.sources.map(
+    (entry): SelectOptionTuple => [String(entry.start), entry.name]);
+  const sourceX = selectControl(
+    'xy.source.x',
+    t('capturePanel.xySourceX'),
+    options,
+    view.sourceX === null ? '' : String(view.sourceX),
+  );
+  sourceX.el.dataset.xySourceX = '';
+  sourceX.disabled = view.sources.length === 0;
+  sourceX.addEventListener('change', () => cb.onPickXySource('x',
+    sourceX.value === '' ? null : Number(sourceX.value)));
+  const sourceY = selectControl(
+    'xy.source.y',
+    t('capturePanel.xySourceY'),
+    options,
+    view.sourceY === null ? '' : String(view.sourceY),
+  );
+  sourceY.el.dataset.xySourceY = '';
+  sourceY.disabled = view.sources.length < 2;
+  sourceY.addEventListener('change', () => cb.onPickXySource('y',
+    sourceY.value === '' ? null : Number(sourceY.value)));
+  const range = selectControl(
+    'xy.range',
+    t('capturePanel.xyRange'),
+    [
+      ['full', t('capturePanel.xyRangeFull')],
+      ['fit', t('capturePanel.xyRangeFit')],
+    ],
+    view.fit ? 'fit' : 'full',
+  );
+  range.el.dataset.xyRange = '';
+  range.addEventListener('change', () => cb.onPickXyFit(range.value === 'fit'));
+  controls.append(sourceX.el, sourceY.el, range.el);
   return controls;
 }
 
