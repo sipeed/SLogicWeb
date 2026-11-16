@@ -61,6 +61,8 @@
  * The module is pure: no DOM, no store, no settings import, no dependency on app.ts.
  */
 
+import type { CaptureStopReason } from './captureViewport.js';
+
 export type CaptureMode = 'single' | 'repeat' | 'loop';
 
 /** How many device sweeps a session owns. Loop has no boundary, hence continuous. */
@@ -386,7 +388,7 @@ export function sessionWithManualView(
  * falls back without any automatic Fit.
  */
 export function sweepEndFitsCapture(
-  session: CaptureSession, reason: 'manual' | 'completed', userView: boolean,
+  session: CaptureSession, reason: CaptureStopReason, userView: boolean,
 ): boolean {
   return session.mode === 'single' && reason === 'completed' &&
     session.policy.kind === 'follow' && !userView;

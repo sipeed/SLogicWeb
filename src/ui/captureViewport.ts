@@ -9,4 +9,4 @@
  */
 
 export type CaptureStartOrigin = 'manual' | 'repeat';
-export type CaptureStopReason = 'manual' | 'completed';
+export type CaptureStopReason = 'manual' | 'completed' | 'error';
