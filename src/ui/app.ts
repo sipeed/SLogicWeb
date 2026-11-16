@@ -175,8 +175,12 @@ import {
   type HoverMeasurement, type RegionTint,
 } from './overlay.js';
 import {
-  AnalogSourceStrip, type AnalogSourceStripItem,
+  AnalogSourceStrip, type AnalogSourceStripItem, type AnalogSourceStripView,
 } from './analogSourceStrip.js';
+import {
+  CursorVoltageProjection, cursorVoltageDetail, cursorVoltageValue,
+  type CursorVoltagePoint, type CursorVoltageSource,
+} from './cursorVoltages.js';
 import { OverviewStrip, type OverviewState } from './overviewStrip.js';
 import { PanelResizer } from './panelResizer.js';
 import { refreshPanelMinWidth } from './panelMinWidth.js';
@@ -242,7 +246,8 @@ import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
 import {
   MERGED_ANALOG_BAND_ID, analogBands, analogRowProjection, focusedAnalogSource, pruneAnalogState,
-  resolveAnalogFocus, type AnalogBand, type AnalogBandSource, type AnalogLayout,
+  resolveAnalogFocus, toggleSourceVisibility, visibleAnalogSources, type AnalogBand,
+  type AnalogBandSource, type AnalogLayout,
 } from './analogBands.js';
 import {
   nextScopeVoltsPerDiv, scopeAutoset, scopeGeometry, scopeRowDivisions, scopeScaleAt, scopeVoltsAtY,
@@ -286,6 +291,7 @@ const LOOP_STORE_HARD_SAMPLES = 0x7fffffff - 0x1000000;
 const LOOP_BUILD_SUSPEND_BYTES_PER_SEC = 160e6;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const EMPTY_ANALOG_HIDDEN: ReadonlySet<string> = new Set<string>();
 /** Download MIME type per save format (the picker path takes it from the handle). */
 const EXPORT_MIME: Record<CaptureFileFormat, string> = {
   lwcap: 'application/octet-stream', sr: 'application/zip', vcd: 'text/plain', csv: 'text/csv',
@@ -355,6 +361,8 @@ export class App {
   private readonly sourceStrip: AnalogSourceStrip;
   private analogLayout: AnalogLayout = 'stacked';
   private analogFocusId: string | null = null;
+  private analogHidden: ReadonlySet<string> = new Set<string>();
+  private readonly analogVoltages = new CursorVoltageProjection();
   private analogRowBands: readonly AnalogBand[] = [];
   private readonly scopeBars = new Map<string, HTMLDivElement>();
   private readonly scopeTriggers = new Map<string, HTMLDivElement>();
@@ -857,6 +865,7 @@ export class App {
     this.el.plot.appendChild(this.scopeHost);
     this.sourceStrip = new AnalogSourceStrip(this.el.plot, {
       onFocus: (busId) => this.setAnalogFocus(busId),
+      onToggleVisibility: (busId) => this.toggleAnalogVisibility(busId),
     });
     this.paintedTheme = getTheme();
     this.palette = canvasPalette(this.paintedTheme);
@@ -2709,7 +2718,10 @@ export class App {
         return scopes.get(bus.id);
       };
       const traces: AnalogTraceView[] = [];
-      for (const source of band.sources) {
+      const hidden = this.hiddenAnalogSources();
+      const visible = hidden.size === 0
+        ? band.sources : band.sources.filter((source) => !hidden.has(source.busId));
+      for (const source of visible) {
         const bus = busesById.get(source.busId);
         if (!bus) continue;
         traces.push(this.analogTrace(bus, scopeOf(bus)));
@@ -2718,9 +2730,11 @@ export class App {
       const focusedBus = focused ? busesById.get(focused.busId) : undefined;
       const scope = focusedBus ? scopeOf(focusedBus) : undefined;
       const first = traces[0];
-      const note = first === undefined ? ''
-        : traces.length === 1 || traces.every((trace) => trace.frame.kind === 'empty')
-          ? noteOf(first.frame) : '';
+      const allHidden = band.sources.length > 0 && visible.length === 0;
+      const note = allHidden ? t('bus.allHiddenNote')
+        : first === undefined ? ''
+          : traces.length === 1 || traces.every((trace) => trace.frame.kind === 'empty')
+            ? noteOf(first.frame) : '';
       const labels = band.sources.length === 1 && focusedBus && first
         ? { top: busLabel(focusedBus, first.yMax), bottom: busLabel(focusedBus, first.yMin) }
         : undefined;
@@ -2882,26 +2896,103 @@ export class App {
     const valid = new Set(this.analogRowEntries()
       .filter((entry) => entry.source.group >= 0)
       .map((entry) => entry.source.busId));
-    const pruned = pruneAnalogState({ focusedId: this.analogFocusId, hidden: new Set<string>() }, valid);
+    const pruned = pruneAnalogState(
+      { focusedId: this.analogFocusId, hidden: this.analogHidden }, valid);
     this.analogFocusId = pruned.focusedId;
+    this.analogHidden = pruned.hidden;
+  }
+
+  private mergedAnalogSources(): readonly AnalogBandSource[] {
+    if (this.analogLayout !== 'merged') return [];
+    return this.analogRowBands.find((band) => band.id === MERGED_ANALOG_BAND_ID)?.sources ?? [];
+  }
+
+  private hiddenAnalogSources(): ReadonlySet<string> {
+    return this.analogLayout === 'merged' ? this.analogHidden : EMPTY_ANALOG_HIDDEN;
+  }
+
+  private voltageCursor(): CursorLine | null {
+    const active = this.activeCursor();
+    if (active !== null && active.marker.sample !== null) return active;
+    return this.cursors.find((cursor) => cursor.marker.sample !== null) ?? null;
+  }
+
+  private analogCursorVoltages(
+    sources: readonly AnalogBandSource[],
+  ): Map<string, CursorVoltagePoint> {
+    const cursor = this.voltageCursor();
+    const inputs: CursorVoltageSource[] = [];
+    for (const source of visibleAnalogSources(sources, this.hiddenAnalogSources())) {
+      const bus = this.busViews.find((candidate) => candidate.id === source.busId);
+      if (bus === undefined) continue;
+      inputs.push({
+        busId: source.busId, name: source.name, color: source.color,
+        bits: bus.spec.bits, group: source.group, gain: source.gain,
+      });
+    }
+    const points = this.analogVoltages.project(
+      this.captureStore.length > 0 ? this.captureStore : null, inputs,
+      { sample: cursor?.marker.sample ?? null, previousWave: this.repeatShowingFront });
+    return new Map(points.map((point) => [point.busId, point]));
+  }
+
+  private analogStripView(sources: readonly AnalogBandSource[]): AnalogSourceStripView {
+    const points = this.analogCursorVoltages(sources);
+    const cursor = this.voltageCursor();
+    const label = cursor?.marker.label ?? '';
+    const focused = resolveAnalogFocus(sources, this.analogFocusId);
+    const hidden = this.hiddenAnalogSources();
+    const items: AnalogSourceStripItem[] = sources.map((source) => {
+      const point = points.get(source.busId);
+      const visible = !hidden.has(source.busId);
+      const read = cursor !== null && visible ? point : undefined;
+      return {
+        busId: source.busId,
+        name: source.name,
+        color: source.color,
+        focused: source.busId === focused,
+        visible,
+        volts: read === undefined ? '' : cursorVoltageValue(read),
+        voltsDetail: read === undefined ? '' : cursorVoltageDetail(read, label),
+      };
+    });
+    return { items, note: this.analogStripNote(sources) };
+  }
+
+  private analogStripNote(sources: readonly AnalogBandSource[]): string {
+    if (sources.length > 0 && visibleAnalogSources(sources, this.hiddenAnalogSources()).length === 0) {
+      return t('bus.allHiddenHint');
+    }
+    if (this.voltageCursor() !== null && this.repeatShowingFront) {
+      return t('bus.voltsPreviousWaveNote');
+    }
+    return '';
   }
 
   private renderAnalogSources(): void {
-    const merged = this.analogLayout === 'merged'
-      ? this.analogRowBands.find((band) => band.id === MERGED_ANALOG_BAND_ID) : undefined;
-    if (!merged) {
-      this.sourceStrip.render([]);
-      return;
-    }
-    const sources = merged.sources;
-    const focused = resolveAnalogFocus(sources, this.analogFocusId);
-    const items: AnalogSourceStripItem[] = sources.map((source) => ({
-      busId: source.busId,
-      name: source.name,
-      color: source.color,
-      focused: source.busId === focused,
-    }));
-    this.sourceStrip.render(items);
+    const sources = this.mergedAnalogSources();
+    this.sourceStrip.render(
+      sources.length === 0 ? { items: [], note: '' } : this.analogStripView(sources));
+  }
+
+  private refreshAnalogVoltages(): void {
+    const sources = this.mergedAnalogSources();
+    if (sources.length === 0) return;
+    this.sourceStrip.updateVoltages(this.analogStripView(sources));
+  }
+
+  private toggleAnalogVisibility(busId: string): void {
+    const sources = this.mergedAnalogSources();
+    if (!sources.some((source) => source.busId === busId)) return;
+    const next = toggleSourceVisibility(
+      sources,
+      { focusedId: resolveAnalogFocus(sources, this.analogFocusId), hidden: this.analogHidden },
+      busId);
+    this.analogHidden = next.hidden;
+    this.analogFocusId = next.focusedId;
+    this.relayout();
+    this.renderPanels();
+    this.dirty = true;
   }
 
   private setAnalogLayout(layout: AnalogLayout): void {
@@ -2915,8 +3006,15 @@ export class App {
 
   private setAnalogFocus(busId: string): void {
     const entry = this.analogRowEntries().find((candidate) => candidate.source.busId === busId);
-    if (!entry || entry.source.group < 0 || busId === this.analogFocusId) return;
+    if (!entry || entry.source.group < 0) return;
+    const hiddenBus = this.analogHidden.has(busId);
+    if (busId === this.analogFocusId && !hiddenBus) return;
     this.analogFocusId = busId;
+    if (hiddenBus) {
+      const hidden = new Set(this.analogHidden);
+      hidden.delete(busId);
+      this.analogHidden = hidden;
+    }
     this.relayout();
     this.renderPanels();
     this.dirty = true;
@@ -3525,6 +3623,7 @@ export class App {
       this.settings.triggerEnableMask, this.settings.triggerSource,
       JSON.stringify(this.settings.analogTriggers ?? {}),
       this.analogLayout, this.analogFocusId ?? '',
+      this.analogLayout === 'merged' ? [...this.analogHidden].sort().join(',') : '',
     ];
     for (const bus of this.busViews) {
       parts.push(...busFrameSignatureParts(bus));
@@ -3798,6 +3897,7 @@ export class App {
           if (cursor.marker.started) this.activeCursorId = cursor.id;
           if (this.cursorsPageShown()) this.capturePanel.updateCursors(this.cursorRows());
           if (this.cursorsPageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
+          this.refreshAnalogVoltages();
           this.dirty = true; return;
         }
       }
@@ -3927,6 +4027,7 @@ export class App {
           if (cursor.marker.started) this.activeCursorId = cursor.id;
           if (this.cursorsPageShown()) this.capturePanel.updateCursors(this.cursorRows());
           if (this.cursorsPageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
+          this.refreshAnalogVoltages();
           this.dirty = true;
         }
         return;
@@ -4907,6 +5008,7 @@ export class App {
     }
     this.repeatShowingFront = false;
     this.repeatHeldTrigger = null;
+    this.refreshAnalogVoltages();
   }
 
   /** The displayed store's T: the current wave's trigger, or the held old wave's T. */
@@ -4966,6 +5068,7 @@ export class App {
     this.repeatComposite = null;
     this.repeatShowingFront = false;
     this.repeatHeldTrigger = null;
+    this.refreshAnalogVoltages();
   }
 
   /**
@@ -5019,6 +5122,7 @@ export class App {
     this.repeatHeldTrigger = null;
     this.repeatComposite = null;
     this.pendingCursorDelta = null;
+    this.refreshAnalogVoltages();
   }
 
   /**
@@ -5738,6 +5842,7 @@ export class App {
   private renderPanels(): void {
     this.syncSidebar();
     this.renderSidebarContent();
+    this.refreshAnalogVoltages();
   }
 
   private syncSidebar(): void {
@@ -7008,6 +7113,7 @@ export class App {
         // vacuum from a Fixed viewport at the wave boundary.
         this.repeatShowingFront = true;
         this.repeatHeldTrigger = front.hasTrigger ? front.origin : null;
+        this.refreshAnalogVoltages();
       } else {
         const hold = planCaptureStartDisplay({
           displayedSamples: this.store.length,

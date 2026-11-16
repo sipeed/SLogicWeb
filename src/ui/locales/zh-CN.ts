@@ -815,6 +815,17 @@ export const zhCN: Messages = {
   'bus.layoutMerged': '叠加',
   'bus.sourceStrip': '模拟信号源',
   'bus.focusSource': '聚焦 {name}',
+  'bus.hideSource': '隐藏 {name}',
+  'bus.showSource': '显示 {name}',
+  'bus.allHiddenNote': '所有信号源已隐藏',
+  'bus.allHiddenHint': '所有信号源已隐藏，用信号源按钮显示其中一个。',
+  'bus.voltsAtCursor': '光标 {cursor} 处 {volts}',
+  'bus.voltsUnknown': '采样未知',
+  'bus.voltsOutside': '在当前波形之外',
+  'bus.voltsPreviousWave': '显示的是上一波',
+  'bus.voltsPreviousWaveNote': '当前显示上一波：光标电压等待当前波。',
+  'bus.voltsNoSource': '本次采集没有该信号源',
+  'bus.voltsNoCursor': '还没有放置光标',
 
   // ------------------------------------------------------- AI assistant
   'assistant.title': 'AI 助手',

@@ -1558,6 +1558,7 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
 .analog-source-strip[hidden] { display: none; }
 .analog-source-chip {
   display: flex; align-items: center; gap: 5px; flex: 0 0 auto;
+  min-width: 0; max-width: 100%;
   pointer-events: auto; cursor: pointer; touch-action: manipulation;
   padding: 2px 7px 2px 5px; border-radius: 999px;
   background: color-mix(in oklab, var(--bg10) 88%, transparent);
@@ -1572,7 +1573,36 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
 }
 .analog-source-swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
 .analog-source-name {
-  max-width: 128px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0; max-width: 128px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.analog-source-item {
+  display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto;
+  min-width: 0; max-width: 100%;
+}
+.analog-source-volts {
+  flex: 0 1 auto; min-width: 0;
+  font-variant-numeric: tabular-nums; color: var(--text80);
+  max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.analog-source-volts:empty { display: none; }
+.analog-source-chip.is-hidden { opacity: 0.55; }
+.analog-source-chip.is-hidden .analog-source-swatch { opacity: 0.35; }
+.analog-source-visibility {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; border-radius: 999px;
+  pointer-events: auto; cursor: pointer; touch-action: manipulation;
+  background: color-mix(in oklab, var(--bg10) 88%, transparent);
+  border: 1px solid var(--border-low); color: var(--text80);
+}
+.analog-source-visibility:hover { border-color: var(--input); }
+.analog-source-visibility:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.analog-source-visibility[aria-pressed="false"] { color: var(--text50); }
+.analog-source-eye { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.2; }
+.analog-source-note {
+  flex: 0 0 auto; max-width: 100%; margin: 0; padding: 1px 6px;
+  border-radius: 6px; pointer-events: auto;
+  background: color-mix(in oklab, var(--bg10) 88%, transparent);
+  font-size: 11px; line-height: 15px; color: var(--text80);
 }
 .wave-canvas { display: block; width: 100%; }
 
