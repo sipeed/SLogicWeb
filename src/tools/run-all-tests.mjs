@@ -41,6 +41,7 @@ const entries = [
   'src/dsp/measurementsSelftest.ts',
   'src/dsp/analogScanSelftest.ts',
   'src/dsp/fftSelftest.ts',
+  'src/dsp/fftSpectrumSelftest.ts',
   'src/dsp/hostTriggerSelftest.ts',
   'src/dsp/hostTriggerStoreIntegrationSelftest.ts',
   'src/dsp/acquisitionSelftest.ts',
