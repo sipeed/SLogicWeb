@@ -7,8 +7,8 @@ import { qualifiedCrossings } from '../data/analogRunQualifier.js';
 import { analogVoltsPerCode } from '../ui/channelBanks.js';
 import { MEASURE_SCAN_SAMPLES } from '../ui/measureSamples.js';
 import {
-  ANALOG_NEAR_LIMIT_PERIOD_SAMPLES, ANALOG_SCAN_MAX_CROSSINGS, scanAnalogCodes,
-  type AnalogCodeScan, type AnalogCodeScanInput,
+  ANALOG_NEAR_LIMIT_PERIOD_SAMPLES, ANALOG_SCAN_MAX_CROSSINGS, AnalogCodeScanAccumulator,
+  scanAnalogCodes, type AnalogCodeScan, type AnalogCodeScanInput,
 } from './analogScan.js';
 
 interface TestResult { name: string; pass: boolean; detail: string }
@@ -101,6 +101,49 @@ function squareWave(length: number, period: number, highSamples: number): Uint8A
 }
 
 const sine = loadAdcTrace('sine');
+
+function sameScan(a: AnalogCodeScan, b: AnalogCodeScan): string {
+  const diffs: string[] = [];
+  for (const key of Object.keys(a) as (keyof AnalogCodeScan)[]) {
+    const left = a[key];
+    const right = b[key];
+    const equal = typeof left === 'number' && typeof right === 'number'
+      ? left === right || (Number.isNaN(left) && Number.isNaN(right))
+      : left === right;
+    if (!equal) diffs.push(`${String(key)}: ${String(left)} vs ${String(right)}`);
+  }
+  return diffs.join('; ');
+}
+
+function chunked(
+  codes: Uint8Array, nextSize: () => number, extra: ScanOverrides = {}, unknown?: Uint8Array,
+): AnalogCodeScan {
+  const accumulator = new AnalogCodeScanAccumulator({ ...BASE, ...extra });
+  for (let at = 0; at < codes.length;) {
+    const end = Math.min(codes.length, at + Math.max(1, nextSize()));
+    if (unknown === undefined) accumulator.push(codes.subarray(at, end));
+    else accumulator.push(codes.subarray(at, end), unknown.subarray(at, end));
+    at = end;
+  }
+  return accumulator.finish();
+}
+
+function lcg(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+}
+
+function perturbed(source: AnalogCodeScan, key: keyof AnalogCodeScan): AnalogCodeScan {
+  const out = { ...source } as Record<string, unknown>;
+  const value = out[key];
+  if (typeof value === 'number') out[key] = Number.isNaN(value) ? 0 : value + 1;
+  else if (typeof value === 'boolean') out[key] = !value;
+  else out[key] = value === 'ok' ? 'no-data' : 'ok';
+  return out as unknown as AnalogCodeScan;
+}
 
 check(
   'scan constants',
@@ -719,6 +762,253 @@ check(
     'accepts the endpoint codes 0 and 255',
     acceptsCodes([0, 255, 0, 255]) && acceptsCodes(new Uint8Array([255, 0, 255, 0])),
     'an in-range code was refused',
+  );
+}
+
+{
+  const whole = scan(sine);
+  const failures: string[] = [];
+  for (const size of [1, 2, 3, 7, 64, 1000]) {
+    const diff = sameScan(whole, chunked(sine, () => size));
+    if (diff) failures.push(`${size}: ${diff}`);
+  }
+  check(
+    'chunked sine: chunk sizes 1, 2, 3, 7, 64 and 1000 reproduce every whole-array field',
+    failures.length === 0,
+    failures.join(' | '),
+  );
+
+  const random = lcg(0x5eed_1234);
+  const randomFailures: string[] = [];
+  for (let run = 0; run < 5; run += 1) {
+    const diff = sameScan(whole, chunked(sine, () => 1 + Math.floor(random() * 997)));
+    if (diff) randomFailures.push(`run ${run}: ${diff}`);
+  }
+  check(
+    'chunked sine: five pseudo-random splits reproduce every whole-array field',
+    randomFailures.length === 0,
+    randomFailures.join(' | '),
+  );
+
+  let singles = 0;
+  let sixtyFours = 0;
+  const singleSample = chunked(sine, () => { singles += 1; return 1; });
+  const sixtyFour = chunked(sine, () => { sixtyFours += 1; return 64; });
+  check(
+    'the chunked driver really splits the fixture into 300 000 and 4688 pushes',
+    singles === 300000 && sixtyFours === 4688 &&
+      sameScan(whole, singleSample) === '' && sameScan(whole, sixtyFour) === '',
+    `singles=${singles}, sixtyFours=${sixtyFours}`,
+  );
+  check(
+    'chunked sine: the equivalence covers 30 carried crossings and 29 carried duty periods',
+    whole.crossingCount === 30 && whole.dutyPeriods === 29 && whole.dutyExcludedPeriods === 0 &&
+      whole.dutyKnownSamples > 0 && whole.frequencyHz === chunked(sine, () => 64).frequencyHz,
+    `crossings=${whole.crossingCount}, periods=${whole.dutyPeriods}, ` +
+      `known=${whole.dutyKnownSamples}`,
+  );
+}
+
+{
+  const codes = periodic(4000, 4, 0, 255);
+  const whole = scan(codes, { window: 0 });
+  const coarse = chunked(codes, () => 1000, { window: 0 });
+  const fine = chunked(codes, () => 3, { window: 0 });
+  check(
+    'chunked cap: the 512-crossing cap and its frozen duty survive every chunk boundary',
+    whole.crossingCap && whole.crossingCount === 512 && whole.firstCrossing === 1 &&
+      whole.lastCrossing === 2045 && sameScan(whole, coarse) === '' && sameScan(whole, fine) === '',
+    `cap=${whole.crossingCap}, count=${whole.crossingCount}, ` +
+      `coarse=${sameScan(whole, coarse)}, fine=${sameScan(whole, fine)}`,
+  );
+}
+
+{
+  const accumulator = new AnalogCodeScanAccumulator({ ...BASE });
+  accumulator.push(sine.subarray(0, 5000));
+  accumulator.push(sine.subarray(5000, 9000));
+  const first = accumulator.finish();
+  const again = accumulator.finish();
+  check(
+    'finish() is idempotent: a second call returns the same result object',
+    first === again && first.analyzed === 9000 && sameScan(first, scan(sine.subarray(0, 9000))) === '',
+    `same=${first === again}, analyzed=${first.analyzed}`,
+  );
+  throwsRange('push after finish() throws RangeError', () => accumulator.push(new Uint8Array(1)));
+  check(
+    'push after finish() leaves the returned result untouched',
+    accumulator.finish() === first && first.analyzed === 9000,
+    `analyzed=${first.analyzed}`,
+  );
+}
+
+{
+  const accumulator = new AnalogCodeScanAccumulator({ ...BASE });
+  accumulator.push(sine.subarray(0, 600));
+  throwsRange(
+    'a rejected sample marks the accumulator',
+    () => accumulator.push([sine[600]!, 999, sine[601]!]),
+  );
+  throwsRange('finish after a rejected sample throws RangeError', () => accumulator.finish());
+  throwsRange(
+    'push after a rejected sample throws RangeError',
+    () => accumulator.push(sine.subarray(603, 700)),
+  );
+  throwsRange('finish stays refused for a rejected accumulator', () => accumulator.finish());
+
+  const validated = new AnalogCodeScanAccumulator({ ...BASE });
+  validated.push(sine.subarray(0, 4));
+  throwsRange(
+    'a length-only rejection does not mark the accumulator',
+    () => validated.push(sine.subarray(4, 8), new Uint8Array(2)),
+  );
+  validated.push(sine.subarray(4, 8));
+  check(
+    'a length-only rejection leaves the accumulator usable and counting',
+    sameScan(validated.finish(), scan(sine.subarray(0, 8))) === '',
+    sameScan(validated.finish(), scan(sine.subarray(0, 8))),
+  );
+}
+
+{
+  const whole = scan(sine);
+  const accumulator = new AnalogCodeScanAccumulator({ ...BASE });
+  const head = sine.slice(0, 30000);
+  const mask = new Uint8Array(30000);
+  accumulator.push(head, mask);
+  head.fill(0);
+  mask.fill(1);
+  accumulator.push(sine.subarray(30000));
+  check(
+    'no pushed chunk is retained: overwriting it in place after push changes nothing',
+    sameScan(whole, accumulator.finish()) === '',
+    sameScan(whole, accumulator.finish()),
+  );
+}
+
+{
+  const whole = scan(sine.subarray(0, 20000));
+  const accumulator = new AnalogCodeScanAccumulator({ ...BASE });
+  for (let at = 0; at < 20000; at += 500) {
+    accumulator.push(sine.subarray(at, at));
+    accumulator.push(sine.subarray(at, at + 500));
+    accumulator.push(sine.subarray(at, at));
+  }
+  const withEmpties = accumulator.finish();
+  check(
+    'empty pushes are legal and change nothing',
+    sameScan(whole, withEmpties) === '' && withEmpties.analyzed === 20000,
+    sameScan(whole, withEmpties),
+  );
+  const nothing = new AnalogCodeScanAccumulator({ ...BASE }).finish();
+  check(
+    'a scan with no pushes reports the empty no-data result',
+    nothing.analyzed === 0 && nothing.known === 0 && nothing.unknown === 0 &&
+      nothing.status === 'no-data' && nothing.crossingCount === 0 && !nothing.crossingCap &&
+      nothing.firstCrossing === -1 && nothing.lastCrossing === -1 &&
+      nothing.dutyPeriods === 0 && Number.isNaN(nothing.dutyPercent),
+    `analyzed=${nothing.analyzed}, status=${nothing.status}`,
+  );
+}
+
+{
+  const codes = squareWave(96, 8, 2);
+  const mask = new Uint8Array(96);
+  mask[28] = 1;
+  const wholeGap = scan(codes, { unknown: mask });
+  const clipCodes = squareWave(96, 8, 2);
+  clipCodes.fill(255, 40, 44);
+  const wholeClip = scan(clipCodes, { window: 2 });
+  const failures: string[] = [];
+  for (const size of [5, 27, 28, 29]) {
+    const diff = sameScan(wholeGap, chunked(codes, () => size, {}, mask));
+    if (diff) failures.push(`gap@${size}: ${diff}`);
+  }
+  for (const size of [40, 41, 42, 43]) {
+    const diff = sameScan(wholeClip, chunked(clipCodes, () => size, { window: 2 }));
+    if (diff) failures.push(`clip@${size}: ${diff}`);
+  }
+  check(
+    'a gap run straddling a chunk boundary keeps the whole-array excluded-period count',
+    wholeGap.dutyExcludedPeriods === 1 && wholeGap.dutyPeriods === 9 &&
+      wholeGap.dutyKnownSamples === 72 && wholeGap.dutyPercent === 25 && failures.length === 0,
+    `excluded=${wholeGap.dutyExcludedPeriods}, periods=${wholeGap.dutyPeriods}, ` +
+      `known=${wholeGap.dutyKnownSamples}, duty=${wholeGap.dutyPercent} ${failures.join(' | ')}`,
+  );
+  check(
+    'a clipping run straddling a chunk boundary keeps the whole-array excluded-period count',
+    wholeClip.clippedHigh && !wholeClip.clippedLow && wholeClip.dutyExcludedPeriods === 1 &&
+      wholeClip.dutyPeriods === 9 && wholeClip.dutyKnownSamples === 72 && failures.length === 0,
+    `clipped=${wholeClip.clippedHigh}/${wholeClip.clippedLow}, ` +
+      `excluded=${wholeClip.dutyExcludedPeriods}, periods=${wholeClip.dutyPeriods}, ` +
+      `known=${wholeClip.dutyKnownSamples} ${failures.join(' | ')}`,
+  );
+}
+
+{
+  const whole = scan(sine);
+  const missed: string[] = [];
+  for (const key of Object.keys(whole) as (keyof AnalogCodeScan)[]) {
+    if (sameScan(whole, perturbed(whole, key)) === '') missed.push(String(key));
+  }
+  check(
+    'the chunk comparator detects a one-unit change in every single scan field',
+    missed.length === 0,
+    `undetected: ${missed.join(', ')}`,
+  );
+
+  const perChunk: AnalogCodeScan = (() => {
+    let last = scan(sine.subarray(0, 1000));
+    let analyzed = 0;
+    let known = 0;
+    let unknown = 0;
+    for (let at = 0; at < sine.length; at += 1000) {
+      last = scan(sine.subarray(at, at + 1000));
+      analyzed += last.analyzed;
+      known += last.known;
+      unknown += last.unknown;
+    }
+    return { ...last, analyzed, known, unknown };
+  })();
+  const rejected = sameScan(whole, perChunk);
+  check(
+    'a driver that restarts indices and the duty ring per chunk is rejected by the comparator',
+    rejected.includes('crossingCount') && rejected.includes('dutyPeriods') &&
+      rejected.includes('firstCrossing') && rejected.includes('dutyKnownSamples'),
+    rejected,
+  );
+}
+
+{
+  const accumulator = new AnalogCodeScanAccumulator({ ...BASE });
+  accumulator.push(sine.subarray(0, 4));
+  throwsRange(
+    'a later push whose unknown mask has a different length throws RangeError',
+    () => accumulator.push(sine.subarray(4, 8), new Uint8Array(2)),
+  );
+  let message = '';
+  let rangeError = false;
+  try {
+    accumulator.push([100, 200, 300, 120]);
+  } catch (error) {
+    rangeError = error instanceof RangeError;
+    message = error instanceof Error ? error.message : String(error);
+  }
+  check(
+    'an out-of-range code in a later push names its absolute sample index',
+    rangeError && message === 'codes[6] must be an integer in 0..255, got 300',
+    message,
+  );
+  let wholeMessage = '';
+  try {
+    scan([100, 200, 300, 120]);
+  } catch (error) {
+    wholeMessage = error instanceof Error ? error.message : String(error);
+  }
+  check(
+    'the whole-array path keeps the same absolute-index code message',
+    wholeMessage === 'codes[2] must be an integer in 0..255, got 300',
+    wholeMessage,
   );
 }
 
