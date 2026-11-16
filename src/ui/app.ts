@@ -92,9 +92,10 @@ import { sameUsbDevice } from './deviceIdentity.js';
 import {
   MEASUREMENT_PARAMETERS, addMeasurementRow, defaultMeasurementConfig, isMeasurementBank,
   measurementCacheKey, measurementRowViews, measurementSources, reconcileMeasurementConfig,
-  resolveMeasurementWindow, runMeasurement, selectMeasurementRange, selectMeasurementSource,
+  removeMeasurementRow, resolveMeasurementWindow, runMeasurement, selectMeasurementRange,
+  selectMeasurementSource,
   type MeasurementConfig, type MeasurementParameter, type MeasurementRange,
-  type MeasurementReadSummary, type MeasurementSectionView,
+  type MeasurementRangeKind, type MeasurementReadSummary, type MeasurementSectionView,
 } from './measurementState.js';
 import type { MeasureRead } from './measureSamples.js';
 import {
@@ -360,6 +361,7 @@ export class App {
   private measurementCache:
     { store: SampleStore; key: string; read: MeasureRead; scan: AnalogCodeScan | null } | null = null;
   private runningPanelAt = 0;
+  private analysisPanelAt = 0;
   /** New samples are waiting for the next data-driven redraw (HSync's status cadence). */
   private livePending = false;
   /** When the screen was last drawn for any reason, in `performance.now()` terms. */
@@ -1290,6 +1292,57 @@ export class App {
     this.measurementCache = null;
     this.renderPanels();
     this.dirty = true;
+  }
+
+  private applyMeasurementConfig(next: MeasurementConfig): void {
+    const sources = measurementSources(this.busViews, this.captureStore.channelCount);
+    this.measurementConfig = reconcileMeasurementConfig(next, sources);
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private pickMeasurementSource(group: number | null): void {
+    const sources = measurementSources(this.busViews, this.captureStore.channelCount);
+    const base = this.measurementConfig ?? defaultMeasurementConfig(sources);
+    this.applyMeasurementConfig(selectMeasurementSource(base, sources, group));
+  }
+
+  private pickMeasurementRange(kind: MeasurementRangeKind): void {
+    const sources = measurementSources(this.busViews, this.captureStore.channelCount);
+    const base = this.measurementConfig ?? defaultMeasurementConfig(sources);
+    const seeded = this.cursors.flatMap((cursor) => {
+      const sample = cursor.marker.sample;
+      return sample === null || !Number.isFinite(sample) ? [] : [cursor.id];
+    });
+    const range: MeasurementRange = kind === 'viewport'
+      ? { kind: 'viewport', a: null, b: null }
+      : {
+        kind: 'cursors',
+        a: base.range.a ?? seeded[0] ?? null,
+        b: base.range.b ?? seeded[1] ?? null,
+      };
+    this.applyMeasurementConfig(selectMeasurementRange(base, range));
+  }
+
+  private pickMeasurementCursor(side: 'a' | 'b', cursorId: number | null): void {
+    const sources = measurementSources(this.busViews, this.captureStore.channelCount);
+    const base = this.measurementConfig ?? defaultMeasurementConfig(sources);
+    if (base.range.kind !== 'cursors') return;
+    const range: MeasurementRange = side === 'a'
+      ? { ...base.range, a: cursorId } : { ...base.range, b: cursorId };
+    this.applyMeasurementConfig(selectMeasurementRange(base, range));
+  }
+
+  private addMeasurementParameter(parameter: MeasurementParameter): void {
+    const sources = measurementSources(this.busViews, this.captureStore.channelCount);
+    const base = this.measurementConfig ?? defaultMeasurementConfig(sources);
+    this.applyMeasurementConfig(addMeasurementRow(base, parameter));
+  }
+
+  private removeMeasurementParameter(parameter: MeasurementParameter): void {
+    const sources = measurementSources(this.busViews, this.captureStore.channelCount);
+    const base = this.measurementConfig ?? defaultMeasurementConfig(sources);
+    this.applyMeasurementConfig(removeMeasurementRow(base, parameter));
   }
 
   // ------------------------------------------------------------------ bus views
@@ -2539,6 +2592,12 @@ export class App {
     // Bus overviews are background work: skip them on the fastest loop streams so the
     // ingest path keeps the link, and let them finish after the capture stops.
     if (!highRateLoop) this.pumpBusBuilders();
+    if (now - this.analysisPanelAt > 500) {
+      this.analysisPanelAt = now;
+      if (this.running && this.cursorsPageShown()) {
+        this.capturePanel.updateMeasurements(this.measurementView());
+      }
+    }
     if (this.running && this.repeatWaveHolding && now - this.runningPanelAt > 500) {
       // A quiet Repeat wave holds the previous frame and progress until its data arrives,
       // but its own trigger state (the pre-fill countdown, then "waiting") is current:
@@ -2590,6 +2649,9 @@ export class App {
     if (!this.dirty && !liveDue) return;
     const forced = this.dirty;
     this.dirty = false;
+    if (forced && !this.running && this.cursorsPageShown()) {
+      this.capturePanel.updateMeasurements(this.measurementView());
+    }
     this.livePending = false;
     this.liveDrawAt = now;
     const drawStartedAt = performance.now();
@@ -4882,6 +4944,11 @@ export class App {
         onRemoveCursorEdge: (rowId) => this.removeEdgeRow(rowId),
         onPickCursorEdge: (rowId, side, cursorId) => this.pickEdgeCursor(rowId, side, cursorId),
         onPickCursorEdgeChannel: (rowId, channel) => this.pickEdgeChannel(rowId, channel),
+        onPickMeasurementSource: (group) => this.pickMeasurementSource(group),
+        onPickMeasurementRange: (kind) => this.pickMeasurementRange(kind),
+        onPickMeasurementCursor: (side, cursorId) => this.pickMeasurementCursor(side, cursorId),
+        onAddMeasurementRow: (parameter) => this.addMeasurementParameter(parameter),
+        onRemoveMeasurementRow: (parameter) => this.removeMeasurementParameter(parameter),
       });
       return;
     }
@@ -5177,6 +5244,7 @@ export class App {
       cursors: this.cursorRows(),
       cursorDistances: this.cursorDistanceRows(),
       cursorEdges: this.cursorEdgeRows(),
+      measurement: this.measurementView(),
       cursorEdgeChannels: this.edgeChannelOptions(),
       triggerViewLost: this.triggerViewLost,
       triggerViewPending: this.triggerViewPending,
@@ -6376,6 +6444,7 @@ export class App {
       }
       this.running = true;
       this.runningPanelAt = 0;
+      this.analysisPanelAt = 0;
       if (!quietRepeat) this.relayout();
       if (origin !== 'repeat' || newSession) {
         // A new session starts in FollowLive with the default live window. Repeat waves

@@ -34,8 +34,12 @@ import {
 import {
   parseCustomThreshold, thresholdChoice, thresholdOptionLabel, thresholdRange,
 } from './thresholdOptions.js';
-import { t } from './i18n.js';
+import { t, type MessageKey } from './i18n.js';
 import { helpTip } from './helpTip.js';
+import type {
+  MeasurementParameter, MeasurementRangeKind, MeasurementRowView, MeasurementSectionView,
+  MeasurementStatus,
+} from './measurementState.js';
 import { chipForeground } from './metrics.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
@@ -85,6 +89,11 @@ export interface CapturePanelCallbacks {
   onRemoveCursorEdge(rowId: number): void;
   onPickCursorEdge(rowId: number, side: DistanceSide, cursorId: number): void;
   onPickCursorEdgeChannel(rowId: number, channel: number | null): void;
+  onPickMeasurementSource(group: number | null): void;
+  onPickMeasurementRange(kind: MeasurementRangeKind): void;
+  onPickMeasurementCursor(side: 'a' | 'b', cursorId: number | null): void;
+  onAddMeasurementRow(parameter: MeasurementParameter): void;
+  onRemoveMeasurementRow(parameter: MeasurementParameter): void;
 }
 
 /** `aborted`: the last capture was ended by a device/link failure (`CapturePanelView.abort`). */
@@ -219,6 +228,7 @@ export interface CapturePanelView {
   loopMetrics?: LoopDisplayMetrics | null;
   /** A previous Repeat Interval missed its trigger; the session is retrying. */
   repeatMissed?: boolean;
+  measurement: MeasurementSectionView;
 }
 
 /**
@@ -369,6 +379,27 @@ export class CapturePanel {
         const result = item.querySelector<HTMLElement>('.cursor-edge-result');
         if (result === null) continue;
         result.textContent = row.result;
+      }
+    }
+  }
+
+  updateMeasurements(view: MeasurementSectionView): void {
+    const byParameter = new Map<MeasurementParameter, MeasurementRowView>();
+    for (const row of view.rows) byParameter.set(row.parameter, row);
+    const note = measurementNoteText(view);
+    for (const root of this.roots()) {
+      for (const item of root.querySelectorAll<HTMLElement>('.measure-row')) {
+        const parameter = item.dataset.measure as MeasurementParameter | undefined;
+        const row = parameter === undefined ? undefined : byParameter.get(parameter);
+        if (row === undefined) continue;
+        const value = item.querySelector<HTMLElement>('.measure-value');
+        if (value !== null) value.textContent = measurementValueText(row);
+        const status = item.querySelector<HTMLElement>('.measure-status');
+        if (status !== null) status.textContent = measurementStatusText(row);
+      }
+      for (const item of root.querySelectorAll<HTMLElement>('[data-measure-note]')) {
+        item.textContent = note;
+        item.hidden = note === '';
       }
     }
   }
@@ -1408,6 +1439,111 @@ export class CapturePanel {
     }
     cursorPage.appendChild(cursorSec.el);
 
+    const measureSec = section(t('capturePanel.measure'));
+    const measureLegend = document.createElement('span');
+    measureLegend.className = 'cursor-legend';
+    measureLegend.textContent = t('capturePanel.measureFormat');
+    measureSec.header.appendChild(measureLegend);
+    const measureControls = div('measure-controls');
+    const measureSource = selectControl(
+      'measure.source',
+      t('capturePanel.measureSource'),
+      v.measurement.sources.map((source): SelectOptionTuple => [String(source.group), source.name]),
+      v.measurement.source === null ? '' : String(v.measurement.source),
+    );
+    measureSource.addEventListener('change', () => this.cb.onPickMeasurementSource(
+      measureSource.value === '' ? null : Number(measureSource.value)));
+    measureSource.disabled = v.measurement.sources.length === 0;
+    const measureRange = selectControl(
+      'measure.range',
+      t('capturePanel.measureRange'),
+      [
+        ['viewport', t('capturePanel.measureRangeViewport')],
+        ['cursors', t('capturePanel.measureRangeCursors')],
+      ],
+      v.measurement.range.kind,
+    );
+    measureRange.addEventListener('change', () => this.cb.onPickMeasurementRange(
+      measureRange.value === 'cursors' ? 'cursors' : 'viewport'));
+    measureControls.append(measureSource.el, measureRange.el);
+    measureSec.body.appendChild(measureControls);
+    if (v.measurement.range.kind === 'cursors') {
+      const measureCursors = div('measure-cursors');
+      const cursorOptions: SelectOptionTuple[] = [
+        ['', t('capturePanel.measureCursorUnset')],
+        ...v.measurement.cursors.map(
+          (cursor): SelectOptionTuple => [String(cursor.id), cursor.label]),
+      ];
+      const first = selectControl('measure.cursor.a', t('capturePanel.measureCursorA'),
+        cursorOptions, v.measurement.range.a === null ? '' : String(v.measurement.range.a));
+      first.addEventListener('change', () => this.cb.onPickMeasurementCursor('a',
+        first.value === '' ? null : Number(first.value)));
+      const second = selectControl('measure.cursor.b', t('capturePanel.measureCursorB'),
+        cursorOptions, v.measurement.range.b === null ? '' : String(v.measurement.range.b));
+      second.addEventListener('change', () => this.cb.onPickMeasurementCursor('b',
+        second.value === '' ? null : Number(second.value)));
+      measureCursors.append(first.el, second.el);
+      if (v.measurement.cursors.length < 2) {
+        const hint = document.createElement('p');
+        hint.className = 'cursor-dist-hint';
+        hint.textContent = t('capturePanel.measureCursorHint');
+        measureCursors.appendChild(hint);
+      }
+      measureSec.body.appendChild(measureCursors);
+    }
+    if (v.measurement.rows.length === 0) {
+      const hint = div('panel-note');
+      hint.textContent = t('capturePanel.measureEmpty');
+      measureSec.body.appendChild(hint);
+    } else {
+      const list = div('measure-list');
+      for (const row of v.measurement.rows) {
+        const item = div('measure-row');
+        item.dataset.measure = row.parameter;
+        const parameter = document.createElement('span');
+        parameter.className = 'measure-param';
+        parameter.textContent = measurementParameterText(row.parameter);
+        const value = document.createElement('span');
+        value.className = 'measure-value';
+        value.translate = false;
+        value.textContent = measurementValueText(row);
+        const status = document.createElement('span');
+        status.className = 'measure-status';
+        status.textContent = measurementStatusText(row);
+        const remove = cursorRemoveButton(
+          t('capturePanel.measureRemove', { parameter: measurementParameterText(row.parameter) }),
+          () => this.cb.onRemoveMeasurementRow(row.parameter),
+        );
+        item.append(parameter, value, status, remove);
+        list.appendChild(item);
+      }
+      measureSec.body.appendChild(list);
+    }
+    if (v.measurement.availableParameters.length > 0) {
+      const addRow = div('measure-add-row');
+      for (const parameter of v.measurement.availableParameters) {
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'analyzer-act measure-add';
+        add.dataset.measureAdd = parameter;
+        add.textContent = measurementParameterText(parameter);
+        const label = t('capturePanel.measureAdd', {
+          parameter: measurementParameterText(parameter),
+        });
+        add.title = label;
+        add.setAttribute('aria-label', label);
+        add.addEventListener('click', () => this.cb.onAddMeasurementRow(parameter));
+        addRow.appendChild(add);
+      }
+      measureSec.body.appendChild(addRow);
+    }
+    const measureNote = div('measure-note');
+    measureNote.dataset.measureNote = '';
+    measureNote.textContent = measurementNoteText(v.measurement);
+    measureNote.hidden = measureNote.textContent === '';
+    measureSec.body.appendChild(measureNote);
+    cursorPage.appendChild(measureSec.el);
+
     const distanceSec = section(t('capturePanel.cursorDistance'));
     distanceSec.header.classList.add('cursor-dist-head');
     const distanceLegend = document.createElement('span');
@@ -2071,6 +2207,85 @@ function cursorRemoveIcon(): SVGSVGElement {
   icon.setAttribute('aria-hidden', 'true');
   for (const d of ['M18 6 6 18', 'm6 6 12 12']) appendIconPath(icon, d);
   return icon;
+}
+
+const MEASUREMENT_LABEL_KEYS: Record<MeasurementParameter, MessageKey> = {
+  frequency: 'capturePanel.measureFrequency',
+  vpp: 'capturePanel.measureVpp',
+  rms: 'capturePanel.measureRms',
+};
+
+const MEASUREMENT_STATUS_KEYS: Record<Exclude<MeasurementStatus, 'ok'>, MessageKey> = {
+  'no-source': 'capturePanel.measureStatusNoSource',
+  'no-window': 'capturePanel.measureStatusNoWindow',
+  'no-data': 'capturePanel.measureStatusNoData',
+  'no-crossing': 'capturePanel.measureStatusNoCrossing',
+  'one-crossing': 'capturePanel.measureStatusOneCrossing',
+  'previous-wave-displayed': 'capturePanel.measureStatusPreviousWave',
+};
+
+function measurementParameterText(parameter: MeasurementParameter): string {
+  return t(MEASUREMENT_LABEL_KEYS[parameter]);
+}
+
+function measurementMethodText(row: MeasurementRowView): string {
+  if (row.parameter === 'frequency') {
+    return t('capturePanel.measureMethodFrequency', { count: formatCount(row.crossingCount) });
+  }
+  return t(row.parameter === 'vpp'
+    ? 'capturePanel.measureMethodVpp' : 'capturePanel.measureMethodRms');
+}
+
+function measurementSharedFlagText(row: MeasurementRowView): string[] {
+  const parts: string[] = [];
+  if (row.truncated) {
+    parts.push(t('capturePanel.measurePartial', {
+      analyzed: formatCount(row.analyzedSamples),
+      requested: formatCount(row.requestedSamples),
+    }));
+  }
+  if (row.rangeClipped) parts.push(t('capturePanel.measureRangeClipped'));
+  if (row.gaps) parts.push(t('capturePanel.measureGaps'));
+  if (row.clippedLow) parts.push(t('capturePanel.measureClippedLow'));
+  if (row.clippedHigh) parts.push(t('capturePanel.measureClippedHigh'));
+  return parts;
+}
+
+function measurementFlagText(row: MeasurementRowView): string[] {
+  const parts = measurementSharedFlagText(row);
+  if (row.parameter !== 'frequency') return parts;
+  if (row.nearSampleLimit) parts.push(t('capturePanel.measureNearLimit'));
+  if (row.crossingCap) {
+    parts.push(t('capturePanel.measureCrossingCap', { count: formatCount(row.crossingCount) }));
+  }
+  return parts;
+}
+
+export function measurementValueText(row: MeasurementRowView): string {
+  if (Number.isNaN(row.value)) return t('capturePanel.measureValueNone');
+  return row.unit === 'hz' ? formatFreq(row.value) : `${formatVoltsNumber(row.value)} V`;
+}
+
+export function measurementStatusText(row: MeasurementRowView): string {
+  const parts = measurementFlagText(row);
+  if (row.status === 'ok') {
+    parts.unshift(measurementMethodText(row));
+  } else {
+    const status = row.status;
+    parts.unshift(t(MEASUREMENT_STATUS_KEYS[status]));
+  }
+  return parts.join(' · ');
+}
+
+export function measurementNoteText(view: MeasurementSectionView): string {
+  if (view.unavailable !== null) return '';
+  const parts: string[] = [];
+  for (const row of view.rows) {
+    for (const part of measurementSharedFlagText(row)) {
+      if (!parts.includes(part)) parts.push(part);
+    }
+  }
+  return parts.join(' · ');
 }
 
 export function cursorDistanceSideId(rowId: number, side: DistanceSide): string {
