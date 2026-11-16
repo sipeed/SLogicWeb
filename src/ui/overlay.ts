@@ -138,6 +138,36 @@ export function regionTintRects(
   return out;
 }
 
+export interface AnalogScopeView {
+  voltsPerDiv: number;
+  zeroPosition: number;
+  offsetV: number;
+  fullScaleV: number;
+  tickVoltsPerDiv?: number;
+  voltsPerDivUnit?: string;
+  triggerVolts?: number;
+  triggerKind?: 'rising' | 'falling';
+}
+
+export interface AnalogTraceView {
+  frame: AnalogFrame;
+  yMin: number;
+  yMax: number;
+  color: string;
+  style: 'line' | 'step';
+  smooth?: boolean;
+  scope?: AnalogScopeView;
+}
+
+export interface AnalogBandView {
+  top: number;
+  band: number;
+  traces: readonly AnalogTraceView[];
+  scope?: AnalogScopeView;
+  labels?: { top: string; bottom: string };
+  note?: string;
+}
+
 export class Overlay {
   readonly grid: HTMLCanvasElement;
   readonly top: HTMLCanvasElement;
@@ -329,7 +359,7 @@ export class Overlay {
   }
 
   /**
-   * One parallel-bus (ADC) row: the value as an analog trace over the full-scale range.
+   * One analog band and the traces drawn in it: each trace over its own calibration.
    *
    * Column frames come in device pixels and are drawn there, one bar per pixel from the
    * column's min to its max, stretched to meet the neighbouring column so a steep signal
@@ -337,22 +367,7 @@ export class Overlay {
    * (`line`, an ADC's samples) or held as steps (`step`), with a dot per sample once they
    * are far enough apart to see. NaN (a gap, or no latch yet) breaks the trace.
    */
-  drawAnalog(o: {
-    top: number; band: number; frame: AnalogFrame; yMin: number; yMax: number;
-    color: string; style: 'line' | 'step'; labels: { top: string; bottom: string }; note: string;
-    /** ADC scope rows: a smooth reconstruction and a vertical V/Div grid. */
-    smooth?: boolean;
-    scope?: {
-      voltsPerDiv: number; zeroPosition: number; offsetV: number; fullScaleV: number;
-      /** Target V/Div: fixed voltage ticks move through the animated display scale. */
-      tickVoltsPerDiv?: number;
-      /** Localized scale unit after the number, e.g. "V/div" or "V/格". */
-      voltsPerDivUnit?: string;
-      /** The armed analog trigger level and slope, drawn on the shared geometry. */
-      triggerVolts?: number;
-      triggerKind?: 'rising' | 'falling';
-    };
-  }): void {
+  drawAnalog(o: AnalogBandView): void {
     const c = this.ctx;
     const scope = o.scope;
     // The trace, graticule, ruler and trigger all use `scopeGeometry`; App uses the same
@@ -360,10 +375,18 @@ export class Overlay {
     const geometry = scope
       ? scopeGeometry(o.top, o.band, scope.voltsPerDiv, scope.zeroPosition) : null;
     const pad = SCOPE_PAD_CSS;
-    const h = geometry ? geometry.innerHeight : Math.max(1, o.band - 2 * pad);
-    const y = (v: number): number => geometry && scope
-      ? geometry.yVolts(scope.offsetV + (v / 255) * scope.fullScaleV)
-      : o.top + pad + ((o.yMax - v) / (o.yMax - o.yMin || 1)) * h;
+    const yFor = (t: AnalogTraceView): ((v: number) => number) => {
+      const traceScope = t.scope;
+      const traceGeometry = traceScope
+        ? scopeGeometry(o.top, o.band, traceScope.voltsPerDiv, traceScope.zeroPosition) : null;
+      if (traceGeometry && traceScope) {
+        return (v: number): number =>
+          traceGeometry.yVolts(traceScope.offsetV + (v / 255) * traceScope.fullScaleV);
+      }
+      const traceHeight = Math.max(1, o.band - 2 * pad);
+      return (v: number): number =>
+        o.top + pad + ((t.yMax - v) / (t.yMax - t.yMin || 1)) * traceHeight;
+    };
     // Tick labels use the target scale while their Y positions use the animated one.
     // Thus a real voltage mark (1 V, 2 V, ...) travels away from or toward 0 V as the
     // ruler extends/contracts; recomputing labels from the animated V/Div would instead
@@ -403,7 +426,8 @@ export class Overlay {
         c.stroke();
       }
       c.globalAlpha = 1;
-    } else if (o.yMin < 0 && o.yMax > 0) {
+    } else if (o.traces.length === 1 && o.traces[0]!.yMin < 0 && o.traces[0]!.yMax > 0) {
+      const y = yFor(o.traces[0]!);
       c.strokeStyle = this.palette.gridMajor;
       c.setLineDash([3, 3]);
       c.lineWidth = 1;
@@ -414,152 +438,158 @@ export class Overlay {
       c.setLineDash([]);
     }
 
-    const f = o.frame;
-    c.fillStyle = o.color;
-    c.strokeStyle = o.color;
-    c.lineWidth = 1.25;
-    c.lineJoin = 'round';
-    if (f.kind === 'columns' && o.smooth) {
-      // The zoomed-out half: a smooth min/max band with a smooth centreline, not one
-      // opaque bar per column - and not the old straight-edged envelope polygon, which
-      // read as a staircase of rectangular blocks at some zoom windows. Columns are
-      // device px; this path draws in CSS px.
-      //
-      // A run is the contiguous span of known columns between NaN columns (a gap, or a
-      // region the builder has not reached). Each run is smoothed on its own: joining
-      // across a NaN would paint unknown time as signal. Provisional columns are sampled
-      // rather than built, so their band is a touch lighter.
-      const d = this.dpr;
-      const len = f.min.length;
-      const known = (x: number): boolean =>
-        !Number.isNaN(f.min[x]!) && !Number.isNaN(f.max[x]!);
-      const bandAlpha = f.provisional ? 0.12 : 0.18;
-      const edgeAlpha = f.provisional ? 0.45 : 0.65;
-      for (let x = 0; x < len;) {
-        if (!known(x)) { x++; continue; }
-        let end = x;
-        while (end + 1 < len && known(end + 1)) end++;
-        const xs: number[] = [];
-        const mins: number[] = [];
-        const maxs: number[] = [];
-        for (let i = x; i <= end; i++) {
-          xs.push(i / d);
-          mins.push(f.min[i]!);
-          maxs.push(f.max[i]!);
-        }
-        const band = smoothBandEdges(xs, mins, maxs);
-        const last = band.x.length - 1;
-        // One smooth closed path through the Catmull-Rom samples: upper edge, right
-        // cap, lower edge, left cap. It is filled as a translucent wash - never the
-        // opaque block the raw min/max polygon used to paint - and stroked so the
-        // silhouette stays readable where the centreline is nearly flat (a sine whose
-        // period is only a few columns wide).
-        c.beginPath();
-        c.moveTo(band.x[0]!, y(band.upper[0]!));
-        for (let i = 1; i < band.x.length; i++) c.lineTo(band.x[i]!, y(band.upper[i]!));
-        c.lineTo(band.x[last]!, y(band.lower[last]!));
-        for (let i = last; i >= 0; i--) c.lineTo(band.x[i]!, y(band.lower[i]!));
-        c.closePath();
-        c.globalAlpha = bandAlpha;
-        c.fill();
-        c.globalAlpha = edgeAlpha;
-        c.lineWidth = 1;
-        c.stroke();
-        x = end + 1;
-      }
-      c.globalAlpha = 1;
+    for (const t of o.traces) {
+      const f = t.frame;
+      const y = yFor(t);
+      c.fillStyle = t.color;
+      c.strokeStyle = t.color;
       c.lineWidth = 1.25;
-      for (let x = 0; x < len;) {
-        if (!known(x)) { x++; continue; }
-        let end = x;
-        while (end + 1 < len && known(end + 1)) end++;
-        const cx: number[] = [];
-        const cy: number[] = [];
-        for (let i = x; i <= end; i++) {
-          cx.push(i / d);
-          cy.push((f.min[i]! + f.max[i]!) / 2);
-        }
-        c.beginPath();
-        smoothTrace(c, cx, cy, y);
-        c.stroke();
-        x = end + 1;
-      }
-    } else if (f.kind === 'columns') {
-      c.setTransform(1, 0, 0, 1, 0, 0);
-      const d = this.dpr;
-      for (let x = 0; x < f.min.length; x++) {
-        let lo = f.min[x]!;
-        let hi = f.max[x]!;
-        if (Number.isNaN(lo)) continue;
-        const pl = x > 0 ? f.min[x - 1]! : Number.NaN;
-        const ph = x > 0 ? f.max[x - 1]! : Number.NaN;
-        if (!Number.isNaN(pl)) {
-          if (ph < lo) lo = ph;
-          if (pl > hi) hi = pl;
-        }
-        const y0 = Math.floor(y(hi) * d);
-        const y1 = Math.ceil(y(lo) * d);
-        c.fillRect(x, y0, 1, Math.max(Math.round(d), y1 - y0));
-      }
-    } else if (f.kind === 'points' && o.smooth) {
-      const d = this.dpr;
-      let runX: number[] = [];
-      let runY: number[] = [];
-      c.beginPath();
-      let lastY = 0;
-      let hasLast = false;
-      const flush = (): void => {
-        smoothTrace(c, runX, runY, y);
-        if (runX.length > 0) {
-          lastY = runY[runY.length - 1]!;
-          hasLast = true;
-        }
-        runX = [];
-        runY = [];
-      };
-      for (let i = 0; i < f.count; i++) {
-        const v = f.v[i]!;
-        if (Number.isNaN(v)) { flush(); continue; }
-        runX.push(f.x[i]! / d);
-        runY.push(v);
-      }
-      flush();
-      // Hold the last value to the right edge only when the frame itself ends on a known
-      // sample. A trailing NaN is unknown time (a gap, or a trigger-anchored view whose
-      // right part is not captured yet) and must not be painted as a flat line.
-      const endsKnown = f.count > 0 && !Number.isNaN(f.v[f.count - 1]!);
-      if (hasLast && endsKnown) c.lineTo(this.wCss, y(lastY));
-      c.stroke();
-    } else if (f.kind === 'points') {
-      const d = this.dpr;
-      const xs: number[] = [];
-      const ys: number[] = [];
-      for (let i = 0; i < f.count; i++) { xs.push(f.x[i]! / d); ys.push(f.v[i]!); }
-      c.beginPath();
-      let open = false;
-      for (let i = 0; i < f.count; i++) {
-        const v = ys[i]!;
-        if (Number.isNaN(v)) { open = false; continue; }
-        const x = xs[i]!;
-        if (!open) { c.moveTo(x, y(v)); open = true; continue; }
-        if (o.style === 'step') c.lineTo(x, y(ys[i - 1]!));
-        c.lineTo(x, y(v));
-      }
-      // The last value holds to the right edge.
-      const last = ys[f.count - 1];
-      if (open && last !== undefined && !Number.isNaN(last)) c.lineTo(this.wCss, y(last));
-      c.stroke();
-      let minGap = Number.POSITIVE_INFINITY;
-      for (let i = 1; i < xs.length; i++) minGap = Math.min(minGap, xs[i]! - xs[i - 1]!);
-      if (minGap >= 8) {
-        for (let i = 0; i < f.count; i++) {
-          if (Number.isNaN(ys[i]!)) continue;
+      c.lineJoin = 'round';
+      if (f.kind === 'columns' && t.smooth) {
+        // The zoomed-out half: a smooth min/max band with a smooth centreline, not one
+        // opaque bar per column - and not the old straight-edged envelope polygon, which
+        // read as a staircase of rectangular blocks at some zoom windows. Columns are
+        // device px; this path draws in CSS px.
+        //
+        // A run is the contiguous span of known columns between NaN columns (a gap, or a
+        // region the builder has not reached). Each run is smoothed on its own: joining
+        // across a NaN would paint unknown time as signal. Provisional columns are sampled
+        // rather than built, so their band is a touch lighter.
+        const d = this.dpr;
+        const len = f.min.length;
+        const known = (x: number): boolean =>
+          !Number.isNaN(f.min[x]!) && !Number.isNaN(f.max[x]!);
+        const bandAlpha = f.provisional ? 0.12 : 0.18;
+        const edgeAlpha = f.provisional ? 0.45 : 0.65;
+        for (let x = 0; x < len;) {
+          if (!known(x)) { x++; continue; }
+          let end = x;
+          while (end + 1 < len && known(end + 1)) end++;
+          const xs: number[] = [];
+          const mins: number[] = [];
+          const maxs: number[] = [];
+          for (let i = x; i <= end; i++) {
+            xs.push(i / d);
+            mins.push(f.min[i]!);
+            maxs.push(f.max[i]!);
+          }
+          const band = smoothBandEdges(xs, mins, maxs);
+          const last = band.x.length - 1;
+          // One smooth closed path through the Catmull-Rom samples: upper edge, right
+          // cap, lower edge, left cap. It is filled as a translucent wash - never the
+          // opaque block the raw min/max polygon used to paint - and stroked so the
+          // silhouette stays readable where the centreline is nearly flat (a sine whose
+          // period is only a few columns wide).
           c.beginPath();
-          c.arc(xs[i]!, y(ys[i]!), 2, 0, 2 * Math.PI);
+          c.moveTo(band.x[0]!, y(band.upper[0]!));
+          for (let i = 1; i < band.x.length; i++) c.lineTo(band.x[i]!, y(band.upper[i]!));
+          c.lineTo(band.x[last]!, y(band.lower[last]!));
+          for (let i = last; i >= 0; i--) c.lineTo(band.x[i]!, y(band.lower[i]!));
+          c.closePath();
+          c.globalAlpha = bandAlpha;
           c.fill();
+          c.globalAlpha = edgeAlpha;
+          c.lineWidth = 1;
+          c.stroke();
+          x = end + 1;
+        }
+        c.globalAlpha = 1;
+        c.lineWidth = 1.25;
+        for (let x = 0; x < len;) {
+          if (!known(x)) { x++; continue; }
+          let end = x;
+          while (end + 1 < len && known(end + 1)) end++;
+          const cx: number[] = [];
+          const cy: number[] = [];
+          for (let i = x; i <= end; i++) {
+            cx.push(i / d);
+            cy.push((f.min[i]! + f.max[i]!) / 2);
+          }
+          c.beginPath();
+          smoothTrace(c, cx, cy, y);
+          c.stroke();
+          x = end + 1;
+        }
+      } else if (f.kind === 'columns') {
+        c.setTransform(1, 0, 0, 1, 0, 0);
+        const d = this.dpr;
+        for (let x = 0; x < f.min.length; x++) {
+          let lo = f.min[x]!;
+          let hi = f.max[x]!;
+          if (Number.isNaN(lo)) continue;
+          const pl = x > 0 ? f.min[x - 1]! : Number.NaN;
+          const ph = x > 0 ? f.max[x - 1]! : Number.NaN;
+          if (!Number.isNaN(pl)) {
+            if (ph < lo) lo = ph;
+            if (pl > hi) hi = pl;
+          }
+          const y0 = Math.floor(y(hi) * d);
+          const y1 = Math.ceil(y(lo) * d);
+          c.fillRect(x, y0, 1, Math.max(Math.round(d), y1 - y0));
+        }
+      } else if (f.kind === 'points' && t.smooth) {
+        const d = this.dpr;
+        let runX: number[] = [];
+        let runY: number[] = [];
+        c.beginPath();
+        let lastY = 0;
+        let hasLast = false;
+        const flush = (): void => {
+          smoothTrace(c, runX, runY, y);
+          if (runX.length > 0) {
+            lastY = runY[runY.length - 1]!;
+            hasLast = true;
+          }
+          runX = [];
+          runY = [];
+        };
+        for (let i = 0; i < f.count; i++) {
+          const v = f.v[i]!;
+          if (Number.isNaN(v)) { flush(); continue; }
+          runX.push(f.x[i]! / d);
+          runY.push(v);
+        }
+        flush();
+        // Hold the last value to the right edge only when the frame itself ends on a known
+        // sample. A trailing NaN is unknown time (a gap, or a trigger-anchored view whose
+        // right part is not captured yet) and must not be painted as a flat line.
+        const endsKnown = f.count > 0 && !Number.isNaN(f.v[f.count - 1]!);
+        if (hasLast && endsKnown) c.lineTo(this.wCss, y(lastY));
+        c.stroke();
+      } else if (f.kind === 'points') {
+        const d = this.dpr;
+        const xs: number[] = [];
+        const ys: number[] = [];
+        for (let i = 0; i < f.count; i++) { xs.push(f.x[i]! / d); ys.push(f.v[i]!); }
+        c.beginPath();
+        let open = false;
+        for (let i = 0; i < f.count; i++) {
+          const v = ys[i]!;
+          if (Number.isNaN(v)) { open = false; continue; }
+          const x = xs[i]!;
+          if (!open) { c.moveTo(x, y(v)); open = true; continue; }
+          if (t.style === 'step') c.lineTo(x, y(ys[i - 1]!));
+          c.lineTo(x, y(v));
+        }
+        // The last value holds to the right edge.
+        const last = ys[f.count - 1];
+        if (open && last !== undefined && !Number.isNaN(last)) c.lineTo(this.wCss, y(last));
+        c.stroke();
+        let minGap = Number.POSITIVE_INFINITY;
+        for (let i = 1; i < xs.length; i++) minGap = Math.min(minGap, xs[i]! - xs[i - 1]!);
+        if (minGap >= 8) {
+          for (let i = 0; i < f.count; i++) {
+            if (Number.isNaN(ys[i]!)) continue;
+            c.beginPath();
+            c.arc(xs[i]!, y(ys[i]!), 2, 0, 2 * Math.PI);
+            c.fill();
+          }
         }
       }
-    } else if (o.note) {
+      c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    }
+
+    if (o.note) {
       c.fillStyle = this.palette.text50;
       c.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
       c.textAlign = 'center';
@@ -661,7 +691,7 @@ export class Overlay {
         c.fillStyle = this.palette.warning;
         c.fillText(triggerLabel, triggerX - 4, triggerY);
       }
-    } else {
+    } else if (o.labels) {
       c.textAlign = 'left';
       c.textBaseline = 'top';
       c.fillText(o.labels.top, 4, o.top + 2);

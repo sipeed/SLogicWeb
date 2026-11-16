@@ -171,8 +171,12 @@ import { cornerView, cornerViewEqual, type CornerView } from './cornerCell.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
 import { TOUCH_TARGET_PX } from './presenters.js';
 import {
-  Overlay, paintMarkerChip, type HoverMeasurement, type RegionTint,
+  Overlay, paintMarkerChip, type AnalogBandView, type AnalogScopeView, type AnalogTraceView,
+  type HoverMeasurement, type RegionTint,
 } from './overlay.js';
+import {
+  AnalogSourceStrip, type AnalogSourceStripItem,
+} from './analogSourceStrip.js';
 import { OverviewStrip, type OverviewState } from './overviewStrip.js';
 import { PanelResizer } from './panelResizer.js';
 import { refreshPanelMinWidth } from './panelMinWidth.js';
@@ -236,7 +240,10 @@ import {
 } from './cursorEdges.js';
 import { WaveformMarker, type MarkerSnapContext } from './waveformMarker.js';
 import { WaveformStack, type RowBox, type RowSpec } from './waveformStack.js';
-import { analogBands, type AnalogBandSource } from './analogBands.js';
+import {
+  MERGED_ANALOG_BAND_ID, analogBands, analogRowProjection, focusedAnalogSource, pruneAnalogState,
+  resolveAnalogFocus, type AnalogBand, type AnalogBandSource, type AnalogLayout,
+} from './analogBands.js';
 import {
   nextScopeVoltsPerDiv, scopeAutoset, scopeGeometry, scopeRowDivisions, scopeScaleAt, scopeVoltsAtY,
 } from './scopeScale.js';
@@ -345,6 +352,10 @@ export class App {
   private readonly overlay: Overlay;
   private readonly overview: OverviewStrip;
   private readonly scopeHost: HTMLDivElement;
+  private readonly sourceStrip: AnalogSourceStrip;
+  private analogLayout: AnalogLayout = 'stacked';
+  private analogFocusId: string | null = null;
+  private analogRowBands: readonly AnalogBand[] = [];
   private readonly scopeBars = new Map<string, HTMLDivElement>();
   private readonly scopeTriggers = new Map<string, HTMLDivElement>();
   private readonly scopeScaleAnimations = new Map<string, { from: number; to: number; startedAt: number }>();
@@ -767,6 +778,7 @@ export class App {
       this.hideIdleChannels = workspace.hideIdleChannels === true;
       this.fitRows = workspace.fitRows !== false;
       this.quickScroll = workspace.quickScroll !== false;
+      this.analogLayout = workspace.analogLayout === 'merged' ? 'merged' : 'stacked';
       this.developerTools = workspace.developerTools === true;
       this.channels = (workspace.channels ?? defaultChannels(16)).map((channel, index) => ({ ...channel, index }));
       this.order = workspace.order ?? this.channels.map((channel) => channel.index);
@@ -818,6 +830,8 @@ export class App {
       setCompactRows: (on) => this.setCompactRows(on),
       hideIdle: () => this.hideIdleChannels,
       setHideIdle: (on) => this.setHideIdle(on),
+      analogLayout: () => this.analogLayout,
+      setAnalogLayout: (layout) => this.setAnalogLayout(layout),
       developerTools: () => this.developerTools,
       setDeveloperTools: (on) => this.setDeveloperTools(on),
       clearCache: () => void this.clearCache(),
@@ -841,6 +855,9 @@ export class App {
     this.scopeHost = document.createElement('div');
     this.scopeHost.className = 'scope-scale-host';
     this.el.plot.appendChild(this.scopeHost);
+    this.sourceStrip = new AnalogSourceStrip(this.el.plot, {
+      onFocus: (busId) => this.setAnalogFocus(busId),
+    });
     this.paintedTheme = getTheme();
     this.palette = canvasPalette(this.paintedTheme);
     this.overlay.setPalette(this.palette);
@@ -1144,7 +1161,15 @@ export class App {
    * the gain changes and on Home/double-click. Resizing never calls this.
    */
   private scopeDefaultVoltsPerDiv(bus: BusViewConfig, gain = analogGainOf(bus)): number {
-    return analogDefaultVoltsPerDiv(gain, scopeRowDivisions(this.rowHeightOf(bus)));
+    return analogDefaultVoltsPerDiv(gain, scopeRowDivisions(this.scopeBandHeight(bus)));
+  }
+
+  private scopeBandHeight(bus: BusViewConfig & { id?: string }): number {
+    const id = bus.id;
+    const band = id === undefined ? undefined
+      : this.analogRowBands.find((candidate) =>
+        candidate.sources.some((source) => source.busId === id));
+    return band ? band.heightCss : this.rowHeightOf(bus);
   }
 
   /** The height a bus row is drawn at: an analog row is raised to the compact minimum. */
@@ -1742,9 +1767,9 @@ export class App {
 
   // ------------------------------------------------------------------ bus views
 
-  private busCells(): BusCell[] {
-    return this.busViews.map((b) => ({
-      id: b.id, name: b.name, summary: busSummary(b.spec), color: b.color, heightCss: this.rowHeightOf(b),
+  private busCell(b: BusViewState, heightCss: number, showHeight: boolean): BusCell {
+    return {
+      id: b.id, name: b.name, summary: busSummary(b.spec), color: b.color, heightCss, showHeight,
       ...(b.analogGroup !== undefined ? {
         analog: true,
         gain: analogGainOf(b),
@@ -1756,7 +1781,19 @@ export class App {
           }
           : {}),
       } : {}),
-    }));
+    };
+  }
+
+  private busCells(): BusCell[] {
+    const cells: BusCell[] = [];
+    for (const band of this.analogRowBands) {
+      const source = focusedAnalogSource(band);
+      const bus = source
+        ? this.busViews.find((candidate) => candidate.id === source.busId) : undefined;
+      if (!bus) continue;
+      cells.push(this.busCell(bus, band.heightCss, band.sources.length <= 1));
+    }
+    return cells;
   }
 
   /** Configure/remove the analog trigger from the group's own row. */
@@ -2432,7 +2469,7 @@ export class App {
     const volts = (code: number): number => bus.offsetV + (code / steps) * fullScaleV;
     const next = scopeAutoset(
       range ? volts(range.min) : Number.NaN, range ? volts(range.max) : Number.NaN,
-      scopeRowDivisions(this.rowHeightOf(bus)), analogVoltsPerDivValues(gain),
+      scopeRowDivisions(this.scopeBandHeight(bus)), analogVoltsPerDivValues(gain),
       this.scopeDefaultVoltsPerDiv(bus),
     );
     // The usual writer: the scale change animates and the ruler shows the new V/div.
@@ -2457,6 +2494,11 @@ export class App {
           const b = current();
           if (b) this.configureBusScope(b.id, { voltsPerDiv: this.scopeDefaultVoltsPerDiv(b), zeroPosition: 0.5 }, true);
         },
+      },
+      {
+        label: t(this.analogLayout === 'merged' ? 'bus.layoutStacked' : 'bus.layoutMerged'),
+        hint: '',
+        onPick: () => this.setAnalogLayout(this.analogLayout === 'merged' ? 'stacked' : 'merged'),
       },
     ]);
   }
@@ -2600,53 +2642,95 @@ export class App {
     document.addEventListener('pointercancel', cancel, { once: true });
   }
 
+  private analogScopeView(bv: BusViewState): AnalogScopeView | undefined {
+    if (bv.analogGroup === undefined) return undefined;
+    const analogTrigger = this.settings.triggerEnableMask &&
+      this.settings.triggerSource === 'analog'
+      ? this.settings.analogTriggers?.[bv.analogGroup * CHANNEL_BANK_SIZE] : undefined;
+    return {
+      voltsPerDiv: this.scopeVoltsPerDiv(bv),
+      tickVoltsPerDiv: this.scopeTargetVoltsPerDiv(bv),
+      voltsPerDivUnit: t('bus.voltsPerDiv'),
+      zeroPosition: Math.min(1, Math.max(0, bv.zeroPosition ?? 0.5)),
+      offsetV: bv.offsetV,
+      fullScaleV: bv.fullScaleV ?? analogSpan(analogGainOf(bv)).fullScaleV,
+      ...(analogTrigger ? {
+        triggerVolts: analogTrigger.volts,
+        triggerKind: analogTrigger.kind,
+      } : {}),
+    };
+  }
+
+  private analogTrace(
+    bv: BusViewState, scope: AnalogScopeView | undefined,
+  ): AnalogTraceView {
+    const store = this.store;
+    const view = this.stack.view;
+    const valid = store.length > 0 && validateBusSpec(bv.spec, store.channelCount).length === 0;
+    const frame: AnalogFrame = valid
+      ? analogFrame(store, bv, view.start, view.end, view.widthPx, this.running)
+      : { kind: 'empty', reason: 'no-capture' };
+    const analogBank = bv.analogGroup !== undefined;
+    const range = busYRange(bv);
+    return {
+      frame,
+      yMin: range.min,
+      yMax: range.max,
+      color: bv.color,
+      // A combinational bus holds its value between bit changes: steps are the truth.
+      // An ADC row is sampled analog data, so it gets a smooth reconstruction instead.
+      style: analogBank ? 'line' : bv.spec.clock ? bv.style : 'step',
+      ...(analogBank ? { smooth: true } : {}),
+      ...(scope ? { scope } : {}),
+    };
+  }
+
   private drawBusRows(
     boxes: readonly RowBox[], tint: readonly RegionTint[] | null,
   ): void {
-    const view = this.stack.view;
     const store = this.store;
+    const busesById = new Map(this.busViews.map((bus) => [bus.id, bus]));
+    const noteOf = (frame: AnalogFrame): string => frame.kind !== 'empty' ? ''
+      : frame.reason === 'live' ? t('bus.liveNote')
+        : store.length > 0 ? t('bus.badChannels') : '';
+    let analogIndex = 0;
     for (const box of boxes) {
       if (box.spec.kind !== 'analog') continue;
-      const bv = this.busViews[box.spec.bus ?? -1];
-      if (!bv) continue;
+      const band = this.analogRowBands[analogIndex];
+      analogIndex += 1;
+      if (!band) continue;
       // The analog row is a renderer row with a trace in it; cover it first, then carry
       // the Repeat two-wave tint across it like every other row.
       this.overlay.fillLane(box.top, box.height);
       if (tint) this.overlay.drawRegionTintOverlay(tint, [{ top: box.top, band: box.band }]);
-      const valid = store.length > 0 && validateBusSpec(bv.spec, store.channelCount).length === 0;
-      const frame: AnalogFrame = valid
-        ? analogFrame(store, bv, view.start, view.end, view.widthPx, this.running)
-        : { kind: 'empty', reason: 'no-capture' };
-      const note = frame.kind !== 'empty' ? ''
-        : frame.reason === 'live' ? t('bus.liveNote')
-          : store.length > 0 ? t('bus.badChannels') : '';
-      const r = busYRange(bv);
-      const analogBank = bv.analogGroup !== undefined;
-      const analogTrigger = analogBank && this.settings.triggerEnableMask &&
-        this.settings.triggerSource === 'analog'
-        ? this.settings.analogTriggers?.[bv.analogGroup! * CHANNEL_BANK_SIZE] : undefined;
-      const scope = analogBank ? {
-        voltsPerDiv: this.scopeVoltsPerDiv(bv),
-        tickVoltsPerDiv: this.scopeTargetVoltsPerDiv(bv),
-        voltsPerDivUnit: t('bus.voltsPerDiv'),
-        zeroPosition: Math.min(1, Math.max(0, bv.zeroPosition ?? 0.5)),
-        offsetV: bv.offsetV,
-        fullScaleV: bv.fullScaleV ?? analogSpan(analogGainOf(bv)).fullScaleV,
-        ...(analogTrigger ? {
-          triggerVolts: analogTrigger.volts,
-          triggerKind: analogTrigger.kind,
-        } : {}),
-      } : undefined;
-      this.overlay.drawAnalog({
-        top: box.top, band: box.band, frame, yMin: r.min, yMax: r.max, color: bv.color,
-        // A combinational bus holds its value between bit changes: steps are the truth.
-        // An ADC row is sampled analog data, so it gets a smooth reconstruction instead.
-        style: analogBank ? 'line' : bv.spec.clock ? bv.style : 'step',
-        smooth: analogBank,
+      const scopes = new Map<string, AnalogScopeView | undefined>();
+      const scopeOf = (bus: BusViewState): AnalogScopeView | undefined => {
+        if (!scopes.has(bus.id)) scopes.set(bus.id, this.analogScopeView(bus));
+        return scopes.get(bus.id);
+      };
+      const traces: AnalogTraceView[] = [];
+      for (const source of band.sources) {
+        const bus = busesById.get(source.busId);
+        if (!bus) continue;
+        traces.push(this.analogTrace(bus, scopeOf(bus)));
+      }
+      const focused = focusedAnalogSource(band);
+      const focusedBus = focused ? busesById.get(focused.busId) : undefined;
+      const scope = focusedBus ? scopeOf(focusedBus) : undefined;
+      const first = traces[0];
+      const note = first === undefined ? ''
+        : traces.length === 1 || traces.every((trace) => trace.frame.kind === 'empty')
+          ? noteOf(first.frame) : '';
+      const labels = band.sources.length === 1 && focusedBus && first
+        ? { top: busLabel(focusedBus, first.yMax), bottom: busLabel(focusedBus, first.yMin) }
+        : undefined;
+      const view: AnalogBandView = {
+        top: box.top, band: box.band, traces,
         ...(scope ? { scope } : {}),
-        labels: { top: busLabel(bv, r.max), bottom: busLabel(bv, r.min) },
-        note,
-      });
+        ...(labels ? { labels } : {}),
+        ...(note ? { note } : {}),
+      };
+      this.overlay.drawAnalog(view);
     }
   }
 
@@ -2767,10 +2851,75 @@ export class App {
   private analogRowSpecs(): RowSpec[] {
     const entries = this.analogRowEntries();
     const byBusId = new Map(entries.map((entry) => [entry.source.busId, entry]));
-    return analogBands('stacked', entries.map((entry) => entry.source), null).map((band) => {
-      const entry = byBusId.get(band.id)!;
-      return { kind: 'analog', channel: entry.channel, heightCss: band.heightCss, bus: entry.bus };
-    });
+    const bands = this.analogBandsFor(entries);
+    this.analogRowBands = bands;
+    return analogRowProjection(bands, (busId) => byBusId.get(busId) ?? null)
+      .map((row) => ({ kind: 'analog', channel: row.channel, heightCss: row.heightCss, bus: row.bus }));
+  }
+
+  private analogBandsFor(entries: readonly AnalogRowEntry[]): AnalogBand[] {
+    if (this.analogLayout !== 'merged') {
+      return analogBands('stacked', entries.map((entry) => entry.source), null);
+    }
+    const merged = analogBands('merged',
+      entries.filter((entry) => entry.source.group >= 0).map((entry) => entry.source),
+      this.analogFocusId);
+    const bands: AnalogBand[] = [];
+    let placed = false;
+    for (const entry of entries) {
+      if (entry.source.group >= 0) {
+        if (placed) continue;
+        bands.push(...merged);
+        placed = true;
+        continue;
+      }
+      bands.push(...analogBands('stacked', [entry.source], null));
+    }
+    return bands;
+  }
+
+  private pruneAnalogFocus(): void {
+    const valid = new Set(this.analogRowEntries()
+      .filter((entry) => entry.source.group >= 0)
+      .map((entry) => entry.source.busId));
+    const pruned = pruneAnalogState({ focusedId: this.analogFocusId, hidden: new Set<string>() }, valid);
+    this.analogFocusId = pruned.focusedId;
+  }
+
+  private renderAnalogSources(): void {
+    const merged = this.analogLayout === 'merged'
+      ? this.analogRowBands.find((band) => band.id === MERGED_ANALOG_BAND_ID) : undefined;
+    if (!merged) {
+      this.sourceStrip.render([]);
+      return;
+    }
+    const sources = merged.sources;
+    const focused = resolveAnalogFocus(sources, this.analogFocusId);
+    const items: AnalogSourceStripItem[] = sources.map((source) => ({
+      busId: source.busId,
+      name: source.name,
+      color: source.color,
+      focused: source.busId === focused,
+    }));
+    this.sourceStrip.render(items);
+  }
+
+  private setAnalogLayout(layout: AnalogLayout): void {
+    if (layout === this.analogLayout) return;
+    this.analogLayout = layout;
+    this.persistWorkspace();
+    this.relayout();
+    this.renderPanels();
+    this.dirty = true;
+  }
+
+  private setAnalogFocus(busId: string): void {
+    const entry = this.analogRowEntries().find((candidate) => candidate.source.busId === busId);
+    if (!entry || entry.source.group < 0 || busId === this.analogFocusId) return;
+    this.analogFocusId = busId;
+    this.relayout();
+    this.renderPanels();
+    this.dirty = true;
   }
 
   private analogRowEntries(): AnalogRowEntry[] {
@@ -2807,6 +2956,7 @@ export class App {
     // axis). When even minimum-height rows do not fit, the stack overflows and the
     // scroll area scrolls - phones get every channel instead of the first six.
     // Analog (parallel-bus) rows sit above the channels and take their height first.
+    this.pruneAnalogFocus();
     const analogRows: RowSpec[] = this.analogRowSpecs();
     const analogH = analogRows.reduce((sum, r) => sum + r.heightCss, 0);
     this.overview.syncSize();
@@ -2824,6 +2974,7 @@ export class App {
       this.stack.setRows(analogRows, channelColors);
       this.channelList.render([]);
       this.channelList.renderBuses(this.busCells());
+      this.renderAnalogSources();
       this.overlay.syncSize(this.el.plot.clientWidth, this.el.plot.clientHeight);
       this.dirty = true;
       return;
@@ -2865,6 +3016,7 @@ export class App {
     this.stack.setRows(rows, channelColors);
     this.channelList.render(cells);
     this.channelList.renderBuses(this.busCells());
+    this.renderAnalogSources();
     this.overlay.syncSize(this.el.plot.clientWidth, this.el.plot.clientHeight);
     this.dirty = true;
   }
@@ -3372,6 +3524,7 @@ export class App {
       this.store.droppedSamples, this.captureStore.length, this.running,
       this.settings.triggerEnableMask, this.settings.triggerSource,
       JSON.stringify(this.settings.analogTriggers ?? {}),
+      this.analogLayout, this.analogFocusId ?? '',
     ];
     for (const bus of this.busViews) {
       parts.push(...busFrameSignatureParts(bus));
@@ -5243,6 +5396,7 @@ export class App {
       hideIdleChannels: this.hideIdleChannels,
       fitRows: this.fitRows,
       quickScroll: this.quickScroll,
+      analogLayout: this.analogLayout,
       // An opened file's rows are the viewed capture; the device layout is what persists.
       channels: (this.deviceLayout?.channels ?? this.channels)
         .map(({ name, color, enabled }) => ({ name, color, enabled })),
@@ -8279,6 +8433,8 @@ export class App {
     addBus: (cfg: Partial<BusViewConfig> & { spec: BusViewConfig['spec'] }) =>
       this.addBus({ ...defaultBusConfig(this.displayChannelCount(), this.settings.testMode), ...cfg }),
     removeBus: (id: string) => this.removeBus(id),
+    setAnalogLayout: (layout: AnalogLayout) => this.setAnalogLayout(layout),
+    focusAnalog: (busId: string) => this.setAnalogFocus(busId),
     buses: () => this.busViews.map((b) => ({
       id: b.id, name: b.name, color: b.color, summary: busSummary(b.spec), hideSources: b.hideSources,
       built: b.builder?.done ?? false, progress: b.builder?.progress ?? 0,

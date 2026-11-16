@@ -268,7 +268,7 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
 }
 
 {
-  const smoothStart = overlay.indexOf("f.kind === 'columns' && o.smooth");
+  const smoothStart = overlay.indexOf("f.kind === 'columns' && t.smooth");
   const smoothEnd = overlay.indexOf("} else if (f.kind === 'columns')", smoothStart);
   const smoothColumns = smoothStart >= 0 && smoothEnd > smoothStart
     ? overlay.slice(smoothStart, smoothEnd) : '';
@@ -276,7 +276,7 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
     overlay.includes('c.lineTo(px, y(py))') &&
     geometry.includes('export function catmullRomWalk(') &&
     geometry.includes('export function smoothBandEdges(') &&
-    overlay.includes("f.kind === 'points' && o.smooth") &&
+    overlay.includes("f.kind === 'points' && t.smooth") &&
     overlay.includes('smoothTrace(c, cx, cy, y)') &&
     // Never hold a trace flat across trailing unknown columns (a gap, or the not-yet-
     // captured right part of a trigger-anchored view).
@@ -305,12 +305,63 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
     smooth && envelope && noRects, `smooth=${smooth}, envelope=${envelope}, noRects=${noRects}`);
 }
 
+function drawAnalogBody(text: string): string {
+  const start = text.indexOf('  drawAnalog(o: AnalogBandView): void {');
+  if (start < 0) return '';
+  const open = text.indexOf('{', start);
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(open, i + 1);
+    }
+  }
+  return '';
+}
+
+function traceStateIsolation(body: string): boolean {
+  const loopStart = body.indexOf('for (const t of o.traces) {');
+  const loopEnd = body.indexOf('if (o.note)', loopStart);
+  const loop = loopStart >= 0 && loopEnd > loopStart ? body.slice(loopStart, loopEnd) : '';
+  const reset = loop.indexOf('c.setTransform(1, 0, 0, 1, 0, 0);');
+  const restore = loop.indexOf('c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);');
+  const graticule = body.indexOf('if (geometry && scope) {');
+  return (body.match(/c\.save\(\);/g) ?? []).length === 1 &&
+    (body.match(/c\.restore\(\);/g) ?? []).length === 1 &&
+    (body.match(/c\.clip\(\);/g) ?? []).length === 1 &&
+    body.includes('c.rect(0, o.top, this.wCss, o.band);') &&
+    graticule >= 0 && graticule < loopStart &&
+    loop.length > 0 && loop.includes('c.fillStyle = t.color;') &&
+    loop.includes('c.strokeStyle = t.color;') &&
+    reset >= 0 && restore > reset &&
+    (loop.match(/c\.setTransform\(this\.dpr, 0, 0, this\.dpr, 0, 0\);/g) ?? []).length === 1;
+}
+
 {
-  const wired = app.includes('const analogBank = bv.analogGroup !== undefined;') &&
-    app.includes("style: analogBank ? 'line' :") &&
-    app.includes('smooth: analogBank') &&
-    app.includes('const scope = analogBank ? {') &&
-    app.includes('zeroPosition: Math.min(1, Math.max(0, bv.zeroPosition ?? 0.5))') &&
+  const body = drawAnalogBody(overlay);
+  check('one band clip, one save/restore and a per-trace transform reset keep every trace on its own calibration',
+    body.length > 0 && traceStateIsolation(body), `isolation=${traceStateIsolation(body)}`);
+  const noRestore = body.replace('      c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);\n', '');
+  const twoClips = body.replace('    c.clip();', '    c.clip();\n    c.clip();');
+  const bandColour = body.replace(
+    '      c.fillStyle = t.color;\n      c.strokeStyle = t.color;\n', '');
+  check('control: a missing per-trace transform restore, a second clip or a missing trace colour fails the same predicate',
+    noRestore !== body && !traceStateIsolation(noRestore) &&
+    twoClips !== body && !traceStateIsolation(twoClips) &&
+    bandColour !== body && !traceStateIsolation(bandColour),
+    `restore=${traceStateIsolation(noRestore)}, clip=${traceStateIsolation(twoClips)}, ` +
+    `colour=${traceStateIsolation(bandColour)}`);
+}
+
+{
+  const wired = app.includes('private analogScopeView(bv: BusViewState): AnalogScopeView | undefined {') &&
+    app.includes('voltsPerDiv: this.scopeVoltsPerDiv(bv),') &&
+    app.includes('zeroPosition: Math.min(1, Math.max(0, bv.zeroPosition ?? 0.5)),') &&
+    app.includes('fullScaleV: bv.fullScaleV ?? analogSpan(analogGainOf(bv)).fullScaleV,') &&
+    app.includes('tickVoltsPerDiv: this.scopeTargetVoltsPerDiv(bv),') &&
+    app.includes("style: analogBank ? 'line' : bv.spec.clock ? bv.style : 'step',") &&
+    app.includes('...(analogBank ? { smooth: true } : {}),') &&
     banks.includes('voltsPerDiv: analogDefaultVoltsPerDiv(analogGain, scopeRowDivisions(ANALOG_DEFAULT_HEIGHT)),') &&
     banks.includes('zeroPosition: 0.5');
   check('App hands analog banks the scope scale and smooth flag, with the gain\'s V/div default (10 V at 1x)',
@@ -327,7 +378,7 @@ const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
     app.includes('private scopeVoltsPerDiv(') && app.includes('scopeScaleAt(') &&
     app.includes('tickVoltsPerDiv: this.scopeTargetVoltsPerDiv(bv)') &&
     app.includes('bus.voltsPerDiv ?? this.scopeDefaultVoltsPerDiv(bus)') &&
-    app.includes('analogDefaultVoltsPerDiv(gain, scopeRowDivisions(this.rowHeightOf(bus)))') &&
+    app.includes('analogDefaultVoltsPerDiv(gain, scopeRowDivisions(this.scopeBandHeight(bus)))') &&
     sheet.includes('.scope-scale-bar {') && sheet.includes('position: absolute; right: 0; width: 48px;') &&
     sheet.includes('cursor: ns-resize') && overlay.includes('const rulerX = Math.round(this.wCss - 6) + 0.5;');
   const triggerDrag = app.includes("className = 'scope-trigger-drag'") &&

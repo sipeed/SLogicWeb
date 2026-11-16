@@ -263,6 +263,26 @@ Analog channels are not bus rows. Each analog signal has a row with:
   a solid line, other divisions dashed.
 - No analog row exists without a profile analog group; the panel says why the control is
   disabled.
+- **Row layout: Stacked (default) or Overlay.** Appearance's "Analog rows" control and
+  the ruler's context menu switch one shared setting. Stacked keeps one row per analog
+  source. Overlay draws the ADC groups into one band: the band is as tall as its tallest
+  participant, and each group keeps its own colour, calibration, V/div and 0 V position.
+  Bus rows that are not ADC groups keep their own row in both layouts. Only the focused
+  group's left cell is shown for the merged band, which has no per-row height grip
+  (there is no single row to resize); a single-source row keeps its grip. Switching back
+  to Stacked restores every source's row exactly as it was. The layout is saved with the
+  workspace; focus is not.
+- **Focus owns the ruler.** Exactly one ADC group is focused. It owns the visible voltage
+  ruler, the trigger handle, Autoset, the wheel/drag/keyboard vertical edits and the
+  hover readout; focusing another group retargets all of them without touching that
+  group's configuration or the acquisition. A focus whose bus disappears (removed, or
+  outside the selected width) is pruned and falls back to the first group.
+- **The plot corner carries the source chips.** In Overlay, a chip strip at the plot's
+  top-left, sibling to the ruler surface and never inside the left label cells, lists
+  the merged band's groups in row order: colour swatch plus name, the focused chip
+  pressed, and a localized focus action as its accessible name. Chips are keyboard
+  reachable; clicking, Enter or Space focuses that source only. Stacked draws no strip:
+  there every row is its own source.
 
 ### 5.3 Buses, math and decoder lanes
 
@@ -316,7 +336,9 @@ Analog channels are not bus rows. Each analog signal has a row with:
   count from 4 to 8 (≤ 160 px: 4, 240 px: 6, ≥ 320 px: 8), so 0 V stays on a line. Resizing
   keeps V/div and the zero position; a taller row shows more divisions and a wider range,
   exactly like a scope with a bigger screen. A gain's default V/div is the finest 1-2-5
-  step showing the whole range on the row's current division count.
+  step showing the whole range on the row's current division count. In Overlay the merged
+  band takes the tallest participant's height on that same division rule, and the
+  per-row height grips are hidden: the focused ruler is the only editable scale there.
 - Row height is per-channel view/workspace state; double-click/row menu restores the
   default. Group headers are 32 px (compact 40 px) and collapse their rows.
 - Group headers show the group's rate and channel range; an analog group shows its
@@ -433,6 +455,9 @@ Analog channels are not bus rows. Each analog signal has a row with:
   an earlier qualification up.
 - Cursor `1/Δt` stays the manual reciprocal it always was: automatic measurements are a
   separate readout with their own source, window and status, and never restyle it.
+- The analog row layout never changes what is measured: automatic measurements still
+  read each ADC bank's own current-wave codes, and every vertical view edit (Autoset,
+  V/div, zero) follows the focused source in Overlay.
 - **Capture** is the third range and the one deliberate exception to window-bounded
   scanning: it analyses the whole retained current wave (`[0, length)`) instead of what the
   viewport shows, and says so — its window line reads "Window: 300,000 samples (captured

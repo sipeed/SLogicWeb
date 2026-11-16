@@ -866,6 +866,10 @@ export const fr: Messages = {
   'bus.unknown': 'inconnu',
   'plot.notCaptured': 'Absent de cette capture - inclus dans la prochaine',
   'bus.code': 'valeur',
+  'bus.layoutStacked': 'Lignes empilées',
+  'bus.layoutMerged': 'Superposition',
+  'bus.sourceStrip': 'Sources analogiques',
+  'bus.focusSource': 'Cibler {name}',
 
   // ------------------------------------------------------- AI assistant
   'assistant.title': 'Assistant IA',
@@ -936,6 +940,7 @@ export const fr: Messages = {
   'settings.compactRowsHelp': 'Réduire les voies logiques à 24 px et n’afficher que l’en-tête de voie. Les voies analogiques et les pistes de décodeur gardent leur taille.',
   'settings.hideIdle': 'Masquer les voies inactives',
   'settings.hideIdleHelp': 'Masquer les voies sans front pendant que l’acquisition est au repos. Les voies avec une piste de décodeur restent visibles ; une note indique le nombre masqué et propose « Afficher ».',
+  'settings.analogLayout': 'Lignes analogiques',
   'settings.developerTools': 'Console de registres USB',
   'settings.developerToolsWhere': 'Panneau latéral › Capture › Avancé',
   'settings.savedData': 'Données enregistrées',

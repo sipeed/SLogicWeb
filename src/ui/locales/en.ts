@@ -867,6 +867,10 @@ export const en = {
   'bus.unknown': 'unknown',
   'plot.notCaptured': 'Not in this capture - the next capture includes it',
   'bus.code': 'value',
+  'bus.layoutStacked': 'Stacked rows',
+  'bus.layoutMerged': 'Overlay',
+  'bus.sourceStrip': 'Analog sources',
+  'bus.focusSource': 'Focus {name}',
 
   // ------------------------------------------------------- AI assistant
   'assistant.title': 'AI assistant',
@@ -937,6 +941,7 @@ export const en = {
   'settings.compactRowsHelp': 'Lower digital rows to 24 px and show only the channel head. Analog rows and decoder lanes keep their sizes.',
   'settings.hideIdle': 'Hide idle channels',
   'settings.hideIdleHelp': 'Hide channels with no edges while a capture is at rest. Decoder-lane rows stay visible; a note shows the hidden count and a Show action.',
+  'settings.analogLayout': 'Analog rows',
   'settings.developerTools': 'USB register console',
   'settings.developerToolsWhere': 'right sidebar › Capture › Advanced',
   'settings.savedData': 'Saved data',

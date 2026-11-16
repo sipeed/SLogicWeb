@@ -1,5 +1,7 @@
 import { t } from './i18n.js';
 import type { MessageKey } from './i18n.js';
+import { analogLayoutOf, type AnalogLayout } from './analogBands.js';
+import { selectControl } from './select.js';
 import { aboutView } from './about.js';
 import type { AboutLink } from './about.js';
 import { helpTip } from './helpTip.js';
@@ -57,6 +59,8 @@ export interface SettingsDialogHost {
   setCompactRows(on: boolean): void;
   hideIdle(): boolean;
   setHideIdle(on: boolean): void;
+  analogLayout(): AnalogLayout;
+  setAnalogLayout(layout: AnalogLayout): void;
   developerTools(): boolean;
   setDeveloperTools(on: boolean): void;
   clearCache(): void;
@@ -201,7 +205,7 @@ export class SettingsDialog {
   private paneContent(section: SettingsSectionId): HTMLElement[] {
     switch (section) {
       case 'appearance':
-        return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];
+        return [this.analogLayoutRow(), this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];
       case 'behaviour':
         return [this.quickScrollRow(), this.wheelZoomsRow(), this.fitRowsRow()];
       case 'shortcuts':
@@ -327,6 +331,20 @@ export class SettingsDialog {
       cell.append(text, helpTip(t(hint)));
       row.append(cell, toggle);
     }
+    return row;
+  }
+
+  private analogLayoutRow(): HTMLDivElement {
+    const row = document.createElement('div');
+    row.className = 'settings-row settings-row-select';
+    const select = selectControl('analogLayout', t('settings.analogLayout'), [
+      ['stacked', t('bus.layoutStacked')],
+      ['merged', t('bus.layoutMerged')],
+    ], this.host.analogLayout());
+    select.el.querySelector<HTMLButtonElement>('.select-trigger')
+      ?.setAttribute('data-settings-key', 'analog-layout');
+    select.addEventListener('change', () => this.host.setAnalogLayout(analogLayoutOf(select.value)));
+    row.appendChild(select.el);
     return row;
   }
 

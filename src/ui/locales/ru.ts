@@ -857,6 +857,10 @@ export const ru: Messages = {
   'bus.unknown': 'неизвестно',
   'plot.notCaptured': 'Нет в этом захвате - войдёт в следующий',
   'bus.code': 'значение',
+  'bus.layoutStacked': 'Стопкой',
+  'bus.layoutMerged': 'Наложение',
+  'bus.sourceStrip': 'Аналоговые источники',
+  'bus.focusSource': 'Фокус на {name}',
 
   // ------------------------------------------------------- AI assistant
   'assistant.title': 'ИИ-ассистент',
@@ -927,6 +931,7 @@ export const ru: Messages = {
   'settings.compactRowsHelp': 'Уменьшать цифровые строки до 24 px и оставлять только заголовок канала. Аналоговые строки и дорожки декодера сохраняют свои размеры.',
   'settings.hideIdle': 'Скрыть неактивные каналы',
   'settings.hideIdleHelp': 'Скрывать каналы без фронтов, пока захват не выполняется. Строки с дорожкой декодера остаются видимыми; примечание показывает число скрытых и действие «Показать».',
+  'settings.analogLayout': 'Аналоговые строки',
   'settings.developerTools': 'Консоль регистров USB',
   'settings.developerToolsWhere': 'Боковая панель › Захват › Расширенные',
   'settings.savedData': 'Сохранённые данные',

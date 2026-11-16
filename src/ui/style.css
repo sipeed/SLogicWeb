@@ -1243,6 +1243,8 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
   align-items: center;
 }
 .settings-row-label-cell .settings-row-label { flex: 1 1 auto; }
+.settings-row-select { grid-template-columns: minmax(0, 1fr); }
+.settings-row-select .select-field { min-width: 0; }
 .settings-toggle {
   justify-self: start;
   display: flex;
@@ -1546,6 +1548,31 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
   content: ''; position: absolute; right: 2px; top: 2px;
   width: 0; height: 0; border-top: 4px solid transparent;
   border-bottom: 4px solid transparent; border-right: 7px solid var(--warning);
+}
+.analog-source-strip {
+  position: absolute; left: 6px; top: 6px; z-index: 3;
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  max-width: calc(100% - 60px);
+  pointer-events: none;
+}
+.analog-source-strip[hidden] { display: none; }
+.analog-source-chip {
+  display: flex; align-items: center; gap: 5px; flex: 0 0 auto;
+  pointer-events: auto; cursor: pointer; touch-action: manipulation;
+  padding: 2px 7px 2px 5px; border-radius: 999px;
+  background: color-mix(in oklab, var(--bg10) 88%, transparent);
+  border: 1px solid var(--border-low); color: var(--text80);
+  font: inherit; font-size: 11px; line-height: 16px;
+}
+.analog-source-chip:hover { border-color: var(--input); }
+.analog-source-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.analog-source-chip[aria-pressed="true"] {
+  border-color: var(--accent); color: var(--foreground);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.analog-source-swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.analog-source-name {
+  max-width: 128px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .wave-canvas { display: block; width: 100%; }
 

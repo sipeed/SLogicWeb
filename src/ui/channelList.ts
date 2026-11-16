@@ -98,6 +98,7 @@ export interface BusCell {
   heightCss: number;
   /** An ADC group's scope controls (V/Div, zero position, height). */
   analog?: boolean;
+  showHeight?: boolean;
   /** An ADC group's declared hardware gain (1 when absent); its range is ±16 V / gain. */
   gain?: number;
   /** The analog trigger configured on this group, if any. */
@@ -655,7 +656,7 @@ export class ChannelList {
       const main = div('ch-main');
       main.append(head, sub);
       body.appendChild(main);
-      if (cell.analog) {
+      if (cell.analog && cell.showHeight !== false) {
         // Scale, zero and trigger readouts live on the plot's right ruler. The left
         // column keeps only the trigger editor and the row-height handle, which snaps to
         // the `ANALOG_HEIGHTS` stops (80..480 px; the graticule follows the height).
