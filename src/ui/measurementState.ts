@@ -129,6 +129,7 @@ export interface MeasurementSectionView {
   tier: MeasureTier;
   cursors: { id: number; label: string; color: string }[];
   rows: MeasurementRowView[];
+  bandRows?: MeasurementRowView[] | undefined;
   allRows: readonly MeasurementRow[];
   rowCount: number;
   undoCount: number | null;
