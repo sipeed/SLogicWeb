@@ -525,6 +525,19 @@ Analog channels are not bus rows. Each analog signal has a row with:
   a job. Measured on the 300,000-sample fixture: a shared analyzed window gives byte-identical
   readouts in both tiers (`10.0 kHz / 21.5 V / 4.09 V`), while `capture` gives `4.09 V` in
   basic against `4.1 V` in advanced, each labelled with its own analysed count.
+- **The advanced reading model is a source × parameter matrix.** `measurementMatrixView()`
+  projects it from the rows the section already produced: rows are the sources after the
+  filter in `measurementSources()` order, columns are the parameters at least one visible row
+  enables, in catalog order (the union, so a filtered source still shows the full column set),
+  and a cell is the existing `MeasurementRowView` for that (source, parameter) or an inert
+  empty cell — never a borrowed or fabricated value. Header actions are `Add measurement…`,
+  `Clear all` and `Reset all statistics`; a cell owns its own disclosure with method, window,
+  Current/Mean/Min/Max/StdDev/Count, `Reset this statistic` and `Remove measurement`, keyed by
+  row id so two same-parameter cells never share one panel. The bounds are 8 columns
+  (`MEASUREMENT_CATALOG.length`) and 4 rows (`analogGroupCount(32)`), asserted against those
+  sources rather than restated; the table scrolls inside its own container (measured
+  `scrollWidth 632` vs `clientWidth 249` at a 390 px viewport with 4 sources × 8 parameters)
+  and the page never scrolls horizontally. Only the advanced tier renders it.
 - Automatic measurements read one real active ADC group as the source — a group exists
   only where its eight-bit bank bus view does, which at 32 channels is A0–A3 and at 16
   A0–A1; with no such bus view the source list is empty, the source select is disabled and
