@@ -507,6 +507,24 @@ Analog channels are not bus rows. Each analog signal has a row with:
   removing a bank and changing the capture width open or close the gate through the
   existing render pass. The parameter, window and status tables are owned by
   `.trellis/spec/frontend/oscilloscope-mode.md`.
+- **The measurement surface has two tiers, and one switch per surface.** `measureTier` is
+  session state in `App` (never in the workspace snapshot), defaulting to `basic`. Basic
+  renders one source select over the valid analog groups, the same three range labels, three
+  read-only readouts (Frequency, Vpp, RMS, in `MEASUREMENT_DEFAULT_PARAMETERS` order), one
+  `Frequency ≠ 1/Δt` note and one `Advanced` entry; it builds no add/remove/clear, no
+  catalog dialog, no per-row disclosure, no analysis view switch, no persistence control and
+  no capture progress. Advanced is the management surface plus one `Basic` switch, and only
+  one of the two switches exists at a time. Both tiers read the same section rows —
+  `basicMeasurementView()` is a projection over the rows the section already produced, so
+  the tiers cannot disagree numerically and neither rebuilds the scan.
+- **The tiers differ in scan depth, not in policy.** The three range labels are identical
+  across tiers; a `capture` range is analysed by the chunked job in the advanced tier and by
+  the bounded immediate scan in the basic tier, whose readouts carry the existing
+  `partial: x of y samples` disclosure. Enforced at the single job-creation site
+  (`range.kind === 'capture' && measureTier === 'advanced'`), so the basic tier cannot start
+  a job. Measured on the 300,000-sample fixture: a shared analyzed window gives byte-identical
+  readouts in both tiers (`10.0 kHz / 21.5 V / 4.09 V`), while `capture` gives `4.09 V` in
+  basic against `4.1 V` in advanced, each labelled with its own analysed count.
 - Automatic measurements read one real active ADC group as the source — a group exists
   only where its eight-bit bank bus view does, which at 32 channels is A0–A3 and at 16
   A0–A1; with no such bus view the source list is empty, the source select is disabled and
