@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import type { MessageKey } from './i18n.js';
 import {
   MEASUREMENT_CATALOG, isMeasurementParameter, type MeasurementParameter,
 } from './measurementCatalog.js';
+import type { MeasurementRowView, MeasurementSectionView } from './measurementState.js';
 
 export interface MeasurementRow {
   readonly id: number;
@@ -131,6 +133,60 @@ export function availableMeasurementParameters(
     .filter((parameter) => !taken.has(parameter));
 }
 
+function cellKey(start: number, parameter: MeasurementParameter): string {
+  return `${start}:${parameter}`;
+}
+
 export function measurementRowKey(row: MeasurementRow): string {
-  return `${row.start}:${row.parameter}`;
+  return cellKey(row.start, row.parameter);
+}
+
+export interface MeasurementMatrixColumn {
+  readonly parameter: MeasurementParameter;
+  readonly labelKey: MessageKey;
+}
+
+export interface MeasurementMatrixCell {
+  readonly row: MeasurementRowView | null;
+}
+
+export interface MeasurementMatrixRow {
+  readonly start: number;
+  readonly name: string;
+  readonly color: string;
+  readonly focused: boolean;
+  readonly cells: readonly MeasurementMatrixCell[];
+}
+
+export interface MeasurementMatrixView {
+  readonly columns: readonly MeasurementMatrixColumn[];
+  readonly rows: readonly MeasurementMatrixRow[];
+}
+
+export const MATRIX_MAX_COLUMNS: number = 8;
+export const MATRIX_MAX_ROWS: number = 4;
+
+export function measurementMatrixView(view: MeasurementSectionView): MeasurementMatrixView {
+  const enabled = new Set(view.allRows.map((row) => row.parameter));
+  const columns: MeasurementMatrixColumn[] = MEASUREMENT_CATALOG
+    .filter((entry) => enabled.has(entry.parameter))
+    .map((entry) => ({ parameter: entry.parameter, labelKey: entry.labelKey as MessageKey }));
+  if (columns.length === 0) return { columns, rows: [] };
+  const byKey = new Map<string, MeasurementRowView>();
+  for (const row of view.rows) byKey.set(measurementRowKey(row), row);
+  const shown = view.filter === null
+    ? view.sources
+    : view.sources.filter((source) => source.start === view.filter);
+  return {
+    columns,
+    rows: shown.map((source) => ({
+      start: source.start,
+      name: source.name,
+      color: source.color ?? '',
+      focused: source.focused === true,
+      cells: columns.map((column) => ({
+        row: byKey.get(cellKey(source.start, column.parameter)) ?? null,
+      })),
+    })),
+  };
 }

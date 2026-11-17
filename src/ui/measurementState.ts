@@ -42,12 +42,15 @@ export interface MeasurementSource {
   start: number;
   gain: number;
   name: string;
+  color?: string;
+  focused?: boolean;
 }
 
 export interface MeasurementBusView {
   name: string;
   analogGroup?: number;
   analogGain?: number;
+  color?: string;
   spec: { bits: readonly number[] };
 }
 
@@ -234,6 +237,7 @@ export function isMeasurementBank(bus: MeasurementBusView, channelCount: number)
 
 export function measurementSources(
   buses: readonly MeasurementBusView[], channelCount: number,
+  focusedStart: number | null = null,
 ): MeasurementSource[] {
   const groups = new Set<number>();
   const sources: MeasurementSource[] = [];
@@ -242,11 +246,14 @@ export function measurementSources(
     if (group === undefined || groups.has(group)) continue;
     if (!isMeasurementBank(bus, channelCount)) continue;
     groups.add(group);
+    const start = group * CHANNEL_BANK_SIZE;
     sources.push({
       group,
-      start: group * CHANNEL_BANK_SIZE,
+      start,
       gain: analogGainOf(bus),
       name: bus.name,
+      color: bus.color ?? '',
+      focused: start === focusedStart,
     });
   }
   return sources.sort((a, b) => a.group - b.group);

@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import { ANALOG_GROUP_COUNT, analogGroupCount } from '../channelBanks.js';
 import {
   MEASUREMENT_CATALOG, MEASUREMENT_DEFAULT_PARAMETERS, MEASUREMENT_PARAMETERS, catalogEntry,
   isMeasurementParameter, measurementGroup, measurementUnit, type MeasurementParameter,
 } from '../measurementCatalog.js';
 import {
-  MEASUREMENT_MAX_ROWS, addMeasurementRow, availableMeasurementParameters, clearMeasurementRows,
-  emptyMeasurementRows, measurementRowKey, pruneMeasurementRows, removeMeasurementRow,
+  MATRIX_MAX_COLUMNS, MATRIX_MAX_ROWS, MEASUREMENT_MAX_ROWS, addMeasurementRow,
+  availableMeasurementParameters, clearMeasurementRows, emptyMeasurementRows,
+  measurementMatrixView, measurementRowKey, pruneMeasurementRows, removeMeasurementRow,
   setMeasurementFilter, toggleMeasurementRow, undoClearMeasurementRows, visibleMeasurementRows,
   type MeasurementRow, type MeasurementRowState,
 } from '../measurementRows.js';
+import type {
+  MeasurementRowView, MeasurementSectionView, MeasurementSource,
+} from '../measurementState.js';
+import { noMeasurementStatsView } from '../measurementStats.js';
 
 interface TestResult {
   name: string;
@@ -33,6 +39,78 @@ function check(name: string, pass: boolean, detail: string): void {
 
 const keys = (rows: readonly MeasurementRow[]): string => rows.map(measurementRowKey).join(',');
 const ids = (rows: readonly MeasurementRow[]): string => rows.map((row) => String(row.id)).join(',');
+
+const SOURCE_A0: MeasurementSource = {
+  group: 0, start: 0, gain: 1, name: 'A0', color: '#1f77b4', focused: false,
+};
+const SOURCE_A1: MeasurementSource = {
+  group: 1, start: 8, gain: 1, name: 'A1', color: '#ff7f0e', focused: true,
+};
+const SOURCE_A2: MeasurementSource = {
+  group: 2, start: 16, gain: 3, name: 'A2', color: '#2ca02c', focused: false,
+};
+
+function rowView(
+  start: number, parameter: MeasurementParameter, value: number,
+): MeasurementRowView {
+  return {
+    id: start * 10 + MEASUREMENT_PARAMETERS.indexOf(parameter) + 1,
+    start,
+    sourceName: `A${start / 8}`,
+    parameter,
+    unit: measurementUnit(parameter),
+    value,
+    status: 'ok',
+    analyzedSamples: 1024,
+    requestedSamples: 1024,
+    truncated: false,
+    rangeClipped: false,
+    gaps: false,
+    clippedLow: false,
+    clippedHigh: false,
+    nearSampleLimit: false,
+    crossingCap: false,
+    crossingCount: 8,
+    dutyPeriods: 8,
+    dutyExcludedPeriods: 0,
+    stats: noMeasurementStatsView(),
+  };
+}
+
+function sectionView(
+  sources: readonly MeasurementSource[],
+  allRows: readonly MeasurementRow[],
+  rows: readonly MeasurementRowView[],
+  filter: number | null,
+): MeasurementSectionView {
+  return {
+    sources: [...sources],
+    filter,
+    range: { kind: 'capture', a: null, b: null },
+    tier: 'advanced',
+    cursors: [],
+    rows: [...rows],
+    allRows,
+    rowCount: allRows.length,
+    undoCount: null,
+    addStart: null,
+    window: null,
+    unavailable: null,
+    capture: null,
+    statsSkipped: 0,
+    statsLoopUnavailable: false,
+  };
+}
+
+const columnOrder = (view: MeasurementSectionView): string =>
+  measurementMatrixView(view).columns.map((column) => column.parameter).join(',');
+
+const rowStarts = (view: MeasurementSectionView): string =>
+  measurementMatrixView(view).rows.map((row) => String(row.start)).join(',');
+
+const cellRowIds = (view: MeasurementSectionView): string =>
+  measurementMatrixView(view).rows
+    .map((row) => row.cells.map((cell) => cell.row?.id ?? 'null').join('|')).join(',');
 
 function seeded(): MeasurementRowState {
   const mean = addMeasurementRow(emptyMeasurementRows(), 16, 'mean');
@@ -398,6 +476,136 @@ function seeded(): MeasurementRowState {
       toggleMeasurementRow(state, 8, 'rms') !== state &&
       setMeasurementFilter(state, 8) !== state,
     JSON.stringify(noopSame));
+}
+
+{
+  const frequencyOnly: MeasurementRow[] = [{ id: 1, start: 0, parameter: 'frequency' }];
+  const sharedVpp: MeasurementRow[] = [
+    { id: 1, start: 0, parameter: 'frequency' },
+    { id: 2, start: 0, parameter: 'vpp' },
+    { id: 3, start: 16, parameter: 'vpp' },
+  ];
+  const rows = [rowView(0, 'frequency', 1000), rowView(0, 'vpp', 3.2), rowView(16, 'vpp', 1.6)];
+  const before = columnOrder(sectionView([SOURCE_A0, SOURCE_A2], frequencyOnly, [rows[0]!], null));
+  const after = columnOrder(sectionView([SOURCE_A0, SOURCE_A2], sharedVpp, rows, null));
+  const reversed = columnOrder(sectionView([SOURCE_A0, SOURCE_A2], [...sharedVpp].reverse(), rows, null));
+  check('a parameter enabled by a second source lands at its catalog position, never appended or duplicated',
+    before === 'frequency' && after === 'vpp,frequency' && reversed === after &&
+      after === MEASUREMENT_PARAMETERS
+        .filter((parameter) => sharedVpp.some((row) => row.parameter === parameter)).join(','),
+    `before=${before}, after=${after}, reversed=${reversed}`);
+}
+
+{
+  const allRows: MeasurementRow[] = [
+    { id: 1, start: 0, parameter: 'vpp' },
+    { id: 2, start: 0, parameter: 'frequency' },
+    { id: 3, start: 16, parameter: 'frequency' },
+  ];
+  const rows = [rowView(0, 'vpp', 3.2), rowView(0, 'frequency', 1000), rowView(16, 'frequency', 2000)];
+  const sources = [SOURCE_A0, SOURCE_A1, SOURCE_A2];
+  const shown16 = [rows[2]!];
+  const filtered = sectionView(sources, allRows, shown16, 16);
+  const unfiltered = sectionView(sources, allRows, rows, null);
+  const rowless = sectionView(sources, allRows, [], 8);
+  const matrix = measurementMatrixView(filtered);
+  check('the source filter narrows the rows while the column set stays the full union',
+    columnOrder(filtered) === 'vpp,frequency' && columnOrder(unfiltered) === 'vpp,frequency' &&
+      columnOrder(rowless) === 'vpp,frequency' &&
+      matrix.rows.length === 1 && matrix.rows[0]!.start === 16 &&
+      matrix.rows[0]!.cells.length === 2 && matrix.rows[0]!.cells[0]!.row === null &&
+      matrix.rows[0]!.cells[1]!.row === shown16[0] && rowStarts(unfiltered) === '0,8,16' &&
+      rowStarts(rowless) === '8' && cellRowIds(rowless) === 'null|null',
+    `filteredColumns=${columnOrder(filtered)}, starts=${rowStarts(unfiltered)}, ` +
+      `filteredStarts=${rowStarts(filtered)}, rowless=${rowStarts(rowless)}/` +
+      `${cellRowIds(rowless)}, cells=${cellRowIds(filtered)}`);
+}
+
+{
+  const allRows: MeasurementRow[] = [
+    { id: 1, start: 0, parameter: 'vpp' },
+    { id: 2, start: 0, parameter: 'mean' },
+  ];
+  const rows = [rowView(0, 'vpp', 3.2), rowView(0, 'mean', 1.1)];
+  const matrix = measurementMatrixView(sectionView([SOURCE_A0, SOURCE_A1], allRows, rows, null));
+  check('a cell projects the existing row for an enabled parameter and stays null otherwise',
+    matrix.rows.length === 2 &&
+      matrix.rows[0]!.cells[0]!.row === rows[0] && matrix.rows[0]!.cells[1]!.row === rows[1] &&
+      matrix.rows[1]!.cells.every((cell) => cell.row === null) &&
+      cellRowIds(sectionView([SOURCE_A0, SOURCE_A1], allRows, rows, null)) ===
+        `${rows[0]!.id}|${rows[1]!.id},null|null` &&
+      matrix.rows[0]!.name === 'A0' && matrix.rows[0]!.color === '#1f77b4' &&
+      matrix.rows[0]!.focused === false && matrix.rows[1]!.start === 8 &&
+      matrix.rows[1]!.name === 'A1' && matrix.rows[1]!.color === '#ff7f0e' &&
+      matrix.rows[1]!.focused === true,
+    `rows=${matrix.rows.length}, cells=${cellRowIds(sectionView([SOURCE_A0, SOURCE_A1], allRows, rows, null))}, ` +
+      `header=${matrix.rows[1]!.name}/${matrix.rows[1]!.color}/${matrix.rows[1]!.focused}`);
+
+  const labels = matrix.columns.map((column) => column.labelKey).join(',');
+  check('the column labels come from the catalog entries, not from new copy',
+    labels === 'capturePanel.measureVpp,capturePanel.measureMean' &&
+      matrix.columns.every((column) =>
+        column.labelKey === catalogEntry(column.parameter).labelKey),
+    `labels=${labels}`);
+}
+
+{
+  const emptyUnion = sectionView([SOURCE_A0, SOURCE_A1], [], [], null);
+  const emptySources = sectionView([], [], [], null);
+  const noUnion = measurementMatrixView(emptyUnion);
+  const noSources = measurementMatrixView(emptySources);
+  check('an empty union or an empty source list projects empty arrays, never a synthetic table',
+    noUnion.columns.length === 0 && noUnion.rows.length === 0 &&
+      noSources.columns.length === 0 && noSources.rows.length === 0,
+    `unionColumns=${noUnion.columns.length}, unionRows=${noUnion.rows.length}, ` +
+      `sourcesColumns=${noSources.columns.length}, sourcesRows=${noSources.rows.length}`);
+}
+
+{
+  const allRows: MeasurementRow[] = [];
+  const rows: MeasurementRowView[] = [];
+  const sources: MeasurementSource[] = [SOURCE_A0, SOURCE_A1, SOURCE_A2, {
+    group: 3, start: 24, gain: 1, name: 'A3', color: '#9467bd', focused: false,
+  }];
+  for (const source of sources) {
+    for (const parameter of MEASUREMENT_PARAMETERS) {
+      allRows.push({
+        id: allRows.length + 1, start: source.start, parameter,
+      });
+      rows.push(rowView(source.start, parameter, 1));
+    }
+  }
+  const matrix = measurementMatrixView(sectionView(sources, allRows, rows, null));
+  const cells = matrix.rows.reduce((sum, row) => sum + row.cells.length, 0);
+  check('the cap constants derive from the catalog size and the analog group count',
+    MATRIX_MAX_COLUMNS === MEASUREMENT_CATALOG.length && MATRIX_MAX_COLUMNS === 8 &&
+      MATRIX_MAX_ROWS === analogGroupCount(32) && MATRIX_MAX_ROWS === ANALOG_GROUP_COUNT &&
+      MATRIX_MAX_ROWS === 4 &&
+      matrix.columns.length === MATRIX_MAX_COLUMNS && matrix.rows.length === MATRIX_MAX_ROWS &&
+      cells === MATRIX_MAX_COLUMNS * MATRIX_MAX_ROWS &&
+      matrix.rows.every((row) => row.cells.length === matrix.columns.length &&
+        row.cells.every((cell) => cell.row !== null)),
+    `columns=${MATRIX_MAX_COLUMNS}/${MEASUREMENT_CATALOG.length}, ` +
+      `rows=${MATRIX_MAX_ROWS}/${analogGroupCount(32)}/${ANALOG_GROUP_COUNT}, ` +
+      `cells=${cells}, measured=${matrix.columns.length}x${matrix.rows.length}`);
+}
+
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as {
+    readFileSync(path: string, encoding: string): string;
+  } | undefined;
+  if (!fs) throw new Error('node fs module unavailable');
+  const source = fs.readFileSync('src/ui/measurementRows.ts', 'utf8');
+  const region = source.slice(source.indexOf('export function measurementMatrixView'));
+  const readsProducedRows = (text: string): boolean =>
+    text.includes('view.allRows') && text.includes('view.rows') &&
+      !text.includes('captureStore') && !text.includes('readMeasureSamples') &&
+      !text.includes('scanAnalogCodes') && !text.includes('measurementStats');
+  const mutated = region.split('view.allRows').join('view.rows');
+  check('the matrix projects the rows the section already produced and never reads the wave',
+    region.length > 0 && region.includes('export function measurementMatrixView') &&
+      readsProducedRows(region) && !readsProducedRows(mutated) && mutated !== region,
+    `region=${region.length}, mutatedRejected=${!readsProducedRows(mutated)}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

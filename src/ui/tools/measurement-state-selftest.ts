@@ -165,6 +165,17 @@ function resultFor(
       measurementSources([bank(0, 0)], 32)[0]?.gain === 1 &&
       measurementSources([hiddenBank], 32).length === 1,
     sources.map((s) => `${s.group}:${s.start}:${s.gain}:${s.name}`).join(', '));
+
+  const colored = measurementSources(
+    [{ ...bank(0), color: '#1f77b4' }, { ...bank(2), color: '#2ca02c' }], 32, 0);
+  const unfocused = measurementSources([{ ...bank(0), color: '#1f77b4' }, bank(2)], 32);
+  check('each source carries its bus colour and the bank the section focuses',
+    colored[0]!.color === '#1f77b4' && colored[0]!.focused === true &&
+      colored[1]!.color === '#2ca02c' && colored[1]!.focused === false &&
+      unfocused[0]!.focused === false && unfocused[0]!.color === '#1f77b4' &&
+      unfocused[1]!.color === '' &&
+      measurementSources([bank(0)], 32, 8)[0]!.focused === false,
+    colored.map((s) => `${s.start}:${s.color}:${s.focused}`).join(', '));
 }
 
 {
