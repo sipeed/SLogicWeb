@@ -38,7 +38,9 @@ async function responseJson(response, operation) {
   catch { throw new Error('invalid ' + operation + ' JSON response'); }
 }
 
-export async function uploadSite(dist, config, fetcher = fetch, pause = delay) {
+// sourceMaps=false publishes the site without *.map files (failures are fatal);
+// sourceMaps=true publishes only the maps, best-effort, after the CDN purge.
+export async function uploadSite(dist, config, fetcher = fetch, pause = delay, { sourceMaps = false } = {}) {
   const { accessKey, secretKey, bucket, uploadHost = 'https://up-z2.qiniup.com' } = config;
   if (!accessKey || !secretKey || !bucket) throw new Error('QINIU_ACCESS_KEY, QINIU_SECRET_KEY and QINIU_BUCKET are required');
   // Only Qiniu receives credentials. Test transports can replace fetcher without
@@ -63,7 +65,7 @@ export async function uploadSite(dist, config, fetcher = fetch, pause = delay) {
     if (!keys.has(key)) throw new Error('artifact missing ' + key);
   }
   if (!files.some(f => f.key.endsWith('.wasm'))) throw new Error('artifact missing Pyodide WASM');
-  let uploaded = 0, skipped = 0;
+  let uploaded = 0, skipped = 0, mapsFailed = 0;
   async function retry(operation, key, action) {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try { return await action(); }
@@ -141,30 +143,46 @@ export async function uploadSite(dist, config, fetcher = fetch, pause = delay) {
     });
     uploaded++;
   }
-  async function uploadGroup(group) {
+  async function uploadGroup(group, run = upload) {
     // Bound cross-region traffic; stop queuing after failure and await in-flight work.
     let next = 0, failure;
     const results = await Promise.allSettled(Array.from({ length: Math.min(2, group.length) }, async () => {
       while (!failure && next < group.length) {
-        try { await upload(group[next++]); }
+        try { await run(group[next++]); }
         catch (error) { failure ||= error; throw error; }
       }
     }));
     const rejected = results.find(result => result.status === 'rejected');
     if (rejected) throw rejected.reason;
   }
-  const assets = files.filter(f => !f.key.endsWith('.html') && f.key !== 'sw.js');
+  const maps = files.filter(f => f.key.endsWith('.map'));
+  if (sourceMaps) {
+    // Only DevTools fetches source maps, and the entry map (multi-MB) is renamed on
+    // every build. Nothing about a map - stat, read or upload - may fail the deploy.
+    await uploadGroup(maps, async file => {
+      try { await upload(file); } catch (error) {
+        mapsFailed++;
+        console.log('::warning::source map not published: ' + error.message);
+      }
+    });
+    return { maps: maps.length, uploaded, skipped, mapsFailed, bucket };
+  }
+  const assets = files.filter(f => !f.key.endsWith('.html') && f.key !== 'sw.js' && !f.key.endsWith('.map'));
   const html = files.filter(f => f.key.endsWith('.html'));
   await uploadGroup(assets);
   await uploadGroup(html);
   await uploadGroup(files.filter(f => f.key === 'sw.js'));
-  return { files: files.length, assets: assets.length, html: html.length, uploaded, skipped, bucket };
+  return { files: files.length, assets: assets.length, html: html.length, mapsDeferred: maps.length, uploaded, skipped, bucket };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  uploadSite(process.argv[2] || 'dist', {
+  const args = process.argv.slice(2);
+  const unknown = args.filter(arg => arg.startsWith('--') && arg !== '--source-maps');
+  if (unknown.length) { console.error('unknown option: ' + unknown.join(' ')); process.exit(2); }
+  const sourceMaps = args.includes('--source-maps');
+  uploadSite(args.find(arg => !arg.startsWith('--')) || 'dist', {
     accessKey: process.env.QINIU_ACCESS_KEY,
     secretKey: process.env.QINIU_SECRET_KEY,
     bucket: process.env.QINIU_BUCKET,
-  }).then(result => console.log(JSON.stringify(result))).catch(error => { console.error(error.message); process.exitCode = 1; });
+  }, fetch, delay, { sourceMaps }).then(result => console.log(JSON.stringify(result))).catch(error => { console.error(error.message); process.exitCode = 1; });
 }
