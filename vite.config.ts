@@ -109,8 +109,8 @@ function requireRuntimeAssets(): Plugin {
  *
  * slogic.sipeed.com sits behind a CDN that keeps files for weeks and allows only a few
  * folder purges a day, but hundreds of single-URL purges. Everything else the page loads
- * already has a content hash in its name (Vite's [name]-[hash] chunks) or is inlined
- * into index.html, so once these two carry one as well, purging index.html alone updates
+ * already has a content hash in its name (Vite's [name]-[hash] chunks, the entry JS/CSS
+ * included), so once these two carry one as well, purging index.html alone updates
  * the whole site: a changed file gets a new URL the CDN has never cached.
  *
  *   public/pyodide/*            -> dist/pyodide/<hash>/*    (Pyodide builds the .wasm,
@@ -228,28 +228,32 @@ function emitLicense(): Plugin {
             'It can also be served unchanged from any static HTTPS host.\n' +
             'JavaScript source maps are included for browser debugging. Advanced contains the USB console.\n'
           : 'slogicweb static distribution\n\n' +
-            'index.html inlines the application code and styles; the Decode and USB workers,\n' +
-            'the decoder detail data, Pyodide WASM/stdlib and the sigrok decoders ship as\n' +
-            'separate files beside it. Serve this directory unchanged from any static HTTPS\n' +
-            'host - Node and npm are not runtime dependencies. The entry source map is inlined\n' +
-            'for browser debugging; other maps ship beside their files. Advanced contains the\n' +
-            'USB console.\n\n' +
+            'index.html loads the content-hashed application code and styles from assets/;\n' +
+            'the Decode and USB workers, the decoder detail data, Pyodide WASM/stdlib and the\n' +
+            'sigrok decoders ship as separate files beside it. Serve this directory unchanged\n' +
+            'from any static HTTPS host - Node and npm are not runtime dependencies. Source\n' +
+            'maps ship beside their files for browser debugging. Advanced contains the USB\n' +
+            'console.\n\n' +
             'sw.js is the offline shell (a service worker) and manifest.webmanifest makes the\n' +
             'page installable. Every other file has a content-hashed name, so after a deploy\n' +
             'purge exactly two URLs from any CDN: index.html and sw.js. Open tabs then show a\n' +
             '"new version is ready" notice and reload into it only when the user clicks.\n\n' +
-            'Double-clicking index.html still opens the UI and capture works through the\n' +
-            'in-page USB fallback, but the workers and the decoder detail data cannot load\n' +
-            'from file://, so protocol decoding needs the portable single-file build instead.\n',
+            'This build needs an http(s) origin: opened from file:// the browser refuses its\n' +
+            'module scripts. Use the portable single-file build to double-click it offline.\n',
       });
     },
   };
 }
 
 /**
- * Keep normal hashed assets/source maps, but also inline the entry JS and CSS into
- * dist/index.html. The portable build also bundles the decode worker and all of its
- * runtime data, so the result does not perform a neighbouring file:// import or fetch.
+ * Portable build only: inline the entry JS and CSS (and their source maps, as data URLs)
+ * into dist/index.html, which also carries the decode worker and all of its runtime
+ * data, so the result does not perform a neighbouring file:// import or fetch.
+ *
+ * Hosted builds keep Vite's own output - a content-hashed assets/index-*.js and .css
+ * with their maps beside them. Inlining there made index.html (no-cache, re-uploaded
+ * and re-downloaded on every deploy) about 5.5 MB, 4.5 MB of it a base64 source map
+ * nobody but DevTools reads; a cross-border CDN upload of it timed out in CI.
  */
 function inlineEntryForFileOpen(): Plugin {
   return {
@@ -257,6 +261,7 @@ function inlineEntryForFileOpen(): Plugin {
     apply: 'build',
     enforce: 'post',
     closeBundle() {
+      if (!portable) return;
       const out = resolve(__dirname, 'dist');
       const indexPath = resolve(out, 'index.html');
       let html = readFileSync(indexPath, 'utf8');
@@ -329,11 +334,13 @@ function inlineEntryForFileOpen(): Plugin {
  *
  * Runs after inlineEntryForFileOpen (both enforce 'post', this one listed later; both
  * closeBundle hooks are synchronous), so the index.html it versions and stamps is the
- * final one, and the entry JS/CSS that plugin inlined are left out of the list.
+ * final one. That plugin only acts on the portable build, which never gets a shell, so
+ * in a hosted build the entry JS/CSS are ordinary hashed files and must be precached:
+ * the build fails if index.html loads one the list does not hold.
  */
 function pwaShell(): Plugin {
   let enabled = false;
-  const inlined: string[] = [];
+  let base = '/';
   return {
     name: 'slogicweb:pwa-shell',
     enforce: 'post',
@@ -341,22 +348,26 @@ function pwaShell(): Plugin {
       enabled = env.command === 'build' && !portable;
       return { define: { __SLOGICWEB_PWA__: JSON.stringify(enabled) } };
     },
-    generateBundle(_options, bundle) {
-      inlined.length = 0;
-      for (const file of Object.values(bundle)) {
-        if (file.type !== 'chunk' || !file.isEntry) continue;
-        inlined.push(file.fileName);
-        const css = (file as { viteMetadata?: { importedCss?: Set<string> } }).viteMetadata?.importedCss;
-        for (const name of css ?? []) inlined.push(name);
-      }
+    configResolved(config) {
+      base = config.base;
     },
     closeBundle() {
       if (!enabled) return;
-      const { version, shell } = buildPwaShell(resolve(__dirname, 'dist'), {
-        inlined,
+      const dist = resolve(__dirname, 'dist');
+      // What the unstamped page loads by URL. Read before buildPwaShell stamps it.
+      const loaded = [...readFileSync(resolve(dist, 'index.html'), 'utf8')
+        .matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)="([^"]+)"/g)]
+        .map((m) => (m[1].startsWith(base) ? m[1].slice(base.length) : m[1]).replace(/^\.?\//, ''))
+        .filter((rel) => /\.(?:js|css)$/.test(rel));
+      if (!loaded.some((rel) => /^assets\/index-[^/]+\.js$/.test(rel))) {
+        this.error('pwa shell: hosted index.html does not load the entry script from assets/');
+      }
+      const { version, shell } = buildPwaShell(dist, {
         template: readFileSync(resolve(__dirname, 'src/pwa/sw.js'), 'utf8'),
         iconDir: resolve(__dirname, 'src/pwa/icons'),
       });
+      const missing = loaded.filter((rel) => !shell.hashed.includes(rel) && !shell.plain.includes(rel));
+      if (missing.length) this.error(`pwa shell: index.html loads files the precache misses: ${missing.join(', ')}`);
       console.log(`pwa shell ${version}: ${shell.hashed.length + shell.plain.length + 1} files `
         + `precached, ${shell.runtime.length} runtime (best-effort at install, else on first use)`);
     },
@@ -405,8 +416,8 @@ const portableAssets = portable ? {
 } : null;
 
 export default defineConfig({
-  // Asset URLs remain portable when dist/ is hosted below a path. The entry itself is
-  // inlined after build so it also works from file://.
+  // Asset URLs remain portable when dist/ is hosted below a path. The portable build
+  // inlines the entry after build so it also works from file://.
   base: './',
   server: lanServer(5173),
   preview: lanServer(5174),
@@ -436,20 +447,14 @@ export default defineConfig({
     rollupOptions: {
       output: {
         banner: BANNER,
-        // The inlineEntryForFileOpen plugin inlines the entry script into
-        // dist/index.html in EVERY build, so a relative dynamic-import
-        // specifier resolves against the document URL, not against assets/.
-        // Locale chunks must therefore sit at the dist root: emitted under the
-        // default assets/[name]-[hash].js they would be requested from
-        // <origin-root>/<chunk>.js and 404. Today the locale catalogs are the only
-        // dynamic imports, so nothing else lands at the root for this reason.
-        // Caveat: rollup renders the specifier relative to the entry chunk, so it
-        // is emitted as "../<chunk>.js". That resolves correctly for the deployments
-        // that work today (dist/ at the origin root; the live --base=/ custom-domain
-        // build) but escapes the base when dist/ is hosted below a sub-path. Fixing
-        // sub-path hosting is a separate, coordinated change (the plugin must become
-        // base-aware - it currently crashes on a sub-path base even without this
-        // commit - plus co-located entry/chunks and matching worker map placement).
+        // Non-entry chunks (the locale catalogs, the decoder detail data and the
+        // preload helper) sit at the dist root. This dates from when the hosted
+        // build also inlined the entry into dist/index.html, so a relative
+        // dynamic-import specifier resolved against the document URL. The hosted
+        // entry now loads from assets/, and the "../<chunk>.js" specifier rollup
+        // emits from there resolves to the same root file (also below a sub-path
+        // base); the layout is kept so published URLs and CDN purge lists do not
+        // move. The portable build folds dynamic imports into the entry.
         chunkFileNames: '[name]-[hash].js',
         // The portable build inlines the entry into index.html, deletes every
         // sibling executable file, and is opened over file:// - where a

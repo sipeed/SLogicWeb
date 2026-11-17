@@ -379,10 +379,12 @@ for i18next in a tree whose only runtime dependency is pyodide.
   only when that language is selected - a menu pick, a stored preference, or the
   browser-language default.
   `vite build` emits one chunk per locale at the **dist root** (`dist/zh-CN-*.js`,
-  `ru-*.js`, `fr-*.js`), not under `assets/`: `inlineEntryForFileOpen` inlines the
-  entry script into `index.html` in every build, so a relative dynamic-import
-  specifier resolves against the document URL, and an `assets/`-placed chunk would
-  be requested from `<origin-root>/<chunk>.js` and 404. [MEASURED] The split took
+  `ru-*.js`, `fr-*.js`), not under `assets/`. Originally `inlineEntryForFileOpen`
+  inlined the entry script into `index.html` in every build, so a relative
+  dynamic-import specifier resolved against the document URL and an `assets/`-placed
+  chunk would have 404ed. Since 2026-11 the plugin only runs for the portable
+  build; the hosted entry loads from `assets/` and its `../<chunk>.js` specifier still
+  resolves to the root chunk, so the layout was kept. [MEASURED] The split took
   the entry from 594.53 kB / gzip 149.72 kB (after the loader seam landed) to
   572.20 kB / gzip 143.46 kB, against a pre-task baseline of 593.53 kB / gzip
   149.32 kB; the zh-CN/ru/fr chunks measure 7.07/9.82/7.68 kB. The
