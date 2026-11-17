@@ -1039,15 +1039,18 @@ function count(source: string, needle: string): number {
   const record = slice(app, 'private recordMeasurementWave(reason: CaptureStopReason): void {', '\n  }');
   const persist = slice(app, 'private submitPersistenceWave(', 'private clearPersistence(');
   const analysis = slice(app, '  private xyAnalysis(', '  private xyDensityFor(');
+  const recordGated = (source: string): boolean => source.includes(
+    "this.measurePageShown() && this.analogScopeActive() && this.viewMode === 'time'");
   check('measurements, the capture job, statistics and Persistence pause for XY too',
     view.includes("if (this.viewMode !== 'time') {") &&
       view.includes('const xy = this.xySectionView();') &&
       pump.includes("if (this.viewMode !== 'time') return;") &&
-      record.includes("this.measurePageShown() && this.viewMode === 'time'") &&
+      recordGated(record) && !recordGated(record.replace(' && this.analogScopeActive()', '')) &&
       persist.includes('viewMode: this.viewMode,') &&
       !persist.includes("viewMode: 'time',"),
     `view=${view.includes('xySectionView')}, pump=${pump.includes('viewMode')}, ` +
-      `record=${record.includes('viewMode')}`);
+      `record=${recordGated(record)}, ` +
+      `ungated=${recordGated(record.replace(' && this.analogScopeActive()', ''))}`);
 
   check('XY reads the current wave through the exact reader for both sources only',
     slice(app, '  private xySectionView(', '  private xyAnalysis(')

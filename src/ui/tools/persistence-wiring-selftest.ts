@@ -65,7 +65,7 @@ const overlay = read('src/ui/overlay.ts');
 const surfaces = read('src/ui/persistenceSurfaces.ts');
 const sheet = read('src/ui/style.css');
 const design = read('docs/DESIGN.md');
-const captureDraw = slice(panel, 'const measureSec = section(', 'cursorPage.appendChild(measureSec.el)');
+const captureDraw = slice(panel, 'const measureSec = section(', 'return measureSec.el;');
 const frameBody = methodBody(app, 'private frame = (): void => {');
 const drawBody = methodBody(app, 'private draw(force = true): void {');
 const submitBody = methodBody(app, 'private submitPersistenceWave(');
@@ -403,6 +403,7 @@ const startBody = methodBody(app, 'private async startCapture(');
     settingsArmed: false,
     activeTriggerPreSamples: undefined,
     measurement: emptyMeasurements,
+    analogScopeActive: true,
     persistence,
   });
   const instance = new CapturePanel({

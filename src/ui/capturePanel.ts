@@ -262,6 +262,7 @@ export interface CapturePanelView {
   /** A previous Repeat Interval missed its trigger; the session is retrying. */
   repeatMissed?: boolean;
   measurement: MeasurementSectionView;
+  analogScopeActive: boolean;
   persistence: PersistencePanelView;
 }
 
@@ -847,7 +848,7 @@ export class CapturePanel {
   render(v: CapturePanelView): void {
     const s = v.settings;
     const capture = this.host.capture;
-    const cursorPage = this.host.measure;
+    const measurePage = this.host.measure;
     const locked = cursorsLocked(v);
     // A ratio being typed survives a rebuild (a capture finishing mid-entry): its text is
     // kept in gainEdit and its field takes the focus back. The old field's blur, which
@@ -862,7 +863,7 @@ export class CapturePanel {
     this.chipRows.clear();
     try {
       capture.replaceChildren();
-      cursorPage.replaceChildren();
+      measurePage.replaceChildren();
     } finally {
       this.rendering = false;
     }
@@ -1621,8 +1622,189 @@ export class CapturePanel {
       }
       cursorSec.body.appendChild(list);
     }
-    cursorPage.appendChild(cursorSec.el);
+    measurePage.appendChild(cursorSec.el);
 
+    const distanceSec = section(t('capturePanel.cursorDistance'));
+    distanceSec.header.classList.add('cursor-dist-head');
+    const distanceLegend = document.createElement('span');
+    distanceLegend.className = 'cursor-legend';
+    distanceLegend.textContent = t('capturePanel.cursorDistanceFormat');
+    distanceSec.header.appendChild(distanceLegend);
+    if (v.cursorDistances.length === 0) {
+      const hint = document.createElement('p');
+      hint.className = 'cursor-dist-hint';
+      hint.textContent = t(v.cursors.length < 2
+        ? 'capturePanel.cursorDistanceEmpty' : 'capturePanel.cursorDistanceNoRows');
+      distanceSec.body.appendChild(hint);
+    } else {
+      const list = div('cursor-dist-list');
+      for (const row of v.cursorDistances) {
+        const item = div('cursor-dist-row');
+        item.dataset.distanceId = String(row.id);
+        const a = distanceSideControl(row, 'a', v.cursors,
+          (cursorId) => this.cb.onPickCursorDistance(row.id, 'a', cursorId));
+        a.el.disabled = locked;
+        const mark = document.createElement('span');
+        mark.className = 'cursor-dist-mark';
+        mark.setAttribute('aria-hidden', 'true');
+        // Start -> end: the reading is end minus start, so the arrow says which way it runs.
+        mark.textContent = '→';
+        const b = distanceSideControl(row, 'b', v.cursors,
+          (cursorId) => this.cb.onPickCursorDistance(row.id, 'b', cursorId));
+        b.el.disabled = locked;
+        const delta = document.createElement('span');
+        delta.className = 'cursor-dist-delta';
+        delta.translate = false;
+        delta.textContent = row.delta;
+        const remove = cursorRemoveButton(
+          t('capturePanel.cursorDistanceRemove', { row: row.row }),
+          () => this.cb.onRemoveCursorDistance(row.id),
+        );
+        remove.disabled = locked;
+        const zoom = distanceZoomButton(
+          t('capturePanel.cursorDistanceZoom', { row: row.row }),
+          row.a === null || row.b === null,
+          () => this.cb.onZoomCursorDistance(row.id),
+        );
+        const tail = div('cursor-dist-tail');
+        tail.append(delta, zoom, remove);
+        item.append(a.el, mark, b.el, tail, a.popover, b.popover);
+        list.appendChild(item);
+      }
+      distanceSec.body.appendChild(list);
+    }
+    const addRow = div('cursor-dist-add-row');
+    addRow.appendChild(distanceAddButton(
+      v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS || locked,
+      () => this.cb.onAddCursorDistance(),
+    ));
+    distanceSec.body.appendChild(addRow);
+    measurePage.appendChild(distanceSec.el);
+
+    const edgeSec = section(t('capturePanel.cursorEdges'));
+    edgeSec.header.classList.add('cursor-edge-head');
+    const edgeLegend = document.createElement('span');
+    edgeLegend.className = 'cursor-legend';
+    edgeLegend.textContent = t('capturePanel.cursorEdgesFormat');
+    edgeSec.header.appendChild(edgeLegend);
+    if (v.cursorEdges.length === 0) {
+      const hint = document.createElement('p');
+      hint.className = 'cursor-edge-hint';
+      hint.textContent = t(v.cursors.length < 2
+        ? 'capturePanel.cursorEdgesEmpty' : 'capturePanel.cursorEdgesNoRows');
+      edgeSec.body.appendChild(hint);
+    } else {
+      const list = div('cursor-edge-list');
+      for (const row of v.cursorEdges) {
+        const item = div('cursor-edge-row');
+        item.dataset.edgeId = String(row.id);
+        const a = edgeSideControl(row, 'a', v.cursors,
+          (cursorId) => this.cb.onPickCursorEdge(row.id, 'a', cursorId));
+        a.el.disabled = locked;
+        const mark = document.createElement('span');
+        mark.className = 'cursor-dist-mark cursor-edge-mark';
+        mark.setAttribute('aria-hidden', 'true');
+        mark.textContent = '−';
+        const b = edgeSideControl(row, 'b', v.cursors,
+          (cursorId) => this.cb.onPickCursorEdge(row.id, 'b', cursorId));
+        b.el.disabled = locked;
+        const at = document.createElement('span');
+        at.className = 'cursor-dist-mark cursor-edge-mark';
+        at.setAttribute('aria-hidden', 'true');
+        at.textContent = '@';
+        const channelOptions: SelectOptionTuple[] = [
+          ['', t('capturePanel.cursorEdgesUnset')],
+          ...v.cursorEdgeChannels.map((channel): SelectOptionTuple => [String(channel.index), channel.name]),
+        ];
+        const channel = selectControl(
+          `cursor.edge.channel.${row.id}`,
+          t('capturePanel.cursorEdgesChannel', { row: row.row }),
+          channelOptions,
+          row.channel === null ? '' : String(row.channel),
+        );
+        channel.el.classList.add('cursor-edge-channel');
+        channel.disabled = locked;
+        channel.addEventListener('change', () => this.cb.onPickCursorEdgeChannel(
+          row.id, channel.value === '' ? null : Number(channel.value),
+        ));
+        const result = document.createElement('span');
+        result.className = 'cursor-edge-result';
+        result.translate = false;
+        result.textContent = row.result;
+        const remove = cursorRemoveButton(
+          t('capturePanel.cursorEdgesRemove', { row: row.row }),
+          () => this.cb.onRemoveCursorEdge(row.id),
+        );
+        remove.disabled = locked;
+        const tail = div('cursor-edge-tail');
+        tail.append(result, remove);
+        item.append(a.el, mark, b.el, at, channel.el, tail, a.popover, b.popover);
+        list.appendChild(item);
+      }
+      edgeSec.body.appendChild(list);
+    }
+    const edgeAddRow = div('cursor-edge-add-row');
+    edgeAddRow.appendChild(edgeAddButton(
+      v.cursorEdges.length >= MAX_CURSOR_EDGE_ROWS || locked,
+      () => this.cb.onAddCursorEdge(),
+    ));
+    edgeSec.body.appendChild(edgeAddRow);
+    measurePage.appendChild(edgeSec.el);
+
+    if (v.analogScopeActive) {
+      measurePage.appendChild(this.measurementSection(v));
+    } else {
+      if (this.catalogDialog.isOpen) this.catalogDialog.close();
+      measurePage.appendChild(this.measurementEnableHint());
+    }
+
+    // ---- advanced test mode + raw USB console
+    const advanced = document.createElement('details');
+    advanced.className = 'advanced';
+    advanced.open = this.advancedOpen;
+    advanced.addEventListener('toggle', () => { this.advancedOpen = advanced.open; });
+    const summary = document.createElement('summary');
+    summary.textContent = t('capturePanel.advanced');
+    advanced.appendChild(summary);
+    const body = div('advanced-body');
+
+    const testModeOptions: SelectOptionTuple[] = [
+      ['0', t('capturePanel.testNormal')],
+      ['2', t('capturePanel.testSimulator')],
+      ['1', t('capturePanel.testUsbMax')],
+    ];
+    const source = selectControl(
+      'capture.testMode',
+      t('capturePanel.testMode'),
+      testModeOptions,
+      String(s.testMode),
+    );
+    source.disabled = v.running;
+    source.addEventListener('change', () =>
+      this.cb.onSettings({ ...s, testMode: Number(source.value) as 0 | 1 | 2 }));
+    // What the test modes are for (and are not) before the user selects one.
+    const sourceRow = div('help-row');
+    sourceRow.append(source.el, helpTip(t('capturePanel.testModeHelp')));
+    body.appendChild(sourceRow);
+    if (s.testMode !== 0) {
+      const analogNote = div('panel-note');
+      analogNote.textContent = t('capturePanel.testModeAnalog');
+      body.appendChild(analogNote);
+    }
+
+    // The raw register console can write device registers, so it is a developer tool:
+    // hidden unless Settings > Developer tools is on (persisted, off by default).
+    if (v.developerTools === true) this.renderUsbConsole(body, v);
+    advanced.appendChild(body);
+    capture.appendChild(advanced);
+    if (v.analogScopeActive) {
+      this.restoreMeasureFocus(v.measurement);
+    } else if (this.measureFocus !== null) {
+      this.dropMeasureFocus(this.measureFocus);
+    }
+  }
+
+  private measurementSection(v: CapturePanelView): HTMLElement {
     const measureSec = section(t('capturePanel.measure'));
     this.measureSectionView = v.measurement;
     for (const id of this.measureOpen) {
@@ -1880,176 +2062,15 @@ export class CapturePanel {
     measureNote.textContent = measurementNoteText(v.measurement);
     measureNote.hidden = measureNote.textContent === '';
     measureSec.body.appendChild(measureNote);
-    cursorPage.appendChild(measureSec.el);
     if (this.catalogDialog.isOpen) this.catalogDialog.update(measurementCatalogView(v.measurement));
+    return measureSec.el;
+  }
 
-    const distanceSec = section(t('capturePanel.cursorDistance'));
-    distanceSec.header.classList.add('cursor-dist-head');
-    const distanceLegend = document.createElement('span');
-    distanceLegend.className = 'cursor-legend';
-    distanceLegend.textContent = t('capturePanel.cursorDistanceFormat');
-    distanceSec.header.appendChild(distanceLegend);
-    if (v.cursorDistances.length === 0) {
-      const hint = document.createElement('p');
-      hint.className = 'cursor-dist-hint';
-      hint.textContent = t(v.cursors.length < 2
-        ? 'capturePanel.cursorDistanceEmpty' : 'capturePanel.cursorDistanceNoRows');
-      distanceSec.body.appendChild(hint);
-    } else {
-      const list = div('cursor-dist-list');
-      for (const row of v.cursorDistances) {
-        const item = div('cursor-dist-row');
-        item.dataset.distanceId = String(row.id);
-        const a = distanceSideControl(row, 'a', v.cursors,
-          (cursorId) => this.cb.onPickCursorDistance(row.id, 'a', cursorId));
-        a.el.disabled = locked;
-        const mark = document.createElement('span');
-        mark.className = 'cursor-dist-mark';
-        mark.setAttribute('aria-hidden', 'true');
-        // Start -> end: the reading is end minus start, so the arrow says which way it runs.
-        mark.textContent = '→';
-        const b = distanceSideControl(row, 'b', v.cursors,
-          (cursorId) => this.cb.onPickCursorDistance(row.id, 'b', cursorId));
-        b.el.disabled = locked;
-        const delta = document.createElement('span');
-        delta.className = 'cursor-dist-delta';
-        delta.translate = false;
-        delta.textContent = row.delta;
-        const remove = cursorRemoveButton(
-          t('capturePanel.cursorDistanceRemove', { row: row.row }),
-          () => this.cb.onRemoveCursorDistance(row.id),
-        );
-        remove.disabled = locked;
-        const zoom = distanceZoomButton(
-          t('capturePanel.cursorDistanceZoom', { row: row.row }),
-          row.a === null || row.b === null,
-          () => this.cb.onZoomCursorDistance(row.id),
-        );
-        const tail = div('cursor-dist-tail');
-        tail.append(delta, zoom, remove);
-        item.append(a.el, mark, b.el, tail, a.popover, b.popover);
-        list.appendChild(item);
-      }
-      distanceSec.body.appendChild(list);
-    }
-    const addRow = div('cursor-dist-add-row');
-    addRow.appendChild(distanceAddButton(
-      v.cursorDistances.length >= MAX_CURSOR_DISTANCE_ROWS || locked,
-      () => this.cb.onAddCursorDistance(),
-    ));
-    distanceSec.body.appendChild(addRow);
-    cursorPage.appendChild(distanceSec.el);
-
-    const edgeSec = section(t('capturePanel.cursorEdges'));
-    edgeSec.header.classList.add('cursor-edge-head');
-    const edgeLegend = document.createElement('span');
-    edgeLegend.className = 'cursor-legend';
-    edgeLegend.textContent = t('capturePanel.cursorEdgesFormat');
-    edgeSec.header.appendChild(edgeLegend);
-    if (v.cursorEdges.length === 0) {
-      const hint = document.createElement('p');
-      hint.className = 'cursor-edge-hint';
-      hint.textContent = t(v.cursors.length < 2
-        ? 'capturePanel.cursorEdgesEmpty' : 'capturePanel.cursorEdgesNoRows');
-      edgeSec.body.appendChild(hint);
-    } else {
-      const list = div('cursor-edge-list');
-      for (const row of v.cursorEdges) {
-        const item = div('cursor-edge-row');
-        item.dataset.edgeId = String(row.id);
-        const a = edgeSideControl(row, 'a', v.cursors,
-          (cursorId) => this.cb.onPickCursorEdge(row.id, 'a', cursorId));
-        a.el.disabled = locked;
-        const mark = document.createElement('span');
-        mark.className = 'cursor-dist-mark cursor-edge-mark';
-        mark.setAttribute('aria-hidden', 'true');
-        mark.textContent = '−';
-        const b = edgeSideControl(row, 'b', v.cursors,
-          (cursorId) => this.cb.onPickCursorEdge(row.id, 'b', cursorId));
-        b.el.disabled = locked;
-        const at = document.createElement('span');
-        at.className = 'cursor-dist-mark cursor-edge-mark';
-        at.setAttribute('aria-hidden', 'true');
-        at.textContent = '@';
-        const channelOptions: SelectOptionTuple[] = [
-          ['', t('capturePanel.cursorEdgesUnset')],
-          ...v.cursorEdgeChannels.map((channel): SelectOptionTuple => [String(channel.index), channel.name]),
-        ];
-        const channel = selectControl(
-          `cursor.edge.channel.${row.id}`,
-          t('capturePanel.cursorEdgesChannel', { row: row.row }),
-          channelOptions,
-          row.channel === null ? '' : String(row.channel),
-        );
-        channel.el.classList.add('cursor-edge-channel');
-        channel.disabled = locked;
-        channel.addEventListener('change', () => this.cb.onPickCursorEdgeChannel(
-          row.id, channel.value === '' ? null : Number(channel.value),
-        ));
-        const result = document.createElement('span');
-        result.className = 'cursor-edge-result';
-        result.translate = false;
-        result.textContent = row.result;
-        const remove = cursorRemoveButton(
-          t('capturePanel.cursorEdgesRemove', { row: row.row }),
-          () => this.cb.onRemoveCursorEdge(row.id),
-        );
-        remove.disabled = locked;
-        const tail = div('cursor-edge-tail');
-        tail.append(result, remove);
-        item.append(a.el, mark, b.el, at, channel.el, tail, a.popover, b.popover);
-        list.appendChild(item);
-      }
-      edgeSec.body.appendChild(list);
-    }
-    const edgeAddRow = div('cursor-edge-add-row');
-    edgeAddRow.appendChild(edgeAddButton(
-      v.cursorEdges.length >= MAX_CURSOR_EDGE_ROWS || locked,
-      () => this.cb.onAddCursorEdge(),
-    ));
-    edgeSec.body.appendChild(edgeAddRow);
-    cursorPage.appendChild(edgeSec.el);
-
-    // ---- advanced test mode + raw USB console
-    const advanced = document.createElement('details');
-    advanced.className = 'advanced';
-    advanced.open = this.advancedOpen;
-    advanced.addEventListener('toggle', () => { this.advancedOpen = advanced.open; });
-    const summary = document.createElement('summary');
-    summary.textContent = t('capturePanel.advanced');
-    advanced.appendChild(summary);
-    const body = div('advanced-body');
-
-    const testModeOptions: SelectOptionTuple[] = [
-      ['0', t('capturePanel.testNormal')],
-      ['2', t('capturePanel.testSimulator')],
-      ['1', t('capturePanel.testUsbMax')],
-    ];
-    const source = selectControl(
-      'capture.testMode',
-      t('capturePanel.testMode'),
-      testModeOptions,
-      String(s.testMode),
-    );
-    source.disabled = v.running;
-    source.addEventListener('change', () =>
-      this.cb.onSettings({ ...s, testMode: Number(source.value) as 0 | 1 | 2 }));
-    // What the test modes are for (and are not) before the user selects one.
-    const sourceRow = div('help-row');
-    sourceRow.append(source.el, helpTip(t('capturePanel.testModeHelp')));
-    body.appendChild(sourceRow);
-    if (s.testMode !== 0) {
-      const analogNote = div('panel-note');
-      analogNote.textContent = t('capturePanel.testModeAnalog');
-      body.appendChild(analogNote);
-    }
-
-    // The raw register console can write device registers, so it is a developer tool:
-    // hidden unless Settings > Developer tools is on (persisted, off by default).
-    if (v.developerTools === true) this.renderUsbConsole(body, v);
-    advanced.appendChild(body);
-    capture.appendChild(advanced);
-    this.restoreMeasureFocus(v.measurement);
+  private measurementEnableHint(): HTMLElement {
+    const hint = div('panel-note');
+    hint.dataset.measureScopeOff = '';
+    hint.textContent = t('capturePanel.measureScopeOff');
+    return hint;
   }
 
   /** The raw USB register console (developer tools only). */

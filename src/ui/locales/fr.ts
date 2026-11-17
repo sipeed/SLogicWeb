@@ -649,6 +649,7 @@ export const fr: Messages = {
   'capturePanel.measureCursorUnset': 'non défini',
   'capturePanel.measureCursorHint': 'Placez deux curseurs sur la forme d’onde pour mesurer l’intervalle entre eux.',
   'capturePanel.measureEmpty': 'Ajoutez une ligne de mesure.',
+  'capturePanel.measureScopeOff': 'Aucun oscilloscope n’est actif. Activez un groupe analogique (A0–A3) dans les lignes « Canaux » pour mesurer ses codes ADC.',
   'capturePanel.measureAddOpen': 'Ajouter une mesure…',
   'capturePanel.measureClearAll': 'Tout effacer',
   'capturePanel.measureRemove': 'Supprimer la ligne : {parameter}',

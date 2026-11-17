@@ -595,6 +595,7 @@ export const zhCN: Messages = {
   'capturePanel.measureCursorUnset': '未设置',
   'capturePanel.measureCursorHint': '在波形上放置两个光标，即可测量它们之间的区间。',
   'capturePanel.measureEmpty': '添加一行测量。',
+  'capturePanel.measureScopeOff': '尚未启用示波器。在「通道」的行中开启模拟组（A0–A3），即可测量它的 ADC 采样码。',
   'capturePanel.measureAddOpen': '添加测量…',
   'capturePanel.measureClearAll': '全部清除',
   'capturePanel.measureRemove': '移除行：{parameter}',

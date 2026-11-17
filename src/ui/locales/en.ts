@@ -650,6 +650,7 @@ export const en = {
   'capturePanel.measureCursorUnset': 'not set',
   'capturePanel.measureCursorHint': 'Place two cursors on the waveform to measure between them.',
   'capturePanel.measureEmpty': 'Add a measurement row.',
+  'capturePanel.measureScopeOff': 'No oscilloscope is on. Turn on an Analog group (A0–A3) in the Channels rows to measure its ADC codes.',
   'capturePanel.measureAddOpen': 'Add measurement…',
   'capturePanel.measureClearAll': 'Clear all',
   'capturePanel.measureRemove': 'Remove row: {parameter}',

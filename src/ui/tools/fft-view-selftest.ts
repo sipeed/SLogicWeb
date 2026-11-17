@@ -531,12 +531,15 @@ function sectionOf(analysis: FftAnalysis | null, over: Partial<FftSectionView> =
   const recordStart = app.indexOf('private recordMeasurementWave(reason: CaptureStopReason): void {');
   const record = recordStart < 0 ? '' : app.slice(recordStart, app.indexOf('\n  }', recordStart));
   const persist = slice(app, 'private submitPersistenceWave(', 'private clearPersistence(');
+  const recordGated = (source: string): boolean => source.includes(
+    "this.measurePageShown() && this.analogScopeActive() && this.viewMode === 'time'");
   check('statistics, the capture job and Persistence all read the real view mode',
     pump.includes("if (this.viewMode !== 'time') return;") &&
-      record.includes("this.measurePageShown() && this.viewMode === 'time'") &&
+      recordGated(record) && !recordGated(record.replace(' && this.analogScopeActive()', '')) &&
       persist.includes('viewMode: this.viewMode,') &&
       !persist.includes("viewMode: 'time',"),
-    `pump=${pump.includes('viewMode')}, record=${record.includes('viewMode')}, ` +
+    `pump=${pump.includes('viewMode')}, record=${recordGated(record)}, ` +
+      `ungated=${recordGated(record.replace(' && this.analogScopeActive()', ''))}, ` +
       `persist=${persist.includes('viewMode: this.viewMode,')}`);
 }
 

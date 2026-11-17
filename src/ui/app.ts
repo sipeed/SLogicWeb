@@ -1383,7 +1383,7 @@ export class App {
 
   private recordMeasurementWave(reason: CaptureStopReason): void {
     const store = this.captureStore;
-    const visible = this.measurePageShown() && this.viewMode === 'time';
+    const visible = this.measurePageShown() && this.analogScopeActive() && this.viewMode === 'time';
     const rows: MeasurementWaveRow[] = [];
     if (visible) {
       const view = this.measurementView();
@@ -1403,6 +1403,10 @@ export class App {
     if (result.state === this.measurementStats) return;
     this.measurementStats = result.state;
     this.dirty = true;
+  }
+
+  private analogScopeActive(): boolean {
+    return measurementSources(this.busViews, this.captureStore.channelCount).length > 0;
   }
 
   private measurementView(): MeasurementSectionView {
@@ -1691,7 +1695,7 @@ export class App {
     const entry = this.measurementCapture;
     if (entry === null || entry.job.status !== 'running') return;
     if (this.viewMode !== 'time') return;
-    if (!this.measurePageShown()) return;
+    if (!this.measurePageShown() || !this.analogScopeActive()) return;
     const store = entry.store;
     if (store !== this.captureStore) {
       entry.job.cancel();
@@ -4207,7 +4211,7 @@ export class App {
         this.xyPending = true;
         this.dirty = true;
       }
-      if (this.running && this.measurePageShown()) {
+      if (this.running && this.measurePageShown() && this.analogScopeActive()) {
         this.capturePanel.updateMeasurements(this.measurementView());
         persistencePanelDue = true;
       }
@@ -4264,7 +4268,7 @@ export class App {
     if (!this.dirty && !liveDue) return;
     const forced = this.dirty;
     this.dirty = false;
-    if (forced && !this.running && this.measurePageShown()) {
+    if (forced && !this.running && this.measurePageShown() && this.analogScopeActive()) {
       this.capturePanel.updateMeasurements(this.measurementView());
     }
     this.livePending = false;
@@ -6924,6 +6928,7 @@ export class App {
       cursorDistances: this.cursorDistanceRows(),
       cursorEdges: this.cursorEdgeRows(),
       measurement: this.measurementView(),
+      analogScopeActive: this.analogScopeActive(),
       persistence: this.persistenceView(),
       cursorEdgeChannels: this.edgeChannelOptions(),
       triggerViewLost: this.triggerViewLost,

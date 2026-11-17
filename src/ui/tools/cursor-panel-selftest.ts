@@ -48,10 +48,10 @@ const analyzerPanel = read('src/ui/analyzerPanel.ts');
 const app = read('src/ui/app.ts');
 const css = read('src/ui/style.css');
 
-const cursorSection = slice(panel, 'const cursorSec = section(', 'cursorPage.appendChild(cursorSec.el)');
+const cursorSection = slice(panel, 'const cursorSec = section(', 'measurePage.appendChild(cursorSec.el)');
 const distanceSection = slice(panel,
   "const distanceSec = section(t('capturePanel.cursorDistance'));",
-  'cursorPage.appendChild(distanceSec.el)');
+  'measurePage.appendChild(distanceSec.el)');
 const sideControlSource = slice(panel, 'function distanceSideControl(', 'function distanceAddButton(');
 const sideIdSource = slice(panel, 'export function cursorDistanceSideId(', 'function distanceSideControl(');
 const addControlSource = slice(panel, 'function distanceAddButton(', 'function distanceAddIcon(');
@@ -68,7 +68,7 @@ const distanceRowsSource = slice(app,
   'private edgeChannels(): number[] {');
 const edgeSection = slice(panel,
   "const edgeSec = section(t('capturePanel.cursorEdges'));",
-  'cursorPage.appendChild(edgeSec.el)');
+  'measurePage.appendChild(edgeSec.el)');
 const edgeSideControlSource = slice(panel, 'function edgeSideControl(', 'function edgeAddButton(');
 const edgeSideIdSource = slice(panel, 'export function cursorEdgeSideId(', 'function edgeSideControl(');
 const edgeAddControlSource = slice(panel, 'function edgeAddButton(', 'function appendIconPath(');
@@ -115,36 +115,64 @@ const edgeMethodsSource = slice(app,
 
 {
   const cursors = [
-    'cursorPage.appendChild(cursorSec.el)',
-    'cursorPage.appendChild(measureSec.el)',
-    'cursorPage.appendChild(distanceSec.el)',
-    'cursorPage.appendChild(edgeSec.el)',
+    'measurePage.appendChild(cursorSec.el)',
+    'measurePage.appendChild(distanceSec.el)',
+    'measurePage.appendChild(edgeSec.el)',
+    'measurePage.appendChild(this.measurementSection(v))',
   ].map((needle) => panel.indexOf(needle));
   const ascending = cursors.every((index, i) =>
     index >= 0 && (i === 0 || index > cursors[i - 1]!));
-  check('the cursors page order is cursors, measurement, distance, edges',
-    ascending && cursors.length === 4 &&
-    panel.includes("const cursorPage = this.host.measure;") &&
-    panel.includes('cursorPage.replaceChildren();'),
-    `indices=${cursors.join(',')}`);
+  const retired = panel.indexOf('measurePage.appendChild(measureSec.el)');
+  check('the measure page order is cursors, distance, edges, then the oscilloscope group',
+    ascending && cursors.length === 4 && retired < 0 &&
+    panel.includes("const measurePage = this.host.measure;") &&
+    panel.includes('measurePage.replaceChildren();') && !panel.includes('cursorPage'),
+    `indices=${cursors.join(',')}, retired=${retired}, ` +
+    `stale=${panel.includes('cursorPage')}`);
+}
+
+{
+  const branch = (source: string): string => {
+    const at = source.indexOf('if (v.analogScopeActive) {');
+    const end = at < 0 ? -1 : source.indexOf('\n    }\n', at);
+    return at < 0 || end < 0 ? '' : source.slice(at, end);
+  };
+  const onlyMeasured = (source: string): boolean => {
+    const gate = branch(source);
+    return ['cursorSec', 'distanceSec', 'edgeSec']
+      .every((name) => !gate.includes(`appendChild(${name}.el)`)) &&
+      gate.includes('this.measurementSection(v)') &&
+      gate.includes('this.measurementEnableHint()');
+  };
+  const wrappedCursor = panel.replace('measurePage.appendChild(cursorSec.el);',
+    'if (v.analogScopeActive) { measurePage.appendChild(cursorSec.el); }');
+  check('only the oscilloscope group sits behind the gate, so the cursor sections render in both states',
+    branch(panel).length > 0 && onlyMeasured(panel) && !onlyMeasured(wrappedCursor) &&
+      !onlyMeasured(panel.replace('this.measurementSection(v)', 'this.measurementEnableHint()')),
+    `onlyMeasured=${onlyMeasured(panel)}, wrapped=${onlyMeasured(wrappedCursor)}`);
 }
 
 {
   const count = (needle: string): number => panel.split(needle).length - 1;
   const owner = (el: string): string => {
     const onCapture = count(`capture.appendChild(${el})`);
-    const onCursors = count(`cursorPage.appendChild(${el})`);
+    const onCursors = count(`measurePage.appendChild(${el})`);
     if (onCapture === 1 && onCursors === 0) return 'capture';
     if (onCursors === 1 && onCapture === 0) return 'cursors';
     return 'none';
   };
   const owners = ['chSec.el', 'modeSec.el', 'triggerSec.el', 'advanced',
-    'cursorSec.el', 'measureSec.el', 'distanceSec.el', 'edgeSec.el'].map(owner);
+    'cursorSec.el', 'distanceSec.el', 'edgeSec.el'].map(owner);
+  const owned = count('measurePage.appendChild(this.measurementSection(v))') === 1 &&
+    count('measurePage.appendChild(this.measurementEnableHint())') === 1 &&
+    count('return measureSec.el;') === 1 &&
+    count('measurePage.appendChild(measureSec.el)') === 0 &&
+    count('capture.appendChild(measureSec.el)') === 0;
   check('every section is appended to exactly one page, so neither page carries the other page\u2019s sections',
-    owners.join(',') === 'capture,capture,capture,capture,cursors,cursors,cursors,cursors' &&
-    count('capture.replaceChildren();') === 1 && count('cursorPage.replaceChildren();') === 1,
-    `owners=${owners.join(',')}, clears=${count('capture.replaceChildren();')}/` +
-    `${count('cursorPage.replaceChildren();')}`);
+    owners.join(',') === 'capture,capture,capture,capture,cursors,cursors,cursors' && owned &&
+    count('capture.replaceChildren();') === 1 && count('measurePage.replaceChildren();') === 1,
+    `owners=${owners.join(',')}, owned=${owned}, clears=${count('capture.replaceChildren();')}/` +
+    `${count('measurePage.replaceChildren();')}`);
 }
 
 {
@@ -761,8 +789,8 @@ const edgeMethodsSource = slice(app,
 }
 
 {
-  const cursorsAppend = panel.indexOf('cursorPage.appendChild(cursorSec.el)');
-  const distanceAppend = panel.indexOf('cursorPage.appendChild(distanceSec.el)');
+  const cursorsAppend = panel.indexOf('measurePage.appendChild(cursorSec.el)');
+  const distanceAppend = panel.indexOf('measurePage.appendChild(distanceSec.el)');
   check('the Cursor distance section follows Cursors on the cursors page and never reaches the capture page',
     distanceSection.length > 0 && cursorsAppend >= 0 && distanceAppend > cursorsAppend &&
     !panel.includes('capture.appendChild(distanceSec.el)') &&
@@ -1383,8 +1411,8 @@ const edgeMethodsSource = slice(app,
 }
 
 {
-  const cursorDistanceAppend = panel.indexOf('cursorPage.appendChild(distanceSec.el)');
-  const edgeAppend = panel.indexOf('cursorPage.appendChild(edgeSec.el)');
+  const cursorDistanceAppend = panel.indexOf('measurePage.appendChild(distanceSec.el)');
+  const edgeAppend = panel.indexOf('measurePage.appendChild(edgeSec.el)');
   check('the Edges section immediately follows Cursor distance on the cursors page',
     edgeSection.length > 0 && cursorDistanceAppend >= 0 && edgeAppend > cursorDistanceAppend &&
     !panel.includes('capture.appendChild(edgeSec.el)') &&

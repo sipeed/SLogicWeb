@@ -10,8 +10,9 @@ import { en } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
 import { ru } from '../locales/ru.js';
 import { fr } from '../locales/fr.js';
-import type {
-  MeasurementRowView, MeasurementSectionView, MeasurementStatus,
+import {
+  isMeasurementBank, type MeasurementRowView, type MeasurementSectionView,
+  type MeasurementStatus,
 } from '../measurementState.js';
 import {
   accumulateSample, emptyAccumulator, measurementStatsView, noMeasurementStatsView,
@@ -60,7 +61,7 @@ const app = read('src/ui/app.ts');
 const css = read('src/ui/style.css');
 
 const measureSection = slice(panel, 'const measureSec = section(',
-  'cursorPage.appendChild(measureSec.el)');
+  'return measureSec.el;');
 const measureUpdater = slice(panel, 'updateMeasurements(view: MeasurementSectionView): void {',
   'updateCursors(rows: readonly CursorRowView[]): void {');
 const appView = slice(app, 'private capturePanelView(): CapturePanelView {',
@@ -159,16 +160,19 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `title=${measureSection.includes("section(t('capturePanel.measure'))")}, ` +
     `legend=${measureSection.includes("t('capturePanel.measureFormat')")}`);
 
-  const cursorAppend = panel.indexOf('cursorPage.appendChild(cursorSec.el)');
-  const measureStart = panel.indexOf('const measureSec = section(');
-  const distanceStart = panel.indexOf("const distanceSec = section(t('capturePanel.cursorDistance'));");
-  const edgeStart = panel.indexOf("const edgeSec = section(t('capturePanel.cursorEdges'));");
-  check('the measurement section sits second on the cursors page, between cursors and distance',
-    cursorAppend >= 0 && measureStart > cursorAppend && distanceStart > measureStart &&
-    edgeStart > distanceStart &&
+  const cursorAppend = panel.indexOf('measurePage.appendChild(cursorSec.el)');
+  const distanceAppend = panel.indexOf('measurePage.appendChild(distanceSec.el)');
+  const edgeAppend = panel.indexOf('measurePage.appendChild(edgeSec.el)');
+  const gateAppend = panel.indexOf('measurePage.appendChild(this.measurementSection(v))');
+  check('the oscilloscope group is the last section on the measure page, after cursors, distance and edges',
+    cursorAppend >= 0 && distanceAppend > cursorAppend && edgeAppend > distanceAppend &&
+    gateAppend > edgeAppend &&
+    panel.indexOf('const measureSec = section(') > gateAppend &&
+    panel.includes('return measureSec.el;') &&
+    !panel.includes('measurePage.appendChild(measureSec.el)') &&
     !panel.includes('capture.appendChild(measureSec.el)'),
-    `cursor=${cursorAppend}, measure=${measureStart}, distance=${distanceStart}, ` +
-    `edge=${edgeStart}`);
+    `cursor=${cursorAppend}, distance=${distanceAppend}, edge=${edgeAppend}, ` +
+    `gate=${gateAppend}`);
 }
 
 {
@@ -1138,7 +1142,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     const end = source.indexOf('now - this.runningPanelAt > 500');
     const body = at < 0 || end < 0 ? '' : source.slice(at, end);
     return body.includes('this.analysisPanelAt = now;') &&
-      body.includes('this.running && this.measurePageShown()') &&
+      body.includes('this.running && this.measurePageShown() && this.analogScopeActive()') &&
       body.includes('this.capturePanel.updateMeasurements(this.measurementView());') &&
       !body.includes('this.runningPanelAt = now;') &&
       !body.includes('updateProgress') && !body.includes('updateTriggerStatus');
@@ -1156,19 +1160,22 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     !independent(shared) && !independent(reused),
     `shared=${independent(shared)}, reused=${independent(reused)}`);
 
-  const forcedAt = frame.indexOf('if (forced && !this.running && this.measurePageShown()) {');
+  const forcedAt = frame.indexOf(
+    'if (forced && !this.running && this.measurePageShown() && this.analogScopeActive()) {');
   const clearedAt = frame.indexOf('this.dirty = false;');
   const forcedRefresh = (source: string): boolean => {
-    const at = source.indexOf('if (forced && !this.running && this.measurePageShown()) {');
+    const at = source.indexOf(
+      'if (forced && !this.running && this.measurePageShown() && this.analogScopeActive()) {');
     const cleared = source.indexOf('this.dirty = false;');
     return at >= 0 && cleared >= 0 && at > cleared &&
       source.slice(at, at + 200).includes(
         'this.capturePanel.updateMeasurements(this.measurementView());');
   };
-  const gatedOff = frame.replace('if (forced && !this.running && this.measurePageShown()) {',
+  const gatedOff = frame.replace(
+    'if (forced && !this.running && this.measurePageShown() && this.analogScopeActive()) {',
     'if (false) {');
   const movedFirst = frame.replace('this.dirty = false;',
-    'if (forced && !this.running && this.measurePageShown()) {' +
+    'if (forced && !this.running && this.measurePageShown() && this.analogScopeActive()) {' +
     ' this.capturePanel.updateMeasurements(this.measurementView()); } this.dirty = false;');
   check('a stopped session refreshes measurements on the drawing gesture, not a clock',
     clearedAt >= 0 && forcedAt > clearedAt && forcedRefresh(frame) &&
@@ -1406,6 +1413,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     settingsArmed: false,
     activeTriggerPreSamples: undefined,
     measurement: section,
+    analogScopeActive: true,
     persistence: { frames: 0, effective: 0, loop: false, clear: null },
   });
   const source: MeasurementSectionView['sources'] = [{ group: 0, start: 0, gain: 1, name: 'A0' }];
@@ -1799,6 +1807,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     settingsArmed: false,
     activeTriggerPreSamples: undefined,
     measurement: section(),
+    analogScopeActive: true,
     persistence: { frames: 0, effective: 0, loop: false, clear: null },
   });
   const panel = new CapturePanel({
@@ -1938,6 +1947,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     settingsArmed: false,
     activeTriggerPreSamples: undefined,
     measurement: section(over),
+    analogScopeActive: true,
     persistence: { frames: 0, effective: 0, loop: false, clear: null },
   });
   const resets: string[] = [];
@@ -2226,6 +2236,319 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       !chevronOpenRule.includes('#') && !chevronOpenRule.includes('rgb'),
     `rule=${chevronRule}, open=${chevronOpen}, resized=${rotationOnly(resizedOpen)}, ` +
       `collapsedOnly=${chevronRotate(collapsedOnly)}`);
+}
+
+{
+  const doc = installFakeDom();
+  const capture = doc.createElement('div');
+  const measure = doc.createElement('div');
+  doc.body.append(capture, measure);
+  const cursorRows = [
+    { id: 1, label: 'A', color: '#ff0000', seconds: 0, sample: 0, time: '0 s' },
+    { id: 2, label: 'B', color: '#00ff00', seconds: 1, sample: 100, time: '1.000 s' },
+  ];
+  const measured = (): MeasurementSectionView => sectionView({
+    sources: [{ group: 0, start: 0, gain: 1, name: 'A0' }],
+    rows: [rowView({ id: 1, parameter: 'vpp', unit: 'v', value: 1.5 })],
+    allRows: [{ id: 1, start: 0, parameter: 'vpp' }],
+    rowCount: 1,
+  });
+  const view = (gate: boolean): CapturePanelView => ({
+    settings: defaultCaptureSettings(),
+    channels: [],
+    widthOptions: [16],
+    buses: [],
+    analogGroups: 0,
+    deviceName: 'fixture',
+    running: false,
+    stopping: false,
+    repeatPending: false,
+    captureState: 'ready',
+    result: null,
+    progress: null,
+    maxSamplerateHz: { 16: 200e6 },
+    triggerState: 'off',
+    cursors: cursorRows,
+    cursorDistances: [],
+    cursorEdges: [],
+    cursorEdgeChannels: [],
+    triggerViewLost: false,
+    triggerViewPending: false,
+    triggerLocked: false,
+    triggerRetuneRejected: false,
+    triggerAnalogRolling: false,
+    triggerArmed: false,
+    triggerAutoDisarmed: false,
+    settingsArmed: false,
+    activeTriggerPreSamples: undefined,
+    measurement: measured(),
+    analogScopeActive: gate,
+    persistence: { frames: 0, effective: 0, loop: false, clear: null },
+  });
+  const panel = new CapturePanel({
+    capture: capture as unknown as HTMLElement,
+    measure: measure as unknown as HTMLElement,
+  }, {} as unknown as CapturePanelCallbacks);
+  const all = (el: FakeElement): FakeElement[] =>
+    el.children.flatMap((child) => [child, ...all(child)]);
+  const titles = (): string[] => measure.querySelectorAll('.panel-section')
+    .map((el) => el.children[0]?.children[0]?.textContent ?? '');
+  const controls = (): number =>
+    all(measure).filter((el) => /(^|\s)measure-/.test(el.className)).length;
+  const hint = (): FakeElement | null => measure.querySelector('[data-measure-scope-off]');
+  const listed = (): string[] => measure.querySelectorAll('.cursor-row')
+    .map((el) => el.dataset.cursorId ?? '');
+  const pageText = (): string => measure.textContent;
+
+  panel.render(view(true));
+  const openTitles = titles();
+  const openControls = controls();
+  const openPersistence = measure.querySelectorAll('.measure-persistence').length;
+  const openRows = measure.querySelectorAll('.measure-row').length;
+  check('with the gate open the measurement group renders last, after Cursors, Cursor distance and Edges',
+    JSON.stringify(openTitles) === JSON.stringify([
+      en['capturePanel.cursors'], en['capturePanel.cursorDistance'],
+      en['capturePanel.cursorEdges'], en['capturePanel.measure'],
+    ]) && openControls > 0 && openPersistence === 1 && openRows === 1 && hint() === null,
+    `titles=${JSON.stringify(openTitles)}, controls=${openControls}, ` +
+      `persistence=${openPersistence}, rows=${openRows}, hint=${hint() !== null}`);
+
+  panel.render(view(true));
+  const secondOpen = `${titles().join('|')}#${controls()}#${pageText()}`;
+  panel.render(view(true));
+  const thirdOpen = `${titles().join('|')}#${controls()}#${pageText()}`;
+  check('an open gate renders the same measurement section on every pass',
+    secondOpen === thirdOpen && openControls === controls() &&
+      measure.querySelectorAll('.measure-row').length === openRows,
+    `stable=${secondOpen === thirdOpen}, controls=${controls()}`);
+
+  panel.render(view(false));
+  const closedTitles = titles();
+  const closedLast = measure.children[measure.children.length - 1];
+  const closedHint = hint();
+  check('with the gate closed the measured group is one enable hint as the last child',
+    JSON.stringify(closedTitles) === JSON.stringify(openTitles.slice(0, 3)) &&
+      controls() === 0 && measure.querySelectorAll('.measure-persistence').length === 0 &&
+      measure.querySelector('[data-view-mode]') === null &&
+      measure.querySelector('.measure-list') === null &&
+      measure.querySelectorAll('.measure-row').length === 0 &&
+      closedHint !== null && closedLast === closedHint &&
+      closedHint.className === 'panel-note' &&
+      closedHint.textContent === en['capturePanel.measureScopeOff'] &&
+      !pageText().includes(en['capturePanel.measure']),
+    `titles=${JSON.stringify(closedTitles)}, controls=${controls()}, ` +
+      `last=${closedLast === closedHint}, text=${closedHint?.textContent ===
+        en['capturePanel.measureScopeOff']}`);
+
+  check('the cursor sections keep rendering in both gate states',
+    JSON.stringify(listed()) === JSON.stringify(['1', '2']) &&
+      measure.querySelectorAll('.cursor-dist-add-row').length === 1 &&
+      measure.querySelectorAll('.cursor-edge-add-row').length === 1 &&
+      closedTitles.length === 3,
+    `rows=${JSON.stringify(listed())}, ` +
+      `distance=${measure.querySelectorAll('.cursor-dist-add-row').length}, ` +
+      `edges=${measure.querySelectorAll('.cursor-edge-add-row').length}`);
+
+  let threw = '';
+  try {
+    panel.updateMeasurements(measured());
+    panel.updatePersistence({ frames: 8, effective: 8, loop: false, clear: null });
+    panel.updateCursors(cursorRows);
+    panel.updateCursorDistances([]);
+    panel.updateCursorEdges([]);
+    panel.updateCursorEdges([{ id: 3, row: 1, a: null, b: null, channel: null, result: '-' }]);
+  } catch (e) {
+    threw = String(e);
+  }
+  check('the in-place updaters survive a gate that closed between renders',
+    threw === '' && controls() === 0 && titles().length === 3 &&
+      measure.children[measure.children.length - 1] === hint(),
+    `threw=${threw}, controls=${controls()}, titles=${titles().length}`);
+}
+
+{
+  const doc = installFakeDom();
+  const capture = doc.createElement('div');
+  const measure = doc.createElement('div');
+  doc.body.append(capture, measure);
+  const pending: (() => void)[] = [];
+  let rows = [rowView({ id: 1, parameter: 'vpp', unit: 'v', value: 1.5 })];
+  let undoCount: number | null = null;
+  const view = (gate: boolean): CapturePanelView => ({
+    settings: defaultCaptureSettings(),
+    channels: [],
+    widthOptions: [16],
+    buses: [],
+    analogGroups: 0,
+    deviceName: 'fixture',
+    running: false,
+    stopping: false,
+    repeatPending: false,
+    captureState: 'ready',
+    result: null,
+    progress: null,
+    maxSamplerateHz: { 16: 200e6 },
+    triggerState: 'off',
+    cursors: [],
+    cursorDistances: [],
+    cursorEdges: [],
+    cursorEdgeChannels: [],
+    triggerViewLost: false,
+    triggerViewPending: false,
+    triggerLocked: false,
+    triggerRetuneRejected: false,
+    triggerAnalogRolling: false,
+    triggerArmed: false,
+    triggerAutoDisarmed: false,
+    settingsArmed: false,
+    activeTriggerPreSamples: undefined,
+    measurement: sectionView({
+      sources: [{ group: 0, start: 0, gain: 1, name: 'A0' }],
+      rows,
+      allRows: rows.map((row) => ({ id: row.id, start: row.start, parameter: row.parameter })),
+      rowCount: rows.length,
+      undoCount,
+    }),
+    analogScopeActive: gate,
+    persistence: { frames: 0, effective: 0, loop: false, clear: null },
+  });
+  const panel = new CapturePanel({
+    capture: capture as unknown as HTMLElement,
+    measure: measure as unknown as HTMLElement,
+  }, {
+    onClearMeasurementRows: () => new Promise<void>((resolve) => { pending.push(resolve); }),
+  } as unknown as CapturePanelCallbacks);
+  const active = (): FakeElement | null =>
+    doc.activeElement === doc.body ? null : doc.activeElement;
+  const addOf = (): FakeElement | null => measure.querySelector('[data-measure-open]');
+  const armClear = (): void => {
+    panel.render(view(true));
+    const clear = measure.querySelector('[data-measure-clear-all]');
+    clear?.focus();
+    clear?.click();
+  };
+
+  armClear();
+  panel.render(view(false));
+  const closed = active();
+  rows = [];
+  undoCount = 2;
+  panel.render(view(true));
+  const afterClosed = active();
+  pending.shift()?.();
+
+  rows = [rowView({ id: 2, parameter: 'vpp', unit: 'v', value: 2.5 })];
+  undoCount = null;
+  armClear();
+  rows = [];
+  undoCount = 3;
+  panel.render(view(true));
+  const appliedInRender = active() === addOf();
+
+  check('a pending measurement hand-off is dropped by a closed-gate render and applied in an open one',
+    closed === null && afterClosed === null && addOf() !== null && appliedInRender,
+    `closed=${closed === null ? 'body' : 'other'}, ` +
+      `reopened=${afterClosed === null ? 'body' : 'other'}, ` +
+      `add=${addOf() !== null}, applied=${appliedInRender}`);
+  pending.length = 0;
+}
+
+{
+  const gateBody = slice(app, 'private analogScopeActive(): boolean {', '  }');
+  const shared = 'return measurementSources(this.busViews, this.captureStore.channelCount).length > 0;';
+  const sharedExpression = (source: string): boolean =>
+    source.includes(shared) &&
+    !source.includes('displayChannelCount') && !source.includes('isMeasurementBank') &&
+    !source.includes('this.sidebar') && !source.includes('persistWorkspace') &&
+    !source.includes('analogGroup');
+  const displayWidthGate = gateBody.replace(shared,
+    'const width = this.displayChannelCount();\n' +
+      '    return this.busViews.some((bus) => isMeasurementBank(bus, width));');
+  const pendingWidth = gateBody.replace('this.captureStore.channelCount',
+    'this.displayChannelCount()');
+  check('the gate is the same measurementSources expression over the same width as the source list',
+    gateBody.length > 0 && sharedExpression(gateBody) &&
+      app.includes('analogScopeActive: this.analogScopeActive(),') &&
+      appView.includes('analogScopeActive: this.analogScopeActive(),') &&
+      panel.includes('analogScopeActive: boolean;') &&
+      !app.includes('analogScopeActive =') && !app.includes('private analogScopeActive: boolean'),
+    `body=${gateBody.length} chars, shared=${sharedExpression(gateBody)}, ` +
+      `view=${app.includes('analogScopeActive: this.analogScopeActive(),')}; red only if ` +
+      'displayChannelCount (pending/idle width) and captureStore.channelCount (on-screen wave) ' +
+      'diverge: a narrowed pending width while a capture runs, or a widened idle width after a ' +
+      'finished narrower wave');
+
+  check('the retired display-width gate and a bare display-width swap both fail that expression',
+    displayWidthGate !== gateBody && !sharedExpression(displayWidthGate) &&
+      pendingWidth !== gateBody && !sharedExpression(pendingWidth),
+    `retired=${sharedExpression(displayWidthGate)}, pendingWidth=${sharedExpression(pendingWidth)}`);
+}
+
+{
+  const clock = 'if (this.running && this.measurePageShown() && this.analogScopeActive()) {';
+  const stopped = 'if (forced && !this.running && this.measurePageShown() && this.analogScopeActive()) {';
+  const pumpLine = 'if (!this.measurePageShown() || !this.analogScopeActive()) return;';
+  const submission =
+    "const visible = this.measurePageShown() && this.analogScopeActive() && this.viewMode === 'time';";
+  const pump = slice(app, 'private pumpMeasurementCapture(): void {', 'private withMeasurementRows(');
+  const record = slice(app, 'private recordMeasurementWave(reason: CaptureStopReason): void {',
+    'private measurementView(): MeasurementSectionView {');
+  const persistence = slice(app, 'private submitPersistenceWave(reason: CaptureStopReason): void {',
+    'private clearPersistence(');
+  const once = (source: string, needle: string): boolean =>
+    needle.length > 0 && source.split(needle).length - 1 === 1;
+  const gatedPersistence = persistence.replace('const commit = shouldCommitPersistence({',
+    'if (!this.analogScopeActive()) return;\n    const commit = shouldCommitPersistence({');
+  const calls = app.split('this.analogScopeActive()').length - 1;
+  check('all four measurement clocks and jobs short-circuit on the same gate',
+    once(frame, clock) && once(frame, stopped) && once(pump, pumpLine) &&
+      once(record, submission) && calls === 5,
+    `clock=${once(frame, clock)}, stopped=${once(frame, stopped)}, ` +
+      `pump=${once(pump, pumpLine)}, record=${once(record, submission)}, calls=${calls}`);
+
+  const ungated = (needle: string): string => needle
+    .replace(' && this.analogScopeActive()', '')
+    .replace(' || !this.analogScopeActive()', '');
+  const gated = [clock, stopped, pumpLine, submission];
+  const gateIsTheDiff = gated.every((needle) => {
+    const bare = ungated(needle);
+    return bare !== needle && !bare.includes('analogScopeActive');
+  });
+  check('the gate is the only difference at each site, and persistence carries none',
+    gateIsTheDiff && !persistence.includes('analogScopeActive') &&
+      gatedPersistence.includes('this.analogScopeActive()'),
+    `diff=${gateIsTheDiff}, persistence=${persistence.includes('analogScopeActive')}, ` +
+      `gatedPersistence=${gatedPersistence.includes('this.analogScopeActive()')}`);
+}
+
+{
+  const bank = (over: {
+    analogGroup?: number; bits?: readonly number[];
+  } = {}): { name: string; analogGroup?: number; spec: { bits: readonly number[] } } => ({
+    name: 'A0',
+    analogGroup: 0,
+    spec: { bits: over.bits ?? [7, 6, 5, 4, 3, 2, 1, 0] },
+    ...over,
+  });
+  const valid = bank();
+  const outOfRange = bank({ analogGroup: 4 });
+  const ascending = bank({ bits: [0, 1, 2, 3, 4, 5, 6, 7] });
+  const sevenBit = bank({ bits: [7, 6, 5, 4, 3, 2, 1] });
+  const second = bank({ analogGroup: 2, bits: [23, 22, 21, 20, 19, 18, 17, 16] });
+  const plain: { name: string; spec: { bits: readonly number[] } } = {
+    name: 'D0-D7', spec: { bits: [0, 1, 2, 3, 4, 5, 6, 7] },
+  };
+  const gate = (width: number, ...buses: readonly { name: string; analogGroup?: number;
+    spec: { bits: readonly number[] } }[]): boolean =>
+    buses.some((bus) => isMeasurementBank(bus, width));
+  check('the gate opens on a canonical ADC bank and stays shut on a foreign, reversed or short one',
+    gate(32, valid) && gate(32, second) && gate(32, plain, valid) &&
+      !gate(32, outOfRange) && !gate(32, ascending) && !gate(32, sevenBit) && !gate(32, plain) &&
+      !gate(7, valid) && !gate(16, second),
+    `valid=${gate(32, valid)}, second=${gate(32, second)}, mixed=${gate(32, plain, valid)}, ` +
+      `outOfRange=${gate(32, outOfRange)}, ascending=${gate(32, ascending)}, ` +
+      `short=${gate(32, sevenBit)}, plain=${gate(32, plain)}, ` +
+      `narrow=${gate(7, valid)}, tier=${gate(16, second)}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
