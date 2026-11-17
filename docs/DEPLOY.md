@@ -26,7 +26,9 @@ The hosted build uses an absolute base of `/`.
 
 [The publisher](../.github/scripts/upload-qiniu.mjs) uploads resources before HTML
 and the service worker, then the workflow refreshes and verifies CDN content.
-Incomplete uploads fail the job.
+Incomplete uploads fail the job. Source maps are left out of that pass and uploaded
+in a separate step after the CDN purge (`--source-maps`); a failed map is only a
+warning, since only DevTools fetches them.
 
 ## Verification
 

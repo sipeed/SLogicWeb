@@ -153,3 +153,13 @@ jobs:
           QINIU_ACCESS_KEY: ${{ secrets.QINIU_ACCESS_KEY }}
           QINIU_SECRET_KEY: ${{ secrets.QINIU_SECRET_KEY }}
         run: .github/scripts/purge-qiniu-cdn.sh "$RUNNER_TEMP/site"
+
+      # Source maps are only fetched by DevTools and the entry map is renamed on every
+      # build, so they go up after the purge and never fail or delay the deploy.
+      - name: Upload source maps to the Qiniu origin (best-effort)
+        continue-on-error: true
+        env:
+          QINIU_ACCESS_KEY: ${{ secrets.QINIU_ACCESS_KEY }}
+          QINIU_SECRET_KEY: ${{ secrets.QINIU_SECRET_KEY }}
+          QINIU_BUCKET: ${{ vars.QINIU_BUCKET }}
+        run: node .github/scripts/upload-qiniu.mjs --source-maps "$RUNNER_TEMP/site"

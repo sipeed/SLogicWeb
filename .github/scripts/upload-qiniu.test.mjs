@@ -276,3 +276,30 @@ test('non-JSON response text never appears in retry logs or errors', async t => 
     assert.equal(caught.message.includes('auditbody'), false);
   }
 });
+
+test('site upload leaves source maps out; the maps pass is best-effort, stat and upload alike', async t => {
+  const root = await fixture(t);
+  await writeFile(join(root, 'assets/main-12345678.js.map'), 'fixture:map');
+  await writeFile(join(root, 'assets/side-87654321.js.map'), 'fixture:map2');
+  const sent = [];
+  const site = await publish(root, config, async (_, { body }) => { sent.push(body.get('key')); return ack(body.get('key')); });
+  assert.equal(sent.some(k => k.endsWith('.map')), false);
+  assert.equal(site.uploaded, files.length);
+
+  const posts = [], logs = [], log = console.log;
+  console.log = message => logs.push(message);
+  t.after(() => { console.log = log; });
+  const maps = await uploadSite(root, config, (url, init) => {
+    if (init.method === 'GET') {
+      const key = Buffer.from(url.split('/stat/')[1], 'base64url').toString();
+      return Promise.resolve(key.endsWith('side-87654321.js.map') ? { ok: false, status: 503 } : { ok: false, status: 612 });
+    }
+    posts.push(init.body.get('key'));
+    return Promise.resolve({ ok: false, status: 503 });
+  }, async () => {}, { sourceMaps: true });
+  console.log = log;
+  assert.deepEqual(posts, Array(3).fill('assets/main-12345678.js.map'));
+  assert.equal(maps.mapsFailed, 2);
+  assert.equal(maps.uploaded, 0);
+  assert.equal(logs.filter(m => m.startsWith('::warning::source map not published')).length, 2, logs.join('\n'));
+});
