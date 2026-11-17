@@ -12,7 +12,7 @@ import { ru } from '../locales/ru.js';
 import { fr } from '../locales/fr.js';
 import {
   isMeasurementBank, type MeasurementRowView, type MeasurementSectionView,
-  type MeasurementStatus,
+  type MeasurementStatus, type MeasureTier,
 } from '../measurementState.js';
 import {
   accumulateSample, emptyAccumulator, measurementStatsView, noMeasurementStatsView,
@@ -60,8 +60,10 @@ const catalogSource = read('src/ui/measurementCatalogDialog.ts');
 const app = read('src/ui/app.ts');
 const css = read('src/ui/style.css');
 
-const measureSection = slice(panel, 'const measureSec = section(',
-  'return measureSec.el;');
+const measureSection = slice(panel, 'private advancedMeasurementSection(',
+  'private basicMeasurementSection(');
+const basicSection = slice(panel, 'private basicMeasurementSection(',
+  'private measurementEnableHint(');
 const measureUpdater = slice(panel, 'updateMeasurements(view: MeasurementSectionView): void {',
   'updateCursors(rows: readonly CursorRowView[]): void {');
 const appView = slice(app, 'private capturePanelView(): CapturePanelView {',
@@ -2552,9 +2554,377 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       `narrow=${gate(7, valid)}, tier=${gate(16, second)}`);
 }
 
+{
+  const readsProjection = (source: string): boolean =>
+    source.includes('const basic = basicMeasurementView(v.measurement);') &&
+    source.includes("const readouts = div('measure-readouts');") &&
+    source.includes('for (const row of basic.rows) {') &&
+    source.includes("const item = div('measure-readout');") &&
+    source.includes('item.dataset.measureKey = row.parameter;') &&
+    source.includes("parameter.className = 'measure-param';") &&
+    source.includes('parameter.textContent = measurementParameterText(row.parameter);') &&
+    source.includes("value.className = 'measure-value';") &&
+    source.includes('value.textContent = measurementValueText(row);') &&
+    source.includes("status.className = 'measure-status';") &&
+    source.includes('status.textContent = measurementStatusText(row);') &&
+    source.includes('item.append(parameter, value, status);') &&
+    source.includes('readouts.appendChild(item);') &&
+    source.includes('measureSec.body.appendChild(readouts);');
+  const inlineValue = basicSection.replace('value.textContent = measurementValueText(row);',
+    "value.textContent = `${row.value} ${row.unit}`;");
+  const ownRow = basicSection.replace('for (const row of basic.rows) {',
+    'for (const row of v.measurement.rows) {');
+  check('the basic readouts are a projection of the shared row texts, in catalog order',
+    readsProjection(basicSection) && !readsProjection(inlineValue) && !readsProjection(ownRow) &&
+      !basicSection.includes('formatMeasureValue') && !basicSection.includes('toFixed') &&
+      panel.split('basicMeasurementView(').length - 1 === 2 &&
+      panel.split('basicMeasurementView(v.measurement)').length - 1 === 1,
+    `projection=${readsProjection(basicSection)}, inline=${readsProjection(inlineValue)}, ` +
+    `ownRows=${readsProjection(ownRow)}, ` +
+    `calls=${panel.split('basicMeasurementView(').length - 1}`);
+
+  const sourceSelect = (source: string): boolean =>
+    source.includes("const source = selectControl(\n      'measure.filter',") &&
+    source.includes("(entry): SelectOptionTuple => [String(entry.start), entry.name])") &&
+    source.includes('basic.source === null ? \'\' : String(basic.source)') &&
+    source.includes('source.disabled = v.measurement.sources.length === 0;') &&
+    !source.includes('measureSourceAll') &&
+    source.includes("source.addEventListener('change', () => " +
+      'this.cb.onPickMeasurementFilter(Number(source.value)));');
+  const allOption = basicSection.replace("t('capturePanel.measureSource'),",
+    "t('capturePanel.measureSource'),\n      [['', t('capturePanel.measureSourceAll')], " +
+    '...v.measurement.sources.map(');
+  const nullable = basicSection.replace('onPickMeasurementFilter(Number(source.value))',
+    "onPickMeasurementFilter(source.value === '' ? null : Number(source.value))");
+  check('the basic source select offers only real analog groups and always picks one',
+    sourceSelect(basicSection) && !sourceSelect(allOption) && !sourceSelect(nullable) &&
+      !basicSection.includes('measureSourceAll') &&
+      measureSection.includes("['', t('capturePanel.measureSourceAll')],"),
+    `select=${sourceSelect(basicSection)}, all=${sourceSelect(allOption)}, ` +
+    `nullable=${sourceSelect(nullable)}`);
+
+  const rangeLabels = ["['viewport', t('capturePanel.measureRangeViewport')],",
+    "['cursors', t('capturePanel.measureRangeCursors')],",
+    "['capture', t('capturePanel.measureRangeCapture')],"];
+  const rangeSelect = (source: string): boolean =>
+    source.includes("const range = selectControl(\n      'measure.range',") &&
+    rangeLabels.every((label) => source.includes(label)) &&
+    source.includes('basic.range,') &&
+    source.includes("range.addEventListener('change', () => this.cb.onPickMeasurementRange(") &&
+    source.includes('measurementRangeKind(range.value))');
+  const swapped = basicSection.replace("['capture', t('capturePanel.measureRangeCapture')],",
+    "['capture', t('capturePanel.measureRangeViewport')],");
+  check('both tiers offer the same three range labels and differ only in scan depth',
+    rangeSelect(basicSection) && !rangeSelect(swapped) &&
+      rangeLabels.every((label) => measureSection.includes(label)) &&
+      measureSection.includes('v.measurement.range.kind,') &&
+      basicSection.indexOf("'measure.filter',") < basicSection.indexOf("'measure.range',"),
+    `range=${rangeSelect(basicSection)}, swapped=${rangeSelect(swapped)}, ` +
+    `shared=${rangeLabels.filter((label) => measureSection.includes(label)).length} of 3`);
+
+  const entry = basicSection.indexOf("advancedEntry.dataset.measureAdvanced = '';");
+  check('the basic surface ends with the Frequency note and one Advanced entry',
+    basicSection.includes("note.dataset.measureBasicNote = '';") &&
+      basicSection.includes("note.textContent = t('capturePanel.measureBasicNote');") &&
+      basicSection.indexOf("t('capturePanel.measureBasicNote')") > basicSection.indexOf('readouts)') &&
+      entry > basicSection.indexOf("const measureActions = div('measure-actions');") &&
+      basicSection.includes("advancedEntry.className = 'analyzer-act measure-advanced';") &&
+      basicSection.includes("advancedEntry.textContent = t('capturePanel.advanced');") &&
+      basicSection.includes("this.runMeasureAction('tier-switch', advancedEntry,\n" +
+        "      () => this.cb.onPickMeasureTier('advanced'), MEASURE_TIER_INDEX.advanced));") &&
+      basicSection.includes('measureActions.appendChild(advancedEntry);'),
+    `note=${basicSection.includes("t('capturePanel.measureBasicNote')")}, entry=${entry}, ` +
+    `label=${basicSection.includes("advancedEntry.textContent = t('capturePanel.advanced');")}`);
+
+  const advancedOnly = ['measure-add', 'measure-clear', 'measure-persistence',
+    'dataset.viewMode', 'measure-open', "div('measure-row')", 'catalogDialog',
+    "div('measure-capture')", 'measurementDetailsBlock', "div('measure-window')",
+    "div('measure-list')", "div('measure-undo')",
+    'onRemoveMeasurementRow', 'onClearMeasurementRows', 'onUndoMeasurementRows'];
+  const foundInBasic = advancedOnly.filter((needle) => basicSection.includes(needle));
+  const missingInAdvanced = advancedOnly.filter((needle) => !measureSection.includes(needle));
+  check('the basic surface carries no management, view, detail, persistence or progress control',
+    foundInBasic.length === 0 && missingInAdvanced.length === 0,
+    `basic=${JSON.stringify(foundInBasic)}, absentFromAdvanced=${JSON.stringify(missingInAdvanced)}`);
+
+  const switchBack = (source: string): boolean =>
+    source.includes("basicSwitch.dataset.measureBasic = '';") &&
+    source.includes("basicSwitch.textContent = t('capturePanel.measureTierBasic');") &&
+    source.includes("const measureTier = div('measure-tier');") &&
+    source.includes('measureTier.appendChild(basicSwitch);') &&
+    source.includes('measureSec.body.appendChild(measureTier);') &&
+    source.includes("this.runMeasureAction('tier-switch', basicSwitch,\n" +
+      "      () => this.cb.onPickMeasureTier('basic'), MEASURE_TIER_INDEX.basic));");
+  check('the advanced surface keeps every control and gains one Basic switch in its header',
+    switchBack(measureSection) && !switchBack(basicSection) &&
+      measureSection.indexOf("basicSwitch.dataset.measureBasic = '';") <
+        measureSection.indexOf("const viewSwitch = div('segmented measure-view-mode');") &&
+      measureSection.indexOf('measureSec.body.appendChild(measureTier);') <
+        measureSection.indexOf("measureSec.body.appendChild(viewSwitch);") &&
+      !measureSection.includes('data-measure-advanced') &&
+      !basicSection.includes('data-measure-basic') &&
+      panel.split("this.cb.onPickMeasureTier(").length - 1 === 2 &&
+      panel.split("runMeasureAction('tier-switch'").length - 1 === 2,
+    `switch=${switchBack(measureSection)}, basicSwitch=${switchBack(basicSection)}, ` +
+    `picks=${panel.split('this.cb.onPickMeasureTier(').length - 1}`);
+
+  const dispatch = (source: string): boolean =>
+    source.includes('this.measureSectionView = v.measurement;\n' +
+      '    return v.measurement.tier === \'basic\'\n' +
+      '      ? this.basicMeasurementSection(v)\n' +
+      '      : this.advancedMeasurementSection(v);');
+  const alwaysAdvanced = panel.replace("return v.measurement.tier === 'basic'",
+    "return v.measurement.tier !== 'never'");
+  check('one dispatcher owns the tier choice and both surfaces take the rendered view',
+    dispatch(panel) && !dispatch(alwaysAdvanced) &&
+      panel.split('this.measureSectionView = v.measurement;').length - 1 === 1 &&
+      panel.includes('private basicMeasurementSection(v: CapturePanelView): HTMLElement {') &&
+      panel.includes('private advancedMeasurementSection(v: CapturePanelView): HTMLElement {') &&
+      measureSection.split('this.measureSectionView = ').length - 1 === 0 &&
+      basicSection.split('this.measureSectionView = ').length - 1 === 0,
+    `dispatch=${dispatch(panel)}, forced=${dispatch(alwaysAdvanced)}, ` +
+    `sets=${panel.split('this.measureSectionView = v.measurement;').length - 1}`);
+
+  const applied = 'if (pending.kind === \'tier-switch\') ' +
+    'return pending.id === MEASURE_TIER_INDEX[view.tier];';
+  const restore =
+    "const selector = view.tier === 'advanced'\n" +
+    "        ? '[data-measure-basic]' : '[data-measure-advanced]';";
+  const focus = slice(panel, 'private measureFocusApplied(', 'private measurementDetailsBlock(');
+  const dropped = focus.replace(applied, '');
+  const reversed = focus.replace(restore,
+    "const selector = view.tier === 'advanced'\n" +
+    "        ? '[data-measure-advanced]' : '[data-measure-basic]';");
+  check('the tier switch arms a focus intent that lands on the other tier and nothing else',
+    focus.includes(applied) && focus.includes(restore) &&
+      !dropped.includes('MEASURE_TIER_INDEX[view.tier]') && !reversed.includes(restore) &&
+      focus.includes('if (pending.kind === \'row\')') &&
+      focus.includes('if (pending.kind === \'clear\')') &&
+      focus.includes('if (pending.kind === \'capture-cancel\')') &&
+      focus.includes('if (pending.kind === \'capture-restart\')') &&
+      panel.includes('const MEASURE_TIER_INDEX: Record<MeasureTier, number> = ' +
+        '{ basic: 0, advanced: 1 };'),
+    `applied=${focus.includes(applied)}, restored=${focus.includes(restore)}, ` +
+    `dropped=${dropped.includes('MEASURE_TIER_INDEX[view.tier]')}, ` +
+    `reversed=${reversed.includes(restore)}; ` +
+    'dropping the branch falls through to the undo rule and takes the next completed render');
+
+  const readoutUpdater = (source: string): boolean =>
+    source.includes("root.querySelectorAll<HTMLElement>('[data-measure-key]')") &&
+    source.includes("const readout = readouts.get(item.dataset.measureKey ?? '');") &&
+    source.includes('if (readout === undefined) continue;') &&
+    source.includes('value.textContent = measurementValueText(readout);') &&
+    source.includes('status.textContent = measurementStatusText(readout);');
+  const noGuard = measureUpdater.replace('if (readout === undefined) continue;', '');
+  const rebuilt = measureUpdater.replace('value.textContent = measurementValueText(readout);',
+    'value.replaceChildren();');
+  const noStatus = measureUpdater.replace(
+    'status.textContent = measurementStatusText(readout);', '');
+  check('the readout refresh is text-only and cannot take a row it does not have',
+    readoutUpdater(measureUpdater) && !readoutUpdater(noGuard) &&
+      !readoutUpdater(rebuilt) && !readoutUpdater(noStatus) &&
+      measureUpdater.includes('for (const row of basicMeasurementView(view).rows) ' +
+        'readouts.set(row.parameter, row);'),
+    `updater=${readoutUpdater(measureUpdater)}, noGuard=${readoutUpdater(noGuard)}, ` +
+    `rebuilt=${readoutUpdater(rebuilt)}, noStatus=${readoutUpdater(noStatus)}`);
+
+  const rules = ['.measure-readouts {', '.measure-readout {', '.measure-readout > .measure-value {'];
+  const absent = rules.filter((rule) => !css.includes(rule));
+  const valueCell = slice(css, '.measure-readout > .measure-value {', '}');
+  check('the readout rules live in the measure block and reserve a fixed-width value cell',
+    absent.length === 0 && valueCell.includes('flex: 0 0 auto;') &&
+      valueCell.includes('min-width: 9ch;') &&
+      slice(css, '.measure-readout {', '}').includes('flex-wrap: wrap;') &&
+      slice(css, '.measure-tier {', '}').includes('flex-wrap: wrap;') &&
+      slice(css, '.analyzer-act.measure-basic {', '}').includes('width: auto;') &&
+      slice(css, '.analyzer-act.measure-advanced {', '}').includes('width: auto;') &&
+      !valueCell.includes('font-size') && !valueCell.includes('color:'),
+    `absent=${JSON.stringify(absent)}, cell=${valueCell.trim()}`);
+}
+
+{
+  const doc = installFakeDom();
+  const capture = doc.createElement('div');
+  const measure = doc.createElement('div');
+  doc.body.append(capture, measure);
+  const sources: MeasurementSectionView['sources'] = [{ group: 0, start: 0, gain: 1, name: 'A0' }];
+  let tier: MeasureTier = 'basic';
+  let captureBlock: MeasurementSectionView['capture'] = null;
+  let rows: MeasurementRowView[] = [
+    rowView({ id: 3, start: 0, parameter: 'rms', unit: 'v', value: 4.099363 }),
+    rowView({ id: 1, start: 0, parameter: 'frequency', unit: 'hz', value: 9999.5877 }),
+    rowView({ id: 2, start: 0, parameter: 'vpp', unit: 'v', value: 21.4588 }),
+  ];
+  const section = (): MeasurementSectionView => sectionView({
+    tier,
+    sources,
+    filter: 0,
+    range: { kind: 'capture', a: null, b: null },
+    rows,
+    allRows: rows.map((row) => ({ id: row.id, start: row.start, parameter: row.parameter })),
+    rowCount: rows.length,
+    capture: captureBlock,
+  });
+  const pageView = (): CapturePanelView => ({
+    settings: defaultCaptureSettings(),
+    channels: [],
+    widthOptions: [16],
+    buses: [],
+    analogGroups: 0,
+    deviceName: 'fixture',
+    running: false,
+    stopping: false,
+    repeatPending: false,
+    captureState: 'ready',
+    result: null,
+    progress: null,
+    maxSamplerateHz: { 16: 200e6 },
+    triggerState: 'off',
+    cursors: [],
+    cursorDistances: [],
+    cursorEdges: [],
+    cursorEdgeChannels: [],
+    triggerViewLost: false,
+    triggerViewPending: false,
+    triggerLocked: false,
+    triggerRetuneRejected: false,
+    triggerAnalogRolling: false,
+    triggerArmed: false,
+    triggerAutoDisarmed: false,
+    settingsArmed: false,
+    activeTriggerPreSamples: undefined,
+    measurement: section(),
+    analogScopeActive: true,
+    persistence: { frames: 0, effective: 0, loop: false, clear: null },
+  });
+  let panel: CapturePanel;
+  const render = (): void => { panel.render(pageView()); };
+  panel = new CapturePanel({
+    capture: capture as unknown as HTMLElement,
+    measure: measure as unknown as HTMLElement,
+  }, {
+    onPickMeasureTier: (next: MeasureTier) => {
+      tier = next;
+      render();
+    },
+  } as unknown as CapturePanelCallbacks);
+  const active = (): FakeElement | null =>
+    doc.activeElement === doc.body ? null : doc.activeElement;
+  const count = (selector: string): number => measure.querySelectorAll(selector).length;
+  const counts = (): Record<string, number> => ({
+    readouts: count('[data-measure-key]'),
+    add: count('.measure-add'),
+    clear: count('.measure-clear'),
+    persistence: count('.measure-persistence'),
+    viewMode: count('[data-view-mode]'),
+    open: count('.measure-open'),
+    rows: count('.measure-row'),
+    capture: count('[data-measure-capture]'),
+    dialogOpen: count('dialog[open]'),
+    basicSwitch: count('[data-measure-basic]'),
+    advancedEntry: count('[data-measure-advanced]'),
+    note: count('[data-measure-basic-note]'),
+  });
+  const readoutKeys = (): string[] =>
+    measure.querySelectorAll('[data-measure-key]').map((item) => item.dataset.measureKey ?? '');
+  const readoutValue = (key: string): string =>
+    measure.querySelector(`[data-measure-key="${key}"] .measure-value`)?.textContent ?? '';
+  const rowValues = (): Record<number, string> => {
+    const out: Record<number, string> = {};
+    for (const item of measure.querySelectorAll('.measure-row')) {
+      const id = Number(item.dataset.measureId);
+      out[id] = item.querySelector('.measure-value')?.textContent ?? '';
+    }
+    return out;
+  };
+  const READOUT_ROW_ID: Record<string, number> = { frequency: 1, vpp: 2, rms: 3 };
+
+  tier = 'basic';
+  render();
+  const basic = counts();
+  const basicKeys = readoutKeys();
+  const basicValues = basicKeys.map(readoutValue);
+  check('the basic tier renders three readouts and none of the advanced surface',
+    basic.readouts === 3 && basic.note === 1 &&
+      basic.add === 0 && basic.clear === 0 && basic.persistence === 0 && basic.viewMode === 0 &&
+      basic.open === 0 && basic.rows === 0 && basic.capture === 0 && basic.dialogOpen === 0 &&
+      basic.basicSwitch === 0 && basic.advancedEntry === 1 &&
+      JSON.stringify(basicKeys) === JSON.stringify(['frequency', 'vpp', 'rms']),
+    `counts=${JSON.stringify(basic)}, keys=${JSON.stringify(basicKeys)}`);
+
+  tier = 'advanced';
+  render();
+  const advanced = counts();
+  const advancedValues = rowValues();
+  const advancedByKey = basicKeys.map((key) => advancedValues[READOUT_ROW_ID[key]!] ?? '');
+  check('the advanced tier keeps every control behind its Basic switch and shows the same values',
+    advanced.readouts === 0 && advanced.note === 0 && advanced.add === 1 && advanced.clear === 1 &&
+      advanced.persistence === 1 && advanced.viewMode === 3 && advanced.open === 3 &&
+      advanced.rows === 3 && advanced.basicSwitch === 1 && advanced.advancedEntry === 0 &&
+      advanced.dialogOpen === 0 &&
+      advancedByKey.length === 3 &&
+      JSON.stringify(advancedByKey) === JSON.stringify(basicValues) &&
+      basicValues.every((value) => value !== '–'),
+    `counts=${JSON.stringify(advanced)}, basic=${JSON.stringify(basicValues)}, ` +
+    `advanced=${JSON.stringify(advancedByKey)}; the same view is the same strings`);
+
+  tier = 'basic';
+  captureBlock = { status: 'running', scanned: 65536, total: 300000, droppedSamples: 0 };
+  render();
+  const forcedCapture = count('[data-measure-capture]');
+  tier = 'advanced';
+  render();
+  const advancedCapture = count('[data-measure-capture]');
+  captureBlock = null;
+  check('the basic surface renders no capture progress even when the view carries a running job',
+    forcedCapture === 0 && advancedCapture === 1,
+    `basic=${forcedCapture}, advanced=${advancedCapture}`);
+
+  tier = 'basic';
+  render();
+  const entry = measure.querySelector('[data-measure-advanced]');
+  entry?.focus();
+  entry?.click();
+  const landedAdvanced = active();
+  const advancedSwitch = measure.querySelector('[data-measure-basic]');
+  advancedSwitch?.focus();
+  advancedSwitch?.click();
+  const landedBasic = active();
+  const basicEntry = measure.querySelector('[data-measure-advanced]');
+  check('the tier switch hands the focus to the switch it lands on, in both directions',
+    entry !== null && landedAdvanced !== null && advancedSwitch !== null &&
+      landedAdvanced === advancedSwitch && landedBasic !== null &&
+      landedBasic === basicEntry && active() === basicEntry,
+    `advanced=${landedAdvanced === advancedSwitch}, basic=${landedBasic === basicEntry}, ` +
+    `tier=${tier}`);
+
+  render();
+  const unrelated = active();
+  check('an unrelated rebuild takes no tier hand-off',
+    unrelated === null && measure.querySelector('[data-measure-advanced]') !== null,
+    `active=${unrelated === null ? 'body' : 'other'}`);
+
+  const frequencyItem = measure.querySelector('[data-measure-key="frequency"]');
+  const truncated = rows.map((row) => (row.parameter === 'frequency'
+    ? rowView({
+      id: row.id, start: 0, parameter: 'frequency', unit: 'hz', value: 10000.41,
+      analyzedSamples: 65536, requestedSamples: 300000, truncated: true,
+    })
+    : row));
+  rows = truncated;
+  panel.updateMeasurements(section());
+  const sameItem = measure.querySelector('[data-measure-key="frequency"]');
+  const updatedValue = frequencyItem?.querySelector('.measure-value')?.textContent ?? '';
+  const updatedStatus = frequencyItem?.querySelector('.measure-status')?.textContent ?? '';
+  check('a live refresh rewrites the readout text in place and discloses the analysed prefix',
+    sameItem === frequencyItem && updatedValue !== basicValues[0] &&
+      updatedValue === '10.0 kHz' &&
+      updatedStatus.includes('partial: 65,536 of 300,000 samples') &&
+      count('[data-measure-key]') === 3,
+    `same=${sameItem === frequencyItem}, value=${updatedValue}, status=${updatedStatus}`);
+}
+
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
 nodeProcess.exit(failed === 0 ? 0 : 1);
-
-export {};

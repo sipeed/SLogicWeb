@@ -1006,7 +1006,8 @@ function rowsOf(scan: AnalogCodeScan | null, read: MeasurementReadSummary | null
   const section = between(appSource,
     '  private captureMeasurementSection(', '  private pumpMeasurementCapture(): void {');
   const scanAt = view.indexOf('runMeasurement(');
-  const branchAt = view.indexOf("if (config.range.kind === 'capture') {");
+  const branchAt = view.indexOf("if (config.range.kind === 'capture' && " +
+    "this.measureTier === 'advanced') {");
   check('the capture range leaves the bounded scan path before it starts',
     branchAt >= 0 && scanAt > branchAt &&
       view.includes('return this.captureMeasurementSection(base, rows, sources, store, start, end, clipped);') &&

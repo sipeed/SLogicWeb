@@ -514,6 +514,26 @@ function scanKey(scan: AnalogCodeScan): string {
     `reconcile=${reconcile(section)}, key=${reconcile(noKey)}, ` +
     `scans=${section.includes('runMeasurement(')}`);
 
+  const tierGate = "if (config.range.kind === 'capture' && " +
+    "this.measureTier === 'advanced') {";
+  const gated = (source: string): boolean =>
+    source.includes(tierGate) &&
+    source.includes('return this.captureMeasurementSection(') &&
+    source.indexOf(tierGate) < source.indexOf('return this.captureMeasurementSection(');
+  const ungated = view.replace(" && this.measureTier === 'advanced'", '');
+  const basicOnly = view.replace("this.measureTier === 'advanced'",
+    "this.measureTier === 'basic'");
+  const immediate = view.slice(view.indexOf(tierGate));
+  check('the chunked job is an advanced-tier feature and the basic tier cannot start one',
+    gated(view) && !gated(ungated) && !gated(basicOnly) &&
+      immediate.includes('runMeasurement({') &&
+      appSource.split('new CaptureRangeJob(').length - 1 === 1 &&
+      appSource.split('this.captureMeasurementSection(').length - 1 === 1 &&
+      !/this\.measurementCapture\s*=/.test(immediate),
+    `gated=${gated(view)}, ungated=${gated(ungated)}, basic=${gated(basicOnly)}, ` +
+    `jobs=${appSource.split('new CaptureRangeJob(').length - 1}, ` +
+    `calls=${appSource.split('this.captureMeasurementSection(').length - 1}`);
+
   const recovered = (source: string): boolean => {
     const stepAt = source.indexOf('entry.job.step(');
     const tryAt = source.indexOf('try {');

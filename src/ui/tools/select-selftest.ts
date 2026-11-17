@@ -712,10 +712,10 @@ check(
   const catalogKey = catalog.includes("'measure.catalogSource'") &&
     (catalog.match(/selectControl\(/g)?.length ?? 0) === 1;
   check(
-    'all four capture selects, the five measurement selects, the three FFT selects, ' +
-      'the three XY selects, the catalog source, edge channels and analog gain use ' +
-      'selectControl with stable keys',
-    missingKeys.length === 0 && controlCalls === 17 && gainKey && catalogKey &&
+    'all four capture selects, the five measurement select keys in both tiers, the three ' +
+      'FFT selects, the three XY selects, the catalog source, edge channels and analog ' +
+      'gain use selectControl with stable keys',
+    missingKeys.length === 0 && controlCalls === 19 && gainKey && catalogKey &&
       oldNativeSites.length === 0 && oldLabelled.length === 0,
     `missingKeys=${JSON.stringify(missingKeys)}, controlCalls=${controlCalls}, ` +
       `catalogKey=${catalogKey}, ` +

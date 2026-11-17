@@ -43,7 +43,7 @@ import {
   MeasurementCatalogDialog, measurementCatalogView,
 } from './measurementCatalogDialog.js';
 import {
-  measurementRangeKind,
+  basicMeasurementView, measurementRangeKind,
   type MeasurementRangeKind, type MeasurementRowView, type MeasurementSectionView,
   type MeasurementStatus, type MeasureTier,
 } from './measurementState.js';
@@ -137,6 +137,8 @@ interface MeasureFocusIntent {
   readonly id: number;
   readonly row: number;
 }
+
+const MEASURE_TIER_INDEX: Record<MeasureTier, number> = { basic: 0, advanced: 1 };
 
 export interface CursorRowView {
   id: number;
@@ -377,6 +379,7 @@ export class CapturePanel {
     if (pending.kind === 'clear') return view.rowCount === 0 && view.undoCount !== null;
     if (pending.kind === 'capture-cancel') return view.capture?.status === 'cancelled';
     if (pending.kind === 'capture-restart') return view.capture?.status === 'running';
+    if (pending.kind === 'tier-switch') return pending.id === MEASURE_TIER_INDEX[view.tier];
     return view.rowCount > 0 && view.undoCount === null;
   }
 
@@ -389,6 +392,12 @@ export class CapturePanel {
     if (pending.kind === 'capture-cancel' || pending.kind === 'capture-restart') {
       const selector = pending.kind === 'capture-cancel'
         ? '[data-measure-capture-restart]' : '[data-measure-capture-cancel]';
+      this.host.measure.querySelector<HTMLElement>(selector)?.focus();
+      return;
+    }
+    if (pending.kind === 'tier-switch') {
+      const selector = view.tier === 'advanced'
+        ? '[data-measure-basic]' : '[data-measure-advanced]';
       this.host.measure.querySelector<HTMLElement>(selector)?.focus();
       return;
     }
@@ -532,11 +541,21 @@ export class CapturePanel {
     this.measureSectionView = view;
     const byId = new Map<number, MeasurementRowView>();
     for (const row of view.rows) byId.set(row.id, row);
+    const readouts = new Map<string, MeasurementRowView>();
+    for (const row of basicMeasurementView(view).rows) readouts.set(row.parameter, row);
     const note = measurementNoteText(view);
     const windowText = measurementWindowText(view);
     const undoText = measurementClearedText(view);
     this.catalogDialog.update(measurementCatalogView(view));
     for (const root of this.roots()) {
+      for (const item of root.querySelectorAll<HTMLElement>('[data-measure-key]')) {
+        const readout = readouts.get(item.dataset.measureKey ?? '');
+        if (readout === undefined) continue;
+        const value = item.querySelector<HTMLElement>('.measure-value');
+        if (value !== null) value.textContent = measurementValueText(readout);
+        const status = item.querySelector<HTMLElement>('.measure-status');
+        if (status !== null) status.textContent = measurementStatusText(readout);
+      }
       for (const item of root.querySelectorAll<HTMLElement>('.measure-row')) {
         const id = Number(item.dataset.measureId);
         const row = Number.isInteger(id) ? byId.get(id) : undefined;
@@ -1806,8 +1825,14 @@ export class CapturePanel {
   }
 
   private measurementSection(v: CapturePanelView): HTMLElement {
-    const measureSec = section(t('capturePanel.measure'));
     this.measureSectionView = v.measurement;
+    return v.measurement.tier === 'basic'
+      ? this.basicMeasurementSection(v)
+      : this.advancedMeasurementSection(v);
+  }
+
+  private advancedMeasurementSection(v: CapturePanelView): HTMLElement {
+    const measureSec = section(t('capturePanel.measure'));
     for (const id of this.measureOpen) {
       if (!v.measurement.allRows.some((row) => row.id === id)) this.measureOpen.delete(id);
     }
@@ -1815,6 +1840,16 @@ export class CapturePanel {
     measureLegend.className = 'cursor-legend';
     measureLegend.textContent = t('capturePanel.measureFormat');
     measureSec.header.appendChild(measureLegend);
+    const measureTier = div('measure-tier');
+    const basicSwitch = document.createElement('button');
+    basicSwitch.type = 'button';
+    basicSwitch.className = 'analyzer-act measure-basic';
+    basicSwitch.dataset.measureBasic = '';
+    basicSwitch.textContent = t('capturePanel.measureTierBasic');
+    basicSwitch.addEventListener('click', () => this.runMeasureAction('tier-switch', basicSwitch,
+      () => this.cb.onPickMeasureTier('basic'), MEASURE_TIER_INDEX.basic));
+    measureTier.appendChild(basicSwitch);
+    measureSec.body.appendChild(measureTier);
     const measureFft = v.measurement.fft;
     const measureXy = v.measurement.xy;
     const measureMode: AnalysisViewMode =
@@ -2064,6 +2099,73 @@ export class CapturePanel {
     measureNote.hidden = measureNote.textContent === '';
     measureSec.body.appendChild(measureNote);
     if (this.catalogDialog.isOpen) this.catalogDialog.update(measurementCatalogView(v.measurement));
+    return measureSec.el;
+  }
+
+  private basicMeasurementSection(v: CapturePanelView): HTMLElement {
+    const measureSec = section(t('capturePanel.measure'));
+    const basic = basicMeasurementView(v.measurement);
+    const measureControls = div('measure-controls');
+    const source = selectControl(
+      'measure.filter',
+      t('capturePanel.measureSource'),
+      v.measurement.sources.map(
+        (entry): SelectOptionTuple => [String(entry.start), entry.name]),
+      basic.source === null ? '' : String(basic.source),
+    );
+    source.disabled = v.measurement.sources.length === 0;
+    source.addEventListener('change', () => this.cb.onPickMeasurementFilter(Number(source.value)));
+    const range = selectControl(
+      'measure.range',
+      t('capturePanel.measureRange'),
+      [
+        ['viewport', t('capturePanel.measureRangeViewport')],
+        ['cursors', t('capturePanel.measureRangeCursors')],
+        ['capture', t('capturePanel.measureRangeCapture')],
+      ],
+      basic.range,
+    );
+    range.addEventListener('change', () => this.cb.onPickMeasurementRange(
+      measurementRangeKind(range.value)));
+    measureControls.append(source.el, range.el);
+    measureSec.body.appendChild(measureControls);
+    const readouts = div('measure-readouts');
+    const readoutLegend = document.createElement('span');
+    readoutLegend.className = 'cursor-legend';
+    readoutLegend.dataset.measureLegend = '';
+    readoutLegend.textContent = t('capturePanel.measureBasicLegend');
+    readouts.appendChild(readoutLegend);
+    for (const row of basic.rows) {
+      const item = div('measure-readout');
+      item.dataset.measureKey = row.parameter;
+      const parameter = document.createElement('span');
+      parameter.className = 'measure-param';
+      parameter.textContent = measurementParameterText(row.parameter);
+      const value = document.createElement('span');
+      value.className = 'measure-value';
+      value.translate = false;
+      value.textContent = measurementValueText(row);
+      const status = document.createElement('span');
+      status.className = 'measure-status';
+      status.textContent = measurementStatusText(row);
+      item.append(parameter, value, status);
+      readouts.appendChild(item);
+    }
+    measureSec.body.appendChild(readouts);
+    const note = div('panel-note');
+    note.dataset.measureBasicNote = '';
+    note.textContent = t('capturePanel.measureBasicNote');
+    measureSec.body.appendChild(note);
+    const measureActions = div('measure-actions');
+    const advancedEntry = document.createElement('button');
+    advancedEntry.type = 'button';
+    advancedEntry.className = 'analyzer-act measure-advanced';
+    advancedEntry.dataset.measureAdvanced = '';
+    advancedEntry.textContent = t('capturePanel.advanced');
+    advancedEntry.addEventListener('click', () => this.runMeasureAction('tier-switch', advancedEntry,
+      () => this.cb.onPickMeasureTier('advanced'), MEASURE_TIER_INDEX.advanced));
+    measureActions.appendChild(advancedEntry);
+    measureSec.body.appendChild(measureActions);
     return measureSec.el;
   }
 

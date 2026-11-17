@@ -1518,7 +1518,7 @@ export class App {
     const start = Math.max(0, Math.min(window.start, store.length));
     const end = Math.max(start, Math.min(window.end, store.length));
     const clipped = start !== window.start || end !== window.end;
-    if (config.range.kind === 'capture') {
+    if (config.range.kind === 'capture' && this.measureTier === 'advanced') {
       return this.captureMeasurementSection(base, rows, sources, store, start, end, clipped);
     }
     const qualification = analogTriggerQualification(store.samplerate);

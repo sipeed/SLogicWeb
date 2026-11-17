@@ -163,9 +163,11 @@ const edgeMethodsSource = slice(app,
   };
   const owners = ['chSec.el', 'modeSec.el', 'triggerSec.el', 'advanced',
     'cursorSec.el', 'distanceSec.el', 'edgeSec.el'].map(owner);
+  const surfaces = count('return measureSec.el;');
   const owned = count('measurePage.appendChild(this.measurementSection(v))') === 1 &&
     count('measurePage.appendChild(this.measurementEnableHint())') === 1 &&
-    count('return measureSec.el;') === 1 &&
+    surfaces === 2 && count('private basicMeasurementSection(') === 1 &&
+    count('private advancedMeasurementSection(') === 1 &&
     count('measurePage.appendChild(measureSec.el)') === 0 &&
     count('capture.appendChild(measureSec.el)') === 0;
   check('every section is appended to exactly one page, so neither page carries the other page\u2019s sections',
