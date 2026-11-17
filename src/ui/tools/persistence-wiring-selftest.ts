@@ -97,6 +97,9 @@ const startBody = methodBody(app, 'private async startCapture(');
     `calls=${count(app, 'shouldCommitPersistence(')}, ` +
     `shared=${read('src/ui/persistenceTrail.ts').includes('acquisitionWaveCompleted({')}`);
 
+  const persistenceBodies = [
+    finishBody, submitBody, settleBody, syncBody, setBody, clearBody,
+  ].join('\n');
   const submitAt = count(app, 'this.submitPersistenceWave(reason);');
   check('a completed Single/Repeat wave is the only submitter: Stop, status and animation frames never submit',
     submitAt === 1 &&
@@ -104,12 +107,15 @@ const startBody = methodBody(app, 'private async startCapture(');
     !stopBody.includes('submitPersistenceWave') &&
     !frameBody.includes('submitPersistenceWave') &&
     !frameBody.includes('shouldCommitPersistence') &&
-    !app.includes('setInterval') &&
+    !persistenceBodies.includes('setInterval') &&
+    !persistenceBodies.includes('setTimeout') &&
+    !app.includes('setInterval(() => this.submitPersistenceWave') &&
     !app.includes('setTimeout(() => this.submitPersistenceWave') &&
     !app.includes('requestAnimationFrame(() => this.submitPersistenceWave') &&
     count(app, 'persistencePendingKey = waveKey;') === 1,
     `calls=${submitAt}, finish=${finishBody.includes('submitPersistenceWave(reason)')}, ` +
-    `stop=${stopBody.includes('submitPersistenceWave')}, frame=${frameBody.includes('submitPersistenceWave')}`);
+    `stop=${stopBody.includes('submitPersistenceWave')}, frame=${frameBody.includes('submitPersistenceWave')}, ` +
+    `timer=${persistenceBodies.includes('setInterval') || persistenceBodies.includes('setTimeout')}`);
 
   const idempotent = submitBody.includes(
     'const waveKey = acquisitionWaveKey(this.captureSessionId, this.captureWaveGeneration);') &&
