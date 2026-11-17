@@ -5,10 +5,12 @@ import {
 } from '../acquisitionWave.js';
 import type { CaptureStopReason } from '../captureViewport.js';
 import type { MeasurementParameter } from '../measurementCatalog.js';
+import { measurementMatrixView } from '../measurementRows.js';
+import type { MeasurementRowView, MeasurementSectionView } from '../measurementState.js';
 import {
   MEASUREMENT_STATS_CAP, accumulateSample, emptyAccumulator, emptyMeasurementStats,
-  excludeSample, measurementStatsKey, measurementStatsSummary, resetAllMeasurementStats,
-  resetMeasurementStatsFor, submitMeasurementWave,
+  excludeSample, measurementStatsKey, measurementStatsSummary, measurementStatsView,
+  resetAllMeasurementStats, resetMeasurementStatsFor, submitMeasurementWave,
   type MeasurementAccumulator, type MeasurementStatsKeyInput, type MeasurementStatsState,
   type MeasurementWaveRow, type MeasurementWaveSubmission,
 } from '../measurementStats.js';
@@ -994,6 +996,108 @@ const stopReasonVocabulary:
     `row=${app.includes('onResetMeasurementStats:')}, ` +
     `all=${app.includes('onResetAllMeasurementStats:')}`);
 }
+
+{
+  const rowView = (
+    id: number, start: number, state: MeasurementStatsState,
+  ): MeasurementRowView => ({
+    id,
+    start,
+    sourceName: start === 0 ? 'A0' : 'A1',
+    parameter: 'vpp',
+    unit: 'v',
+    value: id,
+    status: 'ok',
+    analyzedSamples: 1024,
+    requestedSamples: 1024,
+    truncated: false,
+    rangeClipped: false,
+    gaps: false,
+    clippedLow: false,
+    clippedHigh: false,
+    nearSampleLimit: false,
+    crossingCap: false,
+    crossingCount: 0,
+    dutyPeriods: 0,
+    dutyExcludedPeriods: 0,
+    stats: measurementStatsView(state, id, start === 0 ? '0:vpp' : '8:vpp'),
+  });
+  const matrixOf = (state: MeasurementStatsState): ReturnType<typeof measurementMatrixView> => {
+    const rows = [rowView(1, 0, state), rowView(2, 8, state)];
+    const view: MeasurementSectionView = {
+      sources: [
+        { group: 0, start: 0, gain: 1, name: 'A0' },
+        { group: 1, start: 8, gain: 1, name: 'A1' },
+      ],
+      filter: null,
+      range: { kind: 'viewport', a: null, b: null },
+      tier: 'advanced',
+      cursors: [],
+      rows,
+      allRows: rows.map((row) => ({ id: row.id, start: row.start, parameter: row.parameter })),
+      rowCount: rows.length,
+      undoCount: null,
+      addStart: null,
+      window: null,
+      unavailable: null,
+      capture: null,
+      statsSkipped: 0,
+      statsLoopUnavailable: false,
+    };
+    return measurementMatrixView(view);
+  };
+  let state = emptyMeasurementStats();
+  state = submitMeasurementWave(state, wave({
+    generation: 1,
+    rows: [
+      { rowId: 1, key: '0:vpp', value: 2 },
+      { rowId: 2, key: '8:vpp', value: 10 },
+    ],
+  })).state;
+  state = submitMeasurementWave(state, wave({
+    generation: 2,
+    rows: [
+      { rowId: 1, key: '0:vpp', value: 4 },
+      { rowId: 2, key: '8:vpp', value: 20 },
+    ],
+  })).state;
+  const before = matrixOf(state);
+  const beforeCells = before.rows.map((row) => row.cells[0]?.row ?? null);
+  check('two cells of the same parameter keep independent Count/Mean per source',
+    before.columns.length === 1 && before.columns[0]?.parameter === 'vpp' &&
+      before.rows.length === 2 &&
+      beforeCells.every((cell) => cell !== null) &&
+      beforeCells[0]?.start === 0 && beforeCells[1]?.start === 8 &&
+      beforeCells[0]?.stats.count === 2 && beforeCells[1]?.stats.count === 2 &&
+      beforeCells[0]?.stats.mean === 3 && beforeCells[1]?.stats.mean === 15,
+    `cells=${JSON.stringify(beforeCells.map((cell) => [cell?.start, cell?.stats.count,
+      cell?.stats.mean]))}`);
+
+  const neighbour = JSON.stringify(state.accumulators.get(2));
+  const values = beforeCells.map((cell) => cell?.value);
+  const one = resetMeasurementStatsFor(state, 1);
+  const afterOne = matrixOf(one);
+  const afterCells = afterOne.rows.map((row) => row.cells[0]?.row ?? null);
+  check('resetting one cell clears its history and leaves the neighbour byte-identical',
+    afterCells[0]?.stats.count === 0 && afterCells[0]?.stats.mean !== afterCells[0]?.stats.mean &&
+      afterCells[1]?.stats.count === 2 && afterCells[1]?.stats.mean === 15 &&
+      JSON.stringify(one.accumulators.get(2)) === neighbour &&
+      one.accumulators.has(1) === false &&
+      JSON.stringify(afterCells.map((cell) => cell?.value)) === JSON.stringify(values),
+    `counts=${afterCells.map((cell) => cell?.stats.count)}, ` +
+      `neighbour=${JSON.stringify(one.accumulators.get(2)) === neighbour}`);
+
+  const all = resetAllMeasurementStats(state);
+  const afterAll = matrixOf(all);
+  const allCells = afterAll.rows.map((row) => row.cells[0]?.row ?? null);
+  check('reset all clears every cell history and keeps every value and the duplicate guard',
+    all.accumulators.size === 0 && all.lastWaveKey === state.lastWaveKey &&
+      allCells.every((cell) => cell !== null && cell.stats.count === 0) &&
+      JSON.stringify(allCells.map((cell) => cell?.value)) === JSON.stringify(values),
+    `size=${all.accumulators.size}, counts=${allCells.map((cell) => cell?.stats.count)}, ` +
+      `values=${JSON.stringify(allCells.map((cell) => cell?.value))}`);
+}
+
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;

@@ -6,6 +6,7 @@ import {
   CapturePanel, type CapturePanelCallbacks, type CapturePanelView,
 } from '../capturePanel.js';
 import { defaultCaptureSettings } from '../state.js';
+import type { MeasurementParameter } from '../measurementCatalog.js';
 import { en } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
 import { ru } from '../locales/ru.js';
@@ -18,7 +19,7 @@ import {
   accumulateSample, emptyAccumulator, measurementStatsView, noMeasurementStatsView,
   type MeasurementStatsState, type MeasurementStatsView,
 } from '../measurementStats.js';
-import { installFakeDom, type FakeElement } from './fakeDom.js';
+import { fakeEvent, installFakeDom, type FakeElement } from './fakeDom.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
@@ -255,49 +256,57 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 }
 
 {
-  check('one rendered row per visible row, keyed by row id for the live update',
-    measureSection.includes("const list = div('measure-list');") &&
-    measureSection.includes('v.measurement.rows.forEach((row, index) => {') &&
-    measureSection.includes("const item = div('measure-row');") &&
-    measureSection.includes('item.dataset.measureId = String(row.id);') &&
-    measureSection.includes("source.className = 'measure-source';") &&
-    measureSection.includes('source.textContent = row.sourceName;') &&
-    measureSection.includes("parameter.className = 'measure-param';") &&
-    measureSection.includes("value.className = 'measure-value';") &&
-    measureSection.includes("status.className = 'measure-status';") &&
-    measureSection.includes('item.append(source, toggle, status, remove, details);'),
-    `rows=${measureSection.includes('v.measurement.rows')}, ` +
-    `dataset=${measureSection.includes('item.dataset.measureId = String(row.id);')}, ` +
-    `order=${measureSection.includes('item.append(source, toggle, status, remove, details);')}`);
+  check('the matrix renders one row per source and one cell per enabled parameter',
+    measureSection.includes('const matrix = measurementMatrixView(v.measurement);') &&
+    measureSection.includes('matrix.rows.forEach((source, rowIndex) => {') &&
+    measureSection.includes('source.cells.forEach((cell, columnIndex) => {') &&
+    measureSection.includes("const button = document.createElement('button');") &&
+    measureSection.includes("button.className = expanded ? 'measure-cell is-open' : 'measure-cell';") &&
+    measureSection.includes("button.setAttribute('role', 'gridcell');") &&
+    measureSection.includes('button.dataset.measureKey = rowView.parameter;') &&
+    measureSection.includes('button.dataset.measureId = String(rowView.id);') &&
+    measureSection.includes('button.dataset.measureRow = String(rowIndex);') &&
+    measureSection.includes('button.dataset.measureColumn = String(columnIndex);') &&
+    measureSection.includes('button.append(value, measureChevron(), status);'),
+    `rows=${measureSection.includes('matrix.rows.forEach(')}, ` +
+    `cells=${measureSection.includes('source.cells.forEach(')}, ` +
+    `key=${measureSection.includes('button.dataset.measureKey = rowView.parameter;')}, ` +
+    `order=${measureSection.includes('button.append(value, measureChevron(), status);')}`);
 
-  check('the row text comes from the shared parameter, value and status composition',
-    measureSection.includes('parameter.textContent = measurementParameterText(row.parameter);') &&
-    measureSection.includes('value.textContent = measurementValueText(row);') &&
-    measureSection.includes('status.textContent = measurementStatusText(row);') &&
-    measureSection.includes('toggle.append(parameter, measureChevron(), value);') &&
+  check('a null cell stays inert and empty instead of borrowing a value',
+    measureSection.includes('if (rowView === null) {') &&
+    measureSection.includes("empty.className = 'measure-cell is-empty';") &&
+    measureSection.includes("empty.setAttribute('role', 'gridcell');") &&
+    measureSection.includes("empty.setAttribute('aria-label', t('capturePanel.measureCellEmpty'));") &&
+    !measureSection.includes("empty.textContent = measurementValueText"),
+    `null=${measureSection.includes('if (rowView === null)')}, ` +
+    `key=${measureSection.includes("t('capturePanel.measureCellEmpty')")}`);
+
+  check('the cell text comes from the shared value and status composition',
+    measureSection.includes('value.textContent = measurementValueText(rowView);') &&
+    measureSection.includes('const statusText = measurementStatusText(rowView);') &&
+    measureSection.includes('status.textContent = statusText;') &&
+    measureSection.includes('status.title = statusText;') &&
     panel.includes('function measureChevron(): SVGSVGElement {') &&
     panel.includes("appendIconPath(icon, 'm6 9 6 6 6-6');") &&
     panel.includes('export function measurementValueText(row: MeasurementRowView): string {') &&
     panel.includes('export function measurementStatusText(row: MeasurementRowView): string {'),
-    `parameter=${measureSection.includes('measurementParameterText(row.parameter)')}, ` +
-    `value=${measureSection.includes('measurementValueText(row)')}, ` +
-    `status=${measureSection.includes('measurementStatusText(row)')}, ` +
+    `value=${measureSection.includes('measurementValueText(rowView)')}, ` +
+    `status=${measureSection.includes('measurementStatusText(rowView)')}, ` +
     `chevron=${measureSection.includes('measureChevron()')}`);
 
   const removeFocus = "() => this.runMeasureAction('row', remove,\n" +
-    '            () => this.cb.onRemoveMeasurementRow(row.id), row.id, index)';
-  check('each row removes exactly its own row id through the shared remove button',
-    measureSection.includes('const remove = cursorRemoveButton(') &&
-    measureSection.includes("t('capturePanel.measureRemove', { parameter: label })") &&
-    measureSection.includes('const label = measurementRowLabel(row);') &&
-    measureSection.includes(removeFocus) &&
-    measureSection.indexOf('cursorRemoveButton(') <
-      measureSection.indexOf('this.cb.onRemoveMeasurementRow(row.id)') &&
-    measureSection.indexOf("this.runMeasureAction('row', remove") <
-      measureSection.indexOf('this.cb.onRemoveMeasurementRow(row.id)') &&
+    '        () => this.cb.onRemoveMeasurementRow(rowId), rowId, rowIndex)';
+  check('each disclosure removes exactly its own row id through the shared remove button',
+    panel.includes('const remove = cursorRemoveButton(') &&
+    panel.includes("t('capturePanel.measureRemove', { parameter: measurementRowLabel(row) })") &&
+    panel.includes(removeFocus) &&
+    panel.indexOf('cursorRemoveButton(') < panel.indexOf('this.cb.onRemoveMeasurementRow(rowId)') &&
+    panel.indexOf("this.runMeasureAction('row', remove") <
+      panel.indexOf('this.cb.onRemoveMeasurementRow(rowId)') &&
     panel.includes('onRemoveMeasurementRow(id: number): void;'),
-    `wired=${measureSection.includes(removeFocus)}, ` +
-      `armed=${measureSection.includes("this.runMeasureAction('row', remove")}`);
+    `wired=${panel.includes(removeFocus)}, ` +
+      `armed=${panel.includes("this.runMeasureAction('row', remove")}`);
 
   const armFirst = 'const intent = this.armMeasureFocus(kind, from, id, row);\n' +
     '    try {\n      action();';
@@ -312,21 +321,25 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `armFirst=${panel.includes(armFirst)}, lateArm=${armAfterEmit.includes(armFirst)}, ` +
       `drop=${panel.includes('if (this.measureFocus === intent) this.measureFocus = null;')}`);
 
-  check('the row actions are real buttons, so every control is keyboard reachable',
+  check('the header actions and the cell are real buttons, so every control is keyboard reachable',
     panel.includes("b.type = 'button';") &&
     measureSection.includes("addOpen.type = 'button';") &&
     measureSection.includes("clearAll.type = 'button';") &&
+    measureSection.includes("resetAll.type = 'button';") &&
+    measureSection.includes("button.type = 'button';") &&
     panel.includes('function cursorRemoveButton(label: string, onRemove: () => void): ' +
       'HTMLButtonElement {'),
     `remove=${panel.includes("b.type = 'button';")}, ` +
     `add=${measureSection.includes("addOpen.type = 'button';")}`);
 
-  check('an empty row list shows the add hint instead of a list',
-    measureSection.includes('if (v.measurement.rows.length === 0) {') &&
+  check('an empty union shows the add hint and no table, with the actions still reachable',
+    measureSection.includes('if (matrix.columns.length === 0 || matrix.rows.length === 0) {') &&
     measureSection.includes("hint.textContent = t('capturePanel.measureEmpty');") &&
     measureSection.indexOf("t('capturePanel.measureEmpty')") <
-      measureSection.indexOf("div('measure-list')"),
-    `empty=${measureSection.includes("t('capturePanel.measureEmpty')")}`);
+      measureSection.indexOf('this.measurementMatrix(matrix, v)') &&
+    measureSection.includes('this.measurementHeaderActions(measureActions, v);'),
+    `empty=${measureSection.includes("t('capturePanel.measureEmpty')")}, ` +
+    `table=${measureSection.includes('this.measurementMatrix(matrix, v)')}`);
 }
 
 {
@@ -338,25 +351,34 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     "        this.runMeasureAction('undo', undo, () => this.cb.onUndoMeasurementRows());\n" +
     '      });';
   const footer = (source: string): boolean =>
-    source.includes("const measureActions = div('measure-actions');") &&
+    source.includes('private measurementHeaderActions(') &&
     source.includes("addOpen.dataset.measureOpen = '';") &&
     source.includes("addOpen.setAttribute('aria-haspopup', 'dialog');") &&
     source.includes("addOpen.textContent = t('capturePanel.measureAddOpen');") &&
-    source.includes('addOpen.disabled = v.measurement.sources.length === 0;') &&
+    source.includes('addOpen.disabled = view.measurement.sources.length === 0;') &&
     source.includes('this.catalogDialog.open(\n' +
-      '      measurementCatalogView(v.measurement), addOpen)') &&
+      '      measurementCatalogView(view.measurement), addOpen)') &&
     source.includes("clearAll.dataset.measureClearAll = '';") &&
     source.includes("clearAll.textContent = t('capturePanel.measureClearAll');") &&
-    source.includes('clearAll.disabled = v.measurement.rowCount === 0;') &&
+    source.includes('clearAll.disabled = view.measurement.rowCount === 0;') &&
+    source.includes("resetAll.dataset.measureStatsResetAll = '';") &&
+    source.includes("resetAll.textContent = t('capturePanel.measureStatsResetAll');") &&
+    source.includes("resetAll.addEventListener('click', () => " +
+      'this.cb.onResetAllMeasurementStats());') &&
     source.includes(clearClick) &&
-    source.includes('measureActions.append(addOpen, clearAll);');
+    source.includes('container.append(addOpen, clearAll, resetAll);') &&
+    source.includes("const actions = div('measure-matrix-actions');") &&
+    source.includes('this.measurementHeaderActions(actions, view);') &&
+    source.includes('corner.appendChild(actions);');
   const noEnable = footer(measureSection.replace(
-    'addOpen.disabled = v.measurement.sources.length === 0;', 'addOpen.disabled = false;'));
+    'addOpen.disabled = view.measurement.sources.length === 0;', 'addOpen.disabled = false;'));
   const visibleOnly = footer(measureSection.replace(
-    'clearAll.disabled = v.measurement.rowCount === 0;',
-    'clearAll.disabled = v.measurement.rows.length === 0;'));
-  check('the footer row carries the catalog opener and Clear all, and no temporary add select',
-    footer(measureSection) && !noEnable && !visibleOnly &&
+    'clearAll.disabled = view.measurement.rowCount === 0;',
+    'clearAll.disabled = view.measurement.rows.length === 0;'));
+  const missingReset = footer(measureSection.replace(
+    'resetAll.addEventListener(\'click\', () => this.cb.onResetAllMeasurementStats());', ''));
+  check('the source-column head carries the catalog opener, Clear all and Reset all statistics',
+    footer(measureSection) && !noEnable && !visibleOnly && !missingReset &&
     !measureSection.includes('measure-add-row') &&
     !measureSection.includes("'measure.add'") &&
     !measureSection.includes('onAddMeasurementRow') &&
@@ -364,7 +386,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     panel.includes('onClearMeasurementRows(invoker: HTMLElement | null): Promise<void>;') &&
     panel.includes('onUndoMeasurementRows(): void;'),
     `footer=${footer(measureSection)}, noEnable=${noEnable}, visibleOnly=${visibleOnly}, ` +
-      `temp=${measureSection.includes('onAddMeasurementRow')}`);
+      `reset=${!missingReset}, temp=${measureSection.includes('onAddMeasurementRow')}`);
 
   const noticeAt = measureSection.indexOf("const undoNotice = div('measure-undo');");
   const notice = (source: string): boolean =>
@@ -396,7 +418,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 
   check('the undo notice is a live status line with its own count and one Undo button',
     notice(measureSection) && !alwaysShown &&
-    noticeAt > measureSection.indexOf('measureActions.append(addOpen, clearAll);') &&
+    noticeAt > measureSection.indexOf('measureSec.body.appendChild(this.measurementMatrix(matrix, v));') &&
     noticeAt < measureSection.indexOf("const measureNote = div('measure-note');") &&
     panel.includes('export function measurementClearedText(view: MeasurementSectionView): string {'),
     `noticeAt=${noticeAt}, alwaysShown=${alwaysShown}`);
@@ -439,23 +461,26 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       `updater=${measureUpdater.includes('this.catalogDialog.update(')}`);
 
   const quiet = (source: string): boolean =>
-    (source.match(/setAttribute\('role'/g) ?? []).length === 3 &&
+    (source.match(/setAttribute\('role', 'status'\)/g) ?? []).length === 1 &&
     source.split("undoNotice.setAttribute('role', 'status');").length - 1 === 1 &&
     source.split("progress.setAttribute('role', 'progressbar');").length - 1 === 1 &&
     source.split("viewSwitch.setAttribute('role', 'group');").length - 1 === 1 &&
+    source.split("table.setAttribute('role', 'grid');").length - 1 === 1 &&
+    source.split("rowHead.setAttribute('role', 'rowheader');").length - 1 === 1 &&
+    source.split("button.setAttribute('role', 'gridcell');").length - 1 === 1 &&
     !source.includes('aria-live') && (source.match(/role="/g) ?? []).length === 0;
   const rowLive = measureSection.replace(
-    'item.append(source, toggle, status, remove, details);',
-    "item.setAttribute('role', 'status');\n        " +
-      'item.append(source, toggle, status, remove, details);');
+    "button.append(value, measureChevron(), status);",
+    "button.setAttribute('role', 'status');\n        " +
+      'button.append(value, measureChevron(), status);');
   const valueLive = measureSection.replace(
-    'value.textContent = measurementValueText(row);',
+    'value.textContent = measurementValueText(rowView);',
     "value.setAttribute('role', 'status');\n        " +
-      'value.textContent = measurementValueText(row);');
+      'value.textContent = measurementValueText(rowView);');
   const progressLive = measureSection.replace(
     "progress.setAttribute('role', 'progressbar');",
     "progress.setAttribute('role', 'status');");
-  check('the undo notice is the only status role, the progress bar is a progressbar, and no row is live',
+  check('the undo notice is the only status role, the progress bar is a progressbar, and no cell is live',
     quiet(measureSection) && !quiet(rowLive) && !quiet(valueLive) && !quiet(progressLive),
     `quiet=${quiet(measureSection)}, rowLive=${quiet(rowLive)}, ` +
       `valueLive=${quiet(valueLive)}, progressLive=${quiet(progressLive)}, ` +
@@ -472,8 +497,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const windowLine = measureSection.indexOf("const measureWindow = div('measure-window');");
   check('the section states the window sample count between the controls and the rows',
     windowLine > measureSection.indexOf('measureSec.body.appendChild(measureCursors);') &&
-    windowLine < measureSection.indexOf("const list = div('measure-list');") &&
-    windowLine < measureSection.indexOf('if (v.measurement.rows.length === 0) {') &&
+    windowLine < measureSection.indexOf('const matrix = measurementMatrixView(v.measurement);') &&
+    windowLine < measureSection.indexOf('this.measurementMatrix(matrix, v)') &&
     measureSection.includes("measureWindow.dataset.measureWindow = '';") &&
     measureSection.includes('measureWindow.textContent = measurementWindowText(v.measurement);') &&
     measureSection.includes('measureWindow.hidden = v.measurement.window === null;') &&
@@ -482,26 +507,36 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `line=${windowLine}, ` +
     `hidden=${measureSection.includes('measureWindow.hidden = v.measurement.window === null;')}`);
 
-  const markup = ['<table', '<thead', '<tbody', '<tr', '<th', '<td', 'innerHTML',
-    "createElement('table')", "createElement('th')", "createElement('td')"]
+  const markup = ['<table', '<thead', '<tbody', '<tr', '<th', '<td', 'innerHTML']
     .filter((needle) => measureSection.includes(needle));
-  check('the measurement section is div/span/button markup, never a table or string HTML',
-    markup.length === 0, `hits=${JSON.stringify(markup)}`);
+  check('the matrix is a real imperatively built table, never string HTML',
+    markup.length === 0 &&
+    measureSection.includes("const table = document.createElement('table');") &&
+    measureSection.includes("const head = document.createElement('thead');") &&
+    measureSection.includes("const body = document.createElement('tbody');"),
+    `hits=${JSON.stringify(markup)}, ` +
+    `table=${measureSection.includes("createElement('table')")}`);
 }
 
 {
   const liveRow = (source: string): boolean => {
-    const guard = 'if (row === undefined) continue;';
+    const guard = 'if (readout === undefined) continue;';
     return source.includes('for (const root of this.roots()) {') &&
-      source.includes("root.querySelectorAll<HTMLElement>('.measure-row')") &&
-      source.includes('const id = Number(item.dataset.measureId);') &&
-      source.includes('const row = Number.isInteger(id) ? byId.get(id) : undefined;') &&
+      source.includes("root.querySelectorAll<HTMLElement>('[data-measure-key]')") &&
+      source.includes('const id = item.dataset.measureId;') &&
+      source.includes('const readout = id === undefined') &&
+      source.includes(': byId.get(Number(id));') &&
       source.includes('const byId = new Map<number, MeasurementRowView>();') &&
       source.includes(guard) &&
       source.includes("item.querySelector<HTMLElement>('.measure-value')") &&
-      source.includes('value.textContent = measurementValueText(row);') &&
+      source.includes('value.textContent = measurementValueText(readout);') &&
       source.includes("item.querySelector<HTMLElement>('.measure-status')") &&
-      source.includes('status.textContent = measurementStatusText(row);') &&
+      source.includes('const statusText = measurementStatusText(readout);') &&
+      source.includes('status.textContent = statusText;') &&
+      source.includes("root.querySelectorAll<HTMLElement>('[data-measure-details]')") &&
+      source.includes("const detailRow = item.closest<HTMLElement>('.measure-cell-detail');") &&
+      source.includes('if (detailRow !== null && detailRow.hidden) continue;') &&
+      source.includes('applyMeasurementDetails(item, row, true, view);') &&
       source.includes("root.querySelectorAll<HTMLElement>('[data-measure-note]')") &&
       source.includes('item.textContent = note;') &&
       source.includes('item.hidden = note === \'\';');
@@ -509,19 +544,22 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const structural = ['replaceChildren', 'appendChild', 'insertBefore', 'remove(',
     'innerHTML', 'classList', 'createElement', 'this.cb.']
     .filter((needle) => measureUpdater.includes(needle));
-  check('the live update rewrites only existing row and note text, through both page roots',
+  check('the live update rewrites only existing cell, detail and note text, through both page roots',
     liveRow(measureUpdater) && structural.length === 0 &&
     !measureUpdater.includes('renderPanels(') &&
     !measureUpdater.includes('requestAnimationFrame') &&
     !measureUpdater.includes('setTimeout'),
     `update=${measureUpdater.length} chars, hits=${JSON.stringify(structural)}`);
 
-  const droppedGuard = measureUpdater.replace('if (row === undefined) continue;', '');
-  const rebuild = measureUpdater.replace('value.textContent = measurementValueText(row);',
+  const droppedGuard = measureUpdater.replace('if (readout === undefined) continue;', '');
+  const rebuild = measureUpdater.replace('value.textContent = measurementValueText(readout);',
     'value.replaceChildren();');
-  check('the in-place update is load-bearing: a dropped id guard or a rebuild fails',
-    !liveRow(droppedGuard) && !liveRow(rebuild) && liveRow(measureUpdater),
-    `dropped=${liveRow(droppedGuard)}, rebuilt=${liveRow(rebuild)}`);
+  const borrowed = measureUpdater.replace(': byId.get(Number(id));',
+    ": readouts.get(item.dataset.measureKey ?? '');");
+  check('the in-place update is load-bearing: a dropped guard, a rebuild or a parameter-only lookup fails',
+    !liveRow(droppedGuard) && !liveRow(rebuild) && !liveRow(borrowed) && liveRow(measureUpdater),
+    `dropped=${liveRow(droppedGuard)}, rebuilt=${liveRow(rebuild)}, ` +
+    `borrowed=${liveRow(borrowed)}`);
 
   const liveWindow = (source: string): boolean =>
     source.includes('const windowText = measurementWindowText(view);') &&
@@ -543,21 +581,34 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const capture = doc.createElement('div');
   const cursors = doc.createElement('div');
   doc.body.append(capture, cursors);
-  const makeRow = (root: FakeElement, id: number, value: string): void => {
+  const makeRow = (root: FakeElement, id: number, key: string, value: string): void => {
     const item = doc.createElement('div');
-    item.className = 'measure-row';
+    item.className = 'measure-cell';
+    item.setAttribute('role', 'gridcell');
+    item.dataset.measureKey = key;
     item.dataset.measureId = String(id);
-    const name = doc.createElement('span');
-    name.className = 'measure-param';
-    name.textContent = 'label';
     const cell = doc.createElement('span');
     cell.className = 'measure-value';
     cell.textContent = value;
     const status = doc.createElement('span');
     status.className = 'measure-status';
     status.textContent = 'stale';
-    item.append(name, cell, status);
+    item.append(cell, status);
     root.appendChild(item);
+  };
+  const makeDetail = (root: FakeElement, id: number): void => {
+    const wrap = doc.createElement('div');
+    wrap.className = 'measure-cell-detail';
+    wrap.hidden = false;
+    const details = doc.createElement('div');
+    details.className = 'measure-details';
+    details.dataset.measureDetails = String(id);
+    const count = doc.createElement('span');
+    count.dataset.measureDetail = 'count';
+    count.textContent = 'stale';
+    details.appendChild(count);
+    wrap.appendChild(details);
+    root.appendChild(wrap);
   };
   const makeNote = (root: FakeElement): void => {
     const note = doc.createElement('div');
@@ -592,9 +643,10 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     root.appendChild(notice);
   };
   for (const root of [capture, cursors]) {
-    makeRow(root, 1, 'old vpp');
-    makeRow(root, 2, 'old rms');
-    makeRow(root, 3, 'old hz');
+    makeRow(root, 1, 'vpp', 'old vpp');
+    makeRow(root, 2, 'rms', 'old rms');
+    makeRow(root, 3, 'frequency', 'old hz');
+    makeDetail(root, 1);
     makeNote(root);
     makeWindowLine(root);
     makeUndoNotice(root);
@@ -612,9 +664,11 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   target.updateMeasurements(sectionView({ rows: [vpp, rms] }));
 
   const cells = (root: FakeElement, id: number, cls: string): string =>
-    root.querySelector(`.measure-row[data-measure-id="${id}"] .${cls}`)?.textContent ?? '';
-  const labelOf = (root: FakeElement, id: number): string =>
-    root.querySelector(`.measure-row[data-measure-id="${id}"] .measure-param`)
+    root.querySelector(`[data-measure-id="${id}"] .${cls}`)?.textContent ?? '';
+  const parameterOf = (root: FakeElement, id: number): string =>
+    root.querySelector(`[data-measure-id="${id}"]`)?.getAttribute('data-measure-key') ?? '';
+  const detailText = (root: FakeElement, id: number, key: string): string =>
+    root.querySelector(`[data-measure-details="${id}"] [data-measure-detail="${key}"]`)
       ?.textContent ?? '';
   const noteOf = (root: FakeElement): FakeElement | null =>
     root.querySelector('[data-measure-note]');
@@ -627,21 +681,22 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     cells(root, 2, 'measure-status'),
     cells(root, 3, 'measure-value'),
     cells(root, 3, 'measure-status'),
-    labelOf(root, 1),
+    parameterOf(root, 1),
+    detailText(root, 1, 'count'),
     noteOf(root)?.textContent ?? '',
     noteOf(root)?.hidden,
   ]);
-  const rowsKept = [capture, cursors].every((root) =>
-    root.querySelectorAll('.measure-row').length === 3);
-  check('a live update writes value, status and note text in both roots and leaves unlisted rows alone',
+  const cellsKept = [capture, cursors].every((root) =>
+    root.querySelectorAll('.measure-cell').length === 3);
+  check('a live update writes value, status, open-detail and note text in both roots, leaving unlisted cells alone',
     written.every((entry) => entry[0] === '21.5 V' && entry[2] === '4.1 V' &&
-      entry[4] === 'old hz' && entry[5] === 'stale' && entry[6] === 'label') &&
+      entry[4] === 'old hz' && entry[5] === 'stale' && entry[6] === 'vpp') &&
     written.every((entry) => entry[1] === 'exact code extrema · ' +
       'partial: 32,768 of 65,536 samples') &&
-    written.every((entry) => entry[7] ===
-      'partial: 32,768 of 65,536 samples' && entry[8] === false) &&
-    rowsKept,
-    `written=${JSON.stringify(written)}, rows=${rowsKept}`);
+    written.every((entry) => entry[7] === '0' && entry[8] ===
+      'partial: 32,768 of 65,536 samples' && entry[9] === false) &&
+    cellsKept,
+    `written=${JSON.stringify(written)}, cells=${cellsKept}`);
 
   const wide = rowView({
     id: 1, parameter: 'vpp', unit: 'v', value: 21.4588,
@@ -742,18 +797,17 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   doc.body.appendChild(root);
   const makeRow = (id: number): void => {
     const item = doc.createElement('div');
-    item.className = 'measure-row';
+    item.className = 'measure-cell';
+    item.setAttribute('role', 'gridcell');
+    item.dataset.measureKey = 'vpp';
     item.dataset.measureId = String(id);
-    const name = doc.createElement('span');
-    name.className = 'measure-param';
-    name.textContent = 'Vpp';
     const cell = doc.createElement('span');
     cell.className = 'measure-value';
     cell.textContent = 'stale';
     const status = doc.createElement('span');
     status.className = 'measure-status';
     status.textContent = 'stale';
-    item.append(name, cell, status);
+    item.append(cell, status);
     root.appendChild(item);
   };
   makeRow(4);
@@ -770,8 +824,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     ],
   }));
   const cellOf = (id: number, cls: string): string =>
-    root.querySelector(`.measure-row[data-measure-id="${id}"] .${cls}`)?.textContent ?? '';
-  check('two rows of one parameter on different sources update by row id, not by parameter',
+    root.querySelector(`[data-measure-id="${id}"] .${cls}`)?.textContent ?? '';
+  check('two cells of one parameter on different sources update by row id, not by parameter',
     cellOf(4, 'measure-value') === '1 V' && cellOf(5, 'measure-value') === '2 V' &&
       cellOf(6, 'measure-value') === 'stale',
     `a0=${cellOf(4, 'measure-value')}, a2=${cellOf(5, 'measure-value')}, ` +
@@ -915,6 +969,9 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureCursorUnset': 'not set',
     'capturePanel.measureCursorHint': 'Place two cursors on the waveform to measure between them.',
     'capturePanel.measureEmpty': 'Add a measurement row.',
+    'capturePanel.measureMatrixSummary':
+      'Measurement matrix: {sources} sources by {parameters} parameters',
+    'capturePanel.measureCellEmpty': 'Not measured',
     'capturePanel.measureAddOpen': 'Add measurement…',
     'capturePanel.measureClearAll': 'Clear all',
     'capturePanel.measureRemove': 'Remove row: {parameter}',
@@ -1003,8 +1060,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const value = (dict: Readonly<Record<string, string>>, key: string): string => dict[key] ?? '';
   const missing = catalogs.flatMap(([locale, dict]) =>
     keys.filter((key) => value(dict, key).trim() === '').map((key) => `${locale}:${key}`));
-  check('all four catalogs define the eighty-eight measurement keys',
-    missing.length === 0 && keys.length === 88, `missing=${JSON.stringify(missing)}`);
+  check('all four catalogs define the ninety measurement keys',
+    missing.length === 0 && keys.length === 90, `missing=${JSON.stringify(missing)}`);
 
   const mismatched = keys.filter((key) => value(en, key) !== english[key]);
   check('the English measurement copy matches the approved vocabulary',
@@ -1017,6 +1074,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureDetailsSkipped': ['{count}'],
     'capturePanel.measureStatsCapped': ['{count}'],
     'capturePanel.measureRemove': ['{parameter}'],
+    'capturePanel.measureMatrixSummary': ['{sources}', '{parameters}'],
     'capturePanel.measureCleared': ['{count}'],
     'capturePanel.measureMethodFrequency': ['{count}'],
     'capturePanel.measureMethodPeriod': ['{count}'],
@@ -1289,7 +1347,13 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 }
 
 {
-  const rules = ['.measure-controls {', '.measure-cursors {', '.measure-row {',
+  const rules = ['.measure-controls {', '.measure-cursors {',
+    '.measure-matrix-scroll {', '.measure-matrix {', '.measure-matrix > caption {',
+    '.measure-matrix-source-col {', '.measure-matrix-col {',
+    '.measure-matrix thead th {', '.measure-matrix-actions {', '.measure-matrix tbody th {',
+    '.measure-source-head {', '.measure-source-swatch {', '.measure-cell-slot {',
+    '.measure-cell {', '.measure-cell:hover, .measure-cell.is-open {',
+    '.measure-cell:focus-visible {', '.measure-cell-detail > td {',
     '.measure-param {', '.measure-value {', '.measure-status {', '.measure-actions {',
     '.analyzer-act.measure-add {', '.measure-note {', '.measure-window {',
     '.measure-undo {', '.measure-undo-text {', '.analyzer-act.measure-undo-action {',
@@ -1312,32 +1376,37 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     windowRule === noteRule.replace('.measure-note', '.measure-window'),
     `rule=${windowRule}`);
 
-  const row = slice(css, '.measure-row {', '}');
+  const cell = slice(css, '.measure-cell {', '}');
   const status = slice(css, '.measure-status {', '}');
   const value = slice(css, '.measure-value {', '}');
-  check('rows wrap and their value/status columns never force horizontal overflow',
-    row.includes('flex-wrap: wrap;') && row.includes('row-gap: 2px;') &&
+  check('cells wrap and their value/status columns never force horizontal overflow',
+    cell.includes('flex-wrap: wrap;') && cell.includes('width: 100%;') &&
+    cell.includes('min-height: 24px;') &&
     value.includes('min-width: 0;') && value.includes('overflow-wrap: anywhere;') &&
     status.includes('flex: 1 0 100%;') && status.includes('min-width: 0;') &&
     status.includes('overflow-wrap: anywhere;'),
-    `wrap=${row.includes('flex-wrap: wrap;')}, ` +
+    `wrap=${cell.includes('flex-wrap: wrap;')}, ` +
     `valueMin=${value.includes('min-width: 0;')}, ` +
     `statusFull=${status.includes('flex: 1 0 100%;')}`);
 
-  check('the status line is ordered after the remove control without moving it in the DOM',
+  check('the status line follows the value and chevron in one cell button',
     status.includes('order: 1;') &&
-    measureSection.indexOf('item.append(source, toggle, status, remove, details);') > 0 &&
-    measureSection.indexOf('status.className') <
-      measureSection.indexOf('item.append(source, toggle, status, remove, details);'),
+    measureSection.includes('button.append(value, measureChevron(), status);') &&
+    measureSection.indexOf('value.textContent') <
+      measureSection.indexOf('button.append(value, measureChevron(), status);'),
     `order=${status.includes('order: 1;')}`);
 
-  check('the source column wraps and the footer actions wrap at the narrow rail',
-    slice(css, '.measure-source {', '}').includes('overflow-wrap: anywhere;') &&
-    slice(css, '.measure-actions {', '}').includes('flex-wrap: wrap;') &&
+  check('the matrix scrolls inside itself with a fixed layout and sticky header',
+    slice(css, '.measure-matrix-scroll {', '}').includes('overflow-x: auto;') &&
+    slice(css, '.measure-matrix {', '}').includes('table-layout: fixed;') &&
+    slice(css, '.measure-matrix {', '}').includes('min-width: 632px;') &&
+    slice(css, '.measure-matrix thead th {', '}').includes('position: sticky;') &&
+    slice(css, '.measure-matrix thead th {', '}').includes('background: var(--bg20);') &&
+    slice(css, '\n.measure-source {', '}').includes('overflow-wrap: anywhere;') &&
     !css.includes('.measure-add-row'),
-    `source=${css.includes('.measure-source {')}, ` +
-      `actions=${css.includes('.measure-actions {')}, ` +
-      `temp=${css.includes('.measure-add-row')}`);
+    `scroll=${css.includes('.measure-matrix-scroll {')}, ` +
+    `fixed=${slice(css, '.measure-matrix {', '}').includes('table-layout: fixed;')}, ` +
+    `temp=${css.includes('.measure-add-row')}`);
 
   const catalogRow = slice(css, '.measure-catalog-row {', '}');
   const catalogMethod = slice(css, '.measure-catalog-method {', '}');
@@ -1420,8 +1489,16 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     persistence: { frames: 0, effective: 0, loop: false, clear: null },
   });
   const source: MeasurementSectionView['sources'] = [{ group: 0, start: 0, gain: 1, name: 'A0' }];
+  const ROW_PARAMETER: Record<number, MeasurementParameter> =
+    { 1: 'frequency', 2: 'vpp', 3: 'rms', 7: 'vpp' };
+  const ROW_UNIT: Record<MeasurementParameter, MeasurementRowView['unit']> =
+    { frequency: 'hz', vpp: 'v', rms: 'v', max: 'v', min: 'v', mean: 'v',
+      period: 's', duty: '%' };
   const rowViews = (ids: readonly number[]): MeasurementRowView[] =>
-    ids.map((id) => rowView({ id, parameter: 'vpp', unit: 'v', value: id }));
+    ids.map((id) => {
+      const parameter = ROW_PARAMETER[id] ?? 'vpp';
+      return rowView({ id, parameter, unit: ROW_UNIT[parameter], value: id });
+    });
   const rowModels = (): MeasurementSectionView['allRows'] =>
     rows.map((row) => ({ id: row.id, start: row.start, parameter: row.parameter }));
 
@@ -1487,10 +1564,13 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const active = (): FakeElement | null =>
     doc.activeElement === doc.body ? null : doc.activeElement;
   const removeOf = (id: number): FakeElement | null =>
-    cursors.querySelector(`.measure-row[data-measure-id="${id}"] .analyzer-act--remove`);
+    cursors.querySelector(`[data-measure-details="${id}"] .analyzer-act--remove`);
   const addOf = (): FakeElement | null => cursors.querySelector('[data-measure-open]');
+  const firstCell = (): FakeElement | null => cursors.querySelector('button.measure-cell');
   const shownIds = (): string[] =>
-    cursors.querySelectorAll('.measure-row').map((item) => item.dataset.measureId ?? '');
+    cursors.querySelectorAll('button.measure-cell')
+      .map((item) => item.dataset.measureId ?? '')
+      .sort((a, b) => Number(a) - Number(b));
 
   const reset = (ids: readonly number[]): void => {
     rows = rowViews(ids);
@@ -1508,26 +1588,26 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const middleFocused = active() === removeOf(2);
   removeOf(2)?.click();
   const afterMiddle = active();
-  check('removing a middle row hands the focus to the next row in the same list',
+  check('removing a middle cell hands the focus back to its source row first cell',
     middleFocused && JSON.stringify(shownIds()) === JSON.stringify(['1', '3']) &&
-      afterMiddle !== null && afterMiddle === removeOf(3) && afterMiddle !== addOf(),
+      afterMiddle !== null && afterMiddle === firstCell() && afterMiddle !== addOf(),
     `focused=${middleFocused}, ids=${JSON.stringify(shownIds())}, ` +
-      `next=${afterMiddle === removeOf(3)}, add=${afterMiddle === addOf()}`);
+      `cell=${afterMiddle === firstCell()}, add=${afterMiddle === addOf()}`);
 
   reset([1, 2, 3]);
   removeOf(3)?.focus();
   removeOf(3)?.click();
   const afterLast = active();
-  check('removing the last row hands the focus to the previous row',
+  check('removing the last cell hands the focus back to its source row first cell',
     JSON.stringify(shownIds()) === JSON.stringify(['1', '2']) &&
-      afterLast !== null && afterLast === removeOf(2) && afterLast !== addOf(),
-    `ids=${JSON.stringify(shownIds())}, previous=${afterLast === removeOf(2)}`);
+      afterLast !== null && afterLast === firstCell() && afterLast !== addOf(),
+    `ids=${JSON.stringify(shownIds())}, cell=${afterLast === firstCell()}`);
 
   reset([7]);
   removeOf(7)?.focus();
   removeOf(7)?.click();
   const afterOnly = active();
-  check('removing the only row hands the focus to the Add measurement button',
+  check('removing the only cell hands the focus to the Add measurement button',
     shownIds().length === 0 && afterOnly !== null && afterOnly === addOf(),
     `ids=${JSON.stringify(shownIds())}, add=${afterOnly === addOf()}`);
 
@@ -1708,7 +1788,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 
 {
   const progressBlock = slice(measureSection, 'if (v.measurement.capture !== null) {',
-    'if (v.measurement.rows.length === 0) {');
+    'const matrix = measurementMatrixView(v.measurement);');
   const built = (source: string): boolean =>
     source.includes("const capture = div('measure-capture');") &&
     source.includes("capture.dataset.measureCapture = '';") &&
@@ -1734,7 +1814,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const noCancel = built(progressBlock.replace(
     '() => this.cb.onCancelMeasurementCapture()', '() => {}'));
   const windowAt = measureSection.indexOf("const measureWindow = div('measure-window');");
-  const rowAt = measureSection.indexOf("const list = div('measure-list');");
+  const rowAt = measureSection.indexOf('const matrix = measurementMatrixView(v.measurement);');
   const blockAt = measureSection.indexOf('if (v.measurement.capture !== null) {');
   check('the progress line sits between the window line and the rows with role, label and actions',
     built(progressBlock) && !noRole && !noCancel &&
@@ -1773,6 +1853,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const section = (): MeasurementSectionView => sectionView({
     sources: [{ group: 0, start: 0, gain: 1, name: 'A0' }],
     rows: [rowView({ id: 1, parameter: 'vpp', unit: 'v', value: state === 'done' ? 21.4588 : Number.NaN, status: state === 'done' ? 'ok' : state === 'cancelled' ? 'cancelled' : 'analyzing' })],
+    allRows: [{ id: 1, start: 0, parameter: 'vpp' }],
+    rowCount: 1,
     window: { start: 0, end: total },
     capture: {
       status: state,
@@ -1857,7 +1939,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     text: progressOf()?.textContent ?? '',
     cancel: cancelOf()?.hidden,
     restart: restartOf()?.hidden,
-    row: cursors.querySelector('.measure-row .measure-status')?.textContent ?? '',
+    row: cursors.querySelector('[data-measure-id="1"] .measure-status')?.textContent ?? '',
   };
   check('a cancelled job is disclosed in place with the restart and no live row update',
     cancelledState.text === 'Analysis cancelled' &&
@@ -1961,15 +2043,15 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     onResetMeasurementStats: (rowId: number) => resets.push(`row:${rowId}`),
     onResetAllMeasurementStats: () => resets.push('all'),
   } as unknown as CapturePanelCallbacks);
-  const toggleOf = (): FakeElement | null => cursors.querySelector('.measure-row .measure-open');
+  const toggleOf = (): FakeElement | null => cursors.querySelector('button.measure-cell');
   const detailsOf = (): FakeElement | null => cursors.querySelector('[data-measure-details]');
   const chevronOf = (): FakeElement | null =>
-    cursors.querySelector('.measure-open .measure-chevron');
+    cursors.querySelector('.measure-cell .measure-chevron');
   const toggleClasses = (): string[] => (toggleOf()?.children ?? [])
     .map((child) => child.className);
   const disclosureOrder = (classes: readonly string[]): boolean =>
-    classes.length === 3 && classes[0] === 'measure-param' &&
-      classes[1] === 'measure-chevron' && classes[2] === 'measure-value';
+    classes.length === 3 && classes[0] === 'measure-value' &&
+      classes[1] === 'measure-chevron' && classes[2] === 'measure-status';
   const cellOf = (key: string): string =>
     cursors.querySelector(`[data-measure-detail="${key}"]`)?.textContent ?? '';
   const active = (): FakeElement | null =>
@@ -1978,30 +2060,31 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   target.render(view());
   const closed = {
     tag: toggleOf()?.tagName ?? '',
+    role: toggleOf()?.getAttribute('role') ?? '',
+    tabindex: toggleOf()?.getAttribute('tabindex') ?? '',
     expanded: toggleOf()?.getAttribute('aria-expanded') ?? '',
     controls: toggleOf()?.getAttribute('aria-controls') ?? '',
-    label: toggleOf()?.getAttribute('aria-label') ?? '',
     id: detailsOf()?.id ?? '',
     hidden: detailsOf()?.hidden,
-    param: cursors.querySelector('.measure-open .measure-param')?.textContent ?? '',
-    value: cursors.querySelector('.measure-open .measure-value')?.textContent ?? '',
+    column: cursors.querySelector('.measure-matrix-head')?.textContent ?? '',
+    value: cursors.querySelector('.measure-cell .measure-value')?.textContent ?? '',
   };
-  check('the parameter and value region is a disclosure button wired to one details block',
-    closed.tag === 'BUTTON' && closed.expanded === 'false' &&
+  check('the value cell is a gridcell wired to one details row keyed by its row id',
+    closed.tag === 'BUTTON' && closed.role === 'gridcell' && closed.tabindex === '0' &&
+      closed.expanded === 'false' &&
       closed.controls === 'measure-details-1' && closed.id === 'measure-details-1' &&
-      closed.hidden === true && closed.param === 'Vpp' && closed.value === '21.5 V' &&
-      closed.label === 'Show statistics details: A0 Vpp',
+      closed.hidden === true && closed.column === 'Vpp' && closed.value === '21.5 V',
     `closed=${JSON.stringify(closed)}`);
 
   const chevron = chevronOf();
   const chevronPath = chevron?.children[0] ?? null;
   const chevronAttr = (name: string): string => chevron?.getAttribute(name) ?? '';
   const pathAttr = (name: string): string => chevronPath?.getAttribute(name) ?? '';
-  const swapped = ['measure-param', 'measure-value', 'measure-chevron'];
-  const missingChevron = ['measure-param', 'measure-value'];
-  check('the disclosure affordance sits between the parameter and the value',
+  const swapped = ['measure-value', 'measure-status', 'measure-chevron'];
+  const missingChevron = ['measure-value', 'measure-status'];
+  check('the disclosure affordance sits between the value and the status',
     disclosureOrder(toggleClasses()) &&
-      cursors.querySelectorAll('.measure-open .measure-chevron').length === 1 &&
+      cursors.querySelectorAll('.measure-cell .measure-chevron').length === 1 &&
       !disclosureOrder(swapped) && !disclosureOrder(missingChevron),
     `classes=${JSON.stringify(toggleClasses())}, swapped=${disclosureOrder(swapped)}, ` +
       `missing=${disclosureOrder(missingChevron)}`);
@@ -2019,8 +2102,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   toggleOf()?.click();
   const opened = {
     expanded: toggleOf()?.getAttribute('aria-expanded') ?? '',
-    label: toggleOf()?.getAttribute('aria-label') ?? '',
     hidden: detailsOf()?.hidden,
+    detailHidden: cursors.querySelector('.measure-cell-detail')?.hidden,
     focus: active() === toggleOf(),
     method: cellOf('method'),
     window: cellOf('window'),
@@ -2034,8 +2117,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     loop: cellOf('loop'),
   };
   check('opening the details carries the method, the window, the current value and the population',
-    focused && opened.expanded === 'true' &&
-      opened.label === 'Hide statistics details: A0 Vpp' && opened.hidden === false &&
+    focused && opened.expanded === 'true' && opened.hidden === false &&
+      opened.detailHidden === false &&
       opened.focus && opened.method === 'exact code extrema' &&
       opened.window === 'Window: 1,000 samples' && opened.current === '21.5 V' &&
       opened.mean === '3.5 V' && opened.min === '1 V' && opened.max === '5 V' &&
@@ -2055,7 +2138,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   toggleOf()?.click();
   check('a second activation collapses the details without rebuilding the row',
     toggleOf()?.getAttribute('aria-expanded') === 'false' && detailsOf()?.hidden === true &&
-      active() === toggleOf() && cursors.querySelectorAll('.measure-row').length === 1,
+      cursors.querySelector('.measure-cell-detail')?.hidden === true &&
+      active() === toggleOf() && cursors.querySelectorAll('.measure-cell').length === 1,
     `expanded=${toggleOf()?.getAttribute('aria-expanded')}, hidden=${detailsOf()?.hidden}`);
   toggleOf()?.click();
 
@@ -2066,7 +2150,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     }),
   })] }));
   const updated = {
-    value: cursors.querySelector('.measure-open .measure-value')?.textContent ?? '',
+    value: cursors.querySelector('.measure-cell .measure-value')?.textContent ?? '',
     count: cellOf('count'),
     mean: cellOf('mean'),
     excluded: cellOf('excluded'),
@@ -2148,17 +2232,19 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 
   const reset = cursors.querySelector('[data-measure-stats-reset]');
   const resetAll = cursors.querySelector('[data-measure-stats-reset-all]');
-  check('the details own the per-row and all-rows reset actions',
-    reset !== null && resetAll !== null &&
+  const remove = cursors.querySelector('[data-measure-details] .analyzer-act--remove');
+  check('the details own Reset this statistic and Remove measurement, the header Reset all',
+    reset !== null && resetAll !== null && remove !== null &&
       reset.textContent === 'Reset statistics' &&
       resetAll.textContent === 'Reset all statistics' &&
-      reset.getAttribute('data-measure-stats-reset') === '1',
-    `row=${reset?.textContent}, all=${resetAll?.textContent}`);
+      reset.getAttribute('data-measure-stats-reset') === '1' &&
+      cursors.querySelector('[data-measure-details] [data-measure-stats-reset-all]') === null,
+    `row=${reset?.textContent}, all=${resetAll?.textContent}, remove=${remove !== null}`);
   reset?.click();
   resetAll?.click();
   check('each reset button emits its own callback once, without touching the section',
     JSON.stringify(resets) === JSON.stringify(['row:1', 'all']) &&
-      cursors.querySelectorAll('.measure-row').length === 1,
+      cursors.querySelectorAll('.measure-cell').length === 1,
     `resets=${JSON.stringify(resets)}`);
 
   const accumulate = (values: readonly number[]): MeasurementStatsState => {
@@ -2188,7 +2274,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 }
 
 {
-  const rules = ['.measure-open {', '.measure-chevron {', '.measure-details {', '.measure-detail-method,',
+  const rules = ['.measure-chevron {', '.measure-details {', '.measure-detail-method,',
     '.measure-detail-stats {', '.measure-detail-row {', '.measure-detail-label {',
     '.measure-detail-value {', '.measure-detail-actions {',
     '.analyzer-act.measure-stats-reset {', '.analyzer-act.measure-stats-reset-all {'];
@@ -2216,7 +2302,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       'private measurementDetailsBlock(', 'dispose(): void {').includes(needle)))}`);
 
   const chevronRule = slice(css, '.measure-chevron {', '}');
-  const chevronOpenRule = slice(css, '.measure-open[aria-expanded="true"] .measure-chevron {', '}');
+  const chevronOpenRule = slice(css, '.measure-cell[aria-expanded="true"] .measure-chevron {', '}');
   const ruleBody = (rule: string): string =>
     rule.slice(rule.indexOf('{') + 1).trim();
   const rotationOnly = (body: string): boolean => body === 'transform: rotate(180deg);';
@@ -2224,10 +2310,10 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const resizedOpen = ruleBody(chevronOpenRule.replace(
     'transform: rotate(180deg);', 'transform: rotate(180deg); width: 18px;'));
   const chevronRotate = (source: string): boolean =>
-    rotationOnly(ruleBody(slice(source, '.measure-open[aria-expanded="true"] .measure-chevron {',
+    rotationOnly(ruleBody(slice(source, '.measure-cell[aria-expanded="true"] .measure-chevron {',
       '}')));
-  const collapsedOnly = css.replace('.measure-open[aria-expanded="true"] .measure-chevron',
-    '.measure-open[aria-expanded="false"] .measure-chevron');
+  const collapsedOnly = css.replace('.measure-cell[aria-expanded="true"] .measure-chevron',
+    '.measure-cell[aria-expanded="false"] .measure-chevron');
   check('the chevron keeps one fixed box in both states and rotates through the expanded attribute',
     chevronRule.includes('width: 10px;') && chevronRule.includes('height: 10px;') &&
       chevronRule.includes('flex: none;') &&
@@ -2307,14 +2393,17 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const openTitles = titles();
   const openControls = controls();
   const openPersistence = measure.querySelectorAll('.measure-persistence').length;
-  const openRows = measure.querySelectorAll('.measure-row').length;
+  const openRows = measure.querySelectorAll('.measure-matrix tbody tr[data-measure-start]').length;
+  const openCells = measure.querySelectorAll('button.measure-cell').length;
   check('with the gate open the measurement group renders last, after Cursors, Cursor distance and Edges',
     JSON.stringify(openTitles) === JSON.stringify([
       en['capturePanel.cursors'], en['capturePanel.cursorDistance'],
       en['capturePanel.cursorEdges'], en['capturePanel.measure'],
-    ]) && openControls > 0 && openPersistence === 1 && openRows === 1 && hint() === null,
+    ]) && openControls > 0 && openPersistence === 1 && openRows === 1 &&
+      openCells === 1 && hint() === null,
     `titles=${JSON.stringify(openTitles)}, controls=${openControls}, ` +
-      `persistence=${openPersistence}, rows=${openRows}, hint=${hint() !== null}`);
+      `persistence=${openPersistence}, rows=${openRows}, cells=${openCells}, ` +
+      `hint=${hint() !== null}`);
 
   panel.render(view(true));
   const secondOpen = `${titles().join('|')}#${controls()}#${pageText()}`;
@@ -2322,7 +2411,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const thirdOpen = `${titles().join('|')}#${controls()}#${pageText()}`;
   check('an open gate renders the same measurement section on every pass',
     secondOpen === thirdOpen && openControls === controls() &&
-      measure.querySelectorAll('.measure-row').length === openRows,
+      measure.querySelectorAll('.measure-matrix tbody tr[data-measure-start]').length === openRows,
     `stable=${secondOpen === thirdOpen}, controls=${controls()}`);
 
   panel.render(view(false));
@@ -2333,8 +2422,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     JSON.stringify(closedTitles) === JSON.stringify(openTitles.slice(0, 3)) &&
       controls() === 0 && measure.querySelectorAll('.measure-persistence').length === 0 &&
       measure.querySelector('[data-view-mode]') === null &&
-      measure.querySelector('.measure-list') === null &&
-      measure.querySelectorAll('.measure-row').length === 0 &&
+      measure.querySelector('.measure-matrix') === null &&
+      measure.querySelectorAll('button.measure-cell').length === 0 &&
       closedHint !== null && closedLast === closedHint &&
       closedHint.className === 'panel-note' &&
       closedHint.textContent === en['capturePanel.measureScopeOff'] &&
@@ -2637,10 +2726,11 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `label=${basicSection.includes("advancedEntry.textContent = t('capturePanel.advanced');")}`);
 
   const advancedOnly = ['measure-add', 'measure-clear', 'measure-persistence',
-    'dataset.viewMode', 'measure-open', "div('measure-row')", 'catalogDialog',
+    'dataset.viewMode', "addOpen.dataset.measureOpen = '';",
+    "div('measure-matrix-actions')", 'catalogDialog',
     "div('measure-capture')", 'measurementDetailsBlock', "div('measure-window')",
-    "div('measure-list')", "div('measure-undo')",
-    'onRemoveMeasurementRow', 'onClearMeasurementRows', 'onUndoMeasurementRows'];
+    'button.dataset.measureKey', "div('measure-undo')",
+    'onClearMeasurementRows', 'onUndoMeasurementRows'];
   const foundInBasic = advancedOnly.filter((needle) => basicSection.includes(needle));
   const missingInAdvanced = advancedOnly.filter((needle) => !measureSection.includes(needle));
   check('the basic surface carries no management, view, detail, persistence or progress control',
@@ -2711,22 +2801,27 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 
   const readoutUpdater = (source: string): boolean =>
     source.includes("root.querySelectorAll<HTMLElement>('[data-measure-key]')") &&
-    source.includes("const readout = readouts.get(item.dataset.measureKey ?? '');") &&
+    source.includes('const id = item.dataset.measureId;') &&
+    source.includes('const readout = id === undefined') &&
+    source.includes(': byId.get(Number(id));') &&
     source.includes('if (readout === undefined) continue;') &&
     source.includes('value.textContent = measurementValueText(readout);') &&
-    source.includes('status.textContent = measurementStatusText(readout);');
+    source.includes('const statusText = measurementStatusText(readout);') &&
+    source.includes('status.textContent = statusText;');
   const noGuard = measureUpdater.replace('if (readout === undefined) continue;', '');
   const rebuilt = measureUpdater.replace('value.textContent = measurementValueText(readout);',
     'value.replaceChildren();');
-  const noStatus = measureUpdater.replace(
-    'status.textContent = measurementStatusText(readout);', '');
+  const noStatus = measureUpdater.replace('status.textContent = statusText;', '');
+  const borrowed = measureUpdater.replace(': byId.get(Number(id));',
+    ": readouts.get(item.dataset.measureKey ?? '');");
   check('the readout refresh is text-only and cannot take a row it does not have',
     readoutUpdater(measureUpdater) && !readoutUpdater(noGuard) &&
-      !readoutUpdater(rebuilt) && !readoutUpdater(noStatus) &&
+      !readoutUpdater(rebuilt) && !readoutUpdater(noStatus) && !readoutUpdater(borrowed) &&
       measureUpdater.includes('for (const row of basicMeasurementView(view).rows) ' +
         'readouts.set(row.parameter, row);'),
     `updater=${readoutUpdater(measureUpdater)}, noGuard=${readoutUpdater(noGuard)}, ` +
-    `rebuilt=${readoutUpdater(rebuilt)}, noStatus=${readoutUpdater(noStatus)}`);
+    `rebuilt=${readoutUpdater(rebuilt)}, noStatus=${readoutUpdater(noStatus)}, ` +
+    `borrowed=${readoutUpdater(borrowed)}`);
 
   const rules = ['.measure-readouts {', '.measure-readout {', '.measure-readout > .measure-value {'];
   const absent = rules.filter((rule) => !css.includes(rule));
@@ -2812,13 +2907,13 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     doc.activeElement === doc.body ? null : doc.activeElement;
   const count = (selector: string): number => measure.querySelectorAll(selector).length;
   const counts = (): Record<string, number> => ({
-    readouts: count('[data-measure-key]'),
+    readouts: count('.measure-readout'),
     add: count('.measure-add'),
     clear: count('.measure-clear'),
     persistence: count('.measure-persistence'),
     viewMode: count('[data-view-mode]'),
-    open: count('.measure-open'),
-    rows: count('.measure-row'),
+    cells: count('button.measure-cell'),
+    rows: count('.measure-matrix tbody tr[data-measure-start]'),
     capture: count('[data-measure-capture]'),
     dialogOpen: count('dialog[open]'),
     basicSwitch: count('[data-measure-basic]'),
@@ -2826,12 +2921,13 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     note: count('[data-measure-basic-note]'),
   });
   const readoutKeys = (): string[] =>
-    measure.querySelectorAll('[data-measure-key]').map((item) => item.dataset.measureKey ?? '');
+    measure.querySelectorAll('.measure-readout').map((item) => item.dataset.measureKey ?? '');
   const readoutValue = (key: string): string =>
-    measure.querySelector(`[data-measure-key="${key}"] .measure-value`)?.textContent ?? '';
+    measure.querySelector(`.measure-readout[data-measure-key="${key}"] .measure-value`)
+      ?.textContent ?? '';
   const rowValues = (): Record<number, string> => {
     const out: Record<number, string> = {};
-    for (const item of measure.querySelectorAll('.measure-row')) {
+    for (const item of measure.querySelectorAll('button.measure-cell')) {
       const id = Number(item.dataset.measureId);
       out[id] = item.querySelector('.measure-value')?.textContent ?? '';
     }
@@ -2847,7 +2943,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   check('the basic tier renders three readouts and none of the advanced surface',
     basic.readouts === 3 && basic.note === 1 &&
       basic.add === 0 && basic.clear === 0 && basic.persistence === 0 && basic.viewMode === 0 &&
-      basic.open === 0 && basic.rows === 0 && basic.capture === 0 && basic.dialogOpen === 0 &&
+      basic.cells === 0 && basic.rows === 0 && basic.capture === 0 && basic.dialogOpen === 0 &&
       basic.basicSwitch === 0 && basic.advancedEntry === 1 &&
       JSON.stringify(basicKeys) === JSON.stringify(['frequency', 'vpp', 'rms']),
     `counts=${JSON.stringify(basic)}, keys=${JSON.stringify(basicKeys)}`);
@@ -2859,8 +2955,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const advancedByKey = basicKeys.map((key) => advancedValues[READOUT_ROW_ID[key]!] ?? '');
   check('the advanced tier keeps every control behind its Basic switch and shows the same values',
     advanced.readouts === 0 && advanced.note === 0 && advanced.add === 1 && advanced.clear === 1 &&
-      advanced.persistence === 1 && advanced.viewMode === 3 && advanced.open === 3 &&
-      advanced.rows === 3 && advanced.basicSwitch === 1 && advanced.advancedEntry === 0 &&
+      advanced.persistence === 1 && advanced.viewMode === 3 && advanced.cells === 3 &&
+      advanced.rows === 1 && advanced.basicSwitch === 1 && advanced.advancedEntry === 0 &&
       advanced.dialogOpen === 0 &&
       advancedByKey.length === 3 &&
       JSON.stringify(advancedByKey) === JSON.stringify(basicValues) &&
@@ -2923,6 +3019,297 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       count('[data-measure-key]') === 3,
     `same=${sameItem === frequencyItem}, value=${updatedValue}, status=${updatedStatus}`);
 }
+
+{
+  const doc = installFakeDom();
+  const capture = doc.createElement('div');
+  const measure = doc.createElement('div');
+  doc.body.append(capture, measure);
+  const calls: string[] = [];
+  const matrixPanel = new CapturePanel({
+    capture: capture as unknown as HTMLElement,
+    measure: measure as unknown as HTMLElement,
+  }, {
+    onClearMeasurementRows: () => { calls.push('clear'); return Promise.resolve(); },
+    onResetAllMeasurementStats: () => { calls.push('all'); },
+  } as unknown as CapturePanelCallbacks);
+  const sources: MeasurementSectionView['sources'] = [
+    { group: 0, start: 0, gain: 1, name: 'A0', color: '#1f77b4', focused: true },
+    { group: 1, start: 8, gain: 1, name: 'A1', color: '#ff7f0e', focused: false },
+  ];
+  const rows = [
+    rowView({ id: 1, start: 0, sourceName: 'A0', parameter: 'vpp', unit: 'v', value: 1 }),
+    rowView({ id: 2, start: 0, sourceName: 'A0', parameter: 'rms', unit: 'v', value: 2 }),
+    rowView({ id: 3, start: 0, sourceName: 'A0', parameter: 'frequency', unit: 'hz', value: 3 }),
+    rowView({ id: 4, start: 0, sourceName: 'A0', parameter: 'duty', unit: '%', value: 4 }),
+    rowView({ id: 5, start: 8, sourceName: 'A1', parameter: 'vpp', unit: 'v', value: 5 }),
+  ];
+  const section = (over: Partial<MeasurementSectionView> = {}): MeasurementSectionView =>
+    sectionView({
+      sources,
+      rows,
+      allRows: rows.map((row) => ({ id: row.id, start: row.start, parameter: row.parameter })),
+      rowCount: rows.length,
+      ...over,
+    });
+  const view = (measurement: MeasurementSectionView): CapturePanelView => ({
+    settings: defaultCaptureSettings(),
+    channels: [],
+    widthOptions: [16],
+    buses: [],
+    analogGroups: 0,
+    deviceName: 'fixture',
+    running: false,
+    stopping: false,
+    repeatPending: false,
+    captureState: 'ready',
+    result: null,
+    progress: null,
+    maxSamplerateHz: { 16: 200e6 },
+    triggerState: 'off',
+    cursors: [],
+    cursorDistances: [],
+    cursorEdges: [],
+    cursorEdgeChannels: [],
+    triggerViewLost: false,
+    triggerViewPending: false,
+    triggerLocked: false,
+    triggerRetuneRejected: false,
+    triggerAnalogRolling: false,
+    triggerArmed: false,
+    triggerAutoDisarmed: false,
+    settingsArmed: false,
+    activeTriggerPreSamples: undefined,
+    measurement,
+    analogScopeActive: true,
+    persistence: { frames: 0, effective: 0, loop: false, clear: null },
+  });
+  matrixPanel.render(view(section()));
+
+  const table = measure.querySelector('table.measure-matrix');
+  const heads = measure.querySelectorAll('.measure-matrix-head').map((el) => el.textContent);
+  const rowHeads = measure.querySelectorAll('.measure-row-head');
+  const buttons = measure.querySelectorAll('button.measure-cell');
+  const empties = measure.querySelectorAll('span.measure-cell.is-empty');
+  const detailRows = measure.querySelectorAll('tr.measure-cell-detail');
+  const tbody = measure.querySelector('.measure-matrix tbody');
+  const order = (tbody?.children ?? []).map((el) => el.className);
+  check('the matrix announces its size and lists one header per union column in catalog order',
+    table?.getAttribute('role') === 'grid' &&
+      measure.querySelector('.measure-matrix > caption')?.textContent ===
+        'Measurement matrix: 2 sources by 4 parameters' &&
+      JSON.stringify(heads) === JSON.stringify(['Vpp', 'RMS', 'Frequency', 'Duty']) &&
+      measure.querySelector('.measure-matrix-corner')?.getAttribute('aria-label') === 'Source',
+    `role=${table?.getAttribute('role')}, caption=` +
+      `${measure.querySelector('.measure-matrix > caption')?.textContent ?? ''}, ` +
+      `heads=${JSON.stringify(heads)}`);
+
+  check('one body row per source and one cell per column, inert where the source enables nothing',
+    rowHeads.length === 2 && rowHeads[0]?.getAttribute('scope') === 'row' &&
+      rowHeads[1]?.getAttribute('scope') === 'row' &&
+      measure.querySelectorAll('.measure-cell').length === 8 &&
+      buttons.length === 5 && empties.length === 3 &&
+      empties.every((el) => el.textContent === '' &&
+        el.getAttribute('aria-label') === 'Not measured') &&
+      rows.length === 5,
+    `rows=${rowHeads.length}, cells=${measure.querySelectorAll('.measure-cell').length}, ` +
+      `buttons=${buttons.length}, empty=${empties.length}`);
+
+  check('the focused source names itself with its colour swatch and focus state',
+    rowHeads[0]?.classList.contains('is-focused') === true &&
+      rowHeads[1]?.classList.contains('is-focused') === false &&
+      rowHeads[0]?.querySelector('.measure-source')?.textContent === 'A0' &&
+      rowHeads[0]?.querySelector('.measure-source-swatch')?.style.background === '#1f77b4',
+    `focused=${rowHeads[0]?.classList.contains('is-focused')}, ` +
+      `swatch=${rowHeads[0]?.querySelector('.measure-source-swatch')?.style.background}`);
+
+  check('each disclosure row follows its own source row and spans the whole grid',
+    order[0] === '' && order[1] === 'measure-cell-detail' &&
+      order[5] === '' && order[6] === 'measure-cell-detail' &&
+      detailRows.length === 5 && order.length === 7 &&
+      detailRows.every((el) => el.hidden === true &&
+        el.querySelector('td')?.getAttribute('colspan') === '5') &&
+      detailRows.map((el) => el.getAttribute('data-measure-detail-row')).join(',') ===
+        '1,2,3,4,5',
+    `order=${JSON.stringify(order)}, details=${detailRows.length}, ` +
+      `span=${detailRows[0]?.querySelector('td')?.getAttribute('colspan')}`);
+
+  const headerAdd = measure.querySelector('.measure-matrix-corner [data-measure-open]');
+  const headerClear = measure.querySelector('.measure-matrix-corner [data-measure-clear-all]');
+  const headerReset = measure.querySelector('.measure-matrix-corner [data-measure-stats-reset-all]');
+  headerClear?.click();
+  headerReset?.click();
+  headerAdd?.click();
+  const dialogOpen = doc.querySelector('dialog[open]');
+  check('the three header actions sit in the source head and route to the existing callbacks',
+    headerAdd !== null && headerClear !== null && headerReset !== null &&
+      headerClear.textContent === 'Clear all' &&
+      headerReset.textContent === 'Reset all statistics' &&
+      headerAdd.getAttribute('aria-haspopup') === 'dialog' &&
+      JSON.stringify(calls) === JSON.stringify(['clear', 'all']) &&
+      dialogOpen !== null,
+    `calls=${JSON.stringify(calls)}, dialog=${dialogOpen !== null}, ` +
+      `add=${headerAdd !== null}, clear=${headerClear !== null}, reset=${headerReset !== null}`);
+  matrixPanel.dispose();
+
+  matrixPanel.render(view(section({ rows: [], allRows: [], rowCount: 0 })));
+  const emptyUnion = {
+    table: measure.querySelector('.measure-matrix'),
+    hint: measure.querySelectorAll('.panel-note')
+      .map((el) => el.textContent).includes('Add a measurement row.'),
+    actions: measure.querySelectorAll('.measure-actions .analyzer-act').length,
+    addDisabled: measure.querySelector('[data-measure-open]')?.disabled,
+  };
+  check('an empty union renders the add hint and the actions row, never a table',
+    emptyUnion.table === null && emptyUnion.hint === true &&
+      emptyUnion.actions === 3 && emptyUnion.addDisabled === false,
+    `empty=${JSON.stringify(emptyUnion)}`);
+
+  matrixPanel.render(view(section({
+    sources: [], rows: [], allRows: [], rowCount: 0,
+  })));
+  const noSources = {
+    table: measure.querySelector('.measure-matrix'),
+    actions: measure.querySelectorAll('.measure-actions .analyzer-act').length,
+    addDisabled: measure.querySelector('[data-measure-open]')?.disabled,
+  };
+  check('a session without an analog source keeps the add action but disables it',
+    noSources.table === null && noSources.actions === 3 && noSources.addDisabled === true,
+    `empty=${JSON.stringify(noSources)}`);
+
+  matrixPanel.render(view(section()));
+  const retired = ['.measure-list', '.measure-row', '.measure-open']
+    .filter((name) => measure.querySelector(name) !== null);
+  check('the rendered advanced surface carries none of the retired flat-list DOM',
+    retired.length === 0 &&
+      !panel.includes("div('measure-list')") &&
+      !panel.includes("div('measure-row')") &&
+      !panel.includes("className = 'measure-open'") &&
+      !css.includes('.measure-list') && !css.includes('.measure-row {') &&
+      !css.includes('.measure-open'),
+    `dom=${JSON.stringify(retired)}, ` +
+      `source=${panel.includes("div('measure-row')")}`);
+}
+
+{
+  const doc = installFakeDom();
+  const capture = doc.createElement('div');
+  const measure = doc.createElement('div');
+  doc.body.append(capture, measure);
+  const gridPanel = new CapturePanel({
+    capture: capture as unknown as HTMLElement,
+    measure: measure as unknown as HTMLElement,
+  }, {} as unknown as CapturePanelCallbacks);
+  const sources: MeasurementSectionView['sources'] = [
+    { group: 0, start: 0, gain: 1, name: 'A0' },
+    { group: 1, start: 8, gain: 1, name: 'A1' },
+  ];
+  const rows = [
+    rowView({ id: 1, start: 0, sourceName: 'A0', parameter: 'vpp', unit: 'v', value: 1 }),
+    rowView({ id: 2, start: 0, sourceName: 'A0', parameter: 'rms', unit: 'v', value: 2 }),
+    rowView({ id: 3, start: 0, sourceName: 'A0', parameter: 'frequency', unit: 'hz', value: 3 }),
+    rowView({ id: 4, start: 8, sourceName: 'A1', parameter: 'vpp', unit: 'v', value: 4 }),
+  ];
+  const view: CapturePanelView = {
+    settings: defaultCaptureSettings(),
+    channels: [],
+    widthOptions: [16],
+    buses: [],
+    analogGroups: 0,
+    deviceName: 'fixture',
+    running: false,
+    stopping: false,
+    repeatPending: false,
+    captureState: 'ready',
+    result: null,
+    progress: null,
+    maxSamplerateHz: { 16: 200e6 },
+    triggerState: 'off',
+    cursors: [],
+    cursorDistances: [],
+    cursorEdges: [],
+    cursorEdgeChannels: [],
+    triggerViewLost: false,
+    triggerViewPending: false,
+    triggerLocked: false,
+    triggerRetuneRejected: false,
+    triggerAnalogRolling: false,
+    triggerArmed: false,
+    triggerAutoDisarmed: false,
+    settingsArmed: false,
+    activeTriggerPreSamples: undefined,
+    measurement: sectionView({
+      sources,
+      rows,
+      allRows: rows.map((row) => ({ id: row.id, start: row.start, parameter: row.parameter })),
+      rowCount: rows.length,
+    }),
+    analogScopeActive: true,
+    persistence: { frames: 0, effective: 0, loop: false, clear: null },
+  };
+  gridPanel.render(view);
+  const active = (): FakeElement | null =>
+    doc.activeElement === doc.body ? null : doc.activeElement;
+  const cell = (id: number): FakeElement | null =>
+    measure.querySelector(`button.measure-cell[data-measure-id="${id}"]`);
+  const tabbable = (): string[] =>
+    measure.querySelectorAll('button.measure-cell')
+      .filter((el) => el.getAttribute('tabindex') === '0')
+      .map((el) => el.dataset.measureId ?? '');
+  const press = (target: FakeElement, key: string): ReturnType<typeof fakeEvent> => {
+    const event = fakeEvent('keydown', { key });
+    target.dispatchEvent(event);
+    return event;
+  };
+  const startTabbable = tabbable();
+  const right = press(cell(1)!, 'ArrowRight');
+  const afterRight = active() === cell(2);
+  const down = press(cell(2)!, 'ArrowDown');
+  const afterDown = active() === cell(4);
+  const home = press(cell(4)!, 'Home');
+  const afterHome = active() === cell(4);
+  const end = press(cell(4)!, 'End');
+  const afterEnd = active() === cell(4);
+  check('the grid has one tabbable cell and the arrow/Home/End table moves between cells',
+    JSON.stringify(startTabbable) === JSON.stringify(['1']) &&
+      afterRight && afterDown && afterHome && afterEnd &&
+      right.propagationStopped && down.propagationStopped &&
+      home.propagationStopped && end.propagationStopped &&
+      JSON.stringify(tabbable()) === JSON.stringify(['4']),
+    `start=${JSON.stringify(startTabbable)}, right=${afterRight}, down=${afterDown}, ` +
+      `home=${afterHome}, end=${afterEnd}, tabbable=${JSON.stringify(tabbable())}, ` +
+      `stopped=${right.propagationStopped}/${down.propagationStopped}`);
+
+  const detailOf = (id: number): FakeElement | null =>
+    measure.querySelector(`tr.measure-cell-detail[data-measure-detail-row="${id}"]`);
+  const enter = press(cell(4)!, 'Enter');
+  const opened = {
+    expanded: cell(4)?.getAttribute('aria-expanded') ?? '',
+    hidden: detailOf(4)?.hidden,
+    focus: active() === cell(4),
+    count: measure.querySelector('[data-measure-details="4"] [data-measure-detail="count"]')
+      ?.textContent ?? '',
+  };
+  const escape = press(cell(4)!, 'Escape');
+  const closed = {
+    expanded: cell(4)?.getAttribute('aria-expanded') ?? '',
+    hidden: detailOf(4)?.hidden,
+    focus: active() === cell(4),
+  };
+  check('Enter opens the focused cell disclosure and Escape closes it and keeps the focus',
+    enter.propagationStopped && opened.expanded === 'true' && opened.hidden === false &&
+      opened.focus && opened.count === '0' &&
+      escape.propagationStopped && closed.expanded === 'false' && closed.hidden === true &&
+      closed.focus,
+    `opened=${JSON.stringify(opened)}, closed=${JSON.stringify(closed)}`);
+
+  const space = press(cell(1)!, ' ');
+  const untouched = press(cell(1)!, 'x');
+  check('Space toggles but an unhandled key leaves the plot dispatch alone',
+    space.propagationStopped && !untouched.propagationStopped,
+    `space=${space.propagationStopped}, x=${untouched.propagationStopped}`);
+}
+
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;

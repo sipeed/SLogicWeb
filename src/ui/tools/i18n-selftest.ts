@@ -1254,6 +1254,7 @@ function resetCopyFailures(dicts: Record<string, Messages>): string[] {
     'capturePanel.measureScopeOff',
     'capturePanel.measureTierBasic', 'capturePanel.measureBasicLegend',
     'capturePanel.measureBasicNote',
+    'capturePanel.measureMatrixSummary', 'capturePanel.measureCellEmpty',
     'diagnostic.ui.localeLoad', 'diagnostic.io.nothingToSave',
     'diagnostic.file.unsupported', 'diagnostic.file.lwcap.magic',
     'diagnostic.file.lwcap.channels', 'diagnostic.file.lwcap.gapSpan',

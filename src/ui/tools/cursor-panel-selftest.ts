@@ -249,9 +249,11 @@ const edgeMethodsSource = slice(app,
   const markup = ['<table', '<thead', '<tbody', '<tr', '<th', '<td', 'innerHTML',
     "createElement('table')", "createElement('th')", "createElement('td')",
     "createElement('tbody')", "createElement('thead')"];
-  const hits = markup.filter((needle) => panel.includes(needle));
-  check('the section is div/span/button markup, never a table or string-built HTML',
-    hits.length === 0, `hits=${JSON.stringify(hits)}`);
+  const sections = [cursorSection, distanceSection, edgeSection].join('\n');
+  const hits = markup.filter((needle) => sections.includes(needle));
+  check('the cursor sections are div/span/button markup, never a table or string-built HTML',
+    hits.length === 0 && !panel.includes('innerHTML'),
+    `hits=${JSON.stringify(hits)}, innerHTML=${panel.includes('innerHTML')}`);
 }
 
 {

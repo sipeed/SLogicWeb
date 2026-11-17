@@ -643,6 +643,8 @@ export const ru: Messages = {
   'capturePanel.measureCursorUnset': 'не выбран',
   'capturePanel.measureCursorHint': 'Поставьте два курсора на осциллограмме, чтобы измерить интервал между ними.',
   'capturePanel.measureEmpty': 'Добавьте строку измерения.',
+  'capturePanel.measureMatrixSummary': 'Матрица измерений: источников — {sources}, параметров — {parameters}',
+  'capturePanel.measureCellEmpty': 'Не измеряется',
   'capturePanel.measureScopeOff': 'Осциллограф не включён. Включите аналоговую группу (A0–A3) в строках «Каналы», чтобы измерить её коды АЦП.',
   'capturePanel.measureAddOpen': 'Добавить измерение…',
   'capturePanel.measureClearAll': 'Очистить всё',

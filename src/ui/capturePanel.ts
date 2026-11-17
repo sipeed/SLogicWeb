@@ -48,6 +48,9 @@ import {
   type MeasurementStatus, type MeasureTier,
 } from './measurementState.js';
 import {
+  measurementMatrixView, type MeasurementMatrixView,
+} from './measurementRows.js';
+import {
   FFT_MIN_HZ_PRESETS, fftSummaryLines, fftWindowKind, fftWindowLabel,
   type AnalysisViewMode, type FftSectionView,
 } from './fftView.js';
@@ -334,6 +337,7 @@ export class CapturePanel {
   private chipFallback = false;
   private measureFocus: MeasureFocusIntent | null = null;
   private readonly measureOpen = new Set<number>();
+  private measureActive: { row: number; column: number } = { row: 0, column: 0 };
   private measureSectionView: MeasurementSectionView | null = null;
   private readonly catalogDialog: MeasurementCatalogDialog;
 
@@ -401,16 +405,20 @@ export class CapturePanel {
       this.host.measure.querySelector<HTMLElement>(selector)?.focus();
       return;
     }
-    const rows = this.host.measure.querySelectorAll<HTMLElement>('.measure-row');
+    const rows = this.host.measure.querySelectorAll<HTMLElement>(
+      '.measure-matrix tbody tr[data-measure-start]');
     const row = pending.row >= 0 && rows.length > 0
       ? rows[Math.min(pending.row, rows.length - 1)]
       : undefined;
-    const target = row?.querySelector<HTMLElement>('.analyzer-act--remove') ??
+    const target = row?.querySelector<HTMLElement>('button.measure-cell') ??
       this.host.measure.querySelector<HTMLElement>('[data-measure-open]');
     target?.focus();
   }
 
-  private measurementDetailsBlock(rowId: number): HTMLDivElement {
+  private measurementDetailsBlock(
+    row: MeasurementRowView, rowIndex: number,
+  ): HTMLDivElement {
+    const rowId = row.id;
     const details = div('measure-details');
     details.id = measurementDetailsId(rowId);
     details.dataset.measureDetails = String(rowId);
@@ -437,13 +445,12 @@ export class CapturePanel {
     reset.dataset.measureStatsReset = String(rowId);
     reset.textContent = t('capturePanel.measureStatsReset');
     reset.addEventListener('click', () => this.cb.onResetMeasurementStats(rowId));
-    const resetAll = document.createElement('button');
-    resetAll.type = 'button';
-    resetAll.className = 'analyzer-act measure-stats-reset-all';
-    resetAll.dataset.measureStatsResetAll = '';
-    resetAll.textContent = t('capturePanel.measureStatsResetAll');
-    resetAll.addEventListener('click', () => this.cb.onResetAllMeasurementStats());
-    actions.append(reset, resetAll);
+    const remove = cursorRemoveButton(
+      t('capturePanel.measureRemove', { parameter: measurementRowLabel(row) }),
+      () => this.runMeasureAction('row', remove,
+        () => this.cb.onRemoveMeasurementRow(rowId), rowId, rowIndex),
+    );
+    actions.append(reset, remove);
     details.append(method, windowLine, stats, skipped, loop, note, actions);
     return details;
   }
@@ -549,25 +556,27 @@ export class CapturePanel {
     this.catalogDialog.update(measurementCatalogView(view));
     for (const root of this.roots()) {
       for (const item of root.querySelectorAll<HTMLElement>('[data-measure-key]')) {
-        const readout = readouts.get(item.dataset.measureKey ?? '');
+        const id = item.dataset.measureId;
+        const readout = id === undefined
+          ? readouts.get(item.dataset.measureKey ?? '')
+          : byId.get(Number(id));
         if (readout === undefined) continue;
         const value = item.querySelector<HTMLElement>('.measure-value');
         if (value !== null) value.textContent = measurementValueText(readout);
         const status = item.querySelector<HTMLElement>('.measure-status');
-        if (status !== null) status.textContent = measurementStatusText(readout);
+        if (status !== null) {
+          const statusText = measurementStatusText(readout);
+          status.textContent = statusText;
+          status.title = statusText;
+        }
       }
-      for (const item of root.querySelectorAll<HTMLElement>('.measure-row')) {
-        const id = Number(item.dataset.measureId);
+      for (const item of root.querySelectorAll<HTMLElement>('[data-measure-details]')) {
+        const id = Number(item.dataset.measureDetails);
         const row = Number.isInteger(id) ? byId.get(id) : undefined;
         if (row === undefined) continue;
-        const value = item.querySelector<HTMLElement>('.measure-value');
-        if (value !== null) value.textContent = measurementValueText(row);
-        const status = item.querySelector<HTMLElement>('.measure-status');
-        if (status !== null) status.textContent = measurementStatusText(row);
-        const details = item.querySelector<HTMLElement>('[data-measure-details]');
-        if (this.measureOpen.has(row.id) && details !== null && !details.hidden) {
-          applyMeasurementDetails(item, row, true, view);
-        }
+        const detailRow = item.closest<HTMLElement>('.measure-cell-detail');
+        if (detailRow !== null && detailRow.hidden) continue;
+        applyMeasurementDetails(item, row, true, view);
       }
       for (const item of root.querySelectorAll<HTMLElement>('[data-measure-note]')) {
         item.textContent = note;
@@ -1978,78 +1987,17 @@ export class CapturePanel {
       measureSec.body.appendChild(capture);
       applyMeasurementCapture(capture, measurementCaptureState(v.measurement));
     }
-    if (v.measurement.rows.length === 0) {
+    const matrix = measurementMatrixView(v.measurement);
+    if (matrix.columns.length === 0 || matrix.rows.length === 0) {
       const hint = div('panel-note');
       hint.textContent = t('capturePanel.measureEmpty');
       measureSec.body.appendChild(hint);
+      const measureActions = div('measure-actions');
+      this.measurementHeaderActions(measureActions, v);
+      measureSec.body.appendChild(measureActions);
     } else {
-      const list = div('measure-list');
-      v.measurement.rows.forEach((row, index) => {
-        const item = div('measure-row');
-        item.dataset.measureId = String(row.id);
-        const source = document.createElement('span');
-        source.className = 'measure-source';
-        source.textContent = row.sourceName;
-        const toggle = document.createElement('button');
-        toggle.type = 'button';
-        toggle.className = 'measure-open';
-        toggle.dataset.measureToggle = String(row.id);
-        toggle.setAttribute('aria-controls', measurementDetailsId(row.id));
-        const parameter = document.createElement('span');
-        parameter.className = 'measure-param';
-        parameter.textContent = measurementParameterText(row.parameter);
-        const value = document.createElement('span');
-        value.className = 'measure-value';
-        value.translate = false;
-        value.textContent = measurementValueText(row);
-        toggle.append(parameter, measureChevron(), value);
-        const status = document.createElement('span');
-        status.className = 'measure-status';
-        status.textContent = measurementStatusText(row);
-        const label = measurementRowLabel(row);
-        const remove = cursorRemoveButton(
-          t('capturePanel.measureRemove', { parameter: label }),
-          () => this.runMeasureAction('row', remove,
-            () => this.cb.onRemoveMeasurementRow(row.id), row.id, index),
-        );
-        const details = this.measurementDetailsBlock(row.id);
-        toggle.addEventListener('click', () => {
-          const expanded = !this.measureOpen.has(row.id);
-          if (expanded) this.measureOpen.add(row.id);
-          else this.measureOpen.delete(row.id);
-          const view = this.measureSectionView;
-          const live = view?.rows.find((entry) => entry.id === row.id) ?? row;
-          applyMeasurementDetails(item, live, expanded, view);
-        });
-        item.append(source, toggle, status, remove, details);
-        applyMeasurementDetails(item, row, this.measureOpen.has(row.id), v.measurement);
-        list.appendChild(item);
-      });
-      measureSec.body.appendChild(list);
+      measureSec.body.appendChild(this.measurementMatrix(matrix, v));
     }
-    const measureActions = div('measure-actions');
-    const addOpen = document.createElement('button');
-    addOpen.type = 'button';
-    addOpen.className = 'analyzer-act measure-add';
-    addOpen.dataset.measureOpen = '';
-    addOpen.setAttribute('aria-haspopup', 'dialog');
-    addOpen.textContent = t('capturePanel.measureAddOpen');
-    addOpen.disabled = v.measurement.sources.length === 0;
-    addOpen.addEventListener('click', () => this.catalogDialog.open(
-      measurementCatalogView(v.measurement), addOpen));
-    const clearAll = document.createElement('button');
-    clearAll.type = 'button';
-    clearAll.className = 'analyzer-act measure-clear';
-    clearAll.dataset.measureClearAll = '';
-    clearAll.textContent = t('capturePanel.measureClearAll');
-    clearAll.disabled = v.measurement.rowCount === 0;
-    clearAll.addEventListener('click', () => {
-      const intent = this.armMeasureFocus('clear', clearAll);
-      void this.cb.onClearMeasurementRows(clearAll)
-        .finally(() => this.dropMeasureFocus(intent));
-    });
-    measureActions.append(addOpen, clearAll);
-    measureSec.body.appendChild(measureActions);
     const persistence = div('measure-persistence');
     const persistenceLength = selectControl(
       'measure.persistence',
@@ -2100,6 +2048,274 @@ export class CapturePanel {
     measureSec.body.appendChild(measureNote);
     if (this.catalogDialog.isOpen) this.catalogDialog.update(measurementCatalogView(v.measurement));
     return measureSec.el;
+  }
+
+  private measurementHeaderActions(
+    container: HTMLElement, view: CapturePanelView,
+  ): void {
+    const addOpen = document.createElement('button');
+    addOpen.type = 'button';
+    addOpen.className = 'analyzer-act measure-add';
+    addOpen.dataset.measureOpen = '';
+    addOpen.setAttribute('aria-haspopup', 'dialog');
+    addOpen.textContent = t('capturePanel.measureAddOpen');
+    addOpen.disabled = view.measurement.sources.length === 0;
+    addOpen.addEventListener('click', () => this.catalogDialog.open(
+      measurementCatalogView(view.measurement), addOpen));
+    const clearAll = document.createElement('button');
+    clearAll.type = 'button';
+    clearAll.className = 'analyzer-act measure-clear';
+    clearAll.dataset.measureClearAll = '';
+    clearAll.textContent = t('capturePanel.measureClearAll');
+    clearAll.disabled = view.measurement.rowCount === 0;
+    clearAll.addEventListener('click', () => {
+      const intent = this.armMeasureFocus('clear', clearAll);
+      void this.cb.onClearMeasurementRows(clearAll)
+        .finally(() => this.dropMeasureFocus(intent));
+    });
+    const resetAll = document.createElement('button');
+    resetAll.type = 'button';
+    resetAll.className = 'analyzer-act measure-stats-reset-all';
+    resetAll.dataset.measureStatsResetAll = '';
+    resetAll.textContent = t('capturePanel.measureStatsResetAll');
+    resetAll.addEventListener('click', () => this.cb.onResetAllMeasurementStats());
+    container.append(addOpen, clearAll, resetAll);
+  }
+
+  private measurementMatrix(matrix: MeasurementMatrixView, view: CapturePanelView): HTMLElement {
+    const scroll = div('measure-matrix-scroll');
+    const table = document.createElement('table');
+    table.className = 'measure-matrix';
+    table.setAttribute('role', 'grid');
+    const caption = document.createElement('caption');
+    caption.textContent = t('capturePanel.measureMatrixSummary', {
+      sources: formatCount(matrix.rows.length),
+      parameters: formatCount(matrix.columns.length),
+    });
+    table.appendChild(caption);
+    const columns = document.createElement('colgroup');
+    const sourceColumn = document.createElement('col');
+    sourceColumn.className = 'measure-matrix-source-col';
+    columns.appendChild(sourceColumn);
+    for (const column of matrix.columns) {
+      const col = document.createElement('col');
+      col.className = 'measure-matrix-col';
+      col.dataset.measureColumn = column.parameter;
+      columns.appendChild(col);
+    }
+    table.appendChild(columns);
+    const head = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    headRow.setAttribute('role', 'row');
+    const corner = document.createElement('th');
+    corner.className = 'measure-matrix-corner';
+    corner.setAttribute('scope', 'col');
+    corner.setAttribute('role', 'columnheader');
+    corner.setAttribute('aria-label', t('capturePanel.measureSource'));
+    const actions = div('measure-matrix-actions');
+    this.measurementHeaderActions(actions, view);
+    corner.appendChild(actions);
+    headRow.appendChild(corner);
+    for (const column of matrix.columns) {
+      const th = document.createElement('th');
+      th.className = 'measure-matrix-head';
+      th.setAttribute('scope', 'col');
+      th.setAttribute('role', 'columnheader');
+      th.textContent = t(column.labelKey);
+      th.title = t(catalogEntry(column.parameter).descriptionKey as MessageKey);
+      headRow.appendChild(th);
+    }
+    head.appendChild(headRow);
+    table.appendChild(head);
+    const body = document.createElement('tbody');
+    const active = {
+      row: Math.min(this.measureActive.row, Math.max(0, matrix.rows.length - 1)),
+      column: Math.min(this.measureActive.column, Math.max(0, matrix.columns.length - 1)),
+    };
+    this.measureActive = { ...active };
+    let tabbable: HTMLElement | null = null;
+    const rowCells = new Map<number, HTMLElement[]>();
+    matrix.rows.forEach((source, rowIndex) => {
+      const tr = document.createElement('tr');
+      tr.setAttribute('role', 'row');
+      tr.dataset.measureStart = String(source.start);
+      const rowHead = document.createElement('th');
+      rowHead.className = 'measure-row-head';
+      rowHead.setAttribute('scope', 'row');
+      rowHead.setAttribute('role', 'rowheader');
+      if (source.focused) rowHead.classList.add('is-focused');
+      const sourceHead = div('measure-source-head');
+      const swatch = document.createElement('span');
+      swatch.className = 'measure-source-swatch';
+      swatch.setAttribute('aria-hidden', 'true');
+      swatch.style.background = source.color;
+      const name = document.createElement('span');
+      name.className = 'measure-source';
+      name.textContent = source.name;
+      sourceHead.append(swatch, name);
+      rowHead.appendChild(sourceHead);
+      tr.appendChild(rowHead);
+      const cells: HTMLElement[] = [];
+      source.cells.forEach((cell, columnIndex) => {
+        const slot = document.createElement('td');
+        slot.className = 'measure-cell-slot';
+        slot.setAttribute('role', 'presentation');
+        const rowView = cell.row;
+        if (rowView === null) {
+          const empty = document.createElement('span');
+          empty.className = 'measure-cell is-empty';
+          empty.setAttribute('role', 'gridcell');
+          empty.setAttribute('aria-label', t('capturePanel.measureCellEmpty'));
+          slot.appendChild(empty);
+          tr.appendChild(slot);
+          return;
+        }
+        const expanded = this.measureOpen.has(rowView.id);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = expanded ? 'measure-cell is-open' : 'measure-cell';
+        button.setAttribute('role', 'gridcell');
+        button.setAttribute('tabindex', '-1');
+        button.setAttribute('aria-expanded', String(expanded));
+        button.setAttribute('aria-controls', measurementDetailsId(rowView.id));
+        button.dataset.measureKey = rowView.parameter;
+        button.dataset.measureId = String(rowView.id);
+        button.dataset.measureRow = String(rowIndex);
+        button.dataset.measureColumn = String(columnIndex);
+        const value = document.createElement('span');
+        value.className = 'measure-value';
+        value.translate = false;
+        value.textContent = measurementValueText(rowView);
+        const status = document.createElement('span');
+        status.className = 'measure-status';
+        const statusText = measurementStatusText(rowView);
+        status.textContent = statusText;
+        status.title = statusText;
+        button.append(value, measureChevron(), status);
+        button.addEventListener('click', () => this.toggleMeasurementCell(button));
+        if (rowIndex === active.row && columnIndex === active.column) tabbable = button;
+        cells.push(button);
+        slot.appendChild(button);
+        tr.appendChild(slot);
+      });
+      rowCells.set(rowIndex, cells);
+      body.appendChild(tr);
+      source.cells.forEach((cell) => {
+        const rowView = cell.row;
+        if (rowView === null) return;
+        const expanded = this.measureOpen.has(rowView.id);
+        const detailRow = document.createElement('tr');
+        detailRow.className = 'measure-cell-detail';
+        detailRow.dataset.measureDetailRow = String(rowView.id);
+        detailRow.hidden = !expanded;
+        const detailSlot = document.createElement('td');
+        detailSlot.setAttribute('colspan', String(matrix.columns.length + 1));
+        const details = this.measurementDetailsBlock(rowView, rowIndex);
+        detailSlot.appendChild(details);
+        detailRow.appendChild(detailSlot);
+        body.appendChild(detailRow);
+        if (expanded) applyMeasurementDetails(details, rowView, true, view.measurement);
+      });
+    });
+    table.appendChild(body);
+    if (tabbable === null) {
+      const first = body.querySelector<HTMLElement>('button.measure-cell');
+      if (first !== null) {
+        tabbable = first;
+        this.measureActive = {
+          row: Number(first.dataset.measureRow),
+          column: Number(first.dataset.measureColumn),
+        };
+      }
+    }
+    tabbable?.setAttribute('tabindex', '0');
+    const cellColumn = (el: HTMLElement): number => Number(el.dataset.measureColumn);
+    const focusCell = (cell: HTMLElement): void => {
+      for (const el of table.querySelectorAll<HTMLElement>('button.measure-cell')) {
+        el.setAttribute('tabindex', el === cell ? '0' : '-1');
+      }
+      this.measureActive = {
+        row: Number(cell.dataset.measureRow),
+        column: cellColumn(cell),
+      };
+      cell.focus();
+    };
+    const nextRow = (from: number, step: number, column: number): HTMLElement | null => {
+      for (let at = from + step; at >= 0 && at < matrix.rows.length; at += step) {
+        const cells = rowCells.get(at) ?? [];
+        if (cells.length === 0) continue;
+        let best = cells[0]!;
+        for (const candidate of cells) {
+          if (Math.abs(cellColumn(candidate) - column) < Math.abs(cellColumn(best) - column)) {
+            best = candidate;
+          }
+        }
+        return best;
+      }
+      return null;
+    };
+    table.addEventListener('keydown', (event) => {
+      const target = (event.target as HTMLElement | null)
+        ?.closest<HTMLElement>('button.measure-cell') ?? null;
+      if (target === null) return;
+      const row = Number(target.dataset.measureRow);
+      const column = cellColumn(target);
+      const siblings = rowCells.get(row) ?? [];
+      let next: HTMLElement | null = null;
+      if (event.key === 'ArrowRight') {
+        next = siblings.find((cell) => cellColumn(cell) > column) ?? null;
+      } else if (event.key === 'ArrowLeft') {
+        next = [...siblings].reverse().find((cell) => cellColumn(cell) < column) ?? null;
+      } else if (event.key === 'Home') {
+        next = siblings[0] ?? null;
+      } else if (event.key === 'End') {
+        next = siblings[siblings.length - 1] ?? null;
+      } else if (event.key === 'ArrowDown') {
+        next = nextRow(row, 1, column);
+      } else if (event.key === 'ArrowUp') {
+        next = nextRow(row, -1, column);
+      } else if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.toggleMeasurementCell(target);
+        return;
+      } else if (event.key === 'Escape') {
+        if (!this.measureOpen.has(Number(target.dataset.measureId))) return;
+        event.preventDefault();
+        event.stopPropagation();
+        this.toggleMeasurementCell(target);
+        target.focus();
+        return;
+      } else {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (next !== null) focusCell(next);
+    });
+    scroll.appendChild(table);
+    return scroll;
+  }
+
+  private toggleMeasurementCell(cell: HTMLElement): void {
+    const rowId = Number(cell.dataset.measureId);
+    if (!Number.isInteger(rowId)) return;
+    const table = cell.closest('table');
+    const detailRow = table
+      ?.querySelector<HTMLElement>(`tr.measure-cell-detail[data-measure-detail-row="${rowId}"]`) ??
+      null;
+    const details = table?.querySelector<HTMLElement>(`[data-measure-details="${rowId}"]`) ?? null;
+    const view = this.measureSectionView;
+    const row = view?.rows.find((entry) => entry.id === rowId);
+    const expanded = !this.measureOpen.has(rowId);
+    if (expanded) this.measureOpen.add(rowId);
+    else this.measureOpen.delete(rowId);
+    cell.setAttribute('aria-expanded', String(expanded));
+    cell.classList.toggle('is-open', expanded);
+    if (detailRow !== null) detailRow.hidden = !expanded;
+    if (details !== null && row !== undefined) {
+      applyMeasurementDetails(details, row, expanded, view);
+    }
   }
 
   private basicMeasurementSection(v: CapturePanelView): HTMLElement {
@@ -2885,18 +3101,9 @@ function measurementDetailRow(key: MeasurementDetailKey, label: string): HTMLDiv
 }
 
 function applyMeasurementDetails(
-  item: HTMLElement, row: MeasurementRowView, expanded: boolean,
+  details: HTMLElement, row: MeasurementRowView, expanded: boolean,
   view: MeasurementSectionView | null,
 ): void {
-  const toggle = item.querySelector<HTMLElement>('.measure-open');
-  if (toggle !== null) {
-    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    toggle.setAttribute('aria-label', t(expanded
-      ? 'capturePanel.measureDetailsHide' : 'capturePanel.measureDetailsShow',
-    { parameter: measurementRowLabel(row) }));
-  }
-  const details = item.querySelector<HTMLElement>('[data-measure-details]');
-  if (details === null) return;
   details.hidden = !expanded;
   if (!expanded) return;
   const text = measurementDetailText(view, row);
