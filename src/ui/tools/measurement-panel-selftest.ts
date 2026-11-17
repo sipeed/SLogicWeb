@@ -1138,7 +1138,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     const end = source.indexOf('now - this.runningPanelAt > 500');
     const body = at < 0 || end < 0 ? '' : source.slice(at, end);
     return body.includes('this.analysisPanelAt = now;') &&
-      body.includes('this.running && this.cursorsPageShown()') &&
+      body.includes('this.running && this.measurePageShown()') &&
       body.includes('this.capturePanel.updateMeasurements(this.measurementView());') &&
       !body.includes('this.runningPanelAt = now;') &&
       !body.includes('updateProgress') && !body.includes('updateTriggerStatus');
@@ -1156,19 +1156,19 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     !independent(shared) && !independent(reused),
     `shared=${independent(shared)}, reused=${independent(reused)}`);
 
-  const forcedAt = frame.indexOf('if (forced && !this.running && this.cursorsPageShown()) {');
+  const forcedAt = frame.indexOf('if (forced && !this.running && this.measurePageShown()) {');
   const clearedAt = frame.indexOf('this.dirty = false;');
   const forcedRefresh = (source: string): boolean => {
-    const at = source.indexOf('if (forced && !this.running && this.cursorsPageShown()) {');
+    const at = source.indexOf('if (forced && !this.running && this.measurePageShown()) {');
     const cleared = source.indexOf('this.dirty = false;');
     return at >= 0 && cleared >= 0 && at > cleared &&
       source.slice(at, at + 200).includes(
         'this.capturePanel.updateMeasurements(this.measurementView());');
   };
-  const gatedOff = frame.replace('if (forced && !this.running && this.cursorsPageShown()) {',
+  const gatedOff = frame.replace('if (forced && !this.running && this.measurePageShown()) {',
     'if (false) {');
   const movedFirst = frame.replace('this.dirty = false;',
-    'if (forced && !this.running && this.cursorsPageShown()) {' +
+    'if (forced && !this.running && this.measurePageShown()) {' +
     ' this.capturePanel.updateMeasurements(this.measurementView()); } this.dirty = false;');
   check('a stopped session refreshes measurements on the drawing gesture, not a clock',
     clearedAt >= 0 && forcedAt > clearedAt && forcedRefresh(frame) &&

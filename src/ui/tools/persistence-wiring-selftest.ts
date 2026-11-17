@@ -146,15 +146,15 @@ const startBody = methodBody(app, 'private async startCapture(');
 {
   const reportBody = slice(app, 'persistence: () => ({', 'setPersistence: (raw: unknown)');
   const sidebarGate = app.replace('      visible: true,\n',
-    '      visible: this.cursorsPageShown(),\n');
+    '      visible: this.measurePageShown(),\n');
   const gatedSubmit = methodBody(sidebarGate, 'private submitPersistenceWave(');
   check('a completed wave commits under whichever sidebar page is docked: no page gate pauses it',
     submitBody.includes('visible: true,') &&
-    !submitBody.includes('cursorsPageShown') && !submitBody.includes('this.sidebar') &&
-    gatedSubmit !== submitBody && gatedSubmit.includes('visible: this.cursorsPageShown(),') &&
+    !submitBody.includes('measurePageShown') && !submitBody.includes('this.sidebar') &&
+    gatedSubmit !== submitBody && gatedSubmit.includes('visible: this.measurePageShown(),') &&
     reportBody.includes('loop: this.persistenceLoop(),'),
     `visible=${submitBody.includes('visible: true,')}, ` +
-    `gated=${gatedSubmit.includes('cursorsPageShown')}, ` +
+    `gated=${gatedSubmit.includes('measurePageShown')}, ` +
     `report=${reportBody.includes('loop: this.persistenceLoop(),')}`);
   const staleReason = app.replace('    this.persistenceClearReason = null;\n' +
     '    if (next === 0)', '    if (next === 0)');

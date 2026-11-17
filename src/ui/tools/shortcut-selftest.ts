@@ -564,8 +564,12 @@ function gestureReferenceMatches(
   const page = (id: string, target: string): string =>
     `      case '${id}':\n        this.applySidebar(selectSidebarPage(this.sidebar, '${target}'));\n` +
     '        return true;\n';
-  const mapping = ['capture', 'cursors', 'decoders']
-    .map((target) => page(`sidebar.${target}`, target)).join('');
+  const pageTargets: [string, string][] = [
+    ['sidebar.capture', 'capture'],
+    ['sidebar.cursors', 'measure'],
+    ['sidebar.decoders', 'decoders'],
+  ];
+  const mapping = pageTargets.map(([id, target]) => page(id, target)).join('');
   check('each page chord applies the one sidebar side effect the tab strip uses',
     shortcuts.includes(mapping) &&
     shortcuts.includes("      case 'sidebar.toggle':\n" +

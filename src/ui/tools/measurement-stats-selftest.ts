@@ -813,14 +813,14 @@ const stopReasonVocabulary:
     body.includes("reason: this.captureAbort === null ? reason : 'error',") &&
     body.includes('samples: store.length,') &&
     body.includes("missed: this.triggerState === 'not-found',") &&
-    body.includes("const visible = this.cursorsPageShown() && this.viewMode === 'time';") &&
+    body.includes("const visible = this.measurePageShown() && this.viewMode === 'time';") &&
     body.includes('visible,') &&
     body.includes('rows.push(...this.measurementWaveRows(\n        view.rows, view.sources, store.samplerate, view.range));') &&
     !body.includes('visible: true');
   const aborted = record.replace("reason: this.captureAbort === null ? reason : 'error',",
     'reason,');
   const alwaysVisible = record.replace(
-    "const visible = this.cursorsPageShown() && this.viewMode === 'time';",
+    "const visible = this.measurePageShown() && this.viewMode === 'time';",
     'const visible = true;');
   const analysisVisible = record.replace("this.viewMode === 'time'", "this.viewMode !== 'time'");
   const ungated = record.replace("missed: this.triggerState === 'not-found',", 'missed: false,');

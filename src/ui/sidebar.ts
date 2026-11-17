@@ -1,8 +1,8 @@
 import type { MessageKey } from './i18n.js';
 
-export type SidebarPage = 'capture' | 'cursors' | 'decoders';
+export type SidebarPage = 'capture' | 'measure' | 'decoders';
 
-export const SIDEBAR_PAGES: readonly SidebarPage[] = ['capture', 'cursors', 'decoders'];
+export const SIDEBAR_PAGES: readonly SidebarPage[] = ['capture', 'measure', 'decoders'];
 
 export interface SidebarState {
   readonly visible: boolean;
@@ -18,7 +18,7 @@ export const DEFAULT_SIDEBAR_STATE: SidebarState = {
 
 const LABEL_KEYS: Record<SidebarPage, MessageKey> = {
   capture: 'sidebar.pageCapture',
-  cursors: 'sidebar.pageMeasure',
+  measure: 'sidebar.pageMeasure',
   decoders: 'sidebar.pageDecoders',
 };
 
@@ -49,13 +49,15 @@ export function parseSidebarPage(raw: unknown): SidebarPage | null {
   if (typeof raw !== 'string') return null;
   switch (raw) {
     case 'capture':
-    case 'cursors':
+    case 'measure':
     case 'decoders':
       return raw;
     case 'device':
       return 'capture';
     case 'analyzers':
       return 'decoders';
+    case 'cursors':
+      return 'measure';
     default:
       return null;
   }

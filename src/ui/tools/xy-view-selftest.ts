@@ -1043,7 +1043,7 @@ function count(source: string, needle: string): number {
     view.includes("if (this.viewMode !== 'time') {") &&
       view.includes('const xy = this.xySectionView();') &&
       pump.includes("if (this.viewMode !== 'time') return;") &&
-      record.includes("this.cursorsPageShown() && this.viewMode === 'time'") &&
+      record.includes("this.measurePageShown() && this.viewMode === 'time'") &&
       persist.includes('viewMode: this.viewMode,') &&
       !persist.includes("viewMode: 'time',"),
     `view=${view.includes('xySectionView')}, pump=${pump.includes('viewMode')}, ` +
