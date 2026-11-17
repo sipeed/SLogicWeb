@@ -831,16 +831,19 @@ Key transitions (the full table is generated in one pure module):
   second source of truth. View models are presentation-ready; panels do not re-derive
   armed/capability/formatting values.
 - Measurement selection (`source`, `range`, `rows`) is session state owned by `App`
-  (`src/ui/measurementState.ts`); the Cursors page renders a `MeasurementSectionView` and
-  emits five callbacks (`onPickMeasurementSource`, `onPickMeasurementRange`,
-  `onPickMeasurementCursor`, `onAddMeasurementRow`, `onRemoveMeasurementRow`). It is never
+  (`src/ui/measurementState.ts`); the Measure page's last section renders a
+  `MeasurementSectionView` and emits its seven callbacks (`onPickMeasurementFilter`,
+  `onPickMeasurementRange`, `onPickMeasurementCursor`, `onToggleMeasurementRow`,
+  `onRemoveMeasurementRow`, `onClearMeasurementRows`, `onUndoMeasurementRows`), and it is
+  rendered only while the oscilloscope-mode gate is open (`DESIGN.md` §6.3). It is never
   written to the workspace: a reload starts from the derived default.
 - Repeat's composite is display-only for analysis. The requested composite-coordinate
   window is cropped to current-wave coverage and flagged `rangeClipped`, and a held
   previous wave (`repeatShowingFront`) is an explicit `previous-wave-displayed`
   unavailability with no number until current-wave display coordinates are valid.
 - Live measurement text follows its own `analysisPanelAt` 500 ms timestamp inside
-  `App.frame`, gated by `cursorsPageShown()` while running: it never consumes Capture's
+  `App.frame`, gated by `measurePageShown()` and the oscilloscope-mode gate
+  (`analogScopeActive()`) while running: it never consumes Capture's
   `runningPanelAt`, adds no rAF/timer and calls `updateMeasurements()`, which rewrites only
   value, status and section-note text. A stopped session refreshes the same text on the
   forced drawing gesture that already redraws the plot. The per-source/window cache key

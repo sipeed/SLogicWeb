@@ -485,10 +485,28 @@ Analog channels are not bus rows. Each analog signal has a row with:
   new acquisition clears them with a visible notice; a Repeat wave inside the same
   session remaps them by the display-origin delta and keeps them.
 - Measurement rows reference named cursors; missing references are empty selects.
-- The Cursors surface keeps four sections in one order: Cursors, **Automatic
-  measurements**, Cursor distance, Edges. Automatic measurements is the second section of
-  that page and the surface stays inside the four-section panel budget of §10: no sidebar
-  page, tab or fifth section is added.
+- The Measure page keeps three sections in one fixed order — Cursors, Cursor distance,
+  Edges — and appends the oscilloscope group (**Automatic measurements**) after Edges as
+  the page's last section, only while oscilloscope mode is on. A closed gate renders one
+  enable hint in that position and no measurement control at all, so a session without a
+  scope is a documented state rather than an empty section. With the gate open the page
+  stays inside the four-section panel budget of §10.
+- **The gate is the source list, not the display width.** Oscilloscope mode is one derived
+  predicate, `measurementSources(busViews, captureStore.channelCount).length > 0` — the
+  same call the section's own source list makes, so the gate and the list cannot disagree.
+  It is not stored, not persisted, and takes no part in acquisition, channel locks or
+  width tiers. `displayChannelCount()` is deliberately not the input: it is the pending
+  next-capture width, and it diverges from the width of the wave on screen while a capture
+  runs with a narrowed pending width (the gate would close while the section still has
+  sources) and after a finished narrow wave is widened while idle (the gate would open
+  with no source to measure). Four sites short-circuit on it: the live `analysisPanelAt`
+  clock, the stopped forced-draw refresh, the whole-capture job pump, and the statistics
+  submission on a completed wave. Persistence commits are not gated —
+  `submitPersistenceWave()` keeps its own rule and runs at every completed wave, because a
+  closed gate has no analog band and therefore no surface to commit. Adding, editing or
+  removing a bank and changing the capture width open or close the gate through the
+  existing render pass. The parameter, window and status tables are owned by
+  `.trellis/spec/frontend/oscilloscope-mode.md`.
 - Automatic measurements read one real active ADC group as the source — a group exists
   only where its eight-bit bank bus view does, which at 32 channels is A0–A3 and at 16
   A0–A1; with no such bus view the source list is empty, the source select is disabled and
@@ -541,12 +559,13 @@ Analog channels are not bus rows. Each analog signal has a row with:
   viewport shows, and says so — its window line reads "Window: 300,000 samples (captured
   1,200,000 – 1,500,000)", naming the absolute captured range beside the sample count. It
   runs as one user-requested, cancellable job in fixed 16,384-sample chunks inside the
-  existing frame callback: no new clock, no progress while the Cursors surface is hidden,
-  and nothing published unless every requested sample was read. The section states
-  "Analyzing capture: 98,304 / 300,000 samples (32%)" as a progress bar with its own
-  Cancel, and a cancelled job says so and offers Analyze again; rows carry no value until
-  the job completes. Loop captures and a still-running Single/Repeat capture report that a
-  completed capture is required instead of restarting an unbounded job, and an ordinary
+  existing frame callback: no new clock, no progress while the Measure page is hidden or
+  the gate is closed, and nothing published unless every requested sample was read. The
+  section states "Analyzing capture: 98,304 / 300,000 samples (32%)" as a progress bar
+  with its own Cancel, and a cancelled job says so and offers Analyze again; rows carry no
+  value until the job completes. Loop captures and a still-running Single/Repeat capture
+  report that a completed capture is required instead of restarting an unbounded job, and
+  an ordinary
   Repeat wave inside a stopped session is a stable capture. Cancelling or replacing the
   job (source, parameter, range, gain, trigger, rate, store, row set) discards its partial
   aggregates; only a completed job feeds the rows.
@@ -556,9 +575,10 @@ Analog channels are not bus rows. Each analog signal has a row with:
   Mean, Min, Max, sample StdDev (N−1 denominator, "–" while fewer than two samples exist),
   Count, and the number of results excluded from the aggregates, plus Reset for this row and
   Reset all. Statistics are explicitly cross-acquisition: one valid result per eligible
-  completed Single or Repeat wave measured while the Cursors surface is visible. A Loop
-  reports them unavailable, a wave that finishes while the surface is hidden is counted as a
-  skipped visibility interval instead of being scanned in the background, and an animation
+  completed Single or Repeat wave measured while the Measure page shows it in Time mode,
+  which is a visible page and an open gate. A Loop reports them unavailable, a wave that
+  finishes while the page is hidden or the gate is closed is counted as a skipped
+  visibility interval instead of being scanned in the background, and an animation
   frame, a cursor move, or a duplicate completion notification never increments Count.
   Invalid, clipped, gapped, truncated or range-clipped results are excluded and counted,
   and a row whose analysis is still pending offers neither a sample nor an exclusion.
@@ -577,9 +597,10 @@ Analog channels are not bus rows. Each analog signal has a row with:
   interval divided by the sample rate (never a transform of a rounded Frequency), and Duty
   counts known samples at or above the trigger level over complete qualified periods only,
   excluding and counting the periods that contain gaps or clipping. Nothing scans on a
-  clock while the Cursors surface is hidden: Viewport and cursor-pair windows recompute on
-  settled input changes and on that surface's own live refresh, and the Capture job
-  advances a chunk only on a frame drawn while the surface is visible.
+  clock while the Measure page is hidden or the gate is closed: Viewport and cursor-pair
+  windows recompute on settled input changes and on that page's own live refresh, and the
+  Capture job advances a chunk only on a frame drawn while the page is visible and the gate
+  is open.
 - Math/FFT rows are measurements too: they state their sources, window function, bins and
   units; they never silently change the acquisition.
 
@@ -608,7 +629,8 @@ Analog channels are not bus rows. Each analog signal has a row with:
   automatic measurements, statistics, References, FFT, XY or a saved capture; toggling it
   or its length leaves every measurement row and statistic byte-identical.
 - **The analysis view is a display mode of the same measurement section.** One
-  Time/FFT/XY switch in the measurement section chooses it; FFT or XY replaces the visible
+  Time/FFT/XY switch in the measurement section — the Measure page's last section, present
+  only while oscilloscope mode is on — chooses it; FFT or XY replaces the visible
   plot with one analysis canvas while the Time DOM and canvases keep their state hidden.
   The switch changes visibility only: it never starts, stops or reconfigures an
   acquisition, moves a cursor, rewrites the viewport, T, trigger, source vertical settings,
@@ -863,11 +885,14 @@ Target panels (each with at most four sections):
 | Device | Link, Profile, Notes |
 | Acquire | Acquisition, Retention, Notes |
 | Trigger | Enable/source, Conditions preview, Pre-trigger, State |
-| Measure | Cursors, Automatic measurements (range, row management, whole-capture analysis), Cursor distance, Edges |
+| Measure | Cursors, Cursor distance, Edges, Automatic measurements (range, row management, whole-capture analysis) last and only while oscilloscope mode is on |
 | Analyze | Analyzers, Buses, Results, Status |
 | Record | State, Capacity, Export, Recovery |
 | Settings | Appearance, Behaviour, Shortcuts, About |
 | Diagnostics | Test mode, USB register console (only with Settings > Developer tools on; persisted, off by default), Loop/decoder metrics |
+
+The Measure page's fourth section is the oscilloscope group: it is absent, replaced by one
+enable hint, while no valid ADC bank exists (§6.3).
 
 On a platform without WebUSB, the Device panel states the typed reason and offers file
 replay/Demo; Capture is disabled. The rest of the interface still works on imported data.
