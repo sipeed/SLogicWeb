@@ -83,7 +83,7 @@ export const en = {
 
   // ---------------------------------------------------------- side panel
   'sidebar.pageCapture': 'Capture',
-  'sidebar.pageCursors': 'Cursors',
+  'sidebar.pageCursors': 'Measure',
   'sidebar.pageDecoders': 'Decoders',
   'sidebar.pagesLabel': 'Sidebar pages',
   'sidebar.collapse': 'Collapse sidebar',

@@ -77,7 +77,7 @@ export const zhCN: Messages = {
 
   // ---------------------------------------------------------- side panel
   'sidebar.pageCapture': '采集',
-  'sidebar.pageCursors': '光标',
+  'sidebar.pageCursors': '测量',
   'sidebar.pageDecoders': '解码器',
   'sidebar.pagesLabel': '侧栏页面',
   'sidebar.collapse': '收起侧栏',

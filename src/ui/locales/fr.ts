@@ -79,7 +79,7 @@ export const fr: Messages = {
 
   // ---------------------------------------------------------- side panel
   'sidebar.pageCapture': 'Capture',
-  'sidebar.pageCursors': 'Curseurs',
+  'sidebar.pageCursors': 'Mesures',
   'sidebar.pageDecoders': 'Décodeurs',
   'sidebar.pagesLabel': 'Pages latérales',
   'sidebar.collapse': 'Réduire la barre latérale',

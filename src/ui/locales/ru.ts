@@ -79,7 +79,7 @@ export const ru: Messages = {
 
   // ---------------------------------------------------------- side panel
   'sidebar.pageCapture': 'Захват',
-  'sidebar.pageCursors': 'Курсоры',
+  'sidebar.pageCursors': 'Измерения',
   'sidebar.pageDecoders': 'Декодеры',
   'sidebar.pagesLabel': 'Страницы панели',
   'sidebar.collapse': 'Свернуть боковую панель',
