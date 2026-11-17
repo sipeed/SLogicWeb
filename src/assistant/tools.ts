@@ -17,7 +17,7 @@ import type { SampleStore } from '../data/types.js';
 // would make this module (and its node self-test) depend on the worker bundle.
 import { getDecoder, hydrateDecoders, listDecoders } from '../decode/registry.js';
 import type { DecodeResult } from '../decode/types.js';
-import type { CaptureSettings, TriggerMode } from '../ui/state.js';
+import { SOFTWARE_TEST_MODE, type CaptureSettings, type TriggerMode } from '../ui/state.js';
 import {
   BUS_HEIGHTS, DEFAULT_BUS_HEIGHT, busLabel, busRun, busSummary, runBits, runStart,
   type BusBitOrder, type BusViewConfig,
@@ -600,7 +600,7 @@ export const TOOLS: AssistantTool[] = [
         description: 'Delay between a naturally completed repeat capture and the next one, from 0.1 to 10 seconds.' },
       loop_samples: { type: 'number', minimum: 1024,
         description: 'Retention window in loop mode, in samples; rounded up to a multiple of 1024 and clamped to the loop memory budget.' },
-      test_mode: { type: 'integer', enum: [0, 1, 2], description: '0 real pins, 1 USB max-speed pattern, 2 built-in signal simulator.' },
+      test_mode: { type: 'integer', enum: [0, 1, 2, 3], description: '0 real pins, 1 USB max-speed pattern, 2 built-in signal simulator, 3 host-generated software test signal: it needs the 32-channel board to arm the capture, reads nothing from it, and runs untriggered.' },
       trigger_enabled: { type: 'boolean' },
       trigger_modes: { type: 'object', additionalProperties: { type: 'string', enum: TRIGGER_MODES },
         description: 'e.g. {"0": "rising", "3": "high"}. Use dont-care to clear a channel.' },
@@ -624,6 +624,12 @@ export const TOOLS: AssistantTool[] = [
       if (typeof i.repeat_interval_seconds === 'number') patch.repeatIntervalSeconds = i.repeat_interval_seconds;
       if (typeof i.loop_samples === 'number') patch.loopSamples = i.loop_samples;
       if (i.test_mode === 0 || i.test_mode === 1 || i.test_mode === 2) patch.testMode = i.test_mode;
+      else if (i.test_mode === 3) {
+        if (!st.widthTiers.includes(32)) {
+          throw new Error('Software test (test_mode 3) needs the 32-channel board connected; pick test_mode 0, 1 or 2 instead.');
+        }
+        patch.testMode = SOFTWARE_TEST_MODE;
+      }
       if (typeof i.trigger_enabled === 'boolean') patch.triggerEnableMask = i.trigger_enabled;
       if (typeof i.pre_trigger_percent === 'number') patch.preTriggerPercent = i.pre_trigger_percent;
       if (i.trigger_modes && typeof i.trigger_modes === 'object') {

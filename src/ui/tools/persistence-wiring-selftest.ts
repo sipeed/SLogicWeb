@@ -386,6 +386,8 @@ const startBody = methodBody(app, 'private async startCapture(');
     widthOptions: [16],
     buses: [],
     analogGroups: 0,
+    softwareTestAvailable: false,
+    softwareTestOffered: false,
     deviceName: 'fixture',
     running: false,
     stopping: false,

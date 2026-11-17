@@ -751,13 +751,29 @@ check(
     'const next = Number(select.value);',
     'this.cb.onSettings({ ...s, thresholdVolts: volts })',
     'preTriggerPercent: Number(pre.value)',
-    'testMode: Number(source.value) as 0 | 1 | 2',
+    'testMode: Number(source.value) as CaptureTestMode',
   ];
   const missingPayload = payloadNeedles.filter((needle) => !capture.includes(needle));
   check(
     'every onSettings payload and value coercion is preserved verbatim',
     missingPayload.length === 0,
     `missing=${JSON.stringify(missingPayload)}`,
+  );
+
+  const optionStart = capture.indexOf('const testModeOptions: SelectOptionTuple[] = [');
+  const optionEnd = capture.indexOf('const source = selectControl(', optionStart);
+  const options = optionStart >= 0 && optionEnd > optionStart
+    ? capture.slice(optionStart, optionEnd) : '';
+  const softwareTuple = "[['3', t('capturePanel.testSoftware')] as SelectOptionTuple]";
+  const spreadAt = options.indexOf('v.softwareTestOffered');
+  check(
+    'the software test option is built only inside the softwareTestOffered spread, ' +
+      'between Test pattern and USB max-speed',
+    options.length > 0 && spreadAt > 0 && options.includes(softwareTuple) &&
+      options.indexOf("'2'") < spreadAt && spreadAt < options.indexOf("'1'") &&
+      (capture.match(/t\('capturePanel\.testSoftware'\)/g) ?? []).length === 1 &&
+      (capture.match(/selectControl\(/g)?.length ?? 0) === 18,
+    `options=${JSON.stringify(options.slice(0, 240))}`,
   );
 
   check(

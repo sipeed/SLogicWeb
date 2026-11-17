@@ -6914,6 +6914,9 @@ export class App {
       rateChange: this.rateChange,
       savePercent: this.savePercent,
       analogGroups: this.analogGroups(),
+      softwareTestAvailable: this.deviceHasAnalogModule(),
+      softwareTestOffered: this.deviceHasAnalogModule() ||
+        this.settings.testMode === SOFTWARE_TEST_MODE,
       deviceName: this.device?.name ?? null,
       temperature: this.tempText,
       tempRateMs: this.tempRateMs,

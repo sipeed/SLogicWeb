@@ -61,9 +61,9 @@ import {
 } from './persistenceTrail.js';
 import { selectControl, type SelectOptionTuple } from './select.js';
 import type { BusViewState } from './busView.js';
-import type { CaptureSettings, ChannelState } from './state.js';
+import type { CaptureSettings, CaptureTestMode, ChannelState } from './state.js';
 import {
-  clampLoopSamples, defaultChannelName, LOOP_WINDOW_QUANTUM, maxLoopSamples,
+  clampLoopSamples, defaultChannelName, LOOP_WINDOW_QUANTUM, maxLoopSamples, SOFTWARE_TEST_MODE,
   THRESHOLD_VOLT_OPTIONS,
 } from './state.js';
 import {
@@ -195,6 +195,10 @@ export interface CapturePanelView {
   analogLevelClamped?: { start: number; from: number; to: number } | null;
   /** Analog groups (A0–A3) the current device and width expose; 0 disables the buttons. */
   analogGroups: number;
+  /** A connected board carries the ADC module, so the software test can be armed. */
+  softwareTestAvailable: boolean;
+  /** The software test is offered: a capable board is connected, or `3` is pending. */
+  softwareTestOffered: boolean;
   deviceName: string | null;
   /** The App-owned temperature poll's last text; '—' before the first read. */
   temperature?: string;
@@ -2059,6 +2063,8 @@ export class CapturePanel {
     const testModeOptions: SelectOptionTuple[] = [
       ['0', t('capturePanel.testNormal')],
       ['2', t('capturePanel.testSimulator')],
+      ...(v.softwareTestOffered
+        ? [['3', t('capturePanel.testSoftware')] as SelectOptionTuple] : []),
       ['1', t('capturePanel.testUsbMax')],
     ];
     const source = selectControl(
@@ -2069,12 +2075,18 @@ export class CapturePanel {
     );
     source.disabled = v.running;
     source.addEventListener('change', () =>
-      this.cb.onSettings({ ...s, testMode: Number(source.value) as 0 | 1 | 2 }));
+      this.cb.onSettings({ ...s, testMode: Number(source.value) as CaptureTestMode }));
     // What the test modes are for (and are not) before the user selects one.
     const sourceRow = div('help-row');
     sourceRow.append(source.el, helpTip(t('capturePanel.testModeHelp')));
     body.appendChild(sourceRow);
-    if (s.testMode !== 0) {
+    if (s.testMode === SOFTWARE_TEST_MODE) {
+      const softwareNote = div('panel-note');
+      softwareNote.dataset.softwareTestNote = '';
+      softwareNote.textContent = t(v.softwareTestAvailable
+        ? 'capturePanel.testSoftwareNote' : 'capturePanel.testSoftwareNeedsAdc');
+      body.appendChild(softwareNote);
+    } else if (s.testMode !== 0) {
       const analogNote = div('panel-note');
       analogNote.textContent = t('capturePanel.testModeAnalog');
       body.appendChild(analogNote);

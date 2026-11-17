@@ -154,6 +154,7 @@ function settings(): CaptureSettings {
 class FakeHost implements AssistantHost {
   store_: SampleStore = fixture.store;
   connected = false;
+  tiers: number[] | null = null;
   running = false;
   repeatPending = false;
   analyzers_: HostAnalyzer[] = [];
@@ -168,7 +169,7 @@ class FakeHost implements AssistantHost {
       samples: this.store_.length, dropped: 0,
       samplerate: this.store_.samplerate, channelCount: this.store_.channelCount, triggerState: 'off',
       triggerSampleIndex: null, settings: this.s, rateCeilings: { 16: 400e6, 32: 200e6 },
-      widthTiers: this.connected ? [4, 8, 16, 32] : [],
+      widthTiers: this.tiers ?? (this.connected ? [4, 8, 16, 32] : []),
       enabledChannels: [0, 1, 2], channelNames: Array.from({ length: 32 }, (_, i) => fixture.channelNames[i] ?? `D${i}`),
       view: this.view, decoderReady: true,
     };
@@ -510,6 +511,42 @@ async function run(name: string, input: Record<string, unknown>, host: Assistant
     reported.ok && !('single_unlimited' in applied) && !('single_unlimited' in stateSettings) &&
     applied.seconds === 0.5 && stateSettings.seconds === 0.5,
     JSON.stringify({ applied, stateSettings }));
+}
+
+// ------------------------------------------------------------------ 3d. software test mode
+{
+  const set = toolByName('set_capture_settings')!.inputSchema;
+  const props = set.properties as Record<string, { enum?: number[]; description?: string }>;
+  check('the settings schema offers the host-generated software test mode',
+    (props.test_mode?.enum ?? []).join(',') === '0,1,2,3' &&
+    /host-generated/.test(props.test_mode?.description ?? '') &&
+    /32-channel/.test(props.test_mode?.description ?? ''),
+    JSON.stringify(props.test_mode));
+
+  const sixteen = new FakeHost();
+  sixteen.connected = true;
+  sixteen.tiers = [4, 8, 16];
+  const refused = await run('set_capture_settings', { test_mode: 3 }, sixteen);
+  check('test_mode 3 is refused when the connected board offers no 32-channel tier',
+    !refused.ok && /32-channel/.test(refused.err) && sixteen.applied.length === 0 &&
+    sixteen.s.testMode === 0,
+    refused.ok ? JSON.stringify(sixteen.applied) : refused.err);
+
+  const thirtyTwo = new FakeHost();
+  thirtyTwo.connected = true;
+  const accepted = await run('set_capture_settings', { test_mode: 3 }, thirtyTwo);
+  const softwarePatch = thirtyTwo.applied.at(-1)!.patch;
+  check('test_mode 3 is accepted on the 32-channel board and reaches the settings',
+    accepted.ok && softwarePatch.testMode === 3 && thirtyTwo.s.testMode === 3,
+    `${JSON.stringify(softwarePatch)} state=${thirtyTwo.s.testMode}`);
+
+  const pattern = new FakeHost();
+  pattern.connected = true;
+  const stillOne = await run('set_capture_settings', { test_mode: 2 }, pattern);
+  check('test_mode 2 still applies without a 32-channel tier',
+    stillOne.ok && pattern.applied.at(-1)!.patch.testMode === 2 &&
+    pattern.s.testMode === 2,
+    JSON.stringify(pattern.applied.at(-1)?.patch));
 }
 
 // ------------------------------------------------------------------ 4. loop
