@@ -1068,6 +1068,44 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   }
 }
 
+{
+  const fs = nodeProcess.getBuiltinModule?.('fs') as FsLike | undefined;
+  if (!fs || typeof fs.readFileSync !== 'function') throw new Error('node fs module unavailable');
+  const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
+  const list = fs.readFileSync('src/ui/channelList.ts', 'utf8');
+  const rule = (selector: string): string => {
+    const at = sheet.indexOf(`\n${selector} {`);
+    if (at < 0) return '';
+    const end = sheet.indexOf('}', at);
+    return end < 0 ? '' : sheet.slice(at, end);
+  };
+  const cluster = rule('.bus-measure-pins');
+  const fold = rule('.bus-measure-fold');
+  const chip = rule('.bus-measure-pin');
+  const busRows = list.slice(list.indexOf('  renderBuses('), list.indexOf('  render(cells'));
+  const appendAt = busRows.indexOf('el.appendChild(this.measurePinCluster(');
+  const cardAt = busRows.indexOf('el.appendChild(card);');
+  const bodyAt = busRows.indexOf("const body = document.createElement('div');");
+  const cardBody = bodyAt < 0 || cardAt < bodyAt ? '' : busRows.slice(bodyAt, cardAt);
+  const outOfFlow = cluster.includes('position: absolute;') &&
+    cluster.includes('inset-inline: 6px;') && cluster.includes('bottom: 3px;') &&
+    cluster.includes('pointer-events: none;') && cluster.includes('overflow: hidden;') &&
+    cluster.includes('white-space: nowrap;') &&
+    chip.includes('overflow: hidden;') && chip.includes('text-overflow: ellipsis;') &&
+    fold.includes('pointer-events: auto;') &&
+    !cluster.includes('display: block;') && !cluster.includes('position: relative;');
+  check('the pin cluster is absolute inside the analog cell, so no card control can move',
+    outOfFlow && cardAt >= 0 && appendAt > cardAt &&
+      cardBody.length > 0 && !cardBody.includes('measures') &&
+      busRows.split('cell.measures').length - 1 === 2 &&
+      busRows.split('el.style.height').length - 1 === 1 &&
+      busRows.includes('el.style.height = `${cell.heightCss}px`;'),
+    `absolute=${cluster.includes('position: absolute;')}, ` +
+      `bottom=${cluster.includes('bottom: 3px;')}, ` +
+      `append=${appendAt}, card=${cardAt}, body=${cardBody.length}, ` +
+      `height=${busRows.split('el.style.height').length - 1}`);
+}
+
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

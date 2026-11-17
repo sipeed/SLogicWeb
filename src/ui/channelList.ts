@@ -86,6 +86,30 @@ export interface ChannelListCallbacks {
   onBusScope?(id: string, patch: BusScopePatch, commit: boolean): void;
   /** Configure/remove the analog trigger from the group's own row. */
   onBusTrigger?(id: string, kind: 'rising' | 'falling' | null, volts: number): void;
+  onMeasurePinFold?(busId: string, sourceStart: number): void;
+}
+
+export interface BusCellMeasurePin {
+  readonly key: string;
+  readonly label: string;
+  readonly value: string;
+  readonly status: string;
+}
+
+export interface BusCellMeasures {
+  readonly sourceStart: number;
+  readonly pins: readonly BusCellMeasurePin[];
+  readonly foldCount: number;
+  readonly summary: string;
+}
+
+export interface BusMeasurePins extends BusCellMeasures {
+  readonly busId: string;
+}
+
+export function measurePinChipText(pin: BusCellMeasurePin): string {
+  const text = `${pin.label} ${pin.value}`;
+  return pin.status === '' ? text : `${text} · ${pin.status}`;
 }
 
 /** A parallel-bus (ADC) row's cell: a label for the analog row, not a channel. */
@@ -108,6 +132,7 @@ export interface BusCell {
    * trigger stays visible as a preview, but only an active one may look armed.
    */
   triggerActive?: boolean;
+  measures?: BusCellMeasures;
 }
 
 export interface BusScopePatch {
@@ -595,9 +620,13 @@ export class ChannelList {
    * drag reordering still numbers the channel cells alone.
    */
   renderBuses(cells: readonly BusCell[]): void {
+    for (const stale of Array.from(this.root.querySelectorAll<HTMLElement>('.bus-cell'))) {
+      stale.remove();
+    }
     for (const cell of [...cells].reverse()) {
       const el = document.createElement('div');
       el.className = 'ch-cell bus-cell';
+      el.dataset.busId = cell.id;
       el.style.height = `${cell.heightCss}px`;
       const card = document.createElement('div');
       card.className = 'ch-card';
@@ -727,6 +756,9 @@ export class ChannelList {
       }
       card.append(strip, body);
       el.appendChild(card);
+      if (cell.analog === true && cell.measures !== undefined) {
+        el.appendChild(this.measurePinCluster(cell.id, cell.measures));
+      }
       this.root.prepend(el);
     }
     if (this.editorBusId !== null && !this.editor.hidden) {
@@ -742,6 +774,61 @@ export class ChannelList {
         anchor.setAttribute('aria-expanded', 'true');
         this.positionEditor(anchor);
       }
+    }
+  }
+
+  private measurePinCluster(busId: string, measures: BusCellMeasures): HTMLElement {
+    const cluster = div('bus-measure-pins');
+    cluster.dataset.measurePins = '';
+    cluster.setAttribute('role', 'group');
+    cluster.setAttribute('aria-label', measures.summary);
+    for (const pin of measures.pins) {
+      const chip = document.createElement('span');
+      chip.className = 'bus-measure-pin';
+      chip.dataset.measurePinKey = pin.key;
+      chip.textContent = measurePinChipText(pin);
+      cluster.appendChild(chip);
+    }
+    if (measures.foldCount > 0) {
+      const fold = button(`+${measures.foldCount}`, 'bus-measure-fold');
+      fold.type = 'button';
+      fold.dataset.measureFold = String(measures.sourceStart);
+      const name = t('channels.measureFold', { count: measures.foldCount });
+      fold.title = name;
+      fold.setAttribute('aria-label', name);
+      fold.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.cb.onMeasurePinFold?.(busId, measures.sourceStart);
+      });
+      cluster.appendChild(fold);
+    }
+    return cluster;
+  }
+
+  updateMeasurePins(updates: readonly BusMeasurePins[]): void {
+    for (const update of updates) {
+      const cell = this.root.querySelector<HTMLElement>(
+        `.bus-cell[data-bus-id="${update.busId}"]`);
+      const cluster = cell?.querySelector<HTMLElement>('[data-measure-pins]') ?? null;
+      if (cluster === null) continue;
+      const chips = Array.from(
+        cluster.querySelectorAll<HTMLElement>('[data-measure-pin-key]'));
+      if (chips.length !== update.pins.length) continue;
+      const sameKeys = chips.every((chip, index) =>
+        chip.dataset.measurePinKey === update.pins[index]!.key);
+      if (!sameKeys) continue;
+      const fold = cluster.querySelector<HTMLElement>('[data-measure-fold]');
+      if ((fold !== null) !== (update.foldCount > 0)) continue;
+      chips.forEach((chip, index) => {
+        chip.textContent = measurePinChipText(update.pins[index]!);
+      });
+      if (fold !== null) {
+        const name = t('channels.measureFold', { count: update.foldCount });
+        fold.textContent = `+${update.foldCount}`;
+        fold.title = name;
+        fold.setAttribute('aria-label', name);
+      }
+      cluster.setAttribute('aria-label', update.summary);
     }
   }
 

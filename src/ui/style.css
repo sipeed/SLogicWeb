@@ -2964,6 +2964,22 @@ html[data-theme="light"] .uictrl-card-actions .mini:hover { background: var(--mu
 .bus-cell:hover .bus-height-handle, .bus-height-handle:focus-visible { opacity: 1; }
 .bus-height-handle:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 
+/* ----------------------------------------------- analog card measurement pins */
+.bus-measure-pins {
+  position: absolute; inset-inline: 6px; bottom: 3px; z-index: 1;
+  display: flex; align-items: center; gap: 4px;
+  font-size: 10px; line-height: 1.3; color: var(--text50);
+  white-space: nowrap; overflow: hidden; pointer-events: none;
+}
+.bus-measure-pin { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bus-measure-fold {
+  flex: none; padding: 0 2px; font: inherit; line-height: inherit;
+  color: var(--text80); background: transparent; border: 0; border-radius: 3px;
+  cursor: pointer; pointer-events: auto;
+}
+.bus-measure-fold:hover { color: var(--text); }
+.bus-measure-fold:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
 /* The bus editor: a native modal over the plot, the shortcuts dialog's anatomy. The
    header Add sits at the section head's right. */
 .panel-section-head > .bus-add { margin-left: auto; font-weight: normal; }
@@ -3007,6 +3023,7 @@ html[data-theme="light"] .bus-dialog::backdrop { background: var(--backdrop); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-info,
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-cell { position: relative; }
 .bus-cell-sub { color: var(--muted-foreground); }
+.bus-measure-pins { color: var(--muted-foreground); }
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-btn,
 :is(html[data-theme="dark"], html[data-theme="light"]) .bus-cell-edit {
   background: var(--background); border-color: var(--input); color: var(--muted-foreground);

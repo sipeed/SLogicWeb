@@ -68,6 +68,7 @@ import {
 } from './busView.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
 import { CapturePanel, cursorDistanceSideId, cursorEdgeSideId,
+  measurementStatusText, measurementValueText,
   type CapturePanelState, type CapturePanelView, type CursorDistanceRowView,
   type CursorDistanceSideView, type CursorEdgeChannelView, type CursorEdgeRowView,
   type CursorRowView, type LoopDisplayMetrics, type PersistencePanelView,
@@ -83,8 +84,9 @@ import {
   captureWidthTiers, channelBankIndices, channelBankStart, busOutOfWidth, lockedChannelBanks,
 } from './channelBanks.js';
 import {
-  ChannelList, type BusCell, type BusScopePatch, type ChannelCell, type ChannelConfiguration,
-  type ChannelLaneLabel,
+  ChannelList, measurePinChipText, type BusCell, type BusCellMeasurePin,
+  type BusCellMeasures, type BusMeasurePins, type BusScopePatch, type ChannelCell,
+  type ChannelConfiguration, type ChannelLaneLabel,
 } from './channelList.js';
 import { decoderRowName } from './decoderI18n.js';
 import {
@@ -114,7 +116,8 @@ import { formatCursorTimes } from './cursorTime.js';
 import { sameUsbDevice } from './deviceIdentity.js';
 import {
   MEASURE_TIER_DEFAULT, defaultMeasurementConfig, isMeasurementBank, measurementAddStart,
-  measurementCacheKey, measurementRowViews, measurementRowSettled, measurementSectionCounts,
+  measurementCacheKey, measurementRowViews, measurementRowSettled,
+  measurementSectionCounts,
   measurementSources, measurementWaveValue, reconcileMeasurementConfig, resolveMeasurementWindow,
   runMeasurement, selectMeasurementFilter, selectMeasurementRange,
   type MeasurementConfig, type MeasurementCaptureView, type MeasurementRange,
@@ -122,6 +125,7 @@ import {
   type MeasurementSectionView, type MeasurementSource, type MeasurementSourceResult,
   type MeasurementStatus, type MeasureTier,
 } from './measurementState.js';
+import { measurePinClusters, type MeasureBandRef } from './measurePins.js';
 import {
   CaptureRangeJob, MEASURE_CAPTURE_BUDGET_MS, captureJobKey, captureRangeUnavailable,
   type CaptureJobSource,
@@ -966,6 +970,7 @@ export class App {
       onEditBus: (id) => this.editBus(id),
       onBusScope: (id, patch, commit) => this.configureBusScope(id, patch, commit),
       onBusTrigger: (id, kind, volts) => this.configureAnalogTrigger(id, kind, volts),
+      onMeasurePinFold: (_id, sourceStart) => this.foldMeasurePins(sourceStart),
     });
 
     this.sidebarHost = new SidebarHost(this.el.side, {
@@ -2308,6 +2313,11 @@ export class App {
     this.applyMeasurementConfig(selectMeasurementFilter(this.measurementBase(sources), sources, start));
   }
 
+  private foldMeasurePins(sourceStart: number): void {
+    const from = document.activeElement as HTMLElement | null;
+    this.capturePanel.focusMeasureSource(from, () => this.pickMeasurementFilter(sourceStart));
+  }
+
   private pickMeasurementRange(kind: MeasurementRangeKind): void {
     const sources = measurementSources(this.busViews, this.captureStore.channelCount);
     const base = this.measurementBase(sources);
@@ -2425,15 +2435,59 @@ export class App {
   }
 
   private busCells(): BusCell[] {
-    const cells: BusCell[] = [];
+    const pins = new Map<string, BusCellMeasures>();
+    for (const update of this.measurePinCells()) pins.set(update.busId, update);    const cells: BusCell[] = [];
     for (const band of this.analogRowBands) {
       const source = focusedAnalogSource(band);
       const bus = source
         ? this.busViews.find((candidate) => candidate.id === source.busId) : undefined;
       if (!bus) continue;
-      cells.push(this.busCell(bus, band.heightCss, band.sources.length <= 1));
+      const cell = this.busCell(bus, band.heightCss, band.sources.length <= 1);
+      const measures = pins.get(bus.id);
+      cells.push(measures === undefined ? cell : { ...cell, measures });
     }
     return cells;
+  }
+
+  private measureBandRefs(): MeasureBandRef[] {
+    const bands: MeasureBandRef[] = [];
+    for (const band of this.analogRowBands) {
+      const source = focusedAnalogSource(band);
+      if (source !== null) bands.push({ busId: source.busId, sourceStart: source.start });
+    }
+    return bands;
+  }
+
+  private measurePinCells(): BusMeasurePins[] {
+    if (!this.measurePageShown() || !this.analogScopeActive() || this.viewMode !== 'time') {
+      return [];
+    }
+    const section = this.measurementView();
+    const rows = section.bandRows ?? section.rows;
+    const byId = new Map(rows.map((row) => [row.id, row] as const));
+    return measurePinClusters(section, this.measureBandRefs()).map((cluster) => {
+      const pins: BusCellMeasurePin[] = cluster.pins.map((pin) => {
+        const row = byId.get(pin.rowId);
+        return {
+          key: pin.key,
+          label: t(pin.labelKey),
+          value: row === undefined
+            ? t('capturePanel.measureValueNone') : measurementValueText(row),
+          status: row !== undefined && row.status !== 'ok' ? measurementStatusText(row) : '',
+        };
+      });
+      const first = cluster.pins[0] === undefined ? undefined : byId.get(cluster.pins[0].rowId);
+      return {
+        busId: cluster.busId,
+        sourceStart: cluster.sourceStart,
+        pins,
+        foldCount: cluster.foldCount,
+        summary: t('channels.measurePins', {
+          source: first?.sourceName ?? '',
+          pins: pins.map(measurePinChipText).join(', '),
+        }),
+      };
+    });
   }
 
   /** Configure/remove the analog trigger from the group's own row. */
@@ -4220,6 +4274,7 @@ export class App {
       }
       if (this.running && this.measurePageShown() && this.analogScopeActive()) {
         this.capturePanel.updateMeasurements(this.measurementView());
+        this.channelList.updateMeasurePins(this.measurePinCells());
         persistencePanelDue = true;
       }
     }
@@ -4277,6 +4332,7 @@ export class App {
     this.dirty = false;
     if (forced && !this.running && this.measurePageShown() && this.analogScopeActive()) {
       this.capturePanel.updateMeasurements(this.measurementView());
+      this.channelList.updateMeasurePins(this.measurePinCells());
     }
     this.livePending = false;
     this.liveDrawAt = now;
@@ -6851,6 +6907,7 @@ export class App {
     this.syncSidebar();
     this.renderSidebarContent();
     this.refreshAnalogVoltages();
+    this.channelList.renderBuses(this.busCells());
   }
 
   private syncSidebar(): void {

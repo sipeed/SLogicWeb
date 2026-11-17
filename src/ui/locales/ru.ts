@@ -488,6 +488,8 @@ export const ru: Messages = {
   'capturePanel.analogGainHelp': 'Усиление должно совпадать с настройкой модуля; по нему рассчитываются истинные напряжения.',
   'capturePanel.analogLevelClamped': 'Уровень запуска {name} {from} вне нового диапазона; теперь он {to}.',
   'channels.analogGainSub': '{gain} · ±{range} В',
+  'channels.measurePins': 'Измерения {source}: {pins}',
+  'channels.measureFold': 'Показать все измерения этого источника ({count})',
   'capturePanel.analogEnable': 'Аналог {name}: читать модуль АЦП на входах {range} как одно напряжение {span} ({bits} бит). Подключите сигнал ко входу модуля АЦП; тогда {range} передают его отсчёты, а не логические уровни.',
   'capturePanel.analogDisable': 'Прекратить чтение {name} как аналогового канала',
   'capturePanel.analogBusy': 'Аналоговые каналы заблокированы во время остановки захвата',

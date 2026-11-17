@@ -2580,6 +2580,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const clock = 'if (this.running && this.measurePageShown() && this.analogScopeActive()) {';
   const stopped = 'if (forced && !this.running && this.measurePageShown() && this.analogScopeActive()) {';
   const pumpLine = 'if (!this.measurePageShown() || !this.analogScopeActive()) return;';
+  const pinLine =
+    "if (!this.measurePageShown() || !this.analogScopeActive() || this.viewMode !== 'time') {";
   const submission =
     "const visible = this.measurePageShown() && this.analogScopeActive() && this.viewMode === 'time';";
   const pump = slice(app, 'private pumpMeasurementCapture(): void {', 'private withMeasurementRows(');
@@ -2594,14 +2596,15 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const calls = app.split('this.analogScopeActive()').length - 1;
   check('all four measurement clocks and jobs short-circuit on the same gate',
     once(frame, clock) && once(frame, stopped) && once(pump, pumpLine) &&
-      once(record, submission) && calls === 5,
+      once(record, submission) && once(app, pinLine) && calls === 6,
     `clock=${once(frame, clock)}, stopped=${once(frame, stopped)}, ` +
-      `pump=${once(pump, pumpLine)}, record=${once(record, submission)}, calls=${calls}`);
+      `pump=${once(pump, pumpLine)}, record=${once(record, submission)}, ` +
+      `pins=${once(app, pinLine)}, calls=${calls}`);
 
   const ungated = (needle: string): string => needle
     .replace(' && this.analogScopeActive()', '')
     .replace(' || !this.analogScopeActive()', '');
-  const gated = [clock, stopped, pumpLine, submission];
+  const gated = [clock, stopped, pumpLine, submission, pinLine];
   const gateIsTheDiff = gated.every((needle) => {
     const bare = ungated(needle);
     return bare !== needle && !bare.includes('analogScopeActive');
@@ -3310,6 +3313,24 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `space=${space.propagationStopped}, x=${untouched.propagationStopped}`);
 }
 
+
+{
+  const cardOwner = read('src/ui/channelList.ts');
+  const carriesPins = (text: string): boolean =>
+    text.includes('bus-measure-pin') || text.includes('bus-measure-fold') ||
+    text.includes('data-measure-pin') || text.includes('measurePins') ||
+    text.includes('measureFold');
+  const viewCarriesMeasures = (text: string): boolean => text.includes('measures');
+  const viewType = slice(panel, 'export interface CapturePanelView {',
+    'export interface PersistencePanelView {');
+  check('the sidebar panel carries no pin data: the analog cards own the readouts',
+    viewType.length > 0 && carriesPins(panel) === false && !viewCarriesMeasures(viewType) &&
+      carriesPins(cardOwner) &&
+      carriesPins(`${panel}\n  const pins = div('bus-measure-pins');`) &&
+      viewCarriesMeasures(`${viewType}\n  measures?: unknown;`),
+    `view=${viewType.length}, panel=${carriesPins(panel)}, ` +
+      `cards=${carriesPins(cardOwner)}`);
+}
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;

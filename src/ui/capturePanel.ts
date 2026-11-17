@@ -135,7 +135,8 @@ export type CapturePanelState =
   'ready' | 'capturing' | 'stopping' | 'waiting' | 'completed' | 'aborted';
 
 interface MeasureFocusIntent {
-  readonly kind: 'row' | 'clear' | 'undo' | 'capture-cancel' | 'capture-restart' | 'tier-switch';
+  readonly kind:
+    'row' | 'clear' | 'undo' | 'capture-cancel' | 'capture-restart' | 'tier-switch' | 'source';
   readonly from: HTMLElement | null;
   readonly id: number;
   readonly row: number;
@@ -384,7 +385,12 @@ export class CapturePanel {
     if (pending.kind === 'capture-cancel') return view.capture?.status === 'cancelled';
     if (pending.kind === 'capture-restart') return view.capture?.status === 'running';
     if (pending.kind === 'tier-switch') return pending.id === MEASURE_TIER_INDEX[view.tier];
+    if (pending.kind === 'source') return true;
     return view.rowCount > 0 && view.undoCount === null;
+  }
+
+  focusMeasureSource(from: HTMLElement | null, action: () => void): void {
+    this.runMeasureAction('source', from, action);
   }
 
   private restoreMeasureFocus(view: MeasurementSectionView): void {
@@ -403,6 +409,10 @@ export class CapturePanel {
       const selector = view.tier === 'advanced'
         ? '[data-measure-basic]' : '[data-measure-advanced]';
       this.host.measure.querySelector<HTMLElement>(selector)?.focus();
+      return;
+    }
+    if (pending.kind === 'source') {
+      this.host.measure.querySelector<HTMLElement>('[data-select-key="measure.filter"]')?.focus();
       return;
     }
     const rows = this.host.measure.querySelectorAll<HTMLElement>(

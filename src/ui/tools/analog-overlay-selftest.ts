@@ -435,23 +435,24 @@ const layoutBody = methodBody(app, 'private setAnalogLayout(layout: AnalogLayout
       .includes('entry.source.group < 0'),
     `any=${anySourceFocus.includes('entry.source.group < 0')}`);
   const cellBody = methodBody(app, 'private busCells(): BusCell[] {');
+  const bandHeight = 'const cell = this.busCell(bus, band.heightCss, band.sources.length <= 1);';
   check('one cell per band shows the focused source at the band height, and only a merged band drops the height grip',
     cellBody.includes('for (const band of this.analogRowBands) {') &&
     cellBody.includes('const source = focusedAnalogSource(band);') &&
-    cellBody.includes('cells.push(this.busCell(bus, band.heightCss, band.sources.length <= 1));') &&
+    cellBody.includes(bandHeight) &&
     list.includes('if (cell.analog && cell.showHeight !== false) {'),
     `merged=${cellBody.includes('band.sources.length <= 1')}`);
   const gripControl = list.replace(
     'if (cell.analog && cell.showHeight !== false) {', 'if (cell.analog) {');
   const heightControl = app.replace(
-    'cells.push(this.busCell(bus, band.heightCss, band.sources.length <= 1));',
-    'cells.push(this.busCell(bus, this.rowHeightOf(bus), true));');
+    bandHeight,
+    'const cell = this.busCell(bus, this.rowHeightOf(bus), true);');
   const gripAlways = app.replace(
-    'cells.push(this.busCell(bus, band.heightCss, band.sources.length <= 1));',
-    'cells.push(this.busCell(bus, band.heightCss, true));');
+    bandHeight,
+    'const cell = this.busCell(bus, band.heightCss, true);');
   check('control: an ungated height grip, a per-source height or a grip on a merged band fails the same predicate',
     gripControl !== list && !gripControl.includes('cell.showHeight !== false') &&
-    heightControl !== app && !heightControl.includes('this.busCell(bus, band.heightCss, band.sources.length <= 1)') &&
+    heightControl !== app && !heightControl.includes(bandHeight) &&
     gripAlways !== app && !gripAlways.includes('band.sources.length <= 1'),
     `grip=${gripControl.includes('cell.showHeight !== false')}, ` +
     `height=${heightControl.includes('band.heightCss')}, gripAlways=${gripAlways.includes('band.sources.length <= 1')}`);

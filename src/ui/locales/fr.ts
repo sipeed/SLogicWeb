@@ -497,6 +497,8 @@ export const fr: Messages = {
   'capturePanel.analogGainHelp': 'Le gain doit correspondre au réglage du module ; il sert à calculer les tensions réelles.',
   'capturePanel.analogLevelClamped': 'Le niveau de déclenchement {from} de {name} sort de la nouvelle plage ; il vaut maintenant {to}.',
   'channels.analogGainSub': '{gain} · ±{range} V',
+  'channels.measurePins': 'Mesures de {source} : {pins}',
+  'channels.measureFold': 'Afficher les {count} mesures de cette source',
   'capturePanel.analogEnable': 'Analogique {name} : lire le module ADC branché sur {range} comme une tension {span} ({bits} bits). Branchez le signal sur l’entrée du module ADC ; {range} transportent alors ses échantillons, et non des niveaux logiques.',
   'capturePanel.analogDisable': 'Ne plus lire {name} comme voie analogique',
   'capturePanel.analogBusy': 'Les voies analogiques sont verrouillées pendant l’arrêt de la capture',

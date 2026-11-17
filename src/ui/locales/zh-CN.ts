@@ -445,6 +445,8 @@ export const zhCN: Messages = {
   'capturePanel.analogGainHelp': '增益须与模块上的设置一致；用于换算真实电压。',
   'capturePanel.analogLevelClamped': '{name} 的触发电平 {from} 超出新量程，已调整为 {to}。',
   'channels.analogGainSub': '{gain} · ±{range} V',
+  'channels.measurePins': '{source} 的测量结果：{pins}',
+  'channels.measureFold': '显示该信号源的全部 {count} 个测量结果',
   'capturePanel.analogEnable': '模拟 {name}：把接在 {range} 上的 ADC 模块读成一路 {span} 电压（{bits} 位）。被测信号接 ADC 模块的输入端；此时 {range} 传输的是它的采样值，不再是逻辑电平。',
   'capturePanel.analogDisable': '停止将 {name} 作为模拟通道读取',
   'capturePanel.analogBusy': '采集停止期间无法更改模拟通道',

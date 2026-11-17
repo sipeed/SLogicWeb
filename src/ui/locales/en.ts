@@ -498,6 +498,8 @@ export const en = {
   'capturePanel.analogGainHelp': 'The gain must match the setting on the module; it is used to convert readings to true voltages.',
   'capturePanel.analogLevelClamped': '{name} trigger level {from} is outside the new range; it is now {to}.',
   'channels.analogGainSub': '{gain} · ±{range} V',
+  'channels.measurePins': 'Measurements for {source}: {pins}',
+  'channels.measureFold': 'Show all {count} measurements for this source',
   'capturePanel.analogEnable': 'Analog {name}: read the ADC module on inputs {range} as one {span} voltage ({bits}-bit). Connect the signal to the ADC module\'s input; {range} then carry its samples, not logic levels.',
   'capturePanel.analogDisable': 'Stop reading {name} as an analog channel',
   'capturePanel.analogBusy': 'Analog channels are locked while the capture is stopping',

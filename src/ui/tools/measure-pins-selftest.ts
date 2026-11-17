@@ -9,15 +9,20 @@ import {
   MAX_PINS_PER_BAND, measurePinClusters, type MeasureBandRef, type MeasurePinCluster,
 } from '../measurePins.js';
 import type { MeasurementRow } from '../measurementRows.js';
+import { t, type MessageKey } from '../i18n.js';
 import type {
   MeasurementRowView, MeasurementSectionView, MeasurementSource, MeasurementStatus, MeasureTier,
 } from '../measurementState.js';
 import { noMeasurementStatsView } from '../measurementStats.js';
+import {
+  ChannelList, measurePinChipText, type BusCell, type BusCellMeasurePin,
+  type BusCellMeasures, type BusMeasurePins,
+} from '../channelList.js';
+import { installFakeDom, type FakeElement } from './fakeDom.js';
 
 interface FsLike {
   readFileSync(path: string, encoding: 'utf8'): string;
 }
-
 interface TestResult {
   name: string;
   pass: boolean;
@@ -307,6 +312,196 @@ const orderOf = (clusters: readonly MeasurePinCluster[]): string =>
       !injected('scanAnalogCodes') && !injected('measurementStats') &&
       !injected('section.allRows'),
     `bytes=${sourceText.length}, forbidden needles rejected=4/4, constant=${usesDefaultConstant(sourceText)}`);
+}
+
+function labelOf(parameter: MeasurementParameter): string {
+  return t(catalogEntry(parameter).labelKey as MessageKey);
+}
+
+function pinOf(
+  start: number, parameter: MeasurementParameter, value: string, status = '',
+): BusCellMeasurePin {
+  return { key: `${start}:${parameter}`, label: labelOf(parameter), value, status };
+}
+
+function measuresOf(
+  pins: readonly BusCellMeasurePin[], foldCount = 0, summary = 'A0 summary',
+): BusCellMeasures {
+  return { sourceStart: 0, pins, foldCount, summary };
+}
+
+function analogCellOf(id: string, measures?: BusCellMeasures): BusCell {
+  return {
+    id, name: 'A0', summary: 'D0-D7', color: '#3366cc', heightCss: 160,
+    analog: true, showHeight: true, gain: 1,
+    ...(measures === undefined ? {} : { measures }),
+  };
+}
+
+const directText = (el: FakeElement): string => el.childNodes
+  .filter((node) => typeof (node as FakeElement).matches !== 'function')
+  .map((node) => node.textContent).join('');
+
+const shapeOf = (el: FakeElement): string =>
+  `${el.localName}.${el.className}[${el.style['height'] ?? ''}](${el.children
+    .filter((child) => !child.matches('[data-measure-pins]'))
+    .map((child) => shapeOf(child)).join(',')})${directText(el)}`;
+
+{
+  const doc = installFakeDom();
+  (globalThis as Record<string, unknown>)['window'] = { innerWidth: 1200, innerHeight: 800 };
+  const root = doc.createElement('div');
+  doc.body.appendChild(root);
+  const folds: [string, number][] = [];
+  const list = new ChannelList(root as unknown as HTMLElement, {
+    onConfigure: () => {},
+    onReorder: () => {},
+    onMeasurePinFold: (id, start) => folds.push([id, start]),
+  });
+  const THREE = [
+    pinOf(0, 'frequency', '9.9996 kHz'),
+    pinOf(0, 'vpp', '171 mV'),
+    pinOf(0, 'rms', '32.7 mV'),
+  ];
+  const cluster = (): FakeElement | null =>
+    root.querySelector('[data-bus-id="bus-0"] [data-measure-pins]');
+  const chips = (): FakeElement[] =>
+    root.querySelectorAll('[data-measure-pin-key]');
+
+  list.renderBuses([analogCellOf('bus-0', measuresOf(THREE, 0, 'A0 measurements'))]);
+  const three = cluster();
+  const threeChips = chips();
+  check('an analog card draws one text chip per pin under one accessible group summary',
+    three !== null && three.getAttribute('role') === 'group' &&
+      three.getAttribute('aria-label') === 'A0 measurements' &&
+      threeChips.length === 3 &&
+      threeChips.map((chip) => chip.getAttribute('data-measure-pin-key')).join(',') ===
+        '0:frequency,0:vpp,0:rms' &&
+      threeChips.map((chip) => chip.textContent).join('|') ===
+        THREE.map(measurePinChipText).join('|') &&
+      threeChips.every((chip) => chip.localName === 'span') &&
+      threeChips.every((chip) => chip.getAttribute('tabindex') === null) &&
+      threeChips.every((chip) => chip.getAttribute('role') === null) &&
+      three.getAttribute('tabindex') === null &&
+      three.querySelector('.bus-measure-fold') === null,
+    `chips=${threeChips.map((chip) => `${chip.localName}:${chip.textContent}`).join(',')}, ` +
+      `summary=${three?.getAttribute('aria-label') ?? 'none'}`);
+
+  list.renderBuses([analogCellOf('bus-0', measuresOf(THREE, 2, 'A0 folded'))]);
+  const fold = cluster()?.querySelector('.bus-measure-fold') ?? null;
+  const foldName = t('channels.measureFold', { count: 2 });
+  const beforeFold = folds.length;
+  fold?.click();
+  check('the fourth and later parameters fold into one named button',
+    fold !== null && fold.textContent === '+2' && fold.localName === 'button' &&
+      fold.getAttribute('data-measure-fold') === '0' &&
+      fold.getAttribute('aria-label') === foldName && fold.title === foldName &&
+      folds.length === beforeFold + 1 && folds[beforeFold]![0] === 'bus-0' &&
+      folds[beforeFold]![1] === 0,
+    `fold=${fold?.textContent ?? 'none'}, name=${foldName}, folds=${JSON.stringify(folds)}`);
+
+  list.renderBuses([analogCellOf('bus-0', measuresOf([pinOf(0, 'vpp', '171 mV')]))]);
+  const oneChip = chips().length;
+  const noFold = cluster()?.querySelector('.bus-measure-fold') ?? null;
+  list.renderBuses([analogCellOf('bus-0')]);
+  const absent = root.querySelector('[data-measure-pins]');
+  list.renderBuses([analogCellOf('bus-0', measuresOf(THREE))]);
+  const cardShapeWithPins = shapeOf(root.querySelector('.bus-cell[data-bus-id="bus-0"]')!);
+  list.renderBuses([analogCellOf('bus-0')]);
+  const cardShapeWithout = shapeOf(root.querySelector('.bus-cell[data-bus-id="bus-0"]')!);
+  const cellWithPins = (() => {
+    list.renderBuses([analogCellOf('bus-0', measuresOf(THREE))]);
+    return root.querySelector('.bus-cell[data-bus-id="bus-0"]')!;
+  })();
+  const clusterNode = cellWithPins.querySelector('[data-measure-pins]');
+  check('the cluster is absent, not hidden, when no pin may be drawn and never enters the card',
+    oneChip === 1 && noFold === null && absent === null &&
+      cardShapeWithPins === cardShapeWithout &&
+      clusterNode !== null && clusterNode.parentNode === cellWithPins &&
+      cellWithPins.querySelector('.ch-card')?.querySelector('[data-measure-pins]') === null &&
+      cellWithPins.style['height'] === '160px',
+    `one=${oneChip}, noFold=${noFold === null}, absent=${absent === null}, ` +
+      `equal=${cardShapeWithPins === cardShapeWithout}, pinned=${clusterNode !== null}`);
+
+  const update = (pins: readonly BusCellMeasurePin[], foldCount = 0): BusMeasurePins => ({
+    busId: 'bus-0', sourceStart: 0, pins, foldCount, summary: 'A0 updated',
+  });
+  list.renderBuses([analogCellOf('bus-0', measuresOf(THREE))]);
+  const nodeBefore = chips()[1]!;
+  const nextPin = pinOf(0, 'vpp', '1.20 V', 'partial: 2 of 4 samples');
+  const next = [THREE[0]!, nextPin, THREE[2]!];
+  list.updateMeasurePins([update(next)]);
+  const nodeAfter = chips()[1]!;
+  const rewritten = nodeAfter.textContent;
+  list.updateMeasurePins([update([THREE[0]!, pinOf(0, 'duty', '50 %'), THREE[2]!])]);
+  const keptOnKeyChange = chips()[1]!.textContent === rewritten;
+  list.updateMeasurePins([update(next, 2)]);
+  const foldNotCreated = cluster()?.querySelector('.bus-measure-fold') === null;
+  list.updateMeasurePins([{ ...update(next), busId: 'bus-404' }]);
+  const untouchedOther = chips().length === 3 && chips()[1]!.textContent === rewritten;
+  list.updateMeasurePins([update(next)]);
+  check('the text refresh rewrites existing chips in place and leaves any other shape alone',
+    nodeAfter === nodeBefore && rewritten === measurePinChipText(nextPin) &&
+      rewritten.includes('partial: 2 of 4 samples') &&
+      cluster()?.getAttribute('aria-label') === 'A0 updated' &&
+      keptOnKeyChange && foldNotCreated && untouchedOther &&
+      chips().length === 3,
+    `same=${nodeAfter === nodeBefore}, text=${rewritten}, kept=${keptOnKeyChange}, ` +
+      `fold=${foldNotCreated}, other=${untouchedOther}`);
+}
+
+{
+  const appSource = fs.readFileSync('src/ui/app.ts', 'utf8');
+  const start = appSource.indexOf('private measurePinCells(): BusMeasurePins[] {');
+  const end = appSource.indexOf('private configureAnalogTrigger(');
+  const pinCells = start < 0 || end <= start ? '' : appSource.slice(start, end);
+  const gate = "!this.measurePageShown() || !this.analogScopeActive() || this.viewMode !== 'time'";
+  const gates = (text: string): boolean => text.includes(gate);
+  const calls = appSource.split('this.channelList.updateMeasurePins(this.measurePinCells());').length - 1;
+  const clusters = appSource.split('measurePinClusters(section, this.measureBandRefs())').length - 1;
+  const paired = appSource.split(
+    'this.capturePanel.updateMeasurements(this.measurementView());\n        ' +
+      'this.channelList.updateMeasurePins(this.measurePinCells());').length - 1;
+  const pairedStopped = appSource.split(
+    'this.capturePanel.updateMeasurements(this.measurementView());\n      ' +
+      'this.channelList.updateMeasurePins(this.measurePinCells());').length - 1;
+  check('App derives the pins once per pass behind the page, gate and Time-view predicate',
+    pinCells.length > 0 && gates(pinCells) &&
+      !gates(pinCells.split('this.viewMode !== \'time\'').join('true')) &&
+      !gates(pinCells.replace(" || this.viewMode !== 'time'", '')) &&
+      !gates(pinCells.replace('!this.measurePageShown() || ', '')) &&
+      !gates(pinCells.replace('!this.analogScopeActive() || ', '')) &&
+      clusters === 1 &&
+      appSource.includes('pins.get(bus.id)') &&
+      appSource.includes('cells.push(measures === undefined ? cell : { ...cell, measures });') &&
+      calls === 2 && paired === 1 && pairedStopped === 1,
+    `gate=${gates(pinCells)}, clusters=${clusters}, calls=${calls}, ` +
+      `clock=${paired}, stopped=${pairedStopped}`);
+
+  const valueRule = "value: row === undefined\n            ? t('capturePanel.measureValueNone') : measurementValueText(row),";
+  const statusRule =
+    "status: row !== undefined && row.status !== 'ok' ? measurementStatusText(row) : '',";
+  const composes = pinCells.includes(valueRule) && pinCells.includes(statusRule) &&
+    pinCells.split('measurementValueText(').length - 1 === 1 &&
+    pinCells.split('measurementStatusText(').length - 1 === 1;
+  const valueControl = composes && !pinCells.replace(valueRule,
+    "value: measurementRowEligible(row) ? measurementValueText(row) : '-',").includes(valueRule);
+  const statusControl = composes &&
+    !pinCells.replace(statusRule, "status: '',").includes(statusRule);
+  check('a pin prints the section value text and the status word only when the row is not ok',
+    composes && valueControl && statusControl && !pinCells.includes('measurementRowEligible'),
+    `value=${pinCells.includes(valueRule)}, status=${pinCells.includes(statusRule)}, ` +
+      `controls=${[valueControl, statusControl].join('/')}`);
+
+  const payload = 'measure-plot-pins';
+  const files = ['src/ui/app.ts', 'src/ui/channelList.ts', 'src/ui/capturePanel.ts',
+    'src/ui/style.css', 'src/ui/measurePins.ts'];
+  const carriesPayload = (text: string): boolean => text.includes(payload);
+  const leftover = files.filter((path) => carriesPayload(fs.readFileSync(path, 'utf8')));
+  const synthetic = `// TO${'DO'}(${payload}): draw later`;
+  check('no placeholder marker for this task survives in the pin surfaces',
+    leftover.length === 0 && carriesPayload(synthetic) && !carriesPayload('measured output'),
+    `leftover=${leftover.join(',') || 'none'}, control=${carriesPayload(synthetic)}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
