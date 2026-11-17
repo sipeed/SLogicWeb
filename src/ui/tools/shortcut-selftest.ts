@@ -447,7 +447,7 @@ function groupListProblem(
       'view.zoomOut|shortcuts.zoomOut;view.panLeft|shortcuts.panLeft;view.panRight|shortcuts.panRight;' +
       'view.panLeftPage|shortcuts.panPage;view.panRightPage|shortcuts.panPage;' +
       'theme.next|shortcuts.theme;' +
-      'sidebar.capture|shortcuts.sidebarCapture;sidebar.cursors|shortcuts.sidebarCursors;' +
+      'sidebar.capture|shortcuts.sidebarCapture;sidebar.cursors|shortcuts.sidebarMeasure;' +
       'sidebar.decoders|shortcuts.sidebarDecoders;sidebar.toggle|shortcuts.sidebarToggle;' +
       'decoders.add|shortcuts.addDecoder',
     `rows=${rows}`);
@@ -564,10 +564,11 @@ function gestureReferenceMatches(
   const page = (id: string, target: string): string =>
     `      case '${id}':\n        this.applySidebar(selectSidebarPage(this.sidebar, '${target}'));\n` +
     '        return true;\n';
-  const mapping = ['capture', 'cursors', 'decoders']
-    .map((target) => page(`sidebar.${target}`, target)).join('');
+  const pages: [string, string][] = [['capture', 'capture'], ['cursors', 'measure'], ['decoders', 'decoders']];
+  const mapping = pages.map(([id, target]) => page(`sidebar.${id}`, target)).join('');
   check('each page chord applies the one sidebar side effect the tab strip uses',
     shortcuts.includes(mapping) &&
+    !shortcuts.includes(page('sidebar.cursors', 'cursors')) &&
     shortcuts.includes("      case 'sidebar.toggle':\n" +
       '        if (this.sidebar.visible) this.handleCollapse();\n        else this.handleExpand();\n'),
     `mapping=${mapping.length}, body=${shortcuts.length}`);
@@ -680,19 +681,20 @@ const SHORTCUT_KEY_VALUES: ReadonlyArray<readonly [MessageKey, readonly [string,
     'Добавить декодер протокола', 'Ajouter un décodeur de protocole']],
   ['shortcuts.theme', ['Switch theme', '切换主题', 'Сменить тему', 'Changer de thème']],
   ['shortcuts.sidebarCapture', ['Capture panel', '采集面板', 'Панель захвата', 'Panneau Capture']],
-  ['shortcuts.sidebarCursors', ['Cursors panel', '光标面板', 'Панель курсоров', 'Panneau Curseurs']],
+  ['shortcuts.sidebarMeasure', ['Measure panel', '测量面板', 'Панель измерений', 'Panneau Mesures']],
   ['shortcuts.sidebarDecoders', ['Decoders panel', '解码器面板', 'Панель декодеров',
     'Panneau Décodeurs']],
   ['shortcuts.sidebarToggle', ['Show or hide the sidebar', '显示或隐藏侧栏',
     'Показать или скрыть боковую панель', 'Afficher ou masquer la barre latérale']],
 ];
 
-const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = [
-  ['en', (key) => en[key]],
-  ['zh-CN', (key) => zhCN[key]],
-  ['ru', (key) => ru[key]],
-  ['fr', (key) => fr[key]],
+const CATALOG_RECORDS: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]> = [
+  ['en', en], ['zh-CN', zhCN], ['ru', ru], ['fr', fr],
 ];
+
+const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> =
+  CATALOG_RECORDS.map(([locale, catalog]) =>
+    [locale, (key: MessageKey) => catalog[key]] as const);
 
 {
   const drift: string[] = [];
@@ -710,13 +712,54 @@ const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = 
       : drift.join('; '));
 }
 
+const RETIRED_SIDEBAR_SHORTCUT_KEY = 'shortcuts.sidebarCursors';
+const RETIRED_SIDEBAR_SHORTCUT_COPY: readonly string[] = [
+  'Cursors panel', '光标面板', 'Панель курсоров', 'Panneau Curseurs',
+];
+
+const retiredShortcutKeyLocales = (
+  catalogs: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]>,
+): string[] => catalogs
+  .filter(([, catalog]) => Object.hasOwn(catalog, RETIRED_SIDEBAR_SHORTCUT_KEY))
+  .map(([locale]) => locale);
+
+const retiredShortcutCopyLocales = (
+  catalogs: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]>,
+): string[] => catalogs
+  .filter(([, catalog]) => Object.values(catalog).some((text) =>
+    RETIRED_SIDEBAR_SHORTCUT_COPY.includes(text)))
+  .map(([locale]) => locale);
+
+{
+  const resolving = retiredShortcutKeyLocales(CATALOG_RECORDS);
+  const copied = retiredShortcutCopyLocales(CATALOG_RECORDS);
+  const labeled = SHORTCUTS.filter((entry) =>
+    (entry.labels as readonly string[]).includes(RETIRED_SIDEBAR_SHORTCUT_KEY)).map((entry) => entry.id);
+  const pageRow = SHORTCUTS.find((entry) => entry.id === 'sidebar.cursors');
+  const staleKey: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]> =
+    [['en', { [RETIRED_SIDEBAR_SHORTCUT_KEY]: 'Cursors panel' }]];
+  const staleCopy: ReadonlyArray<readonly [string, Readonly<Record<string, string>>]> =
+    [['en', { 'shortcuts.sidebarMeasure': 'Cursors panel' }]];
+  check('the page shortcut names the measure page and the retired cursor key and copy resolve nowhere',
+    resolving.length === 0 && copied.length === 0 && labeled.length === 0 &&
+    pageRow?.labels.join(',') === 'shortcuts.sidebarMeasure' &&
+    retiredShortcutKeyLocales(staleKey).length === 1 &&
+    retiredShortcutCopyLocales(staleCopy).length === 1,
+    `resolving=${JSON.stringify(resolving)}, copied=${JSON.stringify(copied)}, ` +
+    `labeled=${JSON.stringify(labeled)}, row=${pageRow?.labels.join(',')}; ` +
+    `red if a catalog regains ${RETIRED_SIDEBAR_SHORTCUT_KEY} or one of ` +
+    `${JSON.stringify(RETIRED_SIDEBAR_SHORTCUT_COPY)}, or the ${pageRow?.id} row is relabeled ` +
+    `(control: stale key=${retiredShortcutKeyLocales(staleKey).length}, ` +
+    `stale copy=${retiredShortcutCopyLocales(staleCopy).length})`);
+}
+
 {
   const texts = SHORTCUTS.map((entry) => shortcutActionText(entry));
   const capture = SHORTCUTS.find((entry) => entry.id === 'capture.toggle')!;
   check('the reference action text joins the labeled catalog keys with the two-label separator',
     texts.join(' | ') === 'Open… | Save… | Settings | Capture / Stop | Fit | Clear cursors | ' +
       'Zoom to the cursor interval | Zoom in | Zoom out | Pan left (earlier) | Pan right (later) | Pan by half a screen | ' +
-      'Pan by half a screen | Switch theme | Capture panel | Cursors panel | Decoders panel | ' +
+      'Pan by half a screen | Switch theme | Capture panel | Measure panel | Decoders panel | ' +
       'Show or hide the sidebar | Add a protocol decoder' &&
     capture.labels.length === 2 && t('toolbar.start') === 'Capture',
     `texts=${texts.join(' | ')}`);

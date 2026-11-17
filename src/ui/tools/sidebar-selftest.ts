@@ -52,11 +52,21 @@ const describe = (s: SidebarState): string =>
 {
   const order = SIDEBAR_PAGES.join(',');
   const defaults = DEFAULT_SIDEBAR_STATE;
+  const stripOrder = (pages: readonly string[]): boolean =>
+    pages.length === SIDEBAR_PAGES.length &&
+    pages.every((page, index) => page === SIDEBAR_PAGES[index]);
+  const RETIRED_PAGE = 'cursors';
+  const retiredProbe = ['capture', RETIRED_PAGE, 'decoders'];
+  const retiredRejected = !stripOrder(retiredProbe) &&
+    !(SIDEBAR_PAGES as readonly string[]).includes(RETIRED_PAGE);
   check('three pages in strip order with a visible capture page and no assistant',
-    order === 'capture,cursors,decoders' &&
+    order === 'capture,measure,decoders' && stripOrder(SIDEBAR_PAGES) && retiredRejected &&
     SIDEBAR_PAGES.length === 3 &&
     defaults.visible === true && defaults.page === 'capture' && defaults.assistant === false,
-    `order=${order}, count=${SIDEBAR_PAGES.length}, defaults=${describe(defaults)}`);
+    `order=${order}, count=${SIDEBAR_PAGES.length}, defaults=${describe(defaults)}, ` +
+    `retiredRejected=${retiredRejected} (red if ${JSON.stringify(retiredProbe)} stays accepted ` +
+    `by stripOrder or ${RETIRED_PAGE} rejoins SIDEBAR_PAGES, i.e. a control that fails when ` +
+    `the probe list equals SIDEBAR_PAGES)`);
 }
 
 {
@@ -91,12 +101,12 @@ const describe = (s: SidebarState): string =>
 
 {
   const opener = toggleSidebarVisible(state(true, 'decoders', false));
-  const closer = toggleSidebarVisible(state(true, 'cursors', true));
+  const closer = toggleSidebarVisible(state(true, 'measure', true));
   const reopened = toggleSidebarVisible(closer);
   check('the visibility toggle flips only visible and keeps page and assistant',
     opener.visible === false && opener.page === 'decoders' && opener.assistant === false &&
-    closer.visible === false && closer.page === 'cursors' && closer.assistant === true &&
-    reopened.visible === true && reopened.page === 'cursors' && reopened.assistant === true,
+    closer.visible === false && closer.page === 'measure' && closer.assistant === true &&
+    reopened.visible === true && reopened.page === 'measure' && reopened.assistant === true,
     `open=${describe(opener)}, close=${describe(closer)}, reopen=${describe(reopened)}`);
 }
 
@@ -141,9 +151,9 @@ const describe = (s: SidebarState): string =>
       failures.push(`${page} close-collapsed => ${describe(closedCollapsed)}`);
     }
   }
-  const roundTrip = toggleAssistant(toggleAssistant(state(true, 'cursors', false)));
+  const roundTrip = toggleAssistant(toggleAssistant(state(true, 'measure', false)));
   check('the assistant toggle opens the dock, keeps the page, and returns to that page on close',
-    failures.length === 0 && roundTrip.page === 'cursors' && !roundTrip.assistant && roundTrip.visible,
+    failures.length === 0 && roundTrip.page === 'measure' && !roundTrip.assistant && roundTrip.visible,
     failures.length === 0 ? `roundTrip=${describe(roundTrip)}` : `failed=${JSON.stringify(failures)}`);
 }
 
@@ -177,11 +187,12 @@ const describe = (s: SidebarState): string =>
 {
   const accepted: [string, SidebarPage][] = [
     ['capture', 'capture'],
-    ['cursors', 'cursors'],
+    ['measure', 'measure'],
     ['decoders', 'decoders'],
     ['device', 'capture'],
     ['analyzers', 'decoders'],
   ];
+  const retiredAnswer = String(parseSidebarPage('cursors')) === 'cursors';
   const rejected: [string, unknown][] = [
     ['assistant', 'assistant'],
     ['empty', ''],
@@ -199,10 +210,11 @@ const describe = (s: SidebarState): string =>
   ];
   const badAccepted = accepted.filter(([raw, want]) => parseSidebarPage(raw) !== want);
   const badRejected = rejected.filter(([, raw]) => parseSidebarPage(raw) !== null);
-  check('the guard accepts the three literals plus the two legacy aliases and rejects everything else',
-    badAccepted.length === 0 && badRejected.length === 0,
+  check('the guard accepts the three page literals with the retired page aliased to measure, plus the two legacy aliases, and rejects everything else',
+    badAccepted.length === 0 && badRejected.length === 0 && !retiredAnswer &&
+    parseSidebarPage('cursors') === 'measure',
     badAccepted.length === 0 && badRejected.length === 0
-      ? `${accepted.length} accepted, ${rejected.length} rejected`
+      ? `${accepted.length} accepted, ${rejected.length} rejected, cursors=>${parseSidebarPage('cursors')}`
       : `acceptedFailures=${JSON.stringify(badAccepted)}, rejectedFailures=${JSON.stringify(badRejected.map(([label]) => label))}`);
 }
 
@@ -230,7 +242,7 @@ const describe = (s: SidebarState): string =>
 }
 
 {
-  const visibleTabs = sidebarTabs(state(true, 'cursors', false));
+  const visibleTabs = sidebarTabs(state(true, 'measure', false));
   const hiddenTabs = sidebarTabs(state(false, 'decoders', false));
   const assistantTabs = sidebarTabs(state(true, 'decoders', true));
   const tabLabel = (tabs: readonly { page: SidebarPage; labelKey: string; selected: boolean }[]): string =>
@@ -239,15 +251,16 @@ const describe = (s: SidebarState): string =>
     tabs.filter((t) => t.selected).map((t) => t.page).join(',');
   check('tabs follow the strip order with the catalog label keys and exactly one selected when visible',
     tabLabel(visibleTabs) ===
-      'capture:sidebar.pageCapture:false|cursors:sidebar.pageCursors:true|decoders:sidebar.pageDecoders:false' &&
+      'capture:sidebar.pageCapture:false|measure:sidebar.pageMeasure:true|decoders:sidebar.pageDecoders:false' &&
     tabLabel(assistantTabs) ===
-      'capture:sidebar.pageCapture:false|cursors:sidebar.pageCursors:false|decoders:sidebar.pageDecoders:true' &&
-    selectedPages(visibleTabs) === 'cursors' && selectedPages(assistantTabs) === 'decoders',
+      'capture:sidebar.pageCapture:false|measure:sidebar.pageMeasure:false|decoders:sidebar.pageDecoders:true' &&
+    selectedPages(visibleTabs) === 'measure' && selectedPages(assistantTabs) === 'decoders' &&
+    !tabLabel(visibleTabs).includes('cursors') && !tabLabel(visibleTabs).includes('sidebar.pageCursors'),
     `visible=${tabLabel(visibleTabs)}, assistant=${tabLabel(assistantTabs)}`);
   check('a collapsed dock selects no tab',
     hiddenTabs.length === 3 && selectedPages(hiddenTabs) === '' &&
     tabLabel(hiddenTabs) ===
-      'capture:sidebar.pageCapture:false|cursors:sidebar.pageCursors:false|decoders:sidebar.pageDecoders:false',
+      'capture:sidebar.pageCapture:false|measure:sidebar.pageMeasure:false|decoders:sidebar.pageDecoders:false',
     `hidden=${tabLabel(hiddenTabs)}`);
 }
 
@@ -548,11 +561,11 @@ const describe = (s: SidebarState): string =>
   const retiredToolbar = ['btn-sidebar', 'sidebar-menu'].filter((token) => html.includes(token));
   const wiring = [
     'new SidebarHost(this.el.side, {',
-    "this.sidebarHost.containerFor('cursors');",
+    "this.sidebarHost.containerFor('measure');",
     "this.sidebarHost.containerFor('capture');",
     "this.sidebarHost.containerFor('decoders');",
     'mount: (page, container) => this.mountSidebarPage(page, container),',
-    "cursors: this.sidebarHost.containerFor('cursors'),",
+    "measure: this.sidebarHost.containerFor('measure'),",
     'this.capturePanel.render(this.capturePanelView());',
     'this.sidebarHost.show(this.sidebar);',
     'this.sidebarHost.focusAfterCollapse();',

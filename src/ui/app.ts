@@ -973,7 +973,7 @@ export class App {
       collapse: () => this.handleCollapse(),
       expand: () => this.handleExpand(),
     });
-    this.sidebarHost.containerFor('cursors');
+    this.sidebarHost.containerFor('measure');
     this.sidebarHost.containerFor('capture');
     this.sidebarHost.containerFor('decoders');
 
@@ -1383,7 +1383,7 @@ export class App {
 
   private recordMeasurementWave(reason: CaptureStopReason): void {
     const store = this.captureStore;
-    const visible = this.cursorsPageShown() && this.viewMode === 'time';
+    const visible = this.measurePageShown() && this.viewMode === 'time';
     const rows: MeasurementWaveRow[] = [];
     if (visible) {
       const view = this.measurementView();
@@ -1691,7 +1691,7 @@ export class App {
     const entry = this.measurementCapture;
     if (entry === null || entry.job.status !== 'running') return;
     if (this.viewMode !== 'time') return;
-    if (!this.cursorsPageShown()) return;
+    if (!this.measurePageShown()) return;
     const store = entry.store;
     if (store !== this.captureStore) {
       entry.job.cancel();
@@ -4207,7 +4207,7 @@ export class App {
         this.xyPending = true;
         this.dirty = true;
       }
-      if (this.running && this.cursorsPageShown()) {
+      if (this.running && this.measurePageShown()) {
         this.capturePanel.updateMeasurements(this.measurementView());
         persistencePanelDue = true;
       }
@@ -4264,7 +4264,7 @@ export class App {
     if (!this.dirty && !liveDue) return;
     const forced = this.dirty;
     this.dirty = false;
-    if (forced && !this.running && this.cursorsPageShown()) {
+    if (forced && !this.running && this.measurePageShown()) {
       this.capturePanel.updateMeasurements(this.measurementView());
     }
     this.livePending = false;
@@ -4277,7 +4277,7 @@ export class App {
     } finally {
       this.recordFrameCost(performance.now() - drawStartedAt, liveDue);
     }
-    if (persistencePanelDue || (forced && !this.running && this.cursorsPageShown())) {
+    if (persistencePanelDue || (forced && !this.running && this.measurePageShown())) {
       this.capturePanel.updatePersistence(this.persistenceView());
     }
   };
@@ -4857,8 +4857,8 @@ export class App {
         });
         if (consumed) {
           if (cursor.marker.started) this.activeCursorId = cursor.id;
-          if (this.cursorsPageShown()) this.capturePanel.updateCursors(this.cursorRows());
-          if (this.cursorsPageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
+          if (this.measurePageShown()) this.capturePanel.updateCursors(this.cursorRows());
+          if (this.measurePageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
           this.refreshAnalogVoltages();
           this.dirty = true; return;
         }
@@ -4987,8 +4987,8 @@ export class App {
         });
         if (consumed) {
           if (cursor.marker.started) this.activeCursorId = cursor.id;
-          if (this.cursorsPageShown()) this.capturePanel.updateCursors(this.cursorRows());
-          if (this.cursorsPageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
+          if (this.measurePageShown()) this.capturePanel.updateCursors(this.cursorRows());
+          if (this.measurePageShown()) this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
           this.refreshAnalogVoltages();
           this.dirty = true;
         }
@@ -5143,7 +5143,7 @@ export class App {
         this.applySidebar(selectSidebarPage(this.sidebar, 'capture'));
         return true;
       case 'sidebar.cursors':
-        this.applySidebar(selectSidebarPage(this.sidebar, 'cursors'));
+        this.applySidebar(selectSidebarPage(this.sidebar, 'measure'));
         return true;
       case 'sidebar.decoders':
         this.applySidebar(selectSidebarPage(this.sidebar, 'decoders'));
@@ -6546,9 +6546,9 @@ export class App {
     return s.visible && s.page === 'capture';
   }
 
-  private cursorsPageShown(): boolean {
+  private measurePageShown(): boolean {
     const s = this.sidebar;
-    return s.visible && s.page === 'cursors';
+    return s.visible && s.page === 'measure';
   }
 
   private decodersPageShown(): boolean {
@@ -6589,7 +6589,7 @@ export class App {
     if (page === 'capture') {
       this.capturePanel = new CapturePanel({
         capture: container,
-        cursors: this.sidebarHost.containerFor('cursors'),
+        measure: this.sidebarHost.containerFor('measure'),
       }, {
         onSettings: (s) => this.applySettings(s),
         onToggleChannel: (i, on) => this.setChannelEnabled(i, on),
@@ -6859,7 +6859,7 @@ export class App {
       this.busPanel.render(this.busPanelView());
     }
     if (!this.sidebar.visible) return;
-    if (this.sidebar.page === 'capture' || this.sidebar.page === 'cursors') {
+    if (this.sidebar.page === 'capture' || this.sidebar.page === 'measure') {
       this.capturePanel.render(this.capturePanelView());
       return;
     }
@@ -8920,7 +8920,7 @@ export class App {
         this.edgeRows, new Set(this.cursors.map((cursor) => cursor.id)),
       );
       this.renderPanels();
-    } else if (shifted && this.cursorsPageShown()) {
+    } else if (shifted && this.measurePageShown()) {
       this.capturePanel.updateCursors(this.cursorRows());
       this.capturePanel.updateCursorDistances(this.cursorDistanceRows());
       this.capturePanel.updateCursorEdges(this.cursorEdgeRows());

@@ -77,7 +77,7 @@ export const zhCN: Messages = {
 
   // ---------------------------------------------------------- side panel
   'sidebar.pageCapture': '采集',
-  'sidebar.pageCursors': '光标',
+  'sidebar.pageMeasure': '测量',
   'sidebar.pageDecoders': '解码器',
   'sidebar.pagesLabel': '侧栏页面',
   'sidebar.collapse': '收起侧栏',
@@ -1009,7 +1009,7 @@ export const zhCN: Messages = {
   'shortcuts.save': '保存…',
   'shortcuts.settings': '设置',
   'shortcuts.sidebarCapture': '采集面板',
-  'shortcuts.sidebarCursors': '光标面板',
+  'shortcuts.sidebarMeasure': '测量面板',
   'shortcuts.sidebarDecoders': '解码器面板',
   'shortcuts.sidebarToggle': '显示或隐藏侧栏',
   'shortcuts.group.file': '文件',

@@ -79,7 +79,7 @@ export const ru: Messages = {
 
   // ---------------------------------------------------------- side panel
   'sidebar.pageCapture': 'Захват',
-  'sidebar.pageCursors': 'Курсоры',
+  'sidebar.pageMeasure': 'Измерения',
   'sidebar.pageDecoders': 'Декодеры',
   'sidebar.pagesLabel': 'Страницы панели',
   'sidebar.collapse': 'Свернуть боковую панель',
@@ -1055,7 +1055,7 @@ export const ru: Messages = {
   'shortcuts.save': 'Сохранить…',
   'shortcuts.settings': 'Настройки',
   'shortcuts.sidebarCapture': 'Панель захвата',
-  'shortcuts.sidebarCursors': 'Панель курсоров',
+  'shortcuts.sidebarMeasure': 'Панель измерений',
   'shortcuts.sidebarDecoders': 'Панель декодеров',
   'shortcuts.sidebarToggle': 'Показать или скрыть боковую панель',
   'shortcuts.group.file': 'Файл',

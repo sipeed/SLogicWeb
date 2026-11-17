@@ -595,7 +595,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const cb = {} as CapturePanelCallbacks;
   const target = new CapturePanel({
     capture: capture as unknown as HTMLElement,
-    cursors: cursors as unknown as HTMLElement,
+    measure: cursors as unknown as HTMLElement,
   }, cb);
   const vpp = rowView({
     id: 1, parameter: 'vpp', unit: 'v', value: 21.4588, crossingCount: 0,
@@ -754,7 +754,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   makeRow(6);
   const target = new CapturePanel({
     capture: root as unknown as HTMLElement,
-    cursors: doc.createElement('div') as unknown as HTMLElement,
+    measure: doc.createElement('div') as unknown as HTMLElement,
   }, {} as CapturePanelCallbacks);
   target.updateMeasurements(sectionView({
     rows: [
@@ -1138,7 +1138,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     const end = source.indexOf('now - this.runningPanelAt > 500');
     const body = at < 0 || end < 0 ? '' : source.slice(at, end);
     return body.includes('this.analysisPanelAt = now;') &&
-      body.includes('this.running && this.cursorsPageShown()') &&
+      body.includes('this.running && this.measurePageShown()') &&
       body.includes('this.capturePanel.updateMeasurements(this.measurementView());') &&
       !body.includes('this.runningPanelAt = now;') &&
       !body.includes('updateProgress') && !body.includes('updateTriggerStatus');
@@ -1156,19 +1156,19 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     !independent(shared) && !independent(reused),
     `shared=${independent(shared)}, reused=${independent(reused)}`);
 
-  const forcedAt = frame.indexOf('if (forced && !this.running && this.cursorsPageShown()) {');
+  const forcedAt = frame.indexOf('if (forced && !this.running && this.measurePageShown()) {');
   const clearedAt = frame.indexOf('this.dirty = false;');
   const forcedRefresh = (source: string): boolean => {
-    const at = source.indexOf('if (forced && !this.running && this.cursorsPageShown()) {');
+    const at = source.indexOf('if (forced && !this.running && this.measurePageShown()) {');
     const cleared = source.indexOf('this.dirty = false;');
     return at >= 0 && cleared >= 0 && at > cleared &&
       source.slice(at, at + 200).includes(
         'this.capturePanel.updateMeasurements(this.measurementView());');
   };
-  const gatedOff = frame.replace('if (forced && !this.running && this.cursorsPageShown()) {',
+  const gatedOff = frame.replace('if (forced && !this.running && this.measurePageShown()) {',
     'if (false) {');
   const movedFirst = frame.replace('this.dirty = false;',
-    'if (forced && !this.running && this.cursorsPageShown()) {' +
+    'if (forced && !this.running && this.measurePageShown()) {' +
     ' this.capturePanel.updateMeasurements(this.measurementView()); } this.dirty = false;');
   check('a stopped session refreshes measurements on the drawing gesture, not a clock',
     clearedAt >= 0 && forcedAt > clearedAt && forcedRefresh(frame) &&
@@ -1435,7 +1435,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   doc.body.appendChild(dialog);
   panel = new CapturePanel({
     capture: capture as unknown as HTMLElement,
-    cursors: cursors as unknown as HTMLElement,
+    measure: cursors as unknown as HTMLElement,
   }, {
     onRemoveMeasurementRow: (id: number) => {
       if (openDialogFirst) {
@@ -1803,7 +1803,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   });
   const panel = new CapturePanel({
     capture: capture as unknown as HTMLElement,
-    cursors: cursors as unknown as HTMLElement,
+    measure: cursors as unknown as HTMLElement,
   }, {
     onCancelMeasurementCapture: () => { scans += 1; state = 'cancelled'; render(); },
     onRestartMeasurementCapture: () => { scans += 1; state = 'running'; render(); },
@@ -1943,7 +1943,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const resets: string[] = [];
   const target = new CapturePanel({
     capture: capture as unknown as HTMLElement,
-    cursors: cursors as unknown as HTMLElement,
+    measure: cursors as unknown as HTMLElement,
   }, {
     onResetMeasurementStats: (rowId: number) => resets.push(`row:${rowId}`),
     onResetAllMeasurementStats: () => resets.push('all'),

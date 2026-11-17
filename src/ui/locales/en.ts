@@ -83,7 +83,7 @@ export const en = {
 
   // ---------------------------------------------------------- side panel
   'sidebar.pageCapture': 'Capture',
-  'sidebar.pageCursors': 'Cursors',
+  'sidebar.pageMeasure': 'Measure',
   'sidebar.pageDecoders': 'Decoders',
   'sidebar.pagesLabel': 'Sidebar pages',
   'sidebar.collapse': 'Collapse sidebar',
@@ -1065,7 +1065,7 @@ export const en = {
   'shortcuts.save': 'Save…',
   'shortcuts.settings': 'Settings',
   'shortcuts.sidebarCapture': 'Capture panel',
-  'shortcuts.sidebarCursors': 'Cursors panel',
+  'shortcuts.sidebarMeasure': 'Measure panel',
   'shortcuts.sidebarDecoders': 'Decoders panel',
   'shortcuts.sidebarToggle': 'Show or hide the sidebar',
   'shortcuts.group.file': 'File',

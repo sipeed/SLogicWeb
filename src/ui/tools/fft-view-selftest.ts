@@ -533,7 +533,7 @@ function sectionOf(analysis: FftAnalysis | null, over: Partial<FftSectionView> =
   const persist = slice(app, 'private submitPersistenceWave(', 'private clearPersistence(');
   check('statistics, the capture job and Persistence all read the real view mode',
     pump.includes("if (this.viewMode !== 'time') return;") &&
-      record.includes("this.cursorsPageShown() && this.viewMode === 'time'") &&
+      record.includes("this.measurePageShown() && this.viewMode === 'time'") &&
       persist.includes('viewMode: this.viewMode,') &&
       !persist.includes("viewMode: 'time',"),
     `pump=${pump.includes('viewMode')}, record=${record.includes('viewMode')}, ` +

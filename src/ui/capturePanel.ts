@@ -176,7 +176,7 @@ export interface CursorEdgeChannelView {
 
 export interface CapturePanelHost {
   capture: HTMLElement;
-  cursors: HTMLElement;
+  measure: HTMLElement;
 }
 
 export interface CapturePanelView {
@@ -387,15 +387,15 @@ export class CapturePanel {
     if (pending.kind === 'capture-cancel' || pending.kind === 'capture-restart') {
       const selector = pending.kind === 'capture-cancel'
         ? '[data-measure-capture-restart]' : '[data-measure-capture-cancel]';
-      this.host.cursors.querySelector<HTMLElement>(selector)?.focus();
+      this.host.measure.querySelector<HTMLElement>(selector)?.focus();
       return;
     }
-    const rows = this.host.cursors.querySelectorAll<HTMLElement>('.measure-row');
+    const rows = this.host.measure.querySelectorAll<HTMLElement>('.measure-row');
     const row = pending.row >= 0 && rows.length > 0
       ? rows[Math.min(pending.row, rows.length - 1)]
       : undefined;
     const target = row?.querySelector<HTMLElement>('.analyzer-act--remove') ??
-      this.host.cursors.querySelector<HTMLElement>('[data-measure-open]');
+      this.host.measure.querySelector<HTMLElement>('[data-measure-open]');
     target?.focus();
   }
 
@@ -482,7 +482,7 @@ export class CapturePanel {
 
   private *roots(): Generator<HTMLElement, void, undefined> {
     yield this.host.capture;
-    yield this.host.cursors;
+    yield this.host.measure;
   }
 
   updateProgress(progress: NonNullable<CapturePanelView['progress']>): void {
@@ -847,7 +847,7 @@ export class CapturePanel {
   render(v: CapturePanelView): void {
     const s = v.settings;
     const capture = this.host.capture;
-    const cursorPage = this.host.cursors;
+    const cursorPage = this.host.measure;
     const locked = cursorsLocked(v);
     // A ratio being typed survives a rebuild (a capture finishing mid-entry): its text is
     // kept in gainEdit and its field takes the focus back. The old field's blur, which

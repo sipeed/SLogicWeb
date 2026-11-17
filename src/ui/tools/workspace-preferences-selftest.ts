@@ -1237,16 +1237,17 @@ const stateSource = fs.readFileSync('src/ui/state.ts', 'utf8');
     parseWorkspaceSnapshot(raw(sidebar))?.sidebar?.page;
   const pageRows: [string, string, string | undefined][] = [
     ['capture', 'capture', 'capture'],
-    ['cursors', 'cursors', 'cursors'],
+    ['measure', 'measure', 'measure'],
     ['decoders', 'decoders', 'decoders'],
+    ['cursors alias', 'cursors', 'measure'],
     ['device', 'device', 'capture'],
     ['analyzers', 'analyzers', 'decoders'],
   ];
   const pageMisses = pageRows.filter(([, page, want]) => restorePage({ page }) !== want);
   check('every persisted page restores through the guard, canonicalized to the three page literals',
-    pageMisses.length === 0,
+    pageMisses.length === 0 && String(restorePage({ page: 'cursors' })) !== 'cursors',
     pageMisses.map(([label, page]) => `${label}=>${restorePage({ page })}`).join(', ') ||
-      `${pageRows.length} pages matched`);
+      `${pageRows.length} pages matched, cursors=>${restorePage({ page: 'cursors' })}`);
 
   const rejectedPages: [string, unknown][] = [
     ['null', null], ['unknown', 'assistant'], ['empty', ''], ['blank', ' '],
@@ -1294,7 +1295,9 @@ const stateSource = fs.readFileSync('src/ui/state.ts', 'utf8');
     version: WORKSPACE_SCHEMA_VERSION, sidebar: { page: 'cursors', visible: false },
   }));
   check('a snapshot carrying only the sidebar section restores the page plus bounded defaults',
-    onlySidebar?.sidebar?.page === 'cursors' && onlySidebar.sidebar.visible === false &&
+    onlySidebar?.sidebar?.page === 'measure' &&
+    String(onlySidebar.sidebar.page) !== 'cursors' &&
+    onlySidebar.sidebar.visible === false &&
     onlySidebar.detailedLabels === true && onlySidebar.channels?.length === 16 &&
     onlySidebar.order?.length === 16 && onlySidebar.busViews?.length === 0 &&
     onlySidebar.analyzers?.length === 0 &&
@@ -1310,13 +1313,15 @@ const stateSource = fs.readFileSync('src/ui/state.ts', 'utf8');
   const writeRows: [string, PersistedSidebar, unknown][] = [
     ['default capture page', { page: 'capture', visible: true }, undefined],
     ['empty section', {}, undefined],
-    ['cursors page', { page: 'cursors', visible: true }, { page: 'cursors' }],
+    ['measure page', { page: 'measure', visible: true }, { page: 'measure' }],
     ['decoders page', { page: 'decoders' }, { page: 'decoders' }],
     ['hidden capture page', { page: 'capture', visible: false }, { page: 'capture', visible: false }],
-    ['hidden cursors page', { page: 'cursors', visible: false }, { page: 'cursors', visible: false }],
+    ['hidden measure page', { page: 'measure', visible: false }, { page: 'measure', visible: false }],
+    ['cursors alias',
+      { page: 'cursors' } as unknown as PersistedSidebar, { page: 'measure' }],
     ['legacy alias', { page: 'device' } as unknown as PersistedSidebar, undefined],
     ['assistant flag',
-      { page: 'cursors', assistant: true } as unknown as PersistedSidebar, { page: 'cursors' }],
+      { page: 'measure', assistant: true } as unknown as PersistedSidebar, { page: 'measure' }],
   ];
   const writeMisses = writeRows.filter(([, sidebar, want]) =>
     JSON.stringify(serializedSidebar(sidebar)) !== JSON.stringify(want));
@@ -1325,15 +1330,21 @@ const stateSource = fs.readFileSync('src/ui/state.ts', 'utf8');
     writeMisses.map(([label, sidebar]) => `${label}=>${JSON.stringify(serializedSidebar(sidebar))}`)
       .join(', ') || `${writeRows.length} sections canonicalized`);
 
-  const cursorsRoundTrip = parseWorkspaceSnapshot(
-    serializeWorkspaceSnapshot(baseSnapshot({ page: 'cursors', visible: false })));
+  const measureRoundTrip = parseWorkspaceSnapshot(
+    serializeWorkspaceSnapshot(baseSnapshot({ page: 'measure', visible: false })));
+  const aliasRoundTrip = parseWorkspaceSnapshot(serializeWorkspaceSnapshot(
+    baseSnapshot({ page: 'cursors' } as unknown as PersistedSidebar)));
   const decodersDowngrade = parseWorkspaceSnapshot(serializeWorkspaceSnapshot(
     baseSnapshot({ page: 'decoders' })).replace(',"sidebar":{"page":"decoders"}', ''));
   check('a second build reads the page and visibility back and a build without the field still loads',
-    cursorsRoundTrip?.sidebar?.page === 'cursors' && cursorsRoundTrip.sidebar.visible === false &&
+    measureRoundTrip?.sidebar?.page === 'measure' &&
+    String(measureRoundTrip.sidebar.page) !== 'cursors' &&
+    measureRoundTrip.sidebar.visible === false &&
+    aliasRoundTrip?.sidebar?.page === 'measure' &&
     decodersDowngrade?.sidebar === undefined && decodersDowngrade?.channels?.length === 16 &&
     decodersDowngrade?.capture !== undefined,
-    `roundTrip=${JSON.stringify(cursorsRoundTrip?.sidebar)}, ` +
+    `roundTrip=${JSON.stringify(measureRoundTrip?.sidebar)}, ` +
+    `alias=${JSON.stringify(aliasRoundTrip?.sidebar)}, ` +
     `downgrade=${JSON.stringify(decodersDowngrade?.sidebar)}`);
 
   const legacyDefault = serializeWorkspaceSnapshot({

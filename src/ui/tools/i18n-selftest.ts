@@ -886,11 +886,13 @@ const baseSettings: CaptureSettings = {
     'hints.labels.rename',
     'emptyHint.example',
     'analyzerPanel.title', 'analyzerPanel.subWarm', 'analyzerPanel.subCold',
+    'sidebar.pageCursors',
+    'shortcuts.sidebarCursors',
   ];
   const dicts: Record<string, Messages> = { en, 'zh-CN': zhCN, ru, fr };
   const present = Object.entries(dicts).filter(([, dict]) =>
     retired.some((key) => Object.keys(dict).includes(key)));
-  check('the retired channel, bank, capture, capture-panel, toolbar, settings, empty-state and analyzer panel keys stay absent from every catalog',
+  check('the retired channel, bank, capture, capture-panel, toolbar, settings, empty-state, analyzer panel and sidebar page keys stay absent from every catalog',
     present.length === 0,
     present.length === 0 ? `4 catalogs omit ${retired.length} keys` : present.map(([locale]) => locale).join(', '));
 }
@@ -1235,7 +1237,7 @@ function resetCopyFailures(dicts: Record<string, Messages>): string[] {
     'channels.colorField', 'channels.hue',
     'channels.resetName',
     'channels.triggerMode', 'channels.cancel',
-    'sidebar.pageCapture', 'sidebar.pageCursors', 'sidebar.pageDecoders',
+    'sidebar.pageCapture', 'sidebar.pageMeasure', 'sidebar.pageDecoders',
     'sidebar.pagesLabel',
     'sidebar.collapse', 'sidebar.expand',
     'analyzerPanel.decoderSearchLabel',

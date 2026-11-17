@@ -79,7 +79,7 @@ export const fr: Messages = {
 
   // ---------------------------------------------------------- side panel
   'sidebar.pageCapture': 'Capture',
-  'sidebar.pageCursors': 'Curseurs',
+  'sidebar.pageMeasure': 'Mesures',
   'sidebar.pageDecoders': 'Décodeurs',
   'sidebar.pagesLabel': 'Pages latérales',
   'sidebar.collapse': 'Réduire la barre latérale',
@@ -1064,7 +1064,7 @@ export const fr: Messages = {
   'shortcuts.save': 'Enregistrer…',
   'shortcuts.settings': 'Paramètres',
   'shortcuts.sidebarCapture': 'Panneau Capture',
-  'shortcuts.sidebarCursors': 'Panneau Curseurs',
+  'shortcuts.sidebarMeasure': 'Panneau Mesures',
   'shortcuts.sidebarDecoders': 'Panneau Décodeurs',
   'shortcuts.sidebarToggle': 'Afficher ou masquer la barre latérale',
   'shortcuts.group.file': 'Fichier',
