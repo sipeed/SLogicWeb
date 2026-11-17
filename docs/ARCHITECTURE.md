@@ -324,7 +324,11 @@ a real dropout is reported through the gap API.
   Timestamps reconstruct absolute sample positions; a discontinuity becomes a `GapSpan`
   with a reason, never a silent splice.
 - `DeviceProfile` test modes are diagnostic only; they are not a supported analog voltage
-  source unless the profile says so.
+  source unless the profile says so. The UI's Software test mode is not a profile test
+  mode: it implements the same `Device.start` sample-sink contract on the page, never
+  writes a device test-mode register, never reads device samples, is usable only on a
+  profile with the analog module (the 32U3), and runs untriggered, so `softwareTrigger` is
+  not passed.
 
 ### 3.4 SimDriver
 

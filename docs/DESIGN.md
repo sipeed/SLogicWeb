@@ -867,7 +867,7 @@ Target panels (each with at most four sections):
 | Analyze | Analyzers, Buses, Results, Status |
 | Record | State, Capacity, Export, Recovery |
 | Settings | Appearance, Behaviour, Shortcuts, About |
-| Diagnostics | Test mode, USB register console (only with Settings > Developer tools on; persisted, off by default), Loop/decoder metrics |
+| Diagnostics | Test mode (Normal, test pattern, Software test, USB max-speed — Software test is host-generated and needs the 32-channel board), USB register console (only with Settings > Developer tools on; persisted, off by default), Loop/decoder metrics |
 
 On a platform without WebUSB, the Device panel states the typed reason and offers file
 replay/Demo; Capture is disabled. The rest of the interface still works on imported data.
@@ -1079,7 +1079,9 @@ polite live region, so assistive technology reads the area and hints when they c
   explains itself on hover and on keyboard focus, so the option names stay scannable.
   No implementation terms ("matcher", "local step", "wave"): say "trigger", "capture",
   "previous capture". Test mode 2 is a "test pattern", never "simulator" (confusable with
-  Analog).
+  Analog). The host-generated mode is "Software test": it needs the 32-channel board, the
+  board only arms the capture (no data is read from it), it runs untriggered, and it is a
+  demonstration rather than a measurement.
 - Threshold choices name the logic family they suit (`thresholdOptions.ts`), e.g.
   "1.65 V (3.3 V logic)"; the plain voltage is still what the device receives.
 - The Shortcuts dialog lists the keyboard keys and the mouse/touch gestures, following the
