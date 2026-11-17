@@ -163,9 +163,12 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   const measureStart = panel.indexOf('const measureSec = section(');
   const distanceStart = panel.indexOf("const distanceSec = section(t('capturePanel.cursorDistance'));");
   const edgeStart = panel.indexOf("const edgeSec = section(t('capturePanel.cursorEdges'));");
-  check('the measurement section sits second on the cursors page, between cursors and distance',
-    cursorAppend >= 0 && measureStart > cursorAppend && distanceStart > measureStart &&
-    edgeStart > distanceStart &&
+  const edgeAppend = panel.indexOf('cursorPage.appendChild(edgeSec.el)');
+  const oldOrder = measureStart > cursorAppend && distanceStart > measureStart &&
+    edgeStart > distanceStart;
+  check('the measurement section sits last on the measure page, after the edges append',
+    cursorAppend >= 0 && distanceStart > cursorAppend && edgeStart > distanceStart &&
+    edgeAppend >= 0 && measureStart > edgeAppend && !oldOrder &&
     !panel.includes('capture.appendChild(measureSec.el)'),
     `cursor=${cursorAppend}, measure=${measureStart}, distance=${distanceStart}, ` +
     `edge=${edgeStart}`);

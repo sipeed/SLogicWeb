@@ -114,13 +114,13 @@ const edgeMethodsSource = slice(app,
 {
   const cursors = [
     'cursorPage.appendChild(cursorSec.el)',
-    'cursorPage.appendChild(measureSec.el)',
     'cursorPage.appendChild(distanceSec.el)',
     'cursorPage.appendChild(edgeSec.el)',
+    'cursorPage.appendChild(measureSec.el)',
   ].map((needle) => panel.indexOf(needle));
   const ascending = cursors.every((index, i) =>
     index >= 0 && (i === 0 || index > cursors[i - 1]!));
-  check('the cursors page order is cursors, measurement, distance, edges',
+  check('the measure page order is cursors, distance, edges, measurement',
     ascending && cursors.length === 4 &&
     panel.includes("const cursorPage = this.host.cursors;") &&
     panel.includes('cursorPage.replaceChildren();'),

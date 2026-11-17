@@ -485,8 +485,8 @@ Analog channels are not bus rows. Each analog signal has a row with:
   new acquisition clears them with a visible notice; a Repeat wave inside the same
   session remaps them by the display-origin delta and keeps them.
 - Measurement rows reference named cursors; missing references are empty selects.
-- The Cursors surface keeps four sections in one order: Cursors, **Automatic
-  measurements**, Cursor distance, Edges. Automatic measurements is the second section of
+- The Measure surface keeps four sections in one order: Cursors, Cursor distance, Edges,
+  **Automatic measurements**. Automatic measurements is the last section of
   that page and the surface stays inside the four-section panel budget of §10: no sidebar
   page, tab or fifth section is added.
 - Automatic measurements read one real active ADC group as the source — a group exists
@@ -863,7 +863,7 @@ Target panels (each with at most four sections):
 | Device | Link, Profile, Notes |
 | Acquire | Acquisition, Retention, Notes |
 | Trigger | Enable/source, Conditions preview, Pre-trigger, State |
-| Measure | Cursors, Automatic measurements (range, row management, whole-capture analysis), Cursor distance, Edges |
+| Measure | Cursors, Cursor distance, Edges, Automatic measurements (range, row management, whole-capture analysis) |
 | Analyze | Analyzers, Buses, Results, Status |
 | Record | State, Capacity, Export, Recovery |
 | Settings | Appearance, Behaviour, Shortcuts, About |
