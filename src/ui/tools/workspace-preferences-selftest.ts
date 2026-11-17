@@ -6,7 +6,7 @@ import {
 } from '../workspacePreferences.js';
 import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannelName, defaultChannels,
-  modesToConditions, THRESHOLD_VOLT_OPTIONS,
+  deviceTestMode, modesToConditions, THRESHOLD_VOLT_OPTIONS, type CaptureTestMode,
 } from '../state.js';
 import { analogBusConfig, busChannelBank } from '../channelBanks.js';
 import type { BusViewConfig } from '../busView.js';
@@ -353,6 +353,35 @@ for (const capacity of [4, 8, 16, 32, 64, 128] as const) {
   check('every canonical capture/trigger field round-trips with deterministic trigger-key ordering',
     JSON.stringify(parsed?.capture) === JSON.stringify(capture),
     JSON.stringify(parsed?.capture));
+}
+
+{
+  const capture = {
+    samplerate: 25e6,
+    thresholdVolts: 1.65,
+    mode: 'single' as const,
+    seconds: 2.5,
+    repeatIntervalSeconds: 0.25,
+    loopSamples: 123_456,
+    testMode: 3 as const,
+    triggerEnableMask: true,
+    triggerModes: {},
+    analogTriggers: {},
+    triggerSource: 'digital' as const,
+    preTriggerPercent: 35,
+  };
+  const serialized = serializeWorkspaceSnapshot({ version: 1, detailedLabels: true, capture });
+  const parsed = parseWorkspaceSnapshot(serialized);
+  check('the software test mode round-trips as 3 and serializes the number',
+    parsed?.capture?.testMode === 3 && serialized.includes('"testMode":3'),
+    serialized);
+}
+
+{
+  const rows: readonly (readonly [CaptureTestMode, 0 | 1 | 2])[] = [[0, 0], [1, 1], [2, 2], [3, 0]];
+  check('deviceTestMode maps the host-generated mode to Normal and passes device modes through',
+    rows.every(([mode, expected]) => deviceTestMode(mode) === expected),
+    rows.map(([mode, expected]) => `${mode}=>${deviceTestMode(mode)}/${expected}`).join(', '));
 }
 
 {
@@ -1706,6 +1735,35 @@ check('a capture start carries the channel metadata instead of rebuilding defaul
   !startBody.includes('defaultChannels(') &&
   startBody.includes('this.persistWorkspace();'),
   startBody.replace(/\s+/g, ' ').trim());
+
+const softwareClampAt = deviceBody.indexOf('const softwareTestClamp = ');
+const softwareClampApplied = softwareClampAt >= 0 &&
+  deviceBody.includes('!this.deviceHasAnalogModule() &&') &&
+  deviceBody.includes('this.settings.testMode === SOFTWARE_TEST_MODE ? { testMode: 0 as const } : {}') &&
+  deviceBody.includes('...this.settings, ...softwareTestClamp, channels: width, samplerate,') &&
+  deviceBody.indexOf('this.clampSettings({') > softwareClampAt &&
+  deviceBody.indexOf('this.clampSettings({') < deviceBody.indexOf('this.persistWorkspace();');
+check('a board without the ADC module clamps a stored software test mode to Normal before it persists',
+  softwareClampApplied, `clamp=${softwareClampAt}, applied=${softwareClampApplied}`);
+
+const teardownSourceBody = app.split('private async teardownDevice(')[1]
+  ?.split('private finishCapture(')[0] ?? '';
+const discardSourceBody = app.split('private discardDevice(): number {')[1]
+  ?.split('private detachDevice(')[0] ?? '';
+const installSourceBody = app.split('private installDevice(')[1]
+  ?.split('private usbDisconnected(')[0] ?? '';
+const sourceStopOrder = (body: string, closer: string): boolean =>
+  body.indexOf('void source.stop()') >= 0 &&
+  body.indexOf('void source.stop()') < body.indexOf(closer);
+check('stop, discard and device replacement all end the host capture source before the base device',
+  teardownSourceBody.includes('this.captureSource') && teardownSourceBody.includes('await source.stop()') &&
+  sourceStopOrder(discardSourceBody, 'device.terminate()') &&
+  sourceStopOrder(installSourceBody, 'previous.terminate()') &&
+  discardSourceBody.includes('this.captureSource = null;') &&
+  installSourceBody.includes('this.captureSource = null;'),
+  `teardown=${teardownSourceBody.includes('await source.stop()')}, ` +
+  `discard=${sourceStopOrder(discardSourceBody, 'device.terminate()')}, ` +
+  `install=${sourceStopOrder(installSourceBody, 'previous.terminate()')}`);
 
 const orderCarried = (body: string): boolean =>
   body.includes('restoreOrder(this.order, this.channels.length)') &&

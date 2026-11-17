@@ -149,7 +149,7 @@ function check(name: string, pass: boolean, detail: string): void {
   check('the 50 ms policy ceiling is gone from the gate and its caller',
     ceilingGone, `app=${!app.includes('LIVE_REFRESH_MS')}, policy=${!policy.includes('LIVE_REFRESH_MS')}, literal50=${!/\b50\b/.test(policy)}`);
 
-  const sinkStart = app.indexOf('await device.start(cfg, (chunk) => {');
+  const sinkStart = app.indexOf('await sourceDevice.start(cfg, (chunk) => {');
   const sinkEnd = sinkStart >= 0 ? app.indexOf('}, (pos, missing) => {', sinkStart) : -1;
   const sink = sinkEnd > sinkStart ? app.slice(sinkStart, sinkEnd) : '';
   const appended = (sink.match(/this\.livePending = true;/g) ?? []).length >= 2 &&

@@ -334,7 +334,7 @@ function toggle(
 
 {
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
-  const sinkStart = app.indexOf('await device.start(cfg, (chunk) => {');
+  const sinkStart = app.indexOf('await sourceDevice.start(cfg, (chunk) => {');
   const sink = app.slice(sinkStart, app.indexOf('onTriggerState: (state, triggerSampleIndex) => {', sinkStart));
   const save = app.slice(app.indexOf('private async save(format: CaptureFileFormat)'),
     app.indexOf('private setSaveProgress('));

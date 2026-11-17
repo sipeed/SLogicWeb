@@ -73,8 +73,8 @@ export interface CaptureSettings {
   analogTriggers: Record<number, AnalogTriggerSetting>;
   /** Which trigger family arms: digital conditions may be many, analog exactly one. */
   triggerSource: 'digital' | 'analog';
-  /** Hardware data source: normal pins, USB maximum-speed pattern, or simulator. */
-  testMode: 0 | 1 | 2;
+  /** Data source: normal pins, USB pattern, simulator, or the host-generated software test. */
+  testMode: CaptureTestMode;
   /** Global trigger enable mask. Per-channel modes remain stored when this is false. */
   triggerEnableMask: boolean;
   softwareTrigger: boolean;
@@ -87,6 +87,14 @@ export interface CaptureSettings {
   triggerKind: 'level' | 'rising' | 'falling' | 'edge';
   triggerLevel: 0 | 1;
   preTriggerPercent: number;
+}
+
+export type CaptureTestMode = 0 | 1 | 2 | 3;
+
+export const SOFTWARE_TEST_MODE = 3;
+
+export function deviceTestMode(mode: CaptureTestMode): 0 | 1 | 2 {
+  return mode === SOFTWARE_TEST_MODE ? 0 : mode;
 }
 
 export interface AnalogTriggerSetting {

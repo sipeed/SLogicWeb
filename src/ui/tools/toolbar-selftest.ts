@@ -293,7 +293,7 @@ check(
 );
 
 const startIssuedTo = startBody.indexOf('const device = this.device;') >= 0 &&
-  startBody.includes('await device.start(cfg, (chunk) => {');
+  startBody.includes('await sourceDevice.start(cfg, (chunk) => {');
 const armingStop = ['if (!this.running) {', 'await this.stopPending',
   'else if (this.device === device) await this.teardownDevice(device);']
   .filter((needle) => !startBody.includes(needle));
@@ -301,7 +301,7 @@ check(
   'a stop that lands during arming tears down the device start() was issued to',
   startIssuedTo && armingStop.length === 0 &&
     startBody.indexOf('await this.stopPending') >
-      startBody.indexOf('await device.start(cfg, (chunk) => {'),
+      startBody.indexOf('await sourceDevice.start(cfg, (chunk) => {'),
   `issuedTo=${startIssuedTo}, missing=${JSON.stringify(armingStop)}`,
 );
 

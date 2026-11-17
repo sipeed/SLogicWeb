@@ -187,7 +187,7 @@ function cssRules(selector: string): string[] {
   const analogPanel = panel.slice(analogPanelStart, panel.indexOf('const preOptions', analogPanelStart));
   const planAt = app.indexOf('const plan = this.triggerPlan(this.settings);',
     app.indexOf('private async startCapture'));
-  const deviceStartAt = app.indexOf('await device.start(cfg', planAt);
+  const deviceStartAt = app.indexOf('await sourceDevice.start(cfg', planAt);
   const runtime = configureStart >= 0 && dragStart >= 0 && analogPanelStart >= 0 &&
     !/if\s*\([^)]*this\.(?:running|stopping)/.test(configure) &&
     !/if\s*\([^)]*this\.(?:running|stopping)[^)]*\)\s*return;/.test(drag) &&
@@ -260,7 +260,7 @@ function cssRules(selector: string): string[] {
 
 {
   const disabled = panel.includes('triggerSec.body.hidden = !s.triggerEnableMask') &&
-    app.includes('const softwareTrigger = this.settings.triggerEnableMask &&') &&
+    app.includes('const softwareTrigger = !softwareTest && this.settings.triggerEnableMask &&') &&
     channel.includes("(cell.triggerActive === true ? ' armed' : ' configured')") &&
     channel.includes("cell.trigger.armed ? ' armed' : ' configured'");
   check('disabling Global trigger hides its panel and leaves every condition neutral',

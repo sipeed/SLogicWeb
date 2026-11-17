@@ -19,7 +19,7 @@ import {
 import { DiagnosticError, diagnosticOf } from '../diagnostics.js';
 import {
   MAX_SAMPLERATE_HZ, SAMPLERATES_HZ, TransportDeadError, getGrantedDevicesOnBestThread,
-  requestDeviceOnBestThread, vrefCode, type CaptureConfig, type Device,
+  requestDeviceOnBestThread, softwareTestDevice, vrefCode, type CaptureConfig, type Device,
   type DieTemperatureReading,
 } from '../device/index.js';
 import { WorkerSlogicDevice, workerTransport } from '../device/workerTransport.js';
@@ -215,9 +215,9 @@ import {
   DEFAULT_TRIGGER_MODE,
   analogTriggerAutoArms,
   edgeTriggerAutoArms, clampLoopSamples, DEFAULT_LOOP_SAMPLES, loopDropSamples,
-  modesToConditions, triggerModeFromCondition, mappedCaptureChannels,
-  type AnalogTriggerSetting, type AnalyzerState, type CaptureSettings, type ChannelState,
-  type TriggerMode,
+  modesToConditions, triggerModeFromCondition, mappedCaptureChannels, SOFTWARE_TEST_MODE, deviceTestMode,
+  type AnalogTriggerSetting, type AnalyzerState, type CaptureSettings, type CaptureTestMode,
+  type ChannelState, type TriggerMode,
   type CaptureLabel, type StatusError,
 } from './state.js';
 import { stopFailureIsSilent } from './stopFailure.js';
@@ -596,6 +596,7 @@ export class App {
   private widthExplicit = false;
 
   private device: Device | null = null;
+  private captureSource: Device | null = null;
   private deviceEpoch = 0;
   private stopPending: Promise<void> | null = null;
   private readonly repeatTimer = new RepeatCaptureTimer();
@@ -632,7 +633,7 @@ export class App {
   /** Capture shape of the last wave, to keep a Repeat session's layout off the wave path. */
   private lastCaptureChannels = 0;
   private lastCaptureRate = 0;
-  private lastCaptureTestMode = 0;
+  private lastCaptureTestMode: CaptureTestMode = 0;
   private rateCeilings: Readonly<Record<number, number>> = MAX_SAMPLERATE_HZ;
   /** The board's per-width default rates (`Device.recommendedSamplerateHz`). */
   private rateRecommendations: Readonly<Record<number, number>> = {};
@@ -2849,8 +2850,12 @@ export class App {
 
   /** Groups the connected device (or a loaded 32-channel capture) can offer. */
   private deviceAnalogGroups(): number {
-    if (this.device) return (this.device.maxChannels ?? 0) >= 32 ? ANALOG_GROUP_COUNT : 0;
+    if (this.device) return this.deviceHasAnalogModule() ? ANALOG_GROUP_COUNT : 0;
     return this.loadedCapture() && this.channels.length >= 32 ? ANALOG_GROUP_COUNT : 0;
+  }
+
+  private deviceHasAnalogModule(): boolean {
+    return this.device !== null && (this.device.maxChannels ?? 0) >= 32;
   }
 
   /**
@@ -7734,7 +7739,10 @@ export class App {
     this.repeatTimer.cancel();
     this.settleHeldCaptureStart();
     const device = this.device;
+    const source = this.captureSource;
+    this.captureSource = null;
     this.deviceEpoch += 1;
+    if (source !== null && source !== device) void source.stop();
     if (device) {
       this.device = null;
       device.onError = null;
@@ -7773,6 +7781,9 @@ export class App {
     const previous = this.device;
     this.deviceEpoch += 1;
     if (previous && previous !== d) {
+      const source = this.captureSource;
+      this.captureSource = null;
+      if (source !== null && source !== previous) void source.stop();
       this.device = null;
       previous.onError = null;
       previous.terminate();
@@ -7986,8 +7997,12 @@ export class App {
     if (this.deviceAnalogGroups() === 0) {
       this.busViews = this.busViews.filter((bus) => bus.analogGroup === undefined);
     }
+    const softwareTestClamp = !this.deviceHasAnalogModule() &&
+      this.settings.testMode === SOFTWARE_TEST_MODE ? { testMode: 0 as const } : {};
     // A board change may clamp the rate; keep a loop window's duration across it.
-    const adopted = this.clampSettings({ ...this.settings, channels: width, samplerate });
+    const adopted = this.clampSettings({
+      ...this.settings, ...softwareTestClamp, channels: width, samplerate,
+    });
     this.settings = carryCaptureDuration(this.settings, adopted);
     this.busViews = this.busViews.filter((bus) => !busOutOfWidth(bus.spec, this.displayChannelCount()));
     this.reconcileEdgeChannels();
@@ -8008,6 +8023,7 @@ export class App {
     }
     if (this.resetting) return;
     const device = this.device;
+    const softwareTest = this.settings.testMode === SOFTWARE_TEST_MODE;
     const generation = ++this.captureGeneration;
     this.captureWaveGeneration = generation;
     try {
@@ -8018,8 +8034,15 @@ export class App {
         channels: this.settings.channels,
         samplerate: this.settings.samplerate,
         thresholdVolts: this.settings.thresholdVolts,
-        testMode: this.settings.testMode,
+        testMode: deviceTestMode(this.settings.testMode),
       };
+      const analogGroups = softwareTest ? analogGroupCount(cfg.channels) : 0;
+      if (softwareTest && analogGroups === 0) {
+        throw new Error('Software test requires the 32-channel board');
+      }
+      const sourceDevice: Device = softwareTest
+        ? softwareTestDevice(device, { analogGroups, zeroCode: ADC_ZERO_CODE })
+        : device;
       // The device layer maps volts to a DAC code; check it lands somewhere sane before
       // the capture rather than discovering a clipped threshold in the data.
       const code = vrefCode(cfg.thresholdVolts);
@@ -8034,7 +8057,7 @@ export class App {
       // the screen flashes at every Capture→Stop wave.
       const quietRepeat = origin === 'repeat' && this.repeatSession && mode === 'repeat' &&
         cfg.channels === this.lastCaptureChannels && cfg.samplerate === this.lastCaptureRate &&
-        (cfg.testMode ?? 0) === this.lastCaptureTestMode;
+        this.settings.testMode === this.lastCaptureTestMode;
       const newSession = origin !== 'repeat' || this.session === null ||
         this.session.mode !== mode;
       const session = newSession || !this.session ? createSession(mode) : this.session;
@@ -8049,7 +8072,7 @@ export class App {
       }
       this.lastCaptureChannels = cfg.channels;
       this.lastCaptureRate = cfg.samplerate;
-      this.lastCaptureTestMode = cfg.testMode ?? 0;
+      this.lastCaptureTestMode = this.settings.testMode;
       this.repeatWaveHolding = quietRepeat;
       const store = createSampleStore(cfg.channels, cfg.samplerate);
       this.waveStore = store;
@@ -8087,7 +8110,7 @@ export class App {
       const plan = this.triggerPlan(this.settings);
       const analogTriggers = plan.analog.filter((trigger) =>
         trigger.start + CHANNEL_BANK_SIZE <= cfg.channels);
-      const softwareTrigger = this.settings.triggerEnableMask &&
+      const softwareTrigger = !softwareTest && this.settings.triggerEnableMask &&
         (plan.digital.length > 0 || analogTriggers.length > 0);
       this.captureUsesSoftwareTrigger = softwareTrigger;
       // Loop + trigger freezes the viewport on T. The pre-trigger percentage is then the
@@ -8245,7 +8268,8 @@ export class App {
       this.loopSinkMsAvg = 0;
       let lastLoopSinkMs = 0;
       this.captureArming = true;
-      await device.start(cfg, (chunk) => {
+      this.captureSource = sourceDevice;
+      await sourceDevice.start(cfg, (chunk) => {
         // A late message from a superseded acquisition must never touch the new store.
         if (generation !== this.captureGeneration) return;
         // Chunks arriving while `stopping` are the drained tail of this capture - the
@@ -9087,8 +9111,11 @@ export class App {
 
   private async teardownDevice(device: Device | null): Promise<void> {
     this.stopQuickScroll();
+    const source = this.captureSource;
+    this.captureSource = null;
     try {
-      await device?.stop();
+      if (source !== null) await source.stop();
+      else await device?.stop();
     } catch (e) {
       if (stopFailureIsSilent(e)) {
         console.warn('[ui] the capture stop closed the transport; reconnecting:', e);

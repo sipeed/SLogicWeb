@@ -17,7 +17,7 @@ import { restoredAnalyzerOrdinal, sanitizeAnalyzerLabel } from './analyzerNaming
 import { ANALOG_HEIGHTS, BUS_HEIGHTS, type BusBitOrder, type BusViewConfig } from './busView.js';
 import {
   analyzerColor, analyzerLaneChannel, defaultCaptureSettings, defaultChannelName, defaultChannels,
-  type AnalyzerState, type CaptureSettings, type TriggerMode,
+  type AnalyzerState, type CaptureSettings, type CaptureTestMode, type TriggerMode,
 } from './state.js';
 import { analogLayoutOf, type AnalogLayout } from './analogBands.js';
 import { parseSidebarPage, type SidebarPage } from './sidebar.js';
@@ -48,7 +48,7 @@ export interface PersistedCaptureSettings {
   seconds: number;
   repeatIntervalSeconds?: number;
   loopSamples: number;
-  testMode: 0 | 1 | 2;
+  testMode: CaptureTestMode;
   triggerEnableMask: boolean;
   triggerModes: Record<number, TriggerMode>;
   analogTriggers?: Record<string, { kind: 'rising' | 'falling'; volts: number }>;
@@ -205,7 +205,9 @@ function restoreCapture(value: unknown, capacity: number): PersistedCaptureSetti
   if (typeof value.loopSamples === 'number' && Number.isFinite(value.loopSamples)) {
     capture.loopSamples = value.loopSamples;
   }
-  if (value.testMode === 0 || value.testMode === 1 || value.testMode === 2) capture.testMode = value.testMode;
+  if (value.testMode === 0 || value.testMode === 1 || value.testMode === 2 || value.testMode === 3) {
+    capture.testMode = value.testMode;
+  }
   if (typeof value.triggerEnableMask === 'boolean') capture.triggerEnableMask = value.triggerEnableMask;
   capture.triggerModes = restoreTriggerModes(value.triggerModes, capacity);
   if (isRecord(value.analogTriggers)) {

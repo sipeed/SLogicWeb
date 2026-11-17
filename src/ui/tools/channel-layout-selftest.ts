@@ -951,8 +951,8 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   const startHintAt = startSrc.indexOf("this.el.hint.style.display = 'none';");
   check('a new capture clears the previous frame before device streaming starts',
     startDrawAt >= 0 && startSrc.indexOf('this.storeRef.set(store)') < startDrawAt &&
-    startDrawAt < startHintAt && startHintAt < startSrc.indexOf('await device.start'),
-    `draw=${startDrawAt >= 0}, hint=${startHintAt >= 0}, ordered=${startSrc.indexOf('this.storeRef.set(store)') < startDrawAt && startDrawAt < startHintAt && startHintAt < startSrc.indexOf('await device.start')}`);
+    startDrawAt < startHintAt && startHintAt < startSrc.indexOf('await sourceDevice.start'),
+    `draw=${startDrawAt >= 0}, hint=${startHintAt >= 0}, ordered=${startSrc.indexOf('this.storeRef.set(store)') < startDrawAt && startDrawAt < startHintAt && startHintAt < startSrc.indexOf('await sourceDevice.start')}`);
 
   const enforceStart = appSrc.indexOf('private enforceLoopRetention');
   const enforceEnd = enforceStart >= 0 ? appSrc.indexOf('private async stopCapture', enforceStart) : -1;
