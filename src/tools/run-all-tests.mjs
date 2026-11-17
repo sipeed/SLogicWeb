@@ -32,6 +32,7 @@ const entries = [
   'src/device/profileSelftest.ts',
   'src/device/simDriverSelftest.ts',
   'src/device/simDriverStoreIntegrationSelftest.ts',
+  'src/device/softwareTestSourceSelftest.ts',
   'src/data/signalStoreSelftest.ts',
   'src/data/opfsRecordSelftest.ts',
   'src/data/opfsStorageSelftest.ts',

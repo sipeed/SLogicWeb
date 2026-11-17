@@ -46,6 +46,16 @@ export {
   type SimStartConfig,
 } from './simDriver.js';
 export { WorkerSlogicDevice, workerTransport } from './workerTransport.js';
+export {
+  SOFTWARE_TEST_AMPLITUDE_CODES,
+  SOFTWARE_TEST_SIGNAL_PERIOD_SAMPLES,
+  SOFTWARE_TEST_TILE_SAMPLES,
+  SOFTWARE_TEST_ZERO_CODE,
+  SoftwareTestPattern,
+  softwareTestHalfSignalHz,
+  softwareTestSignalHz,
+  type SoftwareTestPatternConfig,
+} from './softwareTestPattern.js';
 
 /**
  * Open the device the origin already has permission for, on the worker when it can and
