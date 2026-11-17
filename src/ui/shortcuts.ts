@@ -67,7 +67,7 @@ export const SHORTCUTS: readonly ShortcutEntry[] = [
   },
   {
     id: 'sidebar.cursors', group: 'navigation', chords: ['2'],
-    labels: ['shortcuts.sidebarCursors'],
+    labels: ['shortcuts.sidebarMeasure'],
   },
   {
     id: 'sidebar.decoders', group: 'navigation', chords: ['3'],

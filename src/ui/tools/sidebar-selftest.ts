@@ -239,15 +239,15 @@ const describe = (s: SidebarState): string =>
     tabs.filter((t) => t.selected).map((t) => t.page).join(',');
   check('tabs follow the strip order with the catalog label keys and exactly one selected when visible',
     tabLabel(visibleTabs) ===
-      'capture:sidebar.pageCapture:false|cursors:sidebar.pageCursors:true|decoders:sidebar.pageDecoders:false' &&
+      'capture:sidebar.pageCapture:false|cursors:sidebar.pageMeasure:true|decoders:sidebar.pageDecoders:false' &&
     tabLabel(assistantTabs) ===
-      'capture:sidebar.pageCapture:false|cursors:sidebar.pageCursors:false|decoders:sidebar.pageDecoders:true' &&
+      'capture:sidebar.pageCapture:false|cursors:sidebar.pageMeasure:false|decoders:sidebar.pageDecoders:true' &&
     selectedPages(visibleTabs) === 'cursors' && selectedPages(assistantTabs) === 'decoders',
     `visible=${tabLabel(visibleTabs)}, assistant=${tabLabel(assistantTabs)}`);
   check('a collapsed dock selects no tab',
     hiddenTabs.length === 3 && selectedPages(hiddenTabs) === '' &&
     tabLabel(hiddenTabs) ===
-      'capture:sidebar.pageCapture:false|cursors:sidebar.pageCursors:false|decoders:sidebar.pageDecoders:false',
+      'capture:sidebar.pageCapture:false|cursors:sidebar.pageMeasure:false|decoders:sidebar.pageDecoders:false',
     `hidden=${tabLabel(hiddenTabs)}`);
 }
 

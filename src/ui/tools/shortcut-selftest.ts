@@ -447,7 +447,7 @@ function groupListProblem(
       'view.zoomOut|shortcuts.zoomOut;view.panLeft|shortcuts.panLeft;view.panRight|shortcuts.panRight;' +
       'view.panLeftPage|shortcuts.panPage;view.panRightPage|shortcuts.panPage;' +
       'theme.next|shortcuts.theme;' +
-      'sidebar.capture|shortcuts.sidebarCapture;sidebar.cursors|shortcuts.sidebarCursors;' +
+      'sidebar.capture|shortcuts.sidebarCapture;sidebar.cursors|shortcuts.sidebarMeasure;' +
       'sidebar.decoders|shortcuts.sidebarDecoders;sidebar.toggle|shortcuts.sidebarToggle;' +
       'decoders.add|shortcuts.addDecoder',
     `rows=${rows}`);
@@ -680,7 +680,7 @@ const SHORTCUT_KEY_VALUES: ReadonlyArray<readonly [MessageKey, readonly [string,
     'Добавить декодер протокола', 'Ajouter un décodeur de protocole']],
   ['shortcuts.theme', ['Switch theme', '切换主题', 'Сменить тему', 'Changer de thème']],
   ['shortcuts.sidebarCapture', ['Capture panel', '采集面板', 'Панель захвата', 'Panneau Capture']],
-  ['shortcuts.sidebarCursors', ['Cursors panel', '光标面板', 'Панель курсоров', 'Panneau Curseurs']],
+  ['shortcuts.sidebarMeasure', ['Measure panel', '测量面板', 'Панель измерений', 'Panneau Mesures']],
   ['shortcuts.sidebarDecoders', ['Decoders panel', '解码器面板', 'Панель декодеров',
     'Panneau Décodeurs']],
   ['shortcuts.sidebarToggle', ['Show or hide the sidebar', '显示或隐藏侧栏',
@@ -716,7 +716,7 @@ const CATALOGS: ReadonlyArray<readonly [string, (key: MessageKey) => string]> = 
   check('the reference action text joins the labeled catalog keys with the two-label separator',
     texts.join(' | ') === 'Open… | Save… | Settings | Capture / Stop | Fit | Clear cursors | ' +
       'Zoom to the cursor interval | Zoom in | Zoom out | Pan left (earlier) | Pan right (later) | Pan by half a screen | ' +
-      'Pan by half a screen | Switch theme | Capture panel | Cursors panel | Decoders panel | ' +
+      'Pan by half a screen | Switch theme | Capture panel | Measure panel | Decoders panel | ' +
       'Show or hide the sidebar | Add a protocol decoder' &&
     capture.labels.length === 2 && t('toolbar.start') === 'Capture',
     `texts=${texts.join(' | ')}`);

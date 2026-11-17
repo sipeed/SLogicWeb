@@ -18,7 +18,7 @@ export const DEFAULT_SIDEBAR_STATE: SidebarState = {
 
 const LABEL_KEYS: Record<SidebarPage, MessageKey> = {
   capture: 'sidebar.pageCapture',
-  cursors: 'sidebar.pageCursors',
+  cursors: 'sidebar.pageMeasure',
   decoders: 'sidebar.pageDecoders',
 };
 
