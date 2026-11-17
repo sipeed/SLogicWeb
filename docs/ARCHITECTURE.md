@@ -899,8 +899,10 @@ Key transitions (the full table is generated in one pure module):
   `src/pwa/shell.mjs` from a Vite `closeBundle` step; `src/ui/pwaUpdate.ts`):
   - The build enumerates `dist/` into the worker: **shell** = `index.html`, hashed worker /
     locale / lazy chunks, favicon, icons, `manifest.webmanifest`; **runtime** = every
-    `pyodide/<hash>/` file and `decoders/decoders-<hash>.zip`. Source maps, licences,
-    host files and the entry JS/CSS already inlined into `index.html` are never listed.
+    `pyodide/<hash>/` file and `decoders/decoders-<hash>.zip`; the hosted entry JS/CSS are
+    ordinary hashed `assets/` files and are listed (the build fails if `index.html` loads
+    a script or stylesheet the list misses). Source maps, licences and host files are never
+    listed.
     The version hashes every listed byte plus the worker template, and `index.html` is
     stamped with it (`<meta name="slogicweb-build">`).
   - Caches are `slogicweb:<scope>:shell-<version>` (one per version; activation deletes
