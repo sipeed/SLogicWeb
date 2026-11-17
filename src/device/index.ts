@@ -56,6 +56,15 @@ export {
   softwareTestSignalHz,
   type SoftwareTestPatternConfig,
 } from './softwareTestPattern.js';
+export {
+  REAL_SOFTWARE_TEST_SCHEDULE,
+  SOFTWARE_TEST_CHUNK_BYTES,
+  SoftwareTestStream,
+  softwareTestDevice,
+  type SoftwareTestSchedule,
+  type SoftwareTestSourceOptions,
+  type SoftwareTestStreamOptions,
+} from './softwareTestSource.js';
 
 /**
  * Open the device the origin already has permission for, on the worker when it can and

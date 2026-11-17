@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-/** Host-side checks for the software test pattern tile and its rate helpers. */
+/** Host-side checks for the software test pattern, its stream pump and its device adapter. */
 
 import { bytesPerSampleForChannels, type ChannelCount } from '../types.js';
 import { reverseAdcByte } from '../data/softwareTrigger.js';
 import { SLOGIC32U3_PROFILE } from './profiles.js';
+import type { CaptureConfig, Device } from './types.js';
+import {
+  REAL_SOFTWARE_TEST_SCHEDULE,
+  SOFTWARE_TEST_CHUNK_BYTES,
+  SoftwareTestStream,
+  softwareTestDevice,
+  type SoftwareTestSchedule,
+  type SoftwareTestStreamOptions,
+} from './softwareTestSource.js';
 import {
   SOFTWARE_TEST_AMPLITUDE_CODES,
   SOFTWARE_TEST_SIGNAL_PERIOD_SAMPLES,
@@ -348,6 +357,405 @@ expectRangeError('a swing above code 255 is refused',
     thrown(() => new SoftwareTestPattern({ channels: 32, analogGroups: 4 })) === null &&
       thrown(() => pattern.fill(new Uint8Array(4), 0)) === null,
     'valid construction and fill');
+}
+
+class FakeSchedule implements SoftwareTestSchedule {
+  private readonly callbacks = new Map<number, () => void>();
+  private nextHandle = 1;
+
+  set(fn: () => void): unknown {
+    const handle = this.nextHandle++;
+    this.callbacks.set(handle, fn);
+    return handle;
+  }
+
+  clear(handle: unknown): void {
+    this.callbacks.delete(handle as number);
+  }
+
+  get pending(): number {
+    return this.callbacks.size;
+  }
+
+  run(cap = 64): number {
+    let ticks = 0;
+    while (this.callbacks.size > 0 && ticks < cap) {
+      const [handle, fn] = this.callbacks.entries().next().value!;
+      this.callbacks.delete(handle);
+      fn();
+      ticks++;
+    }
+    return ticks;
+  }
+}
+
+interface StreamRecord {
+  chunks: number[];
+  events: string[];
+  bytes: Uint8Array[];
+}
+
+function freshRecord(): StreamRecord {
+  return { chunks: [], events: [], bytes: [] };
+}
+
+function recordingSink(record: StreamRecord): (chunk: Uint8Array) => void {
+  return (chunk) => {
+    record.chunks.push(chunk.length);
+    record.events.push('sink');
+    record.bytes.push(chunk);
+  };
+}
+
+function streamWith(overrides: Partial<SoftwareTestStreamOptions> = {}): SoftwareTestStream {
+  return new SoftwareTestStream({
+    channels: 8,
+    samplerate: 1e6,
+    analogGroups: 1,
+    zeroCode: SOFTWARE_TEST_ZERO_CODE,
+    sink: () => undefined,
+    schedule: new FakeSchedule(),
+    chunkBytes: 4,
+    ...overrides,
+  });
+}
+
+async function rejected(run: () => Promise<void>): Promise<unknown> {
+  try {
+    await run();
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+function totalBytes(record: StreamRecord): number {
+  return record.chunks.reduce((sum, bytes) => sum + bytes, 0);
+}
+
+check('the default chunk constant is 4 MiB',
+  SOFTWARE_TEST_CHUNK_BYTES === 4 * 1024 * 1024,
+  `${SOFTWARE_TEST_CHUNK_BYTES} bytes`);
+
+{
+  let ran = false;
+  const cleared = REAL_SOFTWARE_TEST_SCHEDULE.set(() => { ran = true; });
+  REAL_SOFTWARE_TEST_SCHEDULE.clear(cleared);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  check('the real schedule clears a pending tick', ran === false, `ran ${String(ran)}`);
+
+  const ranLater = { value: false };
+  REAL_SOFTWARE_TEST_SCHEDULE.set(() => { ranLater.value = true; });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  check('the real schedule runs a tick asynchronously', ranLater.value,
+    `ran ${String(ranLater.value)}`);
+}
+
+{
+  const schedule = new FakeSchedule();
+  const record = freshRecord();
+  const observed: number[] = [];
+  const stream: SoftwareTestStream = streamWith({
+    sink: (chunk) => {
+      record.chunks.push(chunk.length);
+      record.events.push('sink');
+      record.bytes.push(chunk);
+      observed.push(stream.emittedSamples);
+    },
+    samples: 10,
+    onEnd: () => { record.events.push('end'); },
+    schedule,
+  });
+  stream.start();
+  const ticks = schedule.run();
+  check('a finite budget streams whole chunks, then ends once',
+    ticks === 3 && record.chunks.join(',') === '4,4,2' &&
+      record.events.join(',') === 'sink,sink,sink,end' &&
+      stream.emittedSamples === 10 && stream.finished && schedule.pending === 0,
+    `${ticks} ticks, chunks ${record.chunks.join('/')}, events ${record.events.join(',')}, ` +
+      `emitted ${stream.emittedSamples}, finished ${String(stream.finished)}, ` +
+      `pending ${schedule.pending}`);
+
+  check('the emitted count advances before the sink call',
+    observed.join(',') === '4,8,10',
+    `emitted at each sink call ${observed.join('/')}`);
+
+  const joined = new Uint8Array(record.chunks.reduce((sum, bytes) => sum + bytes, 0));
+  let at = 0;
+  for (const chunk of record.bytes) {
+    joined.set(chunk, at);
+    at += chunk.length;
+  }
+  const whole = new Uint8Array(joined.length);
+  patternOf(8, 1).fill(whole, 0);
+  check('the stream advances the pattern by whole chunks',
+    equalBytes(joined, whole) && at === joined.length,
+    `${at} bytes compared with one fill`);
+}
+
+{
+  const schedule = new FakeSchedule();
+  const record = freshRecord();
+  const stream = streamWith({
+    sink: recordingSink(record), samples: 7, chunkBytes: 3, schedule,
+  });
+  stream.start();
+  schedule.run();
+  check('a budget that is not a chunk multiple delivers exactly the budget',
+    record.chunks.join(',') === '3,3,1' && totalBytes(record) === 7 &&
+      stream.emittedSamples === 7 && stream.finished &&
+      Math.ceil(7 / 3) * 3 === 9,
+    `chunks ${record.chunks.join('/')}, ${totalBytes(record)} bytes, ` +
+      `a padded tail would deliver 9`);
+}
+
+{
+  const schedule = new FakeSchedule();
+  const record = freshRecord();
+  const stream = streamWith({
+    channels: 16, sink: recordingSink(record), schedule, chunkBytes: 8,
+  });
+  stream.start();
+  const ticks = schedule.run(3);
+  const emitted = stream.emittedSamples;
+  await stream.stop();
+  const pending = schedule.pending;
+  const ticksAfterStop = schedule.run();
+  const stopAgain = await rejected(() => stream.stop());
+  check('an unbounded stream stops on request and never ticks again',
+    ticks === 3 && record.chunks.length === 3 && emitted === 12 &&
+      stream.emittedSamples === emitted && pending === 0 && ticksAfterStop === 0 &&
+      stopAgain === null && !stream.finished,
+    `${ticks} ticks, ${emitted} samples, pending ${pending}, ` +
+      `${ticksAfterStop} ticks after stop`);
+}
+
+{
+  const schedule = new FakeSchedule();
+  const record = freshRecord();
+  let chunks = 0;
+  let stopPromise: Promise<void> = Promise.resolve();
+  const stream: SoftwareTestStream = new SoftwareTestStream({
+    channels: 8,
+    samplerate: 1e6,
+    analogGroups: 1,
+    zeroCode: SOFTWARE_TEST_ZERO_CODE,
+    schedule,
+    chunkBytes: 4,
+    sink: (chunk) => {
+      record.chunks.push(chunk.length);
+      chunks++;
+      if (chunks === 1) stopPromise = stream.stop();
+    },
+  });
+  stream.start();
+  const ticks = schedule.run();
+  const raced = await Promise.race([
+    stopPromise.then(() => 'stopped'),
+    new Promise<string>((resolve) => setTimeout(() => resolve('timeout'), 50)),
+  ]);
+  check('a stop from inside the sink resolves after the tick, without a new chunk',
+    raced === 'stopped' && chunks === 1 && ticks === 1 && schedule.pending === 0 &&
+      stream.emittedSamples === 4,
+    `${raced} after ${ticks} tick, ${chunks} chunks, ${stream.emittedSamples} samples`);
+}
+
+{
+  const schedule = new FakeSchedule();
+  const record = freshRecord();
+  let stopPromise: Promise<void> = Promise.resolve();
+  const stream: SoftwareTestStream = new SoftwareTestStream({
+    channels: 8,
+    samplerate: 1e6,
+    analogGroups: 1,
+    zeroCode: SOFTWARE_TEST_ZERO_CODE,
+    schedule,
+    chunkBytes: 4,
+    samples: 4,
+    onEnd: () => { record.events.push('end'); },
+    sink: (chunk) => {
+      record.chunks.push(chunk.length);
+      stopPromise = stream.stop();
+    },
+  });
+  stream.start();
+  const ticks = schedule.run();
+  await stopPromise;
+  const afterStop = schedule.run();
+  check('a caller stop in the final tick keeps the completion callback silent',
+    ticks === 1 && record.chunks.join(',') === '4' && !record.events.includes('end') &&
+      stream.finished && stream.emittedSamples === 4 && afterStop === 0,
+    `${ticks} tick, chunks ${record.chunks.join('/')}, ` +
+      `events ${record.events.join(',') || 'none'}, finished ${String(stream.finished)}, ` +
+      `pending after stop ${afterStop}`);
+
+  const midSchedule = new FakeSchedule();
+  const midRecord = freshRecord();
+  let midStop: Promise<void> = Promise.resolve();
+  let midEnds = 0;
+  const mid = new SoftwareTestStream({
+    channels: 8,
+    samplerate: 1e6,
+    analogGroups: 1,
+    zeroCode: SOFTWARE_TEST_ZERO_CODE,
+    schedule: midSchedule,
+    chunkBytes: 4,
+    samples: 12,
+    onEnd: () => { midEnds++; },
+    sink: (chunk) => {
+      midRecord.chunks.push(chunk.length);
+      midStop = mid.stop();
+    },
+  });
+  mid.start();
+  const midTicks = midSchedule.run();
+  await midStop;
+  check('a caller stop before the budget never reports completion',
+    midTicks === 1 && midRecord.chunks.length === 1 && midEnds === 0 && !mid.finished &&
+      mid.emittedSamples === 4 && midSchedule.pending === 0,
+    `${midTicks} tick, ${midRecord.chunks.length} chunk, ends ${midEnds}, ` +
+      `finished ${String(mid.finished)}, ${mid.emittedSamples} samples`);
+}
+
+{
+  const stream = streamWith();
+  const beforeStart = await rejected(() => stream.stop());
+  const beforeStartAgain = await rejected(() => stream.stop());
+  check('stop resolves before start and is idempotent',
+    beforeStart === null && beforeStartAgain === null && !stream.finished,
+    'both calls resolved');
+
+  const fresh = streamWith({ schedule: new FakeSchedule() });
+  const first = thrown(() => fresh.start());
+  const second = thrown(() => fresh.start());
+  await fresh.stop();
+  const afterStop = thrown(() => fresh.start());
+  check('start throws on the second call and after stop',
+    first === null && second instanceof Error && afterStop instanceof Error,
+    `first ${String(first)}, second ${String(second)}, after stop ${String(afterStop)}`);
+}
+
+{
+  expectRangeError('a zero sample budget is refused', () => streamWith({ samples: 0 }));
+  expectRangeError('a negative sample budget is refused', () => streamWith({ samples: -4 }));
+  expectRangeError('a fractional sample budget is refused', () => streamWith({ samples: 2.5 }));
+  expectRangeError('a chunk below one sample is refused', () => streamWith({ chunkBytes: 0 }));
+  expectRangeError('a fractional chunk is refused', () => streamWith({ chunkBytes: 2.5 }));
+  expectRangeError('a non-positive samplerate is refused', () => streamWith({ samplerate: 0 }));
+  expectRangeError('a non-finite samplerate is refused',
+    () => streamWith({ samplerate: Number.POSITIVE_INFINITY }));
+  expectRangeError('an unsupported width is refused',
+    () => streamWith({ channels: 12 as ChannelCount }));
+  const badSink = thrown(() => streamWith({ sink: 0 as unknown as SoftwareTestStreamOptions['sink'] }));
+  check('a non-callable sink is refused', badSink instanceof TypeError, String(badSink));
+  check('control: the stream probe accepts a valid configuration',
+    thrown(() => streamWith()) === null && thrown(() => streamWith({ samples: 1, chunkBytes: 1 })) === null,
+    'valid construction');
+}
+
+{
+  const schedule = new FakeSchedule();
+  const baseCalls: string[] = [];
+  const base: Device = {
+    name: 'Fake SLogic32U3',
+    serial: 'FAKE-0001',
+    async start(): Promise<void> {
+      baseCalls.push('start');
+      throw new Error('the base device must not be started');
+    },
+    async stop(): Promise<void> {
+      baseCalls.push('stop');
+    },
+    terminate(): void {
+      baseCalls.push('terminate');
+    },
+  };
+  const cfg: CaptureConfig = { channels: 8, samplerate: 1e6, thresholdVolts: 1.2, testMode: 0 };
+  const adapter = softwareTestDevice(base, {
+    analogGroups: 1, zeroCode: SOFTWARE_TEST_ZERO_CODE, schedule,
+  });
+  check('the software source delegates device metadata',
+    adapter.name === base.name && adapter.serial === base.serial,
+    `${adapter.name} / ${adapter.serial}`);
+
+  const record = freshRecord();
+  await adapter.start(cfg, recordingSink(record));
+  const ticks = schedule.run(3);
+  const streamed = record.chunks.length;
+  await adapter.stop();
+  const pending = schedule.pending;
+  const afterStop = schedule.run();
+  check('the software source streams a capture and stops on request',
+    ticks === 3 && streamed === 3 && record.chunks.length === 3 && pending === 0 &&
+      afterStop === 0,
+    `${ticks} ticks, ${streamed} chunks, pending ${pending}, ${afterStop} after stop`);
+
+  let ended = 0;
+  const limitedRecord = freshRecord();
+  const limited = softwareTestDevice(base, {
+    analogGroups: 1, zeroCode: SOFTWARE_TEST_ZERO_CODE, schedule,
+  });
+  await limited.start(cfg, recordingSink(limitedRecord), undefined, {
+    deviceSampleLimit: 10,
+    onEnd: () => { ended++; },
+  });
+  schedule.run();
+  check('the adapter forwards the host budget and ends once',
+    ended === 1 && totalBytes(limitedRecord) === 10 && schedule.pending === 0,
+    `ended ${ended}, ${totalBytes(limitedRecord)} bytes`);
+
+  let zeroEnds = 0;
+  const zeroRecord = freshRecord();
+  const zeroLimited = softwareTestDevice(base, {
+    analogGroups: 1, zeroCode: SOFTWARE_TEST_ZERO_CODE, schedule,
+  });
+  const zeroStart = await rejected(() => zeroLimited.start(
+    cfg, recordingSink(zeroRecord), undefined,
+    { deviceSampleLimit: 0, onEnd: () => { zeroEnds++; } },
+  ));
+  const zeroTicks = schedule.run(2);
+  const zeroChunks = zeroRecord.chunks.length;
+  await zeroLimited.stop();
+  check('a zero device sample limit means an unbounded stream',
+    zeroStart === null && zeroTicks === 2 && zeroChunks === 2 && zeroEnds === 0 &&
+      schedule.pending === 0,
+    `start ${String(zeroStart)}, ${zeroTicks} ticks, ${zeroChunks} chunks, ends ${zeroEnds}`);
+
+  const terminatedRecord = freshRecord();
+  const terminated = softwareTestDevice(base, {
+    analogGroups: 1, zeroCode: SOFTWARE_TEST_ZERO_CODE, schedule,
+  });
+  await terminated.start(cfg, recordingSink(terminatedRecord));
+  schedule.run(1);
+  terminated.terminate();
+  const afterTerminate = terminatedRecord.chunks.length;
+  schedule.run();
+  check('terminate stops the pump',
+    schedule.pending === 0 && terminatedRecord.chunks.length === afterTerminate,
+    `${afterTerminate} chunks kept`);
+
+  const triggerAdapter = softwareTestDevice(base, {
+    analogGroups: 1, zeroCode: SOFTWARE_TEST_ZERO_CODE, schedule,
+  });
+  const triggerError = await rejected(() =>
+    triggerAdapter.start(cfg, () => undefined, undefined, {
+      softwareTrigger: { channels: 8, preTriggerSamples: 0, maxSamples: 16 },
+    }));
+  check('the software source refuses a software trigger', triggerError instanceof Error,
+    String(triggerError));
+
+  const twice = softwareTestDevice(base, {
+    analogGroups: 1, zeroCode: SOFTWARE_TEST_ZERO_CODE, schedule,
+  });
+  await twice.start(cfg, () => undefined);
+  const secondStart = await rejected(() => twice.start(cfg, () => undefined));
+  const twiceStop = await rejected(() => twice.stop());
+  check('the software source refuses a second start and stops idempotently',
+    secondStart instanceof Error && twiceStop === null,
+    `second start ${String(secondStart)}, second stop ${String(twiceStop)}`);
+
+  check('the software source never starts, stops or terminates the base device',
+    baseCalls.length === 0, baseCalls.join(',') || 'no base call');
 }
 
 console.log(results.map((result) =>
