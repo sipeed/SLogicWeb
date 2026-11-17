@@ -39,6 +39,7 @@ function sectionView(over: Partial<MeasurementSectionView> = {}): MeasurementSec
     sources: [],
     filter: null,
     range: { kind: 'viewport', a: null, b: null },
+    tier: 'advanced',
     cursors: [],
     rows: [],
     allRows: [],

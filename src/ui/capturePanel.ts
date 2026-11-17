@@ -45,7 +45,7 @@ import {
 import {
   measurementRangeKind,
   type MeasurementRangeKind, type MeasurementRowView, type MeasurementSectionView,
-  type MeasurementStatus,
+  type MeasurementStatus, type MeasureTier,
 } from './measurementState.js';
 import {
   FFT_MIN_HZ_PRESETS, fftSummaryLines, fftWindowKind, fftWindowLabel,
@@ -106,6 +106,7 @@ export interface CapturePanelCallbacks {
   onPickCursorEdgeChannel(rowId: number, channel: number | null): void;
   onPickMeasurementFilter(start: number | null): void;
   onPickMeasurementRange(kind: MeasurementRangeKind): void;
+  onPickMeasureTier(tier: MeasureTier): void;
   onPickViewMode(mode: AnalysisViewMode): void;
   onPickFftSource(start: number | null): void;
   onPickFftWindow(kind: WindowKind): void;
@@ -131,7 +132,7 @@ export type CapturePanelState =
   'ready' | 'capturing' | 'stopping' | 'waiting' | 'completed' | 'aborted';
 
 interface MeasureFocusIntent {
-  readonly kind: 'row' | 'clear' | 'undo' | 'capture-cancel' | 'capture-restart';
+  readonly kind: 'row' | 'clear' | 'undo' | 'capture-cancel' | 'capture-restart' | 'tier-switch';
   readonly from: HTMLElement | null;
   readonly id: number;
   readonly row: number;

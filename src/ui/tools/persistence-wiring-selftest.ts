@@ -360,6 +360,7 @@ const startBody = methodBody(app, 'private async startCapture(');
     sources: [],
     filter: null,
     range: { kind: 'viewport', a: null, b: null },
+    tier: 'advanced',
     cursors: [],
     rows: [],
     allRows: [],

@@ -12,15 +12,16 @@ import {
   type MeasurementRow,
 } from '../measurementRows.js';
 import {
-  defaultMeasurementConfig, isMeasurementBank, measurementAddStart, measurementCacheKey,
-  measurementRangeKind, measurementRowEligible, measurementRowSettled, measurementRowViews,
-  measurementSectionCounts, measurementSources, measurementWaveValue,
-  reconcileMeasurementConfig, resolveMeasurementWindow,
-  runMeasurement, selectMeasurementFilter, selectMeasurementRange,
+  MEASURE_TIER_DEFAULT, basicMeasurementView, defaultMeasurementConfig, isMeasurementBank,
+  measurementAddStart, measurementCacheKey, measurementRangeKind, measurementRowEligible,
+  measurementRowSettled, measurementRowViews, measurementSectionCounts, measurementSources,
+  measurementWaveValue, reconcileMeasurementConfig, resolveMeasurementWindow, runMeasurement,
+  selectMeasurementFilter, selectMeasurementRange,
   type MeasurementBusView, type MeasurementCacheInput, type MeasurementConfig,
-  type MeasurementCursor, type MeasurementReadSummary, type MeasurementRowView,
-  type MeasurementSource, type MeasurementSourceResult, type MeasurementStatus,
-  type MeasurementWindow,
+  type MeasurementCursor, type MeasurementRangeKind, type MeasurementReadSummary,
+  type MeasurementRowView, type MeasurementSectionView, type MeasurementSource,
+  type MeasurementSourceResult, type MeasurementStatus, type MeasurementWindow,
+  type MeasureTier,
 } from '../measurementState.js';
 import {
   accumulateSample, emptyAccumulator, excludeSample, measurementStatsView,
@@ -170,7 +171,7 @@ function resultFor(
   const all = defaultMeasurementConfig([A2, A0]);
   const none = defaultMeasurementConfig([]);
   check('the default config seeds the lowest source with the three default rows and All filter',
-    all.rows.filter === null && all.range.kind === 'viewport' &&
+    all.rows.filter === null && all.range.kind === 'capture' &&
       all.range.a === null && all.range.b === null &&
       rowRefs(all) === '1:0:frequency,2:0:vpp,3:0:rms' &&
       all.rows.nextId === 4 && all.rows.undo === null &&
@@ -244,7 +245,7 @@ function resultFor(
   const viewport = selectMeasurementRange(cursors, { kind: 'viewport', a: 2, b: 6 });
   check('the range reducer normalizes its endpoints and is idempotent',
     cursors !== base && cursors.range.kind === 'cursors' && cursors.range.a === 2 &&
-      cursors.range.b === null && base.range.kind === 'viewport' && repeat === cursors &&
+      cursors.range.b === null && base.range.kind === 'capture' && repeat === cursors &&
       cleaned.range.a === null && cleaned.range.b === null &&
       viewport.range.kind === 'viewport' && viewport.range.a === 2 && viewport.range.b === 6 &&
       cursors.rows === base.rows,
@@ -322,6 +323,142 @@ function resultFor(
       (cleared.undo === null) === false && mutated.undo === null &&
       measurementSectionCounts(filtered).undoCount === null,
     `visible=${shallow.rowCount(filtered)}, rowCount=${counts.rowCount}`);
+}
+
+{
+  const defaultTierIs = (tier: MeasureTier): boolean => tier === 'basic';
+  const defaultRangeIs = (kind: MeasurementRangeKind): boolean => kind === 'capture';
+  const seeded = defaultMeasurementConfig([A0, A2]);
+  check('the measurement tier defaults to the basic surface',
+    MEASURE_TIER_DEFAULT === 'basic' && defaultTierIs(MEASURE_TIER_DEFAULT) &&
+      !defaultTierIs('advanced'),
+    `default=${MEASURE_TIER_DEFAULT}, forcedAdvancedIsBasic=${String(defaultTierIs('advanced'))}`);
+  check('the seeded session range is the whole capture, not the viewport',
+    seeded.range.kind === 'capture' && defaultRangeIs(seeded.range.kind) &&
+      !defaultRangeIs('viewport') && seeded.range.a === null && seeded.range.b === null &&
+      rowRefs(seeded) === '1:0:frequency,2:0:vpp,3:0:rms',
+    `kind=${seeded.range.kind}, forcedViewportIsCapture=${String(defaultRangeIs('viewport'))}, ` +
+      `rows=${rowRefs(seeded)}`);
+}
+
+{
+  const sectionView = (over: Partial<MeasurementSectionView> = {}): MeasurementSectionView => ({
+    sources: [],
+    filter: null,
+    range: { kind: 'capture', a: null, b: null },
+    tier: 'basic',
+    cursors: [],
+    rows: [],
+    allRows: [],
+    rowCount: 0,
+    undoCount: null,
+    addStart: null,
+    window: null,
+    unavailable: null,
+    capture: null,
+    statsSkipped: 0,
+    statsLoopUnavailable: false,
+    ...over,
+  });
+  const catalog: MeasurementRow[] = [
+    { id: 1, start: 0, parameter: 'vpp' },
+    { id: 2, start: 0, parameter: 'rms' },
+    { id: 3, start: 0, parameter: 'frequency' },
+    { id: 4, start: 0, parameter: 'duty' },
+    { id: 5, start: 16, parameter: 'frequency' },
+    { id: 6, start: 16, parameter: 'vpp' },
+    { id: 7, start: 16, parameter: 'rms' },
+  ];
+  const results = new Map<number, MeasurementSourceResult>([
+    [0, resultFor(A0,
+      scanFixture({ frequencyHz: 1000, vppVolts: 2, rmsVolts: 0.5 }), readFixture())],
+    [16, resultFor(A2,
+      scanFixture({ frequencyHz: 2000, vppVolts: 3.5, rmsVolts: 0.75 }), readFixture())],
+  ]);
+  const rows = measurementRowViews(catalog, results, null);
+  const inputOrder = rows.filter((row) => row.start === 0)
+    .map((row) => row.parameter).join(',');
+  const basic = basicMeasurementView(sectionView({ sources: [A0, A2], rows }));
+  check('the basic surface reads the three key parameters in catalog order for the first source',
+    basic.source === 0 && basic.range === 'capture' && basic.rows.length === 3 &&
+      basic.rows.map((row) => row.parameter).join(',') ===
+        MEASUREMENT_DEFAULT_PARAMETERS.join(',') &&
+      basic.rows.map((row) => row.value).join(',') === '1000,2,0.5' &&
+      basic.rows.every((row) => row.start === 0) &&
+      inputOrder === 'vpp,rms,frequency,duty' &&
+      inputOrder !== basic.rows.map((row) => row.parameter).join(','),
+    `source=${String(basic.source)}, rows=${basic.rows.map((row) => row.parameter).join(',')}, ` +
+      `values=${basic.rows.map((row) => row.value).join(',')}, input=${inputOrder}`);
+  const filtered = basicMeasurementView(sectionView({ sources: [A0, A2], filter: 16, rows }));
+  check('a source filter outranks the first source and no other source row leaks in',
+    filtered.source === 16 && filtered.rows.length === 3 &&
+      filtered.rows.every((row) => row.start === 16) &&
+      filtered.rows.every((row) => row.sourceName === 'A2') &&
+      filtered.rows.map((row) => row.parameter).join(',') ===
+        MEASUREMENT_DEFAULT_PARAMETERS.join(',') &&
+      filtered.rows.map((row) => row.value).join(',') === '2000,3.5,0.75',
+    `source=${String(filtered.source)}, ` +
+      `rows=${filtered.rows.map((row) => `${row.start}:${row.parameter}`).join(',')}`);
+  const two = basicMeasurementView(sectionView({
+    sources: [A0],
+    rows: rows.filter((row) => row.start !== 0 || row.parameter !== 'frequency'),
+  }));
+  check('a source with two of the three rows shows two readouts and fabricates none',
+    two.source === 0 && two.rows.length === 2 &&
+      two.rows.map((row) => row.parameter).join(',') === 'vpp,rms' &&
+      two.rows.map((row) => row.value).join(',') === '2,0.5',
+    `rows=${two.rows.map((row) => `${row.parameter}=${row.value}`).join(',')}`);
+  const empty = basicMeasurementView(sectionView({ sources: [] }));
+  check('a session with no analog group has no source and no readout',
+    empty.source === null && empty.rows.length === 0 && empty.range === 'capture' &&
+      basicMeasurementView(sectionView()).rows.length === 0,
+    `source=${String(empty.source)}, rows=${empty.rows.length}, range=${empty.range}`);
+  const cursored = basicMeasurementView(sectionView({
+    sources: [A0], rows, range: { kind: 'cursors', a: 1, b: 2 },
+  }));
+  check('the basic surface projects the section range kind unchanged',
+    cursored.range === 'cursors' && cursored.rows.length === 3 &&
+      defaultMeasurementConfig([A0]).range.kind !== cursored.range,
+    `range=${cursored.range}, seeded=${defaultMeasurementConfig([A0]).range.kind}`);
+}
+
+{
+  const snapshot = between(appSource, '  private workspaceSnapshot(): WorkspaceSnapshotV1 {',
+    '  private persistWorkspace(): void {');
+  const snapshotFields = (region: string): string[] =>
+    (region.match(/^ {6}[A-Za-z]\w*:/gm) ?? []).map((line) => line.trim().slice(0, -1));
+  const fields = snapshotFields(snapshot);
+  const withTier = snapshotFields(snapshot.replace(
+    '      analogLayout: this.analogLayout,',
+    '      analogLayout: this.analogLayout,\n      measureTier: this.measureTier,'));
+  const expected = 'version,detailedLabels,wheelZooms,developerTools,compactRows,' +
+    'hideIdleChannels,fitRows,quickScroll,analogLayout,channels,order,capture,busViews,' +
+    'analyzers,sidebar';
+  check('the workspace snapshot field list is unchanged by a tier switch and carries no tier',
+    fields.join(',') === expected && fields.length === 15 &&
+      !snapshot.includes('measureTier') &&
+      withTier.length === fields.length + 1 && withTier.includes('measureTier') &&
+      withTier.join(',') !== fields.join(','),
+    `fields=${fields.length}, withTier=${withTier.length}, ` +
+      `equal=${String(withTier.join(',') === fields.join(','))}`);
+  const setter = between(appSource, '  private setMeasureTier(tier: MeasureTier): void {',
+    '  private pickMeasurementCursor(');
+  const written = setter.match(/this\.\w+ = /g) ?? [];
+  check('the tier setter writes the session field and re-renders, nothing else',
+    setter !== '' && setter.includes('this.measureTier = tier;') &&
+      setter.includes('this.renderPanels();') &&
+      !setter.includes('persistWorkspace') && !setter.includes('this.measurementStats') &&
+      !setter.includes('this.measurementConfig') && !setter.includes('this.cursors') &&
+      written.join(',') === 'this.measureTier = ',
+    `written=${written.join(',')}, setter=${setter.length}`);
+  check('the App owns one session tier and projects it onto the section view',
+    appSource.includes('  private measureTier: MeasureTier = MEASURE_TIER_DEFAULT;') &&
+      appSource.includes('      tier: this.measureTier,') &&
+      appSource.includes('onPickMeasureTier: (tier) => this.setMeasureTier(tier),') &&
+      !snapshot.includes('tier'),
+    `field=${appSource.includes('private measureTier: MeasureTier')}, ` +
+      `view=${appSource.includes('tier: this.measureTier,')}, ` +
+      `wired=${appSource.includes('onPickMeasureTier: (tier) =>')}`);
 }
 
 {
@@ -422,7 +559,8 @@ function resultFor(
 }
 
 {
-  const viewportConfig = defaultMeasurementConfig([A0]);
+  const viewportConfig = selectMeasurementRange(
+    defaultMeasurementConfig([A0]), { kind: 'viewport', a: null, b: null });
   const cursorConfig = selectMeasurementRange(viewportConfig, { kind: 'cursors', a: 1, b: 2 });
   const pair: MeasurementCursor[] = [{ id: 1, sample: 4000 }, { id: 2, sample: 1000 }];
   const sameSample: MeasurementCursor[] = [{ id: 1, sample: 4000 }, { id: 2, sample: 4000 }];
@@ -851,7 +989,8 @@ function rowsOf(scan: AnalogCodeScan | null, read: MeasurementReadSummary | null
       resolveMeasurementWindow(capture, [], VIEWPORT) === null,
     `kind=${capture.range.kind}, window=${JSON.stringify(window)}`);
 
-  const viewport = resolveMeasurementWindow(config, [], VIEWPORT, 300000);
+  const viewport = resolveMeasurementWindow(
+    selectMeasurementRange(config, { kind: 'viewport', a: null, b: null }), [], VIEWPORT, 300000);
   const cursorConfig = selectMeasurementRange(config, { kind: 'cursors', a: 1, b: 2 });
   const cursors: MeasurementCursor[] = [{ id: 1, sample: 10 }, { id: 2, sample: 40 }];
   const cursorWindow = resolveMeasurementWindow(cursorConfig, cursors, VIEWPORT, 300000);

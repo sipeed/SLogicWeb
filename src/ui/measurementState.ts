@@ -18,6 +18,10 @@ import type { XySectionView } from './xyPanel.js';
 
 export type MeasurementRangeKind = 'viewport' | 'cursors' | 'capture';
 
+export type MeasureTier = 'basic' | 'advanced';
+
+export const MEASURE_TIER_DEFAULT: MeasureTier = 'basic';
+
 export type MeasurementStatus =
   | 'ok'
   | 'no-source'
@@ -119,6 +123,7 @@ export interface MeasurementSectionView {
   sources: MeasurementSource[];
   filter: number | null;
   range: MeasurementRange;
+  tier: MeasureTier;
   cursors: { id: number; label: string; color: string }[];
   rows: MeasurementRowView[];
   allRows: readonly MeasurementRow[];
@@ -258,7 +263,7 @@ export function defaultMeasurementConfig(sources: readonly MeasurementSource[]):
       rows = addMeasurementRow(rows, first.start, parameter);
     }
   }
-  return { range: { kind: 'viewport', a: null, b: null }, rows };
+  return { range: { kind: 'capture', a: null, b: null }, rows };
 }
 
 export function reconcileMeasurementConfig(
@@ -414,6 +419,24 @@ export function measurementRowViews(
       stats: statsOf(row.id),
     };
   });
+}
+
+export interface BasicMeasurementView {
+  source: number | null;
+  range: MeasurementRangeKind;
+  rows: readonly MeasurementRowView[];
+}
+
+export function basicMeasurementView(section: MeasurementSectionView): BasicMeasurementView {
+  const source = section.filter ?? section.sources[0]?.start ?? null;
+  const range = section.range.kind;
+  if (source === null) return { source, range, rows: [] };
+  const rows = MEASUREMENT_DEFAULT_PARAMETERS.flatMap((parameter) => {
+    const row = section.rows.find(
+      (entry) => entry.start === source && entry.parameter === parameter);
+    return row === undefined ? [] : [row];
+  });
+  return { source, range, rows };
 }
 
 export function measurementRowEligible(row: MeasurementRowView): boolean {

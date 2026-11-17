@@ -113,14 +113,14 @@ import {
 import { formatCursorTimes } from './cursorTime.js';
 import { sameUsbDevice } from './deviceIdentity.js';
 import {
-  defaultMeasurementConfig, isMeasurementBank, measurementAddStart, measurementCacheKey,
-  measurementRowViews, measurementRowSettled, measurementSectionCounts, measurementSources,
-  measurementWaveValue, reconcileMeasurementConfig, resolveMeasurementWindow, runMeasurement,
-  selectMeasurementFilter, selectMeasurementRange,
+  MEASURE_TIER_DEFAULT, defaultMeasurementConfig, isMeasurementBank, measurementAddStart,
+  measurementCacheKey, measurementRowViews, measurementRowSettled, measurementSectionCounts,
+  measurementSources, measurementWaveValue, reconcileMeasurementConfig, resolveMeasurementWindow,
+  runMeasurement, selectMeasurementFilter, selectMeasurementRange,
   type MeasurementConfig, type MeasurementCaptureView, type MeasurementRange,
   type MeasurementRangeKind, type MeasurementReadSummary, type MeasurementRowView,
   type MeasurementSectionView, type MeasurementSource, type MeasurementSourceResult,
-  type MeasurementStatus,
+  type MeasurementStatus, type MeasureTier,
 } from './measurementState.js';
 import {
   CaptureRangeJob, MEASURE_CAPTURE_BUDGET_MS, captureJobKey, captureRangeUnavailable,
@@ -480,6 +480,7 @@ export class App {
   private captureSessionId = 0;
   private captureWaveGeneration = 0;
   private measurementStats: MeasurementStatsState = emptyMeasurementStats();
+  private measureTier: MeasureTier = MEASURE_TIER_DEFAULT;
   private viewMode: AnalysisViewMode = 'time';
   private fftConfig: FftConfig = FFT_DEFAULT_CONFIG;
   private fftCache: { store: SampleStore; key: string; analysis: FftAnalysis } | null = null;
@@ -1440,6 +1441,7 @@ export class App {
       sources,
       filter: state.filter,
       range: config.range,
+      tier: this.measureTier,
       cursors: cursors.map((cursor) => ({
         id: cursor.id, label: cursor.label, color: cursor.color,
       })),
@@ -2323,6 +2325,11 @@ export class App {
           b: base.range.b ?? seeded[1] ?? null,
         };
     this.applyMeasurementConfig(selectMeasurementRange(base, range));
+  }
+
+  private setMeasureTier(tier: MeasureTier): void {
+    this.measureTier = tier;
+    this.renderPanels();
   }
 
   private pickMeasurementCursor(side: 'a' | 'b', cursorId: number | null): void {
@@ -6614,6 +6621,7 @@ export class App {
         onPickCursorEdgeChannel: (rowId, channel) => this.pickEdgeChannel(rowId, channel),
         onPickMeasurementFilter: (start) => this.pickMeasurementFilter(start),
         onPickMeasurementRange: (kind) => this.pickMeasurementRange(kind),
+        onPickMeasureTier: (tier) => this.setMeasureTier(tier),
         onPickViewMode: (mode) => this.setViewMode(mode),
         onPickFftSource: (start) => this.setFftSource(start),
         onPickFftWindow: (kind) => this.setFftWindow(kind),
