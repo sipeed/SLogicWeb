@@ -107,7 +107,7 @@ const catalogs: Array<[string, Messages]> = [['en', en], ['zh-CN', zhCN], ['ru',
     }
   }
   check('waiting-trigger, Loop and capture-panel copy is plain in every locale',
-    hits.length === 0 && zhCN['capturePanel.armed'].startsWith('等待触发：') &&
+    hits.length === 0 &&
       zhCN['capturePanel.triggerArmNext'].includes('即可立即开始等待触发') &&
       zhCN['capturePanel.loopWindowLimit'] === '最长保留 {duration}（{rate}）。',
     hits.join(', ') || 'clean');

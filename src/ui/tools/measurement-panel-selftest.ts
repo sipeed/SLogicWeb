@@ -1409,7 +1409,6 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     triggerArmed: false,
     triggerAutoDisarmed: false,
     settingsArmed: false,
-    activeTriggerPreSamples: undefined,
     measurement: section,
     persistence: { frames: 0, effective: 0, loop: false, clear: null },
   });
@@ -1804,7 +1803,6 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     triggerArmed: false,
     triggerAutoDisarmed: false,
     settingsArmed: false,
-    activeTriggerPreSamples: undefined,
     measurement: section(),
     persistence: { frames: 0, effective: 0, loop: false, clear: null },
   });
@@ -1945,7 +1943,6 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     triggerArmed: false,
     triggerAutoDisarmed: false,
     settingsArmed: false,
-    activeTriggerPreSamples: undefined,
     measurement: section(over),
     persistence: { frames: 0, effective: 0, loop: false, clear: null },
   });

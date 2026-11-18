@@ -1227,8 +1227,8 @@ channel trigger modes, the Global trigger source, condition removal and the rule
 editable in that state too; the panel shows no pending note. Removing every condition
 restarts the capture so it runs free. Once the matcher has matched, the capture's trigger
 is frozen: edits become pending configuration for the next acquisition (including the next
-Repeat wave), and the trigger section prints `pendingTrigger` for source, preview list,
-armed summary and ruler, with one exception: a Loop analog lock retunes its page-side
+Repeat wave), and the trigger section prints `pendingTrigger` for source, preview list
+and ruler, with one exception: a Loop analog lock retunes its page-side
 crossing detector in place and keeps the lock only while the new condition produces
 edges. Global trigger is an arming decision for the acquisition: off while waiting
 restarts free-running, off after a match releases the view in place and tears down the

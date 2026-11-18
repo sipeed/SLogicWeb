@@ -89,14 +89,11 @@ check('single and repeat show the plain triggered note',
   const repeat = panel({ mode: 'repeat' });
   const digitalLocked = panel({ triggerAnalogRolling: false, triggerLocked: true });
   const analogReleased = panel({ triggerLocked: false, triggerAnalogRolling: true });
-  check('the panel shows pending/arming/armed-summary only in the states that mean them',
-    !p.pending && !p.arming && !p.armedSummary && !p.memoryReleased &&
-    !waiting.pending && waiting.armedSummary &&
-    !releasedDigital.pending && !releasedDigital.armedSummary &&
-    !stopped.pending &&
-    freeRun.arming && !freeRun.armedSummary &&
-    !noCondition.arming && !noCondition.armedSummary &&
-    memory.memoryReleased && !memory.arming && !memory.armedSummary &&
+  check('the panel shows pending/arming/memory-released only in the states that mean them',
+    !p.pending && !p.arming && !p.memoryReleased &&
+    !waiting.pending && !releasedDigital.pending && !stopped.pending &&
+    freeRun.arming && !noCondition.arming &&
+    memory.memoryReleased && !memory.arming &&
     // A matched finite capture and a matched Loop-digital one-shot keep the edit-pending
     // note; a released analog Loop is still live via its scanner.
     single.pending && repeat.pending && digitalLocked.pending && !analogReleased.pending,
@@ -213,8 +210,8 @@ check('single and repeat show the plain triggered note',
       loopDeferred === 'none' && waitingRetune === 'retune' &&
       deferredNotes.armNext && !deferredNotes.arming &&
       !explicitNotes.armNext && explicitNotes.arming &&
-      !nextCapture.armNext && !nextCapture.arming && nextCapture.armedSummary &&
-      !armedNow.armNext && armedNow.armedSummary,
+      !nextCapture.armNext && !nextCapture.arming &&
+      !armedNow.armNext && !armedNow.arming,
     `defer=${deferDigital}/${deferAnalog} idle=${idle} stopping=${stopping} ` +
       `notAuto=${notAuto} actions=${deferredAction}/${explicitAction}/${loopDeferred}/` +
       `${waitingRetune} deferred=${JSON.stringify(deferredNotes)} ` +

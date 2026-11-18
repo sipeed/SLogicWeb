@@ -474,11 +474,9 @@ const startSrc = app.slice(
     startSrc.includes('this.lastAnalogCrossingAbs = Number.NEGATIVE_INFINITY;') &&
     startSrc.includes('this.pendingRelockAbs = null;') &&
     app.includes('if (this.running) await this.stopCapture(\'manual\');') &&
-    app.includes('if (this.stopPending) await this.stopPending;') &&
-    app.includes('activeTriggerPreSamples: this.running && this.captureTriggerBase') &&
-    panel.includes('v.activeTriggerPreSamples !== undefined');
+    app.includes('if (this.stopPending) await this.stopPending;');
   check('opening a capture and live Duration edits clean up/retain the right trigger state',
-    integration, `open=${app.includes('if (this.running) await this.stopCapture(\'manual\');')}, adopt=${app.includes('this.analogScanner = null;\n    this.analogCrossings = [];')}, prefix=${panel.includes('v.activeTriggerPreSamples !== undefined')}`);
+    integration, `open=${app.includes('if (this.running) await this.stopCapture(\'manual\');')}, adopt=${app.includes('this.analogScanner = null;\n    this.analogCrossings = [];')}`);
   check('a lost trigger is reported and the loop message is not the finite-capture one',
     lost && loopMessage && stopped,
     `lost=${lost}, loopMessage=${loopMessage}, stopped=${stopped}`);

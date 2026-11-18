@@ -409,7 +409,6 @@ const startBody = methodBody(app, 'private async startCapture(');
     triggerArmed: false,
     triggerAutoDisarmed: false,
     settingsArmed: false,
-    activeTriggerPreSamples: undefined,
     measurement: emptyMeasurements,
     persistence,
   });

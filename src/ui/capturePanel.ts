@@ -17,8 +17,6 @@
  */
 
 import { SAMPLERATES_HZ, vrefCode, vrefVolts } from '../device/index.js';
-import { MAX_SOFTWARE_TRIGGER_PREFIX_BYTES } from '../data/index.js';
-import { bytesPerSampleForChannels } from '../types.js';
 import {
   formatBytes, formatCount, formatDuration, formatFreq, formatRate, formatStatusDetail, statusDetailOf,
 } from './format.js';
@@ -71,7 +69,6 @@ import {
   maxCaptureSeconds, MIN_CAPTURE_SECONDS, REPEAT_INTERVAL_SECONDS,
 } from './captureTime.js';
 import { captureAbortDetail, type CaptureAbortCause } from './captureAbort.js';
-import { capturePostTriggerSamples } from './capturePolicy.js';
 import { MAX_CURSOR_DISTANCE_ROWS, type DistanceSide } from './cursorDistance.js';
 import { MAX_CURSOR_EDGE_ROWS } from './cursorEdges.js';
 import { cursorsLocked } from './cursorSet.js';
@@ -259,8 +256,6 @@ export interface CapturePanelView {
   triggerRetuneRejected: boolean;
   /** The loop lock is rolling on scanned analog crossings (not the one-shot digital lock). */
   triggerAnalogRolling: boolean;
-  /** Samples of pre-trigger history the running matcher actually retained. */
-  activeTriggerPreSamples: number | undefined;
   /** Seconds of pre-trigger a triggered capture holds when that is less than configured
    * (see `preTriggerShortfall`); null when the full window was obtained. */
   triggerPreObtainedSec?: number | null;
@@ -328,8 +323,6 @@ export class CapturePanel {
   private lostNote: HTMLElement | null = null;
   /** The dynamic arming/pending/memory notes, refreshed without a panel rebuild. */
   private triggerNotesEl: HTMLElement | null = null;
-  /** The "Armed: ..." summary, hidden once the acquisition no longer just waits. */
-  private triggerArmedEl: HTMLElement | null = null;
   private droppedNote: HTMLElement | null = null;
   private memoryNote: HTMLElement | null = null;
   private saveNote: HTMLElement | null = null;
@@ -687,8 +680,8 @@ export class CapturePanel {
 
   /**
    * Refresh only the dynamic trigger notes. Repeat waves and the digital-lock eviction
-   * path do not rebuild the panel, so the "Armed" summary and pending/arming notes would
-   * otherwise stay in the DOM after the state they describe has passed.
+   * path do not rebuild the panel, so the pending/arming notes would otherwise stay in
+   * the DOM after the state they describe has passed.
    */
   private fillTriggerNotes(v: TriggerStatusView): void {
     const host = this.triggerNotesEl;
@@ -728,7 +721,6 @@ export class CapturePanel {
       pending.textContent = t('capturePanel.pendingTrigger');
       host.appendChild(pending);
     }
-    if (this.triggerArmedEl) this.triggerArmedEl.hidden = !notes.armedSummary;
   }
 
   /** The status-view subset of the full panel view, for the text-only refresh path. */
@@ -807,7 +799,7 @@ export class CapturePanel {
     }
 
     if (v.triggerPreObtainedSec !== null && v.triggerPreObtainedSec !== undefined) {
-      // The capture holds less negative time than the armed note promised; say how much.
+      // The capture holds less negative time than requested; say how much.
       const short = div('panel-note');
       short.textContent = t('capturePanel.preTriggerObtained', {
         duration: formatDuration(v.triggerPreObtainedSec),
@@ -1373,7 +1365,6 @@ export class CapturePanel {
       sourceRow.append(sourceSeg, helpTip(t('capturePanel.triggerSourceHelp')));
       triggerSec.body.appendChild(sourceRow);
       this.triggerNotesEl = div('trigger-notes');
-      this.triggerArmedEl = null;
       triggerSec.body.appendChild(this.triggerNotesEl);
       if (!settingsArmed && !v.stopping) {
         // The one mistake this section invites: enabling the trigger and never picking a
@@ -1499,56 +1490,6 @@ export class CapturePanel {
         const analog = v.triggerAnalogRolling || analogConfigured;
         preRow.appendChild(helpTip(t(analog
           ? 'capturePanel.loopTriggerNote' : 'capturePanel.loopTriggerNoteDigital')));
-      }
-
-      // The one mistake this section invites: enabling the trigger and never picking a
-      // condition, which silently arms nothing. Say what is armed, or what is missing.
-      const armed = div('panel-note');
-      const digitalWhat = s.triggerSource === 'digital'
-        ? digitalConditions.map((c) =>
-          `D${c.channel} ${digitalConditionLabel(c.kind, c.level)}`)
-        : [];
-      const analogWhat = s.triggerSource === 'analog'
-        ? analogBanks
-          .filter((start) => s.analogTriggers?.[start] !== undefined)
-          .map((start) => {
-            const setting = s.analogTriggers[start]!;
-            return `A${start / CHANNEL_BANK_SIZE} ` +
-              t(setting.kind === 'rising' ? 'trigger.rising' : 'trigger.falling') +
-              ` ${analogTriggerVolts(setting.kind, setting.volts, gainAt(start)).toFixed(4)} V`;
-          })
-        : [];
-      if (digitalWhat.length > 0 || analogWhat.length > 0) {
-        const what = [...digitalWhat, ...analogWhat].join(t('capturePanel.condJoiner'));
-        // The *effective* pre-trigger window, with the same clamps startCapture
-        // applies: percent of the post-trigger budget (of the loop window in loop
-        // mode), capped by the 64 MiB retained prefix. Promising the raw percentage
-        // would overstate it exactly when the cap bites (e.g. 50% of 1 s at
-        // 16ch/200M is capped at ~167 ms).
-        const post = capturePostTriggerSamples(s);
-        // A running matcher's retained prefix was sized at start; Duration edits cannot
-        // grow or shrink it, so the armed note must not claim the new setting's window.
-        const requestedPre = Math.floor(post * s.preTriggerPercent / 100);
-        const preSamples = v.running && v.activeTriggerPreSamples !== undefined
-          ? v.activeTriggerPreSamples
-          : Math.min(
-            Math.max(0, post - 1),
-            Math.max(0, requestedPre),
-            Math.floor(MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / bytesPerSampleForChannels(s.channels)),
-          );
-        const capped = preSamples < requestedPre;
-        armed.textContent = capped
-          ? t('capturePanel.armedCapped', {
-            what,
-            duration: formatDuration(preSamples / s.samplerate),
-            megabytes: MAX_SOFTWARE_TRIGGER_PREFIX_BYTES / 1048576,
-          })
-          : t('capturePanel.armed', {
-            what,
-            duration: formatDuration(preSamples / s.samplerate),
-          });
-        this.triggerArmedEl = armed;
-        triggerSec.body.appendChild(armed);
       }
 
       this.triggerStatusEl = div('trigger-status');

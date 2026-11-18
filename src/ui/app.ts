@@ -6953,8 +6953,6 @@ export class App {
       triggerArmed: this.captureUsesSoftwareTrigger && this.running && !this.stopping,
       triggerAutoDisarmed: this.triggerAutoDisarmed,
       settingsArmed: this.triggerSettingsArmed(),
-      activeTriggerPreSamples: this.running && this.captureTriggerBase
-        ? this.captureTriggerBase.preTriggerSamples : undefined,
       loopMetrics: this.running && this.captureIsLoop ? this.computeLoopMetrics() : null,
       repeatMissed: this.repeatMissed,
       triggerPreObtainedSec: this.triggerPreObtainedSec(),

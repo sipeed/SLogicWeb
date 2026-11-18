@@ -71,8 +71,8 @@ const note = (patch: Partial<TriggerNoteInput> = {}) => triggerStatusNote({
     });
   const live = panel();
   const done = panel({ running: false });
-  check('a forced sweep is past its search: edits are pending, nothing claims armed',
-    live.pending && !live.armedSummary && !live.arming && !done.pending,
+  check('a forced sweep is past its search: edits are pending, no arming note',
+    live.pending && !live.arming && !done.pending,
     `${JSON.stringify(live)} ${JSON.stringify(done)}`);
 }
 

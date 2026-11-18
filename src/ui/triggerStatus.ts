@@ -94,8 +94,6 @@ export interface TriggerPanelNotes {
   pending: boolean;
   /** Show "restarting to arm the matcher". */
   arming: boolean;
-  /** Show the "Armed: ..." summary. */
-  armedSummary: boolean;
   /** Show "released to keep the loop store bounded". */
   memoryReleased: boolean;
   /** Show "the trigger was turned on by configuring a condition; it arms the next
@@ -106,8 +104,8 @@ export interface TriggerPanelNotes {
 /**
  * Which informational notes the trigger panel should render.
  *
- * A matched one-shot is no longer "armed": the summary and the pending note must not
- * contradict the released status. A Loop analog detector is live after the match, so its
+ * A matched one-shot is no longer "armed": the pending note must not contradict the
+ * released status. A Loop analog detector is live after the match, so its
  * edits are not pending. A capture that was restarted to arm (or auto-disarmed by the
  * memory cap) must not claim an arming action that is not running.
  */
@@ -125,8 +123,6 @@ export function triggerPanelNotes(v: TriggerPanelNoteInput): TriggerPanelNotes {
       !liveAnalog && !releasedOneShot,
     arming: v.running && v.settingsArmed && !v.triggerArmed && !v.triggerAutoDisarmed &&
       !deferred,
-    armedSummary: v.settingsArmed && !v.triggerAutoDisarmed &&
-      (!v.running || v.triggerState === 'waiting'),
     memoryReleased: v.running && v.triggerAutoDisarmed,
     armNext: deferred && v.settingsArmed,
   };

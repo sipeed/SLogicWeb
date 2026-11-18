@@ -66,15 +66,6 @@ function cssRules(selector: string): string[] {
 }
 
 {
-  const armed = panel.includes("s.triggerSource === 'analog'") &&
-    panel.includes('digitalWhat.length > 0 || analogWhat.length > 0') &&
-    panel.includes('`A${start / CHANNEL_BANK_SIZE} `') &&
-    panel.includes('analogTriggerVolts(setting.kind, setting.volts, gainAt(start)).toFixed(4)');
-  check('the armed note reports analog crossings when the analog source is armed',
-    armed, `armed=${armed}`);
-}
-
-{
   const derive = app.includes('private activeAnalogTriggers(') &&
     app.includes('s.analogTriggers?.[start]') &&
     app.includes("clamped.triggerSource === 'digital'") &&
@@ -229,7 +220,7 @@ function cssRules(selector: string): string[] {
     panel.includes("mask.disabled = v.stopping;") &&
     panel.includes('triggerPanelNotes({') &&
     panel.includes('notes.pending') && panel.includes('notes.arming') &&
-    panel.includes('notes.armedSummary') && panel.includes('notes.memoryReleased') &&
+    panel.includes('notes.memoryReleased') &&
     device.includes('updateSoftwareTrigger(config: SoftwareTriggerConfig): boolean') &&
     device.includes('return trigger.reconfigure(config);') &&
     deviceTypes.includes('updateSoftwareTrigger?(config:') &&
