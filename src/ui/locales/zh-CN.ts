@@ -320,7 +320,7 @@ export const zhCN: Messages = {
   'diagnostic.device.underrunStalled':
     '{device} 触发主机过载保护并强行中止采集。{channels} 通道 @ {rate} MHz 产生 {offered} MB/s，连续 {count} 次传输仅耗时 {transferMs} ms 接收 {bytes} B（上限 {limitMs} ms），{runMs} ms 内平均 {avg} MB/s（最低 {minimum} MB/s）。{thread} 线程被阻塞 {stalls} 次，最长停顿 {worstMs} ms（发生在启动后 {atMs} ms），传输队列仅覆盖 {coverMs} ms，板载 FIFO 即将溢出。',
   'diagnostic.device.underrunClean':
-    '{device} 因 USB 通路瓶颈中止采集。{channels} 通道 @ {rate} MHz 产生 {offered} MB/s，连续 {count} 次传输在 {transferMs} ms 仅移交 {bytes} B（上限 {limitMs} ms），{runMs} ms 内平均吞吐 {avg} MB/s（最低 {minimum} MB/s）。{thread} 线程阻塞未超过 {thresholdMs} ms，瓶颈在物理连接或硬件端点。',
+    '{device} 抢在板载 FIFO 溢出前中止采集。{channels} 通道 @ {rate} MHz 产生 {offered} MB/s，连续 {count} 次传输在 {transferMs} ms 仅移交 {bytes} B（上限 {limitMs} ms），{runMs} ms 内平均吞吐 {avg} MB/s（最低 {minimum} MB/s）。{thread} 线程阻塞未超过 {thresholdMs} ms，瓶颈在物理连接或 USB 硬件端点。',
   'diagnostic.device.openFailed': '无法打开 USB 设备',
   'diagnostic.device.configureFailed': '无法选择设备配置',
   'diagnostic.device.claimFailed': '无法占用接口 0',
