@@ -168,6 +168,52 @@ const followsNoteBaseRule = (source: string): boolean => {
     `strippedLength=${stripped.length}, sheetLength=${css.length}`);
 }
 
+const slice = (source: string, from: string, to: string): string => {
+  const start = source.indexOf(from);
+  if (start < 0) return '';
+  const end = source.indexOf(to, start);
+  return end < 0 ? '' : source.slice(start, end);
+};
+
+const ANALOG_FROM = 'if (activeBanks.size > 0) {';
+const ANALOG_TO = 'const code = vrefCode(s.thresholdVolts);';
+const ANALOG_CONSTRUCTION = "const analogNote = div('panel-note');";
+const ANALOG_TEXT = "t('capturePanel.analogRateNote')";
+const ANALOG_HIDDEN =
+  "analogNote.hidden = capturePanelNoteHidden('capturePanel.analogRateNote');";
+const ANALOG_APPEND = 'chSec.body.appendChild(analogNote);';
+const ANALOG_REMOVE = 'analogNote.remove';
+
+const analogNoteHidden = (source: string): boolean =>
+  source.includes(ANALOG_CONSTRUCTION) && source.includes(ANALOG_TEXT) &&
+  source.includes(ANALOG_HIDDEN) && source.includes(ANALOG_APPEND) &&
+  !source.includes(ANALOG_REMOVE);
+
+{
+  const panel = read('src/ui/capturePanel.ts');
+  const block = slice(panel, ANALOG_FROM, ANALOG_TO);
+  check('the analog rate note is built, appended and hidden by the registry',
+    block !== '' && analogNoteHidden(block),
+    `length=${block.length}, construction=${block.includes(ANALOG_CONSTRUCTION)}, ` +
+    `text=${block.includes(ANALOG_TEXT)}, hidden=${block.includes(ANALOG_HIDDEN)}, ` +
+    `append=${block.includes(ANALOG_APPEND)}, remove=${block.includes(ANALOG_REMOVE)}`);
+}
+
+{
+  const panel = read('src/ui/capturePanel.ts');
+  const block = slice(panel, ANALOG_FROM, ANALOG_TO);
+  const stripped = block.split(`${ANALOG_HIDDEN}\n`).join('');
+  const unappended = block.split(`${ANALOG_APPEND}\n`).join('');
+  const strippedPass = analogNoteHidden(stripped);
+  const unappendedPass = analogNoteHidden(unappended);
+  check('control: the analog note predicate fails without the hidden line or without the append',
+    block !== '' && analogNoteHidden(block) && stripped !== block && unappended !== block &&
+    !strippedPass && !unappendedPass,
+    `baseline=${analogNoteHidden(block)}, stripped=${strippedPass}, ` +
+    `unappended=${unappendedPass}, strippedLength=${stripped.length}, ` +
+    `unappendedLength=${unappended.length}, blockLength=${block.length}`);
+}
+
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

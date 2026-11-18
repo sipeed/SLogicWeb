@@ -55,6 +55,7 @@ import { xySummaryLines, type XyAxis, type XySectionView } from './xyPanel.js';
 import { WINDOW_KINDS, type WindowKind } from '../dsp/fft.js';
 import { chipForeground } from './metrics.js';
 import type { MeasurementStatsView } from './measurementStats.js';
+import { capturePanelNoteHidden } from './panelNoteVisibility.js';
 import {
   PERSISTENCE_FRAMES, persistenceOf,
   type PersistenceClearReason, type PersistenceFrames,
@@ -1089,6 +1090,7 @@ export class CapturePanel {
     if (activeBanks.size > 0) {
       const analogNote = div('panel-note');
       analogNote.textContent = t('capturePanel.analogRateNote');
+      analogNote.hidden = capturePanelNoteHidden('capturePanel.analogRateNote');
       chSec.body.appendChild(analogNote);
     }
 
