@@ -392,8 +392,6 @@ const startBody = methodBody(app, 'private async startCapture(');
     running: false,
     stopping: false,
     repeatPending: false,
-    captureState: 'ready',
-    result: null,
     progress: null,
     maxSamplerateHz: { 16: 200e6 },
     triggerState: 'off',

@@ -838,7 +838,6 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     startSrc.includes("const isLoop = mode === 'loop'") &&
     startSrc.includes('const postTriggerSamples = capturePostTriggerSamples(this.settings)') &&
     startSrc.includes('this.captureLimitSamples = isLoop ? MAX_SAMPLES - 1 : postTriggerSamples;') &&
-    startSrc.includes('this.captureRequestedSeconds = isLoop ? null : postTriggerSamples / cfg.samplerate;') &&
     !appSrc.includes('singleUnlimited') &&
     appSrc.includes('repeatIntervalSeconds: clampRepeatIntervalSeconds(') &&
     !appSrc.includes('effectiveCaptureMode') && !appSrc.includes('effectiveMode:') &&

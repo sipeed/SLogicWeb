@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * A capture that ended because the device or the link failed, not because it was
- * stopped or reached its length. The panel reads it to say "Aborted (host overload)"
- * with the requested and the actual duration instead of "Completed"; the banner reads
- * it to lead with a plain conclusion and the one remedy, with the diagnostic collapsed.
+ * stopped or reached its length. The banner reads it to lead with a plain conclusion
+ * and the one remedy, with the diagnostic collapsed.
  *
  * Pure: no DOM, no device. The cause comes from the error's diagnostic code; the
  * remedy's rate comes from the offered-rate table and the board's recommendation.
  */
 
 import { diagnosticOf } from '../diagnostics.js';
-import { formatDuration } from './format.js';
-import { t } from './i18n.js';
 
 /**
  * `hostOverload` is the transport's own abort (`device.underrunStalled`/`Clean`): the
@@ -37,8 +34,6 @@ export function isAllocationFailure(error: unknown): boolean {
 
 export interface CaptureAbort {
   cause: CaptureAbortCause;
-  /** The duration the capture asked for; null for Loop. */
-  requestedSeconds: number | null;
   channels: number;
   samplerate: number;
 }
@@ -76,32 +71,4 @@ export function saveFailureNotice(
   error: unknown,
 ): { notice: { key: 'error.saveOutOfMemory' } } | undefined {
   return isAllocationFailure(error) ? { notice: { key: 'error.saveOutOfMemory' } } : undefined;
-}
-
-const CAUSE_KEYS = {
-  hostOverload: 'capturePanel.abortHostOverload',
-  disconnected: 'capturePanel.abortDisconnected',
-  device: 'capturePanel.abortDevice',
-  memory: 'capturePanel.abortMemory',
-} as const;
-
-/**
- * The panel's status line for an aborted capture, e.g. "Host overload · requested 1 s /
- * actual 109.5 ms · 10,952,704 samples". Loop asks for no duration, so it reports only
- * what arrived.
- */
-export function captureAbortDetail(
-  abort: Pick<CaptureAbort, 'cause' | 'requestedSeconds'>,
-  result: { samples: number; seconds: number },
-): string {
-  const vars = {
-    reason: t(CAUSE_KEYS[abort.cause]),
-    actual: formatDuration(result.seconds),
-    samples: result.samples.toLocaleString(),
-  };
-  return abort.requestedSeconds === null
-    ? t('capturePanel.statusAbortedOpenDetail', vars)
-    : t('capturePanel.statusAbortedDetail', {
-      ...vars, requested: formatDuration(abort.requestedSeconds),
-    });
 }

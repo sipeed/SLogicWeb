@@ -69,7 +69,7 @@ import {
 } from './busView.js';
 import { layoutBubbles, type AnnotationSpan, type Bubble } from './annotationLayout.js';
 import { CapturePanel, cursorDistanceSideId, cursorEdgeSideId,
-  type CapturePanelState, type CapturePanelView, type CursorDistanceRowView,
+  type CapturePanelView, type CursorDistanceRowView,
   type CursorDistanceSideView, type CursorEdgeChannelView, type CursorEdgeRowView,
   type CursorRowView, type LoopDisplayMetrics, type PersistencePanelView,
   type TriggerStatusView } from './capturePanel.js';
@@ -654,8 +654,6 @@ export class App {
    * capture: reaching `captureLimitSamples` is then a 'memory' abort, not "Completed".
    */
   private captureMemoryBound = false;
-  /** The running capture's requested duration; null for Loop. */
-  private captureRequestedSeconds: number | null = null;
   /** Why the last capture ended early; null once a capture starts or one is opened. */
   private captureAbort: CaptureAbort | null = null;
   /** `forced`: an analog Auto sweep captured one window without a trigger (no T). */
@@ -6831,7 +6829,6 @@ export class App {
         (this.triggerViewLock !== null || this.triggerViewPending) && this.analogScanner !== null,
         this.loopTriggerSlackSamples,
       ) : 0,
-      targetSamples: loop ? null : this.captureLimitSamples,
       // A request the ceiling cut runs into the memory ceiling: the panel shows it and the
       // time left at this rate, refreshed on the 500 ms panel clock.
       memory: !loop && this.captureMemoryBound &&
@@ -6839,14 +6836,6 @@ export class App {
         ? captureMemoryReadout(captured.length, captured.channelCount, captured.samplerate)
         : null,
     };
-  }
-
-  private capturePanelState(): CapturePanelState {
-    if (this.stopping) return 'stopping';
-    if (this.repeatTimer.pending) return this.repeatSession ? 'capturing' : 'waiting';
-    if (this.running) return 'capturing';
-    if (this.captureAbort) return 'aborted';
-    return this.captureStore.length > 0 ? 'completed' : 'ready';
   }
 
   private renderPanels(): void {
@@ -6924,17 +6913,6 @@ export class App {
       running: this.running,
       stopping: this.stopping,
       repeatPending: this.repeatTimer.pending,
-      captureState: this.capturePanelState(),
-      abort: this.running || !this.captureAbort ? null : {
-        cause: this.captureAbort.cause,
-        requestedSeconds: this.captureAbort.requestedSeconds,
-      },
-      result: this.captureStore.length > 0
-        ? {
-          samples: this.captureStore.length,
-          seconds: this.captureStore.length / this.captureStore.samplerate,
-        }
-        : null,
       progress: this.running ? this.progressView() : null,
       maxSamplerateHz: this.rateCeilings,
       recommendedSamplerateHz: this.rateRecommendations,
@@ -7309,8 +7287,8 @@ export class App {
 
   /**
    * The store reached its budget. A request the memory ceiling cut short ends as a typed
-   * 'memory' abort ("Memory limit reached"), and a Repeat session does not run another
-   * wave into the same ceiling; otherwise this is the ordinary completed capture.
+   * 'memory' abort, and a Repeat session does not run another wave into the same ceiling;
+   * otherwise this is the ordinary completed capture.
    */
   private captureFilled(): void {
     if (!this.running || this.stopping) return;
@@ -7344,7 +7322,6 @@ export class App {
   private noteMemoryAbort(): void {
     this.captureAbort = {
       cause: 'memory',
-      requestedSeconds: this.captureRequestedSeconds,
       channels: this.lastCaptureChannels,
       samplerate: this.lastCaptureRate,
     };
@@ -7354,7 +7331,6 @@ export class App {
   private noteCaptureAbort(e: unknown): Pick<StatusError, 'notice' | 'action'> | undefined {
     const abort: CaptureAbort = {
       cause: captureAbortCause(e),
-      requestedSeconds: this.captureRequestedSeconds,
       channels: this.lastCaptureChannels,
       samplerate: this.lastCaptureRate,
     };
@@ -8123,7 +8099,6 @@ export class App {
       const postTriggerSamples = capturePostTriggerSamples(this.settings);
       this.captureLimitSamples = isLoop ? MAX_SAMPLES - 1 : postTriggerSamples;
       this.applyCaptureMemoryCeiling(isLoop, cfg.channels);
-      this.captureRequestedSeconds = isLoop ? null : postTriggerSamples / cfg.samplerate;
       this.captureAbort = null;
       this.startMutatedCapture = true;
       this.triggerState = softwareTrigger ? 'waiting' : 'off';

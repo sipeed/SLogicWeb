@@ -16,7 +16,7 @@ import {
   type AnalogRateMemory, type RateChangeNote,
 } from '../analogRateMemory.js';
 import {
-  captureAbortDetail, isAllocationFailure, saveFailureNotice,
+  isAllocationFailure, saveFailureNotice,
 } from '../captureAbort.js';
 import { loadLwcap, planLwcap, saveLwcap, writeLwcap } from '../captureIO.js';
 import { samplerateOptions } from '../capturePanel.js';
@@ -87,19 +87,12 @@ function check(name: string, pass: boolean, detail: string): void {
 // ---------------------------------------------------------------- typed abort
 
 {
-  const result = { samples: 2 ** 29, seconds: 2 ** 29 / 50e6 };
-  const en = captureAbortDetail({ cause: 'memory', requestedSeconds: null }, result);
   await setLocale('zh-CN');
-  const zh = captureAbortDetail({ cause: 'memory', requestedSeconds: null }, result);
   const zhSave = t('error.saveOutOfMemory');
   const zhRaise = t('capturePanel.rateRaisedAnalog', {
     from: formatRate(10e6), to: formatRate(100e6),
   });
   await setLocale('en');
-  check('reaching the ceiling reads "Memory limit reached" (已达内存上限), not Completed',
-    en.startsWith('Memory limit reached') && zh.startsWith('已达内存上限'),
-    `en=${en} | zh=${zh}`);
-
   const allocation = new RangeError('Array buffer allocation failed');
   const ceiling = new Error('capture would exceed the 2^31 sample ceiling (2147483648)');
   const notice = saveFailureNotice(allocation);

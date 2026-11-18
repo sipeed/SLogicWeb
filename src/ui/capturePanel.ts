@@ -68,7 +68,6 @@ import {
 import {
   maxCaptureSeconds, MIN_CAPTURE_SECONDS, REPEAT_INTERVAL_SECONDS,
 } from './captureTime.js';
-import type { CaptureAbortCause } from './captureAbort.js';
 import { MAX_CURSOR_DISTANCE_ROWS, type DistanceSide } from './cursorDistance.js';
 import { MAX_CURSOR_EDGE_ROWS } from './cursorEdges.js';
 import { cursorsLocked } from './cursorSet.js';
@@ -128,10 +127,6 @@ export interface CapturePanelCallbacks {
   onPickPersistence(raw: unknown): void;
   onClearPersistence(): void;
 }
-
-/** `aborted`: the last capture was ended by a device/link failure (`CapturePanelView.abort`). */
-export type CapturePanelState =
-  'ready' | 'capturing' | 'stopping' | 'waiting' | 'completed' | 'aborted';
 
 interface MeasureFocusIntent {
   readonly kind: 'row' | 'clear' | 'undo' | 'capture-cancel' | 'capture-restart';
@@ -208,18 +203,12 @@ export interface CapturePanelView {
   running: boolean;
   stopping: boolean;
   repeatPending: boolean;
-  captureState: CapturePanelState;
-  result: { samples: number; seconds: number } | null;
-  /** Why the last capture ended early; set exactly when `captureState` is 'aborted'. */
-  abort?: { cause: CaptureAbortCause; requestedSeconds: number | null } | null;
   /** Non-null while a capture is streaming. */
   progress: { seconds: number; samples: number; bytes: number; lost: number; dropped: number;
     /** Retained length (`store.length`) and the loop limit; the limit is 0 outside loop mode. */
     kept: number; limit: number;
     /** The running capture's rate; the loop line reads kept/limit/dropped as durations. */
     samplerateHz: number;
-    /** Finite sample target; null for Loop captures. */
-    targetSamples: number | null;
     /**
      * The memory ceiling and the time left at the capture's rate, for a finite request
      * the ceiling cuts; null (or absent) otherwise.
@@ -495,7 +484,7 @@ export class CapturePanel {
     this.fillProgress(progress);
   }
 
-  /** "Saving… x%" under the capture status, without a panel rebuild; null hides it. */
+  /** "Saving… x%" without a panel rebuild; null hides it. */
   updateSaveProgress(percent: number | null): void {
     if (!this.saveNote) return;
     this.saveNote.hidden = percent === null;
@@ -641,7 +630,7 @@ export class CapturePanel {
           duration: formatDuration(memory.remainingSeconds, 2),
         });
         // Within ~10% of the ceiling the readout turns warning: the capture is about to
-        // stop on its own as "Memory limit reached".
+        // stop on its own.
         this.memoryNote.classList.toggle('warning', memory.warn);
       }
     }
