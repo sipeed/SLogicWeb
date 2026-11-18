@@ -38,9 +38,9 @@ const channel = fs.readFileSync('src/ui/channelList.ts', 'utf8');
 const overlay = fs.readFileSync('src/ui/overlay.ts', 'utf8');
 const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
 
-function cssRules(selector: string): string[] {
+function cssRules(selector: string, source: string = sheet): string[] {
   const bodies: string[] = [];
-  for (const match of sheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+  for (const match of source.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     const selectors = match[1]!.split(',').map((part) => part.trim());
     if (selectors.includes(selector)) bodies.push(match[2]!);
   }
@@ -305,6 +305,79 @@ function cssRules(selector: string): string[] {
     source.includes("'capturePanel.testModeHelp':"));
   check('trigger and test-mode toggles carry localized help, with the enable help as the header tip',
     sites && catalogs, `sites=${sites}, catalogs=${catalogs}`);
+}
+
+{
+  const retired = [
+    'capturePanel.triggerEnableDetail',
+    'capturePanel.noDigitalTrigger',
+    'capturePanel.armed',
+    'capturePanel.armedCapped',
+    'capturePanel.condJoiner',
+  ];
+  const header = (src: string): boolean => {
+    const tipAt = src.indexOf("triggerSec.header.appendChild(helpTip(t('capturePanel.triggerEnableHelp')))");
+    const maskAt = src.indexOf('triggerSec.header.appendChild(mask)');
+    return tipAt >= 0 && maskAt > tipAt &&
+      (src.split('triggerSec.header.appendChild(helpTip(').length - 1) === 1 &&
+      (src.split('triggerSec.header.appendChild(').length - 1) === 2 &&
+      !src.includes('triggerSec.el.appendChild');
+  };
+  const guard = (src: string): boolean =>
+    src.includes("if (s.triggerSource === 'digital' && digitalConditions.length > 0)") &&
+    src.includes("else if (s.triggerSource === 'analog')");
+  const rows = (src: string): boolean =>
+    (src.split("className = 'global-trigger-mode'").length - 1) === 2 &&
+    src.includes("t(setting.kind === 'rising' ? 'trigger.rising' : 'trigger.falling')") &&
+    src.includes('analogTriggerVolts(setting.kind, setting.volts, gainAt(start)).toFixed(4)');
+  const copy = (src: string, catalogs: readonly string[]): boolean =>
+    retired.every((key) => !src.includes(key) && catalogs.every((catalog) => !catalog.includes(key))) &&
+    catalogs.every((catalog) => catalog.includes("'capturePanel.triggerEnableHelp':"));
+  const shape = (src: string): boolean => {
+    const title = cssRules('.panel-section-head:has(> .help-tip) > span:first-child', src);
+    const tip = cssRules('.panel-section-head:has(> .help-tip) > .help-tip', src);
+    return title.length === 1 && title[0]!.includes('flex: 0 1 auto') &&
+      tip.length === 1 && tip[0]!.includes('margin-left: 0') &&
+      title.every((body) => !body.includes('margin-bottom')) &&
+      tip.every((body) => !body.includes('margin-bottom')) &&
+      cssRules('.panel-section-body[hidden]', src).length === 1 &&
+      cssRules('.panel-section-head:has(+ .panel-section-body[hidden])', src).length === 1;
+  };
+  const tipLine = "triggerSec.header.appendChild(helpTip(t('capturePanel.triggerEnableHelp')));";
+  const maskLine = 'triggerSec.header.appendChild(mask);';
+  const titleRule = '.panel-section-head:has(> .help-tip) > span:first-child { flex: 0 1 auto; }';
+  const tipRule = '.panel-section-head:has(> .help-tip) > .help-tip { margin-left: 0; }';
+  const mutations: Record<string, boolean> = {
+    header: header(panel.replace(tipLine, '')),
+    outside: header(`${panel}\ntriggerSec.el.appendChild(note);\n`),
+    order: header(panel.replace(tipLine, '')
+      .replace(maskLine, `${maskLine}\n    ${tipLine}`)),
+    guard: guard(panel.replace("if (s.triggerSource === 'digital' && digitalConditions.length > 0)",
+      "if (s.triggerSource === 'digital')")),
+    modeCell: rows(panel.replaceAll("className = 'global-trigger-mode'",
+      "className = 'global-trigger-kind'")),
+    volts: rows(panel.replace(
+      'analogTriggerVolts(setting.kind, setting.volts, gainAt(start)).toFixed(4)',
+      'analogTriggerVolts(setting.kind, setting.volts, gainAt(start)).toFixed(2)')),
+    deadKey: copy(panel, [`${en}\n  'capturePanel.armed': 'Armed',\n`, zh, fr, ru]),
+    deadRef: copy(`${panel}\nt('capturePanel.noDigitalTrigger');\n`, [en, zh, fr, ru]),
+    sheetScope: shape(sheet.replace(titleRule,
+      '.panel-section-head span:first-child { flex: 0 1 auto; }')),
+    sheetTip: shape(sheet.replace(tipRule, '')),
+    sheetGap: shape(sheet.replace('flex: 0 1 auto; }', 'flex: 0 1 auto; margin-bottom: 8px; }')),
+    collapsed: shape(sheet.replace(
+      '.panel-section-head:has(+ .panel-section-body[hidden]) { margin-bottom: 0; }', '')),
+  };
+  const pinHeader = header(panel);
+  const pinGuard = guard(panel);
+  const pinRows = rows(panel);
+  const pinCopy = copy(panel, [en, zh, fr, ru]);
+  const pinShape = shape(sheet);
+  const mutated = Object.values(mutations).every((value) => value === false);
+  check('the Global trigger section is one header row with a guarded list and no retired copy',
+    pinHeader && pinGuard && pinRows && pinCopy && pinShape && mutated,
+    `header=${pinHeader}, guard=${pinGuard}, rows=${pinRows}, copy=${pinCopy}, sheet=${pinShape}; ` +
+    `mut=${Object.entries(mutations).map(([name, value]) => `${name}:${value}`).join(',')}`);
 }
 
 {

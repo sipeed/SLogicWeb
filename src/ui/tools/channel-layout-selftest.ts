@@ -865,7 +865,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     progressSplit,
     `total=${appSrc.includes('samples: loop ? captured.length + this.droppedTotal : captured.length')}, ` +
     `retained=${appSrc.includes('bytesPerSampleForChannels(captured.channelCount)')}`);
-  check('the panel, trigger budget and real start path share stored mode without scope ownership',
+  check('the real start path derives the trigger budget from the stored mode without scope ownership',
     directMode,
     `panel=${panel.includes("s.mode === 'loop'")}, panelBudget=${!panel.includes('capturePostTriggerSamples')}, ` +
     `start=${startSrc.includes('const mode = this.settings.mode;')}, ` +
