@@ -512,7 +512,6 @@ export const en = {
   'capturePanel.triggerDigital': 'Digital',
   'capturePanel.triggerSource': 'Trigger source',
   'capturePanel.pendingApply': 'Changes apply to the next capture; the running one keeps its configuration.',
-  'capturePanel.pendingApplyLoop': 'Duration and Analog apply now; rate, channels and threshold apply to the next capture.',
   'capturePanel.pendingTrigger': 'This capture keeps the trigger it started with; new trigger settings apply from the next capture (Repeat: the next interval; Loop: restart it). A Loop analog trigger updates immediately.',
   'capturePanel.triggerMemoryReleased': 'Trigger released to keep the loop store within its memory ceiling. Restart the capture to arm it again.',
   'capturePanel.sampleRate': 'Sample rate',

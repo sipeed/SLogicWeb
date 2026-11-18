@@ -511,7 +511,6 @@ export const fr: Messages = {
   'capturePanel.triggerDigital': 'Numérique',
   'capturePanel.triggerSource': 'Source de déclenchement',
   'capturePanel.pendingApply': 'Les modifications s’appliquent à la prochaine acquisition ; celle en cours garde sa configuration.',
-  'capturePanel.pendingApplyLoop': 'La durée et Analogique s’appliquent maintenant ; la fréquence, les voies et le seuil à la prochaine acquisition.',
   'capturePanel.pendingTrigger': 'Cette acquisition garde le déclenchement de son démarrage ; les nouveaux réglages s’appliquent à la suivante (Répéter : l’intervalle suivant ; Boucle : redémarrez-la). Un déclenchement analogique en Boucle se met à jour immédiatement.',
   'capturePanel.triggerMemoryReleased': 'Déclenchement relâché pour garder le stock de boucle sous son plafond mémoire. Redémarrez l’acquisition pour l’armer à nouveau.',
   'capturePanel.sampleRate': 'Fréquence d’échantillonnage',

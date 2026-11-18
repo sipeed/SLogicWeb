@@ -1133,8 +1133,7 @@ export class CapturePanel {
 
     if (v.running) {
       const pending = div('panel-note');
-      pending.textContent = t(s.mode === 'loop'
-        ? 'capturePanel.pendingApplyLoop' : 'capturePanel.pendingApply');
+      pending.textContent = t('capturePanel.pendingApply');
       modeSec.body.appendChild(pending);
     }
     if (s.mode === 'repeat') {

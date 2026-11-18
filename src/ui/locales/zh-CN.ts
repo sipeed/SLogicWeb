@@ -460,7 +460,6 @@ export const zhCN: Messages = {
   'capturePanel.triggerDigital': '数字',
   'capturePanel.triggerSource': '触发源',
   'capturePanel.pendingApply': '修改将在下一次采集生效；本次采集保持原有配置。',
-  'capturePanel.pendingApplyLoop': '时长和模拟通道立即生效；采样率、通道数和阈值在下一次采集生效。',
   'capturePanel.pendingTrigger': '本次采集继续使用开始时的触发设置；新设置从下一次采集起生效（重复：下一次间隔；循环：重新开始采集）。循环模式下的模拟触发会立即更新。',
   'capturePanel.triggerMemoryReleased': '为保证循环存储不超过内存上限，触发已释放。重新启动采集可再次武装。',
   'capturePanel.sampleRate': '采样率',

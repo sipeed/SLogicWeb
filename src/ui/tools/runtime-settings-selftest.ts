@@ -44,13 +44,14 @@ const zh = fs.readFileSync('src/ui/locales/zh-CN.ts', 'utf8');
 }
 
 {
-  const notes = panel.includes("t(s.mode === 'loop'") &&
-    panel.includes("'capturePanel.pendingApplyLoop' : 'capturePanel.pendingApply'") &&
+  const notes = panel.includes("pending.textContent = t('capturePanel.pendingApply');") &&
+    !panel.includes("t(s.mode === 'loop'") &&
+    !panel.includes('pendingApplyLoop') &&
     en.includes("'capturePanel.pendingApply':") &&
-    en.includes("'capturePanel.pendingApplyLoop':") &&
     zh.includes("'capturePanel.pendingApply':") &&
-    zh.includes("'capturePanel.pendingApplyLoop':");
-  check('the panel explains that capture settings apply next time (with the Loop exception)',
+    !en.includes("'capturePanel.pendingApplyLoop':") &&
+    !zh.includes("'capturePanel.pendingApplyLoop':");
+  check('the panel explains that capture settings apply next time in one sentence for every mode',
     notes, `notes=${notes}`);
 }
 

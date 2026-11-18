@@ -873,6 +873,7 @@ const baseSettings: CaptureSettings = {
     'capturePanel.triggerEnableDetail', 'capturePanel.noDigitalTrigger',
     'capturePanel.armed', 'capturePanel.armedCapped',
     'capturePanel.repeatSearchNote',
+    'capturePanel.pendingApplyLoop',
     'capturePanel.condJoiner',
     'capturePanel.unlimited', 'capturePanel.singleUnlimitedNote',
     'capturePanel.statusUnlimitedDetail', 'capturePanel.memoryCeiling',
