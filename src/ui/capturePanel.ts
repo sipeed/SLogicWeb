@@ -73,6 +73,7 @@ import { MAX_CURSOR_DISTANCE_ROWS, type DistanceSide } from './cursorDistance.js
 import { MAX_CURSOR_EDGE_ROWS } from './cursorEdges.js';
 import { cursorsLocked } from './cursorSet.js';
 import { acquisitionTimeControl } from './timeControl.js';
+import { applyCaptureLock, captureOptionsLocked } from './captureLock.js';
 import {
   triggerPanelNotes, triggerStatusNote, type PreTriggerFill, type TriggerNoteState,
 } from './triggerStatus.js';
@@ -1112,8 +1113,7 @@ export class CapturePanel {
 
     // ---- mode
     const modeSec = section(t('capturePanel.capture'));
-    const modeLocked = v.running || v.stopping || v.repeatPending;
-    const timeLocked = v.stopping;
+    const captureLocked = captureOptionsLocked(v);
     const seg = div('segmented');
     for (const [id, text] of [
       ['single', t('capturePanel.modeSingle')], ['repeat', t('capturePanel.modeRepeat')],
@@ -1125,11 +1125,11 @@ export class CapturePanel {
       b.dataset.captureMode = id;
       b.title = t(id === 'single' ? 'capturePanel.modeSingleTip'
         : id === 'repeat' ? 'capturePanel.modeRepeatTip' : 'capturePanel.modeLoopTip');
-      b.disabled = modeLocked;
+      b.disabled = captureLocked;
       b.addEventListener('click', () => this.cb.onSettings({ ...s, mode: id }));
       seg.appendChild(b);
     }
-    modeSec.body.appendChild(seg);
+    modeSec.body.appendChild(applyCaptureLock(seg, captureLocked));
 
     if (v.running) {
       const pending = div('panel-note');
@@ -1225,12 +1225,12 @@ export class CapturePanel {
         seconds: s.seconds,
         minSeconds: MIN_CAPTURE_SECONDS,
         maxSeconds,
-        disabled: timeLocked,
+        disabled: captureLocked,
         onValue: (seconds) => {
           this.cb.onSettings({ ...s, seconds });
         },
       });
-      modeSec.body.appendChild(duration.el);
+      modeSec.body.appendChild(applyCaptureLock(duration.el, captureLocked));
       if (s.mode === 'repeat') {
         const interval = acquisitionTimeControl({
           key: 'capture.repeatInterval',
@@ -1238,12 +1238,12 @@ export class CapturePanel {
           seconds: s.repeatIntervalSeconds,
           minSeconds: REPEAT_INTERVAL_SECONDS.min,
           maxSeconds: REPEAT_INTERVAL_SECONDS.max,
-          disabled: timeLocked,
+          disabled: captureLocked,
           onValue: (seconds) => {
             this.cb.onSettings({ ...s, repeatIntervalSeconds: seconds });
           },
         });
-        modeSec.body.appendChild(interval.el);
+        modeSec.body.appendChild(applyCaptureLock(interval.el, captureLocked));
       }
     } else {
       const maxSamples = maxLoopSamples(s.channels);
@@ -1257,13 +1257,13 @@ export class CapturePanel {
         seconds: clampLoopSamples(s.loopSamples, s.channels) / s.samplerate,
         minSeconds,
         maxSeconds: maxWindowSeconds,
-        disabled: timeLocked,
+        disabled: captureLocked,
         onValue: (seconds) => {
           const samples = clampLoopSamples(Math.round(seconds * s.samplerate), s.channels);
           this.cb.onSettings({ ...s, loopSamples: samples });
         },
       });
-      modeSec.body.appendChild(windowControl.el);
+      modeSec.body.appendChild(applyCaptureLock(windowControl.el, captureLocked));
     }
     const limit = div('panel-note');
     if (s.mode === 'loop') {

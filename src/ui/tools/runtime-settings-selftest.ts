@@ -31,14 +31,16 @@ const zh = fs.readFileSync('src/ui/locales/zh-CN.ts', 'utf8');
 
 {
   const editable = panel.includes('b.disabled = v.stopping;') &&
-    panel.includes('const analogBusy = v.stopping;') &&
-    panel.includes('const timeLocked = v.stopping;') &&
-    (panel.match(/disabled: timeLocked/g) ?? []).length === 3;
-  const modeStillLocked = panel.includes('const modeLocked = v.running || v.stopping || v.repeatPending;') &&
-    panel.includes('b.disabled = modeLocked');
+    panel.includes('const analogBusy = v.stopping;');
+  const sharedLock = panel.includes('const captureLocked = captureOptionsLocked(v);') &&
+    panel.includes('b.disabled = captureLocked') &&
+    (panel.match(/disabled: captureLocked/g) ?? []).length === 3 &&
+    (panel.match(/applyCaptureLock\(/g) ?? []).length === 4 &&
+    !panel.includes('const modeLocked') && !panel.includes('timeLocked');
   const guard = app.includes('.ch-editor-popover, button, [role="button"], [role="slider"]');
-  check('width, analog, duration and interval stay editable while running; mode does not',
-    editable && modeStillLocked && guard, `editable=${editable}, mode=${modeStillLocked}, guard=${guard}`);
+  check('width and analog stay editable while running; mode and all three time controls lock on one predicate',
+    editable && sharedLock && guard,
+    `editable=${editable}, sharedLock=${sharedLock}, guard=${guard}`);
 }
 
 {

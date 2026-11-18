@@ -126,14 +126,14 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
     panel.includes("t('capturePanel.statusWaitingDetail'") &&
     panel.includes('status.dataset.captureState = v.captureState') &&
     !panel.includes('capturePanel.repeatPending') &&
-    panel.includes('b.disabled = modeLocked') &&
-    panel.includes('const timeLocked = v.stopping;') &&
-    (panel.match(/disabled: timeLocked/g) ?? []).length === 3 &&
+    panel.includes('b.disabled = captureLocked') &&
+    panel.includes('const captureLocked = captureOptionsLocked(v);') &&
+    (panel.match(/disabled: captureLocked/g) ?? []).length === 3 &&
     !panel.includes('secs.disabled') && !panel.includes('unlimited.disabled') &&
     !panel.includes('interval.disabled') && !panel.includes('win.disabled') &&
     assistant.includes('repeat_pending: st.repeatPending') &&
     (assistant.match(/st\.repeatPending/g) ?? []).length >= 3;
-  check('pending Repeat remains stoppable while mode and start reject re-entry; duration stays editable',
+  check('pending Repeat remains stoppable while mode and start reject re-entry; every capture option stays locked',
     pendingUi, `primary=${primary.length}, toolbar=${toolbar.length}, pendingUi=${pendingUi}`);
 }
 

@@ -1892,6 +1892,14 @@ html.resizing { cursor: col-resize; user-select: none; }
 .panel-note.error { color: var(--negative); }
 .panel-note.warning { color: var(--warning); }
 .panel-note.live { color: var(--text80); }
+.capture-lockable { position: relative; }
+.capture-lockable[data-capture-lock="true"] { cursor: not-allowed; }
+.capture-lockable[data-capture-lock="true"]::after {
+  content: ""; position: absolute; inset: -1px; border-radius: var(--radius);
+  background: color-mix(in oklab, var(--muted) 45%, transparent);
+  pointer-events: auto; cursor: not-allowed;
+}
+.capture-lockable[data-capture-lock="true"] :disabled { cursor: not-allowed; }
 .capture-badge {
   display: inline-flex; min-height: 18px; align-items: center; gap: 5px; padding: 0 7px;
   color: var(--text80); background: var(--muted); border: 1px solid transparent;

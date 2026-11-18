@@ -794,7 +794,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     `transform=${stateSrc.includes('effectiveCaptureMode')}, ` +
     `union=${stateSrc.includes("mode: 'single' | 'repeat' | 'loop';")}`);
   const panel = loopFs.readFileSync('src/ui/capturePanel.ts', 'utf8');
-  const modeBlock = panel.split('const modeSec = section(')[1]?.split('modeSec.body.appendChild(seg)')[0] ?? '';
+  const modeBlock = panel.split('const modeSec = section(')[1]?.split('\n    if (v.running) {')[0] ?? '';
   const panelModes = !panel.includes('capturePanel.freeRun') && !panel.includes('capturePanel.timer') &&
     !panel.includes('capturePanel.retentionSamples') && !panel.includes('capturePanel.retentionNote') &&
     !panel.includes('capturePanel.loopCeilingNote') &&
@@ -809,15 +809,17 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     !panel.includes('singleUnlimited') &&
     panel.includes('capturePanel.singleFiniteNote') && panel.includes('capturePanel.repeatFiniteNote') &&
     panel.includes('capturePanel.loopWindowLimit') &&
-    modeBlock.includes('b.disabled = modeLocked') && modeBlock.includes('s.mode === id') &&
-    modeBlock.includes('const modeLocked = v.running || v.stopping || v.repeatPending') &&
+    modeBlock.includes('b.disabled = captureLocked') && modeBlock.includes('s.mode === id') &&
+    modeBlock.includes('const captureLocked = captureOptionsLocked(v)') &&
+    modeBlock.includes('applyCaptureLock(seg, captureLocked)') &&
+    modeBlock.includes('modeSec.body.appendChild(applyCaptureLock(seg, captureLocked))') &&
     !modeBlock.includes('oscilloscope') && !panel.includes('v.effectiveMode') &&
     !panel.includes('v.oscilloscopeActive') && !panel.includes('oscilloscopeTakeover');
   check('the capture panel offers Single, Repeat and Loop with unified time controls',
     panelModes,
     `free=${panel.includes('capturePanel.freeRun')}, timer=${panel.includes('capturePanel.timer')}, ` +
     `takeover=${panel.includes('oscilloscopeTakeover')}, stored=${modeBlock.includes('s.mode === id')}, ` +
-    `lock=${modeBlock.includes('b.disabled = modeLocked')}`);
+    `lock=${modeBlock.includes('b.disabled = captureLocked')}`);
 
   const appSrc = loopFs.readFileSync('src/ui/app.ts', 'utf8');
   const startStart = appSrc.indexOf('private async startCapture(');
