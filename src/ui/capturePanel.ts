@@ -1285,10 +1285,12 @@ export class CapturePanel {
         duration: formatDuration(clampLoopSamples(s.loopSamples, s.channels) / s.samplerate),
         rate: formatRate(s.samplerate),
       });
+      limit.hidden = capturePanelNoteHidden('capturePanel.loopWindowLimit');
     } else {
       const noteKey = s.mode === 'single'
         ? 'capturePanel.singleFiniteNote' : 'capturePanel.repeatFiniteNote';
       limit.textContent = t(noteKey, { max: formatDuration(maxSeconds) });
+      limit.hidden = capturePanelNoteHidden(noteKey);
     }
     modeSec.body.appendChild(limit);
 

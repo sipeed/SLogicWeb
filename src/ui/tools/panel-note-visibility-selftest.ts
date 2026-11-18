@@ -371,6 +371,79 @@ const repeatLegendHidden = (source: string): boolean =>
     `depth=${braceDepthAt(block, REPEAT_HIDDEN)}, nestedDepth=${braceDepthAt(nested, REPEAT_HIDDEN)}`);
 }
 
+const LIMIT_FROM = "const limit = div('panel-note');";
+const LIMIT_TO = 'const triggerSec = section(';
+const LIMIT_CONSTRUCTION = "const limit = div('panel-note');";
+const LIMIT_LOOP_TEXT = "t('capturePanel.loopWindowLimit'";
+const LIMIT_SINGLE_KEY = "'capturePanel.singleFiniteNote'";
+const LIMIT_REPEAT_KEY = "'capturePanel.repeatFiniteNote'";
+const LIMIT_LOOP_HIDDEN =
+  "limit.hidden = capturePanelNoteHidden('capturePanel.loopWindowLimit');";
+const LIMIT_KEY_HIDDEN = 'limit.hidden = capturePanelNoteHidden(noteKey);';
+const LIMIT_HIDDEN_OPEN = 'limit.hidden = capturePanelNoteHidden(';
+const LIMIT_APPEND = 'modeSec.body.appendChild(limit);';
+const LIMIT_REMOVE = 'limit.remove';
+const LIMIT_LOOP_BRANCH = "if (s.mode === 'loop') {";
+const LIMIT_ELSE = '} else {';
+const LIMIT_HIDDEN_COUNT = 2;
+
+const countOf = (source: string, needle: string): number => source.split(needle).length - 1;
+
+const limitNoteHidden = (source: string): boolean =>
+  source !== '' && source.includes(LIMIT_CONSTRUCTION) && source.includes(LIMIT_LOOP_TEXT) &&
+  source.includes(LIMIT_SINGLE_KEY) && source.includes(LIMIT_REPEAT_KEY) &&
+  source.includes(LIMIT_LOOP_HIDDEN) && source.includes(LIMIT_KEY_HIDDEN) &&
+  source.includes(LIMIT_APPEND) && !source.includes(LIMIT_REMOVE) &&
+  countOf(source, LIMIT_HIDDEN_OPEN) === LIMIT_HIDDEN_COUNT;
+
+{
+  const block = slice(read('src/ui/capturePanel.ts'), LIMIT_FROM, LIMIT_TO);
+  check('the Single, Repeat and Loop limit note is built, appended and hidden on both branches',
+    limitNoteHidden(block),
+    `length=${block.length}, construction=${block.includes(LIMIT_CONSTRUCTION)}, ` +
+    `loopText=${block.includes(LIMIT_LOOP_TEXT)}, singleKey=${block.includes(LIMIT_SINGLE_KEY)}, ` +
+    `repeatKey=${block.includes(LIMIT_REPEAT_KEY)}, ` +
+    `loopHidden=${block.includes(LIMIT_LOOP_HIDDEN)}, ` +
+    `keyHidden=${block.includes(LIMIT_KEY_HIDDEN)}, append=${block.includes(LIMIT_APPEND)}, ` +
+    `remove=${block.includes(LIMIT_REMOVE)}, ` +
+    `hiddenAssignments=${countOf(block, LIMIT_HIDDEN_OPEN)}, expected=${LIMIT_HIDDEN_COUNT}`);
+}
+
+{
+  const block = slice(read('src/ui/capturePanel.ts'), LIMIT_FROM, LIMIT_TO);
+  const start = block.indexOf(LIMIT_LOOP_BRANCH);
+  const elseAt = start < 0 ? -1 : block.indexOf(LIMIT_ELSE, start);
+  const withoutLoopHidden = block.split(`${LIMIT_LOOP_HIDDEN}\n`).join('');
+  const withoutKeyHidden = block.split(`${LIMIT_KEY_HIDDEN}\n`).join('');
+  const withoutAppend = block.split(`${LIMIT_APPEND}\n`).join('');
+  const withoutLoopBranch = start < 0 || elseAt < 0 ? ''
+    : block.slice(0, start) + `${LIMIT_LOOP_BRANCH}` + block.slice(elseAt);
+  const withExtraHidden = withoutLoopHidden === block ? ''
+    : block.split(`${LIMIT_LOOP_HIDDEN}\n`)
+      .join(`${LIMIT_LOOP_HIDDEN}\n      ${LIMIT_HIDDEN_OPEN}'capturePanel.loopWindowLimit');\n`);
+  const loopHiddenPass = limitNoteHidden(withoutLoopHidden);
+  const keyHiddenPass = limitNoteHidden(withoutKeyHidden);
+  const appendPass = limitNoteHidden(withoutAppend);
+  const branchPass = limitNoteHidden(withoutLoopBranch);
+  const extraPass = limitNoteHidden(withExtraHidden);
+  check('control: the limit note predicate fails on a missing branch hide, a missing append ' +
+    'or an extra hide',
+    block !== '' && limitNoteHidden(block) && withoutLoopHidden !== block &&
+    withoutKeyHidden !== block && withoutAppend !== block && withoutLoopBranch !== '' &&
+    withExtraHidden !== '' && !loopHiddenPass && !keyHiddenPass && !appendPass &&
+    !branchPass && !extraPass,
+    `baseline=${limitNoteHidden(block)}, loopHiddenStripped=${loopHiddenPass}, ` +
+    `keyHiddenStripped=${keyHiddenPass}, appendStripped=${appendPass}, ` +
+    `loopBranchStripped=${branchPass}, extraHidden=${extraPass}, ` +
+    `loopHiddenAssignments=${countOf(withoutLoopHidden, LIMIT_HIDDEN_OPEN)}, ` +
+    `keyHiddenAssignments=${countOf(withoutKeyHidden, LIMIT_HIDDEN_OPEN)}, ` +
+    `branchAssignments=${countOf(withoutLoopBranch, LIMIT_HIDDEN_OPEN)}, ` +
+    `extraAssignments=${countOf(withExtraHidden, LIMIT_HIDDEN_OPEN)}, ` +
+    `blockLength=${block.length}, loopHiddenLength=${withoutLoopHidden.length}, ` +
+    `keyHiddenLength=${withoutKeyHidden.length}, appendLength=${withoutAppend.length}, ` +
+    `branchLength=${withoutLoopBranch.length}, extraLength=${withExtraHidden.length}`);
+}
+
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
