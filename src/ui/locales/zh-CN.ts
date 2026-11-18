@@ -471,8 +471,8 @@ export const zhCN: Messages = {
   'capturePanel.thresholdTtl': '{volts} V（5 V TTL）',
   'capturePanel.thresholdCustom': '自定义…',
   'capturePanel.thresholdRange': '输入 {min}–{max} V；会对齐到设备可设置的最近一档',
-  'capturePanel.dacNote': '当前阈值锁定 {volts} V（DAC 码 {code}）。{channels} 通道最高支持 {rate}，超出必须裁减通道。',
-  'capturePanel.dacNoteAdvised': '当前阈值锁定 {volts} V（DAC 码 {code}）。{channels} 通道在 {rate} 下必定超出 USB 持续吞吐，必须下调至 {advised} 或减少通道。',
+  'capturePanel.dacNote': '实际阈值 {volts} V。{channels} 通道最高支持 {rate}，超出必须裁减通道。（DAC 码 {code}）',
+  'capturePanel.dacNoteAdvised': '实际阈值 {volts} V。{channels} 通道在 {rate} 下必定超出 USB 吞吐上限，必须下调至 {advised} 或减少通道。（DAC 码 {code}）',
   'capturePanel.rateAboveAdvised': '{channels} 通道在 {rate} 下超出 USB 持续带宽，必须下调至 {advised} 或减少通道。',
   'capturePanel.rateAnalogForced':
     '模拟输入锁定采样率 ≥{min}。{channels} 通道在 {rate} 下超出 USB 带宽，优先下调至 {advised} 或关闭多余通道。',
