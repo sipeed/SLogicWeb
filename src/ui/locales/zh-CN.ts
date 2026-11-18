@@ -517,7 +517,6 @@ export const zhCN: Messages = {
   'capturePanel.singleFiniteNote': '有限采集最长 {max}。',
   'capturePanel.repeatFiniteNote': '有限采集最长 {max}；每轮正常完成后等待间隔。',
   'capturePanel.repeatLayersNote': '本次采集以暖色覆盖绘制，蓝灰色保留上一次波形直至被新样本完全重写。',
-  'capturePanel.repeatSearchNote': '触发等待超时严格限定为单次采集时长，未捕获边沿直接判定本轮丢弃并在下一周期重试。',
   'capturePanel.softwareTrigger': '全局触发',
   'capturePanel.enableTrigger': '启用全局触发',
   'capturePanel.triggerEnableHelp': '开启后必须满足设定条件才记录样本，无条件时直接以自由运行模式立即采集。关闭后保留配置但停止等待。添加数字边沿或模拟斜率时将自动重新开启，采集中修改在下一轮生效。',

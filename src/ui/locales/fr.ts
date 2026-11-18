@@ -569,7 +569,6 @@ export const fr: Messages = {
   'capturePanel.singleFiniteNote': 'Acquisition finie jusqu’à {max}.',
   'capturePanel.repeatFiniteNote': 'Acquisition finie jusqu’à {max} ; chaque cycle terminé attend l’intervalle.',
   'capturePanel.repeatLayersNote': 'L’acquisition courante est dessinée par-dessus la précédente en teintes chaudes ; la couche bleu-gris garde la précédente jusqu’à ce que les nouveaux échantillons la réécrivent entièrement.',
-  'capturePanel.repeatSearchNote': 'L’attente du déclenchement est strictement limitée à une durée d’acquisition : sans front capté, le cycle est abandonné et retenté à l’intervalle suivant.',
   'capturePanel.softwareTrigger': 'Déclenchement global',
   'capturePanel.enableTrigger': 'Activer le déclenchement global',
   'capturePanel.triggerEnableHelp': 'Activé : les échantillons ne sont enregistrés qu’une fois les conditions remplies ; sans condition, l’acquisition démarre aussitôt en mode libre. Désactivé : les réglages restent en place mais l’attente s’arrête. Ajouter un front numérique ou une pente analogique le réactive ; pendant une acquisition, les modifications s’appliquent à partir de la suivante.',

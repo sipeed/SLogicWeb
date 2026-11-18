@@ -570,7 +570,6 @@ export const en = {
   'capturePanel.singleFiniteNote': 'Finite capture up to {max}.',
   'capturePanel.repeatFiniteNote': 'Finite capture up to {max}; each completed run waits for the interval.',
   'capturePanel.repeatLayersNote': 'This capture is drawn over the previous one in warm colours; the blue-grey layer keeps the earlier trace until new samples have fully overwritten it.',
-  'capturePanel.repeatSearchNote': 'The trigger wait is strictly capped at one capture duration; with no edge caught, the round is dropped and retried at the next interval.',
   'capturePanel.softwareTrigger': 'Global trigger',
   'capturePanel.enableTrigger': 'Enable global trigger',
   'capturePanel.triggerEnableHelp': 'On: samples are recorded only once the set conditions are met; with no condition, it captures immediately, free-running. Off: the settings are kept but waiting stops. Adding a digital edge or an analog slope turns it on again; edits made during a capture apply from the next capture.',

@@ -44,7 +44,7 @@ const HIDDEN_KEYS: readonly (keyof Messages)[] = [
 ];
 
 const NEGATIVE_KEYS: readonly string[] = [
-  'capturePanel.repeatSearchNote',
+  'capturePanel.modeRepeat',
   'capturePanel.dacNotes',
   '',
 ];
