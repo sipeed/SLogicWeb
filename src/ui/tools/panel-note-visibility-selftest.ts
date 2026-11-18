@@ -357,6 +357,62 @@ const repeatLegendHidden = (source: string): boolean =>
     `depth=${braceDepthAt(block, REPEAT_HIDDEN)}, nestedDepth=${braceDepthAt(nested, REPEAT_HIDDEN)}`);
 }
 
+const REPEAT_SEARCH_CONSTRUCTION = "const search = div('panel-note');";
+const REPEAT_SEARCH_TEXT = "t('capturePanel.repeatSearchNote')";
+const REPEAT_SEARCH_APPEND = 'modeSec.body.appendChild(search);';
+const REPEAT_SEARCH_FRAGMENTS: readonly string[] = [
+  REPEAT_SEARCH_CONSTRUCTION,
+  REPEAT_SEARCH_TEXT,
+  REPEAT_SEARCH_APPEND,
+];
+
+const repeatSearchFragments = (source: string): string[] =>
+  REPEAT_SEARCH_FRAGMENTS.filter((fragment) => source.includes(fragment));
+
+const repeatSearchNoteAbsent = (source: string): boolean =>
+  source !== '' && repeatSearchFragments(source).length === 0;
+
+const withRepeatSearchFragment = (source: string, fragment: string): string => {
+  const anchor = `${REPEAT_HIDDEN}\n`;
+  if (!source.includes(anchor)) return source;
+  return source.replace(anchor, `${anchor}      ${fragment}\n`);
+};
+
+{
+  const block = slice(read('src/ui/capturePanel.ts'), REPEAT_FROM, REPEAT_TO);
+  const found = repeatSearchFragments(block);
+  check('the repeat block carries no trigger-wait search note',
+    repeatSearchNoteAbsent(block) && block.includes(REPEAT_CONSTRUCTION),
+    `length=${block.length}, found=${JSON.stringify(found)}, ` +
+    `construction=${block.includes(REPEAT_SEARCH_CONSTRUCTION)}, ` +
+    `text=${block.includes(REPEAT_SEARCH_TEXT)}, append=${block.includes(REPEAT_SEARCH_APPEND)}, ` +
+    `legend=${block.includes(REPEAT_CONSTRUCTION)}`);
+}
+
+{
+  const block = slice(read('src/ui/capturePanel.ts'), REPEAT_FROM, REPEAT_TO);
+  const constructed = withRepeatSearchFragment(block, REPEAT_SEARCH_CONSTRUCTION);
+  const texted = withRepeatSearchFragment(block, REPEAT_SEARCH_TEXT);
+  const appended = withRepeatSearchFragment(block, REPEAT_SEARCH_APPEND);
+  const constructedPass = repeatSearchNoteAbsent(constructed);
+  const textedPass = repeatSearchNoteAbsent(texted);
+  const appendedPass = repeatSearchNoteAbsent(appended);
+  check('control: the absent search note predicate fails when the construction, the text or ' +
+    'the append is injected into the repeat block',
+    repeatSearchNoteAbsent(block) && constructed !== block && texted !== block &&
+    appended !== block && !constructedPass && !textedPass && !appendedPass &&
+    repeatSearchFragments(constructed).length === 1 &&
+    repeatSearchFragments(texted).length === 1 &&
+    repeatSearchFragments(appended).length === 1,
+    `baseline=${repeatSearchNoteAbsent(block)}, constructed=${constructedPass}, ` +
+    `texted=${textedPass}, appended=${appendedPass}, ` +
+    `constructedFound=${JSON.stringify(repeatSearchFragments(constructed))}, ` +
+    `textedFound=${JSON.stringify(repeatSearchFragments(texted))}, ` +
+    `appendedFound=${JSON.stringify(repeatSearchFragments(appended))}, ` +
+    `blockLength=${block.length}, constructedLength=${constructed.length}, ` +
+    `textedLength=${texted.length}, appendedLength=${appended.length}`);
+}
+
 const LIMIT_FROM = "const limit = div('panel-note');";
 const LIMIT_TO = 'const triggerSec = section(';
 const LIMIT_CONSTRUCTION = "const limit = div('panel-note');";
