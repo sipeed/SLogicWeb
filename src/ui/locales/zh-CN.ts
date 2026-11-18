@@ -200,15 +200,15 @@ export const zhCN: Messages = {
   'error.notice.decodeTooLarge': '{id} 解码已停止：采集太大，无法一次解码。请缩短解码范围或减少采集时长。',
   'error.notice.decodeFailed': '{id} 解码器出错并已停止。请检查它的通道和选项后重新解码。',
   'error.notice.decodeUnavailable': '协议解码器加载失败。请刷新页面后重试。',
-  'error.notice.noData': '采集已中止：设备开始采集后没有发送任何数据。请拔下设备再重新插上，然后重新采集。',
-  'error.notice.linkFailed': '采集已中止：与设备的 USB 连接出错。请检查线缆和接口，然后重新采集。',
+  'error.notice.noData': '采集因设备零数据传输中止。拔下 USB 线缆重新插上后再重新采集。',
+  'error.notice.linkFailed': 'USB 传输链路报错并中止采集。检查线缆连接并重新插入。',
   'error.lowerRate': '降低采样率到 {rate}',
 
   // ---------------------------- connect failure guidance (error banner)
-  'connectHelp.busy': '设备正被其他标签页或程序（如 PulseView/DSView、sigrok-cli 或固件更新页面）占用，请关闭后重试。',
-  'connectHelp.busyTab': '设备正被另一个 slogicweb 标签页占用，请在该标签页断开连接或关闭它后重试。',
-  'connectHelp.permission': '系统拒绝访问设备。Linux 请安装 SLogic 的 udev 规则并重新插拔设备；Windows 请关闭占用设备的程序。然后重试。',
-  'connectHelp.lost': '设备已断开。请检查 USB 线缆，重新插入设备后重试。',
+  'connectHelp.busy': '设备正被其他标签页或程序（如 PulseView/DSView 或 sigrok-cli）占用，必须先关闭后重试。',
+  'connectHelp.busyTab': '设备已被另一 slogicweb 标签页独占，必须关闭该标签页后重新连接。',
+  'connectHelp.permission': 'USB 访问受限。Linux 用户安装 udev 规则并重插 USB 线缆，Windows 用户关闭独占驱动进程后重试。',
+  'connectHelp.lost': 'USB 连接中断。拔下并重新插入设备线缆后重试。',
   'connectHelp.unsupported': '此浏览器无法连接设备。请使用 Chrome 或 Edge。',
   'connectHelp.retry': '重试',
 
@@ -283,7 +283,7 @@ export const zhCN: Messages = {
   'diagnostic.device.workerNoTemperature': 'USB 工作线程未返回温度',
   'diagnostic.device.workerNoConsole': 'USB 工作线程未返回控制台结果',
   'diagnostic.device.workerUnclaimed': 'USB 工作线程返回“{kind}”时没有任何请求在等待',
-  'diagnostic.device.stopTimedOut': '采集未在 {ms} ms 内停止；USB 传输已重置',
+  'diagnostic.device.stopTimedOut': '采集停止超过 {ms} ms 超时限制，已强行重置 USB 传输通道',
   'diagnostic.device.loopUnsettled': '释放接口后，上一次采集的读取循环始终没有结束',
   'diagnostic.device.loopUnsettledClosed':
     '释放接口后读取循环始终没有结束，因此设备句柄已被关闭',
@@ -300,7 +300,7 @@ export const zhCN: Messages = {
   'diagnostic.device.tuningTransfer':
     'transferBytes {bytes} 超过 Chromium WebUSB 的 {limit} 字节上限',
   'diagnostic.device.tuningQueue':
-    '传输队列 {depth} x {bytes} B 超出安全的 {budget} 字节 usbfs 预算；请同时提高 usbfs_memory_mb 和 queueBudgetBytes',
+    '传输队列 {depth} x {bytes} B 突破 {budget} 字节预算；必须同时调高 usbfs_memory_mb 与 queueBudgetBytes',
   'diagnostic.device.startRunning': 'start() 在采集已运行时被调用',
   'diagnostic.device.startStopping': 'start() 在上一次采集停止完成之前被调用',
   'diagnostic.device.startBeforeOpen': 'start() 在 open() 之前被调用',
@@ -316,11 +316,11 @@ export const zhCN: Messages = {
   'diagnostic.device.noConsole': '此设备未提供 USB 控制台',
   'diagnostic.device.sampleAccounting': '设备计数已送达 {counted} 个样本，存储中为 {stored} 个',
   'diagnostic.device.noData':
-    '{device} 在 RUN 后 {deadline} ms 内没有送出任何数据（{channels}ch @ {rate} MHz）。处于该状态的板子会回应每一次控制传输，但在批量端点上不发送任何数据：请拔下并重新插入。',
+    '{device} 在 RUN 后 {deadline} ms 内批量端点零输出（{channels} 通道 @ {rate} MHz）。控制传输正常但数据流已卡死，必须拔下 USB 线缆重新插入。',
   'diagnostic.device.underrunStalled':
-    '{device} 让主机过载：{channels}ch @ {rate} MHz 提供 {offered} MB/s，但连续 {count} 次传输只有 {transferMs} ms 传输 {bytes} B（上限 {limitMs} ms），{runMs} ms 内平均 {avg} MB/s（最低 {minimum} MB/s）。已在设备 FIFO 溢出卡死端点之前中止采集。{thread} 线程在采集期间被阻塞 {stalls} 次，最长 {worstMs} ms（采集开始后 {atMs} ms）；队列覆盖 {coverMs} ms。',
+    '{device} 触发主机过载保护并强行中止采集。{channels} 通道 @ {rate} MHz 产生 {offered} MB/s，连续 {count} 次传输仅耗时 {transferMs} ms 接收 {bytes} B（上限 {limitMs} ms），{runMs} ms 内平均 {avg} MB/s（最低 {minimum} MB/s）。{thread} 线程被阻塞 {stalls} 次，最长停顿 {worstMs} ms（发生在启动后 {atMs} ms），传输队列仅覆盖 {coverMs} ms，板载 FIFO 即将溢出。',
   'diagnostic.device.underrunClean':
-    '{device} 让主机过载：{channels}ch @ {rate} MHz 提供 {offered} MB/s，但连续 {count} 次传输只有 {transferMs} ms 传输 {bytes} B（上限 {limitMs} ms），{runMs} ms 内平均 {avg} MB/s（最低 {minimum} MB/s）。已在设备 FIFO 溢出卡死端点之前中止采集。{thread} 线程从未被阻塞超过 {thresholdMs} ms，因此问题出在设备或 USB 通路上。',
+    '{device} 因 USB 通路瓶颈中止采集。{channels} 通道 @ {rate} MHz 产生 {offered} MB/s，连续 {count} 次传输在 {transferMs} ms 仅移交 {bytes} B（上限 {limitMs} ms），{runMs} ms 内平均吞吐 {avg} MB/s（最低 {minimum} MB/s）。{thread} 线程阻塞未超过 {thresholdMs} ms，瓶颈在物理连接或硬件端点。',
   'diagnostic.device.openFailed': '无法打开 USB 设备',
   'diagnostic.device.configureFailed': '无法选择设备配置',
   'diagnostic.device.claimFailed': '无法占用接口 0',
