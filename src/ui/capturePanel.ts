@@ -1150,6 +1150,7 @@ export class CapturePanel {
       // colour alone, and the same wording explains the hand-over during a Fixed view.
       const layers = div('panel-note');
       layers.textContent = t('capturePanel.repeatLayersNote');
+      layers.hidden = capturePanelNoteHidden('capturePanel.repeatLayersNote');
       modeSec.body.appendChild(layers);
       if (s.triggerEnableMask) {
         const search = div('panel-note');
