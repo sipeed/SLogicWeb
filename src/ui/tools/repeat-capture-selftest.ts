@@ -93,6 +93,7 @@ if (!fs) throw new Error('node fs module unavailable');
 const app = fs.readFileSync('src/ui/app.ts', 'utf8');
 const panel = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
 const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
+const stylesheet = fs.readFileSync('src/ui/style.css', 'utf8');
 
 {
   // Natural completions funnel through captureFilled(), the one 'completed' stop site
@@ -122,9 +123,6 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
   const pendingUi = primary.includes('this.running || this.repeatTimer.pending') &&
     toolbar.includes('const showStop = this.running || repeatPending') &&
     toolbar.includes('this.device === null && !showStop') &&
-    panel.includes("waiting: 'capturePanel.statusWaiting'") &&
-    panel.includes("t('capturePanel.statusWaitingDetail'") &&
-    panel.includes('status.dataset.captureState = v.captureState') &&
     !panel.includes('capturePanel.repeatPending') &&
     panel.includes('b.disabled = captureLocked') &&
     panel.includes('const captureLocked = captureOptionsLocked(v);') &&
@@ -152,39 +150,26 @@ const assistant = fs.readFileSync('src/assistant/tools.ts', 'utf8');
 }
 
 {
-  const progress = app.split('private progressView()')[1]?.split('private capturePanelState()')[0] ?? '';
-  const state = app.split('private capturePanelState()')[1]?.split('private renderPanels()')[0] ?? '';
-  const view = app.split('private capturePanelView(): CapturePanelView {')[1]?.split('};')[0] ?? '';
-  const fill = panel.split('private fillProgress(')[1]?.split('private setStatusProgress(')[0] ?? '';
-  const setter = panel.split('private setStatusProgress(')[1]?.split('render(v: CapturePanelView)')[0] ?? '';
-  const status = panel.split('const badgeKeys =')[1]?.split('const maxSeconds =')[0] ?? '';
-  const oneLifecycle = state.includes("if (this.stopping) return 'stopping';") &&
-    state.includes("if (this.repeatTimer.pending) return this.repeatSession ? 'capturing' : 'waiting';") &&
-    state.includes("if (this.running) return 'capturing';") &&
-    state.includes("return this.captureStore.length > 0 ? 'completed' : 'ready';") &&
-    !state.includes('setTimeout') && !state.includes('setInterval') &&
-    view.includes('captureState: this.capturePanelState(),') &&
-    view.includes('progress: this.running ? this.progressView() : null,') &&
-    progress.includes('targetSamples: loop ? null : this.captureLimitSamples') &&
-    !progress.includes('unlimited') &&
-    !progress.includes('setTimeout') && !progress.includes('setInterval');
-  const oneProgress = fill.includes("t('capturePanel.statusFiniteDetail')") &&
-    fill.includes("t('capturePanel.statusLoopDetail')") &&
-    !fill.includes('statusUnlimitedDetail') &&
-    !status.includes('statusUnlimitedDetail') &&
-    fill.includes('this.setStatusProgress(target !== null && target > 0 ? progress.samples / target * 100 : null)') &&
-    setter.includes("this.progressEl.dataset.indeterminate = String(indeterminate)") &&
-    setter.includes("this.progressEl.removeAttribute('aria-valuenow')") &&
-    setter.includes("this.progressEl.setAttribute('aria-valuenow', String(rounded))") &&
-    setter.includes('this.progressBar.style.width = `${rounded}%`') &&
-    status.includes("progress.setAttribute('role', 'progressbar')") &&
-    status.includes("progress.setAttribute('aria-label', t('capturePanel.progress'))") &&
-    status.includes("v.captureState === 'waiting'") &&
-    status.includes("v.captureState === 'completed'") &&
-    !panel.includes('setInterval') && !panel.includes('setTimeout');
-  check('one App-owned lifecycle drives badges, determinate progress, and indeterminate states',
-    oneLifecycle && oneProgress,
-    `state=${state.length}, progress=${progress.length}, fill=${fill.length}, setter=${setter.length}, status=${status.length}`);
+  const fill = panel.split('private fillProgress(')[1]
+    ?.split('updateTriggerStatus(status: TriggerStatusView)')[0] ?? '';
+  const panelTokens = [
+    'capture-badge', 'capture-status', "div('capture-progress')", 'setStatusProgress',
+    'progressEl', 'progressBar', 'progressValue', 'this.statusDetail',
+  ];
+  const cssTokens = ['.capture-badge', '.capture-status', '.capture-progress'];
+  const panelClean = panelTokens.every((token) => !panel.includes(token));
+  const cssClean = cssTokens.every((token) => !stylesheet.includes(token)) &&
+    stylesheet.includes('.capture-lockable[data-capture-lock="true"]::after');
+  const notes = fill.includes("this.liveNote!.textContent = t('capturePanel.recording', {") &&
+    fill.includes("this.lostNote!.textContent = t('capturePanel.dropped', { samples: progress.lost.toLocaleString() });") &&
+    fill.includes("this.droppedNote!.textContent = t('capturePanel.loopWindow', {") &&
+    fill.includes("this.memoryNote.textContent = t('capturePanel.memoryRemaining', {") &&
+    fill.includes("this.memoryNote.classList.toggle('warning', memory.warn);");
+  const timerless = !panel.includes('setInterval') && !panel.includes('setTimeout');
+  check('the capture panel builds no status box while fillProgress keeps the live notes',
+    panelClean && cssClean && notes && timerless,
+    `panelClean=${panelClean}, cssClean=${cssClean}, notes=${notes}, timerless=${timerless}, ` +
+    `fill=${fill.length}`);
 }
 
 {

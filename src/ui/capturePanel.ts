@@ -68,7 +68,7 @@ import {
 import {
   maxCaptureSeconds, MIN_CAPTURE_SECONDS, REPEAT_INTERVAL_SECONDS,
 } from './captureTime.js';
-import { captureAbortDetail, type CaptureAbortCause } from './captureAbort.js';
+import type { CaptureAbortCause } from './captureAbort.js';
 import { MAX_CURSOR_DISTANCE_ROWS, type DistanceSide } from './cursorDistance.js';
 import { MAX_CURSOR_EDGE_ROWS } from './cursorEdges.js';
 import { cursorsLocked } from './cursorSet.js';
@@ -327,10 +327,6 @@ export class CapturePanel {
   private droppedNote: HTMLElement | null = null;
   private memoryNote: HTMLElement | null = null;
   private saveNote: HTMLElement | null = null;
-  private statusDetail: HTMLElement | null = null;
-  private progressEl: HTMLElement | null = null;
-  private progressBar: HTMLElement | null = null;
-  private progressValue: HTMLElement | null = null;
   private triggerStatusEl: HTMLElement | null = null;
   private loopMatcherEl: HTMLElement | null = null;
   private loopSwapEl: HTMLElement | null = null;
@@ -649,29 +645,6 @@ export class CapturePanel {
         this.memoryNote.classList.toggle('warning', memory.warn);
       }
     }
-    const target = progress.targetSamples;
-    if (this.statusDetail) {
-      this.statusDetail.textContent = target !== null
-        ? t('capturePanel.statusFiniteDetail')
-        : t('capturePanel.statusLoopDetail');
-    }
-    this.setStatusProgress(target !== null && target > 0 ? progress.samples / target * 100 : null);
-  }
-
-  private setStatusProgress(percent: number | null): void {
-    if (!this.progressEl || !this.progressBar || !this.progressValue) return;
-    const indeterminate = percent === null;
-    this.progressEl.dataset.indeterminate = String(indeterminate);
-    if (indeterminate) {
-      this.progressEl.removeAttribute('aria-valuenow');
-      this.progressValue.textContent = '';
-      this.progressBar.style.width = '100%';
-      return;
-    }
-    const rounded = Math.max(0, Math.min(100, Math.round(percent)));
-    this.progressEl.setAttribute('aria-valuenow', String(rounded));
-    this.progressValue.textContent = `${rounded}%`;
-    this.progressBar.style.width = `${rounded}%`;
   }
 
   updateTriggerStatus(status: TriggerStatusView): void {
@@ -874,10 +847,6 @@ export class CapturePanel {
     } finally {
       this.rendering = false;
     }
-    this.statusDetail = null;
-    this.progressEl = null;
-    this.progressBar = null;
-    this.progressValue = null;
     this.triggerStatusEl = null;
     this.loopMatcherEl = null;
     this.loopSwapEl = null;
@@ -1143,77 +1112,6 @@ export class CapturePanel {
       layers.textContent = t('capturePanel.repeatLayersNote');
       layers.hidden = capturePanelNoteHidden('capturePanel.repeatLayersNote');
       modeSec.body.appendChild(layers);
-    }
-
-    const badgeKeys = {
-      ready: 'capturePanel.statusReady',
-      capturing: 'capturePanel.statusCapturing',
-      stopping: 'capturePanel.statusStopping',
-      waiting: 'capturePanel.statusWaiting',
-      completed: 'capturePanel.statusCompleted',
-      aborted: 'capturePanel.statusAborted',
-    } as const;
-    const badge = document.createElement('span');
-    badge.className = 'capture-badge'
-      + (v.captureState === 'capturing' ? ' live' : '')
-      + (v.captureState === 'waiting' ? ' waiting' : '')
-      + (v.captureState === 'stopping' ? ' stopping' : '')
-      + (v.captureState === 'aborted' ? ' aborted' : '');
-    badge.textContent = t(badgeKeys[v.captureState]);
-    modeSec.header.appendChild(badge);
-
-    const status = div('capture-status');
-    status.dataset.captureState = v.captureState;
-    const statusLine = div('capture-status-line');
-    const statusDetail = document.createElement('span');
-    statusDetail.className = 'capture-status-detail';
-    statusDetail.dataset.captureStatusDetail = '';
-    const statusValue = document.createElement('strong');
-    statusValue.className = 'capture-status-value';
-    statusValue.translate = false;
-    const progress = div('capture-progress');
-    progress.setAttribute('role', 'progressbar');
-    progress.setAttribute('aria-label', t('capturePanel.progress'));
-    progress.setAttribute('aria-valuemin', '0');
-    progress.setAttribute('aria-valuemax', '100');
-    const progressBar = document.createElement('span');
-    statusLine.append(statusDetail, statusValue);
-    progress.appendChild(progressBar);
-    status.append(statusLine, progress);
-    modeSec.body.appendChild(status);
-    this.statusDetail = statusDetail;
-    this.progressEl = progress;
-    this.progressBar = progressBar;
-    this.progressValue = statusValue;
-
-    const progressActive = v.captureState === 'capturing'
-      || v.captureState === 'stopping' || v.captureState === 'waiting';
-    progress.hidden = !progressActive;
-    statusDetail.textContent = v.captureState === 'ready'
-      ? t('capturePanel.statusReadyDetail')
-      : v.captureState === 'waiting'
-        ? t('capturePanel.statusWaitingDetail', {
-          interval: formatDuration(v.settings.repeatIntervalSeconds),
-        })
-        : v.captureState === 'stopping'
-          ? t('capturePanel.statusStoppingDetail')
-          : v.captureState === 'completed'
-            ? t('capturePanel.statusCompletedDetail', {
-              samples: (v.result?.samples ?? 0).toLocaleString(),
-              duration: formatDuration(v.result?.seconds ?? 0),
-            })
-            : v.captureState === 'aborted'
-              ? captureAbortDetail(v.abort ?? { cause: 'device', requestedSeconds: null },
-                v.result ?? { samples: 0, seconds: 0 })
-            : v.progress && v.progress.targetSamples === null
-              ? t('capturePanel.statusLoopDetail')
-              : t('capturePanel.statusFiniteDetail');
-    if (progressActive) this.setStatusProgress(null);
-    else {
-      this.progressBar.style.width = '0%';
-      this.progressValue.textContent = '';
-      progress.removeAttribute('aria-valuenow');
-      progress.dataset.indeterminate = 'false';
     }
 
     const maxSeconds = maxCaptureSeconds(s.samplerate);

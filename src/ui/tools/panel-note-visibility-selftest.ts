@@ -299,7 +299,7 @@ const dacNoteHidden = (source: string): boolean => {
 }
 
 const REPEAT_FROM = "if (s.mode === 'repeat') {";
-const REPEAT_TO = 'const badgeKeys = {';
+const REPEAT_TO = 'const maxSeconds = maxCaptureSeconds(';
 const REPEAT_CONSTRUCTION = "const layers = div('panel-note');";
 const REPEAT_TEXT = "t('capturePanel.repeatLayersNote')";
 const REPEAT_HIDDEN =
