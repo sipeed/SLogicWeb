@@ -396,17 +396,73 @@ const limitNoteHidden = (source: string): boolean =>
   source.includes(LIMIT_APPEND) && !source.includes(LIMIT_REMOVE) &&
   countOf(source, LIMIT_HIDDEN_OPEN) === LIMIT_HIDDEN_COUNT;
 
+interface LimitBranches {
+  loopSide: string;
+  keySide: string;
+}
+
+const limitBranches = (source: string): LimitBranches => {
+  const loopAt = source.indexOf(LIMIT_LOOP_BRANCH);
+  if (loopAt < 0) return { loopSide: '', keySide: '' };
+  const elseAt = source.indexOf(LIMIT_ELSE, loopAt);
+  if (elseAt < 0) return { loopSide: '', keySide: '' };
+  return {
+    loopSide: source.slice(loopAt, elseAt),
+    keySide: source.slice(elseAt + LIMIT_ELSE.length),
+  };
+};
+
+const loopSideHidden = (branches: LimitBranches): boolean =>
+  countOf(branches.loopSide, LIMIT_LOOP_HIDDEN) === 1 &&
+  countOf(branches.keySide, LIMIT_LOOP_HIDDEN) === 0;
+
+const keySideHidden = (branches: LimitBranches): boolean =>
+  countOf(branches.keySide, LIMIT_KEY_HIDDEN) === 1 &&
+  countOf(branches.loopSide, LIMIT_KEY_HIDDEN) === 0;
+
+const branchScopedLimit = (source: string): boolean => {
+  const branches = limitBranches(source);
+  return loopSideHidden(branches) && keySideHidden(branches);
+};
+
+const moveKeyHiddenIntoLoop = (source: string): string => {
+  const branches = limitBranches(source);
+  if (branches.loopSide === '' || !branches.keySide.includes(LIMIT_KEY_HIDDEN)) return source;
+  const loopAt = source.indexOf(LIMIT_LOOP_BRANCH);
+  const loopWithKey = branches.loopSide.split(`${LIMIT_LOOP_HIDDEN}\n`)
+    .join(`${LIMIT_LOOP_HIDDEN}\n      ${LIMIT_KEY_HIDDEN}\n`);
+  return source.slice(0, loopAt) + loopWithKey + LIMIT_ELSE +
+    branches.keySide.split(`${LIMIT_KEY_HIDDEN}\n`).join('');
+};
+
+const swapHiddenSides = (source: string): string => {
+  const branches = limitBranches(source);
+  if (branches.loopSide === '' || !branches.loopSide.includes(LIMIT_LOOP_HIDDEN) ||
+    !branches.keySide.includes(LIMIT_KEY_HIDDEN)) return source;
+  const loopAt = source.indexOf(LIMIT_LOOP_BRANCH);
+  const loopSwapped = branches.loopSide.split(`${LIMIT_LOOP_HIDDEN}\n`)
+    .join(`${LIMIT_KEY_HIDDEN}\n`);
+  const keySwapped = branches.keySide.split(`${LIMIT_KEY_HIDDEN}\n`)
+    .join(`${LIMIT_LOOP_HIDDEN}\n`);
+  return source.slice(0, loopAt) + loopSwapped + LIMIT_ELSE + keySwapped;
+};
+
 {
   const block = slice(read('src/ui/capturePanel.ts'), LIMIT_FROM, LIMIT_TO);
+  const branches = limitBranches(block);
+  const loopOk = loopSideHidden(branches);
+  const keyOk = keySideHidden(branches);
   check('the Single, Repeat and Loop limit note is built, appended and hidden on both branches',
-    limitNoteHidden(block),
+    limitNoteHidden(block) && branchScopedLimit(block) && loopOk && keyOk,
     `length=${block.length}, construction=${block.includes(LIMIT_CONSTRUCTION)}, ` +
     `loopText=${block.includes(LIMIT_LOOP_TEXT)}, singleKey=${block.includes(LIMIT_SINGLE_KEY)}, ` +
     `repeatKey=${block.includes(LIMIT_REPEAT_KEY)}, ` +
     `loopHidden=${block.includes(LIMIT_LOOP_HIDDEN)}, ` +
     `keyHidden=${block.includes(LIMIT_KEY_HIDDEN)}, append=${block.includes(LIMIT_APPEND)}, ` +
     `remove=${block.includes(LIMIT_REMOVE)}, ` +
-    `hiddenAssignments=${countOf(block, LIMIT_HIDDEN_OPEN)}, expected=${LIMIT_HIDDEN_COUNT}`);
+    `hiddenAssignments=${countOf(block, LIMIT_HIDDEN_OPEN)}, expected=${LIMIT_HIDDEN_COUNT}, ` +
+    `loopSideHidden=${loopOk}, keySideHidden=${keyOk}, ` +
+    `loopSideLength=${branches.loopSide.length}, keySideLength=${branches.keySide.length}`);
 }
 
 {
@@ -421,24 +477,33 @@ const limitNoteHidden = (source: string): boolean =>
   const withExtraHidden = withoutLoopHidden === block ? ''
     : block.split(`${LIMIT_LOOP_HIDDEN}\n`)
       .join(`${LIMIT_LOOP_HIDDEN}\n      ${LIMIT_HIDDEN_OPEN}'capturePanel.loopWindowLimit');\n`);
+  const bothInLoop = moveKeyHiddenIntoLoop(block);
+  const swapped = swapHiddenSides(block);
   const loopHiddenPass = limitNoteHidden(withoutLoopHidden);
   const keyHiddenPass = limitNoteHidden(withoutKeyHidden);
   const appendPass = limitNoteHidden(withoutAppend);
   const branchPass = limitNoteHidden(withoutLoopBranch);
   const extraPass = limitNoteHidden(withExtraHidden);
-  check('control: the limit note predicate fails on a missing branch hide, a missing append ' +
-    'or an extra hide',
-    block !== '' && limitNoteHidden(block) && withoutLoopHidden !== block &&
+  const bothInLoopPass = branchScopedLimit(bothInLoop);
+  const swappedPass = branchScopedLimit(swapped);
+  const blockScoped = branchScopedLimit(block);
+  check('control: the limit note predicate fails on a missing branch hide, a missing append, ' +
+    'an extra hide, both hides on the loop side or the hides swapped between branches',
+    block !== '' && limitNoteHidden(block) && blockScoped && withoutLoopHidden !== block &&
     withoutKeyHidden !== block && withoutAppend !== block && withoutLoopBranch !== '' &&
-    withExtraHidden !== '' && !loopHiddenPass && !keyHiddenPass && !appendPass &&
-    !branchPass && !extraPass,
+    withExtraHidden !== '' && bothInLoop !== block && swapped !== block &&
+    !loopHiddenPass && !keyHiddenPass && !appendPass &&
+    !branchPass && !extraPass && !bothInLoopPass && !swappedPass,
     `baseline=${limitNoteHidden(block)}, loopHiddenStripped=${loopHiddenPass}, ` +
     `keyHiddenStripped=${keyHiddenPass}, appendStripped=${appendPass}, ` +
     `loopBranchStripped=${branchPass}, extraHidden=${extraPass}, ` +
+    `branchScopedBaseline=${blockScoped}, bothInLoop=${bothInLoopPass}, ` +
+    `swapped=${swappedPass}, ` +
     `loopHiddenAssignments=${countOf(withoutLoopHidden, LIMIT_HIDDEN_OPEN)}, ` +
     `keyHiddenAssignments=${countOf(withoutKeyHidden, LIMIT_HIDDEN_OPEN)}, ` +
     `branchAssignments=${countOf(withoutLoopBranch, LIMIT_HIDDEN_OPEN)}, ` +
     `extraAssignments=${countOf(withExtraHidden, LIMIT_HIDDEN_OPEN)}, ` +
+    `bothInLoopLength=${bothInLoop.length}, swappedLength=${swapped.length}, ` +
     `blockLength=${block.length}, loopHiddenLength=${withoutLoopHidden.length}, ` +
     `keyHiddenLength=${withoutKeyHidden.length}, appendLength=${withoutAppend.length}, ` +
     `branchLength=${withoutLoopBranch.length}, extraLength=${withExtraHidden.length}`);
