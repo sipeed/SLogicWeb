@@ -1144,11 +1144,6 @@ export class CapturePanel {
       layers.textContent = t('capturePanel.repeatLayersNote');
       layers.hidden = capturePanelNoteHidden('capturePanel.repeatLayersNote');
       modeSec.body.appendChild(layers);
-      if (s.triggerEnableMask) {
-        const search = div('panel-note');
-        search.textContent = t('capturePanel.repeatSearchNote');
-        modeSec.body.appendChild(search);
-      }
     }
 
     const badgeKeys = {

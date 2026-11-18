@@ -306,8 +306,6 @@ const REPEAT_HIDDEN =
   "layers.hidden = capturePanelNoteHidden('capturePanel.repeatLayersNote');";
 const REPEAT_APPEND = 'modeSec.body.appendChild(layers);';
 const REPEAT_REMOVE = 'layers.remove';
-const REPEAT_SEARCH_APPEND = 'modeSec.body.appendChild(search);';
-const REPEAT_SEARCH_HIDDEN = 'search.hidden';
 const REPEAT_HIDDEN_DEPTH = 1;
 
 const braceDepthAt = (source: string, needle: string): number => {
@@ -324,20 +322,17 @@ const braceDepthAt = (source: string, needle: string): number => {
 const repeatLegendHidden = (source: string): boolean =>
   source.includes(REPEAT_CONSTRUCTION) && source.includes(REPEAT_TEXT) &&
   source.includes(REPEAT_HIDDEN) && source.includes(REPEAT_APPEND) &&
-  source.includes(REPEAT_SEARCH_APPEND) && !source.includes(REPEAT_REMOVE) &&
-  !source.includes(REPEAT_SEARCH_HIDDEN) &&
+  !source.includes(REPEAT_REMOVE) &&
   braceDepthAt(source, REPEAT_HIDDEN) === REPEAT_HIDDEN_DEPTH;
 
 {
   const panel = read('src/ui/capturePanel.ts');
   const block = slice(panel, REPEAT_FROM, REPEAT_TO);
-  check('the repeat layer legend is built, appended and hidden while the search note stays visible',
+  check('the repeat layer legend is built, appended and hidden by the registry',
     block !== '' && repeatLegendHidden(block),
     `length=${block.length}, construction=${block.includes(REPEAT_CONSTRUCTION)}, ` +
     `text=${block.includes(REPEAT_TEXT)}, hidden=${block.includes(REPEAT_HIDDEN)}, ` +
     `append=${block.includes(REPEAT_APPEND)}, remove=${block.includes(REPEAT_REMOVE)}, ` +
-    `searchHidden=${block.includes(REPEAT_SEARCH_HIDDEN)}, ` +
-    `searchAppend=${block.includes(REPEAT_SEARCH_APPEND)}, ` +
     `depth=${braceDepthAt(block, REPEAT_HIDDEN)}`);
 }
 
@@ -346,28 +341,19 @@ const repeatLegendHidden = (source: string): boolean =>
   const block = slice(panel, REPEAT_FROM, REPEAT_TO);
   const stripped = block.split(`${REPEAT_HIDDEN}\n`).join('');
   const unappended = block.split(`${REPEAT_APPEND}\n`).join('');
-  const searchHid = block.split(REPEAT_SEARCH_APPEND)
-    .join(`${REPEAT_SEARCH_APPEND}\n        search.hidden = true;`);
-  const unsearched = block.split(`${REPEAT_SEARCH_APPEND}\n`).join('');
-  const nested = stripped.split(REPEAT_SEARCH_APPEND)
-    .join(`${REPEAT_SEARCH_APPEND}\n        ${REPEAT_HIDDEN}`);
+  const nested = block.split(`${REPEAT_HIDDEN}\n`)
+    .join(`if (s.triggerEnableMask) {\n        ${REPEAT_HIDDEN}\n      }\n`);
   const strippedPass = repeatLegendHidden(stripped);
   const unappendedPass = repeatLegendHidden(unappended);
-  const searchHidPass = repeatLegendHidden(searchHid);
-  const unsearchedPass = repeatLegendHidden(unsearched);
   const nestedPass = repeatLegendHidden(nested);
   check('control: the repeat legend predicate fails without the hidden line, the append, ' +
-    'the search append, with the hidden line in the nested trigger block, ' +
-    'or with a hidden search note',
+    'or with the hidden line nested one level deeper',
     block !== '' && repeatLegendHidden(block) && stripped !== block && unappended !== block &&
-    searchHid !== block && unsearched !== block && nested !== block &&
-    !strippedPass && !unappendedPass && !searchHidPass && !unsearchedPass && !nestedPass,
+    nested !== block && !strippedPass && !unappendedPass && !nestedPass,
     `baseline=${repeatLegendHidden(block)}, stripped=${strippedPass}, ` +
-    `unappended=${unappendedPass}, searchHidden=${searchHidPass}, ` +
-    `unsearched=${unsearchedPass}, nested=${nestedPass}, ` +
+    `unappended=${unappendedPass}, nested=${nestedPass}, ` +
     `blockLength=${block.length}, strippedLength=${stripped.length}, ` +
-    `unappendedLength=${unappended.length}, searchHiddenLength=${searchHid.length}, ` +
-    `unsearchedLength=${unsearched.length}, nestedLength=${nested.length}, ` +
+    `unappendedLength=${unappended.length}, nestedLength=${nested.length}, ` +
     `depth=${braceDepthAt(block, REPEAT_HIDDEN)}, nestedDepth=${braceDepthAt(nested, REPEAT_HIDDEN)}`);
 }
 
