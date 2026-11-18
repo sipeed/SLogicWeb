@@ -1858,6 +1858,7 @@ html.resizing { cursor: col-resize; user-select: none; }
 .panel-section-body[hidden] { display: none; }
 .panel-section-head:has(+ .panel-section-body[hidden]) { margin-bottom: 0; }
 .panel-note { font-size: 10px; color: var(--text50); line-height: 1.5; white-space: pre-wrap; }
+.panel-note[hidden] { display: none; }
 /* A control and its "?" detail on one line; the detail never becomes a panel paragraph. */
 .help-row { display: flex; align-items: center; gap: 6px; }
 .help-row > :first-child { flex: 1 1 auto; min-width: 0; }
