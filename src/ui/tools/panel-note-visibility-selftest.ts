@@ -214,6 +214,90 @@ const analogNoteHidden = (source: string): boolean =>
     `unappendedLength=${unappended.length}, blockLength=${block.length}`);
 }
 
+const DAC_FROM = 'const code = vrefCode(s.thresholdVolts);';
+const DAC_TO = 'capture.appendChild(chSec.el);';
+const DAC_CONSTRUCTION = "const note = div('panel-note');";
+const DAC_ADVISED_TEXT = "t('capturePanel.dacNoteAdvised'";
+const DAC_TEXT = "t('capturePanel.dacNote'";
+const DAC_HIDDEN_OPEN = 'note.hidden = capturePanelNoteHidden(';
+const DAC_APPEND_CALL = 'chSec.body.appendChild(note';
+const DAC_APPEND = `${DAC_APPEND_CALL});`;
+const DAC_REMOVE = 'note.remove';
+const DAC_PREDICATE = 'advised !== undefined && advised < ceiling';
+const DAC_ADVISED_KEY = "'capturePanel.dacNoteAdvised'";
+const DAC_KEY = "'capturePanel.dacNote'";
+
+const dacHiddenArgument = (source: string): string => {
+  const start = source.indexOf(DAC_HIDDEN_OPEN);
+  if (start < 0) return '';
+  const end = source.indexOf(');', start + DAC_HIDDEN_OPEN.length);
+  return end < 0 ? '' : source.slice(start + DAC_HIDDEN_OPEN.length, end);
+};
+
+const dacAdvisesFirst = (argument: string): boolean => {
+  const advisedAt = argument.indexOf(DAC_ADVISED_KEY);
+  const plainAt = argument.indexOf(DAC_KEY);
+  return advisedAt >= 0 && plainAt > advisedAt;
+};
+
+const dacNoteHidden = (source: string): boolean => {
+  const argument = dacHiddenArgument(source);
+  return source.includes(DAC_CONSTRUCTION) && source.includes(DAC_ADVISED_TEXT) &&
+    source.includes(DAC_TEXT) && source.includes(DAC_HIDDEN_OPEN) && source.includes(DAC_APPEND) &&
+    !source.includes(DAC_REMOVE) && argument.includes(DAC_PREDICATE) &&
+    argument.includes(DAC_ADVISED_KEY) && argument.includes(DAC_KEY) &&
+    dacAdvisesFirst(argument) && !argument.includes(DAC_APPEND_CALL);
+};
+
+{
+  const panel = read('src/ui/capturePanel.ts');
+  const block = slice(panel, DAC_FROM, DAC_TO);
+  const argument = dacHiddenArgument(block);
+  check('the DAC threshold note is built, appended and hidden per rendered variant',
+    block !== '' && dacNoteHidden(block),
+    `length=${block.length}, construction=${block.includes(DAC_CONSTRUCTION)}, ` +
+    `advisedText=${block.includes(DAC_ADVISED_TEXT)}, text=${block.includes(DAC_TEXT)}, ` +
+    `hidden=${block.includes(DAC_HIDDEN_OPEN)}, append=${block.includes(DAC_APPEND)}, ` +
+    `remove=${block.includes(DAC_REMOVE)}, predicate=${argument.includes(DAC_PREDICATE)}, ` +
+    `advisedKey=${argument.includes(DAC_ADVISED_KEY)}, key=${argument.includes(DAC_KEY)}, ` +
+    `advisesFirst=${dacAdvisesFirst(argument)}, ` +
+    `bleed=${argument.includes(DAC_APPEND_CALL)}, ` +
+    `argumentLength=${argument.length}`);
+}
+
+{
+  const panel = read('src/ui/capturePanel.ts');
+  const block = slice(panel, DAC_FROM, DAC_TO);
+  const start = block.indexOf(DAC_HIDDEN_OPEN);
+  const end = start < 0 ? -1 : block.indexOf(');', start + DAC_HIDDEN_OPEN.length);
+  const stripped = start < 0 || end < 0 ? block : block.slice(0, start) + block.slice(end + 2);
+  const weakened = start < 0 || end < 0 ? block
+    : block.slice(0, start) + `${DAC_HIDDEN_OPEN}'capturePanel.dacNote');` + block.slice(end + 2);
+  const invertedSpan = start < 0 || end < 0 ? ''
+    : block.slice(start, end + 2).replace(DAC_ADVISED_KEY, '\u0001')
+      .replace(DAC_KEY, DAC_ADVISED_KEY).replace('\u0001', DAC_KEY);
+  const inverted = start < 0 || end < 0 ? block
+    : block.slice(0, start) + invertedSpan + block.slice(end + 2);
+  const bleeding = start < 0 || end < 0 ? block
+    : block.slice(0, start) + block.slice(start, end) + '\n    ;' + block.slice(end + 2);
+  const strippedPass = dacNoteHidden(stripped);
+  const weakenedPass = dacNoteHidden(weakened);
+  const invertedPass = dacNoteHidden(inverted);
+  const bleedingPass = dacNoteHidden(bleeding);
+  check('control: the DAC note predicate fails without the hidden line, with a single-variant ' +
+    'hide, with inverted variants or with an unterminated statement',
+    block !== '' && dacNoteHidden(block) && stripped !== block && weakened !== block &&
+    inverted !== block && bleeding !== block &&
+    !strippedPass && !weakenedPass && !invertedPass && !bleedingPass,
+    `baseline=${dacNoteHidden(block)}, stripped=${strippedPass}, weakened=${weakenedPass}, ` +
+    `inverted=${invertedPass}, bleeding=${bleedingPass}, ` +
+    `argumentLength=${dacHiddenArgument(block).length}, ` +
+    `strippedArgumentLength=${dacHiddenArgument(stripped).length}, ` +
+    `weakenedArgumentLength=${dacHiddenArgument(weakened).length}, ` +
+    `invertedArgumentLength=${dacHiddenArgument(inverted).length}, ` +
+    `bleedingArgumentLength=${dacHiddenArgument(bleeding).length}`);
+}
+
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);

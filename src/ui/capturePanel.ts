@@ -1113,6 +1113,8 @@ export class CapturePanel {
         channels: s.channels,
         rate: formatRate(ceiling),
       });
+    note.hidden = capturePanelNoteHidden(advised !== undefined && advised < ceiling
+      ? 'capturePanel.dacNoteAdvised' : 'capturePanel.dacNote');
     chSec.body.appendChild(note);
     capture.appendChild(chSec.el);
 
