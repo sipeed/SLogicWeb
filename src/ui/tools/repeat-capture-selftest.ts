@@ -156,10 +156,7 @@ const stylesheet = fs.readFileSync('src/ui/style.css', 'utf8');
     'capture-badge', 'capture-status', "div('capture-progress')", 'setStatusProgress',
     'progressEl', 'progressBar', 'progressValue', 'this.statusDetail',
   ];
-  const cssTokens = ['.capture-badge', '.capture-status', '.capture-progress'];
   const panelClean = panelTokens.every((token) => !panel.includes(token));
-  const cssClean = cssTokens.every((token) => !stylesheet.includes(token)) &&
-    stylesheet.includes('.capture-lockable[data-capture-lock="true"]::after');
   const notes = fill.includes("this.liveNote!.textContent = t('capturePanel.recording', {") &&
     fill.includes("this.lostNote!.textContent = t('capturePanel.dropped', { samples: progress.lost.toLocaleString() });") &&
     fill.includes("this.droppedNote!.textContent = t('capturePanel.loopWindow', {") &&
@@ -167,9 +164,27 @@ const stylesheet = fs.readFileSync('src/ui/style.css', 'utf8');
     fill.includes("this.memoryNote.classList.toggle('warning', memory.warn);");
   const timerless = !panel.includes('setInterval') && !panel.includes('setTimeout');
   check('the capture panel builds no status box while fillProgress keeps the live notes',
-    panelClean && cssClean && notes && timerless,
-    `panelClean=${panelClean}, cssClean=${cssClean}, notes=${notes}, timerless=${timerless}, ` +
-    `fill=${fill.length}`);
+    panelClean && notes && timerless,
+    `panelClean=${panelClean}, notes=${notes}, timerless=${timerless}, fill=${fill.length}`);
+}
+
+{
+  const cssTokens = ['.capture-badge', '.capture-status', '.capture-progress'];
+  const cssClean = cssTokens.every((token) => !stylesheet.includes(token));
+  const veil = stylesheet.includes('.capture-lockable[data-capture-lock="true"]::after');
+  check('the stylesheet carries the lock veil and no retired status-box rule',
+    cssClean && veil, `cssClean=${cssClean}, veil=${veil}`);
+}
+
+{
+  const bodyAppends = panel.match(/modeSec\.body\.appendChild\([^;]*;/g) ?? [];
+  const headerless = !panel.includes('modeSec.header.appendChild') &&
+    !panel.includes('modeSec.header.append');
+  const firstLocked = bodyAppends[0]?.trim() ===
+    'modeSec.body.appendChild(applyCaptureLock(seg, captureLocked));';
+  check('the Capture section header is title-only and its body opens on the locked mode switch',
+    headerless && firstLocked,
+    `headerless=${headerless}, first=${bodyAppends[0]?.trim() ?? '(none)'}`);
 }
 
 {
