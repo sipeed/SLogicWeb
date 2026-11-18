@@ -1295,6 +1295,7 @@ export class CapturePanel {
     modeSec.body.appendChild(limit);
 
     const triggerSec = section(t('capturePanel.softwareTrigger'));
+    triggerSec.header.appendChild(helpTip(t('capturePanel.triggerEnableHelp')));
     const mask = document.createElement('input');
     mask.type = 'checkbox'; mask.checked = s.triggerEnableMask;
     // Trigger edits are live while the matcher waits and pending after it matches; only
@@ -1304,14 +1305,6 @@ export class CapturePanel {
     mask.setAttribute('aria-label', mask.title);
     triggerSec.header.appendChild(mask);
     mask.addEventListener('change', () => this.cb.onSettings({ ...s, triggerEnableMask: mask.checked }));
-    // Always visible, even while the section body is collapsed: one sentence on what the
-    // checkbox does, including that "on" with no condition is a free run. Why conditions
-    // can be stored unarmed, and why adding one turns this on, live behind the "?".
-    const enableHelp = div('panel-note help-note');
-    enableHelp.textContent = t('capturePanel.triggerEnableHelp');
-    enableHelp.style.marginTop = '8px';
-    enableHelp.appendChild(helpTip(t('capturePanel.triggerEnableDetail')));
-    triggerSec.el.appendChild(enableHelp);
     triggerSec.body.hidden = !s.triggerEnableMask;
     if (s.triggerEnableMask) {
       // Analog triggering needs an active ADC group, and its preview below only reflects

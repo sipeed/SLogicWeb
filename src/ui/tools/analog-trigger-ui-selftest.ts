@@ -302,15 +302,15 @@ function cssRules(selector: string): string[] {
 }
 
 {
-  const sites = panel.includes('triggerSec.el.appendChild(enableHelp)') &&
-    panel.includes("t('capturePanel.triggerEnableHelp')") &&
+  const sites = panel.includes("triggerSec.header.appendChild(helpTip(t('capturePanel.triggerEnableHelp')))") &&
+    !panel.includes('enableHelp') &&
     panel.includes("t('capturePanel.triggerSourceHelp')") &&
     panel.includes("t('capturePanel.testModeHelp')");
   const catalogs = [en, zh, fr, ru].every((source) =>
     source.includes("'capturePanel.triggerEnableHelp':") &&
     source.includes("'capturePanel.triggerSourceHelp':") &&
     source.includes("'capturePanel.testModeHelp':"));
-  check('trigger and test-mode toggles carry localized help, with the enable note outside the hidden body',
+  check('trigger and test-mode toggles carry localized help, with the enable help as the header tip',
     sites && catalogs, `sites=${sites}, catalogs=${catalogs}`);
 }
 

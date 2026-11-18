@@ -870,6 +870,7 @@ const baseSettings: CaptureSettings = {
     'capturePanel.freeRun', 'capturePanel.timer', 'capturePanel.durationS',
     'capturePanel.repeatIntervalS', 'capturePanel.loopSamples',
     'capturePanel.repeatPending', 'capturePanel.ceilingNote',
+    'capturePanel.triggerEnableDetail',
     'capturePanel.unlimited', 'capturePanel.singleUnlimitedNote',
     'capturePanel.statusUnlimitedDetail', 'capturePanel.memoryCeiling',
     'capturePanel.all', 'capturePanel.clear', 'capturePanel.enabledCount',
