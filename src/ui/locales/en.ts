@@ -194,10 +194,10 @@ export const en = {
   'error.clearCache': 'clear cache',
   'error.localeLoad': 'Could not load the language catalog',
   'error.hostOverloadNotice':
-    'Capture aborted: the USB link could not keep up with {channels} CH @ {rate}. Lower the sample rate or the channel count, then capture again.',
+    'Capture aborted: the current USB transfer rate cannot sustain {channels} CH @ {rate}. Lower the sample rate or channel count, or connect to a 10 Gbps port, then capture again',
   'error.details': 'Technical details',
   'error.captureMemory': 'capture memory',
-  'error.captureMemoryNotice': 'Capture stopped: out of memory. The samples recorded so far are kept. Lower the sample rate or the channel count, or capture for less time.',
+  'error.captureMemoryNotice': 'Capture stopped: out of memory. The samples recorded so far are kept. Lower the sample rate or the channel count, or capture for less time',
   'error.saveOutOfMemory': 'Save failed: out of memory. Close other tabs and try again, or save a shorter capture.',
   'error.clearCacheNotice': 'Clearing was incomplete: some saved data or cached resources may remain. Check that this browser allows site storage for SLogic Web, then try again.',
   'error.notice.fileType': 'This file is not a capture slogicweb can open. Choose a sigrok .sr session or a .lwcap file.',
@@ -207,15 +207,15 @@ export const en = {
   'error.notice.decodeTooLarge': 'Decoding {id} stopped: the capture is too large to decode at once. Decode a shorter range or capture less.',
   'error.notice.decodeFailed': 'The {id} decoder stopped with an error. Check its channels and options, then decode again.',
   'error.notice.decodeUnavailable': 'The protocol decoders could not be loaded. Reload the page to try again.',
-  'error.notice.noData': 'Capture aborted: the board sent no data after it started. Unplug it, plug it back in, then capture again.',
-  'error.notice.linkFailed': 'Capture aborted: the USB connection to the board failed. Check the cable and port, then capture again.',
+  'error.notice.noData': 'Capture aborted: the device sent zero data. Unplug the USB cable, plug it back in, then capture again.',
+  'error.notice.linkFailed': 'USB link error: capture aborted. Check the cable connection and replug it.',
   'error.lowerRate': 'Lower to {rate}',
 
   // ---------------------------- connect failure guidance (error banner)
-  'connectHelp.busy': 'The device is in use by another tab or program (such as PulseView/DSView, sigrok-cli or the firmware updater). Close it, then retry.',
-  'connectHelp.busyTab': 'The device is in use by another slogicweb tab. Disconnect it there or close that tab, then retry.',
-  'connectHelp.permission': 'The system denied access to the device. On Linux, install the SLogic udev rule and replug the board; on Windows, close any program holding it. Then retry.',
-  'connectHelp.lost': 'The device was disconnected. Check the USB cable, plug the board back in, then retry.',
+  'connectHelp.busy': 'The device is in use by another tab or program (such as PulseView/DSView). Close it and retry.',
+  'connectHelp.busyTab': 'The device is exclusively held by another slogicweb tab.',
+  'connectHelp.permission': 'USB access is restricted. On Linux, install the udev rule and replug the USB cable; on Windows, close any process holding the driver exclusively, then retry.',
+  'connectHelp.lost': 'USB connection lost. Unplug and replug the device cable, then retry.',
   'connectHelp.unsupported': 'This browser cannot connect devices. Use Chrome or Edge.',
   'connectHelp.retry': 'Retry',
 
@@ -312,7 +312,7 @@ export const en = {
   'diagnostic.device.workerUnclaimed':
     'the USB worker answered "{kind}" with nobody waiting',
   'diagnostic.device.stopTimedOut':
-    'the capture did not stop within {ms} ms; the USB transport was reset',
+    'capture stop exceeded the {ms} ms timeout; the USB transfer channel was forcibly reset',
   'diagnostic.device.loopUnsettled':
     'the previous capture\'s read loop never settled after the interface was released',
   'diagnostic.device.loopUnsettledClosed':
@@ -338,7 +338,7 @@ export const en = {
   'diagnostic.device.tuningTransfer':
     'transferBytes {bytes} exceeds Chromium WebUSB’s {limit}-byte limit',
   'diagnostic.device.tuningQueue':
-    'transfer queue {depth} x {bytes} B exceeds the safe {budget}-byte usbfs budget; raise usbfs_memory_mb and queueBudgetBytes together',
+    'transfer queue {depth} x {bytes} B breaches the {budget}-byte budget; usbfs_memory_mb and queueBudgetBytes must be raised together',
   'diagnostic.device.startRunning': 'start() called while already running',
   'diagnostic.device.startStopping':
     'start() called before the previous capture finished stopping',
@@ -359,11 +359,11 @@ export const en = {
   'diagnostic.device.sampleAccounting':
     'device counted {counted} samples delivered, store holds {stored}',
   'diagnostic.device.noData':
-    '{device} delivered no data within {deadline} ms of RUN ({channels}ch @ {rate} MHz). A board in this state answers every control transfer and sends nothing on the bulk endpoint: unplug it and plug it back in.',
+    '{device} produced zero output on the bulk endpoint within {deadline} ms of RUN ({channels}ch @ {rate} MHz). Control transfers work normally, but the data stream is wedged; you must unplug and replug the USB cable.',
   'diagnostic.device.underrunStalled':
-    '{device} overran the host: {channels}ch @ {rate} MHz offers {offered} MB/s for {count} consecutive transfers: {transferMs} ms for {bytes} B (limit {limitMs} ms), {avg} MB/s average over {runMs} ms (minimum {minimum} MB/s). Capture aborted before the device FIFO overflow wedged the endpoint. The {thread} thread was blocked {stalls} time(s) during the capture, worst {worstMs} ms at {atMs} ms; the queue covers {coverMs} ms.',
+    '{device} triggered host overload protection and forcibly aborted the capture. {channels}ch @ {rate} MHz produces {offered} MB/s; {count} consecutive transfers took {transferMs} ms to receive {bytes} B (limit {limitMs} ms), averaging {avg} MB/s over {runMs} ms (minimum {minimum} MB/s). The {thread} thread was blocked {stalls} time(s), longest stall {worstMs} ms (at {atMs} ms after start); the transfer queue covers only {coverMs} ms, and the onboard FIFO was about to overflow.',
   'diagnostic.device.underrunClean':
-    '{device} overran the host: {channels}ch @ {rate} MHz offers {offered} MB/s for {count} consecutive transfers: {transferMs} ms for {bytes} B (limit {limitMs} ms), {avg} MB/s average over {runMs} ms (minimum {minimum} MB/s). Capture aborted before the device FIFO overflow wedged the endpoint. The {thread} thread was never blocked for more than {thresholdMs} ms, so this is the device or the USB path.',
+    '{device} aborted the capture before the onboard FIFO overflowed. {channels}ch @ {rate} MHz produces {offered} MB/s; {count} consecutive transfers delivered only {bytes} B in {transferMs} ms (limit {limitMs} ms), averaging {avg} MB/s over {runMs} ms (minimum {minimum} MB/s). The {thread} thread was not blocked for more than {thresholdMs} ms; the bottleneck is in the physical connection or USB hardware endpoint.',
   'diagnostic.device.openFailed': 'could not open the USB device',
   'diagnostic.device.configureFailed': 'could not select the device configuration',
   'diagnostic.device.claimFailed': 'could not claim interface 0',

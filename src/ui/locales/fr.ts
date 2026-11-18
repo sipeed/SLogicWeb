@@ -190,10 +190,10 @@ export const fr: Messages = {
   'error.clearCache': 'vidage du cache',
   'error.localeLoad': 'Impossible de charger le catalogue de langue',
   'error.hostOverloadNotice':
-    'Capture interrompue : le lien USB n’a pas suivi {channels} CH @ {rate}. Réduisez la fréquence d’échantillonnage ou le nombre de voies, puis relancez la capture.',
+    'Capture interrompue : le débit de transfert USB actuel ne suffit pas pour {channels} CH @ {rate}. Réduisez la fréquence d’échantillonnage ou le nombre de voies, ou connectez l’appareil à un port 10 Gbps, puis relancez la capture',
   'error.details': 'Détails techniques',
   'error.captureMemory': 'mémoire de capture',
-  'error.captureMemoryNotice': 'Capture arrêtée : mémoire insuffisante. Les échantillons déjà enregistrés sont conservés. Baissez la fréquence d’échantillonnage ou le nombre de voies, ou capturez moins longtemps.',
+  'error.captureMemoryNotice': 'Capture arrêtée : mémoire insuffisante. Les échantillons déjà enregistrés sont conservés. Baissez la fréquence d’échantillonnage ou le nombre de voies, ou capturez moins longtemps',
   'error.saveOutOfMemory': 'Échec de l’enregistrement : mémoire insuffisante. Fermez d’autres onglets et réessayez, ou enregistrez une capture plus courte.',
   'error.clearCacheNotice': 'L’effacement est incomplet : certaines données enregistrées ou ressources en cache peuvent subsister. Vérifiez que le navigateur autorise le stockage de site pour SLogic Web, puis réessayez.',
   'error.notice.fileType': 'Ce fichier n’est pas une capture que slogicweb sait ouvrir. Choisissez une session sigrok .sr ou un fichier .lwcap.',
@@ -203,15 +203,15 @@ export const fr: Messages = {
   'error.notice.decodeTooLarge': 'Décodage {id} arrêté : la capture est trop grande pour être décodée d’un coup. Décodez une plage plus courte ou capturez moins.',
   'error.notice.decodeFailed': 'Le décodeur {id} s’est arrêté sur une erreur. Vérifiez ses voies et ses options, puis relancez le décodage.',
   'error.notice.decodeUnavailable': 'Les décodeurs de protocole n’ont pas pu être chargés. Rechargez la page pour réessayer.',
-  'error.notice.noData': 'Capture interrompue : la carte n’a envoyé aucune donnée après le démarrage. Débranchez-la, rebranchez-la, puis relancez la capture.',
-  'error.notice.linkFailed': 'Capture interrompue : la connexion USB avec la carte a échoué. Vérifiez le câble et le port, puis relancez la capture.',
+  'error.notice.noData': 'Capture interrompue : l’appareil n’a transmis aucune donnée. Débranchez le câble USB, rebranchez-le, puis relancez la capture.',
+  'error.notice.linkFailed': 'Le lien USB a signalé une erreur et interrompu la capture. Vérifiez le branchement du câble et rebranchez-le.',
   'error.lowerRate': 'Passer à {rate}',
 
   // ---------------------------- connect failure guidance (error banner)
-  'connectHelp.busy': 'L’appareil est utilisé par un autre onglet ou programme (PulseView/DSView, sigrok-cli ou l’outil de mise à jour). Fermez-le, puis réessayez.',
-  'connectHelp.busyTab': 'L’appareil est utilisé par un autre onglet slogicweb. Déconnectez-le dans cet onglet ou fermez-le, puis réessayez.',
-  'connectHelp.permission': 'Le système a refusé l’accès à l’appareil. Sous Linux, installez la règle udev SLogic et rebranchez la carte ; sous Windows, fermez le programme qui l’utilise. Puis réessayez.',
-  'connectHelp.lost': 'L’appareil a été déconnecté. Vérifiez le câble USB, rebranchez la carte, puis réessayez.',
+  'connectHelp.busy': 'L’appareil est utilisé par un autre onglet ou programme (comme PulseView/DSView). Fermez-le et réessayez.',
+  'connectHelp.busyTab': 'L’appareil est utilisé en exclusivité par un autre onglet slogicweb.',
+  'connectHelp.permission': 'Accès USB restreint. Sous Linux, installez la règle udev et rebranchez le câble USB ; sous Windows, fermez le processus qui détient le pilote en exclusivité, puis réessayez.',
+  'connectHelp.lost': 'Connexion USB interrompue. Débranchez et rebranchez le câble de l’appareil, puis réessayez.',
   'connectHelp.unsupported': 'Ce navigateur ne peut pas connecter d’appareil. Utilisez Chrome ou Edge.',
   'connectHelp.retry': 'Réessayer',
 
@@ -309,7 +309,7 @@ export const fr: Messages = {
   'diagnostic.device.workerUnclaimed':
     'le worker USB a répondu « {kind} » alors que personne n’attendait',
   'diagnostic.device.stopTimedOut':
-    'la capture ne s’est pas arrêtée en {ms} ms ; le transport USB a été réinitialisé',
+    'l’arrêt de la capture a dépassé le délai de {ms} ms ; le canal de transfert USB a été réinitialisé de force',
   'diagnostic.device.loopUnsettled':
     'la boucle de lecture de la capture précédente ne s’est jamais terminée après la libération de l’interface',
   'diagnostic.device.loopUnsettledClosed':
@@ -334,7 +334,7 @@ export const fr: Messages = {
   'diagnostic.device.tuningTransfer':
     'transferBytes {bytes} dépasse la limite de {limit} octets de Chromium WebUSB',
   'diagnostic.device.tuningQueue':
-    'la file de transferts {depth} x {bytes} B dépasse le budget usbfs sûr de {budget} octets ; augmentez usbfs_memory_mb et queueBudgetBytes ensemble',
+    'la file de transferts {depth} x {bytes} B dépasse le budget de {budget} octets ; usbfs_memory_mb et queueBudgetBytes doivent être augmentés ensemble',
   'diagnostic.device.startRunning':
     'start() appelé alors qu’une capture est déjà en cours',
   'diagnostic.device.startStopping':
@@ -356,11 +356,11 @@ export const fr: Messages = {
   'diagnostic.device.sampleAccounting':
     'l’appareil compte {counted} échantillons livrés, le stockage en contient {stored}',
   'diagnostic.device.noData':
-    '{device} n’a envoyé aucune donnée dans les {deadline} ms suivant RUN ({channels} canaux @ {rate} MHz). Une carte dans cet état répond à chaque transfert de contrôle et n’envoie rien sur le point de terminaison bulk : débranchez-la et rebranchez-la.',
+    '{device} n’a produit aucune sortie sur le point de terminaison bulk dans les {deadline} ms suivant RUN ({channels} canaux @ {rate} MHz). Les transferts de contrôle fonctionnent normalement, mais le flux de données est bloqué ; vous devez débrancher puis rebrancher le câble USB.',
   'diagnostic.device.underrunStalled':
-    '{device} a saturé l’hôte : {channels} canaux @ {rate} MHz offrent {offered} Mo/s mais {count} transferts consécutifs ont pris {transferMs} ms pour {bytes} B (limite {limitMs} ms), {avg} Mo/s en moyenne sur {runMs} ms (minimum {minimum} Mo/s). Capture interrompue avant que le débordement de la FIFO de l’appareil ne bloque le point de terminaison. Le thread {thread} a été bloqué {stalls} fois pendant la capture, au pire {worstMs} ms à {atMs} ms ; la file couvre {coverMs} ms.',
+    '{device} a déclenché la protection contre la surcharge hôte et interrompu de force la capture. {channels} canaux @ {rate} MHz produisent {offered} Mo/s ; {count} transferts consécutifs ont pris {transferMs} ms pour recevoir {bytes} B (limite {limitMs} ms), soit {avg} Mo/s en moyenne sur {runMs} ms (minimum {minimum} Mo/s). Le thread {thread} a été bloqué {stalls} fois, avec une pause maximale de {worstMs} ms (survenue {atMs} ms après le démarrage) ; la file de transferts ne couvre que {coverMs} ms et la FIFO embarquée était sur le point de déborder.',
   'diagnostic.device.underrunClean':
-    '{device} a saturé l’hôte : {channels} canaux @ {rate} MHz offrent {offered} Mo/s mais {count} transferts consécutifs ont pris {transferMs} ms pour {bytes} B (limite {limitMs} ms), {avg} Mo/s en moyenne sur {runMs} ms (minimum {minimum} Mo/s). Capture interrompue avant que le débordement de la FIFO de l’appareil ne bloque le point de terminaison. Le thread {thread} n’a jamais été bloqué plus de {thresholdMs} ms, c’est donc l’appareil ou le chemin USB.',
+    '{device} a interrompu la capture avant le débordement de la FIFO embarquée. {channels} canaux @ {rate} MHz produisent {offered} Mo/s ; {count} transferts consécutifs n’ont remis que {bytes} B en {transferMs} ms (limite {limitMs} ms), avec un débit moyen de {avg} Mo/s sur {runMs} ms (minimum {minimum} Mo/s). Le thread {thread} n’a pas été bloqué plus de {thresholdMs} ms ; le goulot d’étranglement vient de la liaison physique ou du point de terminaison matériel USB.',
   'diagnostic.device.openFailed': 'impossible d’ouvrir l’appareil USB',
   'diagnostic.device.configureFailed':
     'impossible de sélectionner la configuration de l’appareil',
