@@ -508,7 +508,6 @@ export const en = {
   'capturePanel.noAnalogTrigger': 'No analog trigger. Turn on an analog group, then click the trigger icon on its row in the channel column.',
   'capturePanel.analogSingleNote': 'Analog triggering takes the first sample past the level as T. A crossing counts only once the signal has passed 4 codes, and the ADC’s carry glitches are filtered out automatically; switching the ADC group resets the trigger point.',
   'capturePanel.removeTrigger': 'Remove trigger on {channel}',
-  'capturePanel.noDigitalTrigger': 'No digital trigger. Click the trigger icon at the right of a channel row to add one.',
   'capturePanel.triggerAnalog': 'Analog',
   'capturePanel.triggerDigital': 'Digital',
   'capturePanel.triggerSource': 'Trigger source',

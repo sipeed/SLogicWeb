@@ -456,7 +456,6 @@ export const zhCN: Messages = {
   'capturePanel.noAnalogTrigger': '未设置模拟触发。先开启一个模拟组，再点击左侧通道栏中该行的触发图标。',
   'capturePanel.analogSingleNote': '模拟触发以越过电平的第 1 个采样点为 T。信号必须越过 4 个码值判定有效穿越并自动过滤进位毛刺，切换 ADC 组会重置触发点。',
   'capturePanel.removeTrigger': '移除 {channel} 的触发',
-  'capturePanel.noDigitalTrigger': '未设置数字触发。点击通道行右侧的触发图标即可添加。',
   'capturePanel.triggerAnalog': '模拟',
   'capturePanel.triggerDigital': '数字',
   'capturePanel.triggerSource': '触发源',

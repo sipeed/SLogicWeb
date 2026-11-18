@@ -507,7 +507,6 @@ export const fr: Messages = {
   'capturePanel.noAnalogTrigger': 'Aucun déclenchement analogique. Activez un groupe analogique, puis cliquez l’icône de déclenchement de sa ligne dans la colonne des voies.',
   'capturePanel.analogSingleNote': 'Le déclenchement analogique prend pour T le premier échantillon au-delà du niveau. Un franchissement ne compte qu’une fois que le signal a dépassé 4 codes, et les parasites de retenue de l’ADC sont filtrés automatiquement ; changer de groupe ADC réinitialise le point de déclenchement.',
   'capturePanel.removeTrigger': 'Supprimer le déclenchement sur {channel}',
-  'capturePanel.noDigitalTrigger': 'Aucun déclenchement numérique. Cliquez l’icône de déclenchement à droite d’une ligne de voie pour en ajouter un.',
   'capturePanel.triggerAnalog': 'Analogique',
   'capturePanel.triggerDigital': 'Numérique',
   'capturePanel.triggerSource': 'Source de déclenchement',

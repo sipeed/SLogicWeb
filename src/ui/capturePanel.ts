@@ -1391,40 +1391,34 @@ export class CapturePanel {
         triggerSec.body.appendChild(rejected);
       }
 
-      if (s.triggerSource === 'digital') {
-        if (digitalConditions.length === 0) {
-          const empty = div('panel-note error');
-          empty.textContent = t('capturePanel.noDigitalTrigger');
-          triggerSec.body.appendChild(empty);
-        } else {
-          const list = div('global-trigger-list');
-          for (const condition of digitalConditions) {
-            const row = div('global-trigger-row');
-            const name = document.createElement('span');
-            name.className = 'global-trigger-name';
-            name.textContent = `D${condition.channel}`;
-            const mode = document.createElement('span');
-            mode.className = 'global-trigger-mode';
-            mode.textContent = digitalConditionLabel(condition.kind, condition.level);
-            const remove = document.createElement('button');
-            remove.type = 'button';
-            remove.className = 'global-trigger-remove';
-            remove.textContent = '×';
-            remove.title = t('capturePanel.removeTrigger', { channel: `D${condition.channel}` });
-            remove.setAttribute('aria-label', remove.title);
-            remove.disabled = !triggerEditable;
-            remove.addEventListener('click', () => {
-              const triggerModes = { ...s.triggerModes, [condition.channel]: 'dont-care' as const };
-              const triggerConditions = s.triggerConditions
-                .filter((candidate) => candidate.channel !== condition.channel);
-              this.cb.onSettings({ ...s, triggerModes, triggerConditions });
-            });
-            row.append(name, mode, remove);
-            list.appendChild(row);
-          }
-          triggerSec.body.appendChild(list);
+      if (s.triggerSource === 'digital' && digitalConditions.length > 0) {
+        const list = div('global-trigger-list');
+        for (const condition of digitalConditions) {
+          const row = div('global-trigger-row');
+          const name = document.createElement('span');
+          name.className = 'global-trigger-name';
+          name.textContent = `D${condition.channel}`;
+          const mode = document.createElement('span');
+          mode.className = 'global-trigger-mode';
+          mode.textContent = digitalConditionLabel(condition.kind, condition.level);
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'global-trigger-remove';
+          remove.textContent = '×';
+          remove.title = t('capturePanel.removeTrigger', { channel: `D${condition.channel}` });
+          remove.setAttribute('aria-label', remove.title);
+          remove.disabled = !triggerEditable;
+          remove.addEventListener('click', () => {
+            const triggerModes = { ...s.triggerModes, [condition.channel]: 'dont-care' as const };
+            const triggerConditions = s.triggerConditions
+              .filter((candidate) => candidate.channel !== condition.channel);
+            this.cb.onSettings({ ...s, triggerModes, triggerConditions });
+          });
+          row.append(name, mode, remove);
+          list.appendChild(row);
         }
-      } else {
+        triggerSec.body.appendChild(list);
+      } else if (s.triggerSource === 'analog') {
         const note = div('panel-note');
         note.textContent = t('capturePanel.analogSingleNote');
         triggerSec.body.appendChild(note);

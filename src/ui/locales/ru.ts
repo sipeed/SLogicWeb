@@ -498,7 +498,6 @@ export const ru: Messages = {
   'capturePanel.noAnalogTrigger': 'Аналоговый запуск не задан. Включите аналоговую группу, затем нажмите значок запуска в её строке в колонке каналов.',
   'capturePanel.analogSingleNote': 'Аналоговый запуск берёт за T первый отсчёт за уровнем. Пересечение засчитывается, только если сигнал ушёл на 4 кода дальше уровня, а выбросы переноса АЦП отбрасываются автоматически; смена группы АЦП сбрасывает точку запуска.',
   'capturePanel.removeTrigger': 'Удалить запуск по {channel}',
-  'capturePanel.noDigitalTrigger': 'Цифровой запуск не задан. Нажмите значок запуска справа в строке канала, чтобы добавить его.',
   'capturePanel.triggerAnalog': 'Аналоговый',
   'capturePanel.triggerDigital': 'Цифровой',
   'capturePanel.triggerSource': 'Источник запуска',

@@ -122,7 +122,8 @@ function cssRules(selector: string): string[] {
     panel.includes("div('global-trigger-list')") &&
     panel.includes("className = 'global-trigger-remove'") &&
     panel.includes('[condition.channel]: \'dont-care\' as const') &&
-    panel.includes("t('capturePanel.noDigitalTrigger')") &&
+    !panel.includes("t('capturePanel.noDigitalTrigger')") &&
+    panel.includes("t('capturePanel.noCondition')") &&
     panel.includes("t('capturePanel.analogSingleNote')") &&
     panel.includes("t('capturePanel.noAnalogTrigger')") &&
     channel.includes('private openAnalogTriggerMenu(') &&
@@ -133,7 +134,7 @@ function cssRules(selector: string): string[] {
     app.includes('const triggerConditions = plan.digital;');
   const title = en.includes("'capturePanel.softwareTrigger': 'Global trigger',") &&
     zh.includes("'capturePanel.softwareTrigger': '全局触发',");
-  check('the Global trigger source arms one family, lists its conditions and removes with X',
+  check('the Global trigger source arms one family and lists its conditions, the condition list is the only digital rendering and noCondition is the only empty state',
     plan && ui && title, `plan=${plan}, ui=${ui}, title=${title}`);
 }
 
@@ -183,7 +184,8 @@ function cssRules(selector: string): string[] {
     configureEnd > configureStart ? configureEnd : app.indexOf('/** Live scope controls', configureStart));
   const dragStart = app.indexOf('private dragScopeTrigger(');
   const drag = app.slice(dragStart, app.indexOf('private drawBusRows(', dragStart));
-  const analogPanelStart = panel.indexOf("const note = div('panel-note');", panel.indexOf("if (s.triggerSource === 'digital')"));
+  const analogPanelStart = panel.indexOf("const note = div('panel-note');",
+    panel.indexOf("if (s.triggerSource === 'digital'"));
   const analogPanel = panel.slice(analogPanelStart, panel.indexOf('const preOptions', analogPanelStart));
   const planAt = app.indexOf('const plan = this.triggerPlan(this.settings);',
     app.indexOf('private async startCapture'));
