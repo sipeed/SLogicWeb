@@ -8,6 +8,7 @@
  */
 
 import { fakeEvent, installFakeDom, type FakeElement } from './fakeDom.js';
+import type { AnalogRowConfiguration } from '../analogRowDialog.js';
 import {
   ChannelList, type BusCell, type ChannelCell, type ChannelConfiguration,
 } from '../channelList.js';
@@ -78,6 +79,7 @@ const analyzerState = (id: string, label: string, ordinal: number): AnalyzerStat
 interface Calls {
   configure: [number, ChannelConfiguration][];
   reorder: [number, number][];
+  busConfigure: [string, AnalogRowConfiguration][];
 }
 
 interface Harness {
@@ -93,7 +95,7 @@ function setup(cells: readonly ChannelCell[]): Harness {
   const root = doc.createElement('div');
   root.className = 'channel-list';
   doc.body.appendChild(root);
-  const calls: Calls = { configure: [], reorder: [] };
+  const calls: Calls = { configure: [], reorder: [], busConfigure: [] };
   let current = [...cells];
   const list: ChannelList = new ChannelList(root as unknown as HTMLElement, {
     onConfigure: (index, config) => {
@@ -112,6 +114,7 @@ function setup(cells: readonly ChannelCell[]): Harness {
       list.render(current);
     },
     onReorder: (from, to) => calls.reorder.push([from, to]),
+    onBusConfigure: (id, config) => calls.busConfigure.push([id, config]),
   });
   const harness: Harness = {
     list,
@@ -149,6 +152,26 @@ const preview = (root: FakeElement): FakeElement | null =>
 const actions = (root: FakeElement): FakeElement | null => root.querySelector('.ch-actions');
 const analogDialog = (): FakeElement | null =>
   doc.body.querySelector('dialog[aria-labelledby="analog-row-settings-title"]');
+const analogTitle = (): string | null => analogDialog()?.querySelector('h2')?.textContent ?? null;
+const analogName = (): FakeElement | null =>
+  analogDialog()?.querySelector('#analog-row-settings-name') ?? null;
+const analogLevel = (): FakeElement | null =>
+  analogDialog()?.querySelector('#analog-row-settings-level') ?? null;
+const analogSlots = (): FakeElement[] =>
+  analogDialog()?.querySelectorAll('.channel-trigger-option input') ?? [];
+const analogCancel = (): FakeElement | null =>
+  analogDialog()?.querySelector('.channel-settings-cancel') ?? null;
+const analogBuses = (overrides: Partial<BusCell> = {}): BusCell[] => [{
+  id: 'bus-a0', name: 'A0', summary: 'D0-D7', color: '#48C860', heightCss: 160,
+  analog: true, gain: 2, overlay: false, ...overrides,
+}];
+function chooseAnalog(kind: 'none' | 'rising' | 'falling'): void {
+  for (const input of analogSlots()) input.checked = input.value === kind;
+  analogDialog()?.querySelector('.channel-trigger-options')?.dispatchEvent(fakeEvent('change'));
+}
+function submitAnalog(): void {
+  analogDialog()?.querySelector('.channel-settings-form')?.dispatchEvent(fakeEvent('submit'));
+}
 
 function submit(): void {
   form()?.dispatchEvent(fakeEvent('submit'));
@@ -508,6 +531,126 @@ function chooseMode(mode: TriggerMode): void {
   check('an analog row shows an inert trigger preview and its gear opens the analog row dialog',
     inert && opened,
     `inert=${inert}, opened=${opened}, mode=${analogDialog()?.querySelector('h2')?.textContent}`);
+}
+
+// The analog row gear opens one dialog on the row's own name, slope and level. Its three
+// modes are the analog ones, and its level follows the group's declared gain.
+{
+  const h = setup([makeCell(0)]);
+  h.renderBuses(analogBuses({ trigger: { kind: 'rising', volts: 2.5 } }));
+  const opener = h.root.querySelector('.bus-cell-edit[data-bus-id="bus-a0"]');
+  opener?.click();
+  const values = analogSlots().map((input) => input.value).join(',');
+  const checked = analogSlots().filter((input) => input.checked)
+    .map((input) => input.value).join(',');
+  check('the analog row gear opens a dialog on the row name, one of three slopes and its level',
+    analogTitle() === 'Settings for A0' && analogName()?.value === 'A0' &&
+      values === 'none,rising,falling' && checked === 'rising' &&
+      analogLevel()?.value === '2.5' && analogLevel()?.min === '-8' &&
+      analogLevel()?.max === '8' && analogLevel()?.disabled === false &&
+      analogDialog()?.open === true && doc.activeElement === analogName() &&
+      analogDialog()?.querySelectorAll('.channel-color-swatch').length === 0,
+    `title=${analogTitle()}, values=${values}, checked=${checked}, ` +
+    `level=${analogLevel()?.value}/${analogLevel()?.min}..${analogLevel()?.max}, ` +
+    `focus=${doc.activeElement === analogName()}`);
+
+  chooseAnalog('falling');
+  const enabled = analogLevel()?.disabled === false;
+  analogName()!.value = '  Probe  ';
+  analogLevel()!.value = '3.25';
+  submitAnalog();
+  const call = h.calls.busConfigure[0];
+  check('Save commits the trimmed name, the slope and the level once, then returns focus',
+    enabled && h.calls.busConfigure.length === 1 && call?.[0] === 'bus-a0' &&
+      call?.[1].name === 'Probe' && call?.[1].kind === 'falling' &&
+      call?.[1].volts === 3.25 && call?.[1].overlay === false &&
+      analogDialog()?.open === false && doc.activeElement === opener,
+    `enabled=${enabled}, calls=${JSON.stringify(h.calls.busConfigure)}, ` +
+    `open=${analogDialog()?.open}, focus=${doc.activeElement === opener}`);
+}
+
+// None has no level to edit: the field disables but keeps its draft, and a slope restores
+// it. An unset analog row opens on None with the level still showing the stored value.
+{
+  const h = setup([makeCell(0)]);
+  h.renderBuses(analogBuses({ trigger: { kind: 'falling', volts: -1.5 } }));
+  h.root.querySelector('.bus-cell-edit[data-bus-id="bus-a0"]')?.click();
+  const before = analogLevel()?.disabled === false && analogLevel()?.value === '-1.5';
+  chooseAnalog('none');
+  const whileNone = analogLevel()?.disabled === true && analogLevel()?.value === '-1.5';
+  chooseAnalog('rising');
+  const restored = analogLevel()?.disabled === false && analogLevel()?.value === '-1.5';
+  submitAnalog();
+  const committed = h.calls.busConfigure[0]?.[1].kind === 'rising' &&
+    h.calls.busConfigure[0]?.[1].volts === -1.5;
+  check('choosing None disables the level without losing its draft, and a slope restores it',
+    before && whileNone && restored && committed,
+    `before=${before}, none=${whileNone}, restored=${restored}, committed=${committed}`);
+
+  const unset = setup([makeCell(0)]);
+  unset.renderBuses(analogBuses());
+  unset.root.querySelector('.bus-cell-edit[data-bus-id="bus-a0"]')?.click();
+  const noneChecked = analogSlots().filter((input) => input.checked)
+    .map((input) => input.value).join(',');
+  check('an unset analog row opens on None with a disabled level',
+    noneChecked === 'none' && analogLevel()?.disabled === true,
+    `checked=${noneChecked}, disabled=${analogLevel()?.disabled}`);
+}
+
+// Cancel, Escape and a backdrop press emit nothing; a press inside the dialog keeps it.
+{
+  const h = setup([makeCell(0)]);
+  h.renderBuses(analogBuses());
+  const opener = h.root.querySelector('.bus-cell-edit[data-bus-id="bus-a0"]');
+  opener?.click();
+  analogName()!.value = 'typed';
+  analogCancel()?.click();
+  const cancelled = h.calls.busConfigure.length === 0 &&
+    analogDialog()?.open === false && doc.activeElement === opener;
+
+  opener?.click();
+  analogName()!.value = 'typed';
+  const escape = fakeEvent('cancel');
+  analogDialog()?.dispatchEvent(escape);
+  const escaped = h.calls.busConfigure.length === 0 && analogDialog()?.open === false &&
+    escape.defaultPrevented && doc.activeElement === opener;
+
+  opener?.click();
+  analogName()!.value = 'typed';
+  analogDialog()?.dispatchEvent(fakeEvent('pointerdown'));
+  const backdrop = h.calls.busConfigure.length === 0 && analogDialog()?.open === false &&
+    doc.activeElement === opener;
+
+  opener?.click();
+  analogName()!.value = 'typed';
+  analogDialog()?.querySelector('.channel-settings-form')?.dispatchEvent(fakeEvent('pointerdown'));
+  const inside = h.calls.busConfigure.length === 0 && analogDialog()?.open === true &&
+    analogName()?.value === 'typed';
+
+  check('Cancel, Escape and a backdrop press discard the draft; a press inside keeps it',
+    cancelled && escaped && backdrop && inside,
+    `cancel=${cancelled}, escape=${escaped}, backdrop=${backdrop}, inside=${inside}`);
+}
+
+// The dialog outlives a re-render of its own row and closes uncommitted when the bus goes
+// away, like the channel dialog, so a capture's row rebuilds cannot drop an edit.
+{
+  const h = setup([makeCell(0)]);
+  h.renderBuses(analogBuses());
+  h.root.querySelector('.bus-cell-edit[data-bus-id="bus-a0"]')?.click();
+  analogName()!.value = 'typed';
+  h.renderBuses(analogBuses());
+  const kept = analogDialog()?.open === true && analogName()?.value === 'typed';
+  h.renderBuses(analogBuses({ id: 'bus-a1', name: 'A1' }));
+  const closed = analogDialog()?.open === false && h.calls.busConfigure.length === 0;
+  h.renderBuses(analogBuses());
+  h.root.querySelector('.bus-cell-edit[data-bus-id="bus-a0"]')?.click();
+  const reopened = analogDialog()?.open === true;
+  h.list.closeDialog();
+  check('a re-render keeps the open analog dialog; losing its bus closes it uncommitted',
+    kept && closed && reopened && analogDialog()?.open === false &&
+      h.calls.busConfigure.length === 0,
+    `kept=${kept}, closed=${closed}, reopened=${reopened}, open=${analogDialog()?.open}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

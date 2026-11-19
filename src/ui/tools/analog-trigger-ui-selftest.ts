@@ -421,6 +421,30 @@ console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        
     configureAt >= 0 && clampAt >= 0 && commits && fallback, `commits=${commits}, fallback=${fallback}`);
 }
 
+// The dialog is reached one way only (row -> dialog -> glyph), and a rename is metadata:
+// it rebuilds neither the view nor the capture, and an empty name falls back to the group.
+{
+  const glyph = fs.readFileSync('src/ui/triggerGlyph.ts', 'utf8');
+  const oneWay = channel.includes("from './analogRowDialog.js'") &&
+    analogDialog.includes("from './triggerGlyph.js'") &&
+    !analogDialog.includes("from './channelList.js'") &&
+    !glyph.includes("from './channelList.js'") &&
+    !glyph.includes("from './analogRowDialog.js'");
+  const start = app.indexOf('  private configureAnalogBus(id: string, config: AnalogRowConfiguration): void {');
+  const body = start >= 0 ? app.slice(start, app.indexOf('\n  }\n', start)) : '';
+  const metadata = body.includes('const name = config.name.trim() || `A${bus.analogGroup}`;') &&
+    body.includes('this.busViews = this.busViews.map((b) => (b.id === id ? { ...b, name } : b));') &&
+    body.includes('this.configureAnalogTrigger(id, config.kind, config.volts);') &&
+    !body.includes('this.updateBus(') && !body.includes('persistWorkspace') &&
+    !body.includes('restartCapture') && !body.includes('this.device');
+  const armed = body.indexOf('this.busViews = this.busViews.map(') <
+    body.indexOf('this.configureAnalogTrigger(');
+  check('the row dialog is depended on one way and a rename stays metadata',
+    oneWay && metadata && armed && start >= 0,
+    `oneWay=${oneWay}, metadata=${metadata}, armed=${armed}`);
+}
+
+
 const failed = results.filter((r) => !r.pass).length;
 console.log(`\n${results.length - failed}/${results.length} passed`);
 nodeProcess.exit(failed === 0 ? 0 : 1);
