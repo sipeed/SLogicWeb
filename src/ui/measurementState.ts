@@ -11,7 +11,10 @@ import {
   addMeasurementRow, availableMeasurementParameters, emptyMeasurementRows, pruneMeasurementRows,
   setMeasurementFilter, type MeasurementRow, type MeasurementRowState,
 } from './measurementRows.js';
-import { readMeasureSamples, type MeasureBus, type MeasureRead } from './measureSamples.js';
+import {
+  MEASURE_SCAN_MAX_SAMPLES, MEASURE_SCAN_SAMPLES, readMeasureSamples,
+  type MeasureBus, type MeasureRead,
+} from './measureSamples.js';
 import { noMeasurementStatsView, type MeasurementStatsView } from './measurementStats.js';
 import type { FftSectionView } from './fftView.js';
 import type { XySectionView } from './xyPanel.js';
@@ -438,13 +441,29 @@ export function runMeasurement(input: MeasurementRunInput): {
   read: MeasureRead;
   scan: AnalogCodeScan | null;
 } {
-  const read = readMeasureSamples(input.store, input.bus, {
-    start: input.window.start,
-    end: input.window.end,
-    ...(input.maxSamples === undefined ? {} : { maxSamples: input.maxSamples }),
-  });
-  const scan = read.analyzed === 0
-    ? null
-    : scanAnalogCodes({ ...input.scan, codes: read.codes, unknown: read.unknown });
-  return { read, scan };
+  const scanWindow = (limit: number): { read: MeasureRead; scan: AnalogCodeScan | null } => {
+    const read = readMeasureSamples(input.store, input.bus, {
+      start: input.window.start,
+      end: input.window.end,
+      maxSamples: limit,
+    });
+    const scan = read.analyzed === 0
+      ? null
+      : scanAnalogCodes({ ...input.scan, codes: read.codes, unknown: read.unknown });
+    return { read, scan };
+  };
+  const first = scanWindow(input.maxSamples ?? MEASURE_SCAN_SAMPLES);
+  // A prefix with fewer than two qualified crossings is shorter than one period for a
+  // periodic signal: it cannot report a period, and its extrema may cover only part of
+  // a cycle. When the caller did not impose a limit, re-read the whole requested window
+  // up to the hard cap. Signals with at least two crossings keep the cheap prefix.
+  if (input.maxSamples !== undefined || !first.read.truncated || first.scan === null ||
+      first.scan.crossingCount >= 2 || first.scan.status === 'no-data') {
+    return first;
+  }
+  const available = Math.max(0,
+    Math.min(input.window.end, input.store.length) - Math.max(0, input.window.start));
+  const maxLimit = Math.min(available, MEASURE_SCAN_MAX_SAMPLES);
+  if (maxLimit <= first.read.limit) return first;
+  return scanWindow(maxLimit);
 }

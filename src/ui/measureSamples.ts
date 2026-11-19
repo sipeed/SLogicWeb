@@ -3,6 +3,14 @@
 import { GAP_BIT, type GapSpan, type SampleStore } from '../data/types.js';
 
 export const MEASURE_SCAN_SAMPLES = 65536;
+/**
+ * The hard cap for the adaptive full-window re-read. The interactive measurements start
+ * at `MEASURE_SCAN_SAMPLES`; when that prefix holds fewer than two qualified crossings
+ * (a low-frequency signal whose prefix is shorter than a period), `runMeasurement`
+ * re-reads the requested window up to this bound. 2^20 samples covers a 1 kHz period at
+ * the 800 MS/s analog ceiling; past it the scan is still an exact prefix.
+ */
+export const MEASURE_SCAN_MAX_SAMPLES = 1_048_576;
 export const MEASURE_READ_CHUNK = 4096;
 export const MEASURE_MAX_BITS = 8;
 

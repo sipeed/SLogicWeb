@@ -503,7 +503,10 @@ Analog channels are not bus rows. Each analog signal has a row with:
   narrows the list to one group or to All and changes no row. The section names the
   resolved window's length in samples on its own line ("Window: 300,000 samples") under the
   range controls whenever a window resolves, and omits the line when none does; a truncated
-  scan still states the whole window there and discloses its analyzed prefix on each row.
+  scan still states the whole window there and discloses its analyzed prefix on each row;
+  the interactive scan starts with the 65,536-sample prefix and re-reads the whole window
+  (up to 1,048,576 samples) when that prefix holds fewer than two qualified crossings, so
+  a low-frequency wave is measured over a full period instead of a partial cycle.
   Rows are managed from the section's own footer: each row removes itself, "Add
   measurement…" opens one modal catalog of the eight parameters grouped Vertical and
   Horizontal — each row naming its method in a sentence that carries no live count — and

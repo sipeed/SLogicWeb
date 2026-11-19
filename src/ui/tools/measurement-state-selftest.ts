@@ -653,6 +653,35 @@ function rowsOf(scan: AnalogCodeScan | null, read: MeasurementReadSummary | null
 }
 
 {
+  // 1 kHz at 100 MS/s: one period is 100,000 samples. The 65,536-sample prefix ends
+  // before the second rising crossing, so it cannot report a period and its extrema are
+  // partial. The default run must re-read the whole 300,000-sample window.
+  const slow = new Uint8Array(300_000);
+  for (let i = 0; i < slow.length; i++) {
+    slow[i] = 128 + Math.round(80 * Math.sin(2 * Math.PI * 1000 * (i - 10_000) / 100e6));
+  }
+  const slowStore = fixtureStore(slow);
+  const window: MeasurementWindow = { start: 0, end: slow.length };
+  const prefix = runMeasurement({
+    store: slowStore, bus: BUS, window, scan: SCAN, maxSamples: 65536,
+  });
+  const full = runMeasurement({ store: slowStore, bus: BUS, window, scan: SCAN });
+  check('a low-frequency prefix is one-crossing and partial; the default run re-reads the whole window',
+    prefix.read.analyzed === 65536 && prefix.read.truncated &&
+      prefix.scan?.status === 'one-crossing' && prefix.scan.crossingCount === 1,
+    `prefix=${prefix.read.analyzed}/${prefix.read.truncated}, ` +
+    `status=${prefix.scan?.status}, crossings=${prefix.scan?.crossingCount}`);
+  check('the extended scan measures the 1 kHz period and the full Vpp',
+    full.read.analyzed === slow.length && !full.read.truncated &&
+      full.scan !== null && full.scan.crossingCount >= 2 &&
+      Math.abs(full.scan.frequencyHz - 1000) / 1000 < 0.01 &&
+      Math.abs(full.scan.vppCodes - 160) <= 2,
+    `analyzed=${full.read.analyzed}, truncated=${full.read.truncated}, ` +
+    `crossings=${full.scan?.crossingCount}, freq=${full.scan?.frequencyHz}, ` +
+    `vppCodes=${full.scan?.vppCodes}`);
+}
+
+{
   const empty = createSampleStore(CHANNELS, 100e6);
   const run = runMeasurement({ store: empty, bus: BUS, window: { start: 0, end: 100 }, scan: SCAN });
   const past = runMeasurement({

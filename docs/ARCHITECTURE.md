@@ -777,10 +777,15 @@ Key transitions (the full table is generated in one pure module):
   range-clipped flags, the unknown-sample count and every gap span in absolute positions
   (`droppedSamples` added). Non-integer bounds, invalid limits, and out-of-group or
   duplicate bits are typed `RangeError`s.
-- A window-bounded scan reads at most 65,536 exact samples (`MEASURE_SCAN_SAMPLES`). A
-  wider window returns an exact prefix with the analyzed and requested counts, and every
-  row plus the section note labels it partial, so a prefix amplitude or RMS answer is
-  never presented as a full-window result. FFT holds the same bound (`FFT_MAX_SAMPLES`).
+- A window-bounded scan starts with the 65,536-sample prefix (`MEASURE_SCAN_SAMPLES`).
+  When that prefix holds fewer than two qualified crossings — shorter than one period of a
+  periodic signal — `runMeasurement` re-reads the whole requested window up to
+  `MEASURE_SCAN_MAX_SAMPLES` (1,048,576), so a low-frequency Frequency or Vpp row is not
+  answered from a partial cycle. Signals with at least two crossings keep the cheap prefix.
+  Beyond the hard cap the scan returns an exact prefix with the analyzed and requested
+  counts, and every row plus the section note labels it partial, so a prefix amplitude or
+  RMS answer is never presented as a full-window result. FFT holds its own bound
+  (`FFT_MAX_SAMPLES`).
 - The Capture range is the one deliberate exception, and it is chunked rather than
   unbounded work in one frame: `CaptureRangeJob` (`src/ui/measureCaptureJob.ts`) walks
   the whole retained wave in `MEASURE_CAPTURE_CHUNK`-sample steps (16,384) under a
