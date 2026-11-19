@@ -113,6 +113,42 @@ const catalogs: Array<[string, Messages]> = [['en', en], ['zh-CN', zhCN], ['ru',
     hits.join(', ') || 'clean');
 }
 
+{
+  const streamKeys: Array<keyof Messages> = [
+    'capturePanel.modeLoop', 'capturePanel.pendingTrigger', 'capturePanel.triggerSourceHelp',
+    'capturePanel.triggerMemoryReleased', 'capturePanel.triggerLoopReleased',
+    'capturePanel.triggerLoopReleasedDigital', 'capturePanel.triggeredLoop',
+    'capturePanel.triggeredLoopDigital', 'capturePanel.triggerViewLost',
+    'capturePanel.persistenceLoopOff', 'capturePanel.measureStatusLoop',
+    'capturePanel.measureStatsLoop', 'notice.cursorZoomLoopLimited',
+    'analyzerNote.snapshot', 'diagnostic.decode.tooLongLoop', 'diagnostic.decode.edgeBudgetLoop',
+  ];
+  const retiredMode = /循环|(?<![a-z])loops?|boucles?|цикл/i;
+  const labels: Record<string, string> = { en: 'Stream', 'zh-CN': '流式', ru: 'Поток', fr: 'Flux' };
+  const varNames = (text: string): string =>
+    [...new Set((text.match(/\{(\w+)\}/g) ?? []).map((v) => v.slice(1, -1)))].sort().join(',');
+  const bad: string[] = [];
+  for (const [locale, dict] of catalogs) {
+    if (dict['capturePanel.modeLoop'] !== labels[locale]) {
+      bad.push(`${locale}:capturePanel.modeLoop is "${dict['capturePanel.modeLoop']}" not "${labels[locale]}"`);
+    }
+    for (const key of streamKeys) {
+      const hit = retiredMode.exec(dict[key]);
+      if (hit) bad.push(`${locale}:${key} keeps "${hit[0]}"`);
+      const want = varNames(en[key]);
+      if (varNames(dict[key]) !== want) {
+        bad.push(`${locale}:${key} vars "${varNames(dict[key])}" not "${want}"`);
+      }
+    }
+  }
+  const withVars = streamKeys.filter((key) => varNames(en[key]) !== '').length;
+  check('every name of the third capture mode reads as Stream in all four catalogs, with no retired loop vocabulary and matching placeholders',
+    bad.length === 0,
+    bad.length === 0
+      ? `${streamKeys.length} keys x ${catalogs.length} locales, ${withVars} placeholder-bearing; labels Stream|流式|Поток|Flux`
+      : bad.join('; '));
+}
+
 const failed = results.filter((r) => !r.pass).length;
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
