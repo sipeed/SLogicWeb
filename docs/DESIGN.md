@@ -175,7 +175,7 @@ Target top bar, left to right (≤ 9 commands):
 | Panel | Icon + label | Shows/hides the presenter and opens the panel switcher. |
 | Fullscreen | Icon; pressed tint | Enters/exits fullscreen; follows Save in the view group. |
 | Settings | Icon | App preferences: density, shortcuts, about/diagnostics. |
-| Agent | Icon; approval dot | Opens a compact dropdown anchored under this button and right-aligned like the Language/Theme menus: connection state, permission mode, pending approvals, the audit log, and a three-step setup (install/download the skill, launch with CDP, copy the prompt). A dot badge means an agent action is waiting for approval. |
+| Agent | Icon; approval dot | Opens a compact dropdown anchored under this button and right-aligned like the Language/Theme menus: connection state, permission mode, pending approvals, the audit log, and one copyable prompt that bootstraps the agent (launch CDP, connect, API and guardrails). A dot badge means an agent action is waiting for approval. |
 | Language / Theme | Icon | Right-edge switch group after the flexible spacer, in the order Agent, Language, Theme; Theme is the last command. |
 
 Fullscreen and Settings follow Save in the view group; Agent, Language and Theme form the
@@ -930,10 +930,11 @@ with Reload and Later; Later hides it for this page load, the state stays `ready
   Theme: connection state (`agentHello`/`agentPing`/tool calls,
   stale after 20 s), action permission (ask / allow / read-only), the approval queue for
   capture and decoder actions (60 s unanswered = denied), and a 24-entry audit log.
-  The same dropdown teaches the setup end to end: download `SKILL.md` and save it at
-  `~/.claude/skills/slogicweb/SKILL.md` (or use the repo copy), copy a CDP launch command,
-  and copy the prompt to give the agent. The skill text is bundled into the page from
-  `.claude/skills/slogicweb/SKILL.md`, so a deployed build needs no repository checkout.
+  The same dropdown teaches the setup with one copyable prompt: it carries the page URL,
+  a platform-appropriate CDP launch command, the `debug`/`agentHost()` surface and the
+  approval/USB guardrails, so the agent performs every step and the user only pastes the
+  prompt. The optional repository skill (`~/.claude/skills/slogicweb/SKILL.md`) is named
+  in the prompt when present.
   Reads and view moves always run; capture/attach/stop ask first unless allowed, and
   read-only refuses every mutating host call. The top alert banner remains a first-class
   UI surface.

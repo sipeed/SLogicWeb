@@ -7,9 +7,3 @@
  */
 declare const __APP_VERSION__: string;
 declare const __GIT_HASH__: string;
-
-/** Vite `?raw` imports: the bundled text of the repository skill and future cases. */
-declare module '*?raw' {
-  const text: string;
-  export default text;
-}

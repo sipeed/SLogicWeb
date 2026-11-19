@@ -1270,13 +1270,6 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
   padding-top: 8px; border-top: 1px solid var(--border);
 }
 .settings-agent-setup[hidden] { display: none; }
-.settings-agent-steps {
-  display: flex; flex-direction: column; gap: 7px;
-  margin: 0; padding-left: 16px;
-  font-size: 11px; line-height: 1.45; color: var(--secondary-foreground);
-}
-.settings-agent-steps li { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.settings-agent-steps p { margin: 0; }
 .settings-agent-code {
   display: block;
   padding: 4px 6px;
@@ -1288,7 +1281,7 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.settings-agent-step-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.settings-agent-prompt { max-height: 220px; overflow-y: auto; }
 .settings-agent-help { margin: 0; font-size: 11px; line-height: 1.45; color: var(--muted-foreground); }
 
 #toolbar button.toolbar-item.toolbar-agent { position: relative; }

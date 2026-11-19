@@ -290,11 +290,11 @@ async function rejects(promise: Promise<unknown>): Promise<boolean> {
     menu.includes('settingsMenuRight(rect.right, menuWidth, window.innerWidth)') &&
     menu.includes('agentSession.subscribe(paint)') &&
     menu.includes('window.setInterval(paint, 1000)') &&
-    menu.includes("import skillMarkdown from '../../.claude/skills/slogicweb/SKILL.md?raw';") &&
     menu.includes('agent.setupTitle') &&
-    menu.includes('agent.downloadSkill') &&
-    menu.includes('settings-agent-steps') &&
+    menu.includes('settings-agent-prompt') &&
     menu.includes('agent.askPrompt') &&
+    menu.includes('agent.copyPrompt') &&
+    !menu.includes('agent.downloadSkill') &&
     html.includes('id="btn-agent"') &&
     html.includes('aria-controls="agent-menu"') &&
     html.includes('aria-expanded="false"');

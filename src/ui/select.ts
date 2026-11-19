@@ -520,10 +520,11 @@ export class SelectControl extends EventTarget {
   private syncPresentation(): void {
     const label = resolveLabel(this.options, this.current);
     this.valueEl.textContent = label;
-    // The trigger truncates with an ellipsis when a narrow row caps its width; the
-    // title keeps the full choice readable without opening the list.
+    // The value span truncates with an ellipsis when a narrow row caps its width; a
+    // title on the span keeps the full choice readable on hover. It stays off the
+    // trigger: the app turns a focused [title] into a tooltip, which would pop open
+    // every time a menu focuses its first select.
     this.valueEl.title = label;
-    this.trigger.title = label;
     this.options.forEach((option, index) => {
       const selected = option.value === this.current;
       this.items[index].setAttribute('aria-selected', selected ? 'true' : 'false');

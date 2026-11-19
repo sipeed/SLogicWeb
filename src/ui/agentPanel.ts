@@ -20,9 +20,6 @@ import { selectControl } from './select.js';
 import {
   agentSession, type AgentDecision, type AgentMode, type AgentSnapshot,
 } from './agentSession.js';
-import skillMarkdown from '../../.claude/skills/slogicweb/SKILL.md?raw';
-
-const SKILL_PATH = '~/.claude/skills/slogicweb/SKILL.md';
 
 const DECISION_LABEL_KEYS: Record<AgentDecision, Parameters<typeof t>[0]> = {
   allowed: 'agent.allowed',
@@ -75,16 +72,6 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-function downloadSkill(): void {
-  const blob = new Blob([skillMarkdown], { type: 'text/markdown' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = 'SKILL.md';
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
 function codeBlock(text: string): HTMLElement {
   const code = document.createElement('code');
   code.className = 'settings-agent-code';
@@ -125,39 +112,16 @@ function setupSection(pageUrl: string): HTMLElement {
   const title = document.createElement('h4');
   title.className = 'settings-agent-subtitle';
   title.textContent = t('agent.setupTitle');
-  const steps = document.createElement('ol');
-  steps.className = 'settings-agent-steps';
-
-  const install = document.createElement('li');
-  const installText = document.createElement('p');
-  installText.textContent = t('agent.stepInstall');
-  install.append(installText, codeBlock(SKILL_PATH));
-  const installActions = div('settings-agent-step-actions');
-  const download = button(t('agent.downloadSkill'), 'mini settings-agent-download');
-  download.type = 'button';
-  download.addEventListener('click', downloadSkill);
-  installActions.append(download, copyButton(t('agent.copyPath'), SKILL_PATH));
-  install.appendChild(installActions);
-  const repoNote = document.createElement('p');
-  repoNote.className = 'settings-agent-help';
-  repoNote.textContent = t('agent.repoSkill');
-  install.appendChild(repoNote);
-
-  const launch = document.createElement('li');
-  const launchText = document.createElement('p');
-  launchText.textContent = t('agent.stepLaunch');
-  const command = launchCommand(pageUrl);
-  launch.append(launchText, codeBlock(command),
-    copyButton(t('agent.copyCommand'), command));
-
-  const ask = document.createElement('li');
-  const askText = document.createElement('p');
-  askText.textContent = t('agent.stepAsk');
-  const prompt = t('agent.askPrompt', { origin: pageUrl });
-  ask.append(askText, codeBlock(prompt), copyButton(t('agent.copyPrompt'), prompt));
-
-  steps.append(install, launch, ask);
-  setup.append(title, steps);
+  const intro = document.createElement('p');
+  intro.className = 'settings-agent-help';
+  intro.textContent = t('agent.howTo');
+  const prompt = t('agent.askPrompt', {
+    origin: pageUrl,
+    launch: launchCommand(pageUrl),
+  });
+  const code = codeBlock(prompt);
+  code.classList.add('settings-agent-prompt');
+  setup.append(title, intro, code, copyButton(t('agent.copyPrompt'), prompt));
   return setup;
 }
 
@@ -224,14 +188,10 @@ export class AgentMenu implements ExclusiveMenu {
     const log = document.createElement('ul');
     log.className = 'settings-agent-log';
 
-    const help = document.createElement('p');
-    help.className = 'settings-agent-help';
-    help.textContent = t('agent.howTo');
-
     const pageUrl = location.href.split('#')[0] ?? location.href;
     const setup = setupSection(pageUrl);
 
-    root.append(title, statusRow, mode.el, pendingTitle, pending, logHead, log, help, setup);
+    root.append(title, statusRow, mode.el, pendingTitle, pending, logHead, log, setup);
     menu.appendChild(root);
     document.body.appendChild(menu);
 

@@ -880,7 +880,8 @@ Key transitions (the full table is generated in one pure module):
   Skill documents the workflow. `src/ui/agentSession.ts` owns the connection heartbeat,
   the permission mode (`ask` / `allow` / `read-only`), the approval queue and the
   24-entry audit log; `src/ui/agentPanel.ts` renders it as the toolbar Agent dropdown,
-  including the setup steps and a download of the bundled `.claude/skills/slogicweb/SKILL.md`.
+  including a single copyable setup prompt that quotes the CDP launch command and the
+  `agentHost()` surface.
   `App` wraps every mutating host method: capture/attach/stop wait for approval in `ask`
   mode, sync edits run and log as automatic, and `read-only` refuses all of them. The
   gate is a UX rail, not a security boundary - a CDP client can already run page script.
