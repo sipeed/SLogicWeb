@@ -1015,7 +1015,6 @@ export const fr: Messages = {
   'settings.compactRowsHelp': 'Comprimer les voies logiques à 24 px et masquer le libellé secondaire ; les voies analogiques et les annotations de décodeur gardent leur taille d’origine.',
   'settings.hideIdle': 'Masquer les voies inactives',
   'settings.hideIdleHelp': 'À la fin de l’acquisition, replier automatiquement les broches sans front et ne garder que les voies qui ont des fronts ou un décodeur monté.',
-  'settings.analogLayout': 'Lignes analogiques',
   'settings.developerTools': 'Console de registres USB',
   'settings.developerToolsWhere': 'Panneau latéral › Capture › Avancé',
   'settings.savedData': 'Données enregistrées',

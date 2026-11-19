@@ -964,7 +964,6 @@ export const zhCN: Messages = {
   'settings.compactRowsHelp': '数字通道行高度压缩至 24 像素并隐藏次级标签，模拟通道与协议解码标注保持原始尺寸。',
   'settings.hideIdle': '隐藏无跳变通道',
   'settings.hideIdleHelp': '采集结束自动折叠零跳变引脚，仅保留含边沿或挂载解码器的关键通道。',
-  'settings.analogLayout': '模拟行布局',
   'settings.developerTools': 'USB 寄存器控制台',
   'settings.developerToolsWhere': '右侧栏 › 采集 › 高级',
   'settings.savedData': '已保存的数据',

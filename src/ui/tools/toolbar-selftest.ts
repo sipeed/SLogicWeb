@@ -962,8 +962,8 @@ const settingsRowsScoped = !settingsDialogSrc.includes("t('settings.language')")
   !settingsDialogSrc.includes('LOCALES.map') &&
   !settingsDialogSrc.includes('settingsMenu') &&
   !settingsDialogSrc.includes('openShortcuts') &&
-  (settingsDialogSrc.match(/data-settings-key/g)?.length ?? 0) === 3 &&
-  settingsDialogSrc.includes("setAttribute('data-settings-key', 'analog-layout')") &&
+  (settingsDialogSrc.match(/data-settings-key/g)?.length ?? 0) === 2 &&
+  !settingsDialogSrc.includes("'analog-layout'") &&
   detailedLabelsRowAt >= 0 && shortcutBlocksAt >= 0 && windowRowsComposed;
 const constructorBody = methodBody('constructor() {');
 const detailedLabelsReflection = app.includes("document.documentElement.removeAttribute('data-toolbar-labels')") &&

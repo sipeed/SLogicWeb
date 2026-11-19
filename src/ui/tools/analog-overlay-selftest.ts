@@ -534,31 +534,43 @@ function mergedTracePasses(source: string): boolean {
   const layoutItem = body.includes(
     "label: t(this.analogLayout === 'merged' ? 'bus.layoutStacked' : 'bus.layoutMerged'),") &&
     body.includes("onPick: () => this.setAnalogLayout(this.analogLayout === 'merged' ? 'stacked' : 'merged'),");
-  check('the ruler menu picks the same layout setter as Appearance',
+  check('the row context menu surfaces the layout item through the one App setter',
     layoutItem && app.includes('this.scopeMenuItems(bus)'),
     `menu=${layoutItem}, items=${app.split('this.scopeMenuItems(bus)').length - 1}`);
 }
 
+function retiredLayoutBridge(appSource: string, dialogSource: string, sheetSource: string): boolean {
+  return !dialogSource.includes('analogLayoutRow') &&
+    !dialogSource.includes('selectControl(') &&
+    !dialogSource.includes('analogLayout(): AnalogLayout;') &&
+    !dialogSource.includes('setAnalogLayout(layout: AnalogLayout): void;') &&
+    !appSource.includes('analogLayout: () => this.analogLayout,') &&
+    !appSource.includes('setAnalogLayout: (layout) => this.setAnalogLayout(layout),') &&
+    !sheetSource.includes('.settings-row-select');
+}
+
 {
-  const layoutRow = methodBody(dialog, 'private analogLayoutRow(): HTMLDivElement {');
-  const row = layoutRow.length > 0 ? layoutRow : dialog;
-  const wired = row.includes("selectControl('analogLayout', t('settings.analogLayout'), [") &&
-    row.includes("['stacked', t('bus.layoutStacked')],") &&
-    row.includes("['merged', t('bus.layoutMerged')],") &&
-    row.includes('this.host.analogLayout()') &&
-    row.includes('this.host.setAnalogLayout(analogLayoutOf(select.value))') &&
-    dialog.includes('analogLayout(): AnalogLayout;') &&
-    dialog.includes('setAnalogLayout(layout: AnalogLayout): void;') &&
-    app.includes('analogLayout: () => this.analogLayout,') &&
-    app.includes('setAnalogLayout: (layout) => this.setAnalogLayout(layout),');
-  check('Appearance reads and writes the one App layout setter through both layout names',
-    wired, `wired=${wired}`);
-  const literal = dialog.replace("['merged', t('bus.layoutMerged')],", '');
-  const direct = dialog.replace('this.host.setAnalogLayout(analogLayoutOf(select.value))', '');
-  check('control: dropping a layout option or the host write-back fails the same predicate',
-    literal !== dialog && !literal.includes("t('bus.layoutMerged')") &&
-    direct !== dialog && !direct.includes('this.host.setAnalogLayout('),
-    `literal=${literal !== dialog}, direct=${direct !== dialog}`);
+  const menu = methodBody(app, 'private scopeMenuItems(');
+  const ruler = menu.includes(
+    "label: t(this.analogLayout === 'merged' ? 'bus.layoutStacked' : 'bus.layoutMerged'),") &&
+    menu.includes("onPick: () => this.setAnalogLayout(this.analogLayout === 'merged' ? 'stacked' : 'merged'),");
+  check('the settings window carries no layout bridge or select row style; the ruler menu keeps the one App setter',
+    retiredLayoutBridge(app, dialog, sheet) && ruler,
+    `retired=${retiredLayoutBridge(app, dialog, sheet)}, ruler=${ruler}`);
+  const bridged = app.replace(
+    "      hideIdle: () => this.hideIdleChannels,",
+    "      hideIdle: () => this.hideIdleChannels,\n      analogLayout: () => this.analogLayout,");
+  const restored = dialog.replace(
+    "        return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];",
+    "        return [this.analogLayoutRow(), this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];");
+  const styled = `${sheet}\n.settings-row-select { grid-template-columns: minmax(0, 1fr); }\n`;
+  check('control: bringing the host bridge, the appearance row or its row style back fails the same predicate',
+    bridged !== app && !retiredLayoutBridge(bridged, dialog, sheet) &&
+    restored !== dialog && !retiredLayoutBridge(app, restored, sheet) &&
+    styled !== sheet && !retiredLayoutBridge(app, dialog, styled),
+    `bridged=${retiredLayoutBridge(bridged, dialog, sheet)}, ` +
+    `restored=${retiredLayoutBridge(app, restored, sheet)}, ` +
+    `styled=${retiredLayoutBridge(app, dialog, styled)}`);
 }
 
 {
@@ -722,22 +734,23 @@ function mergedTracePasses(source: string): boolean {
     'bus.voltsAtCursor', 'bus.voltsUnknown', 'bus.voltsOutside', 'bus.voltsPreviousWave',
     'bus.voltsPreviousWaveNote', 'bus.voltsNoSource', 'bus.voltsNoCursor',
   ];
-  const settingsRows = ['settings.analogLayout'];
+  const retiredSettingsRow = 'settings.analogLayout';
   const files = ['en', 'zh-CN', 'fr', 'ru'].map((locale) =>
     fs.readFileSync(`src/ui/locales/${locale}.ts`, 'utf8'));
   const missing = files.flatMap((text, index) => [
     ...layoutNames.filter((key) => !text.includes(`'${key}':`)).map((key) => `${index}:${key}`),
-    ...settingsRows.filter((key) => !text.includes(`'${key}':`)).map((key) => `${index}:${key}`),
   ]);
-  check('all four catalogs carry the layout names, the strip label, the focus action and the settings row',
-    missing.length === 0, `missing=${JSON.stringify(missing)}`);
+  const leftover = files.flatMap((text, index) =>
+    (text.includes(`'${retiredSettingsRow}':`) ? [`${index}:${retiredSettingsRow}`] : []));
+  check('all four catalogs carry the layout names, the strip label and the focus action, and none keeps the retired settings row',
+    missing.length === 0 && leftover.length === 0,
+    `missing=${JSON.stringify(missing)}, leftover=${JSON.stringify(leftover)}`);
   check('the strip and chip styles use the shared tokens and keep the plot corner free of the axis',
     sheet.includes('.analog-source-strip {') &&
     sheet.includes('.analog-source-strip[hidden] { display: none; }') &&
     sheet.includes('.analog-source-chip[aria-pressed="true"]') &&
     sheet.includes('display: flex; align-items: center; gap: 4px; flex-wrap: wrap;') &&
     sheet.includes('max-width: calc(100% - 60px);') &&
-    sheet.includes('.settings-row-select { grid-template-columns: minmax(0, 1fr); }') &&
     ['.analog-source-item {', '.analog-source-volts {', '.analog-source-volts:empty {',
       '.analog-source-chip.is-hidden {', '.analog-source-visibility {', '.analog-source-note {']
       .every((rule) => sheet.includes(rule)) &&

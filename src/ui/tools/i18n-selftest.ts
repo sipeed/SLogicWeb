@@ -858,7 +858,7 @@ const baseSettings: CaptureSettings = {
   const retired = [
     'channels.dialogDescription', 'channels.moreColors', 'channels.renameHint',
     'channels.triggerAllNote', 'channels.removeAnalyzer', 'bus.fixedBits',
-    'bus.dragToOrder', 'bus.confirm', 'channels.triggerOn',
+    'bus.dragToOrder', 'bus.confirm', 'channels.triggerOn', 'settings.analogLayout',
     'bus.bankEnabledNote', 'bus.bankDisableNote', 'bus.bankDisabledNote',
     'bus.bankDialogTitle', 'bus.enableBank', 'bus.channelOrder',
     'capturePanel.oscilloscopeConfig', 'capturePanel.oscilloscopeEnabled',

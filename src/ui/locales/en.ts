@@ -1016,7 +1016,6 @@ export const en = {
   'settings.compactRowsHelp': 'Squeeze digital rows to 24 px and hide the secondary label; analog rows and decoder annotations keep their original size.',
   'settings.hideIdle': 'Hide idle channels',
   'settings.hideIdleHelp': 'When a capture ends, automatically collapse pins with no edges, keeping only channels with edges or a mounted decoder.',
-  'settings.analogLayout': 'Analog rows',
   'settings.developerTools': 'USB register console',
   'settings.developerToolsWhere': 'right sidebar › Capture › Advanced',
   'settings.savedData': 'Saved data',

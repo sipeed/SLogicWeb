@@ -919,8 +919,6 @@ export class App {
       setCompactRows: (on) => this.setCompactRows(on),
       hideIdle: () => this.hideIdleChannels,
       setHideIdle: (on) => this.setHideIdle(on),
-      analogLayout: () => this.analogLayout,
-      setAnalogLayout: (layout) => this.setAnalogLayout(layout),
       developerTools: () => this.developerTools,
       setDeveloperTools: (on) => this.setDeveloperTools(on),
       clearCache: () => void this.clearCache(),

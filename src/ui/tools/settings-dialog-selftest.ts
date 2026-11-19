@@ -455,7 +455,7 @@ const REFERENCE_NEEDLES: readonly string[] = [
 ];
 
 const PANE_CASES: ReadonlyArray<readonly [string, string]> = [
-  ['appearance', 'return [this.analogLayoutRow(), this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];'],
+  ['appearance', 'return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];'],
   ['behaviour', 'return [this.quickScrollRow(), this.wheelZoomsRow(), this.fitRowsRow()];'],
   ['shortcuts', 'return this.shortcutBlocks();'],
   ['developer', 'return [this.developerToolsRow(), this.clearCacheRow()];'],
@@ -478,7 +478,7 @@ function paneComposition(source: string): boolean {
 }
 
 {
-  check('the appearance pane is the analog layout control then the three display toggles in order, the behaviour pane is the quick row, the wheel row then the fit row, the shortcuts pane is the reference, the developer pane is the console toggle then the saved-data action and About holds its own block',
+  check('the appearance pane is the three display toggles in order, the behaviour pane is the quick row, the wheel row then the fit row, the shortcuts pane is the reference, the developer pane is the console toggle then the saved-data action and About holds its own block',
     SETTINGS_SECTIONS.join(',') === PANE_CASES.map(([section]) => section).join(',') &&
     paneComposition(dialogSource),
     `ok=${paneComposition(dialogSource)}, ` +
@@ -487,15 +487,17 @@ function paneComposition(source: string): boolean {
 
 {
   const appearanceRows =
-    '        return [this.analogLayoutRow(), this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];';
+    '        return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];';
   const dropped = dialogSource.replace(appearanceRows,
-    '        return [this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];');
+    '        return [this.compactRowsRow(), this.hideIdleRow()];');
   const swapped = dialogSource.replace(appearanceRows,
-    '        return [this.analogLayoutRow(), this.labelsRow(), this.hideIdleRow(), this.compactRowsRow()];');
+    '        return [this.labelsRow(), this.hideIdleRow(), this.compactRowsRow()];');
   const wheelLeft = dialogSource.replace(appearanceRows,
-    '        return [this.analogLayoutRow(), this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];');
+    '        return [this.labelsRow(), this.wheelZoomsRow(), this.compactRowsRow(), this.hideIdleRow()];');
   const duplicated = dialogSource.replace(appearanceRows,
-    '        return [this.analogLayoutRow(), this.analogLayoutRow(), this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];');
+    '        return [this.labelsRow(), this.labelsRow(), this.compactRowsRow(), this.hideIdleRow()];');
+  const layoutBack = dialogSource.replace(appearanceRows,
+    '        return [this.labelsRow(), this.analogLayoutRow(), this.compactRowsRow(), this.hideIdleRow()];');
   const behaviourRows = '        return [this.quickScrollRow(), this.wheelZoomsRow(), this.fitRowsRow()];';
   const behaviourDropped = dialogSource.replace(
     "      case 'behaviour':\n        return [this.quickScrollRow(), this.wheelZoomsRow(), this.fitRowsRow()];\n",
@@ -528,6 +530,7 @@ function paneComposition(source: string): boolean {
     swapped !== dialogSource && !paneComposition(swapped) &&
     wheelLeft !== dialogSource && !paneComposition(wheelLeft) &&
     duplicated !== dialogSource && !paneComposition(duplicated) &&
+    layoutBack !== dialogSource && !paneComposition(layoutBack) &&
     behaviourDropped !== dialogSource && !paneComposition(behaviourDropped) &&
     quickDropped !== dialogSource && !paneComposition(quickDropped) &&
     quickAfterWheel !== dialogSource && !paneComposition(quickAfterWheel) &&
@@ -541,6 +544,7 @@ function paneComposition(source: string): boolean {
     paneComposition(dialogSource),
     `dropped=${paneComposition(dropped)}, swapped=${paneComposition(swapped)}, ` +
     `wheelLeft=${paneComposition(wheelLeft)}, duplicated=${paneComposition(duplicated)}, ` +
+    `layoutBack=${paneComposition(layoutBack)}, ` +
     `behaviourDropped=${paneComposition(behaviourDropped)}, ` +
     `quickDropped=${paneComposition(quickDropped)}, quickAfterWheel=${paneComposition(quickAfterWheel)}, ` +
     `fitDropped=${paneComposition(fitDropped)}, fitFirst=${paneComposition(fitFirst)}, ` +
@@ -892,15 +896,15 @@ const layoutKeyedControls = (source: string): number =>
 
 function keyedControls(source: string): number {
   return SETTINGS_SECTIONS.length + toggleRowCalls(source) + aboutKeyedBlocks(source) +
-    referenceKeyedRows(source) + actionKeyedControls(source) + layoutKeyedControls(source);
+    referenceKeyedRows(source) + actionKeyedControls(source);
 }
 
 {
   const keyed = keyedControls(dialogSource);
-  check('the window keys one control per tab, seven toggles, the analog layout select, the clear-cache action, the About block and the shared reference row: sixteen today',
-    keyed === 16 && SETTINGS_SECTIONS.length === 5 && toggleRowCalls(dialogSource) === 7 &&
+  check('the window keys one control per tab, seven toggles, the clear-cache action, the About block and the shared reference row: fifteen today',
+    keyed === 15 && SETTINGS_SECTIONS.length === 5 && toggleRowCalls(dialogSource) === 7 &&
     aboutKeyedBlocks(dialogSource) === 1 && referenceKeyedRows(dialogSource) === 1 &&
-    actionKeyedControls(dialogSource) === 1 && layoutKeyedControls(dialogSource) === 1,
+    actionKeyedControls(dialogSource) === 1 && layoutKeyedControls(dialogSource) === 0,
     `keyed=${keyed}, tabs=${SETTINGS_SECTIONS.length}, toggles=${toggleRowCalls(dialogSource)}, ` +
     `layout=${layoutKeyedControls(dialogSource)}, ` +
     `actions=${actionKeyedControls(dialogSource)}, about=${aboutKeyedBlocks(dialogSource)}, ` +
@@ -913,16 +917,17 @@ function keyedControls(source: string): number {
     "      case 'developer':\n        return [this.toggleRow('extra', 'settings.detailedLabels', false, () => {}), this.developerToolsRow(), this.clearCacheRow()];");
   const droppedReference = dialogSource.replace('    row.dataset.settingsKey = key;\n', '');
   const droppedAction = dialogSource.replace("    action.dataset.settingsKey = 'clear-cache';\n", '');
-  const droppedLayout = dialogSource.replace(
-    "    select.el.querySelector<HTMLButtonElement>('.select-trigger')\n      ?.setAttribute('data-settings-key', 'analog-layout');\n", '');
-  check('control: an eighth toggle, a reference row or action without its key, or an unkeyed layout select moves the keyed-control count',
-    extraToggle !== dialogSource && keyedControls(extraToggle) === 17 &&
-    droppedReference !== dialogSource && keyedControls(droppedReference) === 15 &&
-    droppedAction !== dialogSource && keyedControls(droppedAction) === 15 &&
-    droppedLayout !== dialogSource && keyedControls(droppedLayout) === 15 &&
-    keyedControls(dialogSource) === 16,
+  const layoutBackInKeys = dialogSource.replace(
+    "    action.dataset.settingsKey = 'clear-cache';",
+    "    action.dataset.settingsKey = 'clear-cache';\n    action.setAttribute('data-settings-key', 'analog-layout');");
+  check('control: an eighth toggle, a missing reference row or action key moves the count; a layout key cannot re-enter it',
+    extraToggle !== dialogSource && keyedControls(extraToggle) === 16 &&
+    droppedReference !== dialogSource && keyedControls(droppedReference) === 14 &&
+    droppedAction !== dialogSource && keyedControls(droppedAction) === 14 &&
+    layoutBackInKeys !== dialogSource && layoutKeyedControls(layoutBackInKeys) === 1 &&
+    keyedControls(layoutBackInKeys) === 15 && keyedControls(dialogSource) === 15,
     `extra=${keyedControls(extraToggle)}, reference=${keyedControls(droppedReference)}, ` +
-    `action=${keyedControls(droppedAction)}, layout=${keyedControls(droppedLayout)}, ` +
+    `action=${keyedControls(droppedAction)}, layout=${layoutKeyedControls(layoutBackInKeys)}, ` +
     `real=${keyedControls(dialogSource)}`);
 }
 
