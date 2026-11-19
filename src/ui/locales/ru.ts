@@ -889,6 +889,7 @@ export const ru: Messages = {
   'bus.styleStep': 'Ступеньками',
   'analog.finer': 'Мельче по вертикали для {channel}',
   'analog.coarser': 'Крупнее по вертикали для {channel}',
+  'analogRow.settings': 'Настройки {name}',
   'bus.voltsPerDiv': 'В/дел',
   'bus.triggerDragTip': 'Перетащите, чтобы задать уровень аналогового запуска',
   'bus.scaleBarTip': 'Перетащите, чтобы сдвинуть сигнал; колесо меняет В/дел; двойной щелчок или Home сбрасывает масштаб; A или правый щелчок — автомасштаб',

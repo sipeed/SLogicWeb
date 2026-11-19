@@ -52,7 +52,8 @@ function cssRules(selector: string, source: string = sheet): string[] {
     channel.includes('this.openAnalogTriggerMenu(triggerButton!, cell)') &&
     channel.includes('private openAnalogTriggerMenu(') &&
     channel.includes("t('channels.triggerLevel')") &&
-    channel.includes('this.cb.onBusTrigger?.(cell.id, selected') &&
+    channel.includes('this.cb.onBusConfigure?.(cell.id,') &&
+    channel.includes('analogRowConfig(cell, selected,') &&
     !channel.includes('bus-trigger-value') &&
     overlay.includes('const triggerLabel =') &&
     overlay.includes('formatScopeVolts(scope.triggerVolts!)') &&
@@ -118,7 +119,7 @@ function cssRules(selector: string, source: string = sheet): string[] {
     panel.includes("t('capturePanel.analogSingleNote')") &&
     panel.includes("t('capturePanel.noAnalogTrigger')") &&
     channel.includes('private openAnalogTriggerMenu(') &&
-    channel.includes('onBusTrigger?.(cell.id, selected') &&
+    channel.includes('onBusConfigure?.(cell.id,') &&
     app.includes('private configureAnalogTrigger(') &&
     app.includes('const analogStarts = Object.keys(analogTriggers).map(Number).sort((a, b) => a - b);') &&
     app.includes("this.settings.triggerSource === 'analog'") &&

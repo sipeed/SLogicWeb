@@ -438,17 +438,17 @@ const layoutBody = methodBody(app, 'private setAnalogLayout(layout: AnalogLayout
   check('one cell per band shows the focused source at the band height, and only a merged band drops the height grip',
     cellBody.includes('for (const band of this.analogRowBands) {') &&
     cellBody.includes('const source = focusedAnalogSource(band);') &&
-    cellBody.includes('cells.push(this.busCell(bus, band.heightCss, band.sources.length <= 1));') &&
+    cellBody.includes('...this.busCell(bus, band.heightCss, band.sources.length <= 1),') &&
     list.includes('if (cell.analog && cell.showHeight !== false) {'),
     `merged=${cellBody.includes('band.sources.length <= 1')}`);
   const gripControl = list.replace(
     'if (cell.analog && cell.showHeight !== false) {', 'if (cell.analog) {');
   const heightControl = app.replace(
-    'cells.push(this.busCell(bus, band.heightCss, band.sources.length <= 1));',
-    'cells.push(this.busCell(bus, this.rowHeightOf(bus), true));');
+    'this.busCell(bus, band.heightCss, band.sources.length <= 1)',
+    'this.busCell(bus, this.rowHeightOf(bus), true)');
   const gripAlways = app.replace(
-    'cells.push(this.busCell(bus, band.heightCss, band.sources.length <= 1));',
-    'cells.push(this.busCell(bus, band.heightCss, true));');
+    'this.busCell(bus, band.heightCss, band.sources.length <= 1)',
+    'this.busCell(bus, band.heightCss, true)');
   check('control: an ungated height grip, a per-source height or a grip on a merged band fails the same predicate',
     gripControl !== list && !gripControl.includes('cell.showHeight !== false') &&
     heightControl !== app && !heightControl.includes('this.busCell(bus, band.heightCss, band.sources.length <= 1)') &&

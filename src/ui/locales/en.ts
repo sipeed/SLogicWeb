@@ -899,6 +899,7 @@ export const en = {
   'bus.styleStep': 'Steps',
   'analog.finer': 'Analog finer for {channel}',
   'analog.coarser': 'Analog coarser for {channel}',
+  'analogRow.settings': 'Settings for {name}',
   'bus.voltsPerDiv': 'V/div',
   'bus.triggerDragTip': 'Drag to set the analog trigger level',
   'bus.scaleBarTip': 'Drag to move the trace; wheel to change V/div; double-click or Home to reset; A or right-click to autoset',

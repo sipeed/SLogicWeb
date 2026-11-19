@@ -855,6 +855,7 @@ html[data-theme="light"] .channel-settings-dialog::backdrop { background: var(--
 }
 .channel-settings-name-control { display: flex; align-items: stretch; gap: 6px; }
 .channel-settings-name-control .channel-settings-name { flex: 1; min-width: 0; width: auto; }
+.channel-settings-name-control .channel-settings-copy { align-self: center; }
 .channel-settings-name { min-width: 0; padding: 5px 8px; font: inherit; }
 .channel-settings-name:focus-visible,
 .channel-name-reset:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }

@@ -23,6 +23,9 @@
  * read-only armed/configured preview; analog bus rows keep their own trigger menu.
  */
 
+import {
+  AnalogRowSettingsDialog, type AnalogRowConfiguration, type AnalogRowView,
+} from './analogRowDialog.js';
 import { ANALOG_HEIGHTS, analogHeightIndex, stepAnalogHeight } from './busView.js';
 import { button, div } from './capturePanel.js';
 import {
@@ -35,6 +38,7 @@ import { isCompactRow } from './channelLayout.js';
 import { HsvPicker } from './colorPicker.js';
 import { channelColor, defaultChannelName, DEFAULT_TRIGGER_MODE,
   type AnalyzerState, type ChannelState, type TriggerMode } from './state.js';
+import { triggerIcon } from './triggerGlyph.js';
 
 export interface ChannelConfiguration {
   name: string;
@@ -84,8 +88,8 @@ export interface ChannelListCallbacks {
   onEditBus?(id: string): void;
   /** Analog scope controls: preview while dragging (`commit` false), then persist. */
   onBusScope?(id: string, patch: BusScopePatch, commit: boolean): void;
-  /** Configure/remove the analog trigger from the group's own row. */
-  onBusTrigger?(id: string, kind: 'rising' | 'falling' | null, volts: number): void;
+  /** Commit the analog row dialog: name, trigger and shared layout in one action. */
+  onBusConfigure?(id: string, config: AnalogRowConfiguration): void;
 }
 
 /** A parallel-bus (ADC) row's cell: a label for the analog row, not a channel. */
@@ -103,6 +107,7 @@ export interface BusCell {
   gain?: number;
   /** The analog trigger configured on this group, if any. */
   trigger?: { kind: 'rising' | 'falling'; volts: number };
+  overlay?: boolean;
   /**
    * True only when this configured trigger is the live capture source. A configured
    * trigger stays visible as a preview, but only an active one may look armed.
@@ -407,6 +412,7 @@ export class ChannelList {
   private editorAnchor: HTMLButtonElement | null = null;
   private editorBusId: string | null = null;
   private readonly settingsDialog: ChannelSettingsDialog;
+  private readonly analogDialog: AnalogRowSettingsDialog;
 
   constructor(
     private readonly root: HTMLElement,
@@ -419,6 +425,14 @@ export class ChannelList {
             `.ch-settings[data-channel="${channel}"]`);
         target?.focus({ preventScroll: true });
       });
+    this.analogDialog = new AnalogRowSettingsDialog({
+      configure: (id, config) => this.cb.onBusConfigure?.(id, config),
+      dismiss: (id, opener) => {
+        const target = opener?.isConnected === true ? opener
+          : this.root.querySelector<HTMLButtonElement>(`.bus-cell-edit[data-bus-id="${id}"]`);
+        target?.focus({ preventScroll: true });
+      },
+    });
     // One shared popover, not a modal per bus row: the analog trigger menu is the only
     // transient menu left here.
     this.editor = document.createElement('div');
@@ -523,7 +537,8 @@ export class ChannelList {
     const commitSelected = (): void => {
       if (selected === null) return;
       this.closeEditor(false);
-      this.cb.onBusTrigger?.(cell.id, selected, Number(level.value) || 0);
+      this.cb.onBusConfigure?.(cell.id,
+        analogRowConfig(cell, selected, Number(level.value) || 0));
       returnFocus();
     };
     for (const [kind, label] of [
@@ -552,7 +567,8 @@ export class ChannelList {
         if (kind === null) {
           // Removing has no level to edit, so it commits and closes immediately.
           this.closeEditor(false);
-          this.cb.onBusTrigger?.(cell.id, null, Number(level.value) || 0);
+          this.cb.onBusConfigure?.(cell.id,
+            analogRowConfig(cell, null, Number(level.value) || 0));
           returnFocus();
           return;
         }
@@ -632,6 +648,19 @@ export class ChannelList {
           this.openAnalogTriggerMenu(triggerButton!, cell);
         });
         head.appendChild(triggerButton);
+        const gear = document.createElement('button');
+        gear.type = 'button';
+        gear.className = 'bus-cell-edit';
+        gear.dataset.busId = cell.id;
+        gear.title = t('analogRow.settings', { name: cell.name });
+        gear.setAttribute('aria-label', gear.title);
+        gear.setAttribute('aria-haspopup', 'dialog');
+        gear.appendChild(settingsIcon());
+        gear.addEventListener('click', (event) => {
+          event.stopPropagation();
+          this.analogDialog.open(gear, analogRowView(cell));
+        });
+        head.appendChild(gear);
       }
       if (!cell.analog) {
         const edit = document.createElement('button');
@@ -743,6 +772,7 @@ export class ChannelList {
         this.positionEditor(anchor);
       }
     }
+    this.analogDialog.closeUnless(cells.map((cell) => cell.id));
   }
 
   render(cells: readonly ChannelCell[]): void {
@@ -891,6 +921,7 @@ export class ChannelList {
   closeDialog(): void {
     this.closeEditor();
     this.settingsDialog.close();
+    this.analogDialog.close();
   }
 
   private idleNote: HTMLButtonElement | null = null;
@@ -930,37 +961,21 @@ function triggerModeName(mode: TriggerMode): string {
           : mode === 'low' ? t('channels.triggerLow') : t('trigger.none');
 }
 
-/**
- * The trigger glyph. In a row's trigger slot an unset trigger is a faint dashed rising
- * edge - recognisably "the trigger control" - rather than a bare dash, which read as
- * collapse/delete (UX review L3). Inside the mode menu the "none" item keeps the flat
- * dash, where its label explains it.
- */
-function triggerIcon(mode: TriggerMode, place: 'slot' | 'menu' = 'slot'): SVGSVGElement {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 24 16');
-  svg.setAttribute('aria-hidden', 'true');
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  const unsetSlot = mode === 'dont-care' && place === 'slot';
-  const d = mode === 'falling' ? 'M1 4H8V12H23'
-    : mode === 'rising' ? 'M1 12H8V4H23'
-      : mode === 'edge' ? 'M1 4H6L18 12H23M1 12H6L18 4H23'
-        : mode === 'high' ? 'M1 4H23'
-          : mode === 'low' ? 'M1 12H23'
-            : unsetSlot ? 'M2 12H9V4H22'
-              : 'M6 8H18';
-  path.setAttribute('d', d);
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '2');
-  path.setAttribute('stroke-linecap', 'round');
-  path.setAttribute('stroke-linejoin', 'round');
-  if (unsetSlot) {
-    path.setAttribute('stroke-dasharray', '2 3');
-    svg.dataset['triggerIcon'] = 'unset';
-  }
-  svg.appendChild(path);
-  return svg;
+function analogRowView(cell: BusCell): AnalogRowView {
+  return {
+    id: cell.id,
+    name: cell.name,
+    kind: cell.trigger?.kind ?? null,
+    volts: cell.trigger?.volts ?? 0,
+    gain: cell.gain ?? ANALOG_GAIN_DEFAULT,
+    overlay: cell.overlay === true,
+  };
+}
+
+function analogRowConfig(
+  cell: BusCell, kind: 'rising' | 'falling' | null, volts: number,
+): AnalogRowConfiguration {
+  return { name: cell.name, kind, volts, overlay: cell.overlay === true };
 }
 
 function resetNameIcon(): SVGSVGElement {

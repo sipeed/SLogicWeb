@@ -484,11 +484,12 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
   check('the dialog commits once on submit while Escape, the backdrop and Cancel discard',
     commits, `commits=${commits}`);
 
+  const triggerGlyph = fs.readFileSync('src/ui/triggerGlyph.ts', 'utf8');
   const anyEdgeGlyph = channelList.includes("mode === 'edge' ? t('trigger.anyEdge')") &&
-    channelList.includes("mode === 'edge' ? 'M1 4H6L18 12H23M1 12H6L18 4H23'") &&
-    channelList.includes("mode === 'dont-care'") &&
-    channelList.includes("'M6 8H18'") &&
-    channelList.includes("path.setAttribute('stroke-linejoin', 'round')");
+    triggerGlyph.includes("mode === 'edge' ? 'M1 4H6L18 12H23M1 12H6L18 4H23'") &&
+    triggerGlyph.includes("mode === 'dont-care'") &&
+    triggerGlyph.includes("'M6 8H18'") &&
+    triggerGlyph.includes("path.setAttribute('stroke-linejoin', 'round')");
   check('any-edge has a translated name and an X glyph; None is a dash',
     anyEdgeGlyph, `anyEdgeGlyph=${anyEdgeGlyph}`);
 

@@ -87,6 +87,7 @@ import {
   ChannelList, type BusCell, type BusScopePatch, type ChannelCell, type ChannelConfiguration,
   type ChannelLaneLabel,
 } from './channelList.js';
+import type { AnalogRowConfiguration } from './analogRowDialog.js';
 import { decoderRowName } from './decoderI18n.js';
 import {
   columnHasEdge, computeChannelRowHeight, filterIdleRows, type IdleFilterResult,
@@ -970,7 +971,7 @@ export class App {
       onReorder: (from, to) => this.reorder(from, to),
       onEditBus: (id) => this.editBus(id),
       onBusScope: (id, patch, commit) => this.configureBusScope(id, patch, commit),
-      onBusTrigger: (id, kind, volts) => this.configureAnalogTrigger(id, kind, volts),
+      onBusConfigure: (id, config) => this.configureAnalogBus(id, config),
     });
 
     this.sidebarHost = new SidebarHost(this.el.side, {
@@ -2428,12 +2429,24 @@ export class App {
       const bus = source
         ? this.busViews.find((candidate) => candidate.id === source.busId) : undefined;
       if (!bus) continue;
-      cells.push(this.busCell(bus, band.heightCss, band.sources.length <= 1));
+      cells.push({
+        ...this.busCell(bus, band.heightCss, band.sources.length <= 1),
+        overlay: this.analogLayout === 'merged',
+      });
     }
     return cells;
   }
 
-  /** Configure/remove the analog trigger from the group's own row. */
+  private configureAnalogBus(id: string, config: AnalogRowConfiguration): void {
+    const bus = this.busViews.find((candidate) => candidate.id === id);
+    if (!bus || bus.analogGroup === undefined) return;
+    const name = config.name.trim() || `A${bus.analogGroup}`;
+    if (name !== bus.name) {
+      this.busViews = this.busViews.map((b) => (b.id === id ? { ...b, name } : b));
+    }
+    this.configureAnalogTrigger(id, config.kind, config.volts);
+  }
+
   /** Edit the analog trigger; while the matcher waits the change is applied live, after
    *  a match it is pending configuration for the next acquisition. */
   private configureAnalogTrigger(
@@ -2751,8 +2764,8 @@ export class App {
   private editBus(id: string): void {
     const bus = this.busViews.find((candidate) => candidate.id === id);
     if (!bus) return;
-    // An analog bank is fixed: MSB-first, A0-A3, the profile scale. Its only control is the Analog
-    // button, so the generic editor (bit order included) is not offered for it.
+    // An analog bank's wiring is fixed: MSB-first, the profile scale. Its row dialog owns
+    // the name and trigger, so the generic editor (bit order included) is not offered.
     if (bus.analogGroup !== undefined) return;
     // The editor is a dialog over whatever page is shown (DESIGN §5.3), not a panel form.
     this.busPanel.edit(bus, this.busPanelView());
@@ -2798,7 +2811,7 @@ export class App {
   /**
    * The Analog button: one click turns the bank's eight inputs into the ADC module's
    * analog channel, another turns it back off. There is no dialog - the wiring (MSB
-   * first), name (A0-A3), volt scale and hidden sources are fixed by the module
+   * first), volt scale and hidden sources are fixed by the module
    * (HSync adc.rs) - and the sample rates follow from that choice.
    */
   private toggleAnalog(start: number): void {
@@ -2860,7 +2873,7 @@ export class App {
 
   /**
    * A full aligned eight-channel bank is the converter's data bus, so every view claiming
-   * one is brought to the module's fixed definition: MSB first, A0-A3, the profile volt scale at its gain, sources
+   * one is brought to the module's fixed definition: MSB first, the profile volt scale at its gain, sources
    * hidden. Legacy workspaces and the assistant may have stored another order or range;
    * the Analog cell must never describe a different reading than the one drawn.
    */
@@ -2870,14 +2883,14 @@ export class App {
       const start = bus.analogGroup * CHANNEL_BANK_SIZE;
       if (start + CHANNEL_BANK_SIZE > this.channels.length) return bus;
       const fixed = analogBusConfig(start, this.channels.length, bus.color, analogGainOf(bus));
-      const same = bus.name === fixed.name && bus.bitOrder === fixed.bitOrder &&
+      const same = bus.bitOrder === fixed.bitOrder &&
         bus.fullScaleV === fixed.fullScaleV && bus.offsetV === fixed.offsetV &&
         bus.hideSources === fixed.hideSources && bus.spec.encoding === fixed.spec.encoding &&
         bus.spec.clock === null && bus.spec.bits.join(',') === fixed.spec.bits.join(',');
       if (same) return bus;
       // V/div and the 0 V position are view state: a scale correction keeps them.
       return {
-        ...fixed, id: bus.id, heightCss: bus.heightCss, style: bus.style,
+        ...fixed, name: bus.name, id: bus.id, heightCss: bus.heightCss, style: bus.style,
         ...(bus.voltsPerDiv !== undefined && bus.voltsPerDiv !== null ? { voltsPerDiv: bus.voltsPerDiv } : {}),
         ...(bus.zeroPosition !== undefined ? { zeroPosition: bus.zeroPosition } : {}),
         builder: null, builtFor: null, cache: null,
