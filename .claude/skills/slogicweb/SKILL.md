@@ -89,16 +89,21 @@ call). Useful entry points:
 | `debug.setPanel('device' \| 'analyzers' \| null)` | open a side panel page |
 | `debug.setLocale(l)` / `debug.setTheme(id)` | chrome only |
 
-A typical capture:
+A typical capture. Introduce yourself first so the toolbar's Agent dropdown shows you,
+then use the host methods: their capture and decoder calls honor the user's approval mode.
 
 ```js
 const d = window.slogicweb.debug;
-d.setSettings({ channels: 16, samplerate: 100e6, mode: 'single', seconds: 0.05 });
-await d.start();
-// start() returns when the acquisition has been requested; poll while running.
-while (d.snapshot().running) await new Promise((r) => setTimeout(r, 50));
+d.agentHello('claude-code');          // optional display name; heartbeat with agentPing()
+const host = d.agentHost();
+host.applySettings({ channels: 16, samplerate: 100e6, mode: 'single', seconds: 0.05 });
+await host.startAndWait(10000);       // in ask mode this waits for the user's approval
 d.snapshot();
 ```
+
+`debug.start()` / `debug.stop()` / `debug.attach()` / `debug.setSettings()` are the raw
+test surface and bypass the approval queue. Do not use them for captured actions when the
+user expects the gate: use the corresponding `agentHost()` method instead.
 
 ## 5. Summaries and tools: `agentHost()`
 
@@ -126,6 +131,14 @@ Tool risk is declared: `read` and `view` are safe to run; `act` tools change the
 device, settings or capture. Ask the user before running an `act` tool. The host is a
 plain runtime object — do not patch it, and do not reach past it into App internals.
 
+The page's toolbar Agent dropdown is the user's half of this contract. It shows the
+hello/ping state, the permission mode (ask / allow / read-only), pending approvals and a
+24-entry audit log. In `ask` mode `startAndWait`, `stop` and `attach` pause until the user
+clicks Approve (60 s without an answer is a denial); settings and bus edits run and are
+logged as automatic; `read-only` refuses every mutating call. If a call stalls, ask the
+user to open the Agent button and approve — never bypass the gate or switch the mode
+yourself.
+
 In a production build the tool module may be tree-shaken out (the UI no longer imports
 it). Use the dev server, or bundle `src/assistant/tools.ts` yourself, when the page is a
 built `dist/`.
@@ -146,6 +159,7 @@ built `dist/`.
 ## 7. What this replaces
 
 The old toolbar Assistant button and conversation panel are gone from the UI. The
-provider clients and settings module under `src/assistant/` remain as a library, but
-there is no chat tab or column to reach. This skill plus `debug`/`agentHost()` is the
-supported path for an AI agent.
+toolbar Agent button opens the connection dropdown described above; the provider clients
+and settings module under `src/assistant/` remain as a library, but there is no chat tab
+or column to reach. This skill plus `debug`/`agentHost()` is the supported path for an AI
+agent.

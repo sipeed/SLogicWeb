@@ -26,7 +26,7 @@ phone/tablet Chrome with USB OTG is a first-class touch target.
 **Do not:** scripting, macros, user decoder code or expressions; SCPI/REST/WebSocket
 remote control; scheduled or unattended capture; accounts, cloud sync, share links or
 collaboration; device-side deep storage (segmented or single deep captures); iOS/iPadOS;
-multiple devices at once; the Assistant in the baseline.
+multiple devices at once; an in-app Assistant chat or provider API keys.
 
 **Grey areas:** Autoset and automatic measurements are in (instrument features); loop
 recording is in (a storage policy, not automation); mask/limit tests are P2 and run only
@@ -95,7 +95,7 @@ from them. Tier differences are invisible to the user.
 | D1 | Engine + Profile: UI, state machine and pipeline generic; device differences only in `DeviceProfile`; no model branches. | §2, §3.2 |
 | D2 | One timeline: float64 sample positions, seconds for display, one `displayOrigin()`; multi-rate groups aligned by time. | §4.1 |
 | D3 | Retention and recording are orthogonal: retention is the RAM display window; recording is an OPFS archive; Loop may roll and record. | §4.3 |
-| D4 | Assistant is out of the baseline; its host interface remains only for debug/test. | §6, `DESIGN.md` §10 |
+| D4 | Assistant chat is out of the baseline; external agents use the gated CDP host and the Agent connection dropdown. | §6, `DESIGN.md` §10 |
 | D5 | One `TriggerPlan`; P0 keeps the single family, P1 enables mixed digital+analog when the profile supports it. | §5.1 |
 | D6 | Composite state machine: connection × acquisition × recording × view; `suspended`; typed refusal reasons. | §5.2 |
 | D7 | Capture remains the only start/stop entry; compact layouts move it to the bottom action bar; Autoset is a Capture variant. | `DESIGN.md` §4 |
@@ -876,9 +876,15 @@ Key transitions (the full table is generated in one pure module):
 - One `OverlayController` owns the stack of menus, popovers, sheets and dialogs. Opening
   one closes its transient siblings; Escape/back closes the topmost; focus returns to the
   invoker by token.
-- The Assistant chat is not part of the baseline and has no toolbar/panel entry. The same
-  host interface remains available to external AI agents through the debug
-  `agentHost` surface; the repository Skill documents the CDP/user-gesture workflow.
+- There is no Assistant chat and no provider key in the page. External AI agents connect
+  over CDP (`debug.agentHello`, `debug.agentPing`, `debug.agentHost`) and the repository
+  Skill documents the workflow. `src/ui/agentSession.ts` owns the connection heartbeat,
+  the permission mode (`ask` / `allow` / `read-only`), the approval queue and the
+  24-entry audit log; `src/ui/agentPanel.ts` renders it as the toolbar Agent dropdown,
+  including the setup steps and a download of the bundled `.claude/skills/slogicweb/SKILL.md`.
+  `App` wraps every mutating host method: capture/attach/stop wait for approval in `ask`
+  mode, sync edits run and log as automatic, and `read-only` refuses all of them. The
+  gate is a UX rail, not a security boundary - a CDP client can already run page script.
 
 ## 7. Persistence and delivery
 

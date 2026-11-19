@@ -433,7 +433,8 @@ check(
 const leftCommandIds = ['btn-connect', 'transport', 'btn-open', 'btn-save', 'btn-fullscreen', 'btn-settings'];
 const languageCommandId = 'btn-language';
 const themeCommandId = 'btn-theme';
-const commandIds = [...leftCommandIds, languageCommandId, themeCommandId];
+const agentCommandId = 'btn-agent';
+const commandIds = [...leftCommandIds, agentCommandId, languageCommandId, themeCommandId];
 
 const toolbarGroupStarts = [...toolbar.matchAll(/<div class="toolbar-group"[^>]*>/g)]
   .map((match) => match.index ?? -1);
@@ -708,16 +709,17 @@ check(
     `runtime=${fullscreenStateIsRuntime}`,
 );
 
-const switchGroup = toolbarGroupOf(languageCommandId);
+const switchGroup = toolbarGroupOf(agentCommandId);
 const switchGroupStart = switchGroup?.start ?? -1;
 const switchGroupMarkup = switchGroup?.markup ?? '';
+const agentIndex = switchGroupMarkup.indexOf(`id="${agentCommandId}"`);
 const languageIndex = switchGroupMarkup.indexOf(`id="${languageCommandId}"`);
 const themeIndex = switchGroupMarkup.indexOf(`id="${themeCommandId}"`);
 const switchGroupButtons = switchGroupMarkup.match(/<button\b/g)?.length ?? 0;
-const switchGroupOrder = languageIndex >= 0 && themeIndex > languageIndex &&
-  switchGroupButtons === 2;
+const switchGroupOrder = agentIndex >= 0 && languageIndex > agentIndex && themeIndex > languageIndex &&
+  switchGroupButtons === 3;
 const switchGroupAccessible = switchGroupMarkup.includes('role="group"') &&
-  switchGroupMarkup.includes('aria-label="Language and theme"') &&
+  switchGroupMarkup.includes('aria-label="Agent, language and theme"') &&
   switchGroupMarkup.includes('data-i18n-aria-label="toolbar.switchGroup"');
 const spacerToGroup = spacerIndex >= 0 && switchGroupStart > spacerIndex
   ? toolbar.slice(spacerIndex, switchGroupStart) : '';
@@ -730,7 +732,7 @@ const lastButtonIndex = toolbar.lastIndexOf('<button');
 const themeIsFinalCommand = lastButtonIndex >= 0 && lastButtonIndex === themeButtonStart &&
   toolbar.indexOf('role="separator"', themeButtonIndex) === -1;
 check(
-  'the language/theme group follows the spacer and the theme command is last',
+  'the agent/language/theme group follows the spacer and the theme command is last',
   switchGroupOrder && switchGroupAccessible && groupDirectlyAfterSpacer && themeIsFinalCommand,
   `spacer@${spacerIndex}, group@${switchGroupStart}, theme@${themeButtonIndex}, ` +
   `groupOrder=${switchGroupOrder}, accessible=${switchGroupAccessible}, afterSpacer=${groupDirectlyAfterSpacer}, ` +
@@ -1356,7 +1358,7 @@ const sidebarMobileOverrideAbsent = !css.includes('.toolbar-sidebar');
 const switchGroupMobileFlushRight =
   mobileBlock.includes('#toolbar .toolbar-group:last-of-type { margin-left: auto; }');
 check(
-  'the retired sidebar selector hands its mobile flush-right placement to the language/theme group',
+  'the retired sidebar selector hands its mobile flush-right placement to the agent/language/theme group',
   mobileBlock.includes('#toolbar .spacer { display: none; }') &&
     sidebarMobileOverrideAbsent && switchGroupMobileFlushRight,
   `mobileBlock=${mobileBlock.length}, overrideAbsent=${sidebarMobileOverrideAbsent}, ` +

@@ -164,7 +164,7 @@ The cell where the label column meets the overview strip and the ruler (`#labels
 
 ## 4. Shell and primary action
 
-Target top bar, left to right (≤ 8 commands):
+Target top bar, left to right (≤ 9 commands):
 
 | Control | Appearance | Behaviour |
 | --- | --- | --- |
@@ -173,11 +173,13 @@ Target top bar, left to right (≤ 8 commands):
 | Open | Icon + label | Imports a capture. Today it opens a two-row menu: Open file… (`.sr`/`.lwcap`) and Open example (a bundled UART `.sr`, inlined in every build, that loads through the same import path and auto-decodes, so the app can be tried without a device). While the displayed capture is unsaved (device data - running, or completed and not yet saved in any format; an opened file never counts) Open, the example and drag-drop first ask a destructive confirmation (`unsaved.*`; the button asks before the menu's file chooser), and leaving the page triggers the browser's `beforeunload` prompt; the listener exists only while something is unsaved. A confirmed Open stops a running acquisition first. Starting a new capture over unsaved data is deliberately not guarded. A `.sr`/`.lwcap` dropped anywhere on the window opens the same way; while files are dragged over the page the plot shows a dashed "Drop .sr / .lwcap to open" overlay (cleared on drop, leave or dragend), and the empty hint says files can be dragged in. |
 | Save / Export | Icon + label | Saves the displayed capture or exports the record; opens the export sheet. Disabled without data. Today it opens a four-row format menu: `.lwcap` (first; lossless, keeps gaps), `.sr` (sigrok session for PulseView), `.vcd` (value change dump: one `$var wire` per channel, the largest exact timescale) and `.csv` (one row per transition: `time_s,sample,channel,level`, after one initial-level row per channel). `.sr`/`.vcd`/`.csv` write the enabled digital channels only. With the File System Access picker every type is offered (the chosen one first) and the picked extension decides the format; otherwise the file downloads. Default name: `<model>_<N>ch_<rate>_<local YYYYMMDD-HHMMSS>` (model = the device's reported name without spaces, `capture` without one), or the opened file's base name. |
 | Panel | Icon + label | Shows/hides the presenter and opens the panel switcher. |
-| Settings | Icon | App preferences: theme, locale, density, units, shortcuts, about/diagnostics. |
-| — | — | No Assistant, Language, Theme or fullscreen as top-level commands; they live in Settings or the compact overflow. |
+| Fullscreen | Icon; pressed tint | Enters/exits fullscreen; follows Save in the view group. |
+| Settings | Icon | App preferences: density, shortcuts, about/diagnostics. |
+| Agent | Icon; approval dot | Opens a compact dropdown anchored under this button and right-aligned like the Language/Theme menus: connection state, permission mode, pending approvals, the audit log, and a three-step setup (install/download the skill, launch with CDP, copy the prompt). A dot badge means an agent action is waiting for approval. |
+| Language / Theme | Icon | Right-edge switch group after the flexible spacer, in the order Agent, Language, Theme; Theme is the last command. |
 
-Fullscreen, language, theme, density and shortcuts live in Settings or the compact
-overflow; they never take a top-bar slot.
+Fullscreen and Settings follow Save in the view group; Agent, Language and Theme form the
+right-edge switch group, so the theme toggle stays in the last toolbar slot.
 
 **Compact bottom action bar:** one Capture/Stop split button, a Panels control and an
 overflow menu (Open/Save/Settings; Fit is in the corner cell, §3.4). It has no duplicate Capture; the top bar on compact
@@ -922,9 +924,19 @@ with Reload and Later; Later hides it for this page load, the state stays `ready
 - A panel's view model is presentation-ready; the presenter does not re-derive values.
 - On compact, the panel switcher is in the compact bottom action bar and the sheet is
   the presenter; on wide, the switcher is in the top bar and the presenter is docked.
-- The Assistant chat entry is removed from the baseline. External AI agents use the
-  debug `agentHost` surface and the repository Skill; the top alert banner remains a
-  first-class UI surface.
+- There is no Assistant chat and no provider key in the page. External AI agents connect
+  over CDP with the repository `slogicweb` Skill. The toolbar Agent button opens a
+  dropdown anchored under it and right-aligned to the button, like Language and
+  Theme: connection state (`agentHello`/`agentPing`/tool calls,
+  stale after 20 s), action permission (ask / allow / read-only), the approval queue for
+  capture and decoder actions (60 s unanswered = denied), and a 24-entry audit log.
+  The same dropdown teaches the setup end to end: download `SKILL.md` and save it at
+  `~/.claude/skills/slogicweb/SKILL.md` (or use the repo copy), copy a CDP launch command,
+  and copy the prompt to give the agent. The skill text is bundled into the page from
+  `.claude/skills/slogicweb/SKILL.md`, so a deployed build needs no repository checkout.
+  Reads and view moves always run; capture/attach/stop ask first unless allowed, and
+  read-only refuses every mutating host call. The top alert banner remains a first-class
+  UI surface.
 
 ## 11. Interaction hints, errors and progress
 

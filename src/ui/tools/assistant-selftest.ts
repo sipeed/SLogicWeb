@@ -851,9 +851,10 @@ const handlers = (sink: { text: string; thinking: string }) => ({
     !app.includes('assistantPanel') && !app.includes('showAssistant(') &&
     !app.includes('toggleAssistant') && !app.includes("'assistant' | null") &&
     !html.includes('btn-assistant'));
-  check('the private assistantHost stays as the agent-facing API, exposed through debug.agentHost',
+  check('the private assistantHost stays the agent-facing API, exposed through the gated debug.agentHost wrapper',
     app.includes('private assistantHost(): AssistantHost {') &&
-    app.includes('agentHost: () => this.assistantHost(),') &&
+    app.includes('private gatedAgentHost(): AssistantHost {') &&
+    app.includes('agentHost: () => this.gatedAgentHost(),') &&
     app.includes("from '../assistant/tools.js';"));
   const claude = fs.readFileSync('src/assistant/providers/claude.ts', 'utf8');
   const runtimeImports = [...claude.matchAll(/^import\s+(?!type\b)[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);

@@ -1164,10 +1164,11 @@ function shortcutTogglesWindow(source: string): boolean {
     'this.menuStack.register(this.deviceMenu);',
     'this.menuStack.register(this.languageMenu);',
     'this.menuStack.register(this.themeMenu);',
+    'this.menuStack.register(this.agentMenu);',
     'this.menuStack.register(this.saveMenu);',
     'this.menuStack.register(this.openMenu);',
   ];
-  check('the exclusion owner holds only the five transient menus and never the settings window',
+  check('the exclusion owner holds only the six transient menus and never the settings window',
     registrations.length === want.length && registrations.join(' ') === want.join(' ') &&
     !appSource.includes('menuStack.register(this.settings'),
     `registrations=${JSON.stringify(registrations)}`);

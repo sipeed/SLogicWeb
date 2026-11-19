@@ -340,7 +340,8 @@ html[data-theme="dark"] #toolbar .toolbar-theme:not([data-mode]) .theme-icon-dar
   #toolbar .toolbar-device-state { display: none; }
 }
 
-/* Eight 38 px commands need 344 px; the smallest common phones are 360 px wide. */
+/* Nine 38 px commands need 386 px; at the smallest common phone widths the 34 px step
+   keeps them on one 360 px row, and 320 px wraps rather than overflowing. */
 @media (max-width: 400px) {
   #toolbar button.toolbar-item { width: 34px; height: 34px; padding: 3px; }
 }
@@ -1196,6 +1197,105 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
 }
 .settings-row-label:not(label) {
   cursor: default;
+}
+
+/* Agent connection dropdown (toolbar Agent button). A compact status/permission
+   surface for the external AI agent bridge - not a chat, and no provider key ever
+   enters the page. It reuses the settings-menu shell for anchoring and dismissal. */
+.agent-menu {
+  width: min(340px, calc(100vw - 16px));
+  max-height: min(80vh, 560px);
+  overflow-y: auto;
+  padding: 10px;
+}
+.settings-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.settings-agent-title { margin: 0; font-size: 12px; font-weight: 600; color: var(--foreground); }
+.settings-agent-status-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.settings-agent-dot {
+  flex: none; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--muted-foreground);
+}
+.settings-agent-dot.on {
+  background: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 22%, transparent);
+}
+.settings-agent-status {
+  min-width: 0; overflow-wrap: anywhere; font-size: 12px; color: var(--secondary-foreground);
+}
+.settings-agent-mode { align-self: stretch; }
+.settings-agent-subtitle {
+  margin: 2px 0 0; font-size: 11px; font-weight: 600; color: var(--muted-foreground);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.settings-agent-pending { display: flex; flex-direction: column; gap: 6px; }
+.settings-agent-pending:empty { display: none; }
+.settings-agent-approval {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 8px; border: 1px solid var(--primary);
+  border-radius: calc(var(--radius) - 4px); background: var(--muted);
+}
+.settings-agent-approval-text {
+  min-width: 0; overflow-wrap: anywhere; font-size: 12px; color: var(--foreground);
+}
+.settings-agent-approval-actions { display: flex; flex: none; gap: 4px; }
+.settings-agent-log-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.settings-agent-log[hidden],
+.settings-agent-log-head[hidden] { display: none; }
+.settings-agent-clear { flex: none; }
+.settings-agent-log {
+  list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;
+  gap: 3px; max-height: 132px; overflow-y: auto;
+}
+.settings-agent-log-row { display: flex; align-items: baseline; gap: 6px; font-size: 11px; line-height: 1.45; }
+.settings-agent-log-time {
+  flex: none; color: var(--muted-foreground); font-variant-numeric: tabular-nums;
+}
+.settings-agent-log-tool {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--secondary-foreground); font-family: ui-monospace, monospace;
+}
+.settings-agent-log-decision { flex: none; margin-left: auto; }
+.settings-agent-log-decision.allowed { color: var(--primary); }
+.settings-agent-log-decision.auto { color: var(--muted-foreground); }
+.settings-agent-log-decision.denied,
+.settings-agent-log-decision.timeout { color: var(--destructive); }
+.settings-agent-log-empty { font-size: 11px; color: var(--muted-foreground); }
+.settings-agent-setup {
+  display: flex; flex-direction: column; gap: 6px;
+  padding-top: 8px; border-top: 1px solid var(--border);
+}
+.settings-agent-setup[hidden] { display: none; }
+.settings-agent-steps {
+  display: flex; flex-direction: column; gap: 7px;
+  margin: 0; padding-left: 16px;
+  font-size: 11px; line-height: 1.45; color: var(--secondary-foreground);
+}
+.settings-agent-steps li { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.settings-agent-steps p { margin: 0; }
+.settings-agent-code {
+  display: block;
+  padding: 4px 6px;
+  background: var(--secondary);
+  border-radius: calc(var(--radius) - 4px);
+  color: var(--foreground);
+  font: 11px ui-monospace, monospace;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.settings-agent-step-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.settings-agent-help { margin: 0; font-size: 11px; line-height: 1.45; color: var(--muted-foreground); }
+
+#toolbar button.toolbar-item.toolbar-agent { position: relative; }
+#toolbar .toolbar-agent.agent-pending::after {
+  content: ''; position: absolute; top: 7px; right: 7px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--primary); box-shadow: 0 0 0 2px var(--background);
 }
 
 @media (max-width: 760px) {

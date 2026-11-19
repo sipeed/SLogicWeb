@@ -170,6 +170,8 @@ import {
 import { getMode, getTheme, onThemeChange, setMode, THEME_MODES, THEME_MODE_LABEL_KEYS,
   type ThemeId } from './theme.js';
 import { applyToolbarHints } from './toolbarHints.js';
+import { agentSession } from './agentSession.js';
+import { AgentMenu } from './agentPanel.js';
 import {
   analyzerStatesFrom, nextAnalyzerSequence, readWorkspaceSnapshot, restoreOrder, serializeWorkspaceSnapshot,
   WORKSPACE_SCHEMA_VERSION, writeWorkspaceSnapshot,
@@ -533,6 +535,7 @@ export class App {
   private readonly settingsDialog: SettingsDialog;
   private readonly languageMenu: SettingsMenu;
   private readonly themeMenu: SettingsMenu;
+  private readonly agentMenu: AgentMenu;
   private readonly saveMenu: SettingsMenu;
   /** Open: a file from disk, or the bundled example capture (exampleCapture.ts). */
   private readonly openMenu: SettingsMenu;
@@ -796,7 +799,7 @@ export class App {
     corner: HTMLDivElement; cornerSummary: HTMLButtonElement; cornerSummaryText: HTMLSpanElement;
     cornerFit: HTMLButtonElement; cornerFitSpan: HTMLSpanElement;
     cornerAddDecoder: HTMLButtonElement; cornerAddText: HTMLSpanElement; cornerTrigger: HTMLSpanElement;
-    language: HTMLButtonElement; theme: HTMLButtonElement;
+    language: HTMLButtonElement; theme: HTMLButtonElement; agent: HTMLButtonElement;
     errorBanner: HTMLDivElement; errorBannerText: HTMLSpanElement; errorDismiss: HTMLButtonElement;
     errorGuidance: HTMLSpanElement; errorRetry: HTMLButtonElement;
     platformNotice: HTMLDivElement; platformNoticeText: HTMLSpanElement;
@@ -838,6 +841,7 @@ export class App {
       fullscreen: must<HTMLButtonElement>('btn-fullscreen'),
       settings: must<HTMLButtonElement>('btn-settings'),
       language: must<HTMLButtonElement>('btn-language'),
+      agent: must<HTMLButtonElement>('btn-agent'),
       theme: must<HTMLButtonElement>('btn-theme'),
       errorBanner: must<HTMLDivElement>('error-banner'),
       errorBannerText: must<HTMLSpanElement>('error-banner-text'),
@@ -856,6 +860,9 @@ export class App {
       errorAction: must<HTMLButtonElement>('error-banner-action'),
       fileInput: must<HTMLInputElement>('file-input'),
     };
+    // The Agent button carries a dot while an external agent waits for an approval.
+    this.syncAgentBadge();
+    agentSession.subscribe(() => this.syncAgentBadge());
 
     // Static chrome (toolbar buttons, empty hint) translates in place,
     // and <html lang> follows the stored locale - both before the first paint.
@@ -931,10 +938,12 @@ export class App {
     });
     this.languageMenu = new SettingsMenu(this.el.language, 'language-menu');
     this.themeMenu = new SettingsMenu(this.el.theme, 'theme-menu');
+    this.agentMenu = new AgentMenu(this.el.agent, 'agent-menu');
     this.deviceMenu = new SettingsMenu(this.el.connect, 'device-menu');
     this.menuStack.register(this.deviceMenu);
     this.menuStack.register(this.languageMenu);
     this.menuStack.register(this.themeMenu);
+    this.menuStack.register(this.agentMenu);
     this.saveMenu = new SettingsMenu(this.el.save, 'save-menu');
     this.menuStack.register(this.saveMenu);
     this.openMenu = new SettingsMenu(this.el.open, 'open-menu');
@@ -6295,6 +6304,11 @@ export class App {
       this.menuStack.closeOthers(null, 'outside');
       this.settingsDialog.open(this.el.settings);
     });
+    this.el.agent.addEventListener('click', () => {
+      this.channelList.closeDialog();
+      this.menuStack.closeOthers(this.agentMenu, 'outside');
+      this.agentMenu.toggle();
+    });
     this.el.language.addEventListener('click', () => {
       this.channelList.closeDialog();
       this.menuStack.closeOthers(this.languageMenu, 'outside');
@@ -6991,6 +7005,12 @@ export class App {
     return true;
   }
 
+  /** A pending agent approval marks the Agent button that opens the dropdown. */
+  private syncAgentBadge(): void {
+    const pending = agentSession.snapshot().approvals.length > 0;
+    this.el.agent.classList.toggle('agent-pending', pending);
+  }
+
   /**
    * The toolbar transport is the only Start/Stop in the shell - the capture panel used to
    * carry a second pair wired to the same two methods, and the two disagreed about when a
@@ -7017,6 +7037,8 @@ export class App {
       : full ? t('toolbar.exitFullscreenTitle') : t('toolbar.enterFullscreenTitle');
     this.el.settings.setAttribute('aria-label', t('settings.title'));
     this.el.language.setAttribute('aria-label', t('toolbar.languageTitle'));
+    this.el.agent.setAttribute('aria-label', t('toolbar.agentTitle'));
+    this.el.agent.title = t('toolbar.agentTitle');
     this.el.theme.setAttribute('aria-label', t('toolbar.themeTitle'));
 
     const btn = this.el.transport;
@@ -9543,6 +9565,34 @@ export class App {
     };
   }
 
+  /**
+   * The agent-facing host with the connection session in front. Read/view calls pass
+   * through; capture/decoder actions wait for the panel in `ask` mode; settings and bus
+   * edits are synchronous, so they run and are logged (read-only still refuses them).
+   * The session is a UX rail, not a security boundary: a CDP client can already run JS.
+   */
+  private gatedAgentHost(): AssistantHost {
+    const host = this.assistantHost();
+    agentSession.touch();
+    const sync = <T>(tool: string, run: () => T): T => agentSession.guardSync(tool, run);
+    const act = <T>(tool: string, summary: string, run: () => Promise<T>): Promise<T> =>
+      agentSession.guardAsync(tool, summary, run);
+    return {
+      ...host,
+      setChannelWidth: (channels) => sync('setChannelWidth', () => host.setChannelWidth(channels)),
+      applySettings: (patch, enabled) => sync('applySettings', () => host.applySettings(patch, enabled)),
+      startAndWait: (timeoutMs, signal) =>
+        act('startAndWait', t('agent.actionStart'), () => host.startAndWait(timeoutMs, signal)),
+      stop: () => act('stop', t('agent.actionStop'), () => host.stop()),
+      attach: (id, channels, options) =>
+        act('attach', `${t('agent.actionAttach')} (${id})`, () => host.attach(id, channels, options)),
+      removeAnalyzer: (index) => sync('removeAnalyzer', () => host.removeAnalyzer(index)),
+      addBus: (cfg) => sync('addBus', () => host.addBus(cfg)),
+      updateBus: (index, cfg) => sync('updateBus', () => host.updateBus(index, cfg)),
+      removeBus: (index) => sync('removeBus', () => host.removeBus(index)),
+    };
+  }
+
   // ------------------------------------------------------------------ test surface
 
   /**
@@ -9557,8 +9607,13 @@ export class App {
     /**
      * The tool-facing view of the app (src/assistant/tools.ts), for an AI agent driving
      * the page over CDP. There is no chat column; this accessor is the replacement.
+     * Actions pass through the Agent connection session and its approval mode.
      */
-    agentHost: () => this.assistantHost(),
+    agentHost: () => this.gatedAgentHost(),
+    /** The external agent introduces itself; the toolbar Agent dropdown shows it. */
+    agentHello: (name: string) => agentSession.hello(name),
+    /** Keep-alive; the Agent dropdown marks a session stale after 20 s without one. */
+    agentPing: () => agentSession.ping(),
     connect: () => this.connect(),
     setLocale: (l: Locale) => setLocale(l),
     getLocale: () => getLocale(),

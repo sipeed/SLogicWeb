@@ -337,13 +337,13 @@ function check(name: string, pass: boolean, detail: string): void {
     'app.title', 'connectHelp.retry',
     'emptyHint.line1', 'emptyHint.line2', 'drop.overlay',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortOpen', 'toolbar.shortSave',
-    'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage',
-    'toolbar.shortTheme', 'error.details',
+    'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortAgent',
+    'toolbar.shortLanguage', 'toolbar.shortTheme', 'error.details',
   ];
   const expectedTitles = [
     'toolbar.startTitle', 'toolbar.openTitle', 'toolbar.saveTitle',
     'toolbar.enterFullscreenTitle',
-    'toolbar.themeTitle', 'toolbar.languageTitle',
+    'toolbar.themeTitle', 'toolbar.languageTitle', 'toolbar.agentTitle',
     'settings.titleHint', 'panel.resizeTitle',
   ];
   const expectedAriaLabels = [
@@ -397,6 +397,7 @@ function check(name: string, pass: boolean, detail: string): void {
     ['btn-save', 'toolbar.save'],
     ['btn-fullscreen', 'toolbar.fullscreen'],
     ['btn-settings', 'settings.title'],
+    ['btn-agent', 'toolbar.agentTitle'],
     ['btn-language', 'toolbar.languageTitle'],
     ['btn-theme', 'toolbar.themeTitle'],
   ];
@@ -1271,7 +1272,8 @@ function resetCopyFailures(dicts: Record<string, Messages>): string[] {
     'settings.sections.shortcuts', 'settings.sections.developer', 'settings.sections.about',
     'toolbar.shortDevice', 'toolbar.shortStart', 'toolbar.shortStop',
     'toolbar.shortStopping', 'toolbar.shortOpen', 'toolbar.shortSave',
-    'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortLanguage', 'toolbar.shortTheme',
+    'toolbar.shortFullscreen', 'toolbar.shortSettings', 'toolbar.shortAgent',
+    'toolbar.shortLanguage', 'toolbar.shortTheme',
     'toolbar.fullscreen', 'toolbar.enterFullscreenTitle',
     'toolbar.exitFullscreenTitle', 'toolbar.fullscreenUnavailable',
     'trigger.anyEdge',
@@ -1316,6 +1318,7 @@ function resetCopyFailures(dicts: Record<string, Messages>): string[] {
   const dicts: Record<string, Messages | undefined> = { 'zh-CN': zhCN, ru, fr };
   const enSpellings: readonly { locale: string; key: keyof Messages }[] = [
     { locale: 'fr', key: 'sidebar.pageCapture' },
+    { locale: 'fr', key: 'toolbar.shortAgent' },
   ];
   const bad: string[] = [];
   for (const l of LOCALES) {
@@ -1352,6 +1355,7 @@ function resetCopyFailures(dicts: Record<string, Messages>): string[] {
     ['toolbar.shortSave', 'toolbar.save'],
     ['toolbar.shortFullscreen', 'toolbar.fullscreen'],
     ['toolbar.shortSettings', 'settings.title'], ['toolbar.shortAssistant', 'toolbar.assistantTitle'],
+    ['toolbar.shortAgent', 'toolbar.agentTitle'],
     ['toolbar.shortLanguage', 'toolbar.languageTitle'], ['toolbar.shortTheme', 'toolbar.themeTitle'],
   ];
   const catalogs: Record<Locale, Messages> = { en, 'zh-CN': zhCN, ru, fr };
