@@ -160,7 +160,7 @@ export const zhCN: Messages = {
   'notice.cursorZoomNeedsPair': '在波形上放置两个光标，才能缩放到它们之间的区间',
   'notice.cursorZoomDegenerate': '两个光标位于同一个采样点，没有可缩放的区间',
   'notice.cursorZoomMissing': '所选光标已不在波形上；请选择两个已放置的光标再缩放',
-  'notice.cursorZoomLoopLimited': '视图受循环窗口限制，无法精确显示光标区间',
+  'notice.cursorZoomLoopLimited': '视图受流式窗口限制，无法精确显示光标区间',
 
   // ------------------------------------------------------- device menu
   'deviceMenu.model': '型号',
@@ -380,11 +380,11 @@ export const zhCN: Messages = {
   'diagnostic.decode.workerUnexpected': '解码工作线程返回了 {got}，预期 {want}',
   'diagnostic.decode.terminated': '解码工作线程已被终止',
   'diagnostic.decode.tooLong': '捕获共 {samples} 个样本，解码上限为 {max}（{window}，按 200 MS/s 计）。请改为解码一段子区间。',
-  'diagnostic.decode.tooLongLoop': '捕获共 {samples} 个样本，解码上限为 {max}（{window}，按 200 MS/s 计）。请缩小循环窗口。',
+  'diagnostic.decode.tooLongLoop': '捕获共 {samples} 个样本，解码上限为 {max}（{window}，按 200 MS/s 计）。请缩小流式窗口。',
   'diagnostic.decode.edgeBudget':
     '映射通道上有 {edges} 个边沿，超出 {budget} 的解码预算。请禁用某个通道或缩小捕获范围。',
   'diagnostic.decode.edgeBudgetLoop':
-    '映射通道上有 {edges} 个边沿，超出 {budget} 的解码预算。请禁用某个通道或缩小循环窗口。',
+    '映射通道上有 {edges} 个边沿，超出 {budget} 的解码预算。请禁用某个通道或缩小流式窗口。',
   'diagnostic.render.contextLost': 'WebGL 上下文已丢失，渲染器已停止工作',
 
   // -------------------------------------------------------- hover readout
@@ -778,7 +778,7 @@ export const zhCN: Messages = {
   'analyzerNote.pending': '未解码',
   'analyzerNote.edges': '边沿数 {count}',
   'analyzerNote.stats': '注解数 {anns}，{decodeMs} ms（实际耗时 {wallMs} ms）',
-  'analyzerNote.snapshot': '运行中循环的快照，不随采集更新',
+  'analyzerNote.snapshot': '运行中流式的快照，不随采集更新',
   'analyzerNote.timeout': '超时',
   'analyzerNote.cancelled': '已取消',
   'analyzerNote.noAnnotations': '无解码结果',

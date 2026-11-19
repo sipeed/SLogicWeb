@@ -162,7 +162,7 @@ export const ru: Messages = {
   'notice.cursorZoomNeedsPair': 'Поставьте два курсора на осциллограмме, чтобы масштабировать интервал между ними',
   'notice.cursorZoomDegenerate': 'Оба курсора стоят на одном отсчёте — интервала для масштабирования нет',
   'notice.cursorZoomMissing': 'Выбранный курсор больше не на осциллограмме; выберите два установленных курсора для масштабирования',
-  'notice.cursorZoomLoopLimited': 'Вид ограничен окном цикла, поэтому показан не точный интервал курсоров',
+  'notice.cursorZoomLoopLimited': 'Вид ограничен окном потока, поэтому показан не точный интервал курсоров',
 
   // ------------------------------------------------------- device menu
   'deviceMenu.model': 'Модель',
@@ -423,11 +423,11 @@ export const ru: Messages = {
   'diagnostic.decode.workerUnexpected': 'воркер декодирования ответил {got}, ожидался {want}',
   'diagnostic.decode.terminated': 'воркер декодирования был остановлен',
   'diagnostic.decode.tooLong': 'в захвате {samples} отсчётов; декодирование ограничено {max} ({window} при 200 MS/s). Декодируйте поддиапазон.',
-  'diagnostic.decode.tooLongLoop': 'в захвате {samples} отсчётов; декодирование ограничено {max} ({window} при 200 MS/s). Уменьшите окно цикла.',
+  'diagnostic.decode.tooLongLoop': 'в захвате {samples} отсчётов; декодирование ограничено {max} ({window} при 200 MS/s). Уменьшите окно потока.',
   'diagnostic.decode.edgeBudget':
     '{edges} фронтов на сопоставленных каналах превышают бюджет декодирования {budget}. Отключите канал или уменьшите масштаб захвата.',
   'diagnostic.decode.edgeBudgetLoop':
-    '{edges} фронтов на сопоставленных каналах превышают бюджет декодирования {budget}. Отключите канал или уменьшите окно цикла.',
+    '{edges} фронтов на сопоставленных каналах превышают бюджет декодирования {budget}. Отключите канал или уменьшите окно потока.',
   'diagnostic.render.contextLost': 'контекст WebGL потерян, рендерер больше не работает',
 
   // -------------------------------------------------------- hover readout
@@ -822,7 +822,7 @@ export const ru: Messages = {
   'analyzerNote.pending': 'не декодировано',
   'analyzerNote.edges': 'фронтов: {count}',
   'analyzerNote.stats': 'аннотаций: {anns}, {decodeMs} мс (реальное время {wallMs} мс)',
-  'analyzerNote.snapshot': 'снимок работающего цикла - не следует за захватом',
+  'analyzerNote.snapshot': 'снимок работающего потока - не следует за захватом',
   'analyzerNote.timeout': 'тайм-аут',
   'analyzerNote.cancelled': 'отменено',
   'analyzerNote.noAnnotations': 'нет аннотаций',

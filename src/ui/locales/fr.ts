@@ -162,7 +162,7 @@ export const fr: Messages = {
   'notice.cursorZoomNeedsPair': 'Placez deux curseurs sur la trace pour zoomer sur l’intervalle qui les sépare',
   'notice.cursorZoomDegenerate': 'Les deux curseurs sont sur le même échantillon : il n’y a aucun intervalle à zoomer',
   'notice.cursorZoomMissing': 'L’un des curseurs choisis n’est plus sur la trace ; choisissez deux curseurs placés pour zoomer',
-  'notice.cursorZoomLoopLimited': 'La fenêtre de Boucle limite cette vue : elle n’affiche pas exactement l’intervalle des curseurs',
+  'notice.cursorZoomLoopLimited': 'La fenêtre de flux limite cette vue : elle n’affiche pas exactement l’intervalle des curseurs',
 
   // ------------------------------------------------------- device menu
   'deviceMenu.model': 'Modèle',
@@ -432,11 +432,11 @@ export const fr: Messages = {
     'le worker de décodage a répondu {got}, alors que {want} était attendu',
   'diagnostic.decode.terminated': 'le worker de décodage a été arrêté',
   'diagnostic.decode.tooLong': 'la capture compte {samples} échantillons ; le décodage est limité à {max} ({window} à 200 MS/s). Décodez plutôt une sous-plage.',
-  'diagnostic.decode.tooLongLoop': 'la capture compte {samples} échantillons ; le décodage est limité à {max} ({window} à 200 MS/s). Réduisez plutôt la fenêtre de boucle.',
+  'diagnostic.decode.tooLongLoop': 'la capture compte {samples} échantillons ; le décodage est limité à {max} ({window} à 200 MS/s). Réduisez plutôt la fenêtre de flux.',
   'diagnostic.decode.edgeBudget':
     '{edges} fronts sur les canaux mappés dépassent le budget de décodage de {budget}. Désactivez un canal ou réduisez la capture.',
   'diagnostic.decode.edgeBudgetLoop':
-    '{edges} fronts sur les canaux mappés dépassent le budget de décodage de {budget}. Désactivez un canal ou réduisez la fenêtre de boucle.',
+    '{edges} fronts sur les canaux mappés dépassent le budget de décodage de {budget}. Désactivez un canal ou réduisez la fenêtre de flux.',
   'diagnostic.render.contextLost': 'le contexte WebGL a été perdu, le moteur de rendu est hors service',
 
   // -------------------------------------------------------- hover readout
@@ -831,7 +831,7 @@ export const fr: Messages = {
   'analyzerNote.pending': 'non décodé',
   'analyzerNote.edges': 'fronts : {count}',
   'analyzerNote.stats': 'annotations : {anns}, {decodeMs} ms ({wallMs} ms réelles)',
-  'analyzerNote.snapshot': 'instantané d’une boucle en cours - ne suit pas la capture',
+  'analyzerNote.snapshot': 'instantané d’un flux en cours - ne suit pas la capture',
   'analyzerNote.timeout': 'expiré',
   'analyzerNote.cancelled': 'annulé',
   'analyzerNote.noAnnotations': 'aucune annotation',

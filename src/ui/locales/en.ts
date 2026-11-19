@@ -166,7 +166,7 @@ export const en = {
   'notice.cursorZoomNeedsPair': 'Place two cursors on the waveform to zoom to the interval between them',
   'notice.cursorZoomDegenerate': 'Both cursors sit on the same sample, so there is no interval to zoom to',
   'notice.cursorZoomMissing': 'One of the chosen cursors is no longer on the waveform; pick two placed cursors to zoom',
-  'notice.cursorZoomLoopLimited': 'The Loop window limits this view, so it does not show exactly the cursor interval',
+  'notice.cursorZoomLoopLimited': 'The Stream window limits this view, so it does not show exactly the cursor interval',
 
   // ------------------------------------------------------- device menu
   'deviceMenu.model': 'Model',
@@ -433,11 +433,11 @@ export const en = {
   'diagnostic.decode.workerUnexpected': 'the decode worker answered {got}, expected {want}',
   'diagnostic.decode.terminated': 'the decode worker was terminated',
   'diagnostic.decode.tooLong': 'capture is {samples} samples; decoding is limited to {max} ({window} at 200 MS/s). Decode a sub-range instead.',
-  'diagnostic.decode.tooLongLoop': 'capture is {samples} samples; decoding is limited to {max} ({window} at 200 MS/s). Shrink the loop window instead.',
+  'diagnostic.decode.tooLongLoop': 'capture is {samples} samples; decoding is limited to {max} ({window} at 200 MS/s). Shrink the stream window instead.',
   'diagnostic.decode.edgeBudget':
     '{edges} edges on the mapped channels exceed the {budget} decode budget. Disable a channel or zoom the capture down.',
   'diagnostic.decode.edgeBudgetLoop':
-    '{edges} edges on the mapped channels exceed the {budget} decode budget. Disable a channel or shrink the loop window.',
+    '{edges} edges on the mapped channels exceed the {budget} decode budget. Disable a channel or shrink the stream window.',
   'diagnostic.render.contextLost': 'WebGL context was lost; the renderer is dead',
 
   // -------------------------------------------------------- hover readout
@@ -832,7 +832,7 @@ export const en = {
   'analyzerNote.pending': 'not decoded',
   'analyzerNote.edges': '{count} edges',
   'analyzerNote.stats': '{anns} anns, {decodeMs} ms ({wallMs} ms wall)',
-  'analyzerNote.snapshot': 'snapshot of a running loop - does not track the capture',
+  'analyzerNote.snapshot': 'snapshot of a running stream - does not track the capture',
   'analyzerNote.timeout': 'timed out',
   'analyzerNote.cancelled': 'cancelled',
   'analyzerNote.noAnnotations': 'no annotations',

@@ -608,9 +608,9 @@ function check(name: string, pass: boolean, detail: string): void {
   const budget = '48 M';
   const cases: [keyof Messages, string, Record<string, string | number>][] = [
     ['diagnostic.decode.tooLong', 'the sub-range sentence', { samples, max, window }],
-    ['diagnostic.decode.tooLongLoop', 'the loop-window sentence', { samples, max, window }],
+    ['diagnostic.decode.tooLongLoop', 'the stream-window sentence', { samples, max, window }],
     ['diagnostic.decode.edgeBudget', 'the zoom sentence', { edges, budget }],
-    ['diagnostic.decode.edgeBudgetLoop', 'the edge loop-window sentence', { edges, budget }],
+    ['diagnostic.decode.edgeBudgetLoop', 'the edge stream-window sentence', { edges, budget }],
   ];
   const dicts: [string, Messages][] = [['en', en], ['zh-CN', zhCN], ['ru', ru], ['fr', fr]];
   const bad: string[] = [];
@@ -747,7 +747,7 @@ function check(name: string, pass: boolean, detail: string): void {
     [{ kind: 'stats', anns: 1, decodeMs: 2, wallMs: 3, firstError: 'uart: bad frame' },
       '1 anns, 2 ms (3 ms wall) · uart: bad frame'],
     [{ kind: 'stats', anns: 3, decodeMs: 1, wallMs: 2, snapshot: true },
-      '3 anns, 1 ms (2 ms wall) · snapshot of a running loop - does not track the capture'],
+      '3 anns, 1 ms (2 ms wall) · snapshot of a running stream - does not track the capture'],
     [{ kind: 'timeout' }, 'timed out'],
     [{ kind: 'cancelled' }, 'cancelled'],
     [{ kind: 'error', detail: 'worker exploded' }, 'worker exploded'],
@@ -782,11 +782,11 @@ function check(name: string, pass: boolean, detail: string): void {
     [{ kind: 'stats', anns: 1, decodeMs: 2, wallMs: 3, firstError: 'uart: bad frame' },
       'done', 'uart: bad frame'],
     [{ kind: 'stats', anns: 3, decodeMs: 1, wallMs: 2, snapshot: true },
-      'done', 'snapshot of a running loop - does not track the capture'],
+      'done', 'snapshot of a running stream - does not track the capture'],
     // A snapshot that also reported a decoder error keeps both: the tag is a warning,
     // and hiding it behind the diagnostic would claim the result tracks the capture.
     [{ kind: 'stats', anns: 1, decodeMs: 2, wallMs: 3, firstError: 'uart: bad frame', snapshot: true },
-      'done', 'snapshot of a running loop - does not track the capture · uart: bad frame'],
+      'done', 'snapshot of a running stream - does not track the capture · uart: bad frame'],
     [{ kind: 'stats', anns: 0, decodeMs: 1, wallMs: 2 }, 'done', 'no annotations'],
     [{ kind: 'stats', anns: 512, decodeMs: 41.6, wallMs: 87.4 }, 'decoding', 'decoding…'],
     [{ kind: 'pending' }, 'decoding', 'decoding…'],
