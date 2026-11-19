@@ -170,6 +170,15 @@ export interface AnalogReferenceView {
   scope: AnalogScopeView;
 }
 
+export interface AnalogMeasurementChipView {
+  /** Localized parameter label, e.g. "Vpp" or "Freq". */
+  label: string;
+  /** The exact text the measurement panel shows for this row. */
+  value: string;
+  /** The source trace colour, so a merged band still says which group a chip belongs to. */
+  color: string;
+}
+
 export interface AnalogBandView {
   top: number;
   band: number;
@@ -179,6 +188,7 @@ export interface AnalogBandView {
   labels?: { top: string; bottom: string };
   note?: string;
   trail?: PersistenceTrailView;
+  measurements?: readonly AnalogMeasurementChipView[];
 }
 
 function analogYFor(o: AnalogBandView, t: AnalogTraceView): (v: number) => number {
@@ -498,6 +508,9 @@ export class Overlay {
       c.fillText(o.note, this.wCss / 2, o.top + o.band / 2);
     }
 
+    // The measurement chips share the bottom edge with the V/div readout, which owns the
+    // right corner; where a scope ruler exists, its chip marks the hard stop.
+    let chipMaxX = this.wCss - 4;
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     c.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
     c.fillStyle = this.palette.text50;
@@ -543,6 +556,7 @@ export class Overlay {
       const scaleY = o.top + o.band - 10;
       const scaleWidth = c.measureText(scaleLabel).width + 8;
       const vdiv = { x0: scaleX - scaleWidth, x1: scaleX, y0: scaleY - 8, y1: scaleY + 8 };
+      chipMaxX = Math.min(chipMaxX, vdiv.x0 - 4);
       const triggerVisible = scope.triggerVolts !== undefined && scope.triggerKind !== undefined &&
         scope.triggerVolts >= geometry.bottomV && scope.triggerVolts <= geometry.topV;
       const triggerLabel = triggerVisible
@@ -556,6 +570,11 @@ export class Overlay {
       let triggerX = rulerX - 12;
       if (triggerVisible && triggerY + 8 > vdiv.y0 && triggerY - 8 < vdiv.y1) {
         triggerX = vdiv.x0 - 2;
+      }
+      // A low trigger level slides its chip left into the bottom band the measurement
+      // chips occupy; stop the chips at its left edge too.
+      if (triggerVisible && triggerY + 8 > o.top + o.band - 18) {
+        chipMaxX = Math.min(chipMaxX, triggerX - triggerWidth - 4);
       }
       const hidesLabel = (yy: number): boolean =>
         (yy > vdiv.y0 && yy < vdiv.y1) ||
@@ -599,7 +618,45 @@ export class Overlay {
       c.textBaseline = 'bottom';
       c.fillText(o.labels.bottom, 4, o.top + o.band - 2);
     }
+    if (o.measurements !== undefined && o.measurements.length > 0) {
+      this.paintAnalogMeasurements(c, o, chipMaxX);
+    }
     c.restore();
+  }
+
+  /**
+   * The row's measurement readouts as small chips on the bottom-left, in the layout a
+   * physical scope uses: one opaque, trace-coloured box per parameter, left to right in
+   * panel order. A chip that would run under the V/div readout is dropped rather than
+   * overlapped; the panel's text remains the complete record.
+   */
+  private paintAnalogMeasurements(
+    c: CanvasRenderingContext2D, o: AnalogBandView, maxX: number,
+  ): void {
+    const chips = o.measurements;
+    if (chips === undefined || chips.length === 0) return;
+    c.globalAlpha = 1;
+    c.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+    c.textAlign = 'left';
+    c.textBaseline = 'middle';
+    const height = 14;
+    const y = o.top + o.band - 4 - height;
+    let x = 4;
+    for (const chip of chips) {
+      const text = `${chip.label} ${chip.value}`;
+      const width = c.measureText(text).width + 8;
+      if (x + width > maxX) break;
+      c.fillStyle = this.palette.bg;
+      roundRect(c, x, y, width, height, 3);
+      c.fill();
+      c.strokeStyle = chip.color;
+      c.lineWidth = 1;
+      roundRect(c, x + 0.5, y + 0.5, width - 1, height - 1, 3);
+      c.stroke();
+      c.fillStyle = chip.color;
+      c.fillText(text, x + 4, y + height / 2);
+      x += width + 4;
+    }
   }
 
   private commitAnalogTrail(o: AnalogBandView, trail: PersistenceTrailView): void {

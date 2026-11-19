@@ -109,10 +109,10 @@ check('bits and volts per code read 125.5 / 62.75 / 41.83 / 12.55 mV at 1x / 2x 
 // A preset applies straight from the select.
 {
   const h = build();
-  pick(h, '×5');
+  pick(h, '×4');
   pick(h, '×1');
   check('picking a preset declares it (and re-picking the declared one does nothing)',
-    JSON.stringify(h.gains) === '[5]', `gains=${h.gains}`);
+    JSON.stringify(h.gains) === '[4]', `gains=${h.gains}`);
 }
 
 // A declared custom ratio reads as itself.
@@ -219,7 +219,7 @@ check('bits and volts per code read 125.5 / 62.75 / 41.83 / 12.55 mV at 1x / 2x 
 {
   const h = build({ busy: true, editing: '4' });
   const select = trigger(h);
-  pick(h, '×5');
+  pick(h, '×8');
   check('while stopping the select is disabled and an entry in progress is not reopened',
     select?.disabled === true && field(h) === null && h.gains.length === 0,
     `disabled=${select?.disabled}, gains=${h.gains}`);

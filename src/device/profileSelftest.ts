@@ -448,8 +448,8 @@ expectInvalid(
       `resolution=${groups.map((group) => group.resolutionBits).join(',')}`,
   );
   check(
-    '32U3 groups declare the module gain presets 1/2/5/10 and a 0.1-100 custom ratio',
-    groups.every((group) => group.gains.join(',') === '1,2,5,10' &&
+    '32U3 groups declare the module gain presets 1/2/4/8 and a 0.1-100 custom ratio',
+    groups.every((group) => group.gains.join(',') === '1,2,4,8' &&
       group.customGain?.min === 0.1 && group.customGain.max === 100),
     groups.map((group) => `${group.gains.join('/')}@${JSON.stringify(group.customGain)}`).join(','),
   );

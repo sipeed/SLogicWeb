@@ -242,7 +242,9 @@ Analog channels are not bus rows. Each analog signal has a row with:
   Custom turns the select into a ratio field in place (Enter/blur applies, Esc reverts).
   There is no separate gain row. The cell's "?" tip says the gain must match the module's
   own setting and is used to convert codes to true voltages, and gives bits and volts per
-  code (`8-bit · 125.5 mV/code`). The row label names the gain and range ("×2 · ±8 V"). Changing it rescales the display, V/div (reset to the gain's
+  code (`8-bit · 125.5 mV/code`). The official module's binary switch settings are 1×, 2×,
+  4× and 8×, listed in ascending gain: each step halves the range (±16, ±8, ±4, ±2 V), so
+  the list is never reversed. The row label names the gain and range ("×2 · ±8 V"). Changing it rescales the display, V/div (reset to the gain's
   default, the finest 1-2-5 step showing the whole range) and trigger level, never the
   device, and is allowed while a capture runs without restarting it. A configured trigger
   level keeps its volts, re-snapped to the new code grid and moved to the range edge when
@@ -512,11 +514,21 @@ Analog channels are not bus rows. Each analog signal has a row with:
   Undo then restores the rows in their exact order and ids without re-applying the old
   filter, and its notice is a status line rather than a live region on the value rows. The
   section says so when no row is left.
-- Every row states its parameter, its value with unit (or "–") and one textual status:
-  the method when there is a value, the reason when there is not. Method text names what is
+- Every collapsed row states its parameter and its value with unit (or "–"); the method
+  and the resolved window live in the row's expandable details, which names what is
   measured — the mean period of its qualified crossings for Frequency, exact code extrema
-  for Vpp, DC-coupled RMS of exact samples for RMS — and a row whose window was not analyzed
-  whole adds "partial: x of y samples" to it.
+  for Vpp, DC-coupled RMS of exact samples for RMS. A qualification that changes the value
+  ("partial: x of y samples", a clipped window, missing samples, …) stays on the collapsed
+  row, joined by the readout dot; a healthy row with no qualification shows no status line
+  at all, and a row with no value states its reason there instead. Opening the details
+  never repeats the collapsed row's text.
+- **The analog row carries its measurements like a scope.** Each visible measurement row
+  also paints a small opaque, trace-coloured chip at the bottom-left of its group's
+  waveform row ("Vpp 3.3 V"), left to right in panel order; a merged band shows each
+  group's chips in its own colour. Chips reuse the panel's exact value text, so the two
+  readouts cannot disagree, and stop before the V/div readout instead of overlapping it.
+  They appear only while the Measure page is open in the time view, where the rows are
+  actually scanned; the panel remains the complete, accessible record.
 - No value is shown for no source, no window, a window with no usable sample (empty or
   wholly unknown), an older capture on screen, or a Frequency row with no qualified
   crossing or only one. A value that exists carries its qualifications instead: a window
@@ -1091,7 +1103,10 @@ polite live region, so assistive technology reads the area and hints when they c
   board only arms the capture (no data is read from it), it runs untriggered, and it is a
   demonstration rather than a measurement.
 - Threshold choices name the logic family they suit (`thresholdOptions.ts`), e.g.
-  "1.65 V (3.3 V logic)"; the plain voltage is still what the device receives.
+  "1.65 V (3.3 V logic)"; the plain voltage is still what the device receives. The
+  official ADC module's output bus is 3 V logic, so 1.5 V is annotated "3 V logic,
+  official ADC" (not TTL), and while any analog group is active with another threshold
+  chosen, the Acquire panel states the matching choice.
 - The Shortcuts dialog lists the keyboard keys and the mouse/touch gestures, following the
   "wheel zooms" setting; the hint bar and the dialog never disagree with the handlers.
 - Errors name the operation and keep the diagnostic code in the console prefix.

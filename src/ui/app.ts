@@ -196,9 +196,11 @@ import { cornerView, cornerViewEqual, type CornerView } from './cornerCell.js';
 import { AXIS, COLORS, ROWS } from './metrics.js';
 import { TOUCH_TARGET_PX } from './presenters.js';
 import {
-  Overlay, paintMarkerChip, type AnalogBandView, type AnalogReferenceView,
-  type AnalogScopeView, type AnalogTraceView, type HoverMeasurement, type RegionTint,
+  Overlay, paintMarkerChip, type AnalogBandView, type AnalogMeasurementChipView,
+  type AnalogReferenceView, type AnalogScopeView, type AnalogTraceView, type HoverMeasurement,
+  type RegionTint,
 } from './overlay.js';
+import { measurementChipsByStart } from './measurementChips.js';
 import {
   AnalogSourceStrip, type AnalogSourceStripItem, type AnalogSourceStripView,
 } from './analogSourceStrip.js';
@@ -488,6 +490,13 @@ export class App {
   private captureSessionId = 0;
   private captureWaveGeneration = 0;
   private measurementStats: MeasurementStatsState = emptyMeasurementStats();
+  /**
+   * The measurement readouts painted on the analog rows, keyed by group start. Refilled
+   * whenever `measurementView()` runs (the panel's own cadence), so drawing a frame never
+   * re-scans or re-composes the measurement section.
+   */
+  private measurementChips: ReadonlyMap<number, readonly AnalogMeasurementChipView[]> =
+    new Map();
   private viewMode: AnalysisViewMode = 'time';
   private fftConfig: FftConfig = FFT_DEFAULT_CONFIG;
   private fftCache: { store: SampleStore; key: string; analysis: FftAnalysis } | null = null;
@@ -1411,6 +1420,20 @@ export class App {
   }
 
   private measurementView(): MeasurementSectionView {
+    const view = this.computeMeasurementView();
+    // Keep the analog rows' scope-style readouts in step with the panel: the same view
+    // feeds both, so a chip cannot show a value the measurement list does not.
+    const hidden = this.hiddenAnalogSources();
+    const colorByStart = new Map<number, string>();
+    for (const bus of this.busViews) {
+      if (bus.analogGroup === undefined || hidden.has(bus.id)) continue;
+      colorByStart.set(bus.analogGroup * CHANNEL_BANK_SIZE, bus.color);
+    }
+    this.measurementChips = measurementChipsByStart(view, (start) => colorByStart.get(start));
+    return view;
+  }
+
+  private computeMeasurementView(): MeasurementSectionView {
     const store = this.captureStore;
     for (const [start, entry] of this.measurementCache) {
       if (entry.store !== store) this.measurementCache.delete(start);
@@ -3430,6 +3453,12 @@ export class App {
         ? { top: busLabel(focusedBus, first.yMax), bottom: busLabel(focusedBus, first.yMin) }
         : undefined;
       const trail = this.persistenceTrail.trailOf(band.id, persistenceFrames, commitsTrail);
+      // The measurement readouts live on the waveform like a scope's on-trace boxes.
+      // While the measure page is closed (or another analysis view is up) the rows are
+      // not scanned, so the last chips would be stale: hide them instead.
+      const measurements = this.measurePageShown() && this.viewMode === 'time'
+        ? band.sources.flatMap((source) => this.measurementChips.get(source.start) ?? [])
+        : [];
       const view: AnalogBandView = {
         top: box.top, band: box.band, traces,
         ...(trail === undefined ? {} : { trail }),
@@ -3437,6 +3466,7 @@ export class App {
         ...(scope ? { scope } : {}),
         ...(labels ? { labels } : {}),
         ...(note ? { note } : {}),
+        ...(measurements.length > 0 ? { measurements } : {}),
       };
       this.overlay.drawAnalog(view);
     }

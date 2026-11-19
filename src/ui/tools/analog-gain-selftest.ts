@@ -95,9 +95,9 @@ for (const gain of GAINS) {
 {
   const fromProfile = SLOGIC32U3_PROFILE.analog.groups[0]!.gains.join(',');
   check('the UI presets are the profile\'s AnalogGroup.gains, not a model branch',
-    ANALOG_GAIN_PRESETS.join(',') === fromProfile && fromProfile === '1,2,5,10' &&
+    ANALOG_GAIN_PRESETS.join(',') === fromProfile && fromProfile === '1,2,4,8' &&
       formatAnalogGain(3) === '×3' && formatAnalogGain(0.5) === '×0.5' &&
-      analogGainChoice(5) === '5' && analogGainChoice(3) === 'custom' &&
+      analogGainChoice(4) === '4' && analogGainChoice(3) === 'custom' &&
       parseAnalogGain(' 3 ') === 3 && parseAnalogGain('×2.5') === 2.5 && parseAnalogGain('3x') === 3 &&
       parseAnalogGain('0,5') === 0.5 && parseAnalogGain('0') === null &&
       parseAnalogGain('500') === null && parseAnalogGain('abc') === null && parseAnalogGain('') === null,

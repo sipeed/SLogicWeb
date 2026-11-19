@@ -1,6 +1,6 @@
 // Pins the plain-language copy of the capture panel's key switches (UX review M13/L6/L8/L10).
 import { THRESHOLD_VOLT_OPTIONS } from '../state.js';
-import { thresholdFamily, thresholdOptionLabel } from '../thresholdOptions.js';
+import { ADC_THRESHOLD_VOLTS, thresholdFamily, thresholdOptionLabel } from '../thresholdOptions.js';
 import { analogInputHint } from '../capturePanel.js';
 import { en, type Messages } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
@@ -29,21 +29,28 @@ const catalogs: Array<[string, Messages]> = [['en', en], ['zh-CN', zhCN], ['ru',
 {
   const labels = THRESHOLD_VOLT_OPTIONS.map((volts) => thresholdOptionLabel(volts));
   const want = [
-    '0.6 V (1.2 V logic)', '0.9 V (1.8 V logic)', '1.2 V (2.5 V logic)', '1.5 V (5 V TTL)',
+    '0.6 V (1.2 V logic)', '0.9 V (1.8 V logic)', '1.2 V (2.5 V logic)',
+    '1.5 V (3 V logic, official ADC)',
     '1.65 V (3.3 V logic)', '1.8 V', '2.5 V (5 V logic)', '3.3 V',
   ];
   check('every threshold option is annotated with the logic family it suits, or left bare',
     labels.join('|') === want.join('|'), labels.join('|'));
-  // A family's threshold is about half its supply; TTL switches near 1.4 V.
+  // A family's threshold is about half its supply, including the ADC module's 3 V bus.
   const off = THRESHOLD_VOLT_OPTIONS.filter((volts) => {
     const family = thresholdFamily(volts);
     if (family === null) return false;
-    if (family.kind === 'ttl') return Math.abs(volts - 1.4) > 0.15;
     return Math.abs(volts - family.supplyVolts / 2) > 0.06;
   });
   check('each annotation is within the family mid-swing', off.length === 0, `off=${off.join(',')}`);
-  check('the zh-CN option form is "1.65 V（3.3 V 逻辑）"',
-    zhCN['capturePanel.thresholdLogic'] === '{volts} V（{logic} V 逻辑）', zhCN['capturePanel.thresholdLogic']);
+  check('the zh-CN option forms are "1.65 V（3.3 V 逻辑）" and "1.5 V（3 V 逻辑，官方 ADC 专用）"',
+    zhCN['capturePanel.thresholdLogic'] === '{volts} V（{logic} V 逻辑）' &&
+    zhCN['capturePanel.thresholdLogicAdc'] === '{volts} V（{logic} V 逻辑，官方 ADC 专用）',
+    `${zhCN['capturePanel.thresholdLogic']} | ${zhCN['capturePanel.thresholdLogicAdc']}`);
+  check('the 1.5 V choice is the official ADC module annotation, not a TTL one',
+    thresholdFamily(ADC_THRESHOLD_VOLTS)?.officialAdc === true &&
+    labels.some((label) => label.includes('official ADC')) &&
+    !labels.some((label) => /TTL/i.test(label)),
+    labels.find((label) => label.includes('official ADC')) ?? 'absent');
 }
 
 {
@@ -56,6 +63,12 @@ const catalogs: Array<[string, Messages]> = [['en', en], ['zh-CN', zhCN], ['ru',
     .map(([locale]) => locale);
   check('every locale says which inputs and range the analog button reads', missing.length === 0,
     `missing=${missing.join(',')}`);
+  const noteMissing = catalogs.filter(([, dict]) => {
+    const text = dict['capturePanel.analogThresholdNote'];
+    return !text.includes('{volts}') || !/3\s*[VBВ]/.test(text);
+  }).map(([locale]) => locale);
+  check('every locale prompts the 3 V ADC bus threshold in the capture panel', noteMissing.length === 0,
+    `missing=${noteMissing.join(',')}, volts=${ADC_THRESHOLD_VOLTS}`);
 }
 
 {

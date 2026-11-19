@@ -30,7 +30,8 @@ import {
   chipLabel, chipRowFit, widestChipBox,
 } from './channelChipLayout.js';
 import {
-  parseCustomThreshold, thresholdChoice, thresholdOptionLabel, thresholdRange,
+  ADC_THRESHOLD_VOLTS, parseCustomThreshold, thresholdChoice, thresholdOptionLabel,
+  thresholdRange,
 } from './thresholdOptions.js';
 import { t, type MessageKey } from './i18n.js';
 import { helpTip } from './helpTip.js';
@@ -537,7 +538,10 @@ export class CapturePanel {
         const value = item.querySelector<HTMLElement>('.measure-value');
         if (value !== null) value.textContent = measurementValueText(row);
         const status = item.querySelector<HTMLElement>('.measure-status');
-        if (status !== null) status.textContent = measurementStatusText(row);
+        if (status !== null) {
+          status.textContent = measurementRowNoteText(row);
+          status.hidden = status.textContent === '';
+        }
         const details = item.querySelector<HTMLElement>('[data-measure-details]');
         if (this.measureOpen.has(row.id) && details !== null && !details.hidden) {
           applyMeasurementDetails(item, row, true, view);
@@ -1045,6 +1049,18 @@ export class CapturePanel {
       analogNote.textContent = t('capturePanel.analogRateNote');
       analogNote.hidden = capturePanelNoteHidden('capturePanel.analogRateNote');
       chSec.body.appendChild(analogNote);
+      // The analog group is read as the ADC module's digital output bus, so the same
+      // threshold that decodes every other input decodes the samples. When the current
+      // choice is not the official module's 3 V level, say which one is, instead of
+      // leaving the default (3.3 V logic, 1.65 V) to misread the bus.
+      if (s.thresholdVolts !== ADC_THRESHOLD_VOLTS) {
+        const analogThreshold = div('panel-note');
+        analogThreshold.dataset.analogThresholdNote = '';
+        analogThreshold.textContent = t('capturePanel.analogThresholdNote', {
+          volts: ADC_THRESHOLD_VOLTS,
+        });
+        chSec.body.appendChild(analogThreshold);
+      }
     }
 
     const code = vrefCode(s.thresholdVolts);
@@ -1755,7 +1771,8 @@ export class CapturePanel {
           toggle.append(parameter, measureChevron(), value);
           const status = document.createElement('span');
           status.className = 'measure-status';
-          status.textContent = measurementStatusText(row);
+          status.textContent = measurementRowNoteText(row);
+          status.hidden = status.textContent === '';
           const label = measurementRowLabel(row);
           const remove = cursorRemoveButton(
             t('capturePanel.measureRemove', { parameter: label }),
@@ -2423,7 +2440,7 @@ const MEASUREMENT_STATUS_KEYS: Record<Exclude<MeasurementStatus, 'ok'>, MessageK
   'paused': 'capturePanel.measureStatusPaused',
 };
 
-function measurementParameterText(parameter: MeasurementParameter): string {
+export function measurementParameterText(parameter: MeasurementParameter): string {
   return t(catalogEntry(parameter).labelKey as MessageKey);
 }
 
@@ -2681,6 +2698,17 @@ export function measurementStatusText(row: MeasurementRowView): string {
     parts.unshift(t(MEASUREMENT_STATUS_KEYS[status]));
   }
   return parts.join(' · ');
+}
+
+/**
+ * The inline note under a collapsed row. A healthy row's method is already stated in its
+ * expanded details, so the closed row carries only the qualification flags; an empty
+ * string hides the line instead of leaving a blank gap between rows. A non-ok row always
+ * reports its status here because the value reads as a dash on its own.
+ */
+export function measurementRowNoteText(row: MeasurementRowView): string {
+  if (row.status !== 'ok') return measurementStatusText(row);
+  return measurementFlagText(row).join(' · ');
 }
 
 export function measurementWindowText(view: MeasurementSectionView): string {

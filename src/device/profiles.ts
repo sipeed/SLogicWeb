@@ -115,11 +115,12 @@ const ADC_ZERO_CODE = 128;
 const ADC_RANGES_V = [ADC_SPAN_V * ADC_FRONT_END_ATTENUATION / 2] as const;
 /**
  * The ADC module's front-end gain is set on the module (jumper/trimmer), not by any
- * register the host can write: every code reads as its 1x volts / G. These are the
- * presets the UI offers; any ratio inside `ADC_CUSTOM_GAIN` may be declared instead
+ * register the host can write: every code reads as its 1x volts / G. The official module
+ * offers the binary 1/2/4/8 switch settings, so each step halves the range
+ * (±16, ±8, ±4, ±2 V); any ratio inside `ADC_CUSTOM_GAIN` may be declared instead
  * (e.g. 3x -> ±5.33 V). A wrong declaration only mis-scales the displayed volts.
  */
-const ADC_GAINS = [1, 2, 5, 10] as const;
+const ADC_GAINS = [1, 2, 4, 8] as const;
 const ADC_CUSTOM_GAIN = { min: 0.1, max: 100 } as const;
 const ADC_RESOLUTION_BITS = 8;
 

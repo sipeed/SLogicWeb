@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import {
-  measurementCaptureState, measurementNoteText, measurementStatusText, measurementValueText,
+  measurementCaptureState, measurementNoteText, measurementRowNoteText, measurementStatusText,
+  measurementValueText,
   measurementWindowText,
   CapturePanel, type CapturePanelCallbacks, type CapturePanelView,
 } from '../capturePanel.js';
@@ -275,7 +276,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   check('the row text comes from the shared parameter, value and status composition',
     measureSection.includes('parameter.textContent = measurementParameterText(row.parameter);') &&
     measureSection.includes('value.textContent = measurementValueText(row);') &&
-    measureSection.includes('status.textContent = measurementStatusText(row);') &&
+    measureSection.includes('status.textContent = measurementRowNoteText(row);') &&
+    measureSection.includes("status.hidden = status.textContent === '';") &&
     measureSection.includes('toggle.append(parameter, measureChevron(), value);') &&
     panel.includes('function measureChevron(): SVGSVGElement {') &&
     panel.includes("appendIconPath(icon, 'm6 9 6 6 6-6');") &&
@@ -504,7 +506,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       source.includes("item.querySelector<HTMLElement>('.measure-value')") &&
       source.includes('value.textContent = measurementValueText(row);') &&
       source.includes("item.querySelector<HTMLElement>('.measure-status')") &&
-      source.includes('status.textContent = measurementStatusText(row);') &&
+      source.includes('status.textContent = measurementRowNoteText(row);') &&
+      source.includes("status.hidden = status.textContent === '';") &&
       source.includes("root.querySelectorAll<HTMLElement>('[data-measure-note]')") &&
       source.includes('item.textContent = note;') &&
       source.includes('item.hidden = note === \'\';');
@@ -636,11 +639,11 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   ]);
   const rowsKept = [capture, cursors].every((root) =>
     root.querySelectorAll('.measure-row').length === 3);
-  check('a live update writes value, status and note text in both roots and leaves unlisted rows alone',
+  check('a live update writes value, qualification note and note text in both roots and leaves unlisted rows alone',
     written.every((entry) => entry[0] === '21.5 V' && entry[2] === '4.1 V' &&
+      entry[3] === '' &&
       entry[4] === 'old hz' && entry[5] === 'stale' && entry[6] === 'label') &&
-    written.every((entry) => entry[1] === 'exact code extrema · ' +
-      'partial: 32,768 of 65,536 samples') &&
+    written.every((entry) => entry[1] === 'partial: 32,768 of 65,536 samples') &&
     written.every((entry) => entry[7] ===
       'partial: 32,768 of 65,536 samples' && entry[8] === false) &&
     rowsKept,
@@ -808,6 +811,19 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     vpp === 'exact code extrema' &&
     rms === 'DC-coupled RMS of exact samples',
     `frequency=${frequency}, vpp=${vpp}, rms=${rms}`);
+
+  const cleanNote = measurementRowNoteText(rowView({ crossingCount: 12 }));
+  const flagNote = measurementRowNoteText(rowView({
+    parameter: 'vpp', unit: 'v', value: 1, truncated: true,
+    analyzedSamples: 10, requestedSamples: 20,
+  }));
+  const brokenNote = measurementRowNoteText(rowView({ status: 'no-data' }));
+  check('the collapsed row repeats only its qualification flags, never the method in its details',
+    cleanNote === '' && flagNote === 'partial: 10 of 20 samples' &&
+      brokenNote === STATUS_TEXT['no-data'] &&
+      !flagNote.includes('exact code extrema') && !brokenNote.includes('NaN'),
+    `clean=${JSON.stringify(cleanNote)}, flag=${JSON.stringify(flagNote)}, ` +
+      `broken=${JSON.stringify(brokenNote)}`);
 
   const statuses = (Object.keys(STATUS_TEXT) as MeasurementStatus[])
     .filter((status) => status !== 'ok')
