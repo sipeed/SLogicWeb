@@ -562,6 +562,25 @@ function mergedTracePasses(source: string): boolean {
 }
 
 {
+  const rowDialog = methodBody(app,
+    'private configureAnalogBus(id: string, config: AnalogRowConfiguration): void {');
+  const switched = rowDialog.includes(
+    "this.setAnalogLayout(config.overlay ? 'merged' : 'stacked');") &&
+    rowDialog.indexOf('this.configureAnalogTrigger(') <
+      rowDialog.indexOf('this.setAnalogLayout(config.overlay');
+  const cell = methodBody(app, 'private busCells(): BusCell[] {');
+  const carried = cell.includes('overlay: this.analogLayout === \'merged\',');
+  const writers = (app.match(/this\.analogLayout = /g) ?? []).length;
+  check('the row dialog writes the one shared layout through the App setter after its other fields',
+    switched && carried && writers === 2,
+    `switched=${switched}, carried=${carried}, writers=${writers}`);
+  const dropped = app.replace("this.setAnalogLayout(config.overlay ? 'merged' : 'stacked');", '');
+  check('control: dropping the dialog write-back fails the same predicate',
+    dropped !== app && !dropped.includes('this.setAnalogLayout(config.overlay'),
+    `dropped=${dropped !== app}`);
+}
+
+{
   const body = methodBody(app, 'private toggleAnalogVisibility(busId: string): void {');
   const toggled = body.includes('toggleSourceVisibility(') &&
     body.includes('{ focusedId: resolveAnalogFocus(sources, this.analogFocusId), hidden: this.analogHidden },') &&

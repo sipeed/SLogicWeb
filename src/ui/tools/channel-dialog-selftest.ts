@@ -161,6 +161,8 @@ const analogSlots = (): FakeElement[] =>
   analogDialog()?.querySelectorAll('.channel-trigger-option input') ?? [];
 const analogCancel = (): FakeElement | null =>
   analogDialog()?.querySelector('.channel-settings-cancel') ?? null;
+const analogOverlay = (): FakeElement | null =>
+  analogDialog()?.querySelector('#analog-row-settings-overlay') ?? null;
 const analogBuses = (overrides: Partial<BusCell> = {}): BusCell[] => [{
   id: 'bus-a0', name: 'A0', summary: 'D0-D7', color: '#48C860', heightCss: 160,
   analog: true, gain: 2, overlay: false, ...overrides,
@@ -651,6 +653,71 @@ function chooseMode(mode: TriggerMode): void {
     kept && closed && reopened && analogDialog()?.open === false &&
       h.calls.busConfigure.length === 0,
     `kept=${kept}, closed=${closed}, reopened=${reopened}, open=${analogDialog()?.open}`);
+}
+
+// The dialog ends with one Overlay switch. It opens on the shared layout, Save flips it,
+// and a cancelled draft never leaks into the next row.
+{
+  const h = setup([makeCell(0)]);
+  h.renderBuses(analogBuses({ overlay: true }));
+  const opener = h.root.querySelector('.bus-cell-edit[data-bus-id="bus-a0"]');
+  opener?.click();
+  const fields = analogDialog()?.querySelector('.channel-settings-fields')?.children ?? [];
+  const lastField = fields[fields.length - 1] ?? null;
+  const checkedMerged = analogOverlay()?.checked === true;
+  const last = lastField?.querySelector('#analog-row-settings-overlay') !== null &&
+    analogDialog()?.querySelector('.channel-settings-toggle input') === analogOverlay() &&
+    (analogDialog()?.querySelector('.channel-settings-toggle .help-tip')?.title ?? '').length > 0;
+  analogOverlay()!.checked = false;
+  submitAnalog();
+  const flipped = h.calls.busConfigure.length === 1 &&
+    h.calls.busConfigure[0]?.[1].overlay === false;
+  check('the dialog ends with one Overlay switch that opens on the shared layout',
+    checkedMerged && last && flipped,
+    `checked=${checkedMerged}, fields=${fields.length}, last=${last}, ` +
+    `calls=${JSON.stringify(h.calls.busConfigure)}`);
+
+  // The App relayouts after the commit, so the next open reads the new shared state.
+  h.render([makeCell(0)]);
+  h.renderBuses(analogBuses({ overlay: false }));
+  h.root.querySelector('.bus-cell-edit[data-bus-id="bus-a0"]')?.click();
+  const stacked = analogOverlay()?.checked === false;
+  analogOverlay()!.checked = true;
+  analogCancel()?.click();
+  h.render([makeCell(0)]);
+  h.renderBuses(analogBuses({ overlay: false }));
+  h.root.querySelector('.bus-cell-edit[data-bus-id="bus-a0"]')?.click();
+  const noLeak = analogOverlay()?.checked === false && h.calls.busConfigure.length === 1;
+  check('a cancelled switch draft does not leak into the next open',
+    stacked && noLeak,
+    `stacked=${stacked}, noLeak=${noLeak}, calls=${JSON.stringify(h.calls.busConfigure)}`);
+}
+
+// The whole dialog, the switch and its tip re-read the catalog on every open.
+{
+  const h = setup([makeCell(0)]);
+  h.renderBuses(analogBuses({ name: 'A0' }));
+  const opener = h.root.querySelector('.bus-cell-edit[data-bus-id="bus-a0"]');
+  const rootLang = { lang: '' };
+  (doc as unknown as { documentElement?: typeof rootLang }).documentElement = rootLang;
+  await setLocale('zh-CN');
+  opener?.click();
+  const zhTitle = t('analogRow.settings', { name: 'A0' });
+  const zhTip = t('analogRow.overlayHelp');
+  const copies = (analogDialog()?.querySelectorAll('.channel-settings-copy') ?? [])
+    .map((el) => el.textContent);
+  const localized = analogTitle() === zhTitle &&
+    analogDialog()?.querySelector('.channel-settings-toggle .help-tip')?.title === zhTip &&
+    copies.includes(t('bus.layoutMerged')) && rootLang.lang === 'zh-CN';
+  await setLocale('en');
+  opener?.click();
+  const refreshed = analogTitle() === t('analogRow.settings', { name: 'A0' }) &&
+    (analogDialog()?.querySelector('.channel-settings-toggle .help-tip')?.title ?? '') ===
+      t('analogRow.overlayHelp');
+  delete (doc as unknown as { documentElement?: typeof rootLang }).documentElement;
+  check('the analog row dialog, its Overlay label and its tip follow the locale',
+    localized && refreshed,
+    `title=${analogTitle()}, tip=${analogDialog()?.querySelector('.help-tip')?.title}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));
