@@ -469,7 +469,7 @@ function scanKey(scan: AnalogCodeScan): string {
   check('the capture job is pumped before the idle early return, from the one frame callback',
     ordered(frame) && !ordered(latePump) &&
       appSource.split('this.pumpMeasurementCapture();').length - 1 === 1 &&
-      pump.includes('if (!this.measurePageShown()) return;') &&
+      pump.includes('if (!this.measurePageShown() && !this.measurementChipsWanted()) return;') &&
       pump.includes("entry.job.status !== 'running'") &&
       pump.includes('entry.job.step(') &&
       pump.includes('MEASURE_CAPTURE_BUDGET_MS') &&
@@ -481,11 +481,13 @@ function scanKey(scan: AnalogCodeScan): string {
 
   const visibleGated = (source: string): boolean =>
     source.includes('if (entry === null || entry.job.status !== \'running\') return;') &&
-    source.includes('if (!this.measurePageShown()) return;') &&
+    source.includes('if (this.viewMode !== \'time\') return;') &&
+    source.includes('if (!this.measurePageShown() && !this.measurementChipsWanted()) return;') &&
     !source.includes('setTimeout') && !source.includes('setInterval') &&
     !source.includes('requestAnimationFrame');
-  const unguarded = pump.replace('if (!this.measurePageShown()) return;', '');
-  check('a hidden measure page cannot advance the job and no new clock is created',
+  const unguarded = pump.replace(
+    'if (!this.measurePageShown() && !this.measurementChipsWanted()) return;', '');
+  check('the capture job pauses only when neither the Measure page nor the time-view chips need it, and no new clock is created',
     visibleGated(pump) && !visibleGated(unguarded) && !visibleGated('') &&
       !frame.includes('setInterval') && !frame.includes('setTimeout') &&
       !section.includes('setInterval') && !section.includes('setTimeout'),

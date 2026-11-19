@@ -1164,12 +1164,13 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     const end = source.indexOf('now - this.runningPanelAt > 500');
     const body = at < 0 || end < 0 ? '' : source.slice(at, end);
     return body.includes('this.analysisPanelAt = now;') &&
-      body.includes('this.running && this.measurePageShown()') &&
-      body.includes('this.capturePanel.updateMeasurements(this.measurementView());') &&
+      body.includes('this.running && (this.measurePageShown() || this.measurementChipsWanted())') &&
+      body.includes('const view = this.measurementView();') &&
+      body.includes('this.capturePanel.updateMeasurements(view);') &&
       !body.includes('this.runningPanelAt = now;') &&
       !body.includes('updateProgress') && !body.includes('updateTriggerStatus');
   };
-  check('the measurement clock is its own 500 ms branch ahead of the capture panel clock',
+  check('the measurement clock is its own 500 ms branch (also feeding the on-trace chips) ahead of the capture panel clock',
     analysisAt >= 0 && runningAt > analysisAt && independent(frame) &&
     !block.includes('requestAnimationFrame') && !block.includes('setTimeout') &&
     !block.includes('setInterval') && !block.includes('renderPanels('),
@@ -1182,20 +1183,24 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     !independent(shared) && !independent(reused),
     `shared=${independent(shared)}, reused=${independent(reused)}`);
 
-  const forcedAt = frame.indexOf('if (forced && !this.running && this.measurePageShown()) {');
+  const forcedGate = 'if (forced && !this.running &&\n' +
+    '        (this.measurePageShown() || this.measurementChipsWanted())) {';
+  const forcedAt = frame.indexOf(forcedGate);
   const clearedAt = frame.indexOf('this.dirty = false;');
   const forcedRefresh = (source: string): boolean => {
-    const at = source.indexOf('if (forced && !this.running && this.measurePageShown()) {');
+    const at = source.indexOf(forcedGate);
     const cleared = source.indexOf('this.dirty = false;');
+    const window = at < 0 ? '' : source.slice(at, at + 240);
     return at >= 0 && cleared >= 0 && at > cleared &&
-      source.slice(at, at + 200).includes(
-        'this.capturePanel.updateMeasurements(this.measurementView());');
+      window.includes('const view = this.measurementView();') &&
+      window.includes('if (this.measurePageShown()) this.capturePanel.updateMeasurements(view);');
   };
-  const gatedOff = frame.replace('if (forced && !this.running && this.measurePageShown()) {',
-    'if (false) {');
+  const gatedOff = frame.replace(forcedGate, 'if (false) {');
   const movedFirst = frame.replace('this.dirty = false;',
-    'if (forced && !this.running && this.measurePageShown()) {' +
-    ' this.capturePanel.updateMeasurements(this.measurementView()); } this.dirty = false;');
+    forcedGate +
+    ' const view = this.measurementView(); ' +
+    'if (this.measurePageShown()) this.capturePanel.updateMeasurements(view); } ' +
+    'this.dirty = false;');
   check('a stopped session refreshes measurements on the drawing gesture, not a clock',
     clearedAt >= 0 && forcedAt > clearedAt && forcedRefresh(frame) &&
     !forcedRefresh(gatedOff) && !forcedRefresh(movedFirst),

@@ -527,8 +527,9 @@ Analog channels are not bus rows. Each analog signal has a row with:
   waveform row ("Vpp 3.3 V"), left to right in panel order; a merged band shows each
   group's chips in its own colour. Chips reuse the panel's exact value text, so the two
   readouts cannot disagree, and stop before the V/div readout instead of overlapping it.
-  They appear only while the Measure page is open in the time view, where the rows are
-  actually scanned; the panel remains the complete, accessible record.
+  They stay visible while the time view shows a traced analog group, whichever sidebar
+  page is open; only an FFT/XY view hides them. The panel remains the complete,
+  accessible record.
 - No value is shown for no source, no window, a window with no usable sample (empty or
   wholly unknown), an older capture on screen, or a Frequency row with no qualified
   crossing or only one. A value that exists carries its qualifications instead: a window

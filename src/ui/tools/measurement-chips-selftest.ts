@@ -132,10 +132,13 @@ const chipsModule = read('src/ui/measurementChips.ts');
     app.includes('this.measurementChips = measurementChipsByStart(view, (start) => colorByStart.get(start));') &&
     app.includes('if (bus.analogGroup === undefined || hidden.has(bus.id)) continue;') &&
     app.includes('colorByStart.set(bus.analogGroup * CHANNEL_BANK_SIZE, bus.color);') &&
-    app.includes('this.measurePageShown() && this.viewMode === \'time\'') &&
+    app.includes('private measurementChipsWanted(): boolean') &&
+    app.includes('if (this.viewMode !== \'time\') return false;') &&
+    app.includes('const measurements = this.measurementChipsWanted()') &&
+    app.includes('this.measurePageShown() || this.measurementChipsWanted()') &&
     app.includes('band.sources.flatMap((source) => this.measurementChips.get(source.start) ?? [])') &&
     app.includes('...(measurements.length > 0 ? { measurements } : {}),');
-  check('App keys chips by group start, hides them off the time view and paints them from the cached panel view',
+  check('App keys chips by group start, keeps them in the time view on every panel page and paints them from the cached measurement view',
     wired, `wired=${wired}`);
   check('the chip builder reuses the panel\'s parameter and value text instead of a second formatter',
     chipsModule.includes('measurementParameterText(row.parameter)') &&

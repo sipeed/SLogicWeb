@@ -1721,7 +1721,7 @@ export class App {
     const entry = this.measurementCapture;
     if (entry === null || entry.job.status !== 'running') return;
     if (this.viewMode !== 'time') return;
-    if (!this.measurePageShown()) return;
+    if (!this.measurePageShown() && !this.measurementChipsWanted()) return;
     const store = entry.store;
     if (store !== this.captureStore) {
       entry.job.cancel();
@@ -3454,9 +3454,8 @@ export class App {
         : undefined;
       const trail = this.persistenceTrail.trailOf(band.id, persistenceFrames, commitsTrail);
       // The measurement readouts live on the waveform like a scope's on-trace boxes.
-      // While the measure page is closed (or another analysis view is up) the rows are
-      // not scanned, so the last chips would be stale: hide them instead.
-      const measurements = this.measurePageShown() && this.viewMode === 'time'
+      // They stay while any panel page is open; only a non-time view hides them.
+      const measurements = this.measurementChipsWanted()
         ? band.sources.flatMap((source) => this.measurementChips.get(source.start) ?? [])
         : [];
       const view: AnalogBandView = {
@@ -4261,9 +4260,12 @@ export class App {
         this.xyPending = true;
         this.dirty = true;
       }
-      if (this.running && this.measurePageShown()) {
-        this.capturePanel.updateMeasurements(this.measurementView());
-        persistencePanelDue = true;
+      if (this.running && (this.measurePageShown() || this.measurementChipsWanted())) {
+        const view = this.measurementView();
+        if (this.measurePageShown()) {
+          this.capturePanel.updateMeasurements(view);
+          persistencePanelDue = true;
+        }
       }
     }
     if (this.running && this.repeatWaveHolding && now - this.runningPanelAt > 500) {
@@ -4318,8 +4320,10 @@ export class App {
     if (!this.dirty && !liveDue) return;
     const forced = this.dirty;
     this.dirty = false;
-    if (forced && !this.running && this.measurePageShown()) {
-      this.capturePanel.updateMeasurements(this.measurementView());
+    if (forced && !this.running &&
+        (this.measurePageShown() || this.measurementChipsWanted())) {
+      const view = this.measurementView();
+      if (this.measurePageShown()) this.capturePanel.updateMeasurements(view);
     }
     this.livePending = false;
     this.liveDrawAt = now;
@@ -6603,6 +6607,19 @@ export class App {
   private measurePageShown(): boolean {
     const s = this.sidebar;
     return s.visible && s.page === 'measure';
+  }
+
+  /**
+   * The analog rows paint measurement chips whenever the time view shows a traced
+   * analog group, independent of the sidebar page: a scope's on-trace readouts do not
+   * disappear because another panel is open. The measurement view is still only built
+   * at its own cadence (or on a forced redraw), not per frame.
+   */
+  private measurementChipsWanted(): boolean {
+    if (this.viewMode !== 'time') return false;
+    const hidden = this.hiddenAnalogSources();
+    return this.busViews.some((bus) =>
+      bus.analogGroup !== undefined && !hidden.has(bus.id));
   }
 
   private decodersPageShown(): boolean {
