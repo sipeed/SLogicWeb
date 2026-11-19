@@ -28,7 +28,7 @@ import {
 } from './analogRowDialog.js';
 import { ANALOG_HEIGHTS, analogHeightIndex, stepAnalogHeight } from './busView.js';
 import { button, div } from './capturePanel.js';
-import { ANALOG_GAIN_DEFAULT, analogHalfRangeV, formatAnalogGain } from './channelBanks.js';
+import { ANALOG_GAIN_DEFAULT, analogHalfRangeV } from './channelBanks.js';
 import { formatAnalyzerNote } from './format.js';
 import { t } from './i18n.js';
 import { CHANNEL_COLOR_PRESETS } from './metrics.js';
@@ -491,11 +491,12 @@ export class ChannelList {
       }
       const sub = document.createElement('div');
       sub.className = 'bus-cell-sub';
-      // An analog row names its declared gain and the range it gives ("×3 · ±5 V").
+      // An analog row names its range directly ("±16 V"); the gain ratio lives in the
+      // capture panel's help tip.
       const gain = cell.gain ?? ANALOG_GAIN_DEFAULT;
       sub.textContent = cell.analog === true
         ? t('channels.analogGainSub', {
-          gain: formatAnalogGain(gain), range: String(Number(analogHalfRangeV(gain).toPrecision(3))),
+          range: String(Number(analogHalfRangeV(gain).toPrecision(3))),
         })
         : cell.summary;
       if (cell.analog === true) sub.dataset.analogGain = String(gain);

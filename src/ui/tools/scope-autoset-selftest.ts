@@ -65,7 +65,7 @@ const cases: Case[] = [
     expect: { 4: 'default', 6: 'default', 8: 'default' } },
   // Centring would put 0 V below the row: the clamp keeps zero at the bottom edge, and the
   // finer steps that would then cut the signal off are skipped.
-  { name: '10..12 V offset sine at 1x', gain: 1, codes: sine(1, 1, 11), expect: { 4: 5, 6: 5, 8: 2 } },
+  { name: '10..12 V offset sine at 1x', gain: 1, codes: sine(1, 1, 11), expect: { 4: 5, 6: 2, 8: 2 } },
 ];
 
 for (const c of cases) {

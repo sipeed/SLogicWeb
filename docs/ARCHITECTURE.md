@@ -268,13 +268,11 @@ interface RateTier {
 interface AnalogGroup {
   start: number;
   channels: number;
-  ranges: readonly number[];        // bipolar range in volts, e.g. 1, 5, 16 (±1 V, ±5 V, ±16 V)
-  adcSpanV: number;                 // converter input span, e.g. 1.6
-  frontEndAttenuation: number;      // fixed front-end attenuation, e.g. 20
-  codeDenominator: number;          // LSB = adcSpanV * frontEndAttenuation / codeDenominator
-  zeroCode: number;                 // code reading 0 V; volts = (code - zeroCode) * LSB / gain
-  gains: readonly number[];         // declarable hardware gain presets, ascending, include 1
-  customGain?: { min: number; max: number }; // bounds of a custom declared ratio
+  ranges: readonly number[];        // nominal bipolar range in volts, e.g. 16 (±16 V at 1x)
+  mvPerLsb: number;                 // measured 1x step, e.g. 137.2549 mV
+  zeroCode: number;                 // code reading 0 V; volts = (code - zeroCode) * mV/LSB / 1000 / gain
+  gains: readonly number[];         // hardware gain presets, ascending, include 1
+  customGain?: { min: number; max: number }; // bounds of a saved custom ratio (no UI entry)
   resolutionBits: number;
   maxHz: Readonly<Partial<Record<LinkRate, number>>>;
 }
@@ -297,16 +295,17 @@ interface ProfileQuirk { id: string; note: string }
   reads the same profile and renders only offered values.
 - Analog groups are hardware-defined ranges; vertical scale and offset are view state,
   not profile capability. The code-to-volt mapping is profile data, converted in one
-  place (`src/ui/channelBanks.ts`): `volts = (code - zeroCode) * LSB / G` and
-  `code = clamp(round(volts * G / LSB + zeroCode), 0, 2^bits - 1)`. The 32U3 values
-  (1.6 V, 20x, /255, zero 128: 0.12549 V per code, -16.063..+15.937 V at 1x) were
-  confirmed by the hardware team on 2026-11-06; HSync and scopehal used ±15 V with zero
-  at 127.5. G is the gain the user declares for the module's front-end stage, which the
-  host cannot read or program; it lives on the analog bus view in the workspace
-  (`analogGain`, absent = 1x, invalid saved values are rejected) and the bus offset/span
-  are derived from it. `.lwcap` stores transitions only, so a file does not carry the
-  gain. Trigger levels are stored in volts and re-snapped to the gain's code grid by the
-  settings clamp; the matcher always receives a code.
+  place (`src/ui/channelBanks.ts`): `volts = (code - zeroCode) * mvPerLsb / 1000 / G` and
+  `code = clamp(round(volts * 1000 * G / mvPerLsb + zeroCode), 0, 2^bits - 1)`. The 32U3
+  step is 137.2549 mV per LSB at 1x (the ~35 V equivalent input full scale over 255
+  codes, 0 V at code 128, -17.5686..+17.4314 V), measured on 2026-11-19; the nominal
+  `ranges` name the UI's ±16 V at 1x and never enter the conversion. HSync and scopehal
+  used ±15 V with zero at 127.5. G is the gain the user declares for the module's
+  front-end stage, which the host cannot read or program; it lives on the analog bus view
+  in the workspace (`analogGain`, absent = 1x, invalid saved values are rejected) and the
+  bus offset/span are derived from it. `.lwcap` stores transitions only, so a file does
+  not carry the gain. Trigger levels are stored in volts and re-snapped to the gain's code
+  grid by the settings clamp; the matcher always receives a code.
 
 ### 3.3 Device commands and framing
 

@@ -165,8 +165,9 @@ check(
   );
   check(
     'full sine: Vpp volts are the exact calibrated code span',
-    full.vppVolts === full.vppCodes * LSB && closeTo(full.vppVolts, 21.45879, 1e-4),
-    `got ${full.vppVolts}, expected ${171 * LSB} (~21.45879)`,
+    full.vppVolts === full.vppCodes * LSB &&
+      closeTo(LSB, 0.1372549, 1e-12),
+    `got ${full.vppVolts}, expected ${171 * LSB} (calibrated LSB ${LSB})`,
   );
   nearly('full sine: min volts', full.minVolts, (84 - ZERO) * LSB);
   nearly('full sine: max volts', full.maxVolts, (255 - ZERO) * LSB);
@@ -184,8 +185,9 @@ check(
   );
   check(
     'full sine: RMS volts are the exact calibrated centered RMS',
-    full.rmsVolts === full.rmsOffsetCodes * LSB && closeTo(full.rmsVolts, 4.09936, 1e-5),
-    `got ${full.rmsVolts}, expected ${full.rmsOffsetCodes * LSB} (~4.09936)`,
+    full.rmsVolts === full.rmsOffsetCodes * LSB &&
+      closeTo(LSB, 0.1372549, 1e-12),
+    `got ${full.rmsVolts}, expected ${full.rmsOffsetCodes * LSB} (calibrated LSB)`,
   );
   check(
     'full sine: the 11-sample 255 carry run is not sustained clipping',

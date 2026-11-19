@@ -643,8 +643,8 @@ function rowsOf(scan: AnalogCodeScan | null, read: MeasurementReadSummary | null
   check('the full-record answers are the exact fixture amplitude and RMS',
     scan.vppCodes === 171 && vpp.value === 171 * LSB &&
       scan.rmsOffsetCodes === 32.66680430243114 && rms.value === scan.rmsVolts &&
-      Math.abs(scan.vppVolts - 21.4588) < 1e-4 &&
-      Math.abs(scan.rmsVolts - 4.09936) < 1e-5,
+      Math.abs(scan.vppVolts - 171 * LSB) < 1e-6 &&
+      Math.abs(scan.rmsVolts - scan.rmsOffsetCodes * LSB) < 1e-6,
     `vpp=${vpp.value}, rms=${rms.value}, rmsCodes=${scan.rmsOffsetCodes}`);
   check('the full-record frequency matches the independent reference within 0.5%',
     scan.crossingCount === 30 && frequency.status === 'ok' &&

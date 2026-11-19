@@ -1037,9 +1037,10 @@ its analog channel directly - no dialog:
 
 - The code is MSB-first: input 0 of the group is the code's MSB. `bitOrder` is pinned to
   `msb`, so a test pattern cannot flip the converter wiring.
-- Name `A0`–`A3`, range from the profile scale and the declared gain (1x: code 0 =
-  −16.063 V, 128 = 0 V, 255 = +15.937 V; see ARCHITECTURE §3.2), unsigned, line style; the
-  eight source inputs are hidden from the plot because they are the converter's data bus.
+- Name `A0`–`A3`, range from the profile scale and the declared gain (1x: 137.2549 mV/LSB,
+  code 0 = −17.5686 V, 128 = 0 V, 255 = +17.4314 V; see ARCHITECTURE §3.2), unsigned, line
+  style; the eight source inputs are hidden from the plot because they are the converter's
+  data bus.
 - The button is disabled on the 16U3 (no module), on a partial 4 CH row, and while a
   capture runs. An existing bank, for example one restored from an older workspace, is
   normalized to this definition on load.

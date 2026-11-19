@@ -21,7 +21,7 @@ import {
   formatBytes, formatCount, formatDuration, formatFreq, formatRate, formatStatusDetail, statusDetailOf,
 } from './format.js';
 import {
-  ADC_RESOLUTION_BITS, ANALOG_GAIN_DEFAULT, ANALOG_GAIN_MAX, ANALOG_GAIN_MIN, ANALOG_GAIN_PRESETS,
+  ADC_RESOLUTION_BITS, ANALOG_GAIN_DEFAULT, ANALOG_GAIN_PRESETS,
   CHANNEL_BANK_SIZE, analogGainOf, analogHalfRangeV, analogSamplerates, analogTriggerVolts,
   analogVoltsPerCode, channelBankIndices, channelBankRange, channelBankStarts, formatAnalogGain,
   isAnalogGain, lockedChannelBanks,
@@ -300,8 +300,6 @@ export class CapturePanel {
   private advancedOpen = false;
   /** The live temperature span in the Advanced section, if it is mounted. */
   private tempValue: HTMLElement | null = null;
-  /** The custom gain ratio being typed, kept across re-renders; null when none is. */
-  private gainEdit: { start: number; text: string } | null = null;
   /** The custom threshold being typed, kept across re-renders; null when none is. */
   private thresholdEdit: string | null = null;
   /** True while render() detaches the old tree, so a removed field's blur is inert. */
@@ -814,12 +812,9 @@ export class CapturePanel {
     const capture = this.host.capture;
     const cursorPage = this.host.cursors;
     const locked = cursorsLocked(v);
-    // A ratio being typed survives a rebuild (a capture finishing mid-entry): its text is
-    // kept in gainEdit and its field takes the focus back. The old field's blur, which
-    // the removal may fire, must not apply or revert anything.
+    // The threshold's custom entry survives a rebuild (a capture finishing mid-entry):
+    // its text is kept and its field takes the focus back.
     const focused = document.activeElement as HTMLElement | null;
-    const focusedGain = focused && capture.contains(focused) ? focused.dataset?.analogGainInput : undefined;
-    const refocusGain = focusedGain !== undefined ? Number(focusedGain) : null;
     const refocusThreshold = !!focused && capture.contains(focused) &&
       focused.dataset?.thresholdInput !== undefined;
     this.rendering = true;
@@ -869,7 +864,6 @@ export class CapturePanel {
     const banks = div('channel-banks');
     const activeBanks = lockedChannelBanks(v.buses, v.channels.length);
     const analogBusy = v.stopping;
-    const bankNotes: HTMLElement[] = [];
     for (const start of channelBankStarts(v.channels.length)) {
       const indices = channelBankIndices(start, v.channels.length);
       const range = channelBankRange(start, v.channels.length);
@@ -883,19 +877,11 @@ export class CapturePanel {
         // The eight inputs are the converter's data bus while it is read, so the row is
         // the analog channel itself, not eight logic chips (HSync's Analog toggle).
         const gain = analogGainOf(v.buses.find((bus) => bus.analogGroup === group));
-        const editing = this.gainEdit?.start === start ? this.gainEdit.text : null;
         const gainCell = analogGainCell({
-          start, total: v.channels.length, gain, busy: analogBusy, editing,
-          live: () => !this.rendering,
-          onEditing: (text) => {
-            this.gainEdit = text === null ? null : { start, text };
-          },
+          start, total: v.channels.length, gain, busy: analogBusy,
           onGain: (next) => this.cb.onAnalogGain(start, next),
         });
         bank.appendChild(gainCell.cell);
-        bankNotes.push(gainCell.note);
-        // After this render has attached the tree: a detached field cannot take focus.
-        if (editing !== null && refocusGain === start) queueMicrotask(() => gainCell.focusField());
       } else {
         const grid = div('chip-grid channel-bank-grid');
         grid.dataset.bankGrid = String(start);
@@ -946,8 +932,6 @@ export class CapturePanel {
       bank.appendChild(analogButton(start, active, usable && !analogBusy, hint,
         () => this.cb.onToggleAnalog(start)));
       banks.appendChild(bank);
-      // A rejected ratio and a clamped trigger level read under the cell they concern.
-      for (const note of bankNotes.splice(0)) banks.appendChild(note);
       const clamped = v.analogLevelClamped;
       if (active && clamped && clamped.start === start) {
         const note = div('panel-note');
@@ -2029,22 +2013,12 @@ export interface AnalogGainCellOptions {
   gain: number;
   /** Stopping: the control is shown but cannot change. */
   busy: boolean;
-  /** The ratio being typed when the panel was rebuilt mid-entry, else null. */
-  editing: string | null;
-  /** False while the owner detaches the old tree: a blur then is not a commit. */
-  live(): boolean;
-  /** The text being typed (null when the field closes), kept by the owner. */
-  onEditing(text: string | null): void;
   onGain(gain: number): void;
 }
 
 export interface AnalogGainCell {
-  /** `A0 [×1 ▾] ±16 V ?`: the row's cell in place of the eight D chips. */
+  /** `A0 [±16 V ▾] ?`: the selector names the nominal range, ratio in the help tip. */
   cell: HTMLDivElement;
-  /** Under the bank row: says why a typed ratio was rejected (hidden until it is). */
-  note: HTMLDivElement;
-  /** Focus the ratio field, caret at the end (after a rebuild mid-entry). */
-  focusField(): void;
 }
 
 
@@ -2065,12 +2039,11 @@ export function samplerateOptions(
  * One analog group's cell, and its gain declaration (DESIGN §5.2 "Gain is declared, not
  * set"). The gain stage sits on the module and the host can neither read nor set it, so
  * the select only declares the ratio used to convert codes to volts; changing it never
- * restarts a capture. The select holds the profile presets, the current custom ratio
- * when it is not a preset, and "Custom…", which turns the select into a ratio field in
- * place: Enter or leaving the field applies, Esc reverts. A ratio outside the profile's
- * bounds is refused: Enter keeps the field with the declared ratio and the browser's
- * validity bubble (cleared on the next keystroke, not before it can show); leaving the
- * field reverts to the select. Both say why in the note under the row.
+ * restarts a capture. The select names each preset's nominal input range (`±16 V`,
+ * `±8 V`, …) because that is the useful fact at the row; the ratio and the calibrated
+ * step stay in the help tip. The profile presets are the only choices. A saved custom
+ * ratio from an older workspace stays visible so its readings keep their scale, but no
+ * new ratio can be entered.
  */
 export function analogGainCell(o: AnalogGainCellOptions): AnalogGainCell {
   const { start, gain } = o;
@@ -2090,138 +2063,29 @@ export function analogGainCell(o: AnalogGainCellOptions): AnalogGainCell {
   const slot = document.createElement('span');
   slot.className = 'analog-cell-gain';
 
-  const choice = analogGainChoice(gain);
-  const options: SelectOptionTuple[] = [
-    ...ANALOG_GAIN_PRESETS.map((preset): SelectOptionTuple =>
-      [String(preset), formatAnalogGain(preset)]),
-    // A declared custom ratio reads as itself, not as "Custom…".
-    ...(choice === 'custom' ? [[String(gain), formatAnalogGain(gain)] as SelectOptionTuple] : []),
-    ['custom', t('capturePanel.analogGainCustom')],
-  ];
+  const rangeLabel = (ratio: number): string =>
+    t('capturePanel.analogCellRange', { range: formatVoltsNumber(analogHalfRangeV(ratio)) });
+  const options: SelectOptionTuple[] = ANALOG_GAIN_PRESETS.map((preset): SelectOptionTuple =>
+    [String(preset), rangeLabel(preset)]);
+  if (!ANALOG_GAIN_PRESETS.some((preset) => Math.abs(preset - gain) < 1e-9)) {
+    options.push([String(gain), rangeLabel(gain)]);
+  }
   const select = selectControl(
     `capture.analogGain.${start}`, t('capturePanel.analogGain', { name }), options, String(gain),
   );
   select.disabled = o.busy;
-
-  const rangeText = t('capturePanel.analogGainRange', { min: ANALOG_GAIN_MIN, max: ANALOG_GAIN_MAX });
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.inputMode = 'decimal';
-  input.autocomplete = 'off';
-  input.spellcheck = false;
-  input.className = 'analog-gain-input';
-  input.disabled = o.busy;
-  input.dataset.analogGainInput = String(start);
-  input.title = rangeText;
-  input.setAttribute('aria-label',
-    `${t('capturePanel.analogGain', { name })}, ${t('capturePanel.analogGainRatio')}`);
-
-  const range = document.createElement('span');
-  range.className = 'analog-cell-range';
-  range.setAttribute('translate', 'no');
-  range.textContent = t('capturePanel.analogCellRange', { range: formatVoltsNumber(analogHalfRangeV(gain)) });
-
-  const tip = helpTip(`${t('capturePanel.analogGainHelp')} ${analogGainReadout(gain)}`);
-  tip.dataset.analogGainTip = String(start);
-
-  const note = div('panel-note error');
-  note.dataset.analogGainRejected = String(start);
-  note.setAttribute('role', 'alert');
-  note.hidden = true;
-  const reject = (): void => {
-    note.textContent = rangeText;
-    note.hidden = false;
-  };
-  const clearReject = (): void => {
-    note.hidden = true;
-    note.textContent = '';
-  };
-
-  let open = false;
-  const showSelect = (focus: boolean): void => {
-    open = false;
-    o.onEditing(null);
-    slot.replaceChildren(select.el);
-    if (focus) select.el.querySelector<HTMLElement>('.select-trigger')?.focus();
-  };
-  const showField = (text: string, focus: boolean): void => {
-    open = true;
-    input.value = text;
-    input.setCustomValidity('');
-    o.onEditing(text);
-    slot.replaceChildren(input);
-    if (focus) focusField();
-  };
-  const focusField = (): void => {
-    if (!open) return;
-    input.focus();
-    input.setSelectionRange?.(input.value.length, input.value.length);
-  };
-  const apply = (how: 'enter' | 'blur'): void => {
-    const next = parseAnalogGain(input.value);
-    if (next === null) {
-      reject();
-      if (how === 'blur') {
-        showSelect(false);
-        return;
-      }
-      // Keep the message until the next keystroke: clearing it right after
-      // reportValidity() would hide the bubble before it shows.
-      input.value = String(gain);
-      o.onEditing(input.value);
-      input.setCustomValidity(rangeText);
-      input.reportValidity();
-      return;
-    }
-    clearReject();
-    // The owner rebuilds the panel on a change; find the new select by its key so the
-    // keyboard stays on the control.
-    const scope = cell.closest('.side-page') ?? cell.parentElement;
-    showSelect(how === 'enter' && Math.abs(next - gain) < 1e-12);
-    if (Math.abs(next - gain) < 1e-12) return;
-    o.onGain(next);
-    if (how === 'enter' && !cell.isConnected) {
-      scope?.querySelector<HTMLElement>(
-        `.select-trigger[data-select-key="capture.analogGain.${start}"]`)?.focus();
-    }
-  };
-
   select.addEventListener('change', () => {
-    clearReject();
-    if (select.value === 'custom') {
-      // The select keeps showing the declared gain if the entry is abandoned.
-      select.value = String(gain);
-      showField(String(gain), true);
-      return;
-    }
     const next = Number(select.value);
     if (isAnalogGain(next) && Math.abs(next - gain) >= 1e-12) o.onGain(next);
   });
-  input.addEventListener('input', () => {
-    input.setCustomValidity('');
-    o.onEditing(input.value);
-  });
-  input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      apply('enter');
-    } else if (event.key === 'Escape') {
-      // Esc belongs to the field: it reverts the entry and closes nothing else.
-      event.preventDefault();
-      event.stopPropagation();
-      clearReject();
-      showSelect(true);
-    }
-  });
-  input.addEventListener('blur', () => {
-    if (!open || !o.live() || !input.isConnected) return;
-    apply('blur');
-  });
 
-  if (o.editing !== null && !o.busy) showField(o.editing, false);
-  else showSelect(false);
-  cell.append(label, slot, range, tip);
-  return { cell, note, focusField };
+  const tip = helpTip(`${t('capturePanel.analogGainHelp')} ` +
+    `${formatAnalogGain(gain)} · ${analogGainReadout(gain)}`);
+  tip.dataset.analogGainTip = String(start);
+
+  slot.appendChild(select.el);
+  cell.append(label, slot, tip);
+  return { cell };
 }
 
 export interface ThresholdFieldOptions {
@@ -2349,7 +2213,7 @@ export function thresholdField(o: ThresholdFieldOptions): { el: HTMLElement; foc
   return { el: slot, focusField };
 }
 
-/** Bits and volts per code at a gain: `8-bit · 125.5 mV/code` (four significant digits). */
+/** Bits and volts per code at a gain: `8-bit · 137.3 mV/code` (four significant digits). */
 export function analogGainReadout(gain: number): string {
   return t('capturePanel.analogGainReadout', {
     bits: ADC_RESOLUTION_BITS,
@@ -2360,20 +2224,6 @@ export function analogGainReadout(gain: number): string {
 /** A voltage magnitude with at most three significant digits: 15, 5, 1.5, 0.15. */
 export function formatVoltsNumber(volts: number): string {
   return String(Number(volts.toPrecision(3)));
-}
-
-/** The select value for a gain: a preset's own value, else `custom`. */
-export function analogGainChoice(gain: number): string {
-  return ANALOG_GAIN_PRESETS.some((preset) => Math.abs(preset - gain) < 1e-9)
-    ? String(gain) : 'custom';
-}
-
-/** A typed custom ratio, or null when it is not a declarable gain. */
-export function parseAnalogGain(text: string): number | null {
-  const trimmed = text.trim().replace(/^[x×]/i, '').replace(/[x×]$/i, '').replace(',', '.');
-  if (trimmed === '') return null;
-  const value = Number(trimmed);
-  return isAnalogGain(value) ? value : null;
 }
 
 function analogButton(

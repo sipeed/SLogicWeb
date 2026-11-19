@@ -100,19 +100,15 @@ const ADC_GROUP_CHANNELS = 8;
 /** Four groups cover D0-D7, D8-D15, D16-D23 and D24-D31. */
 const ADC_GROUP_STARTS = [0, 8, 16, 24] as const;
 /**
- * The ADC module's code-to-volt facts, confirmed by the hardware team on 2026-11-06: the
- * 8-bit converter spans 1600 mV behind a 20x front-end attenuation, divided over 255 code
- * steps with 0 V at code 128. One code is 1.6 * 20 / 255 = 0.12549 V; code 0 reads
- * -16.063 V and code 255 +15.937 V. Everything else (`channelBanks.ts`) is derived from
- * these four values. (HSync `adc.rs` and scopehal used ±15 V over /255 with zero at
- * 127.5, about 6.7% off.)
+ * The ADC module's code-to-volt facts, measured on 2026-11-19: the 1x conversion step is
+ * 137.2549 mV per LSB (the ~35 V equivalent input full scale over 255 codes), with 0 V
+ * at code 128. The UI names the nominal ±16 V range; the calibration lives directly in
+ * the mV/LSB step, not in a span/attenuation formula.
  */
-const ADC_SPAN_V = 1.6;
-const ADC_FRONT_END_ATTENUATION = 20;
-const ADC_CODE_DENOMINATOR = 255;
+const ADC_MV_PER_LSB = 137.2549;
 const ADC_ZERO_CODE = 128;
 /** The bipolar magnitude, per the `AnalogGroup.ranges` contract: ±16 V at 1x. */
-const ADC_RANGES_V = [ADC_SPAN_V * ADC_FRONT_END_ATTENUATION / 2] as const;
+const ADC_RANGES_V = [16] as const;
 /**
  * The ADC module's front-end gain is set on the module (jumper/trimmer), not by any
  * register the host can write: every code reads as its 1x volts / G. The official module
@@ -187,9 +183,7 @@ function analogGroup(start: number): AnalogGroup {
     start,
     channels: ADC_GROUP_CHANNELS,
     ranges: ADC_RANGES_V,
-    adcSpanV: ADC_SPAN_V,
-    frontEndAttenuation: ADC_FRONT_END_ATTENUATION,
-    codeDenominator: ADC_CODE_DENOMINATOR,
+    mvPerLsb: ADC_MV_PER_LSB,
     zeroCode: ADC_ZERO_CODE,
     gains: ADC_GAINS,
     customGain: ADC_CUSTOM_GAIN,

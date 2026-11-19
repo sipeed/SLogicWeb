@@ -2,8 +2,8 @@
 /**
  * The ADC module's declared hardware gain: one conversion (`analogVoltsPerCode`) used by
  * the display, the trigger level, the V/div scale and the workspace. The 1x scale is
- * profile data (1.6 V * 20 / 255 per code, 0 V at code 128; hardware team, 2026-11-06)
- * and a gain G divides it, so 3x reads ±5.33 V at 41.8 mV per code.
+ * profile data: a measured 137.2549 mV per LSB at 1x with 0 V at code 128; a gain G
+ * divides it. The UI range names stay nominal (±16 V at 1x, ±5.33 V at 3x).
  */
 
 import {
@@ -19,7 +19,6 @@ import {
 } from '../scopeScale.js';
 import { parseWorkspaceSnapshot, serializeWorkspaceSnapshot } from '../workspacePreferences.js';
 import { defaultChannels } from '../state.js';
-import { analogGainChoice, parseAnalogGain } from '../capturePanel.js';
 import { SLOGIC32U3_PROFILE } from '../../device/index.js';
 import { SoftwareTrigger } from '../../data/softwareTrigger.js';
 
@@ -41,8 +40,8 @@ function check(name: string, pass: boolean, detail: string): void {
 const near = (a: number, b: number, eps = 1e-9): boolean => Math.abs(a - b) <= eps;
 
 const GAINS = [1, 2, 3, 5, 10, 0.1, 2.5, 100];
-/** The profile's 1x scale, restated here only to check the derivation. */
-const LSB = 1.6 * 20 / 255;
+/** The profile's 1x step, restated here only to check the derivation. */
+const LSB = 137.2549 / 1000;
 
 // ---- conversion ------------------------------------------------------------
 
@@ -73,8 +72,8 @@ for (const gain of GAINS) {
   const bad = [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1000].map((g) => analogSpan(g));
   check('the profile fixes LSB, zero and top code; analogSpan divides by the gain, invalid reads 1x',
     near(ADC_LSB_V, LSB, 1e-15) && ADC_ZERO_CODE === 128 && ADC_MAX_CODE === 255 &&
-      near(span.offsetV, -128 * LSB / 3) && near(span.fullScaleV, 32 / 3) &&
-      near(g1.offsetV, -128 * LSB) && near(g1.fullScaleV, 32) &&
+      near(span.offsetV, -128 * LSB / 3) && near(span.fullScaleV, 255 * LSB / 3) &&
+      near(g1.offsetV, -128 * LSB) && near(g1.fullScaleV, 255 * LSB) &&
       bad.every((s) => s.offsetV === g1.offsetV && s.fullScaleV === g1.fullScaleV),
     JSON.stringify({ span, g1, bad }));
 }
@@ -96,11 +95,7 @@ for (const gain of GAINS) {
   const fromProfile = SLOGIC32U3_PROFILE.analog.groups[0]!.gains.join(',');
   check('the UI presets are the profile\'s AnalogGroup.gains, not a model branch',
     ANALOG_GAIN_PRESETS.join(',') === fromProfile && fromProfile === '1,2,4,8' &&
-      formatAnalogGain(3) === '×3' && formatAnalogGain(0.5) === '×0.5' &&
-      analogGainChoice(4) === '4' && analogGainChoice(3) === 'custom' &&
-      parseAnalogGain(' 3 ') === 3 && parseAnalogGain('×2.5') === 2.5 && parseAnalogGain('3x') === 3 &&
-      parseAnalogGain('0,5') === 0.5 && parseAnalogGain('0') === null &&
-      parseAnalogGain('500') === null && parseAnalogGain('abc') === null && parseAnalogGain('') === null,
+      formatAnalogGain(3) === '×3' && formatAnalogGain(0.5) === '×0.5',
     `presets=${ANALOG_GAIN_PRESETS.join(',')}, profile=${fromProfile}`);
 }
 
@@ -110,11 +105,11 @@ for (const gain of GAINS) {
   const invalid = analogBusConfig(0, 8, '#123456', 0);
   const mid = busLabel(cfg, 128);
   check('an analog bus carries its gain and the derived span, so every reading shows true volts',
-    cfg.analogGain === 3 && near(cfg.fullScaleV!, 32 / 3) && near(cfg.offsetV, -128 * LSB / 3) &&
-      cfg.voltsPerDiv === 5 && busLabel(cfg, 255) === '5.312 V' && busLabel(cfg, 0) === '-5.354 V' &&
+    cfg.analogGain === 3 && near(cfg.fullScaleV!, 255 * LSB / 3) && near(cfg.offsetV, -128 * LSB / 3) &&
+      cfg.voltsPerDiv === 5 && busLabel(cfg, 255) === '5.810 V' && busLabel(cfg, 0) === '-5.856 V' &&
       Math.abs(Number.parseFloat(mid)) < 1e-9 &&
-      plain.analogGain === 1 && near(plain.fullScaleV!, 32) && near(plain.offsetV, -128 * LSB) &&
-      plain.voltsPerDiv === 10 && invalid.analogGain === 1 && near(invalid.fullScaleV!, 32),
+      plain.analogGain === 1 && near(plain.fullScaleV!, 255 * LSB) && near(plain.offsetV, -128 * LSB) &&
+      plain.voltsPerDiv === 10 && invalid.analogGain === 1 && near(invalid.fullScaleV!, 255 * LSB),
     `cfg=${cfg.analogGain}:${cfg.offsetV}..${cfg.fullScaleV}@${cfg.voltsPerDiv}, ` +
       `labels=${busLabel(cfg, 0)}/${busLabel(cfg, 255)}, plain=${plain.analogGain}:${plain.fullScaleV}`);
 }
@@ -122,14 +117,14 @@ for (const gain of GAINS) {
 // ---- trigger level -----------------------------------------------------------
 
 {
-  // 3x: +2.5 V -> round(2.5 * 3 / 0.12549 + 128) = round(187.77) = 188.
+  // 3x: +2.5 V -> round(2.5 * 3 / calibrated LSB + 128) = 183.
   const code = analogCodeFromVolts(2.5, 3);
   const level = analogTriggerVolts('rising', 2.5, 3);
   const atOneX = analogCodeFromVolts(2.5, 1);
-  check('a configured level selects its code through the gain (3x: +2.5 V -> 188)',
-    code === 188 && near(level, Number(analogVoltsFromCode(188, 3).toFixed(4))) &&
-      analogCodeFromVolts(level, 3) === 188 && atOneX === 148 &&
-      analogTriggerCode('rising', 2.5, 3) === 188,
+  check('a configured level selects its code through the gain (3x: +2.5 V -> 183)',
+    code === 183 && near(level, Number(analogVoltsFromCode(183, 3).toFixed(4))) &&
+      analogCodeFromVolts(level, 3) === 183 && atOneX === 146 &&
+      analogTriggerCode('rising', 2.5, 3) === 183,
     `code=${code}, level=${level}, at1x=${atOneX}`);
 }
 
@@ -142,7 +137,8 @@ for (const gain of GAINS) {
   check('levels clamp to the codes the gain reads and the unreachable endpoints move one code inward',
     near(clampedHigh, 127 * LSB / 3) && near(clampedLow, -128 * LSB / 3) &&
       analogCodeFromVolts(rising, 3) === 1 && analogCodeFromVolts(falling, 3) === 254 &&
-      tenX === 1.5812 && analogCodeFromVolts(9, 3) === 255 && analogCodeFromVolts(-9, 3) === 0,
+      tenX === Number(analogVoltsFromCode(254, 10).toFixed(4)) &&
+      analogCodeFromVolts(9, 3) === 255 && analogCodeFromVolts(-9, 3) === 0,
     `clamp=${clampedLow}..${clampedHigh}, rising=${rising}, falling=${falling}, tenX=${tenX}`);
 }
 
@@ -179,13 +175,14 @@ for (const gain of GAINS) {
   const highAt10 = analogTriggerVolts('rising', high, 10);
   const back = analogTriggerVolts('rising', highAt10, 1);
   check('a gain change keeps a level\'s volts, recomputes its code and clamps it into the new range',
-    // 1.2549 V is code 138 at 1x and exactly code 158 at 3x (ten 1x codes are thirty 3x
+    // 1.2353 V is code 137 at 1x and exactly code 155 at 3x (ten 1x codes are thirty 3x
     // codes): the volts stay equal while the code changes, which is why the app retunes
     // on every gain change of a group with a level rather than on a volts change.
-    keeps && codeAt3 === analogCodeFromVolts(at1, 3) && codeAt3 === 158 &&
-      analogCodeFromVolts(at1, 1) === 138 && at3 === at1 &&
+    keeps && codeAt3 === analogCodeFromVolts(at1, 3) && codeAt3 === 155 &&
+      analogCodeFromVolts(at1, 1) === 137 && at3 === at1 &&
       Math.abs(at2p5 - at1) <= analogVoltsPerCode(2.5) / 2 + 1e-4 &&
-      highAt10 === 1.5937 && Math.abs(back - 1.5937) < analogVoltsPerCode(1),
+      highAt10 === Number(analogVoltsFromCode(255, 10).toFixed(4)) &&
+      Math.abs(back - analogVoltsFromCode(255, 10)) < analogVoltsPerCode(1),
     `at1=${at1}, at3=${at3}, code3=${codeAt3}, high=${high}->${highAt10}->${back}`);
 }
 
@@ -248,10 +245,10 @@ function roundTrip(views: unknown[], analogTriggers?: Record<string, unknown>): 
   delete (old as Record<string, unknown>).analogGroup;
   const migrated = roundTrip([old])?.busViews?.[0];
   check('workspace: a saved gain round-trips with its span; a missing gain (older saves) is 1x',
-    a0?.analogGain === 3 && near(a0.fullScaleV!, 32 / 3) && near(a0.offsetV, -128 * LSB / 3) &&
+    a0?.analogGain === 3 && near(a0.fullScaleV!, 255 * LSB / 3) && near(a0.offsetV, -128 * LSB / 3) &&
       a1 !== undefined && a1.analogGain === undefined && analogGainOf(a1) === 1 &&
-      near(a1.fullScaleV!, 32) && t0?.analogGain === 3 && near(t0.fullScaleV!, 32 / 3) &&
-      migrated?.analogGroup === 0 && near(migrated.fullScaleV!, 32) && near(migrated.offsetV, -128 * LSB),
+      near(a1.fullScaleV!, 255 * LSB) && t0?.analogGain === 3 && near(t0.fullScaleV!, 255 * LSB / 3) &&
+      migrated?.analogGroup === 0 && near(migrated.fullScaleV!, 255 * LSB) && near(migrated.offsetV, -128 * LSB),
     JSON.stringify({ a0, a1, t0, migrated }));
 }
 
@@ -334,15 +331,15 @@ function roundTrip(views: unknown[], analogTriggers?: Record<string, unknown>): 
     // No pre-trigger, so the first emitted sample is the one that matched.
     return { level, stats: trigger.stats, first: out.length > 0 ? raw(out[0]!) : null };
   };
-  const rising = run([170, 180, 187, 188, 200], 'rising', 2.5, 3);
-  const falling = run([210, 200, 189, 188, 150], 'falling', 2.5, 3);
-  const none = run([170, 180, 187, 186, 150], 'rising', 2.5, 3);
-  const oneX = run([140, 145, 150, 160], 'rising', 2.5, 1);
-  check('3x +2.5 V arms the matcher on code 188: rising, falling and no trigger',
-    rising.level === 188 && rising.stats.matched && rising.first === 188 &&
-    falling.level === 188 && falling.stats.matched && falling.first === 188 &&
+  const rising = run([165, 175, 182, 183, 195], 'rising', 2.5, 3);
+  const falling = run([205, 195, 184, 183, 145], 'falling', 2.5, 3);
+  const none = run([165, 175, 182, 181, 145], 'rising', 2.5, 3);
+  const oneX = run([138, 143, 146, 155], 'rising', 2.5, 1);
+  check('3x +2.5 V arms the matcher on code 183: rising, falling and no trigger',
+    rising.level === 183 && rising.stats.matched && rising.first === 183 &&
+    falling.level === 183 && falling.stats.matched && falling.first === 183 &&
     none.stats.noTrigger && !none.stats.matched &&
-    oneX.level === 148 && oneX.stats.matched && oneX.first === 150,
+    oneX.level === 146 && oneX.stats.matched && oneX.first === 146,
     `rising=${rising.level}@${rising.first}, falling=${falling.level}@${falling.first}, ` +
     `none=${none.stats.noTrigger}, 1x=${oneX.level}@${oneX.first}`);
 }

@@ -26,24 +26,24 @@ export const ADC_MIN_SAMPLERATE_HZ = 100e6;
 export const ADC_RESOLUTION_BITS = CHANNEL_BANK_SIZE;
 
 /**
- * The code-to-volt scale is profile data (`AnalogGroup.adcSpanV`, `frontEndAttenuation`,
- * `codeDenominator`, `zeroCode`, `gains`, `customGain`); nothing here restates it. The
- * only profile with an analog group is the 32U3, whose groups all share one scale.
+ * The code-to-volt scale is profile data (`AnalogGroup.mvPerLsb`, `zeroCode`, `ranges`,
+ * `gains`, `customGain`); nothing here restates it. The only profile with an analog
+ * group is the 32U3, whose groups all share one scale.
  *
- * 1x: LSB = adcSpanV * frontEndAttenuation / codeDenominator (1.6 * 20 / 255 =
- * 0.12549 V), 0 V at code 128: code 0 = -16.063 V, code 255 = +15.937 V. Confirmed by
- * the hardware team on 2026-11-06 (HSync and scopehal used ±15 V with zero at 127.5).
+ * 1x conversion: 137.2549 mV per LSB (the ~35 V equivalent input full scale over 255
+ * codes), 0 V at code 128; code 0 = -17.5686 V and code 255 = +17.4314 V. The nominal
+ * ±16 V range is the UI's name for the gain setting and never enters this arithmetic.
  *
  * Hardware gain (the module's front-end stage, set on the module and only *declared* to
- * the host) divides: volts = (code - 128) * LSB / G, so 3x reads ±5.33 V at 41.8 mV per
- * code. A probe attenuation would multiply; this is a gain.
+ * the host) divides: volts = (code - 128) * mV/LSB / 1000 / G, so 3x reads ±5.81 V at
+ * 45.75 mV per code. A probe attenuation would multiply; this is a gain.
  */
 const PROFILE_ANALOG_GROUP = PROFILES.flatMap((profile) => profile.analog.groups)[0];
 if (!PROFILE_ANALOG_GROUP) throw new Error('no device profile declares an analog group');
-/** The converter's input span times the front-end attenuation: 32 V at 1x. */
-const ADC_INPUT_SPAN_V = PROFILE_ANALOG_GROUP.adcSpanV * PROFILE_ANALOG_GROUP.frontEndAttenuation;
-/** Volts per code at 1x. */
-export const ADC_LSB_V = ADC_INPUT_SPAN_V / PROFILE_ANALOG_GROUP.codeDenominator;
+/** Calibrated volts per code at 1x, straight from the measured mV/LSB step. */
+export const ADC_LSB_V = PROFILE_ANALOG_GROUP.mvPerLsb / 1000;
+/** The nominal 1x half-range the UI names: ±16 V for the 32U3. */
+const ADC_NOMINAL_HALF_RANGE_V = PROFILE_ANALOG_GROUP.ranges[0] ?? 16;
 /** The code that reads 0 V. */
 export const ADC_ZERO_CODE = PROFILE_ANALOG_GROUP.zeroCode;
 /** The highest code the converter outputs. */
@@ -104,7 +104,7 @@ export function analogGainOf(bus: { analogGain?: number } | undefined): number {
   return isAnalogGain(bus?.analogGain) ? bus.analogGain : ANALOG_GAIN_DEFAULT;
 }
 
-/** Volts per converter code at a gain: 0.12549 V at 1x. The one place volts scale. */
+/** Volts per converter code at a gain: 137.2549 mV at 1x. The one place volts scale. */
 export function analogVoltsPerCode(gain = ANALOG_GAIN_DEFAULT): number {
   return ADC_LSB_V / (isAnalogGain(gain) ? gain : ANALOG_GAIN_DEFAULT);
 }
@@ -119,12 +119,14 @@ export function analogSpan(gain = ANALOG_GAIN_DEFAULT): { offsetV: number; fullS
 }
 
 /**
- * The nominal bipolar half-range at a gain, as the UI names it: half the input span,
- * ±16 V at 1x, ±5.33 V at 3x. The exact code endpoints (-16.063 / +15.937 V at 1x) are
- * `analogVoltsFromCode(0 | ADC_MAX_CODE)`; clamping uses those.
+ * The nominal bipolar half-range at a gain, as the UI names it: ±16 V at 1x, ±5.33 V at
+ * 3x. The measured mV/LSB conversion is deliberately not folded in here, so the gain
+ * choices and trigger-level bounds stay the simple nominal ranges; code-to-volts uses
+ * `ADC_LSB_V`. The exact code endpoints (-17.5686 / +17.4314 V at 1x) are
+ * `analogVoltsFromCode(0 | ADC_MAX_CODE)`.
  */
 export function analogHalfRangeV(gain = ANALOG_GAIN_DEFAULT): number {
-  return ADC_INPUT_SPAN_V / 2 / (isAnalogGain(gain) ? gain : ANALOG_GAIN_DEFAULT);
+  return ADC_NOMINAL_HALF_RANGE_V / (isAnalogGain(gain) ? gain : ANALOG_GAIN_DEFAULT);
 }
 
 /** The widest half-range any declarable gain gives (at ANALOG_GAIN_MIN). */
@@ -135,7 +137,7 @@ export function analogVoltsFromCode(code: number, gain = ANALOG_GAIN_DEFAULT): n
   return (Math.max(0, Math.min(ADC_MAX_CODE, code)) - ADC_ZERO_CODE) * analogVoltsPerCode(gain);
 }
 
-/** Clamp a voltage into what codes 0..max read at a gain (-16.063 .. +15.937 V at 1x). */
+/** Clamp a voltage into what codes 0..max read at a gain (-17.569 .. +17.431 V at 1x). */
 export function clampAnalogVolts(volts: number, gain = ANALOG_GAIN_DEFAULT): number {
   return Math.max(analogVoltsFromCode(0, gain), Math.min(analogVoltsFromCode(ADC_MAX_CODE, gain), volts));
 }

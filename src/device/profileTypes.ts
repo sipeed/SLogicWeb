@@ -46,15 +46,12 @@ export interface AnalogGroup {
   /** Bipolar range in volts, e.g. 1, 5, 16 (±1 V, ±5 V, ±16 V). */
   ranges: readonly number[];
   /**
-   * The converter's own input span in volts, before the front end. With the other three
-   * scale fields it fixes the 1x code-to-volt mapping:
-   * LSB = adcSpanV * frontEndAttenuation / codeDenominator, volts = (code - zeroCode) * LSB.
+   * The measured 1x conversion step in millivolts per LSB (32U3: 137.2549 mV, the
+   * ~35 V equivalent input full scale over 255 codes, with 0 V at `zeroCode`). Every
+   * code-to-volt reading is `(code - zeroCode) * mvPerLsb / 1000 / gain`; the nominal
+   * `ranges` stay the UI's names and bounds and do not enter that arithmetic.
    */
-  adcSpanV: number;
-  /** Fixed attenuation of the input front end at its default hardware setting (e.g. 20). */
-  frontEndAttenuation: number;
-  /** The code steps the span divides into (255 for the 32U3 module). */
-  codeDenominator: number;
+  mvPerLsb: number;
   /** The code that reads 0 V (128 for the 32U3 module). */
   zeroCode: number;
   /**

@@ -1978,16 +1978,6 @@ html.resizing { cursor: col-resize; user-select: none; }
 .analog-cell-gain .select-trigger {
   height: 18px; min-height: 18px; padding: 0 4px; gap: 2px; font-size: 10px; line-height: 16px;
 }
-.analog-gain-input {
-  width: 6ch; min-width: 0; height: 18px; padding: 0 4px;
-  background: var(--background); color: var(--foreground);
-  border: 1px solid var(--input); border-radius: 3px; font: inherit; font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
-.analog-cell-range {
-  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  font-variant-numeric: tabular-nums;
-}
 .analog-cell .help-tip { margin-left: 0; }
 .global-trigger-list { display: flex; flex-direction: column; gap: 2px; margin: 4px 0; }
 .global-trigger-row {

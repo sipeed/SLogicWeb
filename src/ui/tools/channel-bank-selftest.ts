@@ -73,14 +73,15 @@ check('bank start uses the absolute channel index',
 }
 
 {
-  // Profile scale (hardware team, 2026-11-06): 1.6 V * 20 / 255 per code, 0 V at 128.
+  // Profile scale: 137.2549 mV per LSB at 1x (the ~35 V full scale), 0 V at 128.
   const codes = [-16.0628, 0, 15.9373, -99, 99, -15, 15].map((v) => analogCodeFromVolts(v));
   const volts = [0, 128, 255].map((c) => analogVoltsFromCode(c));
-  check('ADC trigger levels map the module\'s -16.063..+15.937 V range onto codes 0..255',
-    codes.join(',') === '0,128,255,0,255,8,248' &&
-    Math.abs(ADC_LSB_V - 1.6 * 20 / 255) < 1e-12 && ADC_ZERO_CODE === 128 && ADC_MAX_CODE === 255 &&
-    Math.abs(volts[0]! + 128 * 32 / 255) < 1e-9 && volts[1] === 0 &&
-    Math.abs(volts[2]! - 127 * 32 / 255) < 1e-9,
+  check('ADC trigger levels map the calibrated -17.569..+17.431 V range onto codes 0..255',
+    codes.join(',') === '11,128,244,0,255,19,237' &&
+    Math.abs(ADC_LSB_V - 0.1372549) < 1e-12 &&
+    ADC_ZERO_CODE === 128 && ADC_MAX_CODE === 255 &&
+    Math.abs(volts[0]! + 128 * ADC_LSB_V) < 1e-9 && volts[1] === 0 &&
+    Math.abs(volts[2]! - 127 * ADC_LSB_V) < 1e-9,
     `codes=${codes.join(',')}, volts=${volts.join(',')}`);
 }
 
@@ -89,9 +90,9 @@ check('bank start uses the absolute channel index',
   const falling = analogTriggerVolts('falling', 99);
   const mid = analogTriggerVolts('rising', 1.2);
   check('trigger levels snap to the converter grid and move the unreachable endpoints inward',
-    rising === Number(analogVoltsFromCode(1).toFixed(4)) && rising === -15.9373 &&
-    falling === Number(analogVoltsFromCode(254).toFixed(4)) && falling === 15.8118 &&
-    mid === 1.2549,
+    rising === Number(analogVoltsFromCode(1).toFixed(4)) && rising === -17.4314 &&
+    falling === Number(analogVoltsFromCode(254).toFixed(4)) && falling === 17.2941 &&
+    mid === 1.2353,
     `rising=${rising}, falling=${falling}, mid=${mid}`);
 }
 
@@ -117,7 +118,7 @@ check('bank start uses the absolute channel index',
   const fixed = atZero.name === 'A0' && atOne.name === 'A1' &&
     atZero.bitOrder === 'msb' && atZero.spec.encoding === 'unsigned' &&
     atZero.spec.clock === null && atZero.hideSources === true &&
-    Math.abs(atZero.fullScaleV! - 32) < 1e-9 && Math.abs(atZero.offsetV + 128 * 32 / 255) < 1e-9;
+    Math.abs(atZero.fullScaleV! - 255 * ADC_LSB_V) < 1e-9 && Math.abs(atZero.offsetV + 128 * ADC_LSB_V) < 1e-9;
   // MSB first: input 0 is the converter's MSB, so the LSB-first bit list ends with it.
   const msbFirst = atZero.spec.bits.join(',') === '7,6,5,4,3,2,1,0' &&
     atOne.spec.bits.join(',') === '15,14,13,12,11,10,9,8';
@@ -130,14 +131,14 @@ check('bank start uses the absolute channel index',
 }
 
 {
-  // Code 0 is -16.063 V and code 255 +15.937 V; code 128 reads 0 V.
+  // Code 0 is -17.569 V and code 255 +17.431 V; code 128 reads 0 V.
   const view = analogBusConfig(0, 8, '#fff');
   const low = busLabel(view, 0);
   const mid = busLabel(view, 128);
   const high = busLabel(view, 255);
   const midVolts = Number.parseFloat(mid) * (mid.includes('mV') ? 1e-3 : 1);
   check('analog codes map onto the module\'s profile range',
-    low === '-16.06 V' && high === '15.94 V' && Math.abs(midVolts) < 1e-9,
+    low === '-17.57 V' && high === '17.43 V' && Math.abs(midVolts) < 1e-9,
     `0=${low}, 128=${mid}, 255=${high}`);
 }
 

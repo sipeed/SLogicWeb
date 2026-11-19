@@ -240,18 +240,18 @@ Analog channels are not bus rows. Each analog signal has a row with:
   zero position are view state and can be changed without affecting the device.
 - **Gain is declared, not set.** A group whose profile lists `gains` carries its one gain
   control inside the group's cell in the Acquire panel — the cell that replaces the eight
-  D chips reads `A0 [×1 ▾] ±16 V`, the select holding the profile presets and "Custom…";
-  Custom turns the select into a ratio field in place (Enter/blur applies, Esc reverts).
-  There is no separate gain row. The cell's "?" tip says the gain must match the module's
-  own setting and is used to convert codes to true voltages, and gives bits and volts per
-  code (`8-bit · 125.5 mV/code`). The official module's binary switch settings are 1×, 2×,
-  4× and 8×, listed in ascending gain: each step halves the range (±16, ±8, ±4, ±2 V), so
-  the list is never reversed. The row label names the gain and range ("×2 · ±8 V"). Changing it rescales the display, V/div (reset to the gain's
-  default, the finest 1-2-5 step showing the whole range) and trigger level, never the
-  device, and is allowed while a capture runs without restarting it. A configured trigger
-  level keeps its volts, re-snapped to the new code grid and moved to the range edge when
-  outside it (not restored if the gain is changed back); a waiting or Loop trigger is
-  retuned live, like a level drag, and a finished capture keeps its T.
+  D chips reads `A0 [±16 V ▾]`, the select holding the profile's preset ranges (`±16 V`,
+  `±8 V`, `±4 V`, `±2 V`). There is no custom-ratio entry and no separate gain row. The
+  cell's "?" tip names the declared ratio, says the gain must match the module's own
+  setting, and gives bits and the calibrated step per code (`8-bit · 137.3 mV/code`). The
+  official module's binary switch settings are 1×, 2×, 4× and 8×, listed in ascending
+  gain: each step halves the range (±16, ±8, ±4, ±2 V), so the list is never reversed. The
+  row label names the range ("±8 V"). Changing it rescales the display, V/div (reset to
+  the gain's default, the finest 1-2-5 step showing the whole range) and trigger level,
+  never the device, and is allowed while a capture runs without restarting it. A
+  configured trigger level keeps its volts, re-snapped to the new code grid and moved to
+  the range edge when outside it (not restored if the gain is changed back); a waiting or
+  Loop trigger is retuned live, like a level drag, and a finished capture keeps its T.
 - The row's right ruler carries the graticule, `V/div` and the trigger level. Dragging
   the trigger line edits the same analog condition as the editor; it is not a second
   trigger.

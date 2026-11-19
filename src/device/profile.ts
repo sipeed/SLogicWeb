@@ -504,21 +504,18 @@ export function validateProfile(p: DeviceProfile): ProfileValidation {
       }
       previousRange = range;
     }
-    // The 1x code-to-volt facts: a positive span and attenuation, a code denominator the
-    // converter's resolution can reach, and a zero code inside its code range.
+    // The 1x code-to-volt facts: a positive mV/LSB step and a zero code inside the
+    // converter's code range.
     const bitsForCodes: unknown = group.resolutionBits;
     // An invalid resolution is reported by its own check below.
     const topCode = isInteger(bitsForCodes) && bitsForCodes >= 1 && bitsForCodes <= 32
       ? 2 ** bitsForCodes - 1 : Number.POSITIVE_INFINITY;
-    if (!isFiniteNumber(group.adcSpanV) || group.adcSpanV <= 0 ||
-        !isFiniteNumber(group.frontEndAttenuation) || group.frontEndAttenuation <= 0 ||
-        !isFiniteNumber(group.codeDenominator) || group.codeDenominator < 1 ||
-        group.codeDenominator > topCode + 1 ||
+    if (!isFiniteNumber(group.mvPerLsb) || group.mvPerLsb <= 0 ||
         !isFiniteNumber(group.zeroCode) || group.zeroCode < 0 || group.zeroCode > topCode) {
       return fail(
         'analog-scale',
-        `analog group at ${start} needs adcSpanV > 0, frontEndAttenuation > 0, ` +
-          `1 <= codeDenominator <= 2^resolutionBits and 0 <= zeroCode < 2^resolutionBits`,
+        `analog group at ${start} needs mvPerLsb > 0 and ` +
+          `0 <= zeroCode < 2^resolutionBits`,
       );
     }
     // A declared gain divides the range (`AnalogGroup.gains`): 1 must be offered, the

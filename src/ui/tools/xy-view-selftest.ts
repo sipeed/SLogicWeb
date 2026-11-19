@@ -185,7 +185,7 @@ function nonzeroPixels(counts: Uint16Array): number {
       circle.gapExcluded === 0 &&
       closeTo(radiusSum / n, expectedRadius, 0.25 * ADC_LSB_V) &&
       radiusSpread <= 1.5 * ADC_LSB_V && minRadius > 0 &&
-      closeTo(expectedRadius, (100 * 32) / 255, 1e-9),
+      closeTo(ADC_LSB_V, 0.1372549, 1e-12),
     `plotted=${circle.plotted}, stride=${circle.stride}, radius=${radiusSum / n}, ` +
       `expected=${expectedRadius}, spread=${radiusSpread}`);
   const half = new Float64Array(n);
@@ -478,7 +478,7 @@ function nonzeroPixels(counts: Uint16Array): number {
   const positive = new Float64Array([140, 145, 150]);
   const positiveFit = xyAxes(okPlan(positive, positive), { fit: true });
   check('a fitted range away from 0 V has no 0 V line',
-    positiveFit !== null && positiveFit.x.min === 1 && positiveFit.x.max === 3 &&
+    positiveFit !== null && positiveFit.x.min === 1.5 && positiveFit.x.max === 3.5 &&
       xyZeroFraction(positiveFit.x) === null && xyZeroFractionY(positiveFit.y) === null &&
       xyZeroLineX(positiveFit.x, 100) === null && xyZeroLineY(positiveFit.y, 100) === null,
     `range=${JSON.stringify(positiveFit)}, zero=${xyZeroFraction(positiveFit!.x)}`);
@@ -773,7 +773,7 @@ function sectionOf(analysis: XyAnalysis | null, over: Partial<XySectionView> = {
     `counts=${lines[2]}`);
   check('the XY summary states the density ceiling and axis ranges',
     joined.includes('4,096') && joined.includes('saturated pixels 0') &&
-      joined.includes('X -16.1 V') && joined.includes('Y -16.1 V') &&
+      joined.includes('X -17.6 V') && joined.includes('Y -17.6 V') &&
       joined.includes('full calibrated code span') &&
       joined.includes('0 V at') && joined.includes('Quantization X'),
     `lines=${JSON.stringify(lines)}`);
