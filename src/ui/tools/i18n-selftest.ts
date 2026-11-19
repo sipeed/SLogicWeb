@@ -918,6 +918,34 @@ const baseSettings: CaptureSettings = {
     names.join(' | '));
 }
 
+{
+  const modeKeys: (keyof Messages)[] = [
+    'capturePanel.modeSingle', 'capturePanel.modeRepeat', 'capturePanel.modeLoop',
+  ];
+  const catalogs: Record<Locale, Messages> = { en, 'zh-CN': zhCN, ru, fr };
+  const pinned: Record<Locale, readonly string[]> = {
+    en: ['Single', 'Repeat', 'Stream'],
+    'zh-CN': ['单次', '重复', '流式'],
+    ru: ['Одиночный', 'Повтор', 'Поток'],
+    fr: ['Unique', 'Répéter', 'Flux'],
+  };
+  const bad: string[] = [];
+  for (const locale of LOCALES) {
+    const dict = catalogs[locale];
+    const expected = pinned[locale];
+    modeKeys.forEach((key, i) => {
+      const got: string | undefined = dict[key];
+      if (locale !== 'en' && got === en[key]) bad.push(`${locale}:${key} copies English`);
+      else if (got !== expected[i]) bad.push(`${locale}:${key} is '${String(got)}', not '${expected[i]}'`);
+    });
+  }
+  check('the three capture-mode labels keep their pinned spelling in every locale',
+    bad.length === 0,
+    bad.length === 0
+      ? LOCALES.map((l) => `${l}=${pinned[l].join('/')}`).join(', ')
+      : bad.join('; '));
+}
+
 // ----------------------------------------------- settings toggle labels and help copy
 
 const SETTINGS_TOGGLE_COPY: ReadonlyArray<readonly [keyof Messages, keyof Messages]> = [

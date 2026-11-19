@@ -529,7 +529,7 @@ export const en = {
   'capturePanel.capture': 'Capture',
   'capturePanel.modeSingle': 'Single',
   'capturePanel.modeRepeat': 'Repeat',
-  'capturePanel.modeLoop': 'Loop',
+  'capturePanel.modeLoop': 'Stream',
   'capturePanel.modeSingleTip': 'Capture once for the set duration, then stop.',
   'capturePanel.modeRepeatTip': 'Capture again after each interval - for watching a signal that changes.',
   'capturePanel.modeLoopTip': 'Capture continuously, keeping only the latest window - for long monitoring.',

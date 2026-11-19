@@ -477,7 +477,7 @@ export const zhCN: Messages = {
   'capturePanel.capture': '采集',
   'capturePanel.modeSingle': '单次',
   'capturePanel.modeRepeat': '重复',
-  'capturePanel.modeLoop': '循环',
+  'capturePanel.modeLoop': '流式',
   'capturePanel.modeSingleTip': '按设定时长采集一次后停止。',
   'capturePanel.modeRepeatTip': '每隔一个间隔重新采集一次，适合观察会变化的信号。',
   'capturePanel.modeLoopTip': '连续采集，只保留最近的一段窗口，适合长时间监视。',

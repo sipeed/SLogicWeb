@@ -519,7 +519,7 @@ export const ru: Messages = {
   'capturePanel.capture': 'Захват',
   'capturePanel.modeSingle': 'Одиночный',
   'capturePanel.modeRepeat': 'Повтор',
-  'capturePanel.modeLoop': 'Цикл',
+  'capturePanel.modeLoop': 'Поток',
   'capturePanel.modeSingleTip': 'Один захват заданной длительности, затем остановка.',
   'capturePanel.modeRepeatTip': 'Повторять захват после каждого интервала — чтобы следить за меняющимся сигналом.',
   'capturePanel.modeLoopTip': 'Непрерывный захват с хранением только последнего окна — для долгого наблюдения.',

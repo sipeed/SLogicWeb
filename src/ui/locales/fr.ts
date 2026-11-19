@@ -528,7 +528,7 @@ export const fr: Messages = {
   'capturePanel.capture': 'Capture',
   'capturePanel.modeSingle': 'Unique',
   'capturePanel.modeRepeat': 'Répéter',
-  'capturePanel.modeLoop': 'Boucle',
+  'capturePanel.modeLoop': 'Flux',
   'capturePanel.modeSingleTip': 'Capturer une fois pendant la durée choisie, puis s’arrêter.',
   'capturePanel.modeRepeatTip': 'Recapturer après chaque intervalle — pour suivre un signal qui change.',
   'capturePanel.modeLoopTip': 'Capturer en continu en ne gardant que la dernière fenêtre — pour une surveillance longue.',
