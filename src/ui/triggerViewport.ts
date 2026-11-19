@@ -61,12 +61,6 @@ export interface TriggerReconcileInput {
   phase: TriggerReconcilePhase;
   /** The current settings enable the mask and have at least one in-width condition. */
   settingsArmed: boolean;
-  /**
-   * Configuring a condition auto-enabled the trigger during this free-running capture
-   * (`autoArmDefersToNextCapture`): it arms the next acquisition, so the running one is
-   * not restarted. An explicit enable clears this and keeps the restart-to-arm rule.
-   */
-  armDeferred?: boolean;
 }
 
 /**
@@ -76,9 +70,10 @@ export interface TriggerReconcileInput {
  * armed, disarmed or retuned after it has matched. Loop has a page-side analog detector
  * after the match; Single/Repeat do not. Turning the trigger off means "no trigger now"
  * and must tear the page detector down so a released view cannot re-lock on a condition
- * the matcher never armed. Turning it on explicitly in a capture that started
- * free-running restarts the acquisition, because matching cannot begin mid-stream; an
- * auto-arm from configuring a condition (`armDeferred`) instead waits for the next one.
+ * the matcher never armed. Turning it on in a capture that started free-running (whether
+ * explicitly or by configuring the first condition, which auto-enables the trigger)
+ * restarts the acquisition, because matching cannot begin mid-stream; the panel shows
+ * the restart.
  */
 export function reconcileTrigger(input: TriggerReconcileInput): TriggerReconcileAction {
   if (!input.running || input.stopping) return 'none';
@@ -88,9 +83,7 @@ export function reconcileTrigger(input: TriggerReconcileInput): TriggerReconcile
     if (input.phase === 'triggered') return 'disable';
     return 'none';
   }
-  if (!input.captureArmed || input.phase === 'off') {
-    return input.armDeferred && !input.captureArmed ? 'none' : 'restart';
-  }
+  if (!input.captureArmed || input.phase === 'off') return 'restart';
   if (input.phase === 'waiting') return 'retune';
   return input.loop ? 'retune' : 'none';
 }

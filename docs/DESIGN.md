@@ -806,11 +806,10 @@ Rules:
   never turns it off. Configuring the *first* condition while the trigger is off (a
   digital edge mode, or an analog rising/falling crossing) turns it on: that is the
   user's intent to arm (`edgeTriggerAutoArms`, `analogTriggerAutoArms`). Level and
-  don't-care modes do not auto-arm. While a capture is running, this auto-arm never
-  restarts it: the capture keeps free-running, the panel says the trigger arms the next
-  capture (Repeat: the next interval), and Stop → Capture arms it now
-  (`autoArmDefersToNextCapture`). Turning the enable on explicitly during a free-running
-  capture is the named restart-to-arm transition and says "Restarting…".
+  don't-care modes do not auto-arm. While a capture is running free (the mask was off at
+  start), enabling it — explicitly or through that auto-arm — restarts the capture so the
+  matcher can begin waiting, and the panel shows "Restarting…" while it does. Matching
+  cannot begin mid-stream, so there is no deferred next-capture state.
 - **Pre-trigger:** percentage/time, with the profile cap and the resulting history;
   per-group sample counts are read-only. The panel never promises more history than the
   ring can hold. The trigger waits until that window has filled (pre-fill holdoff), so a

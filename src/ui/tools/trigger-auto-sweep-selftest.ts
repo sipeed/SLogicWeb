@@ -106,7 +106,7 @@ check('a forced sweep has no pre-trigger shortfall readout (no T)',
   const phase = triggerReconcilePhase('forced');
   const base = {
     running: true, stopping: false, loop: false, captureArmed: true, phase,
-    settingsArmed: true, armDeferred: false,
+    settingsArmed: true,
   } as const;
   const edit = reconcileTrigger(base);
   const off = reconcileTrigger({ ...base, settingsArmed: false });

@@ -302,7 +302,7 @@ import {
 } from './triggerViewport.js';
 import { AnalogCrossingScanner } from './analogCrossingScan.js';
 import {
-  autoArmDefersToNextCapture, finishedCaptureLabel, preTriggerFill, preTriggerShortfall,
+  finishedCaptureLabel, preTriggerFill, preTriggerShortfall,
   triggerAutoAfterSamples, triggerReconcilePhase, type PreTriggerFill, type TriggerNoteState,
 } from './triggerStatus.js';
 import {
@@ -710,9 +710,6 @@ export class App {
   /** When the armed matcher's stream started (performance.now()); null when no matcher
    * is armed. The pre-fill holdoff readout counts from here (`preTriggerFill`). */
   private triggerStreamArmedAt: number | null = null;
-  /** Configuring a condition auto-enabled the trigger during this free-running capture;
-   * it arms the next acquisition instead of restarting this one. */
-  private triggerArmDeferred = false;
   /** A settings change removed every condition; the capture is restarting free-run. */
   private triggerRestartPending = false;
   /** A user Stop during an automatic trigger restart cancels the pending start. */
@@ -2492,7 +2489,6 @@ export class App {
     // Setting a crossing is user intent to arm, like committing a digital edge mode.
     // Removing one leaves the mask as the user set it.
     const autoArms = analogTriggerAutoArms(kind, this.settings.triggerEnableMask);
-    this.noteAutoArm(autoArms);
     this.applySettings({
       ...this.settings,
       ...(autoArms ? { triggerEnableMask: true } : {}),
@@ -2518,9 +2514,6 @@ export class App {
    * condition the matcher never armed.
    */
   private syncActiveTrigger(): void {
-    // Turning the mask off ends a deferred auto-arm; enabling it again is an explicit
-    // enable, which keeps the restart-to-arm rule.
-    if (!this.settings.triggerEnableMask) this.triggerArmDeferred = false;
     if (!this.running || this.stopping) return;
     const channels = this.store.channelCount;
     if (!isChannelCount(channels)) return;
@@ -2544,7 +2537,6 @@ export class App {
       phase,
       settingsArmed: this.settings.triggerEnableMask &&
         (conditions.length > 0 || analog.length > 0),
-      armDeferred: this.triggerArmDeferred,
     });
     if (action === 'none') return;
     if (this.captureArming) {
@@ -2713,23 +2705,6 @@ export class App {
         }
       }
     })();
-  }
-
-  /**
-   * Record an auto-arm (the first condition turned the global trigger on). On a running
-   * free-run capture it applies to the next acquisition rather than restarting this one
-   * (`autoArmDefersToNextCapture`); the trigger panel says so. Call before applying the
-   * settings, so the reconcile they trigger sees the deferral.
-   */
-  private noteAutoArm(autoArms: boolean): void {
-    if (autoArmDefersToNextCapture({
-      autoArms,
-      running: this.running,
-      stopping: this.stopping,
-      captureArmed: this.captureUsesSoftwareTrigger,
-    })) {
-      this.triggerArmDeferred = true;
-    }
   }
 
   /** Live scope controls on an analog bank: V/Div, row height and the 0 V position. */
@@ -3690,7 +3665,6 @@ export class App {
         this.triggerState = 'off';
         this.clearTriggerSample();
       }
-      if (triggerChanged) this.noteAutoArm(autoArms);
       this.settings = next;
       if (triggerChanged) this.syncActiveTrigger();
     }
@@ -6782,7 +6756,6 @@ export class App {
       repeatMissed: this.repeatMissed,
       triggerPreObtainedSec: this.triggerPreObtainedSec(),
       triggerPreFill: this.triggerPreFillView(),
-      triggerArmDeferred: this.triggerArmDeferred,
     };
   }
 
@@ -6996,7 +6969,6 @@ export class App {
       repeatMissed: this.repeatMissed,
       triggerPreObtainedSec: this.triggerPreObtainedSec(),
       triggerPreFill: this.triggerPreFillView(),
-      triggerArmDeferred: this.triggerArmDeferred,
     };
   }
 
@@ -8136,8 +8108,6 @@ export class App {
       this.captureIsLoop = isLoop;
       this.captureMode = mode;
       this.triggerStreamArmedAt = null;
-      // A new acquisition reads the current mask: a deferred auto-arm is now applied.
-      this.triggerArmDeferred = false;
       this.clearTriggerSample();
       this.captureUsesSoftwareTrigger = false;
       this.captureTriggerBase = null;

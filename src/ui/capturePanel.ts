@@ -253,9 +253,6 @@ export interface CapturePanelView {
   /** The armed matcher is still filling its pre-trigger window and cannot fire yet
    * (`preTriggerFill`); null once it can. */
   triggerPreFill?: PreTriggerFill | null;
-  /** Configuring a condition turned the trigger on during this free-running capture; it
-   * arms the next acquisition (`autoArmDefersToNextCapture`). */
-  triggerArmDeferred?: boolean;
   /** Loop display matcher/swap readout; null outside a running analog Loop. */
   loopMetrics?: LoopDisplayMetrics | null;
   /** A previous Repeat Interval missed its trigger; the session is retrying. */
@@ -296,8 +293,8 @@ export interface LoopDisplayMetrics {
 export type TriggerStatusView = Pick<CapturePanelView,
   'running' | 'stopping' | 'triggerState' | 'triggerViewLost' | 'triggerViewPending' |
   'triggerLocked' | 'triggerAnalogRolling' | 'triggerArmed' | 'triggerAutoDisarmed' |
-  'settingsArmed' | 'repeatMissed' | 'triggerPreObtainedSec' | 'triggerPreFill' |
-  'triggerArmDeferred'> & { mode: CaptureSettings['mode'] };
+  'settingsArmed' | 'repeatMissed' | 'triggerPreObtainedSec' | 'triggerPreFill'> &
+  { mode: CaptureSettings['mode'] };
 
 export class CapturePanel {
   private advancedOpen = false;
@@ -666,18 +663,11 @@ export class CapturePanel {
       triggerAnalogRolling: v.triggerAnalogRolling,
       triggerViewPending: v.triggerViewPending,
       triggerAutoDisarmed: v.triggerAutoDisarmed,
-      triggerArmDeferred: v.triggerArmDeferred === true,
     });
     if (notes.arming) {
       const arming = div('panel-note live');
       arming.textContent = t('capturePanel.armingTrigger');
       host.appendChild(arming);
-    }
-    if (notes.armNext) {
-      const next = div('panel-note');
-      next.textContent = t(v.mode === 'repeat'
-        ? 'capturePanel.triggerArmNextRepeat' : 'capturePanel.triggerArmNext');
-      host.appendChild(next);
     }
     if (notes.memoryReleased) {
       const released = div('panel-note error');
@@ -708,7 +698,6 @@ export class CapturePanel {
       repeatMissed: v.repeatMissed === true,
       triggerPreObtainedSec: v.triggerPreObtainedSec ?? null,
       triggerPreFill: v.triggerPreFill ?? null,
-      triggerArmDeferred: v.triggerArmDeferred === true,
     };
   }
 

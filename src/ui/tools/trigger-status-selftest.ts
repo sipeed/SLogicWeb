@@ -4,7 +4,7 @@
  */
 
 import {
-  autoArmDefersToNextCapture, preTriggerFill, preTriggerShortfall, triggerPanelNotes,
+  preTriggerFill, preTriggerShortfall, triggerPanelNotes,
   triggerStatusNote, type TriggerNoteInput,
 } from '../triggerStatus.js';
 import { reconcileTrigger } from '../triggerViewport.js';
@@ -165,58 +165,40 @@ check('single and repeat show the plain triggered note',
 }
 
 {
-  // Auto-arm during a running free-run capture: the first condition turns the mask on,
-  // the running capture is not restarted, and the panel says the trigger arms the next
-  // capture. An explicit enable (no deferral) keeps the documented restart-to-arm rule.
-  const running = { running: true, stopping: false, captureArmed: false };
+  // Auto-arm during a running free-run capture: configuring the first condition turns the
+  // mask on and restarts the capture to arm the matcher, exactly like an explicit enable.
   const autoDigital = edgeTriggerAutoArms('dont-care', 'rising', false);
   const autoAnalog = analogTriggerAutoArms('rising', false);
-  const deferDigital = autoArmDefersToNextCapture({ autoArms: autoDigital, ...running });
-  const deferAnalog = autoArmDefersToNextCapture({ autoArms: autoAnalog, ...running });
-  const idle = autoArmDefersToNextCapture({
-    autoArms: true, running: false, stopping: false, captureArmed: false,
-  });
-  const stopping = autoArmDefersToNextCapture({ autoArms: true, ...running, stopping: true });
-  const notAuto = autoArmDefersToNextCapture({ autoArms: false, ...running });
-  const reconcile = (armDeferred: boolean) => reconcileTrigger({
-    running: true, stopping: false, loop: false, captureArmed: false, phase: 'off',
-    settingsArmed: true, armDeferred,
-  });
-  const deferredAction = reconcile(deferDigital);
-  const explicitAction = reconcile(false);
-  const loopDeferred = reconcileTrigger({
-    running: true, stopping: false, loop: true, captureArmed: false, phase: 'off',
-    settingsArmed: true, armDeferred: true,
-  });
-  // The deferral never blocks the armed-capture paths.
-  const waitingRetune = reconcileTrigger({
-    running: true, stopping: false, loop: false, captureArmed: true, phase: 'waiting',
-    settingsArmed: true, armDeferred: true,
-  });
-  const panel = (deferred: boolean, patch: Partial<Parameters<typeof triggerPanelNotes>[0]> = {}) =>
+  const reconcile = (patch: Partial<Parameters<typeof reconcileTrigger>[0]> = {}) =>
+    reconcileTrigger({
+      running: true, stopping: false, loop: false, captureArmed: false, phase: 'off',
+      settingsArmed: true, ...patch,
+    });
+  const autoAction = reconcile();
+  const loopAction = reconcile({ loop: true });
+  const idleAction = reconcile({ running: false });
+  const stoppingAction = reconcile({ stopping: true });
+  // An armed capture keeps the retune path for a live edit.
+  const waitingRetune = reconcile({ captureArmed: true, phase: 'waiting' });
+  const panel = (patch: Partial<Parameters<typeof triggerPanelNotes>[0]> = {}) =>
     triggerPanelNotes({
       running: true, stopping: false, mode: 'single', triggerState: 'off',
       settingsArmed: true, triggerArmed: false, triggerLocked: false,
       triggerAnalogRolling: false, triggerViewPending: false, triggerAutoDisarmed: false,
-      triggerArmDeferred: deferred, ...patch,
+      ...patch,
     });
-  const deferredNotes = panel(true);
-  const explicitNotes = panel(false);
-  const nextCapture = panel(true, { running: false });
-  const armedNow = panel(true, { triggerArmed: true, triggerState: 'waiting' });
-  check('auto-arm during a running free-run capture defers to the next capture, visibly',
-    autoDigital && autoAnalog && deferDigital && deferAnalog && !idle && !stopping &&
-      !notAuto && deferredAction === 'none' && explicitAction === 'restart' &&
-      loopDeferred === 'none' && waitingRetune === 'retune' &&
-      deferredNotes.armNext && !deferredNotes.arming &&
-      !explicitNotes.armNext && explicitNotes.arming &&
-      !nextCapture.armNext && !nextCapture.arming &&
-      !armedNow.armNext && !armedNow.arming,
-    `defer=${deferDigital}/${deferAnalog} idle=${idle} stopping=${stopping} ` +
-      `notAuto=${notAuto} actions=${deferredAction}/${explicitAction}/${loopDeferred}/` +
-      `${waitingRetune} deferred=${JSON.stringify(deferredNotes)} ` +
-      `explicit=${JSON.stringify(explicitNotes)} next=${JSON.stringify(nextCapture)} ` +
-      `armed=${JSON.stringify(armedNow)}`);
+  const armingNotes = panel();
+  const armedNow = panel({ triggerArmed: true, triggerState: 'waiting' });
+  const idleNotes = panel({ running: false });
+  check('auto-arm during a running free-run capture restarts it to arm, visibly',
+    autoDigital && autoAnalog && autoAction === 'restart' && loopAction === 'restart' &&
+      idleAction === 'none' && stoppingAction === 'none' && waitingRetune === 'retune' &&
+      armingNotes.arming && !armingNotes.pending && !armingNotes.memoryReleased &&
+      !armedNow.arming && !armedNow.pending && !idleNotes.arming,
+    `auto=${autoAction}/${loopAction} idle=${idleAction} ` +
+      `stopping=${stoppingAction} retune=${waitingRetune} ` +
+      `arming=${JSON.stringify(armingNotes)} armed=${JSON.stringify(armedNow)} ` +
+      `idleNotes=${JSON.stringify(idleNotes)}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

@@ -516,8 +516,6 @@ export const zhCN: Messages = {
   'capturePanel.preTriggerObtained': '实际预触发：{duration}（少于设定值）。',
   'capturePanel.waitingTrigger': '正在等待触发条件…',
   'capturePanel.preTriggerFilling': '正在填充预触发（{elapsed}/{total}）… 此期间不会触发。',
-  'capturePanel.triggerArmNext': '触发已自动开启但本次采集保持自由运行，先停止再采集即可立即开始等待触发。',
-  'capturePanel.triggerArmNextRepeat': '触发已自动开启但本次采集跳过触发，下一采集周期立即执行触发判定。',
   'capturePanel.triggered': '已捕获触发点，正在写入触发后采样。',
   'capturePanel.triggeredLoopDigital': '已捕获单次数字跳变并锁定视图，后续跳变直接忽略。',
   'capturePanel.triggeredLoop': '已捕获模拟穿越，视图随每次新穿越前移。',

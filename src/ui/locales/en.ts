@@ -568,8 +568,6 @@ export const en = {
   'capturePanel.preTriggerObtained': 'Actual pre-trigger: {duration} (less than configured).',
   'capturePanel.waitingTrigger': 'Waiting for the trigger condition…',
   'capturePanel.preTriggerFilling': 'Filling the pre-trigger window ({elapsed} / {total})… the trigger cannot fire until it is full.',
-  'capturePanel.triggerArmNext': 'The trigger was turned on automatically, but this capture stays free-running; stop and capture again to start waiting for the trigger now.',
-  'capturePanel.triggerArmNextRepeat': 'The trigger was turned on automatically, but this capture skips it; the next capture interval runs the trigger check right away.',
   'capturePanel.triggered': 'Trigger point captured; recording the post-trigger samples.',
   'capturePanel.triggeredLoopDigital': 'Triggered - a digital transition was captured and the view is locked; later transitions are ignored.',
   'capturePanel.triggeredLoop': 'Triggered - an analog crossing was captured; the view moves forward with each new crossing.',

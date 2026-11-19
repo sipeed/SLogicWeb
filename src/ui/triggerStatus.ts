@@ -84,9 +84,6 @@ export interface TriggerPanelNoteInput {
   triggerViewPending: boolean;
   /** The trigger was disarmed by the Loop store's hard memory cap. */
   triggerAutoDisarmed: boolean;
-  /** Configuring a condition auto-enabled the trigger during this free-running capture;
-   * it applies from the next acquisition (see `autoArmDefersToNextCapture`). */
-  triggerArmDeferred?: boolean;
 }
 
 export interface TriggerPanelNotes {
@@ -96,9 +93,6 @@ export interface TriggerPanelNotes {
   arming: boolean;
   /** Show "released to keep the loop store bounded". */
   memoryReleased: boolean;
-  /** Show "the trigger was turned on by configuring a condition; it arms the next
-   * capture" (instead of `arming`: the running capture is not restarted). */
-  armNext: boolean;
 }
 
 /**
@@ -113,18 +107,13 @@ export function triggerPanelNotes(v: TriggerPanelNoteInput): TriggerPanelNotes {
   const liveAnalog = v.mode === 'loop' && v.triggerAnalogRolling;
   const releasedOneShot = v.mode === 'loop' && v.running && v.triggerState === 'triggered' &&
     !v.triggerLocked && !v.triggerAnalogRolling && !v.triggerViewPending;
-  // A deferred auto-arm only exists on a running capture that did not arm a matcher.
-  const deferred = v.triggerArmDeferred === true && v.running && !v.stopping &&
-    !v.triggerArmed;
   return {
     // A forced (Auto) sweep has finished searching just like a match: edits apply next.
     pending: v.running && !v.stopping &&
       (v.triggerState === 'triggered' || v.triggerState === 'forced') &&
       !liveAnalog && !releasedOneShot,
-    arming: v.running && v.settingsArmed && !v.triggerArmed && !v.triggerAutoDisarmed &&
-      !deferred,
+    arming: v.running && v.settingsArmed && !v.triggerArmed && !v.triggerAutoDisarmed,
     memoryReleased: v.running && v.triggerAutoDisarmed,
-    armNext: deferred && v.settingsArmed,
   };
 }
 
@@ -199,31 +188,6 @@ export function preTriggerFill(v: PreTriggerFillInput): PreTriggerFill | null {
   const totalSec = v.preTriggerSamples / v.samplerate;
   const elapsedSec = Math.max(0, v.streamMs / 1000);
   return elapsedSec < totalSec ? { elapsedSec, totalSec } : null;
-}
-
-export interface AutoArmInput {
-  /** The edit turns the global trigger on (`edgeTriggerAutoArms`/`analogTriggerAutoArms`). */
-  autoArms: boolean;
-  running: boolean;
-  stopping: boolean;
-  /** The running acquisition armed a matcher (it cannot have while the mask was off). */
-  captureArmed: boolean;
-}
-
-/**
- * Whether an auto-arm (configuring the first condition while the global trigger is off)
- * applies to the next acquisition instead of restarting the running one.
- *
- * An explicit enable while a capture free-runs restarts it to arm, with the visible
- * "restarting" note. An auto-arm is a side effect of configuring a condition; restarting
- * there would discard the running capture's data behind the user's back (DESIGN §8: a
- * restart is never a hidden side effect). So the running capture keeps free-running, the
- * panel says the trigger applies from the next capture, and the existing Stop → Capture
- * path arms it now. Repeat picks it up at its next interval. While stopping there is
- * nothing to defer: the next start reads the enabled mask.
- */
-export function autoArmDefersToNextCapture(v: AutoArmInput): boolean {
-  return v.autoArms && v.running && !v.stopping && !v.captureArmed;
 }
 
 export interface AutoSweepInput {

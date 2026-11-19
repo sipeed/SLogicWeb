@@ -644,10 +644,9 @@ type TriggerBudget =
 - Retune: while waiting, a new plan is recompiled and sent; edge continuity restarts.
   After a match, edits are pending for the next acquisition unless the profile supports a
   live detector (analog Loop). A restart is a named transition with a typed reason; it
-  never reuses the user Stop path. Explicitly enabling the trigger during a free-running
-  capture restarts it to arm (with a visible "Restarting" note); an auto-arm from
-  configuring the first condition does not restart (`armDeferred` in `reconcileTrigger`),
-  and arms the next acquisition instead.
+  never reuses the user Stop path. Enabling the trigger during a free-running capture —
+  explicitly or through the auto-arm from configuring the first condition — restarts it
+  to arm, with a visible "Restarting" note; matching cannot begin mid-stream.
 - Loop: D is the fixed data window, V the user viewport. A digital Lock is one-shot and
   releases when T leaves retention; an analog detector can re-lock when edges return. The
   plan owns the anchor, not the UI. The acquisition executor enforces D by calling

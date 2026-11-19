@@ -567,8 +567,6 @@ export const fr: Messages = {
   'capturePanel.preTriggerObtained': 'Pré-déclenchement obtenu : {duration} (inférieur au réglage).',
   'capturePanel.waitingTrigger': 'En attente de la condition de déclenchement…',
   'capturePanel.preTriggerFilling': 'Remplissage de la fenêtre de pré-déclenchement ({elapsed} / {total})… aucun déclenchement possible avant qu’elle soit pleine.',
-  'capturePanel.triggerArmNext': 'Le déclenchement a été activé automatiquement, mais cette acquisition reste en mode libre ; arrêtez puis relancez pour attendre le déclenchement tout de suite.',
-  'capturePanel.triggerArmNextRepeat': 'Le déclenchement a été activé automatiquement, mais cette acquisition l’ignore ; l’intervalle suivant lance la vérification dès son début.',
   'capturePanel.triggered': 'Point de déclenchement capturé ; écriture des échantillons post-déclenchement.',
   'capturePanel.triggeredLoopDigital': 'Déclenché — une transition numérique a été capturée et la vue est verrouillée ; les suivantes sont ignorées.',
   'capturePanel.triggeredLoop': 'Déclenché — un franchissement analogique a été capturé ; la vue avance à chaque nouveau franchissement.',
