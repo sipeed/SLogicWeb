@@ -982,6 +982,7 @@ export class CapturePanel {
     );
     rate.addEventListener('change', () =>
       this.cb.onSettings({ ...s, samplerate: Number(rate.value) }));
+    rate.el.classList.add('rate-field');
     if (advisedHz !== undefined && selectable.some((r) => r > advisedHz)) {
       rate.el.title = t('capturePanel.rateOptionOverAdvisedHint', {
         channels: s.channels, advised: formatRate(advisedHz),
@@ -998,7 +999,9 @@ export class CapturePanel {
       onVolts: (volts) => this.cb.onSettings({ ...s, thresholdVolts: volts }),
     });
     rowRT.appendChild(th.el);
-    chSec.body.appendChild(rowRT);
+    const rateWrap = div('rate-threshold');
+    rateWrap.appendChild(rowRT);
+    chSec.body.appendChild(rateWrap);
     if (thresholdEditing !== null && refocusThreshold) queueMicrotask(() => th.focusField());
 
     // The effective rate above the profile's sustainable one for this width, whether the

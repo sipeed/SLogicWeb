@@ -518,7 +518,12 @@ export class SelectControl extends EventTarget {
   }
 
   private syncPresentation(): void {
-    this.valueEl.textContent = resolveLabel(this.options, this.current);
+    const label = resolveLabel(this.options, this.current);
+    this.valueEl.textContent = label;
+    // The trigger truncates with an ellipsis when a narrow row caps its width; the
+    // title keeps the full choice readable without opening the list.
+    this.valueEl.title = label;
+    this.trigger.title = label;
     this.options.forEach((option, index) => {
       const selected = option.value === this.current;
       this.items[index].setAttribute('aria-selected', selected ? 'true' : 'false');

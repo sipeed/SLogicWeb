@@ -745,6 +745,32 @@ check(
     `appended=${JSON.stringify(appendedRoots)}`,
   );
 
+  {
+    const css = fs.readFileSync('src/ui/style.css', 'utf8');
+    const container = /\.rate-threshold \{ container-type: inline-size; min-width: 0; \}/.test(css);
+    const baseRate = /\.rate-threshold \.rate-field \{ flex: 1 1 0; min-width: 0; \}/.test(css);
+    const baseThreshold = /\.rate-threshold \.threshold-field \{ flex: 1 1 0; min-width: 0; \}/.test(css);
+    const wide = /@container \(min-width: 408px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    const narrow = /@container \(max-width: 239px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+    const wideRate = /\.rate-field \{ flex: 1 1 auto; \}/.test(wide);
+    const wideThreshold = /\.threshold-field \{ flex: 0 0 200px; max-width: 200px; \}/.test(wide);
+    const gap = Number(/\.field-row \{ display: flex; gap: (\d+)px; \}/.exec(css)?.[1] ?? NaN);
+    const narrowWraps = /flex-wrap: wrap;/.test(narrow);
+    const narrowFull = /\.rate-field,\s*\.rate-threshold \.threshold-field \{ flex: 1 1 auto; width: 100%; max-width: none; \}/.test(narrow);
+    const wrapped = capture.includes("const rateWrap = div('rate-threshold');") &&
+      capture.includes('rateWrap.appendChild(rowRT)') &&
+      capture.includes("rate.el.classList.add('rate-field')");
+    check(
+      'the rate/threshold row caps the threshold at 200 px, hands extra width to the rate, equalizes below 408 px and wraps at 240 px',
+      container && baseRate && baseThreshold && wideRate && wideThreshold && gap === 8 &&
+        narrowWraps && narrowFull && wrapped &&
+        408 === 2 * 200 + gap && 239 === 2 * 116 + gap - 1,
+      `container=${container}, baseRate=${baseRate}, baseThreshold=${baseThreshold}, ` +
+        `wideRate=${wideRate}, wideThreshold=${wideThreshold}, gap=${gap}, ` +
+        `narrowWraps=${narrowWraps}, narrowFull=${narrowFull}, wrapped=${wrapped}`,
+    );
+  }
+
   const payloadNeedles = [
     'samplerate: Number(rate.value)',
     // The threshold select is wrapped by thresholdField (presets + Custom…).

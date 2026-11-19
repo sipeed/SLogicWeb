@@ -1972,6 +1972,26 @@ html.resizing { cursor: col-resize; user-select: none; }
 }
 
 .field-row { display: flex; gap: 8px; }
+
+/* Rate + threshold: one row with three phases, reversed exactly by growing the panel.
+   Wide: threshold is capped at 200 px and the rate select receives the remaining width.
+   Narrower than 408 px (= 2 x 200 + 8 gap): both columns shrink together, so the rate
+   never collapses while the threshold keeps its full width. Below 240 px the row wraps
+   to two full-width rows. Container queries keep the phases tied to the panel's real
+   content width, not the viewport. */
+.rate-threshold { container-type: inline-size; min-width: 0; }
+.rate-threshold > .field-row { min-width: 0; }
+.rate-threshold .rate-field { flex: 1 1 0; min-width: 0; }
+.rate-threshold .threshold-field { flex: 1 1 0; min-width: 0; }
+@container (min-width: 408px) {
+  .rate-threshold .rate-field { flex: 1 1 auto; }
+  .rate-threshold .threshold-field { flex: 0 0 200px; max-width: 200px; }
+}
+@container (max-width: 239px) {
+  .rate-threshold > .field-row { flex-wrap: wrap; }
+  .rate-threshold .rate-field,
+  .rate-threshold .threshold-field { flex: 1 1 auto; width: 100%; max-width: none; }
+}
 .field { flex: 1; display: flex; flex-direction: column; gap: 3px; }
 .field label { font-size: 10px; color: var(--text50); }
 .field input {
