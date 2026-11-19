@@ -1066,7 +1066,10 @@ html[data-theme="light"] .shortcuts-dialog::backdrop { background: var(--backdro
 .settings-dialog {
   --settings-nav-w: 152px;
   width: min(560px, calc(100vw - 32px));
-  min-height: min(360px, calc(100dvh - 32px));
+  /* One fixed height for every section: the pane scrolls its own content, so switching
+     to Shortcuts and gestures (the longest section) never resizes the window. */
+  height: min(360px, calc(100vh - 32px));
+  height: min(360px, calc(100dvh - 32px));
   max-height: calc(100vh - 32px);
   max-height: calc(100dvh - 32px);
   padding: 0;
@@ -1196,7 +1199,7 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
 }
 
 @media (max-width: 760px) {
-  .settings-dialog { width: calc(100vw - 16px); max-width: calc(100vw - 16px); min-height: min(360px, calc(100dvh - 16px)); max-height: calc(100dvh - 16px); }
+  .settings-dialog { width: calc(100vw - 16px); max-width: calc(100vw - 16px); height: min(360px, calc(100vh - 16px)); height: min(360px, calc(100dvh - 16px)); max-height: calc(100dvh - 16px); }
   .settings-dialog-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .settings-nav { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--border); }
   .settings-nav-item { width: auto; }

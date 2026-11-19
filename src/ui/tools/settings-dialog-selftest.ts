@@ -1358,6 +1358,21 @@ const dialogCss = cssStart >= 0 && cssEnd > cssStart ? css.slice(cssStart, cssEn
   check('the window takes the themed shadow twin of the two existing dialogs',
     css.includes(twin),
     `twin=${css.includes(twin)}`);
+
+  const windowRule = /\.settings-dialog\s*\{([^}]*)\}/.exec(dialogCss)?.[1] ?? '';
+  const paneRule = /\.settings-pane\s*\{([^}]*)\}/.exec(dialogCss)?.[1] ?? '';
+  // The dialog is one fixed height, not a min-height the long Shortcuts section can push
+  // up; the pane already owns the scroll for any section that overflows.
+  const fixedHeight = (rule: string): boolean =>
+    /(?:^|;|\n)\s*height:\s*min\(360px, calc\(100dvh - 32px\)\)/.test(rule) &&
+    !/(?:^|;|\n)\s*min-height:/.test(rule);
+  const paneScrolls = /(?:^|;)\s*min-height:\s*0/.test(paneRule) &&
+    /(?:^|;)\s*overflow-y:\s*auto/.test(paneRule);
+  const grown = windowRule.replace('height:', 'min-height:');
+  check('the window keeps one fixed height and the pane scrolls, so a long section never resizes it',
+    fixedHeight(windowRule) && paneScrolls && !fixedHeight(grown),
+    `fixed=${fixedHeight(windowRule)}, pane=${paneScrolls}, grown=${fixedHeight(grown)}, ` +
+    `rule=${JSON.stringify(windowRule)}`);
 }
 
 function forcedOrRawHex(block: string): boolean {
@@ -1979,7 +1994,7 @@ function narrowWindowSized(narrow: string): boolean {
   const margin = SETTINGS_DIALOG_NARROW_MARGIN;
   return rule.includes(`width: calc(100vw - ${margin}px);`) &&
     rule.includes(`max-width: calc(100vw - ${margin}px);`) &&
-    rule.includes(`min-height: min(${SETTINGS_DIALOG_HEIGHT}px, calc(100dvh - ${margin}px));`) &&
+    rule.includes(`height: min(${SETTINGS_DIALOG_HEIGHT}px, calc(100dvh - ${margin}px));`) &&
     rule.includes(`max-height: calc(100dvh - ${margin}px);`);
 }
 
