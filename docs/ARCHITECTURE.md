@@ -862,8 +862,13 @@ Key transitions (the full table is generated in one pure module):
   them by sample index through `src/ui/xyView.ts` with no interpolation. Neither writes
   acquisition, trigger, cursor, viewport or persisted state; FFT display bounds are
   re-derived from a settled transform, so pan and zoom never recompute it. While an
-  analysis view is shown the automatic time measurements report `paused`, statistics skip
-  the wave, and Persistence commits nothing.
+  analysis view is shown the automatic-measurement surface is not presented: the section
+  builds no measurement rows, filter, range, cursor pair, window line, capture progress,
+  Persistence block or legend, and leaves the Time/FFT/XY switch plus the active view's
+  own controls and summary. The suppression is one section flag derived from `viewMode`,
+  never from the row set, so the row model still reports `paused` internally while
+  statistics skip the wave and Persistence commits nothing. Switching back to Time
+  restores the same rows, disclosure state and configuration unchanged.
 - One `OverlayController` owns the stack of menus, popovers, sheets and dialogs. Opening
   one closes its transient siblings; Escape/back closes the topmost; focus returns to the
   invoker by token.

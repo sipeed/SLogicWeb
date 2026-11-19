@@ -642,9 +642,12 @@ Analog channels are not bus rows. Each analog signal has a row with:
   log-magnitude interpolation between bins, with the raw bin stated beside it; hover names
   the nearest bin. Running updates use the section's own 500 ms
   `analysisPanelAt` branch inside the frame callback, stopped updates are event-driven,
-  and no second rAF or timer is added. While FFT is shown the automatic time measurements
-  report paused and scan nothing; statistics and Persistence commit only in Time mode.
-  FFT is never an input to or output from References, Persistence or an acquisition.
+  and no second rAF or timer is added. While FFT is shown the automatic-measurement
+  surface is not presented at all: no measurement rows, source filter, range, cursor pair,
+  Persistence or capture-progress controls, and no section legend, so the Time/FFT/XY
+  switch, the FFT controls and its summary are what remain. The row model still reports
+  `paused` internally and scans nothing; statistics and Persistence commit only in Time
+  mode. FFT is never an input to or output from References, Persistence or an acquisition.
 - **XY view is a relationship of two real analog groups.** X and Y selects name two
   different active ADC groups; both read the same current-wave window as the rows above
   (Viewport, cursor pair or whole capture), and Repeat composite coverage from an older
@@ -672,8 +675,10 @@ Analog channels are not bus rows. Each analog signal has a row with:
   Persistence; returning to Time restores every field unchanged and redraws the retained
   surface. Its source, range and fit choices are session-only. Running updates use the
   same separate 500 ms `analysisPanelAt` branch as FFT, stopped updates are event-driven,
-  and no second rAF or timer is added; automatic time measurements report paused and
-  statistics and Persistence commit only in Time mode.
+  and no second rAF or timer is added; the automatic-measurement surface is not presented
+  in the XY view either (the switch, the XY source/range/Fit controls and its summary are
+  what remain), the row model still reports `paused` internally, and statistics and
+  Persistence commit only in Time mode.
 
 ### 6.4 Plot painting
 
