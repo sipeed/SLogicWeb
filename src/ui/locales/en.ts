@@ -898,6 +898,7 @@ export const en = {
   'analog.finer': 'Analog finer for {channel}',
   'analog.coarser': 'Analog coarser for {channel}',
   'analogRow.settings': 'Settings for {name}',
+  'analogRow.overlayHelp': 'Draw every analog group into one band; each keeps its colour, scale and 0 V position.',
   'bus.voltsPerDiv': 'V/div',
   'bus.triggerDragTip': 'Drag to set the analog trigger level',
   'bus.scaleBarTip': 'Drag to move the trace; wheel to change V/div; double-click or Home to reset; A or right-click to autoset',

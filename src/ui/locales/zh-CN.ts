@@ -844,6 +844,7 @@ export const zhCN: Messages = {
   'analog.finer': '{channel} 减小 V/格',
   'analog.coarser': '{channel} 增大 V/格',
   'analogRow.settings': '{name} 设置',
+  'analogRow.overlayHelp': '将所有模拟组合并到同一行绘制；各组保留自己的颜色、刻度和 0 V 位置。',
   'bus.voltsPerDiv': 'V/格',
   'bus.triggerDragTip': '上下拖动可设置模拟触发电平',
   'bus.scaleBarTip': '拖动可上下移动波形；滚轮可调整 V/格；双击或按 Home 复位；按 A 或右键可自动量程',

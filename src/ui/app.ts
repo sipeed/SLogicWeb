@@ -2445,6 +2445,7 @@ export class App {
       this.busViews = this.busViews.map((b) => (b.id === id ? { ...b, name } : b));
     }
     this.configureAnalogTrigger(id, config.kind, config.volts);
+    this.setAnalogLayout(config.overlay ? 'merged' : 'stacked');
   }
 
   /** Edit the analog trigger; while the matcher waits the change is applied live, after

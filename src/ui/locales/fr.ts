@@ -897,6 +897,7 @@ export const fr: Messages = {
   'analog.finer': 'Échelle verticale plus fine pour {channel}',
   'analog.coarser': 'Échelle verticale plus grossière pour {channel}',
   'analogRow.settings': 'Réglages de {name}',
+  'analogRow.overlayHelp': 'Superpose tous les groupes analogiques sur une seule ligne ; chacun garde sa couleur, son échelle et son zéro.',
   'bus.voltsPerDiv': 'V/div',
   'bus.triggerDragTip': 'Faites glisser pour régler le niveau de déclenchement analogique',
   'bus.scaleBarTip': 'Faites glisser pour déplacer la trace ; molette pour V/div ; double-clic ou Origine pour réinitialiser ; A ou clic droit pour l’échelle automatique',

@@ -5,6 +5,7 @@ import { button, div } from './capturePanel.js';
 import {
   analogHalfRangeV, analogVoltsPerCode,
 } from './channelBanks.js';
+import { helpTip, setHelpTipText } from './helpTip.js';
 import { t } from './i18n.js';
 import { triggerIcon } from './triggerGlyph.js';
 
@@ -53,10 +54,12 @@ export class AnalogRowSettingsDialog {
   private readonly triggerOptions = new Map<Kind, KindOption>();
   private readonly levelLabel: HTMLLabelElement;
   private readonly levelInput: HTMLInputElement;
+  private readonly overlayLabel: HTMLLabelElement;
+  private readonly overlayInput: HTMLInputElement;
+  private readonly overlayTip: HTMLButtonElement;
   private readonly cancelButton: HTMLButtonElement;
   private readonly saveButton: HTMLButtonElement;
   private id: string | null = null;
-  private overlay = false;
   private opener: HTMLButtonElement | null = null;
 
   constructor(private readonly cb: AnalogRowDialogCallbacks) {
@@ -122,7 +125,19 @@ export class AnalogRowSettingsDialog {
     levelControl.append(this.levelInput, unit);
     levelField.append(this.levelLabel, levelControl);
 
-    fields.append(nameField, triggerField, levelField);
+    const overlayField = div('channel-settings-field channel-settings-kv');
+    this.overlayLabel = document.createElement('label');
+    this.overlayLabel.className = 'channel-settings-copy';
+    this.overlayLabel.htmlFor = 'analog-row-settings-overlay';
+    this.overlayInput = document.createElement('input');
+    this.overlayInput.id = 'analog-row-settings-overlay';
+    this.overlayInput.type = 'checkbox';
+    this.overlayTip = helpTip(t('analogRow.overlayHelp'));
+    const overlayControl = div('channel-settings-toggle');
+    overlayControl.append(this.overlayInput, this.overlayTip);
+    overlayField.append(this.overlayLabel, overlayControl);
+
+    fields.append(nameField, triggerField, levelField, overlayField);
 
     const footer = div('channel-settings-actions');
     this.cancelButton = button('', 'channel-settings-cancel');
@@ -157,7 +172,7 @@ export class AnalogRowSettingsDialog {
     if (this.dialog.open) this.close();
     this.id = view.id;
     this.opener = opener;
-    this.overlay = view.overlay;
+    this.overlayInput.checked = view.overlay;
     this.renderStrings(view.name);
     this.nameInput.value = view.name;
     const half = analogHalfRangeV(view.gain);
@@ -189,6 +204,8 @@ export class AnalogRowSettingsDialog {
     this.nameLabel.textContent = t('bus.name');
     this.triggerLabel.textContent = t('channels.triggerMode');
     this.levelLabel.textContent = t('channels.triggerLevel');
+    this.overlayLabel.textContent = t('bus.layoutMerged');
+    setHelpTipText(this.overlayTip, t('analogRow.overlayHelp'));
     this.cancelButton.textContent = t('channels.cancel');
     this.saveButton.textContent = t('toolbar.save');
     for (const [kind, option] of this.triggerOptions) {
@@ -216,7 +233,7 @@ export class AnalogRowSettingsDialog {
       name: this.nameInput.value.trim(),
       kind: kind === 'none' ? null : kind,
       volts: Number(this.levelInput.value) || 0,
-      overlay: this.overlay,
+      overlay: this.overlayInput.checked,
     };
     this.reset();
     this.cb.configure(id, config);
