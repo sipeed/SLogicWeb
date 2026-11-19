@@ -450,10 +450,10 @@ const startBody = methodBody(app, 'private async startCapture(');
   render({ frames: 8, effective: 0, loop: true, clear: 'display-change' });
   check('Loop disables the control and explains why, keeping the stored choice visible',
     triggerOf() !== null && triggerOf()!.disabled &&
-    (noteOf()?.textContent ?? '').includes('Loop has no finite acquisition wave') &&
+    (noteOf()?.textContent ?? '').includes('Stream has no finite acquisition wave') &&
     clearOf() !== null && clearOf()!.disabled &&
     persistenceNoteText({ frames: 8, effective: 0, loop: true, clear: null })
-      .includes('Loop has no finite acquisition wave'),
+      .includes('Stream has no finite acquisition wave'),
     `disabled=${triggerOf()?.disabled}, note=${noteOf()?.textContent}`);
 
   render({ frames: 0, effective: 0, loop: false, clear: null });

@@ -146,7 +146,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   'analyzing': 'analysing the current capture',
   'cancelled': 'capture analysis cancelled; analyze again to resume',
   'stable-capture-required': 'analysis needs a completed Single or Repeat capture',
-  'loop': 'Loop captures cannot be analysed; stop a Single or Repeat capture first',
+  'loop': 'Stream captures cannot be analysed; stop a Single or Repeat capture first',
   'paused': 'paused while an analysis view (FFT or XY) is shown',
 };
 
@@ -958,7 +958,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureStatusCancelled': 'capture analysis cancelled; ' +
       'analyze again to resume',
     'capturePanel.measureStatusStableCapture': 'analysis needs a completed Single or Repeat capture',
-    'capturePanel.measureStatusLoop': 'Loop captures cannot be analysed; ' +
+    'capturePanel.measureStatusLoop': 'Stream captures cannot be analysed; ' +
       'stop a Single or Repeat capture first',
     'capturePanel.measurePartial': 'partial: {analyzed} of {requested} samples',
     'capturePanel.measureWindowSamples': 'Window: {samples} samples',
@@ -988,7 +988,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     'capturePanel.measureStatsCapped': 'capped at {count}',
     'capturePanel.measureStatsReset': 'Reset statistics',
     'capturePanel.measureStatsResetAll': 'Reset all statistics',
-    'capturePanel.measureStatsLoop': 'cross-acquisition statistics are unavailable in Loop captures',
+    'capturePanel.measureStatsLoop': 'cross-acquisition statistics are unavailable in Stream captures',
     'capturePanel.measureStatsNote': 'Statistics are cross-acquisition and kept for this session only.',
     'capturePanel.measureValueNone': '–',
   };
@@ -2129,7 +2129,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
   };
   check('Loop discloses the unavailable statistics with the reason instead of a zero count',
     loop.statsHidden === true && loop.count === '--' &&
-      loop.loop === 'cross-acquisition statistics are unavailable in Loop captures' &&
+      loop.loop === 'cross-acquisition statistics are unavailable in Stream captures' &&
       loop.skippedHidden === true && loop.current === '21.5 V',
     `loop=${JSON.stringify(loop)}`);
 
