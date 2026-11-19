@@ -415,7 +415,7 @@ expectHeight('annotation lanes cannot push a channel below the minimum', 200, 32
     rowSource.includes("settings.addEventListener('mousedown', () => { el.draggable = false; })") &&
     rowSource.includes('this.settingsDialog.closeUnless(cells.map((cell) => cell.channel.index))') &&
     !rowSource.includes('nameInput') &&
-    rowSource.includes("this.editor.className = 'ch-editor-popover'");
+    rowSource.includes('new AnalogRowSettingsDialog(');
   check('the row head shows the read-only trigger preview and the gear sits in the body actions column',
     rowStart >= 0 && dialogSource.length > 0 && gearEntry,
     `rowStart=${rowStart}, dialog=${dialogSource.length}, gear=${gearEntry}`);

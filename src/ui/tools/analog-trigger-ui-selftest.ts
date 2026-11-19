@@ -35,6 +35,7 @@ const zh = fs.readFileSync('src/ui/locales/zh-CN.ts', 'utf8');
 const fr = fs.readFileSync('src/ui/locales/fr.ts', 'utf8');
 const ru = fs.readFileSync('src/ui/locales/ru.ts', 'utf8');
 const channel = fs.readFileSync('src/ui/channelList.ts', 'utf8');
+const analogDialog = fs.readFileSync('src/ui/analogRowDialog.ts', 'utf8');
 const overlay = fs.readFileSync('src/ui/overlay.ts', 'utf8');
 const sheet = fs.readFileSync('src/ui/style.css', 'utf8');
 
@@ -48,21 +49,29 @@ function cssRules(selector: string, source: string = sheet): string[] {
 }
 
 {
-  const rows = channel.includes("triggerButton.className = 'bus-trigger'") &&
-    channel.includes('this.openAnalogTriggerMenu(triggerButton!, cell)') &&
-    channel.includes('private openAnalogTriggerMenu(') &&
-    channel.includes("t('channels.triggerLevel')") &&
-    channel.includes('this.cb.onBusConfigure?.(cell.id,') &&
-    channel.includes('analogRowConfig(cell, selected,') &&
+  const rows = channel.includes("preview.className = 'bus-trigger-preview'") &&
+    channel.includes("preview.setAttribute('role', 'img')") &&
+    !channel.includes("preview.setAttribute('aria-haspopup'") &&
+    !channel.includes("preview.setAttribute('aria-expanded'") &&
+    channel.includes('this.analogDialog.open(gear, analogRowView(cell))') &&
+    channel.includes("t('analogRow.settings', { name: cell.name })") &&
+    !channel.includes('openAnalogTriggerMenu') && !channel.includes('ch-editor-popover') &&
+    !channel.includes('positionEditor') && !channel.includes('keepAnalogDraft') &&
+    !channel.includes('editorBusId') &&
+    analogDialog.includes("t('channels.triggerLevel')") &&
+    analogDialog.includes('this.cb.configure(id, config);') &&
     !channel.includes('bus-trigger-value') &&
     overlay.includes('const triggerLabel =') &&
     overlay.includes('formatScopeVolts(scope.triggerVolts!)') &&
     panel.includes("div('global-trigger-list')") &&
     panel.includes("t('capturePanel.noAnalogTrigger')") &&
     !panel.includes('analog-trigger-slope');
-  const styled = sheet.includes('.bus-trigger {') && !sheet.includes('.bus-trigger-value') &&
-    sheet.includes('.ch-trigger-level {');
-  check('the analog trigger is configured on its ADC row; Global Trigger only previews it',
+  const styled = sheet.includes('.bus-trigger-preview {') &&
+    sheet.includes('.bus-trigger-preview.armed') && !sheet.includes('.bus-trigger-value') &&
+    !sheet.includes('.ch-trigger-menu') && !sheet.includes('.ch-trigger-item') &&
+    !sheet.includes('.ch-trigger-level') && !sheet.includes('.ch-trigger-dot') &&
+    !sheet.includes('.ch-editor-popover');
+  check('the analog trigger is configured from its ADC row settings; Global Trigger only previews it',
     rows && styled, `rows=${rows}, styled=${styled}`);
 }
 
@@ -118,8 +127,8 @@ function cssRules(selector: string, source: string = sheet): string[] {
     panel.includes("t('capturePanel.noCondition')") &&
     panel.includes("t('capturePanel.analogSingleNote')") &&
     panel.includes("t('capturePanel.noAnalogTrigger')") &&
-    channel.includes('private openAnalogTriggerMenu(') &&
-    channel.includes('onBusConfigure?.(cell.id,') &&
+    channel.includes('this.analogDialog.open(gear, analogRowView(cell))') &&
+    channel.includes('onBusConfigure?.(id, config)') &&
     app.includes('private configureAnalogTrigger(') &&
     app.includes('const analogStarts = Object.keys(analogTriggers).map(Number).sort((a, b) => a - b);') &&
     app.includes("this.settings.triggerSource === 'analog'") &&
@@ -150,19 +159,19 @@ function cssRules(selector: string, source: string = sheet): string[] {
       !rule.includes('var(--warning)')) &&
     previewArmed.every((rule) => rule.includes('color: var(--warning)') &&
       !rule.includes('border') && !rule.includes('background'));
-  const analogConfigured = cssRules('.bus-trigger.configured');
-  const analogArmed = cssRules('.bus-trigger.armed');
+  const analogConfigured = cssRules('.bus-trigger-preview.configured');
+  const analogArmed = cssRules('.bus-trigger-preview.armed');
   const analogStates = analogConfigured.length > 0 && analogArmed.length > 0 &&
     analogConfigured.every((rule) => rule.includes('color: var(--text80)') &&
       !rule.includes('var(--accent)') && !rule.includes('var(--primary)') &&
       !rule.includes('var(--warning)')) &&
     analogArmed.every((rule) => rule.includes('color: var(--warning)') &&
-      rule.includes('border-color: var(--warning)'));
-  const draft = channel.includes("let selected: 'rising' | 'falling' | null") &&
-    channel.includes('const syncSelected = (): void =>') &&
-    channel.includes('selected = kind;') && channel.includes('level.focus();') &&
-    channel.includes('const commitSelected = (): void =>') &&
-    channel.includes("apply.textContent = t('bus.confirm')");
+      !rule.includes('border') && !rule.includes('background'));
+  const draft = analogDialog.includes('private syncLevel(): void') &&
+    analogDialog.includes("this.levelInput.disabled = this.checkedKind() === 'none';") &&
+    analogDialog.includes('const kind = this.checkedKind();') &&
+    analogDialog.includes('this.triggerFieldset.addEventListener') &&
+    !channel.includes("t('bus.confirm')");
   check('the row preview and the analog trigger keep neutral configured and bright selected-source states',
     active && previewStates && analogStates && draft,
     `active=${active}, preview=${previewStates}, base=${JSON.stringify(previewBase)}, ` +
@@ -191,10 +200,9 @@ function cssRules(selector: string, source: string = sheet): string[] {
     panel.includes("t('capturePanel.pendingTrigger')") &&
     panel.includes("div(v.running || v.stopping ? 'panel-note' : 'panel-note error')") &&
     planAt >= 0 && deviceStartAt > planAt;
-  const popover = channel.includes('private editorBusId: string | null = null;') &&
-    channel.includes('const keepAnalogDraft =') &&
-    channel.includes('this.editorBusId = cell.id;') &&
-    channel.includes('this.positionEditor(anchor);');
+  const popover = channel.includes('this.analogDialog.closeUnless(cells.map((cell) => cell.id));') &&
+    channel.includes('this.analogDialog.close();') &&
+    analogDialog.includes('closeUnless(present: readonly string[]): void {');
   // Edits retune a matcher that is still waiting. After the match the device matcher is
   // frozen; a Loop analog lock retunes the page detector, a disarm tears it down, and a
   // capture that started unarmed restarts to arm.
@@ -243,12 +251,13 @@ function cssRules(selector: string, source: string = sheet): string[] {
 }
 
 {
-  const keys = en.includes("'channels.triggerOn':") &&
+  const keys = !en.includes("'channels.triggerOn':") &&
+    !zh.includes("'channels.triggerOn':") &&
     en.includes("'channels.triggerLevel':") && en.includes("'bus.triggerDragTip':") &&
-    zh.includes("'channels.triggerOn':") && zh.includes("'channels.triggerLevel':") &&
+    zh.includes("'channels.triggerLevel':") &&
     zh.includes("'bus.triggerDragTip':") && en.includes("'capturePanel.pendingTrigger':") &&
     zh.includes("'capturePanel.pendingTrigger':");
-  check('the analog row editor, ruler and pending-run note are localized',
+  check('the analog row settings, ruler and pending-run note are localized',
     keys, `keys=${keys}`);
 }
 

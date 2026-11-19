@@ -5071,7 +5071,7 @@ export class App {
       if (target instanceof HTMLElement &&
           (target.isContentEditable ||
             target.closest('.select-field, .assistant-panel, .cursor-dist-popover') !== null ||
-            target.closest('.ch-editor-popover, button, [role="button"], [role="slider"]') !== null)) return;
+            target.closest('button, [role="button"], [role="slider"]') !== null)) return;
       if (target instanceof HTMLElement && target.closest('dialog[open]') !== null) return;
       if (this.runShortcut(id)) e.preventDefault();
     });

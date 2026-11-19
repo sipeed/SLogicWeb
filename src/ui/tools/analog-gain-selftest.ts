@@ -282,6 +282,7 @@ function roundTrip(views: unknown[], analogTriggers?: Record<string, unknown>): 
   const app = fs.readFileSync('src/ui/app.ts', 'utf8');
   const panel = fs.readFileSync('src/ui/capturePanel.ts', 'utf8');
   const list = fs.readFileSync('src/ui/channelList.ts', 'utf8');
+  const dialog = fs.readFileSync('src/ui/analogRowDialog.ts', 'utf8');
   const start = app.indexOf('  private configureAnalogGain(');
   const end = app.indexOf('\n  }\n', start);
   const body = start >= 0 && end > start ? app.slice(start, end) : '';
@@ -303,7 +304,8 @@ function roundTrip(views: unknown[], analogTriggers?: Record<string, unknown>): 
   const ui = app.includes('onAnalogGain: (start, gain) => this.configureAnalogGain(start, gain),') &&
     panel.includes('this.cb.onAnalogGain(start, next)') &&
     panel.includes("t('capturePanel.analogGainHelp')") &&
-    list.includes("t('channels.analogGainSub', {") && list.includes('level.max = String(half);');
+    list.includes("t('channels.analogGainSub', {") &&
+    dialog.includes('this.levelInput.max = String(half);');
   check('a gain change is conversion only: re-snapped through the settings clamp, retuned live, never restarted',
     gainPath && triggerPath && ui, `gainPath=${gainPath}, triggerPath=${triggerPath}, ui=${ui}`);
 }

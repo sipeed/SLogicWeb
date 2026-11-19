@@ -37,7 +37,7 @@ const zh = fs.readFileSync('src/ui/locales/zh-CN.ts', 'utf8');
     (panel.match(/disabled: captureLocked/g) ?? []).length === 3 &&
     (panel.match(/applyCaptureLock\(/g) ?? []).length === 4 &&
     !panel.includes('const modeLocked') && !panel.includes('timeLocked');
-  const guard = app.includes('.ch-editor-popover, button, [role="button"], [role="slider"]');
+  const guard = app.includes('target.closest(\'button, [role="button"], [role="slider"]\')');
   check('width and analog stay editable while running; mode and all three time controls lock on one predicate',
     editable && sharedLock && guard,
     `editable=${editable}, sharedLock=${sharedLock}, guard=${guard}`);

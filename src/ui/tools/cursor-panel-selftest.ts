@@ -1009,8 +1009,8 @@ const edgeMethodsSource = slice(app,
     '        if (this.runShortcut(id)) e.preventDefault();\n' +
     '        return;\n      }\n';
   const movedBelowGuard = app.replace(anywhereBlock, '').replace(
-    "            target.closest('.ch-editor-popover, button, [role=\"button\"], [role=\"slider\"]') !== null)) return;\n",
-    "            target.closest('.ch-editor-popover, button, [role=\"button\"], [role=\"slider\"]') !== null)) return;\n" +
+    "            target.closest('button, [role=\"button\"], [role=\"slider\"]') !== null)) return;\n",
+    "            target.closest('button, [role=\"button\"], [role=\"slider\"]') !== null)) return;\n" +
       anywhereBlock);
   check('the popover keeps Space and Escape for its own picker',
     app.includes("target.closest('.select-field, .assistant-panel, .cursor-dist-popover') !== null") &&

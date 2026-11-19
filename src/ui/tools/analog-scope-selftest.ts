@@ -412,7 +412,7 @@ function methodBody(text: string, signature: string): string {
   const triggerDrag = app.includes("className = 'scope-trigger-drag'") &&
     app.includes('private dragScopeTrigger(') && app.includes('triggerKind: analogTrigger.kind') &&
     sheet.includes('.scope-trigger-drag {') && sheet.includes('border-right: 7px solid var(--warning)') &&
-    list.includes("triggerButton.className = 'bus-trigger'") &&
+    list.includes("preview.className = 'bus-trigger-preview'") &&
     overlay.includes('const triggerY = triggerVisible ? geometry.yVolts(scope.triggerVolts!) : 0;') &&
     overlay.includes('const triggerLabel =') && overlay.includes('formatScopeVolts(scope.triggerVolts!)') &&
     !list.includes('bus-trigger-value');

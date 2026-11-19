@@ -147,7 +147,8 @@ const gear = (root: FakeElement, channel: number): FakeElement | null =>
 const preview = (root: FakeElement): FakeElement | null =>
   root.querySelector('.ch-trigger-preview');
 const actions = (root: FakeElement): FakeElement | null => root.querySelector('.ch-actions');
-const popover = (): FakeElement | null => doc.body.querySelector('.ch-editor-popover');
+const analogDialog = (): FakeElement | null =>
+  doc.body.querySelector('dialog[aria-labelledby="analog-row-settings-title"]');
 
 function submit(): void {
   form()?.dispatchEvent(fakeEvent('submit'));
@@ -488,19 +489,25 @@ function chooseMode(mode: TriggerMode): void {
     `openAgain=${openAgain}, open=${settingsDialog()?.open}`);
 }
 
-// The analog bus row keeps its own popover trigger menu, not the channel dialog.
+// An analog bus row's glyph is a read-only preview; its gear opens the analog row dialog.
 {
   const h = setup([makeCell(0)]);
   h.renderBuses([{
     id: 'bus-a1', name: 'A1', summary: 'D0-D7', color: '#48C860', heightCss: 160, analog: true,
   }]);
-  h.root.querySelector('.bus-trigger[data-bus-id="bus-a1"]')?.click();
-  const menu = popover();
-  check('an analog bus trigger opens its own popover menu and never the channel dialog',
-    settingsDialog()?.open === false && menu !== null && menu.hidden === false &&
-      menu.querySelector('.ch-trigger-menu') !== null && menu.getAttribute('role') === 'dialog',
-    `dialogOpen=${settingsDialog()?.open}, hidden=${menu?.hidden}, ` +
-    `menu=${menu?.querySelector('.ch-trigger-menu') !== null}`);
+  const glyph = h.root.querySelector('.bus-trigger-preview');
+  glyph?.click();
+  const inert = glyph !== null && glyph.getAttribute('role') === 'img' &&
+    glyph.getAttribute('aria-haspopup') === null &&
+    analogDialog()?.open !== true && settingsDialog()?.open === false;
+  const opener = h.root.querySelector('.bus-cell-edit[data-bus-id="bus-a1"]');
+  opener?.click();
+  const opened = analogDialog() !== null && analogDialog()?.open === true &&
+    settingsDialog()?.open === false &&
+    analogDialog()?.querySelectorAll('.channel-trigger-option input').length === 3;
+  check('an analog row shows an inert trigger preview and its gear opens the analog row dialog',
+    inert && opened,
+    `inert=${inert}, opened=${opened}, mode=${analogDialog()?.querySelector('h2')?.textContent}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

@@ -636,46 +636,16 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
 }
 .ch-trigger-preview.configured { color: var(--text80); }
 .ch-trigger-preview.armed { color: var(--warning); }
-.bus-trigger.armed {
-  color: var(--warning); border-color: var(--warning);
-  background: color-mix(in oklab, var(--warning) 14%, var(--bg20));
+.bus-trigger-preview {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 18px;
+  color: var(--text50);
 }
-.bus-trigger {
-  flex: none; margin-left: auto; display: flex; align-items: center; justify-content: center;
-  width: 22px; height: 18px; padding: 0; cursor: pointer;
-  color: var(--text50); background: var(--bg20);
-  border: 1px solid var(--border-low); border-radius: 3px;
-}
-.bus-trigger.configured { color: var(--text80); border-color: var(--border-high); }
-.bus-trigger svg { display: block; width: 14px; height: 14px; }
-.ch-trigger-level {
-  display: flex; align-items: center; gap: 5px;
-  font-size: 10px; color: var(--text50);
-}
-.ch-trigger-level input {
-  width: 64px; height: 24px; padding: 2px 5px; font: inherit; font-size: 11px;
-  color: var(--foreground); background: var(--background);
-  border: 1px solid var(--border); border-radius: var(--radius);
-}
+.bus-trigger-preview.configured { color: var(--text80); }
+.bus-trigger-preview.armed { color: var(--warning); }
+.bus-trigger-preview svg { display: block; width: 14px; height: 14px; }
 
 .ch-trigger-preview svg { display: block; width: 14px; height: 14px; }
-
-/* Dark theme: the compact analog bus trigger button follows the same secondary-control
-   roles as the other icon buttons while keeping the established 18 CSS px head height. */
-:is(html[data-theme="dark"], html[data-theme="light"]) .bus-trigger {
-  background: var(--background); border-color: var(--input);
-  color: var(--muted-foreground); border-radius: calc(var(--radius) - 4px);
-}
-:is(html[data-theme="dark"], html[data-theme="light"]) .bus-trigger:hover {
-  border-color: var(--primary); color: var(--foreground);
-}
-:is(html[data-theme="dark"], html[data-theme="light"]) .bus-trigger.configured {
-  border-color: var(--border-high); color: var(--text80);
-}
-:is(html[data-theme="dark"], html[data-theme="light"]) .bus-trigger.armed {
-  border-color: var(--warning); color: var(--warning);
-  background: color-mix(in oklab, var(--warning) 14%, var(--background));
-}
 
 .ch-original-id {
   flex: none; margin-left: 4px; font-size: 10px; color: var(--text50);
@@ -707,41 +677,6 @@ html:not([data-toolbar-labels="off"]) #toolbar :is(.primary, .danger) .toolbar-i
   color: var(--muted-foreground); border-radius: calc(var(--radius) - 4px);
 }
 :is(html[data-theme="dark"], html[data-theme="light"]) .ch-settings:hover { border-color: var(--primary); color: var(--foreground); }
-
-.ch-trigger-menu-head {
-  display: flex; align-items: center; gap: 6px; padding: 0 2px 6px;
-  font-size: 11px; color: var(--text80);
-}
-.ch-trigger-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; }
-.ch-trigger-menu { display: flex; flex-direction: column; gap: 1px; }
-.ch-trigger-item {
-  display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 6px;
-  border: 0; border-radius: 4px; background: transparent; color: var(--text80);
-  font: inherit; font-size: 11px; text-align: left; cursor: pointer;
-}
-.ch-trigger-item:hover { background: var(--bg30); }
-.ch-trigger-item.selected:not(.none) { background: var(--bg30); color: var(--text); }
-.ch-trigger-item.selected.none { background: transparent; }
-.ch-trigger-item:disabled { opacity: .45; cursor: default; }
-.ch-trigger-item-icon { flex: none; display: flex; width: 18px; }
-.ch-trigger-item-icon svg { width: 16px; height: 12px; }
-.ch-trigger-item-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ch-trigger-item-check { flex: none; color: var(--primary); opacity: 0; font-size: 12px; }
-.ch-trigger-item.selected .ch-trigger-item-check { opacity: 1; }
-.ch-trigger-menu-note {
-  margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border-low);
-  font-size: 10px; line-height: 1.4; color: var(--text50);
-}
-/* The analog trigger menu: a small popover, never a modal. */
-.ch-editor-popover {
-  position: fixed; z-index: 60; width: 236px; padding: 10px;
-  display: flex; flex-direction: column; gap: 8px;
-  background: var(--bg10); color: var(--text);
-  border: 1px solid var(--border-high); border-radius: var(--radius);
-  box-shadow: 0 10px 28px rgb(0 0 0 / 32%);
-  max-height: calc(100vh - 16px); overflow-y: auto;
-}
-.ch-editor-popover[hidden] { display: none; }
 
 /* Dark theme: the channel cell renders as one rounded Item-style card (the shadcn
    Item anatomy: strip = media, tag+name = content, settings = action). The cell box
