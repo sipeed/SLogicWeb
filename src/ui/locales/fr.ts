@@ -124,7 +124,7 @@ export const fr: Messages = {
   'hints.overview.pan': 'Déplacer la chronologie',
   'hints.overview.center': 'Cliquer ou glisser : centrer la vue',
   'hints.labels.scroll': 'Molette : faire défiler les voies',
-  'hints.labels.trigger': 'Cliquer l’icône de déclenchement : modifier',
+  'hints.labels.trigger': 'Cliquer l’engrenage de la ligne : ouvrir ses réglages',
   'hints.sidePanel.scroll': 'Molette : faire défiler le panneau',
   'hints.toolbar.activate': 'Cliquer : activer',
   'hints.area.corner': 'Coin de la vue',

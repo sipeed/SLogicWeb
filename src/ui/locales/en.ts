@@ -128,7 +128,7 @@ export const en = {
   'hints.overview.pan': 'Pan the timeline',
   'hints.overview.center': 'Click or drag: center the view',
   'hints.labels.scroll': 'Wheel: scroll channels',
-  'hints.labels.trigger': 'Click the trigger icon: edit trigger',
+  'hints.labels.trigger': 'Click the row gear: open its settings',
   'hints.sidePanel.scroll': 'Wheel: scroll the panel',
   'hints.toolbar.activate': 'Click: activate',
   'hints.area.corner': 'View corner',

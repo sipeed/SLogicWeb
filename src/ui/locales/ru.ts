@@ -124,7 +124,7 @@ export const ru: Messages = {
   'hints.overview.pan': 'Сдвигать таймлайн',
   'hints.overview.center': 'Щелчок или перетаскивание: центрировать вид',
   'hints.labels.scroll': 'Колесо: прокрутка каналов',
-  'hints.labels.trigger': 'Щелчок по значку запуска: изменить',
+  'hints.labels.trigger': 'Щелчок по шестерёнке строки: открыть настройки',
   'hints.sidePanel.scroll': 'Колесо: прокрутка панели',
   'hints.toolbar.activate': 'Щелчок: выполнить',
   'hints.area.corner': 'Угол вида',

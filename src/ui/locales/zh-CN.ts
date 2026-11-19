@@ -122,7 +122,7 @@ export const zhCN: Messages = {
   'hints.overview.pan': '左右平移时间范围',
   'hints.overview.center': '单击或拖动：居中视图',
   'hints.labels.scroll': '滚轮：上下滚动通道',
-  'hints.labels.trigger': '单击触发图标：编辑触发',
+  'hints.labels.trigger': '单击行齿轮：打开行设置',
   'hints.sidePanel.scroll': '滚轮：滚动面板',
   'hints.toolbar.activate': '单击：执行',
   'hints.area.corner': '视图角',
