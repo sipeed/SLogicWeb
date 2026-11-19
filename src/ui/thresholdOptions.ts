@@ -10,14 +10,17 @@
  *   1.2 V  -> 2.5 V logic     (0.5 x 2.5 = 1.25)
  *   1.5 V  -> 3 V logic       (0.5 x 3; the official ADC module's output bus)
  *   1.65 V -> 3.3 V logic     (0.5 x 3.3; LVCMOS/LVTTL 3.3 V)
- *   2.5 V  -> 5 V CMOS        (0.5 x 5)
+ *   1.8 V  -> 3.3 V logic     (a higher switching point for noisy 3.3 V signals)
+ *   2.5 V  -> 5 V logic       (0.5 x 5)
+ *   3.3 V  -> 5 V logic       (a higher switching point for noisy 5 V signals)
  *
  * An analog group reads its eight inputs as the ADC module's digital output bus, so the
  * digital threshold decodes that bus too: the official module drives 3 V logic, which is
- * why 1.5 V carries the "official ADC" annotation rather than a TTL one. 1.8 V and 3.3 V
- * are not the mid-swing of a common family, so they keep the bare value (they suit noisy
- * 3.3 V / 5 V signals that need a higher switching point). The table is advisory text
- * only; the device still receives the plain voltage.
+ * why 1.5 V carries the "official ADC" annotation rather than a TTL one. Every option
+ * names the family it serves, so the list has no bare-volt rows; 1.8 V and 3.3 V share
+ * the 3.3 V and 5 V families with the mid-swing options below them but sit higher for
+ * noisy signals. The table is advisory text only; the device still receives the plain
+ * voltage.
  */
 import { vrefCode, vrefVolts } from '../device/index.js';
 import { t } from './i18n.js';
@@ -41,7 +44,9 @@ const FAMILIES: ReadonlyMap<number, ThresholdFamily> = new Map<number, Threshold
   [1.2, { kind: 'logic', supplyVolts: 2.5 }],
   [ADC_THRESHOLD_VOLTS, { kind: 'logic', supplyVolts: 3, officialAdc: true }],
   [1.65, { kind: 'logic', supplyVolts: 3.3 }],
+  [1.8, { kind: 'logic', supplyVolts: 3.3 }],
   [2.5, { kind: 'logic', supplyVolts: 5 }],
+  [3.3, { kind: 'logic', supplyVolts: 5 }],
 ]);
 
 export function thresholdFamily(volts: number): ThresholdFamily {

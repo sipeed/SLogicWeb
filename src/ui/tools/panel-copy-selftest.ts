@@ -31,17 +31,22 @@ const catalogs: Array<[string, Messages]> = [['en', en], ['zh-CN', zhCN], ['ru',
   const want = [
     '0.6 V (1.2 V logic)', '0.9 V (1.8 V logic)', '1.2 V (2.5 V logic)',
     '1.5 V (3 V logic, official ADC)',
-    '1.65 V (3.3 V logic)', '1.8 V', '2.5 V (5 V logic)', '3.3 V',
+    '1.65 V (3.3 V logic)', '1.8 V (3.3 V logic)', '2.5 V (5 V logic)',
+    '3.3 V (5 V logic)',
   ];
-  check('every threshold option is annotated with the logic family it suits, or left bare',
+  check('every threshold option is annotated with the logic family it suits',
     labels.join('|') === want.join('|'), labels.join('|'));
-  // A family's threshold is about half its supply, including the ADC module's 3 V bus.
+  // A family's threshold is its mid-swing, or the documented higher switching point for
+  // a noisy signal above the mid-swing and below the supply.
   const off = THRESHOLD_VOLT_OPTIONS.filter((volts) => {
     const family = thresholdFamily(volts);
-    if (family === null) return false;
-    return Math.abs(volts - family.supplyVolts / 2) > 0.06;
+    if (family === null) return true;
+    const midSwing = Math.abs(volts - family.supplyVolts / 2) <= 0.06;
+    const higher = volts > family.supplyVolts / 2 && volts < family.supplyVolts;
+    return !midSwing && !higher;
   });
-  check('each annotation is within the family mid-swing', off.length === 0, `off=${off.join(',')}`);
+  check('each annotation is the family mid-swing or its documented higher switching point',
+    off.length === 0, `off=${off.join(',')}`);
   check('the zh-CN option forms are "1.65 V（3.3 V 逻辑）" and "1.5 V（3 V 逻辑，官方 ADC 专用）"',
     zhCN['capturePanel.thresholdLogic'] === '{volts} V（{logic} V 逻辑）' &&
     zhCN['capturePanel.thresholdLogicAdc'] === '{volts} V（{logic} V 逻辑，官方 ADC 专用）',

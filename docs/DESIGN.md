@@ -1103,10 +1103,11 @@ polite live region, so assistive technology reads the area and hints when they c
   board only arms the capture (no data is read from it), it runs untriggered, and it is a
   demonstration rather than a measurement.
 - Threshold choices name the logic family they suit (`thresholdOptions.ts`), e.g.
-  "1.65 V (3.3 V logic)"; the plain voltage is still what the device receives. The
-  official ADC module's output bus is 3 V logic, so 1.5 V is annotated "3 V logic,
-  official ADC" (not TTL), and while any analog group is active with another threshold
-  chosen, the Acquire panel states the matching choice.
+  "1.65 V (3.3 V logic)"; every choice is annotated, including the higher switching
+  points 1.8 V (3.3 V logic) and 3.3 V (5 V logic) for noisy signals. The plain voltage is
+  still what the device receives. The official ADC module's output bus is 3 V logic, so
+  1.5 V is annotated "3 V logic, official ADC" (not TTL), and while any analog group is
+  active with another threshold chosen, the Acquire panel states the matching choice.
 - The Shortcuts dialog lists the keyboard keys and the mouse/touch gestures, following the
   "wheel zooms" setting; the hint bar and the dialog never disagree with the handlers.
 - Errors name the operation and keep the diagnostic code in the console prefix.
