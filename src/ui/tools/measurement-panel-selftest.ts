@@ -5,6 +5,7 @@ import {
   measurementWindowText,
   CapturePanel, type CapturePanelCallbacks, type CapturePanelView,
 } from '../capturePanel.js';
+import type { AnalysisViewMode } from '../fftView.js';
 import { defaultCaptureSettings } from '../state.js';
 import { en } from '../locales/en.js';
 import { zhCN } from '../locales/zh-CN.js';
@@ -47,6 +48,8 @@ function check(name: string, pass: boolean, detail: string): void {
 }
 
 const read = (path: string): string => fs.readFileSync(path, 'utf8');
+const contains = (haystack: string, needle: string): boolean => new RegExp(
+  needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')).test(haystack);
 const slice = (source: string, from: string, to: string): string => {
   const start = source.indexOf(from);
   if (start < 0) return '';
@@ -116,6 +119,7 @@ function rowView(over: Partial<MeasurementRowView> = {}): MeasurementRowView {
 
 function sectionView(over: Partial<MeasurementSectionView> = {}): MeasurementSectionView {
   return {
+    suspended: false,
     sources: [],
     filter: null,
     range: { kind: 'viewport', a: null, b: null },
@@ -175,8 +179,10 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
 }
 
 {
-  const filterAt = measureSection.indexOf("selectControl(\n      'measure.filter',");
-  const rangeAt = measureSection.indexOf("selectControl(\n      'measure.range',");
+  const selectAt = (key: string): number => measureSection.search(
+    new RegExp(`selectControl\\(\\s*'${key.replaceAll('.', '\\.')}',`));
+  const filterAt = selectAt('measure.filter');
+  const rangeAt = selectAt('measure.range');
   check('the filter and range selects are the first two controls of the section',
     filterAt >= 0 && rangeAt > filterAt &&
     measureSection.includes("t('capturePanel.measureSource')") &&
@@ -280,19 +286,20 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     `status=${measureSection.includes('measurementStatusText(row)')}, ` +
     `chevron=${measureSection.includes('measureChevron()')}`);
 
-  const removeFocus = "() => this.runMeasureAction('row', remove,\n" +
-    '            () => this.cb.onRemoveMeasurementRow(row.id), row.id, index)';
+  const removeFocus = new RegExp("this\\.runMeasureAction\\('row', remove,\\s*\\(\\) => " +
+    'this\\.cb\\.onRemoveMeasurementRow\\(row\\.id\\), row\\.id, index\\)');
+  const removeFocusAt = measureSection.search(removeFocus);
   check('each row removes exactly its own row id through the shared remove button',
     measureSection.includes('const remove = cursorRemoveButton(') &&
     measureSection.includes("t('capturePanel.measureRemove', { parameter: label })") &&
     measureSection.includes('const label = measurementRowLabel(row);') &&
-    measureSection.includes(removeFocus) &&
+    removeFocusAt >= 0 &&
     measureSection.indexOf('cursorRemoveButton(') <
       measureSection.indexOf('this.cb.onRemoveMeasurementRow(row.id)') &&
     measureSection.indexOf("this.runMeasureAction('row', remove") <
       measureSection.indexOf('this.cb.onRemoveMeasurementRow(row.id)') &&
     panel.includes('onRemoveMeasurementRow(id: number): void;'),
-    `wired=${measureSection.includes(removeFocus)}, ` +
+    `wired=${removeFocusAt >= 0}, ` +
       `armed=${measureSection.includes("this.runMeasureAction('row', remove")}`);
 
   const armFirst = 'const intent = this.armMeasureFocus(kind, from, id, row);\n' +
@@ -339,12 +346,12 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     source.includes("addOpen.setAttribute('aria-haspopup', 'dialog');") &&
     source.includes("addOpen.textContent = t('capturePanel.measureAddOpen');") &&
     source.includes('addOpen.disabled = v.measurement.sources.length === 0;') &&
-    source.includes('this.catalogDialog.open(\n' +
+    contains(source, 'this.catalogDialog.open(\n' +
       '      measurementCatalogView(v.measurement), addOpen)') &&
     source.includes("clearAll.dataset.measureClearAll = '';") &&
     source.includes("clearAll.textContent = t('capturePanel.measureClearAll');") &&
     source.includes('clearAll.disabled = v.measurement.rowCount === 0;') &&
-    source.includes(clearClick) &&
+    contains(source, clearClick) &&
     source.includes('measureActions.append(addOpen, clearAll);');
   const noEnable = footer(measureSection.replace(
     'addOpen.disabled = v.measurement.sources.length === 0;', 'addOpen.disabled = false;'));
@@ -372,7 +379,7 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
     source.includes("undo.className = 'analyzer-act measure-undo-action';") &&
     source.includes("undo.dataset.measureUndo = '';") &&
     source.includes("undo.textContent = t('capturePanel.measureUndo');") &&
-    source.includes(undoClick) &&
+    contains(source, undoClick) &&
     source.includes('undoNotice.append(undoText, undo);');
   const alwaysShown = notice(measureSection.replace(
     'if (v.measurement.undoCount !== null) {', 'if (true) {'));
@@ -384,8 +391,8 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       panel.includes('onToggle: (start, parameter) => ' +
         'this.cb.onToggleMeasurementRow(start, parameter),') &&
       panel.includes('onPickSource: (start) => this.cb.onPickMeasurementFilter(start),') &&
-      measureSection.includes(clearClick) &&
-      measureSection.includes(undoClick),
+      contains(measureSection, clearClick) &&
+      contains(measureSection, undoClick),
     `toggle=${panel.split('this.cb.onToggleMeasurementRow(').length - 1}, ` +
       `clear=${panel.split('this.cb.onClearMeasurementRows(').length - 1}, ` +
       `undo=${panel.split('this.cb.onUndoMeasurementRows(').length - 1}`);
@@ -2226,6 +2233,277 @@ const STATUS_TEXT: Record<MeasurementStatus, string> = {
       !chevronOpenRule.includes('#') && !chevronOpenRule.includes('rgb'),
     `rule=${chevronRule}, open=${chevronOpen}, resized=${rotationOnly(resizedOpen)}, ` +
       `collapsedOnly=${chevronRotate(collapsedOnly)}`);
+}
+
+{
+  const doc = installFakeDom();
+  const capture = doc.createElement('div');
+  const cursors = doc.createElement('div');
+  doc.body.append(capture, cursors);
+  const sources: MeasurementSectionView['sources'] = [{ group: 0, start: 0, gain: 1, name: 'A0' }];
+  const timeRows = [
+    rowView({ id: 11, parameter: 'vpp', unit: 'v', value: 3.5 }),
+    rowView({ id: 12, parameter: 'mean', unit: 'v', value: 1.5 }),
+    rowView({ id: 13, parameter: 'frequency' }),
+  ];
+  const allRows = timeRows.map(
+    (row) => ({ id: row.id, start: row.start, parameter: row.parameter }));
+  let mode: AnalysisViewMode = 'time';
+  const section = (): MeasurementSectionView => sectionView({
+    suspended: mode !== 'time',
+    sources,
+    range: { kind: 'cursors', a: 7, b: 8 },
+    cursors: [{ id: 7, label: 'A', color: '#f00' }, { id: 8, label: 'B', color: '#0f0' }],
+    rows: mode === 'time'
+      ? timeRows
+      : timeRows.map((row) => ({ ...row, status: 'paused' as const })),
+    allRows,
+    rowCount: timeRows.length,
+    undoCount: 2,
+    window: mode === 'time' ? { start: 0, end: 4096 } : null,
+    capture: mode === 'time'
+      ? { status: 'running', scanned: 1024, total: 4096, droppedSamples: 0 } : null,
+    fft: { mode, sources, source: 0, window: 'hann', minHz: null, maxHz: null, analysis: null },
+    xy: { mode, sources, sourceX: 0, sourceY: 0, fit: true, analysis: null },
+  });
+  const view = (): CapturePanelView => ({
+    settings: defaultCaptureSettings(),
+    channels: [],
+    widthOptions: [16],
+    buses: [],
+    analogGroups: 0,
+    softwareTestAvailable: false,
+    softwareTestOffered: false,
+    deviceName: 'fixture',
+    running: false,
+    stopping: false,
+    repeatPending: false,
+    progress: null,
+    maxSamplerateHz: { 16: 200e6 },
+    triggerState: 'off',
+    cursors: [],
+    cursorDistances: [],
+    cursorEdges: [],
+    cursorEdgeChannels: [],
+    triggerViewLost: false,
+    triggerViewPending: false,
+    triggerLocked: false,
+    triggerRetuneRejected: false,
+    triggerAnalogRolling: false,
+    triggerArmed: false,
+    triggerAutoDisarmed: false,
+    settingsArmed: false,
+    measurement: section(),
+    persistence: { frames: 32, effective: 32, loop: false, clear: null },
+  });
+  let panel: CapturePanel;
+  const render = (): void => panel.render(view());
+  panel = new CapturePanel({
+    capture: capture as unknown as HTMLElement,
+    cursors: cursors as unknown as HTMLElement,
+  }, {
+    onPickViewMode: (next: AnalysisViewMode) => {
+      mode = next;
+      render();
+    },
+  } as unknown as CapturePanelCallbacks);
+  const count = (selector: string): number => cursors.querySelectorAll(selector).length;
+  const rowIds = (): string[] =>
+    cursors.querySelectorAll('.measure-row').map((el) => el.dataset.measureId ?? '');
+  const segment = (which: AnalysisViewMode): FakeElement | null =>
+    cursors.querySelector(`[data-view-mode="${which}"]`);
+  const measureEl = (): FakeElement | null =>
+    cursors.querySelector('.measure-view-mode')?.closest('.panel-section') ?? null;
+  const labelTexts = (selector: string): string[] =>
+    cursors.querySelectorAll(selector).map((el) => el.textContent ?? '');
+
+  render();
+  const timeSurface = {
+    ids: rowIds().join(','),
+    filter: count('[data-select-key="measure.filter"]'),
+    range: count('[data-select-key="measure.range"]'),
+    picks: labelTexts('.measure-cursors .select-value'),
+    window: count('[data-measure-window]'),
+    capture: count('[data-measure-capture]'),
+    persistence: count('.measure-persistence'),
+    add: count('[data-measure-open]'),
+    clear: count('[data-measure-clear-all]'),
+    undo: count('[data-measure-undo-notice]'),
+    note: count('[data-measure-note]'),
+    legend: measureEl()?.querySelectorAll('.cursor-legend').length ?? 0,
+  };
+  check('Time mode renders the whole measurement surface, the switch included',
+    timeSurface.ids === '11,12,13' && timeSurface.filter === 1 && timeSurface.range === 1 &&
+      JSON.stringify(timeSurface.picks) === JSON.stringify(['A', 'B']) &&
+      timeSurface.window === 1 && timeSurface.capture === 1 && timeSurface.persistence === 1 &&
+      timeSurface.add === 1 && timeSurface.clear === 1 && timeSurface.undo === 1 &&
+      timeSurface.note === 1 && timeSurface.legend === 1 &&
+      count('.measure-view-mode-btn') === 3,
+    `surface=${JSON.stringify(timeSurface)}`);
+
+  cursors.querySelector('[data-measure-toggle="12"]')?.click();
+  const disclosureOpen = cursors.querySelector('[data-measure-details="12"]')?.hidden === false;
+
+  segment('fft')?.focus();
+  segment('fft')?.click();
+  const fftSurface = {
+    rows: count('.measure-row'),
+    filter: count('[data-select-key="measure.filter"]'),
+    range: count('[data-select-key="measure.range"]'),
+    cursors: count('.measure-cursors'),
+    window: count('[data-measure-window]'),
+    capture: count('[data-measure-capture]'),
+    persistence: count('.measure-persistence'),
+    add: count('[data-measure-open]'),
+    clear: count('[data-measure-clear-all]'),
+    undo: count('[data-measure-undo-notice]'),
+    note: count('[data-measure-note]'),
+    hint: measureEl()?.querySelectorAll('.panel-note').length ?? -1,
+    legend: measureEl()?.querySelectorAll('.cursor-legend').length ?? -1,
+    switches: count('.measure-view-mode'),
+    buttons: count('.measure-view-mode-btn'),
+    pressed: count('.measure-view-mode-btn.on'),
+    controls: count('[data-select-key="fft.source"]'),
+    summary: count('[data-fft-summary]'),
+  };
+  const fftAbsent = Object.entries(fftSurface).every(([key, value]) => key === 'switches' ||
+    key === 'buttons' || key === 'pressed' || key === 'controls' || key === 'summary' ||
+    value === 0);
+  check('the FFT view paints no measurement surface at all, not even an empty hint or legend',
+    fftAbsent && fftSurface.switches === 1 && fftSurface.buttons === 3 &&
+      fftSurface.pressed === 1 && fftSurface.controls === 1 && fftSurface.summary === 1,
+    `surface=${JSON.stringify(fftSurface)}`);
+  check('the FFT view keeps the switch, its own controls, its summary and no pause notice',
+    (measureEl()?.textContent ?? '').includes('FFT') &&
+      !(measureEl()?.textContent ?? '').toLowerCase().includes('paused') &&
+      !(measureEl()?.textContent ?? '').toLowerCase().includes('switch to'),
+    `text=${JSON.stringify((measureEl()?.textContent ?? '').slice(0, 120))}`);
+  check('clicking FFT lands the focus on the FFT segment button',
+    doc.activeElement === segment('fft') && doc.activeElement !== doc.body,
+    `active=${doc.activeElement === segment('fft')}`);
+
+  segment('xy')?.focus();
+  segment('xy')?.click();
+  const xySurface = {
+    rows: count('.measure-row'),
+    persistence: count('.measure-persistence'),
+    undo: count('[data-measure-undo-notice]'),
+    hint: measureEl()?.querySelectorAll('.panel-note').length ?? -1,
+    controls: count('[data-select-key="xy.source.x"]'),
+    summary: count('[data-xy-summary]'),
+  };
+  check('the XY view hides the same surface and keeps its own source, range and summary',
+    xySurface.rows === 0 && xySurface.persistence === 0 && xySurface.undo === 0 &&
+      xySurface.hint === 0 && xySurface.controls === 1 && xySurface.summary === 1 &&
+      doc.activeElement === segment('xy'),
+    `surface=${JSON.stringify(xySurface)}, active=${doc.activeElement === segment('xy')}`);
+
+  let updateThrew = false;
+  const beforeUpdate = { rows: count('.measure-row'), buttons: count('.measure-view-mode-btn') };
+  try {
+    panel.updateMeasurements(section());
+  } catch {
+    updateThrew = true;
+  }
+  check('the in-place updater tolerates the absent rows without a throw or a rebuild',
+    !updateThrew && count('.measure-row') === beforeUpdate.rows &&
+      count('.measure-view-mode-btn') === beforeUpdate.buttons,
+    `threw=${updateThrew}, rows=${count('.measure-row')}`);
+
+  segment('time')?.focus();
+  segment('time')?.click();
+  const restored = {
+    ids: rowIds().join(','),
+    open: cursors.querySelector('[data-measure-details="12"]')?.hidden === false,
+    picks: labelTexts('.measure-cursors .select-value'),
+    persistence: labelTexts('.measure-persistence .select-value').join(''),
+    undo: count('[data-measure-undo-notice]'),
+    filter: count('[data-select-key="measure.filter"]'),
+    active: doc.activeElement === segment('time'),
+  };
+  check('a Time -> FFT -> XY -> Time round trip restores rows, disclosure, configuration and focus',
+    restored.ids === '11,12,13' && disclosureOpen && restored.open &&
+      JSON.stringify(restored.picks) === JSON.stringify(['A', 'B']) &&
+      restored.persistence.includes('32') && restored.undo === 1 && restored.filter === 1 &&
+      restored.active,
+    `restored=${JSON.stringify(restored)}, opened=${disclosureOpen}`);
+
+  const addButton = cursors.querySelector('[data-measure-open]');
+  addButton?.click();
+  const dialog = doc.body.querySelector('[data-measure-catalog]');
+  const dialogOpened = dialog?.open === true;
+  mode = 'fft';
+  render();
+  const dialogClosed = doc.body.querySelector('[data-measure-catalog]')?.open === false;
+  check('a switch that removes the catalog opener closes the open catalog dialog',
+    dialogOpened && dialogClosed && count('.measure-row') === 0,
+    `opened=${dialogOpened}, closed=${dialogClosed}`);
+
+  const unavailableRows = (['no-source', 'loop', 'previous-wave-displayed'] as const)
+    .map((status) => {
+      panel.render({ ...view(), measurement: sectionView({
+        sources,
+        rows: timeRows.map((row) => rowView({
+          id: row.id, start: row.start, parameter: row.parameter, status, value: Number.NaN,
+        })),
+        allRows,
+        rowCount: timeRows.length,
+        unavailable: status,
+      }) });
+      return { status, rows: count('.measure-row'), text: labelTexts('.measure-status').join('|') };
+    });
+  check('suppression keys off the shown view only: every other unavailability keeps its rows',
+    unavailableRows.every((entry) => entry.rows === timeRows.length && entry.text !== '' &&
+      entry.text !== '—'),
+    `rows=${JSON.stringify(unavailableRows)}`);
+}
+
+{
+  const at = (pattern: RegExp): number => {
+    const match = pattern.exec(measureSection);
+    return match === null ? -1 : match.index;
+  };
+  const flagAt = at(/const suspended = v\.measurement\.suspended;/);
+  const legendAt = at(/if \(!suspended\) measureSec\.header\.appendChild\(measureLegend\);/);
+  const controlsAt = at(
+    /if \(!suspended\) \{\s*const measureControls = div\('measure-controls'\);/);
+  const blockAt = at(/if \(!suspended\) \{\s*if \(v\.measurement\.range\.kind === 'cursors'\) \{/);
+  const fftAt = measureSection.indexOf("if (measureFft !== undefined && measureMode === 'fft') {");
+  const xyAt = measureSection.indexOf("if (measureXy !== undefined && measureMode === 'xy') {");
+  const listAt = measureSection.indexOf("const list = div('measure-list');");
+  const noteAt = measureSection.indexOf("measureSec.body.appendChild(measureNote);");
+  check('the panel skips the legend, the controls and the whole block behind one view flag',
+    flagAt >= 0 && legendAt >= 0 && controlsAt >= 0 && blockAt > controlsAt &&
+      listAt > blockAt && noteAt > listAt,
+    `flag=${flagAt}, legend=${legendAt}, controls=${controlsAt}, block=${blockAt}, ` +
+      `list=${listAt}, note=${noteAt}`);
+
+  const guardedSlice = blockAt < 0 ? '' : measureSection.slice(blockAt);
+  check('both analysis-view blocks sit outside the view guard, and nothing measurement leaks',
+    fftAt >= 0 && xyAt > fftAt && fftAt < blockAt && xyAt < blockAt &&
+      !guardedSlice.includes('if (measureFft !== undefined') &&
+      !guardedSlice.includes('if (measureXy !== undefined') &&
+      guardedSlice.includes("const list = div('measure-list');") &&
+      guardedSlice.includes("const measureActions = div('measure-actions');") &&
+      guardedSlice.includes("const persistence = div('measure-persistence');") &&
+      guardedSlice.includes("const undoNotice = div('measure-undo');"),
+    `fft=${fftAt}, xy=${xyAt}, guard=${blockAt}`);
+
+  check('the flag is derived from the shown view mode, never from the row set or its statuses',
+    measureView.includes('suspended: false,') && measureView.includes('suspended: true,') &&
+      measureView.indexOf('suspended: true,') >
+        measureView.indexOf("if (this.viewMode !== 'time') {") &&
+      !/suspended:\s*[^,\n]*(rows|unavailable|paused)/.test(measureView) &&
+      !measureView.includes('every((row) => row.status'),
+    `false=${measureView.includes('suspended: false,')}, ` +
+      `true=${measureView.includes('suspended: true,')}`);
+
+  check('the panel never re-derives the suppression from a row status',
+    !panel.includes("row.status === 'paused'") && panel.includes('v.measurement.suspended') &&
+      !panel.replace(
+        'if (v.measurement.suspended && this.catalogDialog.isOpen) this.catalogDialog.close();', '',
+      ).includes("=== 'paused'"),
+    `pausedRows=${panel.includes("row.status === 'paused'")}`);
 }
 
 console.log(results.map((r) => `${r.pass ? 'PASS' : 'FAIL'}  ${r.name}\n        ${r.detail}`).join('\n'));

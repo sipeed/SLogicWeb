@@ -363,6 +363,7 @@ const startBody = methodBody(app, 'private async startCapture(');
   const cursors = doc.createElement('div');
   doc.body.append(capture, cursors);
   const emptyMeasurements: MeasurementSectionView = {
+    suspended: false,
     sources: [],
     filter: null,
     range: { kind: 'viewport', a: null, b: null },

@@ -538,6 +538,47 @@ function sectionOf(analysis: FftAnalysis | null, over: Partial<FftSectionView> =
       !persist.includes("viewMode: 'time',"),
     `pump=${pump.includes('viewMode')}, record=${record.includes('viewMode')}, ` +
       `persist=${persist.includes('viewMode: this.viewMode,')}`);
+
+  const model = read('src/ui/measurementState.ts');
+  const branch = view.indexOf("if (this.viewMode !== 'time') {");
+  const modelFlag = model.includes('suspended: boolean;');
+  const appFlag = (source: string): boolean =>
+    branch >= 0 &&
+      source.indexOf('suspended: false,') >= 0 &&
+      source.indexOf('suspended: false,') < branch &&
+      source.indexOf('suspended: true,') > branch &&
+      source.indexOf('suspended: true,') < source.indexOf('if (sources.length === 0) {') &&
+      !/suspended: [^,\n]*(rows|unavailable|paused|status)/.test(source);
+  const panelGuard = (source: string): boolean =>
+    source.includes('const suspended = v.measurement.suspended;') &&
+    source.includes('if (!suspended) measureSec.header.appendChild(measureLegend);') &&
+    /if \(!suspended\) \{\s*const measureControls = div\('measure-controls'\);/.test(source) &&
+    /if \(!suspended\) \{\s*if \(v\.measurement\.range\.kind === 'cursors'\) \{/.test(source) &&
+    source.includes('if (v.measurement.suspended && this.catalogDialog.isOpen) ' +
+      'this.catalogDialog.close();');
+  const fftOutsideGuard = (source: string): boolean => {
+    const block = /if \(!suspended\) \{\s*if \(v\.measurement\.range\.kind === 'cursors'\) \{/
+      .exec(source);
+    const fftAt = source.indexOf("if (measureFft !== undefined && measureMode === 'fft') {");
+    return block !== null && fftAt >= 0 && fftAt < block.index &&
+      !source.slice(block.index).includes('if (measureFft !== undefined');
+  };
+  const fromRows = view.replace('suspended: true,',
+    "suspended: rows.every((row) => row.status === 'paused'),");
+  const noFlag = view.replace('suspended: true,', '');
+  const ungatedBlock = panel.replace(
+    /if \(!suspended\) \{\s*if \(v\.measurement\.range\.kind === 'cursors'\) \{/,
+    "if (true) {\n      if (v.measurement.range.kind === 'cursors') {");
+  const ungatedLegend = panel.replace(
+    'if (!suspended) measureSec.header.appendChild(measureLegend);',
+    'measureSec.header.appendChild(measureLegend);');
+  check('the FFT view suspends the whole measurement surface and keeps only the switch',
+    modelFlag && appFlag(view) && !appFlag(fromRows) && !appFlag(noFlag) &&
+      panelGuard(panel) && !panelGuard(ungatedBlock) && !panelGuard(ungatedLegend) &&
+      fftOutsideGuard(panel),
+    `model=${modelFlag}, app=${appFlag(view)}, fromRows=${appFlag(fromRows)}, ` +
+      `guard=${panelGuard(panel)}, block=${panelGuard(ungatedBlock)}, ` +
+      `legend=${panelGuard(ungatedLegend)}`);
 }
 
 {

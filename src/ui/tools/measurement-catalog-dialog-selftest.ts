@@ -36,6 +36,7 @@ function catalogRow(
 
 function sectionView(over: Partial<MeasurementSectionView> = {}): MeasurementSectionView {
   return {
+    suspended: false,
     sources: [],
     filter: null,
     range: { kind: 'viewport', a: null, b: null },

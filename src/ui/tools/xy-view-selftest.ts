@@ -999,6 +999,44 @@ function sectionOf(analysis: XyAnalysis | null, over: Partial<XySectionView> = {
       !panel.includes("section(t('capturePanel.xy"),
     `switch=${oneSwitch}`);
 
+  const measureModel = read('src/ui/measurementState.ts');
+  const xyMeasureView = slice(app, 'private measurementView(): MeasurementSectionView {',
+    'private measurementBase(');
+  const timeBranch = xyMeasureView.indexOf("if (this.viewMode !== 'time') {");
+  const appFlag = (source: string): boolean =>
+    timeBranch >= 0 && source.indexOf('suspended: false,') >= 0 &&
+      source.indexOf('suspended: false,') < timeBranch &&
+      source.indexOf('suspended: true,') > timeBranch &&
+      source.indexOf('suspended: true,') < source.indexOf('if (sources.length === 0) {') &&
+      !/suspended: [^,\n]*(rows|unavailable|paused|status)/.test(source);
+  const suspendedGuard = (source: string): boolean =>
+    source.includes('const suspended = v.measurement.suspended;') &&
+    source.includes('if (!suspended) measureSec.header.appendChild(measureLegend);') &&
+    /if \(!suspended\) \{\s*const measureControls = div\('measure-controls'\);/.test(source) &&
+    /if \(!suspended\) \{\s*if \(v\.measurement\.range\.kind === 'cursors'\) \{/.test(source);
+  const xyOutsideGuard = (source: string): boolean => {
+    const block = /if \(!suspended\) \{\s*if \(v\.measurement\.range\.kind === 'cursors'\) \{/
+      .exec(source);
+    const xyAt = source.indexOf("if (measureXy !== undefined && measureMode === 'xy') {");
+    return block !== null && xyAt >= 0 && xyAt < block.index &&
+      !source.slice(block.index).includes('if (measureXy !== undefined');
+  };
+  const noFlag = xyMeasureView.replace('suspended: true,', '');
+  const fromRows = xyMeasureView.replace('suspended: true,',
+    "suspended: rows.every((row) => row.status === 'paused'),");
+  const ungatedBlock = panel.replace(
+    /if \(!suspended\) \{\s*if \(v\.measurement\.range\.kind === 'cursors'\) \{/,
+    "if (true) {\n      if (v.measurement.range.kind === 'cursors') {");
+  check('the XY view suspends the measurement surface and keeps its own source, range and Fit',
+    measureModel.includes('suspended: boolean;') && appFlag(xyMeasureView) &&
+      !appFlag(noFlag) && !appFlag(fromRows) && suspendedGuard(panel) &&
+      !suspendedGuard(ungatedBlock) && xyOutsideGuard(panel) &&
+      panel.includes('if (v.measurement.suspended && this.catalogDialog.isOpen) ' +
+        'this.catalogDialog.close();'),
+    `model=${measureModel.includes('suspended: boolean;')}, app=${appFlag(xyMeasureView)}, ` +
+      `fromRows=${appFlag(fromRows)}, guard=${suspendedGuard(panel)}, ` +
+      `xy=${xyOutsideGuard(panel)}`);
+
   const frameStart = app.indexOf('private frame = (): void => {');
   const frameEnd = app.indexOf('\n  };', frameStart);
   const frame = frameStart < 0 ? '' : app.slice(frameStart, frameEnd);
