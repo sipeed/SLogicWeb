@@ -549,11 +549,13 @@ function chooseMode(mode: TriggerMode): void {
     analogTitle() === 'Settings for A0' && analogName()?.value === 'A0' &&
       values === 'none,rising,falling' && checked === 'rising' &&
       analogLevel()?.value === '2.5' && analogLevel()?.min === '-8' &&
-      analogLevel()?.max === '8' && analogLevel()?.disabled === false &&
+      analogLevel()?.max === '8' && analogLevel()?.step === 'any' &&
+      Number(analogLevel()?.min) <= 0 && Number(analogLevel()?.max) >= 0 &&
+      analogLevel()?.disabled === false &&
       analogDialog()?.open === true && doc.activeElement === analogName() &&
       analogDialog()?.querySelectorAll('.channel-color-swatch').length === 0,
     `title=${analogTitle()}, values=${values}, checked=${checked}, ` +
-    `level=${analogLevel()?.value}/${analogLevel()?.min}..${analogLevel()?.max}, ` +
+    `level=${analogLevel()?.value}/${analogLevel()?.min}..${analogLevel()?.max}/${analogLevel()?.step}, ` +
     `focus=${doc.activeElement === analogName()}`);
 
   chooseAnalog('falling');

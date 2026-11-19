@@ -3,7 +3,7 @@
 
 import { button, div } from './capturePanel.js';
 import {
-  analogHalfRangeV, analogVoltsPerCode,
+  analogHalfRangeV,
 } from './channelBanks.js';
 import { helpTip, setHelpTipText } from './helpTip.js';
 import { t } from './i18n.js';
@@ -178,7 +178,11 @@ export class AnalogRowSettingsDialog {
     const half = analogHalfRangeV(view.gain);
     this.levelInput.min = String(-half);
     this.levelInput.max = String(half);
-    this.levelInput.step = String(Number(Math.max(0.001, analogVoltsPerCode(view.gain)).toPrecision(1)));
+    // The trigger path snaps the typed level to the converter's code grid. A decimal
+    // step anchored at min would reject valid in-range values, including 0 V at gains
+    // whose LSB does not divide the range (2x: min -8, step 0.06 rejects 0), so let only
+    // the range constrain the field.
+    this.levelInput.step = 'any';
     this.levelInput.value = String(view.volts);
     const kind: Kind = view.kind ?? 'none';
     for (const [candidate, option] of this.triggerOptions) {
