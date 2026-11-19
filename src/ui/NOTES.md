@@ -1268,8 +1268,7 @@ discards it, outside clicks close. Trigger edits reconcile live with a running c
 detector. Renaming remains available. Colour is part of the channel identity and is not
 editable.
 The popover is shared and lives in the document, positioned against the row; it is not a
-modal and installs no backdrop. An open analog editor keeps its draft and focus across
-capture-trigger relayouts, re-anchoring to the replacement row button instead of closing.
+modal and installs no backdrop.
 
 **Scope display.** Analog rows share one vertical coordinate system across the trace,
 graticule, voltage ruler, 0 V line and trigger (`scopeScale.ts`). The padded row contains
@@ -1370,11 +1369,11 @@ preview list only: digital rows show `D{ch}` and its mode, analog rows show `A{g
 the slope and the threshold; each row's ✕ clears that channel back to None. There are no
 slope/level editors in the panel.
 
-An analog group is configured from its own left row: the trigger glyph at the right of
-the A0–A3 row opens `Trigger on A0` (None/Rising edge/Falling edge plus a level input).
-Slope and level are applied together; None removes the trigger immediately. The right
-ruler shows the threshold (`R 1.235 V`) on its trigger line, while the row button keeps
-separate configured and globally armed styling. Setting
+An analog group is configured from its own left row: the gear opens `Settings for A0`
+(name, None/Rising edge/Falling edge, the level inside the gain's range and the Overlay
+switch), and Save applies them together. The trigger glyph beside it is a read-only
+preview. The right ruler shows the threshold (`R 1.235 V`) on its trigger line, and the
+preview keeps separate configured and globally armed styling. Setting
 one group switches the source to Analog and replaces any other analog trigger. The dashed
 trigger line on the plot is itself draggable and keyboard-operable, with a small warning
 triangle in the right ruler; dragging changes the level through the same inverse voltage
@@ -1472,3 +1471,46 @@ neighbouring cluster's box; when two boxes in the same row end up closer than th
 the two clusters are merged (by anchor x, then list order) and laid out again, repeating
 until no such conflict remains or one cluster holds everything - a merge retries the two
 rows first, so it can resolve with zero displacement.
+
+## 28. Analog row settings dialog
+
+**Prediction, recorded before measurement.** Moving an analog row's name, trigger and the
+Stacked/Overlay choice from a transient popover plus the settings window into the digital
+row's own dialog shape should keep the 18 px label head (`A0`, a read-only glyph, a gear),
+cost no new stylesheet system — the channel dialog's field group, three-mode fieldset and
+footer already fit — and make the layout reachable where the row is.
+
+**Implementation.** `analogRowDialog.ts` owns one persistent native `<dialog>` built from
+the channel dialog's classes: name, three trigger modes (None/rising/falling, the glyph
+shared through `triggerGlyph.ts`), a level input whose range and step come from the group's
+declared gain and which disables on None without losing its draft, and — last — the
+Overlay checkbox with a `?` tip. Save is the form's submit and emits one
+`onBusConfigure(id, { name, kind, volts, overlay })`; Cancel, Escape and a backdrop press
+emit nothing and return focus to the rebuilt gear. `App.configureAnalogBus` renames the bus
+view as metadata (no builder invalidation, no restart, empty falls back to `A{group}`),
+then delegates the trigger to the untouched `configureAnalogTrigger` and the layout to
+`setAnalogLayout`. Because the name is now user data, `normalizeAnalogBanks` preserves a
+stored analog name instead of rewriting it to `A{group}`. The trigger glyph became a
+`bus-trigger-preview` span with `role="img"`; the popover, its document listeners, its
+re-anchoring path, its CSS and its `channels.triggerOn` / `bus.confirm` copy are gone, and
+the label-column hint and the Global trigger empty note point at the row settings.
+
+**Backtracking.** The first cut kept the popover next to the new gear and switched the row
+callback from `onBusTrigger` to `onBusConfigure` in the same commit, so both entries
+committed through one path; the next commit turned the glyph into a preview and deleted the
+popover. The settings window's Analog rows select stayed until the dialog's switch existed,
+then left with its host bridge, its locale key and its `.settings-row-select` rules.
+
+**Result: HELD.** [MEASURED] in the running dev build, in Simplified Chinese, on a loaded
+ADC capture with two groups. Each analog row's head stays 18 CSS px: a 48.6 px name, a
+22x18 preview whose glyph is 14 px, and a 24x18 gear, with no overlap
+(66.4 + 22 < 92.4 px). The dialog is `:modal`, titled `A0 设置`, opens focused on the name,
+lists exactly None/rising/falling, shows gain-1 `-16…16 V` in 0.1 V steps with the level
+disabled on None, carries no colour swatch, and ends with the Overlay checkbox and its
+tip. Saving name `Probe`, rising, 2.5 V and Overlay wrote one merged row named `Probe`
+whose preview reads armed, persisted `analogLayout: "merged"`, and returned focus to the
+gear; after a reload the row kept `Probe`, the rising slope and the level (2.5098 V,
+snapped to the converter code grid) and the dialog reopened with Overlay checked.
+Unchecking it and saving restored both stacked rows and dropped the source chips. Escape
+and a backdrop press close without writing. [UNVERIFIED] the ruler context menu on live
+device data - its layout item is source-pinned only.

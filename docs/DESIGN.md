@@ -228,9 +228,11 @@ one anatomy (band or inset card, one separator token).
 Analog channels are not bus rows. Each analog signal has a row with:
 
 - Signal colour strip; `A0` tag; editable name; probe/range chip; `V/div`; zero marker;
-  overload badge; trigger slot. The range/V-div/zero/overload are readouts; the only row
-  actions are the trigger slot and the row entry (editor). Dragging the ruler is direct
-  manipulation of the same values, not a third action.
+  overload badge; trigger preview. The range/V-div/zero/overload are readouts; the only
+  row actions are the settings gear and the height grip. The trigger glyph is a
+  read-only preview of the row's trigger (neutral when configured, bright only while it
+  is the live source) and is never an editor. Dragging the ruler is direct manipulation
+  of the same values, not a third action.
 - **Range is hardware, scale is view.** Range (e.g. ±1 V, ±16 V) and coupling/attenuation
   are probe settings in the channel editor and require a profile capability. `V/div` and
   zero position are view state and can be changed without affecting the device.
@@ -263,10 +265,11 @@ Analog channels are not bus rows. Each analog signal has a row with:
   a solid line, other divisions dashed.
 - No analog row exists without a profile analog group; the panel says why the control is
   disabled.
-- **Row layout: Stacked (default) or Overlay.** Appearance's "Analog rows" control and
-  the ruler's context menu switch one shared setting. Stacked keeps one row per analog
-  source. Overlay draws the ADC groups into one band: the band is as tall as its tallest
-  participant, and each group keeps its own colour, calibration, V/div and 0 V position.
+- **Row layout: Stacked (default) or Overlay.** The analog row's settings dialog (its
+  last field, an Overlay checkbox) and the ruler's context menu switch one shared setting.
+  Stacked keeps one row per analog source. Overlay draws the ADC groups into one band: the
+  band is as tall as its tallest participant, and each group keeps its own colour,
+  calibration, V/div and 0 V position.
   Bus rows that are not ADC groups keep their own row in both layouts. Only the focused
   group's left cell is shown for the merged band, which has no per-row height grip
   (there is no single row to resize); a single-source row keeps its grip. Switching back
@@ -772,10 +775,10 @@ Rules:
 
 ## 8. Trigger UI
 
-- **Conditions are owned by rows.** A digital row's trigger slot opens the six modes;
-  an analog row's trigger slot opens rising/falling + level + hysteresis (profile-
-  dependent). The Trigger panel previews, removes and explains; it is not a second
-  editor.
+- **Conditions are owned by rows.** A digital row's gear opens the six modes; an analog
+  row's gear opens its row dialog, which offers None/rising/falling plus the level inside
+  the declared gain's range (the crossing qualification is profile-dependent and is not a
+  control). The Trigger panel previews, removes and explains; it is not a second editor.
 - **Trigger panel:** enable, source/summary, condition list, pre-trigger, execution owner
   (read-only), state chip. For a profile with `mixed: false`, a Digital/Analog family
   choice is shown; switching retains the other family's stored conditions but they are
@@ -920,7 +923,7 @@ polite live region, so assistive technology reads the area and hints when they c
 | Waveform | wheel per §7 (scroll rows, or zoom with "wheel zooms" on); the other of Ctrl+wheel; Shift+wheel pans time; drag pans; double-click adds a cursor |
 | Time axis | wheel per §7; Shift+wheel pans; drag pans; dragging a cursor's numbered chip moves that cursor |
 | Overview | wheel per §7; Shift+wheel pans the timeline; click or drag centers the view |
-| Channel labels | wheel scrolls rows; double-click a name renames it; the trigger icon opens the trigger editor |
+| Channel labels | wheel scrolls rows; the row gear opens that row's settings, the trigger glyph is a read-only state preview |
 | Side panel | wheel scrolls the panel |
 | Toolbar | click activates the command |
 
@@ -958,7 +961,7 @@ polite live region, so assistive technology reads the area and hints when they c
 | Surface | Use | Rules |
 | --- | --- | --- |
 | Menu | Choose one of a short list (device, capture mode, panel, export) | Anchored; one level; Esc/back/outside closes; focus returns. |
-| Popover | Small anchored editor for one row (trigger, name, probe) | No scrim; one at a time; Enter commits, Esc/back discards; focus returns. |
+| Popover | Small anchored editor for one control (colour, distance readout, select list) | No scrim; one at a time; Enter commits, Esc/back discards; focus returns. |
 | Sheet | A panel on medium/compact touch | Scrim, handle, Close/back; one sheet; height persisted. |
 | Dialog | Complex/destructive edits or confirmations | Focus trap; Esc/back/Close; title names the object; primary action explicit. |
 | Inline section | A panel value that applies immediately or next | No overlay; lifecycle badge rules apply. |
