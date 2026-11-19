@@ -109,9 +109,19 @@ function launchCommand(pageUrl: string): string {
 function setupSection(pageUrl: string): HTMLElement {
   const setup = document.createElement('section');
   setup.className = 'settings-agent-setup';
-  const title = document.createElement('h4');
-  title.className = 'settings-agent-subtitle';
-  title.textContent = t('agent.setupTitle');
+  const head = div('settings-agent-setup-head');
+  const toggle = button(t('agent.setupTitle'), 'settings-agent-toggle');
+  toggle.type = 'button';
+  const body = div('settings-agent-setup-body');
+  body.id = 'agent-setup-body';
+  body.hidden = true;
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-controls', body.id);
+  toggle.addEventListener('click', () => {
+    const opening = body.hidden;
+    body.hidden = !opening;
+    toggle.setAttribute('aria-expanded', String(opening));
+  });
   const intro = document.createElement('p');
   intro.className = 'settings-agent-help';
   intro.textContent = t('agent.howTo');
@@ -121,7 +131,9 @@ function setupSection(pageUrl: string): HTMLElement {
   });
   const code = codeBlock(prompt);
   code.classList.add('settings-agent-prompt');
-  setup.append(title, intro, code, copyButton(t('agent.copyPrompt'), prompt));
+  body.append(intro, code);
+  head.append(toggle, copyButton(t('agent.copyPrompt'), prompt));
+  setup.append(head, body);
   return setup;
 }
 

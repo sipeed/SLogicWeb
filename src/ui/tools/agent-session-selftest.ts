@@ -291,6 +291,9 @@ async function rejects(promise: Promise<unknown>): Promise<boolean> {
     menu.includes('agentSession.subscribe(paint)') &&
     menu.includes('window.setInterval(paint, 1000)') &&
     menu.includes('agent.setupTitle') &&
+    menu.includes('settings-agent-setup-head') &&
+    menu.includes('settings-agent-setup-body') &&
+    menu.includes('body.hidden = true') &&
     menu.includes('settings-agent-prompt') &&
     menu.includes('agent.askPrompt') &&
     menu.includes('agent.copyPrompt') &&

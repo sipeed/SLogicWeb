@@ -1270,6 +1270,17 @@ html[data-theme="light"] .settings-dialog::backdrop { background: var(--backdrop
   padding-top: 8px; border-top: 1px solid var(--border);
 }
 .settings-agent-setup[hidden] { display: none; }
+.settings-agent-setup-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.settings-agent-toggle {
+  min-width: 0; padding: 0; border: 0; background: none;
+  color: var(--muted-foreground); font: inherit; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase; text-align: left; cursor: pointer;
+}
+.settings-agent-toggle::after { content: '▸'; margin-left: 4px; }
+.settings-agent-toggle[aria-expanded="true"]::after { content: '▾'; }
+.settings-agent-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.settings-agent-setup-body { display: flex; flex-direction: column; gap: 6px; }
+.settings-agent-setup-body[hidden] { display: none; }
 .settings-agent-code {
   display: block;
   padding: 4px 6px;
