@@ -9529,11 +9529,12 @@ export class App {
           this.captureWaiters = [];
           return 'not-started';
         }
+        const limit = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15_000;
         let timer = 0;
         const outcome = await Promise.race([
           finished.then(() => 'finished' as const),
-          new Promise<'timeout'>((r) => { timer = window.setTimeout(() => r('timeout'), timeoutMs); }),
-          new Promise<'timeout'>((r) => signal.addEventListener('abort', () => r('timeout'), { once: true })),
+          new Promise<'timeout'>((r) => { timer = window.setTimeout(() => r('timeout'), limit); }),
+          new Promise<'timeout'>((r) => signal?.addEventListener('abort', () => r('timeout'), { once: true })),
         ]);
         window.clearTimeout(timer);
         return outcome;

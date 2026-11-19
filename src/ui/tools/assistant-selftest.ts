@@ -856,6 +856,9 @@ const handlers = (sink: { text: string; thinking: string }) => ({
     app.includes('private gatedAgentHost(): AssistantHost {') &&
     app.includes('agentHost: () => this.gatedAgentHost(),') &&
     app.includes("from '../assistant/tools.js';"));
+  check('startAndWait tolerates an omitted abort signal and timeout, as the agent prompt shows it',
+    app.includes("signal?.addEventListener('abort'") &&
+    app.includes('Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 15_000'));
   const claude = fs.readFileSync('src/assistant/providers/claude.ts', 'utf8');
   const runtimeImports = [...claude.matchAll(/^import\s+(?!type\b)[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);
   check('the lazy Claude provider imports nothing at runtime but the SDK',

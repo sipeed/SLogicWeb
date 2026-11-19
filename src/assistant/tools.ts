@@ -72,7 +72,7 @@ export interface AssistantHost {
   /** Select a capture width tier, as the width selector does. */
   setChannelWidth(channels: number): void;
   /** Start a capture and resolve when it has stopped (or the timeout passed). */
-  startAndWait(timeoutMs: number, signal: AbortSignal): Promise<CaptureOutcome>;
+  startAndWait(timeoutMs: number, signal?: AbortSignal): Promise<CaptureOutcome>;
   stop(): Promise<void>;
   /** Attach a decoder and resolve after its first decode. */
   attach(decoderId: string, channels: Record<number, number>, options: Record<string, string | number>): Promise<void>;
