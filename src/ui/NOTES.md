@@ -1156,26 +1156,44 @@ thresholds, boundary ownership, position mapping, Unlimited share and formatting
 ## 24. Editing settings while a capture runs
 
 The acquisition keeps the configuration it started with; the panel edits the *next* one.
-All six controls stay live while running: channel width, Analog, sample rate, threshold,
-Duration and Repeat Interval. The mode buttons, test-mode selector, global trigger
-source/mask/pre-trigger and digital trigger editors stay locked because changing them
-mid-acquisition is not meaningful.
-Analog slope/level/removal on the ADC row remain editable as next-acquisition settings;
-section 25 covers their live triangle and source highlighting.
+The Capture section's own options — mode, Duration, Repeat Interval and the Loop
+window — are locked for as long as the app owns the capture (`captureOptionsLocked()`:
+running, stopping and the Repeat wait between waves) and release on a Single capture's
+completion, on a user stop and on an error stop. The visible half of the lock is chrome
+only: a locked control is covered by a translucent veil and answers the pointer with a
+forbidden (`not-allowed`) cursor. Every other option stays live, though not always only for
+the next capture: channel width, sample rate and threshold are next-capture settings (an
+Analog group change repaints at once; only its forced ADC rate waits), while a Software
+Trigger source or condition edit retunes a waiting matcher in place (removing the last
+condition restarts it free-running) and, once the matcher has matched, becomes pending for
+the next acquisition — except removing the last condition (or switching the trigger off),
+which disarms the running acquisition in place; a Loop analog lock is the one exception,
+retuning its page-side detector in place (section 25). The test-mode source is
+disabled only while a capture runs and the pre-trigger select while it runs or stops,
+because a different acquisition setup or window cannot be retrofitted to the running one.
+Analog slope/level/removal on the ADC row follow the same rule — live while the matcher
+waits, pending once it has matched, with that same removal-of-the-last-condition
+exception; section 25 covers their live triangle and source highlighting.
 
 - **Single**: `captureLimitSamples`, the store rate and width are fixed at start. Edits
   apply when the next Capture starts.
 - **Repeat**: each wave calls `startCapture` with the current `settings`, so the next wave
-  picks up every edit; `finishCapture` schedules that wave with the latest interval.
-- **Loop**: a Duration edit is applied to the running retention window on the next frame
-  (`loopRetentionLen`, then `enforceLoopRetention` and a bus-builder reset). Analog is a
-  display-only view and applies immediately. Rate, width and threshold cannot be applied
-  to an already-streaming store, so they wait for the next start; the panel says so.
+  picks up every edit made during the run; `finishCapture` schedules that wave with the
+  interval in the current settings. Duration and Repeat Interval are not among those live
+  edits: they can only be edited while no Repeat session owns the capture, because both the
+  running wave and the pending wait are locked.
+- **Loop**: `applySettings` still applies a Duration edit to the running retention window
+  on the next frame (`loopRetentionLen`, then `enforceLoopRetention` and a bus-builder
+  reset), but the panel cannot reach that path during a run — the guard stays for any
+  other settings source. Analog is a display-only view and applies immediately. Rate,
+  width and threshold cannot be applied to an already-streaming store, so they wait for
+  the next start; the panel says so.
 
 `renderChannelCount()` keeps the running store's width authoritative for rows,
 availability and bank locks, while the capture panel shows the pending width. This is
 what keeps "the current result unaffected" true when the width is edited mid-run. The
-panel prints `pendingApply` (or `pendingApplyLoop`) while running.
+panel prints `pendingApply` while running, one sentence for every mode, because a locked
+Duration leaves nothing that would justify a second variant.
 
 Terminology: the primary action is **Capture** (not Start) and the Repeat control is
 **Interval**, in every catalog.

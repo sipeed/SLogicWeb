@@ -835,12 +835,13 @@ Rules:
   picked a rate in between.
 - **Memory ceiling:** Single/Repeat stores share the Loop window's 2 GiB packed-sample
   budget (`maxCaptureSamples`: 8 ch 2^31 - 1, 16 ch 2^30, 32 ch 2^29 samples). A finite
-  request that would exceed it is cut at the ceiling; the panel shows the ceiling and,
-  while running, "about x s left at this rate" on the 500 ms panel clock, in warning style
-  within 10% of it. Reaching it, or an allocation failure, ends the capture as "Aborted ·
-  Memory limit reached" with the samples kept, never a crashed tab. A big .lwcap save
-  streams bounded parts with "Saving… x%" and fails with a plain "out of memory" notice,
-  not the raw allocation error.
+  request that would exceed it is cut at the ceiling; while a capture runs, the panel shows
+  the ceiling readout as "about x s left at this rate" on the 500 ms panel clock, in
+  warning style within 10% of it. Reaching it ends the capture with the samples kept and
+  prints nothing; only a failed allocation raises the banner's plain "out of memory"
+  notice. Neither crashes the tab. A big .lwcap save streams bounded parts with
+  "Saving… x%" and fails with a plain "out of memory" notice, not the raw allocation
+  error.
 - **Retention:** the panel shows kept bytes/time, the limit and the loop window; when the
   limit binds, a warning names the consequence. It never silently trims the trigger lock.
 - **Record:** a separate state (`off/armed/recording/paused/exporting/error/full`), with
@@ -926,12 +927,11 @@ polite live region, so assistive technology reads the area and hints when they c
 - A fatal error appears only in the prominent top alert banner; the bottom bar does
   not summarize errors. The banner has a dismiss action and uses the destructive
   token pair in both themes.
-- A capture ended by a device or link failure is reported as Aborted with its cause
-  and requested vs actual duration, never as Completed. For a failure with a known
-  remedy the banner leads with the plain conclusion and what to do, keeps the
-  diagnostic under a collapsed "Technical details", and may offer one remedy button
-  that only changes settings (e.g. lower the rate); Capture/Stop still starts the next
-  capture.
+- A capture ended by a device or link failure is reported in the banner with its cause,
+  never as a completed capture. For a failure with a known remedy the banner leads with
+  the plain conclusion and what to do, keeps the diagnostic under a collapsed
+  "Technical details", and may offer one remedy button that only changes settings (e.g.
+  lower the rate); Capture/Stop still starts the next capture.
 - The same plain-first-sentence rule covers a file that will not open (wrong type,
   unsupported content, damaged), a failed or oversized decode, the decoders failing to
   load, and a capture the board ended with no data or a dead USB transfer
