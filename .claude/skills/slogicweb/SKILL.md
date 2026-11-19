@@ -20,17 +20,21 @@ Two rules come first:
    `debug.snapshot()` and the `agentHost()` tools; they return statistics, capped edge
    lists and decoded annotations.
 
-## 1. Serve the app
+## 1. Reach the page
 
-From the repository root:
+You drive the page the user already has open. If you are working inside the repository,
+serve it and open the printed URL in a Chromium-based browser with WebUSB:
 
 ```sh
 npm run dev          # Vite, default http://localhost:5173
 npm run dev:lan      # HTTPS on the LAN, for a phone (see docs/DEPLOY.md)
 ```
 
-Open the printed URL in a Chromium-based browser with WebUSB. Vite serves the
-TypeScript modules directly, so `import('/src/assistant/tools.ts')` also works in dev.
+If the user installed this skill from the app's Agent dropdown, there is no checkout:
+ask for the page URL shown there (the dropdown also has a copyable launch command) and
+attach to that tab instead. Vite serves TypeScript modules directly, so
+`import('/src/assistant/tools.ts')` also works in dev; a standalone build may not ship
+that module (see §5).
 
 ## 2. Connect to the page over CDP
 
@@ -121,6 +125,12 @@ const stateTool = toolByName('get_state');
 const out = await stateTool.run({}, window.slogicweb.debug.agentHost(), new AbortController().signal);
 ```
 
+Without a source checkout (a deployed build or the portable `dist/`), that import is not
+available. Call the `agentHost()` methods directly instead — they are the same operations
+the tools wrap: `snapshot()`, `store()`, `analyzers()`, `startAndWait()`, `stop()`,
+`attach()`, `applySettings()`, `setViewportSeconds()`, `zoomToAnnotation()`, and the bus
+methods.
+
 `TOOLS` covers: `get_state`, `get_channel_stats`, `get_edges`, `list_decoders`,
 `describe_decoder`, `get_annotations`, `set_viewport`, `zoom_to_annotation`,
 `set_capture_settings`, `start_capture`, `stop_capture`, `attach_decoder`,
@@ -140,8 +150,8 @@ user to open the Agent button and approve — never bypass the gate or switch th
 yourself.
 
 In a production build the tool module may be tree-shaken out (the UI no longer imports
-it). Use the dev server, or bundle `src/assistant/tools.ts` yourself, when the page is a
-built `dist/`.
+it). Use the dev server, or bundle `src/assistant/tools.ts` yourself, when you need the
+`TOOLS` table; otherwise drive `agentHost()` directly as described above.
 
 ## 6. Guardrails
 
