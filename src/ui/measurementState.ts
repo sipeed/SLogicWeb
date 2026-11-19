@@ -116,6 +116,7 @@ export interface MeasurementCaptureView {
 }
 
 export interface MeasurementSectionView {
+  suspended: boolean;
   sources: MeasurementSource[];
   filter: number | null;
   range: MeasurementRange;

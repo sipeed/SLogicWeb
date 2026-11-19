@@ -1453,6 +1453,7 @@ export class App {
       xy,
       statsSkipped: this.measurementStats.skipped,
       statsLoopUnavailable: this.captureIsLoop,
+      suspended: false,
     };
     if (this.viewMode !== 'time') {
       if (this.measurementCapture !== null) this.dropMeasurementCapture();
@@ -1462,6 +1463,7 @@ export class App {
       }
       return {
         ...base,
+        suspended: true,
         rows: measurementRowViews(rows, paused, null, stats),
         window: null,
         unavailable: null,

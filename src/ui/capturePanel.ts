@@ -325,6 +325,7 @@ export class CapturePanel {
   private measureFocus: MeasureFocusIntent | null = null;
   private readonly measureOpen = new Set<number>();
   private measureSectionView: MeasurementSectionView | null = null;
+  private pendingViewFocus: AnalysisViewMode | null = null;
   private readonly catalogDialog: MeasurementCatalogDialog;
 
   constructor(
@@ -816,6 +817,7 @@ export class CapturePanel {
 
   render(v: CapturePanelView): void {
     const s = v.settings;
+    if (v.measurement.suspended && this.catalogDialog.isOpen) this.catalogDialog.close();
     const capture = this.host.capture;
     const cursorPage = this.host.cursors;
     const locked = cursorsLocked(v);
@@ -1588,11 +1590,12 @@ export class CapturePanel {
     const measureLegend = document.createElement('span');
     measureLegend.className = 'cursor-legend';
     measureLegend.textContent = t('capturePanel.measureFormat');
-    measureSec.header.appendChild(measureLegend);
     const measureFft = v.measurement.fft;
     const measureXy = v.measurement.xy;
     const measureMode: AnalysisViewMode =
       measureXy?.mode === 'xy' ? 'xy' : measureFft?.mode === 'fft' ? 'fft' : 'time';
+    const suspended = v.measurement.suspended;
+    if (!suspended) measureSec.header.appendChild(measureLegend);
     const viewSwitch = div('segmented measure-view-mode');
     viewSwitch.setAttribute('role', 'group');
     viewSwitch.setAttribute('aria-label', t('capturePanel.viewMode'));
@@ -1601,6 +1604,7 @@ export class CapturePanel {
       ['fft', 'capturePanel.viewFft'],
       ['xy', 'capturePanel.viewXy'],
     ];
+    const viewModeButtons = new Map<AnalysisViewMode, HTMLButtonElement>();
     for (const [mode, label] of viewModes) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -1608,38 +1612,44 @@ export class CapturePanel {
       button.dataset.viewMode = mode;
       button.textContent = t(label);
       button.setAttribute('aria-pressed', String(measureMode === mode));
-      button.addEventListener('click', () => this.cb.onPickViewMode(mode));
+      button.addEventListener('click', () => {
+        if (measureMode !== mode) this.pendingViewFocus = mode;
+        this.cb.onPickViewMode(mode);
+      });
+      viewModeButtons.set(mode, button);
       viewSwitch.appendChild(button);
     }
     measureSec.body.appendChild(viewSwitch);
-    const measureControls = div('measure-controls');
-    const measureFilter = selectControl(
-      'measure.filter',
-      t('capturePanel.measureSource'),
-      [
-        ['', t('capturePanel.measureSourceAll')],
-        ...v.measurement.sources.map(
-          (source): SelectOptionTuple => [String(source.start), source.name]),
-      ],
-      v.measurement.filter === null ? '' : String(v.measurement.filter),
-    );
-    measureFilter.addEventListener('change', () => this.cb.onPickMeasurementFilter(
-      measureFilter.value === '' ? null : Number(measureFilter.value)));
-    measureFilter.disabled = v.measurement.sources.length === 0;
-    const measureRange = selectControl(
-      'measure.range',
-      t('capturePanel.measureRange'),
-      [
-        ['viewport', t('capturePanel.measureRangeViewport')],
-        ['cursors', t('capturePanel.measureRangeCursors')],
-        ['capture', t('capturePanel.measureRangeCapture')],
-      ],
-      v.measurement.range.kind,
-    );
-    measureRange.addEventListener('change', () => this.cb.onPickMeasurementRange(
-      measurementRangeKind(measureRange.value)));
-    measureControls.append(measureFilter.el, measureRange.el);
-    measureSec.body.appendChild(measureControls);
+    if (!suspended) {
+      const measureControls = div('measure-controls');
+      const measureFilter = selectControl(
+        'measure.filter',
+        t('capturePanel.measureSource'),
+        [
+          ['', t('capturePanel.measureSourceAll')],
+          ...v.measurement.sources.map(
+            (source): SelectOptionTuple => [String(source.start), source.name]),
+        ],
+        v.measurement.filter === null ? '' : String(v.measurement.filter),
+      );
+      measureFilter.addEventListener('change', () => this.cb.onPickMeasurementFilter(
+        measureFilter.value === '' ? null : Number(measureFilter.value)));
+      measureFilter.disabled = v.measurement.sources.length === 0;
+      const measureRange = selectControl(
+        'measure.range',
+        t('capturePanel.measureRange'),
+        [
+          ['viewport', t('capturePanel.measureRangeViewport')],
+          ['cursors', t('capturePanel.measureRangeCursors')],
+          ['capture', t('capturePanel.measureRangeCapture')],
+        ],
+        v.measurement.range.kind,
+      );
+      measureRange.addEventListener('change', () => this.cb.onPickMeasurementRange(
+        measurementRangeKind(measureRange.value)));
+      measureControls.append(measureFilter.el, measureRange.el);
+      measureSec.body.appendChild(measureControls);
+    }
     if (measureFft !== undefined && measureMode === 'fft') {
       measureSec.body.appendChild(fftControls(measureFft, this.cb));
       const summary = document.createElement('p');
@@ -1656,187 +1666,189 @@ export class CapturePanel {
       summary.textContent = xySummaryLines(measureXy).join('\n');
       measureSec.body.appendChild(summary);
     }
-    if (v.measurement.range.kind === 'cursors') {
-      const measureCursors = div('measure-cursors');
-      const cursorOptions: SelectOptionTuple[] = [
-        ['', t('capturePanel.measureCursorUnset')],
-        ...v.measurement.cursors.map(
-          (cursor): SelectOptionTuple => [String(cursor.id), cursor.label]),
-      ];
-      const first = selectControl('measure.cursor.a', t('capturePanel.measureCursorA'),
-        cursorOptions, v.measurement.range.a === null ? '' : String(v.measurement.range.a));
-      first.addEventListener('change', () => this.cb.onPickMeasurementCursor('a',
-        first.value === '' ? null : Number(first.value)));
-      const second = selectControl('measure.cursor.b', t('capturePanel.measureCursorB'),
-        cursorOptions, v.measurement.range.b === null ? '' : String(v.measurement.range.b));
-      second.addEventListener('change', () => this.cb.onPickMeasurementCursor('b',
-        second.value === '' ? null : Number(second.value)));
-      measureCursors.append(first.el, second.el);
-      if (v.measurement.cursors.length < 2) {
-        const hint = document.createElement('p');
-        hint.className = 'cursor-dist-hint';
-        hint.textContent = t('capturePanel.measureCursorHint');
-        measureCursors.appendChild(hint);
+    if (!suspended) {
+      if (v.measurement.range.kind === 'cursors') {
+        const measureCursors = div('measure-cursors');
+        const cursorOptions: SelectOptionTuple[] = [
+          ['', t('capturePanel.measureCursorUnset')],
+          ...v.measurement.cursors.map(
+            (cursor): SelectOptionTuple => [String(cursor.id), cursor.label]),
+        ];
+        const first = selectControl('measure.cursor.a', t('capturePanel.measureCursorA'),
+          cursorOptions, v.measurement.range.a === null ? '' : String(v.measurement.range.a));
+        first.addEventListener('change', () => this.cb.onPickMeasurementCursor('a',
+          first.value === '' ? null : Number(first.value)));
+        const second = selectControl('measure.cursor.b', t('capturePanel.measureCursorB'),
+          cursorOptions, v.measurement.range.b === null ? '' : String(v.measurement.range.b));
+        second.addEventListener('change', () => this.cb.onPickMeasurementCursor('b',
+          second.value === '' ? null : Number(second.value)));
+        measureCursors.append(first.el, second.el);
+        if (v.measurement.cursors.length < 2) {
+          const hint = document.createElement('p');
+          hint.className = 'cursor-dist-hint';
+          hint.textContent = t('capturePanel.measureCursorHint');
+          measureCursors.appendChild(hint);
+        }
+        measureSec.body.appendChild(measureCursors);
       }
-      measureSec.body.appendChild(measureCursors);
-    }
-    const measureWindow = div('measure-window');
-    measureWindow.dataset.measureWindow = '';
-    measureWindow.textContent = measurementWindowText(v.measurement);
-    measureWindow.hidden = v.measurement.window === null;
-    measureSec.body.appendChild(measureWindow);
-    if (v.measurement.capture !== null) {
-      const capture = div('measure-capture');
-      capture.dataset.measureCapture = '';
-      const progress = div('measure-capture-progress');
-      progress.dataset.measureCaptureProgress = '';
-      progress.setAttribute('role', 'progressbar');
-      progress.setAttribute('aria-valuemin', '0');
-      progress.setAttribute('aria-label', t('capturePanel.measureCaptureLabel'));
-      const captureActions = div('measure-capture-actions');
-      const cancel = document.createElement('button');
-      cancel.type = 'button';
-      cancel.className = 'analyzer-act measure-capture-cancel';
-      cancel.dataset.measureCaptureCancel = '';
-      cancel.textContent = t('capturePanel.measureCaptureCancel');
-      cancel.addEventListener('click', () => {
-        this.runMeasureAction('capture-cancel', cancel,
-          () => this.cb.onCancelMeasurementCapture());
-      });
-      const restart = document.createElement('button');
-      restart.type = 'button';
-      restart.className = 'analyzer-act measure-capture-restart';
-      restart.dataset.measureCaptureRestart = '';
-      restart.textContent = t('capturePanel.measureCaptureRestart');
-      restart.addEventListener('click', () => {
-        this.runMeasureAction('capture-restart', restart,
-          () => this.cb.onRestartMeasurementCapture());
-      });
-      captureActions.append(cancel, restart);
-      capture.append(progress, captureActions);
-      measureSec.body.appendChild(capture);
-      applyMeasurementCapture(capture, measurementCaptureState(v.measurement));
-    }
-    if (v.measurement.rows.length === 0) {
-      const hint = div('panel-note');
-      hint.textContent = t('capturePanel.measureEmpty');
-      measureSec.body.appendChild(hint);
-    } else {
-      const list = div('measure-list');
-      v.measurement.rows.forEach((row, index) => {
-        const item = div('measure-row');
-        item.dataset.measureId = String(row.id);
-        const source = document.createElement('span');
-        source.className = 'measure-source';
-        source.textContent = row.sourceName;
-        const toggle = document.createElement('button');
-        toggle.type = 'button';
-        toggle.className = 'measure-open';
-        toggle.dataset.measureToggle = String(row.id);
-        toggle.setAttribute('aria-controls', measurementDetailsId(row.id));
-        const parameter = document.createElement('span');
-        parameter.className = 'measure-param';
-        parameter.textContent = measurementParameterText(row.parameter);
-        const value = document.createElement('span');
-        value.className = 'measure-value';
-        value.translate = false;
-        value.textContent = measurementValueText(row);
-        toggle.append(parameter, measureChevron(), value);
-        const status = document.createElement('span');
-        status.className = 'measure-status';
-        status.textContent = measurementStatusText(row);
-        const label = measurementRowLabel(row);
-        const remove = cursorRemoveButton(
-          t('capturePanel.measureRemove', { parameter: label }),
-          () => this.runMeasureAction('row', remove,
-            () => this.cb.onRemoveMeasurementRow(row.id), row.id, index),
-        );
-        const details = this.measurementDetailsBlock(row.id);
-        toggle.addEventListener('click', () => {
-          const expanded = !this.measureOpen.has(row.id);
-          if (expanded) this.measureOpen.add(row.id);
-          else this.measureOpen.delete(row.id);
-          const view = this.measureSectionView;
-          const live = view?.rows.find((entry) => entry.id === row.id) ?? row;
-          applyMeasurementDetails(item, live, expanded, view);
+      const measureWindow = div('measure-window');
+      measureWindow.dataset.measureWindow = '';
+      measureWindow.textContent = measurementWindowText(v.measurement);
+      measureWindow.hidden = v.measurement.window === null;
+      measureSec.body.appendChild(measureWindow);
+      if (v.measurement.capture !== null) {
+        const capture = div('measure-capture');
+        capture.dataset.measureCapture = '';
+        const progress = div('measure-capture-progress');
+        progress.dataset.measureCaptureProgress = '';
+        progress.setAttribute('role', 'progressbar');
+        progress.setAttribute('aria-valuemin', '0');
+        progress.setAttribute('aria-label', t('capturePanel.measureCaptureLabel'));
+        const captureActions = div('measure-capture-actions');
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'analyzer-act measure-capture-cancel';
+        cancel.dataset.measureCaptureCancel = '';
+        cancel.textContent = t('capturePanel.measureCaptureCancel');
+        cancel.addEventListener('click', () => {
+          this.runMeasureAction('capture-cancel', cancel,
+            () => this.cb.onCancelMeasurementCapture());
         });
-        item.append(source, toggle, status, remove, details);
-        applyMeasurementDetails(item, row, this.measureOpen.has(row.id), v.measurement);
-        list.appendChild(item);
+        const restart = document.createElement('button');
+        restart.type = 'button';
+        restart.className = 'analyzer-act measure-capture-restart';
+        restart.dataset.measureCaptureRestart = '';
+        restart.textContent = t('capturePanel.measureCaptureRestart');
+        restart.addEventListener('click', () => {
+          this.runMeasureAction('capture-restart', restart,
+            () => this.cb.onRestartMeasurementCapture());
+        });
+        captureActions.append(cancel, restart);
+        capture.append(progress, captureActions);
+        measureSec.body.appendChild(capture);
+        applyMeasurementCapture(capture, measurementCaptureState(v.measurement));
+      }
+      if (v.measurement.rows.length === 0) {
+        const hint = div('panel-note');
+        hint.textContent = t('capturePanel.measureEmpty');
+        measureSec.body.appendChild(hint);
+      } else {
+        const list = div('measure-list');
+        v.measurement.rows.forEach((row, index) => {
+          const item = div('measure-row');
+          item.dataset.measureId = String(row.id);
+          const source = document.createElement('span');
+          source.className = 'measure-source';
+          source.textContent = row.sourceName;
+          const toggle = document.createElement('button');
+          toggle.type = 'button';
+          toggle.className = 'measure-open';
+          toggle.dataset.measureToggle = String(row.id);
+          toggle.setAttribute('aria-controls', measurementDetailsId(row.id));
+          const parameter = document.createElement('span');
+          parameter.className = 'measure-param';
+          parameter.textContent = measurementParameterText(row.parameter);
+          const value = document.createElement('span');
+          value.className = 'measure-value';
+          value.translate = false;
+          value.textContent = measurementValueText(row);
+          toggle.append(parameter, measureChevron(), value);
+          const status = document.createElement('span');
+          status.className = 'measure-status';
+          status.textContent = measurementStatusText(row);
+          const label = measurementRowLabel(row);
+          const remove = cursorRemoveButton(
+            t('capturePanel.measureRemove', { parameter: label }),
+            () => this.runMeasureAction('row', remove,
+              () => this.cb.onRemoveMeasurementRow(row.id), row.id, index),
+          );
+          const details = this.measurementDetailsBlock(row.id);
+          toggle.addEventListener('click', () => {
+            const expanded = !this.measureOpen.has(row.id);
+            if (expanded) this.measureOpen.add(row.id);
+            else this.measureOpen.delete(row.id);
+            const view = this.measureSectionView;
+            const live = view?.rows.find((entry) => entry.id === row.id) ?? row;
+            applyMeasurementDetails(item, live, expanded, view);
+          });
+          item.append(source, toggle, status, remove, details);
+          applyMeasurementDetails(item, row, this.measureOpen.has(row.id), v.measurement);
+          list.appendChild(item);
+        });
+        measureSec.body.appendChild(list);
+      }
+      const measureActions = div('measure-actions');
+      const addOpen = document.createElement('button');
+      addOpen.type = 'button';
+      addOpen.className = 'analyzer-act measure-add';
+      addOpen.dataset.measureOpen = '';
+      addOpen.setAttribute('aria-haspopup', 'dialog');
+      addOpen.textContent = t('capturePanel.measureAddOpen');
+      addOpen.disabled = v.measurement.sources.length === 0;
+      addOpen.addEventListener('click', () => this.catalogDialog.open(
+        measurementCatalogView(v.measurement), addOpen));
+      const clearAll = document.createElement('button');
+      clearAll.type = 'button';
+      clearAll.className = 'analyzer-act measure-clear';
+      clearAll.dataset.measureClearAll = '';
+      clearAll.textContent = t('capturePanel.measureClearAll');
+      clearAll.disabled = v.measurement.rowCount === 0;
+      clearAll.addEventListener('click', () => {
+        const intent = this.armMeasureFocus('clear', clearAll);
+        void this.cb.onClearMeasurementRows(clearAll)
+          .finally(() => this.dropMeasureFocus(intent));
       });
-      measureSec.body.appendChild(list);
+      measureActions.append(addOpen, clearAll);
+      measureSec.body.appendChild(measureActions);
+      const persistence = div('measure-persistence');
+      const persistenceLength = selectControl(
+        'measure.persistence',
+        t('capturePanel.persistence'),
+        PERSISTENCE_FRAMES.map((frames): SelectOptionTuple =>
+          [String(frames), persistenceLengthLabel(frames)]),
+        String(v.persistence.frames),
+      );
+      persistenceLength.disabled = v.persistence.loop;
+      persistenceLength.addEventListener('change', () => this.cb.onPickPersistence(
+        persistenceOf(Number(persistenceLength.value))));
+      const persistenceClear = document.createElement('button');
+      persistenceClear.type = 'button';
+      persistenceClear.className = 'analyzer-act measure-persistence-clear';
+      persistenceClear.dataset.persistenceClear = '';
+      persistenceClear.textContent = t('capturePanel.persistenceClear');
+      persistenceClear.disabled = v.persistence.effective === 0;
+      persistenceClear.addEventListener('click', () => this.cb.onClearPersistence());
+      persistence.append(persistenceLength.el, persistenceClear);
+      measureSec.body.appendChild(persistence);
+      const persistenceNote = div('measure-note');
+      persistenceNote.dataset.persistenceNote = '';
+      persistenceNote.textContent = persistenceNoteText(v.persistence);
+      persistenceNote.hidden = persistenceNote.textContent === '';
+      measureSec.body.appendChild(persistenceNote);
+      if (v.measurement.undoCount !== null) {
+        const undoNotice = div('measure-undo');
+        undoNotice.dataset.measureUndoNotice = '';
+        undoNotice.setAttribute('role', 'status');
+        const undoText = document.createElement('span');
+        undoText.className = 'measure-undo-text';
+        undoText.textContent = measurementClearedText(v.measurement);
+        const undo = document.createElement('button');
+        undo.type = 'button';
+        undo.className = 'analyzer-act measure-undo-action';
+        undo.dataset.measureUndo = '';
+        undo.textContent = t('capturePanel.measureUndo');
+        undo.addEventListener('click', () => {
+          this.runMeasureAction('undo', undo, () => this.cb.onUndoMeasurementRows());
+        });
+        undoNotice.append(undoText, undo);
+        measureSec.body.appendChild(undoNotice);
+      }
+      const measureNote = div('measure-note');
+      measureNote.dataset.measureNote = '';
+      measureNote.textContent = measurementNoteText(v.measurement);
+      measureNote.hidden = measureNote.textContent === '';
+      measureSec.body.appendChild(measureNote);
     }
-    const measureActions = div('measure-actions');
-    const addOpen = document.createElement('button');
-    addOpen.type = 'button';
-    addOpen.className = 'analyzer-act measure-add';
-    addOpen.dataset.measureOpen = '';
-    addOpen.setAttribute('aria-haspopup', 'dialog');
-    addOpen.textContent = t('capturePanel.measureAddOpen');
-    addOpen.disabled = v.measurement.sources.length === 0;
-    addOpen.addEventListener('click', () => this.catalogDialog.open(
-      measurementCatalogView(v.measurement), addOpen));
-    const clearAll = document.createElement('button');
-    clearAll.type = 'button';
-    clearAll.className = 'analyzer-act measure-clear';
-    clearAll.dataset.measureClearAll = '';
-    clearAll.textContent = t('capturePanel.measureClearAll');
-    clearAll.disabled = v.measurement.rowCount === 0;
-    clearAll.addEventListener('click', () => {
-      const intent = this.armMeasureFocus('clear', clearAll);
-      void this.cb.onClearMeasurementRows(clearAll)
-        .finally(() => this.dropMeasureFocus(intent));
-    });
-    measureActions.append(addOpen, clearAll);
-    measureSec.body.appendChild(measureActions);
-    const persistence = div('measure-persistence');
-    const persistenceLength = selectControl(
-      'measure.persistence',
-      t('capturePanel.persistence'),
-      PERSISTENCE_FRAMES.map((frames): SelectOptionTuple =>
-        [String(frames), persistenceLengthLabel(frames)]),
-      String(v.persistence.frames),
-    );
-    persistenceLength.disabled = v.persistence.loop;
-    persistenceLength.addEventListener('change', () => this.cb.onPickPersistence(
-      persistenceOf(Number(persistenceLength.value))));
-    const persistenceClear = document.createElement('button');
-    persistenceClear.type = 'button';
-    persistenceClear.className = 'analyzer-act measure-persistence-clear';
-    persistenceClear.dataset.persistenceClear = '';
-    persistenceClear.textContent = t('capturePanel.persistenceClear');
-    persistenceClear.disabled = v.persistence.effective === 0;
-    persistenceClear.addEventListener('click', () => this.cb.onClearPersistence());
-    persistence.append(persistenceLength.el, persistenceClear);
-    measureSec.body.appendChild(persistence);
-    const persistenceNote = div('measure-note');
-    persistenceNote.dataset.persistenceNote = '';
-    persistenceNote.textContent = persistenceNoteText(v.persistence);
-    persistenceNote.hidden = persistenceNote.textContent === '';
-    measureSec.body.appendChild(persistenceNote);
-    if (v.measurement.undoCount !== null) {
-      const undoNotice = div('measure-undo');
-      undoNotice.dataset.measureUndoNotice = '';
-      undoNotice.setAttribute('role', 'status');
-      const undoText = document.createElement('span');
-      undoText.className = 'measure-undo-text';
-      undoText.textContent = measurementClearedText(v.measurement);
-      const undo = document.createElement('button');
-      undo.type = 'button';
-      undo.className = 'analyzer-act measure-undo-action';
-      undo.dataset.measureUndo = '';
-      undo.textContent = t('capturePanel.measureUndo');
-      undo.addEventListener('click', () => {
-        this.runMeasureAction('undo', undo, () => this.cb.onUndoMeasurementRows());
-      });
-      undoNotice.append(undoText, undo);
-      measureSec.body.appendChild(undoNotice);
-    }
-    const measureNote = div('measure-note');
-    measureNote.dataset.measureNote = '';
-    measureNote.textContent = measurementNoteText(v.measurement);
-    measureNote.hidden = measureNote.textContent === '';
-    measureSec.body.appendChild(measureNote);
     cursorPage.appendChild(measureSec.el);
     if (this.catalogDialog.isOpen) this.catalogDialog.update(measurementCatalogView(v.measurement));
 
@@ -1914,6 +1926,10 @@ export class CapturePanel {
     advanced.appendChild(body);
     capture.appendChild(advanced);
     this.restoreMeasureFocus(v.measurement);
+    if (this.pendingViewFocus !== null) {
+      if (this.pendingViewFocus === measureMode) viewModeButtons.get(measureMode)?.focus();
+      this.pendingViewFocus = null;
+    }
   }
 
   /** The App's temperature poll updates the mounted value without a render. */
