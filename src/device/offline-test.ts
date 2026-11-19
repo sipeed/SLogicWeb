@@ -1226,6 +1226,52 @@ async function main(): Promise<void> {
       `name=${dev.name}, maxChannels=${dev.maxChannels}, length=${store.length}, ${mismatch}`);
   }
   {
+    // The 32U3's DDR3 timing is retrained immediately before every capture: two control
+    // words at R32_DBG_CTRL (0x001c), after CTRL_STOP and before the capture is
+    // programmed. The 16U3 has no DDR3 and must never write that register.
+    const fake32 = new FakeStreamDevice(recorded32(), [
+      { kind: 'data', bytes: [0, 0, 0, 0] },
+      { kind: 'data', bytes: [0, 0, 0, 0] },
+    ], PID_SLOGIC32_U3);
+    fake32.productName = 'SLogic32 U3';
+    const dev32 = new Slogic16U3(fake32 as unknown as USBDevice);
+    await dev32.open();
+    const cfg32: CaptureConfig = { channels: 32, samplerate: 16e6, thresholdVolts: 1.6 };
+    await dev32.start(cfg32, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+    await dev32.stop();
+    await dev32.start(cfg32, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+    await dev32.stop();
+    const ddrWrites = fake32.log
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => line === 'W 1c 02000000' || line === 'W 1c 00000000');
+    // configureTestMode is the first programming step of every capture (aux selector 5),
+    // so its selector write marks where that capture's configuration begins.
+    const programStart = fake32.log
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => line === 'W c 05000000');
+    check('every 32U3 capture retrains DDR3 before the capture is programmed',
+      ddrWrites.length === 4 && programStart.length >= 2 &&
+        ddrWrites[0]?.line === 'W 1c 02000000' && ddrWrites[1]?.line === 'W 1c 00000000' &&
+        ddrWrites[0]!.index < programStart[0]!.index &&
+        ddrWrites[2]?.line === 'W 1c 02000000' && ddrWrites[3]?.line === 'W 1c 00000000' &&
+        ddrWrites[2]!.index > ddrWrites[1]!.index &&
+        ddrWrites[2]!.index < programStart[1]!.index,
+      `ddr=${ddrWrites.length} program=${programStart.length} ` +
+        `${fake32.log.slice(0, 24).join(' | ')}`);
+
+    const fake16 = new FakeStreamDevice(recorded(), [{ kind: 'data', bytes: [0, 0, 0, 0] }]);
+    const dev16 = new Slogic16U3(fake16 as unknown as USBDevice);
+    await dev16.open();
+    await dev16.start({ channels: 16, samplerate: 16e6, thresholdVolts: 1.6 }, () => {});
+    await new Promise((r) => setTimeout(r, 20));
+    await dev16.stop();
+    check('the 16U3 never writes the 32U3 DDR3 control',
+      !fake16.log.some((line) => line.startsWith('W 1c ')),
+      fake16.log.slice(0, 10).join(' | '));
+  }
+  {
     // 4 channels: the head drop happens on the wire, before expansion, so 4
     // raw bytes = 8 samples disappear and the rest doubles.
     const fake = new FakeStreamDevice(recorded(), [

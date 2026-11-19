@@ -1131,6 +1131,15 @@ export class Slogic16U3 implements Device {
     // afterwards. Clear the endpoint before every new run so capture #2 starts with a
     // reset data toggle rather than inheriting capture #1's cancelled transfer state.
     await this.usb.clearHalt('in', EP_IN);
+    // The 32U3's sample stream runs through DDR3, and the controller only re-trains
+    // against the part on a reset pulse. A board whose last capture, temperature poll or
+    // unrelated control transfer left the timing stale then delivers corrupt or no
+    // samples for the whole acquisition, so retrain before every capture (operator
+    // report, 2026-11-19). The pulse is two words on the control endpoint and the
+    // device is already stopped here; the 16U3 has no DDR3 and never writes it.
+    if (this.profile.id === 'slogic32u3') {
+      await recalibrateDdr(bus, (e) => this.trace(e));
+    }
     // The driver only touches the pattern register when the frontend asks for a
     // pattern, which means a device left in "Emulation" by a previous session
     // stays there. Program it explicitly so a capture is never silently fake.
